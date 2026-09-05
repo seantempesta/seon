@@ -1204,6 +1204,190 @@ details.tool-call-details[open] .tool-preview {
   min-width: 0;
   min-height: 0;
 }
+.seon-debug-header {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--color-base-800);
+  background: var(--color-base-900);
+  color: var(--color-text-200);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.seon-debug-header > div {
+  display: flex;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.seon-debug-header span {
+  color: var(--color-text-400);
+}
+.seon-debug-header code {
+  overflow-wrap: anywhere;
+}
+.seon-debug-experiment {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--color-base-800);
+}
+.seon-debug-experiment > .seon-debug-body {
+  overflow: visible;
+  border-bottom: 1px solid var(--color-base-800);
+}
+.seon-debug-section-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--color-text-400);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+}
+.seon-debug-section-line h3 {
+  margin: 0;
+  color: var(--color-text-200);
+  font-size: 0.7rem;
+}
+.seon-debug-datom-page + .seon-debug-datom-page,
+.seon-debug-identities {
+  margin-top: 0.75rem;
+}
+.seon-debug-datom-page table {
+  width: 100%;
+  margin-top: 0.25rem;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+}
+.seon-debug-datom-page th,
+.seon-debug-datom-page td {
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--color-base-800);
+  text-align: left;
+  vertical-align: top;
+}
+.seon-debug-datom-page th {
+  color: var(--color-text-400);
+  font-weight: 500;
+}
+.seon-debug-datom-page td code {
+  overflow-wrap: anywhere;
+}
+.seon-debug-continuation {
+  display: inline-block;
+  margin-top: 0.35rem;
+  color: var(--color-signal);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.seon-debug-notice {
+  margin: 0 0 0.5rem;
+  color: var(--color-warning);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.seon-debug-fact,
+.seon-debug-selected,
+.seon-debug-identities h3 {
+  margin: 0.35rem 0;
+  color: var(--color-text-400);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 400;
+}
+.seon-debug-stages {
+  margin: 0.4rem 0 0;
+  padding-left: 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.seon-debug-stages > li + li {
+  margin-top: 0.4rem;
+}
+.seon-debug-stages ul {
+  margin: 0.2rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--color-text-400);
+}
+.seon-debug-error {
+  color: var(--color-error);
+}
+.seon-debug-output-preview {
+  color: var(--color-text-100);
+}
+.seon-debug-evidence,
+.seon-debug-selection-detail,
+.seon-debug-prompt-detail {
+  margin-top: 0.5rem;
+  color: var(--color-text-400);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.seon-debug-evidence > summary,
+.seon-debug-selection-detail > summary,
+.seon-debug-prompt-detail > summary {
+  padding: 0.35rem 0;
+  color: var(--color-text-200);
+  cursor: pointer;
+}
+.seon-debug-prompt-detail {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.seon-debug-prompt-detail > summary {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--color-base-800);
+  background: var(--color-base-900);
+}
+.seon-debug-observation .seon-data-map {
+  grid-template-columns: fit-content(30ch) minmax(0, 1fr);
+}
+
+@media (max-width: 52rem) {
+  .seon-body:has(.seon-debug),
+  .seon-main:has(.seon-debug) {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+  }
+  .seon-debug,
+  .seon-debug-grid {
+    height: auto;
+    overflow: visible;
+  }
+  .seon-debug-grid {
+    display: block;
+  }
+  .seon-debug-experiment {
+    overflow: visible;
+    border-right: 0;
+  }
+  .seon-debug-prompt-detail {
+    overflow: visible;
+    border-top: 1px solid var(--color-base-800);
+  }
+  .seon-debug-observation .seon-data-map {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .seon-debug-observation .seon-data-map > dt {
+    padding-top: 0.4rem;
+    color: var(--color-text-400);
+  }
+  .seon-debug-observation .seon-data-map > dd {
+    margin: 0;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--color-base-850);
+    overflow-wrap: anywhere;
+  }
+  .seon-debug-datom-page {
+    overflow-x: auto;
+  }
+}
 .seon-debug-pane {
   display: flex;
   flex-direction: column;

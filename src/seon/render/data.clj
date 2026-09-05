@@ -1,13 +1,15 @@
 (ns seon.render.data
-  "The shared `get-in` cursor vocabulary for routed value floors.
+  "Bounded entity observations and `get-in` cursors for routed values.
 
-  This namespace selects the value named by a URL path and nothing more.
-  Presentation, windowing, admission, caps, stable node ids, and drill links
+  Entity observations retain actual datoms, references and snapshot identity.
+  Nested cursors select the value named by a URL path. Presentation,
+  admission, stable node ids, and navigation links
   belong to the one floor in `seon.render.value`; `/data` and per-agent debug
   routes both hand their selected value to that floor.
 
   Crash walk: pure. A kill loses only a cursor carried by the URL."
   (:require [clojure.edn :as edn]
+            [seon.db :as db]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -71,3 +73,110 @@
                   :seon.error/data {:seon.render.data/step (pr-str step)} :seon.render.data/no-such-path true}))))
           {:seon.render.data/value value}
           path))
+
+(defn- observation-error [kind message]
+  {:seon.error/kind kind :seon.error/message message})
+
+(defn- continuation [snapshot eid direction offset cursor]
+  (cond-> {::snapshot snapshot ::eid eid ::direction direction
+           ::attribute-offset offset}
+    cursor (assoc ::index-cursor cursor)))
+
+(defn- matching-continuation? [cursor snapshot eid direction]
+  (or (nil? cursor)
+      (and (= snapshot (::snapshot cursor))
+           (= eid (::eid cursor))
+           (= direction (::direction cursor)))))
+
+(defn- outgoing-page [database snapshot eid limit weight cursor]
+  (let [page (db/index-page
+              database
+              (cond-> {:index :eavt :components [eid] :direction :forward
+                       :limit limit :max-result-weight weight}
+                cursor (assoc :cursor (::index-cursor cursor))))]
+    (if (:seon.error/kind page)
+      page
+      (cond-> {::datoms (:datahike.index-page/datoms page)
+               ::complete? (:datahike.index-page/complete? page)}
+        (:datahike.index-page/cursor page)
+        (assoc ::continuation
+               (continuation snapshot eid :outgoing 0
+                             (:datahike.index-page/cursor page)))))))
+
+(defn- incoming-page
+  [database snapshot eid attributes limit weight probe-limit cursor]
+  (let [start (or (::attribute-offset cursor) 0)
+        stop (min (count attributes) (+ start probe-limit))]
+    (if (> start (count attributes))
+      (observation-error ::invalid-continuation
+                         "Incoming continuation exceeds the reference attributes.")
+      (reduce
+       (fn [result offset]
+         (let [remaining (- limit (count (::datoms result)))
+               page (db/index-page
+                     database
+                     (cond-> {:index :avet :components [(nth attributes offset) eid]
+                              :direction :forward :limit remaining
+                              :max-result-weight weight}
+                       (and (= offset start) (::index-cursor cursor))
+                       (assoc :cursor (::index-cursor cursor))))]
+           (if (:seon.error/kind page)
+             (reduced page)
+             (let [rows (into (::datoms result) (:datahike.index-page/datoms page))
+                   more? (not (:datahike.index-page/complete? page))
+                   next-offset (if more? offset (inc offset))
+                   complete? (and (not more?) (= next-offset (count attributes)))
+                   next-result
+                   (cond-> {::datoms rows ::complete? complete?
+                            ::ref-attributes-probed (inc (::ref-attributes-probed result))}
+                     (not complete?)
+                     (assoc ::continuation
+                            (continuation snapshot eid :incoming next-offset
+                                          (:datahike.index-page/cursor page))))]
+               (if (or more? (= limit (count rows)))
+                 (reduced next-result)
+                 next-result)))))
+       (cond-> {::datoms [] ::complete? (= start (count attributes))
+                ::ref-attributes-probed 0}
+         (< start (count attributes))
+         (assoc ::continuation (continuation snapshot eid :incoming start nil)))
+       (range start stop)))))
+
+(defn entity-observation
+  "Bounded assertions and references for one entity at one database value."
+  {:malli/schema [:=> [:catn [::request ::observation-request]]
+                  [:or ::observation :seon.error/value]]}
+  [{database :seon.db/db ::keys [subject limit max-result-weight
+                                max-ref-attributes outgoing-cursor incoming-cursor]}]
+  (let [snapshot (db/database-value-identity database)
+        found (db/pull database [:db/id] subject)
+        eid (:db/id found)]
+    (cond
+      (:seon.error/kind snapshot) snapshot
+      (:seon.error/kind found) found
+      (nil? eid) (observation-error ::missing-subject "The selected entity does not exist.")
+      (not (and (matching-continuation? outgoing-cursor snapshot eid :outgoing)
+                (matching-continuation? incoming-cursor snapshot eid :incoming)))
+      (observation-error ::stale-continuation
+                         "The continuation belongs to a different database value, entity, or direction.")
+      :else
+      (let [attributes (into [] (comp (filter (fn [[_ definition]]
+                                               (= :db.type/ref (:db/valueType definition))))
+                                     (map key))
+                             (:schema database))
+            attributes (vec (sort attributes))
+            outgoing (outgoing-page database snapshot eid limit max-result-weight outgoing-cursor)
+            incoming (incoming-page database snapshot eid attributes limit max-result-weight
+                                    max-ref-attributes incoming-cursor)]
+        {::subject subject ::eid eid ::snapshot snapshot
+         ::outgoing outgoing ::incoming incoming
+         ::identities (filterv (fn [datom]
+                                (= :db.unique/identity
+                                   (get-in database [:schema (:a datom) :db/unique])))
+                              (::datoms outgoing []))
+         ;; A continuation page can be complete for its remaining suffix while
+         ;; the observation still omits identity datoms from earlier pages.
+         ;; Only an uncontinued, complete outgoing page can certify the set.
+         ::identities-complete? (and (nil? outgoing-cursor)
+                                     (true? (::complete? outgoing)))
+         ::ref-attributes-probed (::ref-attributes-probed incoming 0)}))))

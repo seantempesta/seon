@@ -108,6 +108,7 @@
              (render/agent-render-profile (config/defaults)))
             stream-channel (async/chan (async/sliding-buffer 1))
             render-channel (async/chan (async/sliding-buffer 1))
+            runtime-eval-channel (async/chan (async/sliding-buffer 1))
             pages-channel (async/chan (async/sliding-buffer 1))
             completion (async/promise-chan)
             graph
@@ -119,6 +120,7 @@
                  #'web/render-step :io
                  {:seon.env/environment @test-environment
                   :seon.render.web/render-channel render-channel
+                  :seon.render.web/runtime-eval-channel runtime-eval-channel
                   :seon.render/context-channel context-channel
                   :seon.render.web/pages-channel pages-channel
                   :seon.render.web/registration (atom {})

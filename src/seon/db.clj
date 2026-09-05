@@ -225,8 +225,16 @@
       :seon.db/source-argument-position 0
       :datahike.read/dependency-plan plan})))
 
+(defn- stable-read-result
+  [result]
+  (walk/postwalk (fn [value]
+                   (if (map? value)
+                     (dissoc value :seon.db/db)
+                     value))
+                 result))
+
 (defn- append-query-evidence!
-  [request response _result]
+  [request response result]
   (when *read-evidence-sink*
     (let [arguments (:args request)
           database-positions (into []
@@ -262,11 +270,12 @@
            replayable?
            (assoc :seon.db/read-request
                   {:seon.db/read-operation :q
-                   :seon.db/query-request replay-request}))))))
+                   :seon.db/query-request replay-request}
+                  :seon.db/read-result result))))))
   nil)
 
 (defn- append-pull-evidence!
-  [database arguments operation-key response _result]
+  [database arguments operation-key response result]
   (let [selector
         ((requiring-resolve 'datahike.pull-api/pull-plan-selector)
          (:datahike.pull/plan response))
@@ -281,7 +290,8 @@
       :seon.db/source-argument-position 0
       :datahike.read/dependency-plan (:datahike.read/dependency-plan response)
       :seon.db/read-request {:seon.db/read-operation operation-key
-                             :seon.db/pull-arguments replay-arguments}})))
+                             :seon.db/pull-arguments replay-arguments}
+      :seon.db/read-result result})))
 
 ;;; The committed identity a retained read's revision is keyed on. Datahike
 ;;; derives its OWN query-cache key exactly this way
@@ -357,24 +367,39 @@
                    (:datahike.cache/conservative-revision context))))))))
 
 (defn read-evidence
-  "Retain dependency revisions without retaining database values."
-  {:malli/schema [:=> [:cat [:vector :seon.db/captured-read]]
-                  [:vector :seon.db/read-evidence]]}
-  [captured]
-  (mapv (fn [{database :seon.db/db
-              source-position :seon.db/source-argument-position
-              plan :datahike.read/dependency-plan
-              :as entry}]
-          (cond->
-           {:seon.db/source-argument-position source-position
-            :datahike.read/dependency-plan plan
-            :datahike.read/revision
-            (dependency-revision database plan source-position)}
-            (:seon.db/read-request entry)
-            (assoc :seon.db/read-request (:seon.db/read-request entry))))
-        captured))
+  "Retain dependency revisions without retaining database values.
 
-(declare decode-query-result decode-pull-result read-declarations)
+  Process-local caches may explicitly retain stable read results for semantic
+  replay. The default omits them so evaluation evidence written as database
+  facts cannot inline read payloads."
+  {:malli/schema
+   [:function
+    [:=> [:cat [:vector :seon.db/captured-read]]
+     [:vector :seon.db/read-evidence]]
+    [:=> [:cat [:vector :seon.db/captured-read]
+          :seon.db/read-evidence-options]
+     [:vector :seon.db/read-evidence]]]}
+  ([captured] (read-evidence captured {}))
+  ([captured options]
+   (mapv (fn [{database :seon.db/db
+               source-position :seon.db/source-argument-position
+               plan :datahike.read/dependency-plan
+               :as entry}]
+           (cond->
+            {:seon.db/source-argument-position source-position
+             :datahike.read/dependency-plan plan
+             :datahike.read/revision
+             (dependency-revision database plan source-position)}
+             (:seon.db/read-request entry)
+             (assoc :seon.db/read-request (:seon.db/read-request entry))
+
+             (and (:seon.db/retain-read-results? options)
+                  (find entry :seon.db/read-result))
+             (assoc :seon.db/read-result
+                    (stable-read-result (:seon.db/read-result entry)))))
+         captured)))
+
+(declare decode-index-page decode-query-result decode-pull-result read-declarations)
 
 (defn- pull-plan-with-evidence
   [& arguments]
@@ -384,8 +409,45 @@
 (defn- pull-many-plan-with-evidence
   [& arguments]
   (apply (requiring-resolve
-          'datahike.pull-api/pull-many-plan-with-evidence)
+         'datahike.pull-api/pull-many-plan-with-evidence)
          arguments))
+
+(defn- replay-read
+  [database request]
+  (case (:seon.db/read-operation request)
+    :q
+    (let [query-request
+          (update (:seon.db/query-request request) :args
+                  (fn [arguments]
+                    (mapv #(if (= ::database %) database %) arguments)))
+          parsed-query (query/memoized-parse-query (:query query-request))
+          response (d/q-with-evidence query-request)]
+      (decode-query-result (read-declarations database)
+                           query-request
+                           parsed-query
+                           (:datahike.query/result response)))
+
+    :pull
+    (let [arguments (:seon.db/pull-arguments request)
+          response (apply pull-plan-with-evidence database arguments)]
+      (decode-pull-result (read-declarations database)
+                          (:datahike.pull/plan response)
+                          :datahike.pull/result
+                          (:datahike.pull/result response)))
+
+    :pull-many
+    (let [arguments (:seon.db/pull-arguments request)
+          response (apply pull-many-plan-with-evidence database arguments)]
+      (decode-pull-result (read-declarations database)
+                          (:datahike.pull/plan response)
+                          :datahike.pull-many/result
+                          (:datahike.pull-many/result response)))
+
+    :index-page
+    (decode-index-page (read-declarations database)
+                       database
+                       (d/index-page database
+                                     (:seon.db/index-page-options request)))))
 
 (defn read-evidence-current?
   "True when `database` still satisfies every retained dependency revision."
@@ -399,9 +461,16 @@
      (fn [{source-position :seon.db/source-argument-position
            plan :datahike.read/dependency-plan
            revision :datahike.read/revision
-           :as _evidence}]
-       (and (not (false? (:datahike.read/cache-eligible? revision)))
-            (= revision (dependency-revision database plan source-position))))
+           :as evidence}]
+       (or (and (not (false? (:datahike.read/cache-eligible? revision)))
+                (= revision (dependency-revision database plan source-position)))
+           (when (and (find evidence :seon.db/read-request)
+                      (find evidence :seon.db/read-result))
+             (try
+               (= (:seon.db/read-result evidence)
+                  (stable-read-result
+                   (replay-read database (:seon.db/read-request evidence))))
+               (catch Throwable _ false)))))
      retained)))
 
 ;;; THE declaration population for ONE read operation. Every decode walker
@@ -1218,6 +1287,17 @@
      :tx (:tx datom)
      :added (:added datom)}))
 
+(defn- decode-index-page
+  [declarations database page]
+  (update page :datahike.index-page/datoms
+          (fn [page-datoms]
+            (mapv (fn [datom]
+                    (let [decoded (datom->data declarations database datom)]
+                      (cond-> decoded
+                        (not= (:v datom) (:v decoded))
+                        (assoc :seon.db/stored-value (:v datom)))))
+                  page-datoms))))
+
 (defn- datoms-call
   [database arguments]
   (if (error-value? database)
@@ -1249,6 +1329,35 @@
     (datoms-call database-or-index arguments)
     (datoms-call (current-database-value)
                  (cons database-or-index arguments))))
+
+(defn index-page
+  "One bounded, decoded page in native Datahike index order."
+  {:malli/schema
+   [:function
+    [:=> [:catn [::options ::index-page-options]]
+     [:or ::index-page-result :seon.error/value]]
+    [:=> [:catn [::database [:or ::database-value :seon.error/value]]
+          [::options ::index-page-options]]
+     [:or ::index-page-result :seon.error/value]]]}
+  ([options] (index-page (current-database-value) options))
+  ([database options]
+   (if (error-value? database)
+     database
+     (try
+       (let [page (decode-index-page (read-declarations database)
+                                     database
+                                     (d/index-page database options))]
+         (append-read-evidence!
+          {:seon.db/db database
+           :seon.db/source-argument-position 0
+           :datahike.read/dependency-plan :all
+           :seon.db/read-request {:seon.db/read-operation :index-page
+                                  :seon.db/index-page-options options}
+           :seon.db/read-result page})
+         page)
+       (catch Throwable cause
+         (append-database-evidence! database :all)
+         (dependency-error ::index-page cause))))))
 
 (defn- database-view
   [operation database arguments]

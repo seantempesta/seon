@@ -35,7 +35,10 @@
            [:map
             [:datahike.query.dependency/sources
              [:vector :seon.db/read-dependency-source]]]],
-          :read-operation [:enum :q :pull :pull-many],
+          :read-operation [:enum :q :pull :pull-many :index-page],
+          :read-evidence-options
+          [:map
+           [:seon.db/retain-read-results? {:optional true} :boolean]],
           :pull-arguments [:vector :seon.schema/value],
           :read-request
           [:or
@@ -44,14 +47,14 @@
             [:seon.db/query-request :seon.db/query-args]]
            [:map
             [:seon.db/read-operation [:enum :pull :pull-many]]
-            [:seon.db/pull-arguments :seon.db/pull-arguments]]],
-          ;; Retained replay evidence is ordinary admitted data, so its
-          ;; logical contract stays polymorphic. Once Lane B made it a receipt
-          ;; component attribute it also needed one concrete Datahike storage
-          ;; representation. The heterogeneous union selects the bridge's
-          ;; canonical EDN-string codec while preserving the existing value
-          ;; validator on decode.
-          :read-result [:or :seon.schema/value :string],
+            [:seon.db/pull-arguments :seon.db/pull-arguments]]
+           [:map
+            [:seon.db/read-operation [:= :index-page]]
+            [:seon.db/index-page-options :seon.db/index-page-options]]],
+          ;; Stable read results are optional process-local render evidence.
+          ;; Durable evaluation evidence omits them and no database attribute
+          ;; stores this key.
+          :read-result :seon.schema/value,
           ;; A read's source is identified exactly as Datahike identifies its
           ;; own query-cache key (query.cljc:2658-2671): a committed raw DB by
           ;; its cache context, an as-of view by the ORIGIN's context plus its
@@ -134,6 +137,23 @@
            [:tx :int]
            [:added :boolean]],
           :datoms [:vector :seon.db/datom],
+          :index-page-cursor
+          [:tuple :seon.schema/value :seon.schema/value :seon.schema/value
+           :int :boolean],
+          :index-page-options
+          [:map
+           [:index [:enum :eavt :aevt :avet]]
+           [:components [:vector {:max 4} :seon.schema/value]]
+           [:direction [:enum :forward :reverse]]
+           [:limit [:int {:min 1 :max 200}]]
+           [:cursor {:optional true} :seon.db/index-page-cursor]
+           [:max-result-weight [:int {:min 1}]]],
+          :index-page-result
+          [:map
+           [:datahike.index-page/datoms :seon.db/datoms]
+           [:datahike.index-page/complete? :boolean]
+           [:datahike.index-page/cursor {:optional true}
+            :seon.db/index-page-cursor]],
           :datom-count [:int {:min 0}],
           :entity-id
           [:or :int [:sequential :seon.schema/value] :keyword],

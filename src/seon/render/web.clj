@@ -140,6 +140,99 @@
                      (URLDecoder/decode (or setting "") "UTF-8")]))))
         (str/split (or (:query-string request) "") #"&")))
 
+(defn- read-query-value
+  [setting]
+  (try
+    (when-not (str/blank? setting)
+      (binding [*read-eval* false]
+        (edn/read-string setting)))
+    (catch Throwable _ nil)))
+
+(defn- positive-query-long
+  [setting fallback maximum]
+  (let [parsed (some-> setting parse-long)]
+    (if (and parsed (pos? parsed))
+      (min parsed maximum)
+      fallback)))
+
+(declare query-entity route-namespace agent-namespace)
+
+(def ^:private debug-defaults
+  {:seon.render.data/limit 40
+   :seon.render.data/max-ref-attributes 40
+   :seon.render.data/max-result-weight 4000
+   ::pull-max-work 4000
+   ::pull-max-results 4000})
+
+(defn- debug-query
+  [query default-subject viewer-namespace agent-id]
+  (let [subject (or (query-entity (get query "subject")) default-subject)
+        output (read-query-value (get query "output"))]
+    (cond->
+     {:seon.render.debug/viewer-namespace viewer-namespace
+      :seon.render.debug/subject subject
+      :seon.render/output
+      (if (#{:seon.render/ai :seon.render/html :seon.render/form} output)
+        output
+        :seon.render/html)
+      :seon.render.debug/prompt? (= "true" (get query "prompt"))
+      :seon.render.data/limit
+      (positive-query-long (get query "limit")
+                           (:seon.render.data/limit debug-defaults) 200)
+      :seon.render.data/max-ref-attributes
+      (positive-query-long
+       (get query "maxRefAttributes")
+       (:seon.render.data/max-ref-attributes debug-defaults) 200)
+     :seon.render.data/max-result-weight
+      (positive-query-long
+       (get query "maxResultWeight")
+       (:seon.render.data/max-result-weight debug-defaults) 1000000)
+      ::pull-max-work
+      (positive-query-long (get query "maxWork")
+                           (::pull-max-work debug-defaults) 1000000)
+      ::pull-max-results
+      (positive-query-long (get query "maxResults")
+                           (::pull-max-results debug-defaults) 1000000)
+      :seon.render.data/cursor
+      (data/parse-cursor (get query "path") (get query "offset"))}
+      agent-id
+      (assoc :seon.cluster.agent/id agent-id)
+
+      (read-query-value (get query "outgoingCursor"))
+      (assoc :seon.render.data/outgoing-cursor
+             (read-query-value (get query "outgoingCursor")))
+
+      (read-query-value (get query "incomingCursor"))
+      (assoc :seon.render.data/incoming-cursor
+             (read-query-value (get query "incomingCursor"))))))
+
+(defn- debug-query-strings
+  [debug-request]
+  (cond->
+   {:debug "true"
+    :viewer (str (:seon.render.debug/viewer-namespace debug-request))
+    :subject (pr-str (:seon.render.debug/subject debug-request))
+    :output (pr-str (:seon.render/output debug-request))
+    :prompt (str (boolean (:seon.render.debug/prompt? debug-request)))
+    :limit (str (:seon.render.data/limit debug-request))
+    :maxRefAttributes
+    (str (:seon.render.data/max-ref-attributes debug-request))
+    :maxResultWeight
+    (str (:seon.render.data/max-result-weight debug-request))
+    :maxWork (str (::pull-max-work debug-request))
+    :maxResults (str (::pull-max-results debug-request))
+    :path (pr-str (get-in debug-request
+                          [:seon.render.data/cursor :seon.render.data/path] []))
+    :offset (str (get-in debug-request
+                         [:seon.render.data/cursor :seon.render.data/offset] 0))}
+    (:seon.render.data/outgoing-cursor debug-request)
+    (assoc :outgoingCursor
+           (pr-str (:seon.render.data/outgoing-cursor debug-request)))
+
+    (:seon.render.data/incoming-cursor debug-request)
+    (assoc :incomingCursor
+           (pr-str (:seon.render.data/incoming-cursor debug-request)))))
+
 (defn message-bar-html
   "`:seon.render/html` — the constant human-to-agent message bar.
 
@@ -190,7 +283,8 @@
   settings: reconnect forever, and do not hold a socket open for a
   backgrounded tab."
   {:malli/schema [:=> [:cat :seon.render.web/page-request] :string]}
-  [{:keys [:seon.cluster.agent/id :seon.render/page :seon.render.web/feed-url]}]
+  [{:keys [:seon.cluster.agent/id :seon.render/page :seon.render.web/feed-url
+           :seon.render.debug/viewer-namespace]}]
   (str
    "<!doctype html>"
    (hiccup/->string
@@ -199,7 +293,7 @@
       [:meta {:charset "utf-8"}]
       [:meta {:name "viewport"
               :content "width=device-width, initial-scale=1.0"}]
-      [:title (str "seon · " id)]
+      [:title (str "seon · " (or viewer-namespace id))]
       [:link {:rel "stylesheet"
               :href (route/path ::route/css {:path "output.css"})}]
       [:script {:type "module"
@@ -214,10 +308,11 @@
       ;; refuses it, correctly, and the first live page came back empty
       ;; until this said `seq`. A seq is a fragment and splices.
       [:main {:class "seon-main"}
-       [:nav {:class "seon-agent-routes"}
-        [:a {:href (route/path ::route/agent {:id id})} "agent"]
-        [:a {:href (route/path ::route/agent-debug {:id id})} "debug"]]
-       (message-bar-html {:seon.cluster.agent/id id})
+       (when id
+         [:nav {:class "seon-agent-routes"}
+          [:a {:href (route/path ::route/agent {:id id})} "agent"]
+          [:a {:href (route/path ::route/agent-debug {:id id})} "debug"]])
+       (when id (message-bar-html {:seon.cluster.agent/id id}))
        (seq page)]
       ;; OUTSIDE every morph target. A data-init inside one is stripped
       ;; by that element's first whole-element morph, and the tab then
@@ -625,57 +720,363 @@
   [agent-id]
   (str "debug-html-" agent-id))
 
-(defn- debug-html
-  [agent-id page]
+(defn- debug-value-html
+  [value]
+  (if (:seon.error/kind value)
+    [:pre {:class "seon-debug-error"} (pr-str value)]
+    [:pre (pr-str value)]))
+
+(defn- debug-page-url
+  [debug-request changes]
+  (route/path
+   ::route/namespace-debug
+   {:namespace (str (:seon.render.debug/viewer-namespace debug-request))}
+   (debug-query-strings (merge debug-request changes))))
+
+(defn- continuation-html
+  [debug-request direction page]
+  (when-let [continuation (:seon.render.data/continuation page)]
+    [:a {:class "seon-debug-continuation"
+         :href (debug-page-url
+                debug-request
+                {(case direction
+                   :outgoing :seon.render.data/outgoing-cursor
+                   :incoming :seon.render.data/incoming-cursor)
+                 continuation})}
+     "continue →"]))
+
+(defn- datom-page-html
+  [debug-request direction page]
+  [:section {:class "seon-debug-datom-page"}
+   [:div {:class "seon-debug-section-line"}
+    [:h3 (name direction)]
+    [:span (cond
+             (:seon.error/kind page) "unavailable"
+             (:seon.render.data/complete? page) "complete"
+             :else "partial")]]
+   (if (:seon.error/kind page)
+     (debug-value-html page)
+     [:div
+      [:table
+       [:thead [:tr (map (fn [heading] [:th heading])
+                         ["e" "attribute" "decoded value" "stored value" "tx" "op"])]]
+       (into
+        [:tbody]
+        (map (fn [{:keys [e a v tx added]
+                   stored :seon.db/stored-value}]
+               [:tr
+                [:td [:code (pr-str e)]]
+                [:td [:code (pr-str a)]]
+                [:td [:code (pr-str v)]]
+                [:td [:code (if (some? stored) (pr-str stored) "—")]]
+                [:td [:code (pr-str tx)]]
+                [:td (if added "+" "−")]]))
+        (:seon.render.data/datoms page))]
+      (continuation-html debug-request direction page)])])
+
+(defn- debug-header-html
+  [debug-request observation acquisition-ms]
   (hiccup/->string
-   (into [:section {:id (debug-html-id agent-id)
-                    :class "seon-debug-body seon-debug-body-html"}]
-         (if (seq page)
-           (map hiccup/raw page)
-           [[:p {:class "seon-render-pending"}
-             "Loading the current HTML projection…"]]))))
+   [:header {:id "debug-inspection-header" :class "seon-debug-header"}
+    [:div
+     [:span "viewer"]
+     [:code (pr-str (:seon.render.debug/viewer-namespace debug-request))]]
+    [:div
+     [:span "subject"]
+     [:code (pr-str (:seon.render.debug/subject debug-request))]]
+    [:div
+     [:span "snapshot"]
+     [:code (pr-str (:seon.render.data/snapshot observation))]]
+    [:div
+     [:span "output"]
+     [:code (pr-str (:seon.render/output debug-request))]]
+    [:div
+     [:span "render value acquisition"]
+     [:code (str acquisition-ms " ms · work " (::pull-max-work debug-request)
+                " · results " (::pull-max-results debug-request)
+                " · weight "
+                (:seon.render.data/max-result-weight debug-request))]]]))
+
+(defn- debug-observation-html
+  [debug-request observation entity-html restarted?]
+  (hiccup/->string
+   [:section {:id "debug-observation" :class "seon-debug-body seon-debug-observation"}
+    [:h2 {:class "seon-debug-caption"} "actual entity value"]
+    (when restarted?
+      [:p {:class "seon-debug-notice"}
+       "Data changed; pagination restarted at the newest snapshot."])
+    (if (:seon.error/kind observation)
+      (debug-value-html observation)
+      [:div
+       [:p {:class "seon-debug-fact"}
+        (str "eid " (pr-str (:seon.render.data/eid observation))
+             " · ref attributes probed "
+             (:seon.render.data/ref-attributes-probed observation))]
+       entity-html
+       [:details {:class "seon-debug-evidence"}
+        [:summary "raw datom evidence"]
+        (datom-page-html debug-request :outgoing
+                         (:seon.render.data/outgoing observation))
+        (datom-page-html debug-request :incoming
+                         (:seon.render.data/incoming observation))
+        [:div {:class "seon-debug-identities"}
+         [:h3 (str "identities present in this outgoing page · "
+                   (if (:seon.render.data/identities-complete? observation)
+                     "complete"
+                     "partial"))]
+         (debug-value-html (:seon.render.data/identities observation))]]])]))
+
+(defn- debug-candidate-html
+  [candidate]
+  [:li
+   [:code
+    (pr-str (:seon.render.selection.candidate/producer candidate))]
+   [:span
+    (str " "
+         (name (:seon.render.selection.candidate/status candidate))
+         (when-let [reason
+                    (:seon.render.selection.candidate/reason candidate)]
+           (str " · " (name reason))))]])
+
+(defn- debug-stage-html
+  [stage]
+  [:li
+   [:div {:class "seon-debug-section-line"}
+    [:code (pr-str (:seon.render.selection.stage/name stage))]
+    [:span (name (:seon.render.selection.stage/status stage))]]
+   (when-let [candidates (:seon.render.selection.stage/candidates stage)]
+     (into [:ul] (map debug-candidate-html) candidates))
+   (when-let [error (:seon.render.selection.stage/error stage)]
+     (debug-value-html error))])
+
+(defn- debug-selection-html
+  [selection]
+  (hiccup/->string
+   [:section {:id "debug-selection"
+              :class "seon-debug-body seon-debug-selection"}
+    [:h2 {:class "seon-debug-caption"} "renderer selection"]
+    (if-not selection
+      [:p {:class "seon-render-pending"}
+       "Selection is unavailable because no complete render value was acquired."]
+      [:details {:class "seon-debug-selection-detail"}
+       [:summary
+        [:span "selected "]
+        [:code (pr-str (:seon.render.selection/selected selection))]]
+       [:p {:class "seon-debug-selected"}
+        "Ordered precedence and compatible candidates"]
+       (into [:ol {:class "seon-debug-stages"}]
+             (map debug-stage-html)
+             (:seon.render.selection/stages selection))])]))
+
+(defn- debug-output-html
+  [debug-request acquisition rendered]
+  (hiccup/->string
+   [:section {:id (debug-html-id
+                   (or (:seon.cluster.agent/id debug-request) "inspection"))
+              :class "seon-debug-body seon-debug-body-html"}
+    [:h2 {:class "seon-debug-caption"} "actual selected output"]
+    (cond
+      (:seon.error/kind acquisition)
+      [:div
+       [:p {:class "seon-debug-fact"}
+        "Full render value acquisition refused; no renderer was selected."]
+       (debug-value-html acquisition)]
+
+      (:seon.error/kind rendered)
+      (debug-value-html rendered)
+
+      (= :seon.render/html (:seon.render/output debug-request))
+      [:div {:class "seon-debug-output-preview"} rendered]
+
+      :else
+      (debug-value-html rendered))]))
+
+(defn- debug-data-call-id
+  [debug-request]
+  [::debug-data
+   (select-keys debug-request
+                [:seon.render.debug/subject
+                 :seon.render.data/limit
+                 :seon.render.data/max-ref-attributes
+                 :seon.render.data/max-result-weight
+                 :seon.render.data/outgoing-cursor
+                 :seon.render.data/incoming-cursor
+                 ::pull-max-work
+                 ::pull-max-results])])
+
+(defn- acquire-debug-data
+  [database debug-request retained-calls]
+  (let [call-id (debug-data-call-id debug-request)
+        static-evidence
+        {:seon.render.call/producer 'seon.render.data/entity-observation
+         :seon.render.call/argument (second call-id)}
+        previous (get retained-calls call-id)
+        reusable? (and previous
+                       (= static-evidence
+                          (:seon.render.call/static-evidence previous))
+                       (db/read-evidence-current?
+                        database
+                        (:seon.render.call/read-evidence previous)))
+        captured (atom [])
+        output
+        (if reusable?
+          (:seon.render.call/output previous)
+          (binding [db/*read-evidence-sink* captured]
+            (let [observation-request
+                  (cond->
+                   {:seon.db/db database
+                    :seon.render.data/subject
+                    (:seon.render.debug/subject debug-request)
+                    :seon.render.data/limit
+                    (:seon.render.data/limit debug-request)
+                    :seon.render.data/max-ref-attributes
+                    (:seon.render.data/max-ref-attributes debug-request)
+                    :seon.render.data/max-result-weight
+                    (:seon.render.data/max-result-weight debug-request)}
+                    (:seon.render.data/outgoing-cursor debug-request)
+                    (assoc :seon.render.data/outgoing-cursor
+                           (:seon.render.data/outgoing-cursor debug-request))
+                    (:seon.render.data/incoming-cursor debug-request)
+                    (assoc :seon.render.data/incoming-cursor
+                           (:seon.render.data/incoming-cursor debug-request)))
+                  first-observation (data/entity-observation
+                                     observation-request)
+                  restarted? (= :seon.render.data/stale-continuation
+                                (:seon.error/kind first-observation))
+                  effective-request (if restarted?
+                                      (dissoc debug-request
+                                              :seon.render.data/outgoing-cursor
+                                              :seon.render.data/incoming-cursor)
+                                      debug-request)
+                  observation (if restarted?
+                                (data/entity-observation
+                                 (dissoc observation-request
+                                         :seon.render.data/outgoing-cursor
+                                         :seon.render.data/incoming-cursor))
+                                first-observation)
+                  started (System/nanoTime)
+                  acquisition
+                  (db/pull database
+                           {:selector '[*]
+                            :eid (:seon.render.debug/subject effective-request)
+                            :max-work (::pull-max-work effective-request)
+                            :max-results (::pull-max-results effective-request)
+                            :max-result-weight
+                            (:seon.render.data/max-result-weight
+                             effective-request)})]
+              {::debug-request effective-request
+               ::observation observation
+               ::restarted? restarted?
+               ::acquisition acquisition
+               ::acquisition-ms
+               (/ (double (- (System/nanoTime) started)) 1000000.0)})))
+        entry (if reusable?
+                previous
+                {:seon.render.call/static-evidence static-evidence
+                 :seon.render.call/read-evidence
+                 (db/read-evidence @captured
+                                   {:seon.db/retain-read-results? true})
+                 :seon.render.call/basis-transaction (db/basis-t database)
+                 :seon.render.call/output output})]
+    {::debug-data-output output
+     ::debug-data-call-id call-id
+     ::debug-data-entry entry}))
 
 (defn- debug-page-result
-  [db connection agent-id root-agent-id caps profile handle]
-  (let [live-processes
-        (when-some [process (:seon.cluster.run/process handle)] #{process})
-        page-request
-        (cond-> {:seon.db/db db
-                 :seon.cluster.agent/id agent-id
-                 :seon.render.web/root-agent-id root-agent-id
-                 :seon.sci.admit/caps caps
-                 :seon.render/profile profile
-                 :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
-                 :seon.config.eval/time-limit-ms
-                 (:seon.config.eval/time-limit-ms handle)
-                 :seon.config/on-core-error
-                 (:seon.config/on-core-error handle)
-                 :seon.db/connection connection}
-          live-processes
-          (assoc :seon.cluster.run/live-processes live-processes))
-        liveness-diagnostic
-        (when-not live-processes
-          (debug-diagnostic
-           ::live-processes-unavailable
-           "The debug page cannot observe which run-holder processes are alive."
-           'seon.render.web/debug-page-result
-           :seon.cluster.run/live-processes
-           [:set :seon.cluster.run/process]
-           [:seon.cluster.agent/id agent-id]
-           ::observation-unavailable
-           :seon.error/unknown))
-        result (page-result page-request)
-        page (dissoc (:seon.render.web/page result) stream-strip-id)
-        ai-id (str "debug-ai-" agent-id)
-        html-id (debug-html-id agent-id)
-        prompt-result (debug-prompt db connection agent-id caps
-                                    (assoc handle :seon.render/profile profile))]
-    (cond->
-     (assoc result :seon.render.web/page
-            {ai-id (debug-ai-html agent-id prompt-result)
-             html-id (debug-html agent-id (vals page))})
-      liveness-diagnostic
-      (assoc :seon.error/value liveness-diagnostic))))
+  [db connection debug-request caps profile handle retained-calls]
+  (let [{debug-data-output ::debug-data-output
+         data-call-id ::debug-data-call-id
+         debug-data-entry ::debug-data-entry}
+        (acquire-debug-data db debug-request retained-calls)
+        debug-request (::debug-request debug-data-output)
+        observation (::observation debug-data-output)
+        restarted? (::restarted? debug-data-output)
+        acquisition (::acquisition debug-data-output)
+        acquisition-ms (::acquisition-ms debug-data-output)
+        render-agent-id
+        (or (:seon.cluster.agent/id debug-request)
+            (:seon.cluster.agent/id handle))
+        render-custody
+        (cond->
+         {:seon.db/db db
+          :seon.render/namespace
+          (:seon.render.debug/viewer-namespace debug-request)
+          :seon.render/profile profile
+          :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+          :seon.sci.admit/caps caps
+          :seon.sci.eval/time-limit-ms
+          (:seon.config.eval/time-limit-ms handle)
+          :seon.config/on-core-error (:seon.config/on-core-error handle)}
+          render-agent-id
+          (assoc :seon.cluster.agent/id render-agent-id))
+        entity-html
+        (if (or (nil? acquisition) (:seon.error/kind acquisition))
+          (debug-value-html
+           (or acquisition
+               {:seon.error/kind ::render-value-missing
+                :seon.error/message "The selected entity does not exist."}))
+          (let [cursor (or (:seon.render.data/cursor debug-request)
+                           (data/parse-cursor nil nil))
+                found (data/at acquisition cursor)
+                opened-value (if (contains? found :seon.render.data/value)
+                               (:seon.render.data/value found)
+                               found)
+                rendered-value
+                (value/render-html
+                 (assoc render-custody
+                        :seon.render.value/root
+                        (:seon.render.debug/subject debug-request)
+                        :seon.render.value/route-base
+                        (debug-page-url debug-request {})
+                        :seon.render.data/cursor cursor
+                        :seon.render.value/options
+                        {:seon.render.value/structural? true}
+                        :seon.render/value opened-value))]
+            (if (:seon.error/kind rendered-value)
+              (debug-value-html rendered-value)
+              rendered-value)))
+        captured-calls (atom {data-call-id debug-data-entry})
+        call-id [::inspection-render
+                 (:seon.render.debug/viewer-namespace debug-request)
+                 (:seon.render.debug/subject debug-request)
+                 (:seon.render/output debug-request)]
+        render-request
+        (when-not (or (nil? acquisition) (:seon.error/kind acquisition))
+          (assoc render-custody
+                 :seon.render/value acquisition
+                 :seon.render/output (:seon.render/output debug-request)
+                 :seon.render.call/id call-id
+                 :seon.render/retained-calls retained-calls
+                 :seon.render/captured-calls captured-calls))
+        rendered (when render-request (render/render-call render-request))
+        selection (get-in @captured-calls
+                          [call-id :seon.render.call/static-evidence
+                           :seon.render/selection])
+        prompt-id (str "debug-ai-"
+                       (or (:seon.cluster.agent/id debug-request) "inspection"))
+        prompt-result
+        (when-let [agent-id (and (:seon.render.debug/prompt? debug-request)
+                                (:seon.cluster.agent/id debug-request))]
+          (debug-prompt db connection agent-id caps
+                        (assoc handle :seon.render/profile profile)))
+        page
+        (cond->
+         {"debug-inspection-header"
+          (debug-header-html debug-request observation acquisition-ms)
+          "debug-observation"
+          (debug-observation-html debug-request observation entity-html
+                                  restarted?)
+          "debug-selection" (debug-selection-html selection)
+          (debug-html-id
+           (or (:seon.cluster.agent/id debug-request) "inspection"))
+          (debug-output-html debug-request acquisition rendered)}
+          prompt-result
+          (assoc prompt-id
+                 (debug-ai-html (:seon.cluster.agent/id debug-request)
+                                prompt-result)))]
+    {:seon.render.web/page page
+     :seon.render.web/fragments {}
+     :seon.render/captured-calls @captured-calls}))
 
 (defn join-package
   "Return the render proc's settled package unchanged.
@@ -810,11 +1211,7 @@
                                            (calls-interest retained)))
                          #{}
                          calls)]
-    ;; The generic debug page deliberately reads arbitrary attributes. Its
-    ;; honest interest is therefore `:all`, never an incomplete hand list.
-    (if (some vector? (keys (::packages state)))
-      :all
-      interest)))
+    interest))
 
 (defn- current-read-evidence
   [database retained]
@@ -865,7 +1262,8 @@
        :seon.render.call/argument
        (select-keys request [:seon.render.walk/lookup
                              :seon.render/distance])}
-      :seon.render.call/read-evidence (db/read-evidence @captured)
+      :seon.render.call/read-evidence
+      (db/read-evidence @captured {:seon.db/retain-read-results? true})
       :seon.render.call/basis-transaction
       (db/basis-t (:seon.db/db request))
       :seon.render.call/output acquisition
@@ -929,19 +1327,38 @@
                      [::run/plan-digest ::run/error ::run/closed-at])))))
 
 (defn- page-refresh
-  [state database streams profile registration-key derive-all?]
+  [state database streams profile registration-key derive-all? invalidate-calls?]
   (let [handle (:seon.cluster.loop/cluster state)
         connection (:seon.db/connection handle)
         caps (:seon.sci.admit/caps handle)
         debug? (and (vector? registration-key)
                     (= ::debug-tab (first registration-key)))
-        agent-id (if debug? (second registration-key) registration-key)]
+        debug-request (when debug? (second registration-key))
+        agent-id (if debug?
+                   (:seon.cluster.agent/id debug-request)
+                   registration-key)]
     (if debug?
-      (when derive-all?
-        (debug-page-result database connection agent-id
-                           (:seon.render.web/root-agent-id state)
-                           caps profile handle))
-      (let [retained (get-in state [::calls registration-key] {})
+      (let [retained (if invalidate-calls?
+                       {}
+                       (get-in state [::calls registration-key] {}))
+            candidates (candidate-call-ids retained database)
+            package (get-in state [::packages registration-key])]
+        ;; A join marker shares the newest-only interest channel with database
+        ;; and evaluation wakes. A missing exact package is the durable level
+        ;; condition. For a retained package, the same read-evidence mechanism
+        ;; as every render call decides whether to derive; an unchanged page
+        ;; only advances its observed database basis below.
+        (if (or invalidate-calls? (nil? package) (seq candidates))
+          (debug-page-result database connection debug-request caps profile
+                             handle retained)
+          {::retained-only? true
+           ::advance-basis? (not= (db/basis-t database)
+                                  (:seon.render.package/basis-transaction
+                                   package))
+           :seon.render/captured-calls retained}))
+      (let [retained (if invalidate-calls?
+                       {}
+                       (get-in state [::calls registration-key] {}))
             candidates (candidate-call-ids retained database)
             call-id (root-call-id :seon.render/html registration-key)
             request
@@ -994,8 +1411,10 @@
   ([state]
    (render-pass state
                 @(-> state :seon.cluster.loop/cluster :seon.db/connection)
-                true))
+                true false))
   ([state database derive-all?]
+   (render-pass state database derive-all? false))
+  ([state database derive-all? invalidate-calls?]
   (let [handle (:seon.cluster.loop/cluster state)
         registration (:seon.render.web/registration state)
         watched (into (sorted-set-by #(compare (pr-str %1) (pr-str %2)))
@@ -1016,11 +1435,11 @@
                       (::streams state))
         results
         (into {}
-              (keep (fn [registration-key]
-                      (when-let [result
-                                 (page-refresh state database streams profile
-                                               registration-key derive-all?)]
-                        [registration-key result])))
+              (map (fn [registration-key]
+                     [registration-key
+                      (page-refresh state database streams profile
+                                    registration-key derive-all?
+                                    invalidate-calls?)]))
               watched)
         paint-results (into {}
                             (remove (comp ::retained-only? val))
@@ -1029,9 +1448,11 @@
         (reduce-kv
          (fn [{latest :packages changed? :changed?}
               registration-key result]
-           (let [debug? (vector? registration-key)
-                 agent-id (if debug? (second registration-key)
-                              registration-key)
+           (let [debug? (and (vector? registration-key)
+                             (= ::debug-tab (first registration-key)))
+                 agent-id (if debug?
+                            (:seon.cluster.agent/id (second registration-key))
+                            registration-key)
                  [package package-changed?]
                  (next-package
                   (get latest registration-key)
@@ -1042,7 +1463,17 @@
               :changed? (or changed? package-changed?)}))
          {:packages (::packages state) :changed? false}
          paint-results)
-        packages (:packages advanced)
+        packages
+        (reduce-kv
+         (fn [packages registration-key result]
+           (if (::advance-basis? result)
+             (assoc-in packages
+                       [registration-key
+                        :seon.render.package/basis-transaction]
+                       (db/basis-t database))
+             packages))
+         (:packages advanced)
+         results)
         changed? (:changed? advanced)
         fragments
         (reduce-kv
@@ -1186,10 +1617,11 @@
 (defn render-step
   "The render proc's transform, in Flow's four arities (F2 §1.1).
 
-  Three in-ports: `::interest` and `::stream` use `(sliding-buffer 1)`;
-  `::context` is the reliable demand channel for exact agent context.
-  `::interest` — the render
-  wake channel, a payload-free \"look\"; `::stream` — the cluster's one
+  Four in-ports: `::interest`, `::runtime-eval`, and `::stream` use
+  `(sliding-buffer 1)`; `::context` is the reliable demand channel for exact
+  agent context. `::interest` is the database render wake, a payload-free
+  \"look\"; `::runtime-eval` announces that evaluated code may have changed;
+  `::stream` is the cluster's one
   stream conn carrying `{agent-id + run-id + :seon.ai/partial snapshot}`
   entries. There is NO clear entry: the frozen-plan/error/close fact is
   the stream terminal. One out-port, `::pages`, feeding the mult;
@@ -1237,6 +1669,8 @@
    ;; is exactly the class the readiness rule exists to kill, so the
    ;; proc refuses to be built without the channels it reads.
    (let [ports {::interest (:seon.render.web/render-channel args)
+                ::runtime-eval
+                (:seon.render.web/runtime-eval-channel args)
                 ::stream (:seon.cluster.loop/stream-channel
                           (:seon.cluster.loop/cluster args))
                 ::context (:seon.render/context-channel args)
@@ -1253,6 +1687,7 @@
    (assoc args
           ::flow/in-ports
           {::interest (:seon.render.web/render-channel args)
+           ::runtime-eval (:seon.render.web/runtime-eval-channel args)
            ::stream (:seon.cluster.loop/stream-channel
                      (:seon.cluster.loop/cluster args))
            ::context (:seon.render/context-channel args)}
@@ -1280,7 +1715,8 @@
      (let [[state response] (context-pass state message)]
        (async/put! (:seon.render.context/reply message) response)
        [(publish-interest! state (:seon.db/db response)) nil])
-     (let [settlement
+     (let [runtime-eval? (= ::runtime-eval input)
+           settlement
          (when (and (= ::interest input) (map? message))
            (::settlement message))
          join? (and (= ::interest input) (map? message) (::join message))
@@ -1307,8 +1743,13 @@
        ;; serves it whole
        (Thread/sleep (long remainder)))
      (let [database @connection
-           derive-all? (or join? settlement (= ::stream input))
-           [state packages] (render-pass state database derive-all?)
+           derive-all? (or join? settlement runtime-eval? (= ::stream input))
+           ;; Evaluated code can change a selected render function or any
+           ;; helper below it without changing database facts. Reuse the one
+           ;; render pass, but refuse every retained call on this distinct
+           ;; signal so a database wake cannot overwrite code invalidation.
+           [state packages] (render-pass state database derive-all?
+                                         runtime-eval?)
            state (-> state
                      (assoc ::coalesce-ms (coalesce-floor database))
                      (publish-interest! database))
@@ -1458,7 +1899,17 @@
             backstop-ms :seon.config.eval/time-limit-ms}]
   (let [query (query-params request)
         debug? (= "true" (get query "debug"))
-        registration-key (if debug? [::debug-tab id] id)
+        viewer-namespace
+        (when debug?
+          (or (some-> (get query "viewer") route-namespace)
+              (agent-namespace @connection id)))
+        registration-key
+        (if debug?
+          [::debug-tab
+           (debug-query query [:seon.cluster.agent/id id]
+                        viewer-namespace
+                        (when (agent-namespace @connection id) id))]
+          id)
         channel (:async-channel request)
         tap (async/chan (async/sliding-buffer 1))
         tab-id (str (random-uuid))
@@ -1698,9 +2149,11 @@
   [encoded]
   (try
     (let [value (some-> encoded edn/read-string)]
-      (when (and (vector? value)
-                 (= 2 (count value))
-                 (qualified-keyword? (first value)))
+      (when (or (int? value)
+                (keyword? value)
+                (and (vector? value)
+                     (= 2 (count value))
+                     (qualified-keyword? (first value))))
         value))
     (catch Throwable _ nil)))
 
@@ -1821,8 +2274,14 @@
   [{connection :seon.store/connection-object
     caps :seon.sci.admit/caps
     :as service}
-   agent-id]
+   viewer-namespace agent-id request]
   (let [db @connection
+        query (query-params request)
+        default-subject (if agent-id
+                          [:seon.cluster.agent/id agent-id]
+                          [:seon.ns/name viewer-namespace])
+        debug-request (debug-query query default-subject viewer-namespace
+                                   agent-id)
         projection (sci.kernel/context-projection
                     (:seon.sci.eval/ctx service))
         effective (schema/call-with-projection
@@ -1831,27 +2290,64 @@
         render-context
         (assoc service :seon.render/profile
                (render/agent-render-profile effective))
-        prompt-result (debug-prompt db connection agent-id caps render-context)]
+        prompt-result (when (and agent-id
+                                 (:seon.render.debug/prompt? debug-request))
+                        (debug-prompt db connection agent-id caps
+                                      render-context))
+        feed-id (or agent-id (str viewer-namespace))
+        output-id (debug-html-id (or agent-id "inspection"))
+        prompt-section
+        (if prompt-result
+          [:details {:class "seon-debug-prompt-detail"}
+           [:summary "agent prompt comparison"]
+           [:section {:class "seon-debug-pane seon-debug-pane-ai"}
+            (hiccup/raw (debug-ai-html agent-id prompt-result))]]
+          (when agent-id
+            [:a {:class "seon-debug-prompt-link"
+                 :href (debug-page-url
+                        debug-request
+                        {:seon.render.debug/prompt? true})}
+             "include agent prompt comparison"]))
+        page
+        [[:section {:class "seon-debug"
+                    :data-signals__ifmissing
+                    "{showEverything:true,selectedUnit:''}"}
+          [:header {:id "debug-inspection-header" :class "seon-debug-header"}
+           [:div [:span "viewer"] [:code (pr-str viewer-namespace)]]
+           [:div [:span "subject"]
+            [:code (pr-str (:seon.render.debug/subject debug-request))]]
+           [:div [:span "snapshot"]
+            [:code (pr-str (db/database-value-identity db))]]
+           [:div [:span "output"]
+            [:code (pr-str (:seon.render/output debug-request))]]]
+          [:div {:class "seon-debug-grid"}
+           [:div {:class "seon-debug-experiment"}
+            [:section {:id "debug-observation"
+                       :class "seon-debug-body seon-debug-observation"}
+             [:p {:class "seon-render-pending"}
+              "Loading bounded structural observation…"]]
+            [:section {:id "debug-selection"
+                       :class "seon-debug-body seon-debug-selection"}
+             [:p {:class "seon-render-pending"}
+              "Loading renderer selection…"]]
+            [:section {:id output-id
+                       :class "seon-debug-body seon-debug-body-html"}
+             [:p {:class "seon-render-pending"}
+              "Loading the actual selected output…"]]]
+           prompt-section]]]]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body
      (shell
-      {:seon.cluster.agent/id agent-id
-       :seon.render/page
-       [[:section {:class "seon-debug"
-                   :data-signals__ifmissing
-                   "{showEverything:true,selectedUnit:''}"}
-         [:div {:class "seon-debug-grid"}
-          [:section {:class "seon-debug-pane seon-debug-pane-ai"}
-           [:h2 {:class "seon-debug-caption"} ":seon.render/ai"]
-           (hiccup/raw (debug-ai-html agent-id prompt-result))]
-          [:section {:class "seon-debug-pane seon-debug-pane-html"}
-           [:h2 {:class "seon-debug-caption"} ":seon.render/html"]
-           (hiccup/raw (debug-html agent-id nil))]]]]
-       :seon.render.web/feed-url
-       (route/path ::route/feed
-                   {:id agent-id}
-                   {:debug "true"})})}))
+      (cond->
+       {:seon.render.debug/viewer-namespace viewer-namespace
+         :seon.render/page page
+         :seon.render.web/feed-url
+         (route/path ::route/feed
+                     {:id feed-id}
+                     (debug-query-strings debug-request))}
+        agent-id
+        (assoc :seon.cluster.agent/id agent-id)))}))
 
 (defn- canonical-namespace-response
   [{connection :seon.store/connection-object :as service} debug? request]
@@ -1859,21 +2355,24 @@
                                route-namespace)]
     (if-not (and namespace-name (namespace-exists? @connection namespace-name))
       (not-found request)
-      (let [owner (ensure-namespace-owner! service namespace-name)]
-        (if (string? owner)
-          (if debug?
-            (debug-response service owner)
-            (page-response service owner))
-          {:status 500
-           :headers {"content-type" "text/plain; charset=utf-8"}
-           :body (:seon.error/message owner)})))))
+      (if debug?
+        (debug-response service namespace-name
+                        (cluster.agent/owner-of @connection namespace-name)
+                        request)
+        (let [owner (ensure-namespace-owner! service namespace-name)]
+          (if (string? owner)
+            (page-response service owner)
+            {:status 500
+             :headers {"content-type" "text/plain; charset=utf-8"}
+             :body (:seon.error/message owner)}))))))
 
 (defn- agent-alias-response
   [{connection :seon.store/connection-object :as service} debug? request]
   (let [agent-id (get-in request [:path-params :id])]
     (if (agent-namespace @connection agent-id)
       (if debug?
-        (debug-response service agent-id)
+        (debug-response service (agent-namespace @connection agent-id)
+                        agent-id request)
         (page-response service agent-id))
       (not-found request))))
 

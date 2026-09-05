@@ -121,6 +121,7 @@
   [_connection cluster-handle body]
   (let [context-channel (async/chan)
         render-channel (async/chan (async/sliding-buffer 1))
+        runtime-eval-channel (async/chan (async/sliding-buffer 1))
         pages-channel (async/chan (async/sliding-buffer 1))
         stream-channel (async/chan (async/sliding-buffer 1))
         completion (async/promise-chan)
@@ -136,6 +137,7 @@
              #'web/render-step :io
              {:seon.env/environment @test-environment
               :seon.render.web/render-channel render-channel
+              :seon.render.web/runtime-eval-channel runtime-eval-channel
               :seon.render/context-channel context-channel
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/interest (atom :all)
@@ -3832,6 +3834,7 @@
   [cluster]
   (let [completion (async/promise-chan)
         render-channel (async/chan (async/sliding-buffer 1))
+        runtime-eval-channel (async/chan (async/sliding-buffer 1))
         graph (flow.core/create-flow
                {:procs
                 {:seon.render.web/render
@@ -3840,6 +3843,8 @@
                          {:seon.env/environment @test-environment
                           :seon.render.web/render-channel
                           render-channel
+                          :seon.render.web/runtime-eval-channel
+                          runtime-eval-channel
                           :seon.render/context-channel (async/chan)
                           :seon.render.web/pages-channel
                           (async/chan (async/sliding-buffer 1))

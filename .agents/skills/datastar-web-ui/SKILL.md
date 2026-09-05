@@ -33,11 +33,11 @@ not database facts.
 |---|---|
 | `GET /` | alias to the configured root agent's namespace page |
 | `GET /ns/{namespace}` | canonical namespace page |
-| `GET /ns/{namespace}/debug` | canonical namespace debug surface |
+| `GET /ns/{namespace}/debug` | read-only entity/render inspection in that viewing namespace; it does not create a namespace owner |
 | `GET /agent/{id}` | alias to that agent's namespace page |
 | `GET /agent/{id}/debug` | alias to that agent's debug surface |
 | `POST /agent/{id}/message` | same-origin inbound-message commit |
-| `GET /feed/{id}` | that agent's Datastar SSE feed; debug surfaces use `?debug=true` |
+| `GET /feed/{id}` | the existing Datastar SSE feed; debug requests carry `?debug=true`, viewer, subject, output, bounds, and cursors |
 | `GET /data` | schema/entity `get-in` surface |
 | `GET /css/{*path}`, `GET /js/{*path}` | packaged public resources |
 
@@ -50,21 +50,26 @@ generalized action endpoint: none appears in the one route table
 
 ## Keep the namespace page on the one walk
 
-Resolve a canonical namespace route through its namespace owner. An absent
-owner is ensured through the existing agent-creation transaction; an unknown
-or malformed namespace returns 404 (`src/seon/render/web.clj:931-983,1074-1087`).
+Resolve an ordinary canonical namespace route through its namespace owner. An
+absent owner is ensured through the existing agent-creation transaction. The
+canonical debug route is read-only and does not ensure an owner; this permits
+inspection in a separate viewing namespace. An unknown or malformed namespace
+returns 404 (`src/seon/render/web.clj:2260-2353`).
 The `/agent/{id}` forms are aliases and return 404 when the agent has no
 assigned namespace (`src/seon/render/web.clj:1089-1102`).
 
 Keep AI context and namespace-page HTML on the same visible walk. HTML `page-of` calls
 `seon.render.walk/neighborhood` and `units`; the AI boundary calls
 `seon.render/walk`, which calls the same neighborhood and assembles the AI projection
-(`src/seon/render/web.clj:300-350,988-1009`,
+(`src/seon/render/web.clj:300-350,1326-1399`,
 `src/seon/render.clj:147-226`, `src/seon/render/walk.clj:693-876`). The debug
-surface derives both projections from the same database value and shows AI on the
-left and every walked HTML unit on the right
-(`src/seon/render/web.clj:428-441,1041-1072`). Do not add a parallel web
-renderer or a debug-only traversal.
+surface is an inspection of one arbitrary database entity: it shows bounded
+structural floor HTML, the real ordered render selection and candidates, the
+actual selected output, and raw datom evidence. An agent prompt comparison is
+available explicitly with `?prompt=true`; it is not derived by the initial GET
+(`src/seon/render/web.clj:800-1090,2260-2337`). All results use the existing
+render functions, retained-call evidence, revisioned packages, and feed. Do not
+add a parallel renderer, walk, or delivery path.
 
 AI and HTML remain distinct projections: AI returns text and HTML returns
 Hiccup. Recursive render-function selection applies at every admitted value depth,

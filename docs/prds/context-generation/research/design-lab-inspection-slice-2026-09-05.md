@@ -374,3 +374,29 @@ channel. These are focused proofs, not a combined gate or a fresh running
 browser proof. Both checks also encountered a pre-body source-span indexing
 error on an earlier attempt; that evidence is recorded in the existing
 [shared-edit publication issue](../../../seon/issues/bin-test-shared-base-compiles-other-lanes-half-edits.md).
+
+### Fresh process observations
+
+The other session subsequently restarted `default`: PID 1170, process start
+2026-09-05T23:32:33Z, PREPL 53638, web port 7994. A fresh MCP JVM session
+reported the required runtime-evaluation channel present and zero core fault
+facts at basis 536870955, commit
+`6a9ca73e-481b-5663-a7d8-2138d1a1f7ce`, source digest
+`ab402df7a2ee4381a9b550693080dcfe695842358ce24da7d998afaac6cad41b`.
+This is point-in-time evidence; later file edits still require publication or
+explicit hot reload before a live claim.
+
+The canonical `seon.flow` debug GET returned its 1,818-byte loading shell in
+20 ms. A bounded ten-second connection to its declared feed received one
+14,444-byte Datastar patch with data, selection and output fragments; HTTP
+first-byte latency was 3.8 ms. That first-byte measurement is not a measured
+time-to-complete-render. The full selected HTML output was reduced to an
+elision describing 63,913 original characters, so a readable actual-output
+preview remains a visual defect. Browser automation could not inspect the
+layout because the Mac was locked.
+
+The cache falsifier also remains red at this point: an unrelated message
+transaction changed observation/discovery/invocation counts from 1/1/1 to
+2/2/2. The fix is in the existing read-evidence mechanism and must retain
+comparison values only transiently, preserving the batched evaluation path's
+removal of bulky durable read results.

@@ -47,6 +47,15 @@
   [request]
   (target-call 'seon.render 'render-html request))
 
+(defn- selection
+  [request]
+  (target-call 'seon.render 'selection request))
+
+(defn- stage-statuses
+  [decision]
+  (mapv :seon.render.selection.stage/status
+        (:seon.render.selection/stages decision)))
+
 (defn- flat-units
   [neighborhood]
   neighborhood)
@@ -72,33 +81,71 @@
                      (:seon.error/kind (render-ai request))))))))))
 
 (deftest candidate-input-and-output-must-fit-the-same-arity
-  (let [cross-arity 'probe.render/cross-arity
-        matching 'probe.render/matching
-        argument-schema [:map [:seon.render/value :int]]
-        projection
-        (schema/build-projection
-         (schema.edn/packaged-forms)
-         {cross-arity
-          [:function
-           [:=> [:cat argument-schema] :int]
-           [:=> [:cat :string :string] :string]]
-          matching [:=> [:cat argument-schema] :string]})
-        request
-        {:seon.sci.eval/ctx {}
-         :seon.render/namespace 'probe.render
-         :seon.render/output-schema :string
-         :seon.render/value 7
-         :seon.render/profile
-         {:seon.render.profile/id :seon.render.profile/agent
-          :seon.render.profile/token-budget 100
-          :seon.render.profile/max-depth 4
-          :seon.render.profile/max-children 10
-          :seon.render.profile/composition :seon.render.profile.composition/context}}]
-    (with-redefs [kernel/context-projection (constantly projection)
-                  kernel/public-functions-in
-                  (fn [_ctx _namespace-name] [cross-arity matching])]
-      (is (= [(str matching)]
-             (target-call 'seon.render 'candidates request))))))
+  (support/with-database
+   (fn [connection]
+     (let [cross-arity 'probe.render/cross-arity
+           matching 'probe.render/matching
+           argument-schema [:map [:seon.render/value :int]]
+           projection
+           (schema/build-projection
+            (schema.edn/packaged-forms)
+            {cross-arity
+             [:function
+              [:=> [:cat argument-schema] :int]
+              [:=> [:cat :string :string] :seon.render/ai]]
+             matching [:=> [:cat argument-schema] :seon.render/ai]})
+           request
+           (assoc (render-request @connection {} 'probe.render 7)
+                  :seon.render/output :seon.render/ai
+                  :seon.render/profile
+                  {:seon.render.profile/id :seon.render.profile/agent
+                   :seon.render.profile/token-budget 100
+                   :seon.render.profile/max-depth 4
+                   :seon.render.profile/max-children 10
+                   :seon.render.profile/composition
+                   :seon.render.profile.composition/context})]
+       (with-redefs [kernel/context-projection (constantly projection)
+                     kernel/public-functions-in
+                     (fn [_ctx _namespace-name] [cross-arity matching])]
+         (let [decision (selection request)
+               namespace-stage
+               (nth (:seon.render.selection/stages decision) 2)]
+           (is (= matching (:seon.render.selection/selected decision)))
+           (is (= [:explicit-value :explicit-request :namespace
+                   :schema :floor]
+                  (mapv :seon.render.selection.stage/name
+                        (:seon.render.selection/stages decision))))
+           (is (= [:no-match :no-match :selected
+                   :not-consulted :not-consulted]
+                  (stage-statuses decision)))
+           (is (= [{:seon.render.selection.candidate/producer cross-arity
+                    :seon.render.selection.candidate/status :rejected
+                    :seon.render.selection.candidate/reason
+                    :no-same-arity-match}
+                   {:seon.render.selection.candidate/producer matching
+                    :seon.render.selection.candidate/status :compatible}]
+                  (:seon.render.selection.stage/candidates
+                   namespace-stage)))))))))
+
+(deftest explicit-value-selection-records-a-value-without-calling-it-a-producer
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           decision
+           (selection
+            (assoc (render-request @connection ctx nil
+                                   {:seon.render/ai "already rendered"})
+                   :seon.render/output :seon.render/ai))
+           explicit-stage
+           (first (:seon.render.selection/stages decision))]
+       (is (= "already rendered"
+              (:seon.render.selection/selected decision)))
+       (is (= "already rendered"
+              (:seon.render.selection.stage/value explicit-stage)))
+       (is (nil? (:seon.render.selection.stage/candidates explicit-stage)))
+       (is (= [:selected :not-consulted :not-consulted
+               :not-consulted :not-consulted]
+              (stage-statuses decision)))))))
 
 (deftest missing-render-profile-remains-a-flat-error
   (support/with-database
@@ -131,7 +178,113 @@
             (get-in @captured
                     [call-id
                      :seon.render.call/static-evidence
-                     :seon.render/would-fall-to-floor?])))))))
+                     :seon.render/would-fall-to-floor?])))
+       (let [decision
+             (get-in @captured
+                     [call-id :seon.render.call/static-evidence
+                      :seon.render/selection])]
+         (is (= 'seon.render.value/render-ai
+                (:seon.render.selection/selected decision)))
+         (is (= [:no-match :no-match :no-match :no-match :selected]
+                (stage-statuses decision))))))))
+
+(deftest unchanged-retained-call-skips-discovery-and-invocation
+  (support/with-database
+   (fn [connection]
+     (db/transact! connection
+                   [{:seon.ns/name fixture-a
+                     :seon.ns/doc "one"}])
+     (let [ctx (support/fork-cluster-ctx connection)
+           call-id [:seon.render-simplification-test/cached-namespace]
+           helper 'seon.render-simplification.fixture-a/cache-helper
+           discoveries (atom 0)
+           invocations (atom 0)
+           public-functions-in kernel/public-functions-in
+           invoke kernel/invoke
+           request
+           (fn [database retained captured]
+             (cond->
+              (assoc (render-request database ctx fixture-a
+                                     {:seon.ns/name fixture-a})
+                     :seon.render.call/id call-id
+                     :seon.render/output :seon.render/ai
+                     :seon.render/captured-calls captured
+                     :seon.render/candidate-call-ids #{call-id})
+               retained (assoc :seon.render/retained-calls retained)))]
+       (sci/binding [sci/ns (sci/create-ns fixture-a)]
+         (sci/eval-form ctx '(defn cache-helper [] "H1"))
+         (sci/eval-form
+          ctx
+          '(defn namespace-ai [value]
+             (str "A:" (:seon.ns/name value) ":"
+                  (seon.db/q
+                   '[:find ?doc .
+                     :in $ ?name
+                     :where
+                     [?namespace :seon.ns/name ?name]
+                     [?namespace :seon.ns/doc ?doc]]
+                   (:seon.db/db value) (:seon.ns/name value))
+                  ":" (cache-helper)))))
+       (with-redefs [kernel/public-functions-in
+                     (fn [candidate-ctx namespace-name]
+                       (swap! discoveries inc)
+                       (public-functions-in candidate-ctx namespace-name))
+                     kernel/invoke
+                     (fn [invocation]
+                       (swap! invocations inc)
+                       (invoke invocation))]
+         (let [first-captured (atom {})
+               first-output
+               (target-call 'seon.render 'render-call
+                            (request @connection nil first-captured))
+               retained @first-captured
+               second-captured (atom {})
+               second-output
+               (target-call 'seon.render 'render-call
+                            (request @connection retained second-captured))]
+           (is (= (str "A:" fixture-a ":one:H1")
+                  first-output second-output))
+           (is (= {:discoveries 1 :invocations 1}
+                  {:discoveries @discoveries :invocations @invocations})
+               "the unchanged call skips candidate and nested invocation work")
+           (db/transact! connection [{:seon.cluster/name "cache-unrelated"}])
+           (let [unrelated-captured (atom {})
+                 unrelated-output
+                 (target-call 'seon.render 'render-call
+                              (request @connection @second-captured
+                                       unrelated-captured))]
+             (is (= first-output unrelated-output))
+             (is (= {:discoveries 1 :invocations 1}
+                    {:discoveries @discoveries :invocations @invocations})
+                 "an unrelated database revision retains the call")
+             (db/transact! connection
+                           [{:seon.ns/name fixture-a
+                             :seon.ns/doc "two"}])
+             (let [relevant-captured (atom {})
+                   relevant-output
+                   (target-call 'seon.render 'render-call
+                                (request @connection @unrelated-captured
+                                         relevant-captured))]
+               (is (= (str "A:" fixture-a ":two:H1") relevant-output))
+               (is (= {:discoveries 2 :invocations 2}
+                      {:discoveries @discoveries :invocations @invocations})
+                   "a changed read dependency invalidates the call")
+               (sci/binding [sci/ns (sci/create-ns fixture-a)]
+                 (sci/eval-form ctx '(defn cache-helper [] "H2")))
+           (kernel/cache-function!
+                ctx helper
+                {:seon.sci.eval/function-private? true
+                 :seon.fn/source "(defn cache-helper [] \"H2\")"})
+               (let [helper-captured (atom {})
+                     helper-output
+                     (target-call 'seon.render 'render-call
+                                  (request @connection @relevant-captured
+                                           helper-captured))]
+                 (is (= (str "A:" fixture-a ":two:H2") helper-output))
+                 (is (= {:discoveries 3 :invocations 3}
+                        {:discoveries @discoveries
+                         :invocations @invocations})
+                     "a helper program change invalidates its caller"))))))))))
 
 (deftest nested-values-render-their-declared-faces
   (support/with-database
@@ -226,9 +379,11 @@
    (fn [connection]
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
-           result (render-ai
-                   (render-request database ctx fixture-ambiguous
-                                   {:seon.ns/name fixture-ambiguous}))
+           request (render-request database ctx fixture-ambiguous
+                                   {:seon.ns/name fixture-ambiguous})
+           result (render-ai request)
+           decision (selection
+                     (assoc request :seon.render/output :seon.render/ai))
            walked (walk/neighborhood
                    {:seon.db/db database
                     :seon.sci.eval/ctx ctx
@@ -242,6 +397,12 @@
            expected #{"seon.render-simplification.fixture-ambiguous/first-ai"
                       "seon.render-simplification.fixture-ambiguous/second-ai"}]
        (is (= :seon.render/ambiguous (:seon.error/kind result)))
+       (is (= :seon.render/ambiguous
+              (:seon.error/kind
+               (:seon.render.selection/selected decision))))
+       (is (= [:no-match :no-match :ambiguous
+               :not-consulted :not-consulted]
+              (stage-statuses decision)))
        (is (= expected
               (set (:seon.render/candidates (:seon.error/data result)))))
        (is (= (sort expected)
@@ -303,12 +464,16 @@
                :seon.sci.admit/caps caps
                :seon.sci.eval/time-limit-ms 2000
                :seon.config/on-core-error :panic})
-             row (:seon.program/row evaluation)]
-         (db/transact! connection [(dissoc row :seon.sci.eval/evaluated?)])
-         (eval/install-row!
+             row (dissoc (:seon.program/row evaluation)
+                         :seon.sci.eval/evaluated?)
+             report
+             (db/transact! connection [row])]
+         (eval/install-evaluated-rows!
           {:seon.sci.eval/ctx ctx
-           :seon.db/db @connection
-           :seon.program/row row})
+           :seon.db/db (:db-after report)
+           :seon.sci.eval/installations
+           [{:seon.program/row row
+             :seon.sci.eval/evaluation evaluation}]})
          (is (some #{'seon.render-simplification.fixture-a/live-html}
                    (kernel/public-functions-in ctx fixture-a))
              "the terminal install publishes a new renderer candidate")

@@ -466,6 +466,35 @@
          (is (not (db/read-evidence-current? @connection evidence))
              "a depended attribute revision makes the retained read stale"))))))
 
+(deftest process-local-read-results-replay-without-entering-durable-evidence
+  (test-support/with-database
+   (fn [connection]
+     (let [subject [:seon.ns/name 'seon.flow]
+           captured (atom [])
+           original (binding [db/*read-evidence-sink* captured]
+                      (db/pull @connection '[*] subject))
+           durable (db/read-evidence @captured)
+           process-local
+           (db/read-evidence @captured
+                             {:seon.db/retain-read-results? true})]
+       (is (map? original))
+       (is (not-any? #(find % :seon.db/read-result) durable)
+           "default evidence cannot inline read payloads into evaluation facts")
+       (is (every? #(find % :seon.db/read-result) process-local)
+           "the explicit process-local cache retains stable replay values")
+       (db/transact! connection
+                     [{:seon.cluster.message/id "semantic-replay-unrelated"
+                       :seon.cluster.message/content "unrelated"}])
+       (is (false? (db/read-evidence-current? @connection durable))
+           "a wildcard revision alone remains conservative")
+       (is (true? (db/read-evidence-current? @connection process-local))
+           "an equal bounded replay keeps the process-local read current")
+       (db/transact! connection
+                     [{:seon.ns/name 'seon.flow
+                       :seon.ns/doc "semantic-replay-changed"}])
+       (is (false? (db/read-evidence-current? @connection process-local))
+           "a changed selected value invalidates the retained read")))))
+
 (deftest component-expanded-pull-evidence-detects-a-child-only-change
   (test-support/with-database
    {:seon.test-support/extra-schema component-evidence-schema}

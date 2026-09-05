@@ -4,6 +4,9 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [datahike.api :as d]
+            [seon.db :as db]
+            [seon.test-support :as support]
             [seon.render.data :as data]
             [seon.schema]))
 
@@ -57,3 +60,74 @@
   (let [found (data/at {:present nil} (cursor [:present] 0))]
     (is (contains? found :seon.render.data/value))
     (is (nil? (:seon.render.data/value found)))))
+
+(deftest observation-pages-preserve-facts-and-refuse-cross-snapshot-cursors
+  (support/with-database
+   {:seon.test-support/extra-schema
+    [{:db/ident ::id :db/valueType :db.type/string
+      :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+     {:db/ident ::link :db/valueType :db.type/ref
+      :db/cardinality :db.cardinality/many}]}
+   (fn [connection]
+     (d/transact connection [{:db/id "a" ::id "a" ::link ["a" "b"]}
+                             {:db/id "b" ::id "b" ::link ["a"]}])
+     (let [database @connection
+           request {:seon.db/db database ::data/subject [::id "a"]
+                    ::data/limit 1 ::data/max-result-weight 65536
+                    ::data/max-ref-attributes 200}
+           first-page (data/entity-observation request)
+           cursor (get-in first-page [::data/outgoing ::data/continuation])
+           second-page (data/entity-observation (assoc request ::data/outgoing-cursor cursor))
+           eid (::data/eid first-page)
+           expected (mapv #(select-keys % [:e :a :v :tx :added])
+                          (d/datoms database :eavt eid))
+           pages (take (count expected)
+                       (iterate (fn [page]
+                                  (data/entity-observation
+                                   (assoc request ::data/outgoing-cursor
+                                          (get-in page [::data/outgoing ::data/continuation]))))
+                                first-page))]
+       (is (pos-int? eid))
+       (is (= expected (into [] (mapcat #(get-in % [::data/outgoing ::data/datoms])) pages)))
+       (is (false? (::data/identities-complete? first-page)))
+       (is (false? (::data/identities-complete? (last pages))))
+       (is (not= (get-in first-page [::data/outgoing ::data/datoms])
+                 (get-in second-page [::data/outgoing ::data/datoms])))
+       (is (= ::data/missing-subject
+              (:seon.error/kind (data/entity-observation
+                                (assoc request ::data/subject [::id "absent"])))))
+       (is (= ::data/stale-continuation
+              (:seon.error/kind (data/entity-observation
+                                (assoc request ::data/subject [::id "b"]
+                                       ::data/outgoing-cursor cursor)))))
+       (is (= (:t (::data/snapshot first-page)) (db/basis-t @connection))
+           "observation itself transacts nothing")
+       (d/transact connection [{::id "c"}])
+       (is (= ::data/stale-continuation
+              (:seon.error/kind (data/entity-observation
+                                (assoc request :seon.db/db @connection
+                                       ::data/outgoing-cursor cursor)))))
+       (let [incoming (data/entity-observation (assoc request ::data/limit 200))
+             incoming-rows (get-in incoming [::data/incoming ::data/datoms])]
+         (is (= 2 (count (filter #(= ::link (:a %)) incoming-rows)))))))))
+
+(deftest index-pages-enforce-native-bounds
+  (support/with-database
+   {:seon.test-support/extra-schema
+    [{:db/ident ::raw-value :db/valueType :db.type/string
+      :db/cardinality :db.cardinality/one}]}
+   (fn [connection]
+     (d/transact connection [{::raw-value "fixture"}])
+     (let [database @connection
+           eid (db/q '[:find ?e . :where [?e ::raw-value "fixture"]] database)
+           options {:index :eavt :components [eid ::raw-value]
+                    :direction :forward :limit 1 :max-result-weight 65536}
+           result (db/index-page database options)]
+       (is (pos-int? eid))
+       (is (= "fixture" (:v (first (:datahike.index-page/datoms result)))))
+       (is (:seon.error/kind
+            (db/index-page database (assoc options :max-result-weight 1))))
+       (is (:seon.error/kind
+            (db/index-page database
+                           (assoc options :cursor
+                                  [eid ::raw-value "missing" 1 true]))))))))

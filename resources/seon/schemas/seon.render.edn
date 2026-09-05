@@ -33,6 +33,50 @@
                [:seon.render/output-schema
                 :seon.render/output-schema]],
               :candidates [:vector :seon.fn/sym],
+              :selection-request
+              [:and
+               :seon.render/call-request
+               [:map [:seon.render/output :seon.render/output]]],
+              :selection-candidate-status
+              [:enum :compatible :rejected],
+              :selection-candidate-reason
+              [:= :no-same-arity-match],
+              :selection-candidate
+              [:map
+               [:seon.render.selection.candidate/producer
+                :qualified-symbol]
+               [:seon.render.selection.candidate/status
+                :seon.render/selection-candidate-status]
+               [:seon.render.selection.candidate/reason
+                {:optional true}
+                :seon.render/selection-candidate-reason]],
+              :selection-stage-name
+              [:enum :explicit-value :explicit-request :namespace :schema
+               :floor],
+              :selection-stage-status
+              [:enum :selected :no-match :ambiguous :not-consulted],
+              :selection-stage
+              [:map
+               [:seon.render.selection.stage/name
+                :seon.render/selection-stage-name]
+               [:seon.render.selection.stage/status
+                :seon.render/selection-stage-status]
+               [:seon.render.selection.stage/value
+                {:optional true}
+                :seon.render/rendered]
+               [:seon.render.selection.stage/candidates
+                {:optional true}
+                [:vector :seon.render/selection-candidate]]
+               [:seon.render.selection.stage/error
+                {:optional true}
+                :seon.error/value]],
+              :selection
+              [:map
+               [:seon.render.selection/stages
+                [:vector {:min 5 :max 5} :seon.render/selection-stage]]
+               [:seon.render.selection/selected
+                [:or :qualified-symbol :seon.render/rendered
+                 :seon.error/value]]],
               :distance [:int {:min 0}],
               :failure
               [:map

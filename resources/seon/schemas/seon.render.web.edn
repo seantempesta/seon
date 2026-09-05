@@ -47,7 +47,12 @@
                    seon.flow/atom-reference?],
                   :page-request
                   [:map
-                   [:seon.cluster.agent/id :seon.cluster.agent/id]
+                   [:seon.cluster.agent/id
+                    {:optional true}
+                    :seon.cluster.agent/id]
+                   [:seon.render.debug/viewer-namespace
+                    {:optional true}
+                    :seon.ns/name]
                    [:seon.render/page :seon.render/page]
                    [:seon.render.web/feed-url [:string {:min 1}]]],
                   :pages-mult
@@ -121,6 +126,8 @@
                   :view
                   [:map
                    [:seon.render.web/render-channel :seon.flow/channel]
+                   [:seon.render.web/runtime-eval-channel
+                    :seon.flow/channel]
                    [:seon.render/context-channel :seon.flow/channel]
                    [:seon.render.web/pages-channel :seon.flow/channel]
                    [:seon.render.web/registration

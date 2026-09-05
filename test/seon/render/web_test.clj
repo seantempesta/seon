@@ -42,6 +42,7 @@
             [seon.oversight :as oversight]
             [seon.problems :as problems]
             [seon.render :as render]
+            [seon.render.data :as data]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
@@ -146,6 +147,7 @@
             ctx (sci.eval/cluster-ctx @connection connection)
             server (atom nil)
             render-channel (async/chan (async/sliding-buffer 1))
+            runtime-eval-channel (async/chan (async/sliding-buffer 1))
             context-channel (async/chan)
             pages-channel (async/chan (async/sliding-buffer 1))
             registration (atom {})
@@ -156,6 +158,7 @@
             stream-channel (async/chan (async/sliding-buffer 1))
             graph-errors (atom [])
             view {:seon.render.web/render-channel render-channel
+                  :seon.render.web/runtime-eval-channel runtime-eval-channel
                   :seon.render/context-channel context-channel
                   :seon.render.web/pages-channel pages-channel
                   :seon.render.web/registration registration
@@ -233,6 +236,7 @@
                 {:graph graph
                  :pages-mult pages-mult
                  :render-channel render-channel
+                 :runtime-eval-channel runtime-eval-channel
                  :stream-channel stream-channel
                  :fault-channel fault-channel
                  :latest-packages latest-packages
@@ -256,6 +260,7 @@
             (support/await-event! (future (async/<!! completion))
                                   [:render-proc-stopped])
             (async/close! render-channel)
+            (async/close! runtime-eval-channel)
             (async/close! pages-channel)
             (async/close! stream-channel)))))))
 
@@ -486,7 +491,7 @@
                           (swap! calls inc)
                           (throw
                            (ex-info "the request thread derived a walk" {})))]
-            (let [response (fetch server "/agent/root/debug")
+            (let [response (fetch server "/agent/root/debug?prompt=true")
                   body (.body response)]
               (is (= 200 (.statusCode response)))
               (is (zero? @calls)
@@ -499,7 +504,7 @@
               (is (str/includes? body "id=\"debug-html-root\""))
               (is (str/includes? body "class=\"seon-debug-grid\""))
               (is (str/includes? body
-                                 "Loading the current HTML projection")
+                                 "Loading the actual selected output")
                   "the pending pane states what has not derived yet"))))))))
 
 (deftest a-never-run-agents-debug-context-is-labeled-prospective
@@ -511,7 +516,7 @@
                       (fn [request]
                         (reset! observed request)
                         (history request))]
-          (let [response (fetch server "/agent/root/debug")
+          (let [response (fetch server "/agent/root/debug?prompt=true")
                 body (.body response)]
             (is (= 200 (.statusCode response)))
             (is (= agent-id
@@ -557,7 +562,7 @@
                                 :seon.cluster.agent/id rendered-agent-id})
                         (message-custody database run-id rendered-agent-id
                                          message-eid))]
-          (let [response (fetch server "/agent/root/debug")
+          (let [response (fetch server "/agent/root/debug?prompt=true")
                 body (.body response)]
             (is (= 200 (.statusCode response)))
             (is (nil?
@@ -592,7 +597,7 @@
                     (fn [_request]
                       (throw (RuntimeException.
                               "injected prospective failure")))]
-        (let [response (fetch server "/agent/root/debug")
+        (let [response (fetch server "/agent/root/debug?prompt=true")
               body (.body response)]
           (is (= 200 (.statusCode response)))
           (is (str/includes? body
@@ -710,6 +715,177 @@
               (str path " wrote no datoms"))
           (is (= basis-before (:max-tx @connection))
               (str path " committed no transaction")))))))
+
+(deftest canonical-debug-inspects-without-creating-a-namespace-owner
+  (with-server
+    (fn [connection server _context]
+      (let [namespace-name 'seon.flow
+            basis-before (:max-tx @connection)
+            response (fetch server
+                            (str "/ns/seon.flow/debug?subject="
+                                 (java.net.URLEncoder/encode
+                                  (pr-str [:seon.ns/name namespace-name])
+                                  "UTF-8")
+                                 "&output=%3Aseon.render%2Fhtml"))
+            body (.body response)]
+        (is (nil? (cluster.agent/owner-of @connection namespace-name)))
+        (is (= 200 (.statusCode response)))
+        (is (= basis-before (:max-tx @connection))
+            "inspection commits no transaction")
+        (is (nil? (cluster.agent/owner-of @connection namespace-name))
+            "inspection does not create an agent")
+        (is (str/includes? body "id=\"debug-inspection-header\""))
+        (is (str/includes? body "viewer</span><code>seon.flow"))
+        (is (str/includes? body "subject</span><code>[:seon.ns/name seon.flow]"))
+        (is (str/includes? body "debug=true")
+            "the existing feed receives the experiment request")))))
+
+(deftest canonical-debug-feed-repaints-when-the-subject-changes
+  (with-server
+    (fn [connection server _context]
+      (let [namespace-name 'seon.flow
+            subject (java.net.URLEncoder/encode
+                     (pr-str [:seon.ns/name namespace-name]) "UTF-8")
+            stream (open-feed
+                    server
+                    (str "/feed/seon.flow?debug=true&viewer=seon.flow"
+                         "&subject=" subject
+                         "&output=%3Aseon.render%2Fhtml"))]
+        (try
+          (read-patches! stream 1)
+          (db/transact! connection
+                        [{:seon.ns/name namespace-name
+                          :seon.ns/doc "debug-live-subject-marker"}])
+          (is (str/includes?
+               (read-until! stream "debug-live-subject-marker")
+               "debug-live-subject-marker")
+              "the existing feed repaints from the new database value")
+          (finally (.close stream)))))))
+
+(deftest debug-data-reuses-read-evidence-when-the-database-is-unchanged
+  (support/with-database
+    (fn [connection]
+      (let [request {:seon.render.debug/subject [:seon.ns/name 'seon.flow]
+                     :seon.render.data/limit 40
+                     :seon.render.data/max-ref-attributes 40
+                     :seon.render.data/max-result-weight 4000
+                     :seon.render.web/pull-max-work 4000
+                     :seon.render.web/pull-max-results 4000}
+            calls (atom 0)
+            observe data/entity-observation]
+        (with-redefs [data/entity-observation
+                      (fn [observation-request]
+                        (swap! calls inc)
+                        (observe observation-request))]
+          (let [first-result ((web-private 'acquire-debug-data)
+                              @connection request {})
+                retained {(:seon.render.web/debug-data-call-id first-result)
+                          (:seon.render.web/debug-data-entry first-result)}]
+            ((web-private 'acquire-debug-data) @connection request retained)
+            (is (= 1 @calls)
+                "unchanged debug reads reuse the retained observation")))))))
+
+(deftest unrelated-transaction-reuses-debug-observation-and-render-call
+  (with-server
+    (fn [connection server context]
+      (let [counts (atom {:observation 0 :discovery 0 :invocation 0})
+            observe data/entity-observation
+            discover render/selection
+            invoke render/render-html]
+        (with-redefs [data/entity-observation
+                      (fn [request]
+                        (swap! counts update :observation inc)
+                        (observe request))
+                      render/selection
+                      (fn [request]
+                        (swap! counts update :discovery inc)
+                        (discover request))
+                      render/render-html
+                      (fn [request]
+                        (swap! counts update :invocation inc)
+                        (invoke request))]
+          (let [subject (URLEncoder/encode
+                         (pr-str [:seon.ns/name 'seon.flow]) "UTF-8")
+                stream (open-feed
+                        server
+                        (str "/feed/seon.flow?debug=true&viewer=seon.flow"
+                             "&subject=" subject
+                             "&output=%3Aseon.render%2Fhtml"))]
+            (try
+              (read-patches! stream 1)
+              (let [before @counts
+                    pass-before (derivations context)]
+                (is (= {:observation 1 :discovery 1 :invocation 1} before)
+                    "the initial page acquires and renders exactly once")
+                (db/transact!
+                 connection
+                 [{:seon.cluster.message/id "debug-cache-unrelated"
+                   :seon.cluster.message/content
+                   "does not affect the inspected namespace"}])
+                (await-ping!
+                 context
+                 #(< pass-before (:seon.render.web/passes %))
+                 [:unrelated-debug-render-wake])
+                (is (= before @counts)
+                    "the database wake reuses observation, discovery, and invocation")
+                (let [pass-after-unrelated (derivations context)]
+                  (db/transact!
+                   connection
+                   [{:seon.ns/name 'seon.flow
+                     :seon.ns/doc "debug-cache-relevant"}])
+                  (await-ping!
+                   context
+                   #(< pass-after-unrelated (:seon.render.web/passes %))
+                   [:relevant-debug-render-wake])
+                  (is (= {:observation 2 :discovery 2 :invocation 2}
+                         @counts)
+                      "a selected-data change reacquires and renders exactly once")))
+              (finally (.close stream)))))))))
+
+(deftest runtime-evaluation-cannot-be-displaced-by-a-database-wake
+  (with-server
+    (fn [_connection server context]
+      (let [phase (atom 0)
+            calls (atom 0)
+            original (web-private 'debug-page-result)
+            decorated
+            (fn [& args]
+              (swap! calls inc)
+              (let [result (apply original args)
+                    marker (str "runtime-eval-phase-" @phase)]
+                (update-in result
+                           [:seon.render.web/page
+                            "debug-inspection-header"]
+                           str/replace
+                           "</header>"
+                           (str "<span>" marker "</span></header>"))))]
+        (with-redefs-fn
+          {(ns-resolve 'seon.render.web 'debug-page-result) decorated}
+          (fn []
+            (let [subject (URLEncoder/encode
+                           (pr-str [:seon.ns/name 'seon.flow]) "UTF-8")
+                  stream (open-feed
+                          server
+                          (str "/feed/seon.flow?debug=true&viewer=seon.flow"
+                               "&subject=" subject
+                               "&output=%3Aseon.render%2Fhtml"))]
+              (try
+                (read-until! stream "runtime-eval-phase-0")
+                (doseq [next-phase [1 2]]
+                  (reset! phase next-phase)
+                  (is (async/offer! (:runtime-eval-channel context)
+                                    :seon.render.web/runtime-eval))
+                  ;; The ordinary database wake has a different newest-value
+                  ;; buffer, so it cannot replace the pending code signal.
+                  (is (async/offer! (:render-channel context)
+                                    :seon.cluster.wake/render))
+                  (is (str/includes?
+                       (read-until! stream
+                                    (str "runtime-eval-phase-" next-phase))
+                       (str "runtime-eval-phase-" next-phase))))
+                (is (= 3 @calls)
+                    "the initial paint and both code changes rederive once")
+                (finally (.close stream))))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The wire — the rung's claim
@@ -1300,6 +1476,9 @@
         (is (str/includes? agent-page "/agent/root/debug")
             "the always-available debug view is linked from the curated page")
         (is (str/includes? root "debug=true"))
+        (is (str/includes? root "include agent prompt comparison")
+            "the expensive prompt comparison is an explicit secondary view")
+        (is (not (str/includes? root "id=\"debug-ai-root\"")))
         (is (str/includes? alice "/feed/alice"))
         (is (not= root alice) "the stable root address includes the agent"))
       (is (= 404 (.statusCode (fetch server "/agent/missing/debug")))))))

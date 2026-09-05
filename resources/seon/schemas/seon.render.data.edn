@@ -20,4 +20,55 @@
                      {:optional true}
                      :seon.render.data/offset]],
                    :no-such-path [:= true]
-                   :no-such-path-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a requested nested value path that does not exist"} [:seon.render.data/no-such-path :seon.render.data/no-such-path] [:seon.error/message :seon.error/message]]}
+                   :no-such-path-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a requested nested value path that does not exist"} [:seon.render.data/no-such-path :seon.render.data/no-such-path] [:seon.error/message :seon.error/message]]
+ :subject :seon.db/entity-id
+ :eid :int
+ :snapshot :seon.db/database-value-identity
+ :limit [:int {:min 1 :max 200}]
+ :max-result-weight [:int {:min 1}]
+ :max-ref-attributes [:int {:min 1 :max 200}]
+ :attribute-offset [:int {:min 0}]
+ :ref-attributes-probed [:int {:min 0}]
+ :direction [:enum :outgoing :incoming]
+ :index-cursor :seon.db/index-page-cursor
+ :continuation
+ [:map
+  [:seon.render.data/snapshot :seon.render.data/snapshot]
+  [:seon.render.data/eid :seon.render.data/eid]
+  [:seon.render.data/direction :seon.render.data/direction]
+  [:seon.render.data/attribute-offset :seon.render.data/attribute-offset]
+  [:seon.render.data/index-cursor {:optional true} :seon.render.data/index-cursor]]
+ :datoms :seon.db/datoms
+ :complete? :boolean
+ :identities-complete? :boolean
+ :page
+ [:map
+  [:seon.render.data/datoms :seon.render.data/datoms]
+  [:seon.render.data/complete? :seon.render.data/complete?]
+  [:seon.render.data/continuation {:optional true} :seon.render.data/continuation]
+  [:seon.render.data/ref-attributes-probed {:optional true} :seon.render.data/ref-attributes-probed]]
+ :outgoing [:or :seon.render.data/page :seon.error/value]
+ :incoming [:or :seon.render.data/page :seon.error/value]
+ :identities :seon.db/datoms
+ :outgoing-cursor :seon.render.data/continuation
+ :incoming-cursor :seon.render.data/continuation
+ :observation-request
+ [:map
+  [:seon.db/db :seon.db/db]
+  [:seon.render.data/subject :seon.render.data/subject]
+  [:seon.render.data/limit :seon.render.data/limit]
+  [:seon.render.data/max-result-weight :seon.render.data/max-result-weight]
+  [:seon.render.data/max-ref-attributes :seon.render.data/max-ref-attributes]
+  [:seon.render.data/outgoing-cursor {:optional true} :seon.render.data/outgoing-cursor]
+  [:seon.render.data/incoming-cursor {:optional true} :seon.render.data/incoming-cursor]]
+ :observation
+ [:map
+  [:seon.render.data/subject :seon.render.data/subject]
+  [:seon.render.data/eid :seon.render.data/eid]
+  [:seon.render.data/snapshot :seon.render.data/snapshot]
+  [:seon.render.data/outgoing :seon.render.data/outgoing]
+  [:seon.render.data/incoming :seon.render.data/incoming]
+  [:seon.render.data/identities :seon.render.data/identities]
+  [:seon.render.data/identities-complete? :seon.render.data/identities-complete?]
+  [:seon.render.data/ref-attributes-probed :seon.render.data/ref-attributes-probed]]
+}
