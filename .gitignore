@@ -98,3 +98,7 @@ evals/runs/*/*/*/blobs/
 # never committed — the distilled README.md/defects.md carry the cited excerpts.
 evals/runs/*/transcripts/
 *.heapsnapshot
+
+# local tool caches
+.clojure/
+.deps.clj/
