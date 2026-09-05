@@ -647,8 +647,11 @@ namespace, its doc is its introduction.)
 
 **Statement.** Every eval result — the agent's own and the system's
 generated entries — is followed by ONE line naming it: `;; result/<id>`.
-`result/<id>` is a REAL symbol in the agent's context: `(get-in
-result/k7f2 [0 :seon.cluster.message/content])` works with no re-query,
+`result/<id>` is a REAL symbol in the agent's context bound to WHAT THE
+FORM RETURNED — data for a query form, text for a form that wrapped its
+query in a render function (the generator chooses per entry): `(get-in
+result/k7f2 [0 :seon.cluster.message/content])` works with no re-query when
+k7f2's form was the query,
 `(count result/k7f2)`, `(inbox-view result/k7f2)`. The agent is
 encouraged to use them. The stored result (the eval's `result-edn` or
 blob) is the value; on resume the system determines whether that value is

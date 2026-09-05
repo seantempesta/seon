@@ -307,6 +307,45 @@ nothing is dropped.
 **What is deliberately NOT here:** a stored transcript, a stored prompt,
 a stored page, a per-consumer data model. Three functions, one graph.
 
+### 3.4 What already exists at HEAD — where the context's forms and results are recorded today (verified 2026-09-05 on `ctxprobe`)
+
+The owner's requirement: the comments and forms the generator produces are
+executed through the SAME parser and eval system as the agent's own, their
+results recorded with the agent, so a session can be resumed and
+inspected. Most of this exists; it is scattered, and one part is missing.
+
+| what | recorded today? | where | joined how |
+|---|---|---|---|
+| the generated OPENING (help, dirs, teaching, the trigger) as comments + forms | **YES — exactly the wanted mechanism** | the bootstrap run's `:seon.cluster.run.form` rows, `author :system`; on `ctxprobe`, run `bootstrap:root` holds 11 system forms (`"; A new run just opened. Why am I awake — do I have messages?\n(help)"`, `(dir my.message)`, `(dir my.run)`, …) | by `run` + `ordinal` |
+| their RESULTS | yes | 11 `:seon.cluster.eval` receipts on the same run (`result-edn` as a print node, `read-evidence`) | by `run` + `ordinal` (a second family for one entry — census §1) |
+| the agent's own forms + results | yes | the same two families, `author :agent` | same join |
+| the agent's defs | yes | `:seon.def` rows | by agent/ns/name |
+| the per-turn NEIGHBOURHOOD entries (what the walk renders each turn: messages, runs, errors, namespace dirs) | **NO** — rendered bytes only | `seon.render.walk/history` builds `:seon.render.history/bytes` in the render proc; retained in `seon.render.web`'s proc state; NO schema row exists for `:seon.render.history/*` or `:seon.render.call/*` — a process memo, lost on restart, invisible to queries | — |
+| the prompt actually sent | yes, as BYTES | `:seon.context.capture` (one per run) + `:seon.context.contribution` rows carrying `hash`, `position`, `tokens`, `:seon.render.block/name :walk` — fingerprints of segments, not forms or values | by run |
+| what each render cost | partly | `:seon.render.cost` facts (shape key, profile, tokens, at) — no producer symbol | by run |
+
+So: the OPENING already does what the design asks — the system types
+forms on the agent's behalf, they run through the loop, and comments,
+forms, and results land on the agent's run as facts. The per-turn CONTEXT
+does not: the walk renders the neighbourhood straight to bytes, captures
+only the final prompt, and forgets the forms it would have typed. That is
+the one missing piece, and it is a generalization, not a new mechanism:
+route every generated entry — discovery, teaching, diff — through the same
+`generated-form-request` path the opening uses (`run.clj:778-831`), and
+the per-turn context becomes forms + results on the agent's run like the
+opening's. Colocation then follows from the record shape (§2: evals point
+at the agent), and the run-form/eval split collapses into one row (64).
+
+**The result-handle question, seen this way, is not a design fork.** A
+generated form runs through the eval system and its result is whatever the
+form returns: `(seon.db/q …)` yields data and its handle is data;
+`(inbox-view (seon.db/q …))` yields text and its handle is text. Both are
+recorded identically. Which form the generator emits is a per-entry choice
+(data forms where the agent should reuse the value; wrapped forms where
+only the view matters, with the render function's name in the form), and
+the lab shows both on the same data. §3's provisional marks are lifted;
+B13 is amended to "a handle denotes what its form returned."
+
 ## 4. What we have EVIDENCE will work
 
 | claim | evidence |
@@ -529,5 +568,5 @@ handle is its data, and the print floor applies the chosen render function
 whose name appears on the handle line (`;; result/b2 rendered-by
 inbox-view`); (b) the form is the wrapped call, the handle is text, and the
 data is a second handle. The lab shows both for the same entry; the owner
-chooses. Until then §3's "wrapped in the render function" and B13 are both
-marked provisional.
+chooses. Resolved 2026-09-05 (§3.4): a handle denotes what its form returned; the
+generator chooses per entry which form to emit; both are recorded alike.
