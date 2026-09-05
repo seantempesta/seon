@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [clojure.test.check.generators :as gen]
             [seon.ai.tokens :as tokens]
+            [seon.render.hiccup :as html]
             [seon.schema :as schema]
             #?(:clj [seon.schema.edn :as schema.edn])
             [seon.schema.form :as schema.form]))
@@ -826,6 +827,74 @@
       fitted-elision
       (conj fitted-elision))))
 
+(def ^:private html-void-tags
+  #{"area" "base" "br" "col" "embed" "hr" "img" "input" "link"
+    "meta" "param" "source" "track" "wbr"})
+
+(defn- html-size
+  [value]
+  (count (html/->string value)))
+
+(defn- html-preview
+  "Keep a valid Hiccup prefix without slicing markup or attributes."
+  [value budget]
+  (let [marker [:span {:class "seon-print-html-elision"} "… omitted"]
+        budget (max 0 (- budget (html-size marker)))]
+    (letfn [(walk [value budget]
+            (cond
+              (nil? value) [nil budget false]
+              (string? value)
+              (if (<= (count value) budget)
+                [value (- budget (count value)) false]
+                (if (pos? budget)
+                  [(str (subs value 0 (max 0 (dec budget))) "…") 0 true]
+                  [nil budget true]))
+              (vector? value)
+              (let [tag (nth value 0 nil)
+                    body (subvec value 1)
+                    attrs (when (map? (first body)) (first body))
+                    children (if attrs (subvec body 1) body)
+                    base (cond-> [tag] attrs (conj attrs))]
+                (if (> (html-size base) budget)
+                  [nil budget true]
+                    (let [remaining (- budget (html-size base))
+                        [kept _remaining omitted]
+                        (reduce (fn [[kept remaining omitted] child]
+                                  (if (or omitted (zero? remaining))
+                                    [kept remaining true]
+                                    (let [[child remaining' omitted']
+                                          (walk child remaining)]
+                                      [(cond-> kept child (conj child))
+                                       remaining'
+                                       (or omitted omitted')])))
+                                [[] remaining false]
+                                (if (contains? html-void-tags (name tag))
+                                  []
+                                  children))
+                        result (into base kept)
+                        omitted (or omitted (< (count kept) (count children)))]
+                    [result (- budget (html-size result)) omitted])))
+              (sequential? value)
+              (let [[kept remaining omitted]
+                    (reduce (fn [[kept remaining omitted] child]
+                              (if (or omitted (zero? remaining))
+                                [kept remaining true]
+                                (let [[child remaining' omitted']
+                                      (walk child remaining)]
+                                  [(cond-> kept child (conj child)) remaining'
+                                   (or omitted omitted')])))
+                            [[] budget false] value)]
+                [(seq kept) remaining omitted])
+              :else
+              (let [size (html-size value)]
+                (if (<= size budget) [value (- budget size) false]
+                    [nil budget true]))))]
+    (let [[preview _ omitted?] (walk value budget)]
+      (when preview
+        (if omitted?
+          (list preview marker)
+          preview))))))
+
 (defn- projected-text
   [node]
   (let [value (::value node)]
@@ -866,9 +935,11 @@
         original (long (or (::length node) (count value)))]
     (if-let [bounded (bounded-text value original string-limit)]
       (if html-projection?
-        (elision-node profile path (count (::value bounded))
-                      (- original (count (::value bounded))) original
-                      :characters "rendered HTML")
+        (if-let [preview (html-preview (::value node) string-limit)]
+          (assoc node ::value preview)
+          (elision-node profile path (count (::value bounded))
+                        (- original (count (::value bounded))) original
+                        :characters "rendered HTML"))
         (elision-node profile path (count (::value bounded))
                       (- original (count (::value bounded))) original
                       :characters (pr-str (::value bounded))))

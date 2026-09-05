@@ -53,6 +53,19 @@ single elision, with a trailing `… 5711 more characters of 7349; requery by
 Full walk with per-page verdicts:
 [ui-verification-2026-08-14](../../prds/context-generation/research/ui-verification-2026-08-14.md).
 
+### Design-lab observation, 2026-09-05
+
+The print-owner fix in `e54240e9d` removes the quoted Hiccup payload from
+oversized HTML elisions. A fresh `default` process (PID 1170) still delivered
+only `rendered HTML…60637 more characters of 63913` in the debug page's
+actual-output section for `seon.flow`. The output is no longer escaped EDN,
+but it also supplies no useful preview of the selected renderer's result.
+The stored-data section renders separately and remains visible. Keep this
+issue open for the inspection experience until the existing fit/profile and
+navigation mechanisms provide a useful bounded preview or an actionable way
+to inspect the actual output; replacing unreadable output with a label alone
+does not complete that experience.
+
 ## Owner
 
 The `/html` projection seam between `seon.render.walk` / `seon.render.web`

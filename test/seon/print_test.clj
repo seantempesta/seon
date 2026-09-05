@@ -265,21 +265,27 @@
                        :seon.print/requery-id
                        [:seon.render.call/id :fixture/long])
         long-text (apply str (repeat 512 "outward "))]
-    (doseq [node [{:seon.print/face :seon.print/projected
-                   :seon.render/output :seon.render/ai
-                   :seon.print/value long-text}
-                  {:seon.print/face :seon.print/projected
-                   :seon.render/output :seon.render/html
-                   :seon.print/value [:pre long-text]}]]
-      (let [fitted (print/fit node profile)]
-        (is (= :seon.print/elided (:seon.print/face fitted)))
-        (is (= :characters (:seon.print/elision-unit fitted)))
-        (is (= [:seon.render.call/id :fixture/long]
-               (:seon.print/requery-id fitted)))
-        (is (pos? (:seon.print/omitted fitted)))
-        (is (= (:seon.render.data/total fitted)
-               (+ (:seon.render.data/next-offset fitted)
-                  (:seon.print/omitted fitted))))))))
+    (let [fitted (print/fit {:seon.print/face :seon.print/projected
+                             :seon.render/output :seon.render/ai
+                             :seon.print/value long-text}
+                            profile)]
+      (is (= :seon.print/elided (:seon.print/face fitted)))
+      (is (= :characters (:seon.print/elision-unit fitted)))
+      (is (= [:seon.render.call/id :fixture/long]
+             (:seon.print/requery-id fitted)))
+      (is (pos? (:seon.print/omitted fitted)))
+      (is (= (:seon.render.data/total fitted)
+             (+ (:seon.render.data/next-offset fitted)
+                (:seon.print/omitted fitted)))))
+    (let [fitted (print/fit {:seon.print/face :seon.print/projected
+                             :seon.render/output :seon.render/html
+                             :seon.print/value [:pre long-text]}
+                            profile)
+          html (hiccup/->string (print/emit-hiccup fitted (print/default-options)))]
+      (is (= :seon.print/projected (:seon.print/face fitted)))
+      (is (str/includes? html "<pre>"))
+      (is (str/includes? html "seon-print-html-elision"))
+      (is (not (str/includes? html "[:pre"))))))
 
 (deftest oversized-html-projection-elides-without-printing-hiccup-source
   (let [profile (assoc (render/agent-render-profile
