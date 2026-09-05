@@ -516,6 +516,21 @@ transaction (or be split/fast) — owner `seon.fn/index!`'s progress path;
 lane `datahike-bulk-commit` (running) owns that seam and gets the note on
 its return.
 
+## 2026-09-05 (day 2, evening) — a second session is working in the tree
+
+Uncommitted edits from another session (not this orchestrator's lanes):
+the Design Lab PRD rewritten (−296/+278 lines, uncommitted), four rows
+added to `docs/seon/issues/index.md`, a new research doc
+`research/design-lab-investigation-2026-09-05.md` ("the owner explicitly
+reopened the design: defaults bootstrap every namespace's agent, each agent
+may query any connected data and define its own render functions, and the
+current UI is not the desired design"), and three new render issues
+(candidate checks mix arities; selection loses the viewing namespace;
+namespace layout confines content to scroll boxes). This orchestrator
+PRESERVES them untouched and does not edit the PRD until the owner says
+which session's version is authoritative. `store.clj`/`fn_test.clj`
+modifications are lane `datahike-bulk-commit`'s in-flight work.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
