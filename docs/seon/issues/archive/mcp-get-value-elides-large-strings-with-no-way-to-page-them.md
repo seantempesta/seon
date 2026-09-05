@@ -1,8 +1,8 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
-tags: [issue, mcp, tooling, render, elision]
+tags: [issue, mcp, render]
 ---
 
 # `mcp__seon__get_value` returns `seon.sci.admit/elided` for a large string at the drilled path, with no way to page it
@@ -32,3 +32,20 @@ A string at a drilled path pages by character offset with the tool's
 existing `offset`; no window ever shows zero characters of a non-empty
 string (a string budget below one line is a floor hit that is counted and
 shows the head); one regression per claim.
+
+## Resolution
+
+Resolved by `d5b212f88`. `seon.print/fit` now cuts collection breadth and
+depth before reducing strings, and its string limit stops at the printer's
+72-character line width. The MCP projection applies that fit profile to every
+result rather than only blob-backed results. Stored strings page directly by
+character offset, clamping an at-or-past-end request to the last character so
+a non-empty string never returns an empty window.
+
+`bin/test seon.print-test seon.cluster.mcp-test` passed 29 tests and 139
+assertions. A cluster freshly reforked from isolated-root `current-src` commit
+`6a9c610f-8513-5365-abb1-863f7e5ae3aa` rendered the 116-row `seon.db` function
+query with readable `"([database request])"` and `"([value])"` strings while
+eliding breadth. The same live MCP surface returned `"i"`, `shown 1`, and
+`beyond-end? true` for a 4,975-character stored string requested at offset
+4,975.
