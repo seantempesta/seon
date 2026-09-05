@@ -236,6 +236,75 @@ messages. Root's help therefore lists processing functions over agents
 (fork, message, take over, reassign a namespace) beside its own data.
 The projection is the render function; the data is the same graph.
 
+### 3.3 Three projections of one record — SCI, the completion prompt, the page
+
+The agent's transcript is a projection of its data: its comments, forms,
+and results, sorted by execution time. The same data has three consumers,
+and each wants a different OPTIMAL FORMAT. Nothing is stored in any of
+the three formats; each is a function of the facts, produced by functions
+that are themselves facts (program rows), found by contract.
+
+| consumer | optimal format | what a "render function" is here | ordering |
+|---|---|---|---|
+| **SCI** — the agent's execution environment for a turn | bindings: namespaces required, defs interned, `result/<id>` vars bound (lazily) to stored values, contracts wrapped | INSTALLERS: `require-namespace`, `install-def`, `bind-result`, `wrap-contract` — input a fact family, output a ctx effect | dependency order: requires → defs in `[turn ordinal]` (later redefinitions win) → result bindings → wrappers |
+| **the completion endpoint** — the AI's context | one string: entries `;; intent` · `ns=> form` · the result rendered · `;; result/<id>`; prefix-stable across turns | `/ai` functions: input the value's family (or collection), output text | the layout function: plumbing → teaching before use → kinds by recency → the agent's own evals by time → trigger last; fitted to the token budget |
+| **the user's page** — HTML | hiccup: a shared header, the transcript as blocks, panels the user asked for; morph-updated over SSE | `/html` functions: same inputs, output hiccup; a LAYOUT function composes regions | regions: header (plumbing) · main (the transcript by execution time) · panels (newest basis first); within the transcript, the same order as the prompt |
+
+**One composition rule for all three.** Given the discovered data (§3
+phase 1): for each datum and each consumer, select the function whose
+contract accepts the datum's family and returns that consumer's format;
+compute the PRE-REQUISITES the chosen forms need; order; apply.
+
+**Pre-requisites are a derivation, per consumer:**
+- *SCI*: a def's namespace must be required before it is interned; a
+  result binding needs its value readable (EDN or blob) — an unreadable
+  one binds nothing and the transcript shows no handle; a contract wrapper
+  needs the fn row. Nothing is taught here; the environment HAS the real
+  bindings.
+- *the prompt*: every symbol a proposed form uses whose row the agent has
+  not yet used correctly demands `(doc sym)` before it; every namespace
+  first touched demands `(dir ns)` before it; the render function named
+  in a wrapped form demands nothing (it is a name in the form; its doc is
+  one form away) unless the agent later errs on it. The demand edges are
+  the DAG the layout sorts.
+- *the page*: the same demand edges become links and hover cards: a form's
+  symbols link to their namespace pages; a rendered value's family links
+  to its schema; a block shows which function rendered it.
+
+**The page, all of it, as functions of the same facts:**
+- **Shared header** — `seon.agent/header-html`: the agent's plumbing
+  attributes (id, namespace, turn, process alive, basis, unhandled count)
+  plus the cluster's agents as one line each (root's `agents-summary`
+  reused at one line). Pure function of the agent entity.
+- **Main content: the transcript** — `seon.agent/transcript-html`: the
+  ordered evals; each eval is a BLOCK (`seon.agent.eval/html`): the intent
+  comment as a caption, the source syntax-highlighted (a function over the
+  source string — highlighting is a render function on `:seon.agent.eval/source`,
+  replaceable), the result through the value's `/html` face, the
+  `result/<id>` chip. A prose comment the agent wrote (its `;;` lines) is
+  rendered as MARKDOWN inline: emphasis, code spans, lists — a render
+  function on the comment string, so "the agent outputs markdown for the
+  user" is one more face, not a special case.
+- **Panels: specialized visualizations** — every function in the agent's
+  namespace (or reachable by distance) whose contract accepts a family the
+  agent's data belongs to and returns `:seon.render/html` is a candidate
+  panel; the user or the agent asks for one by evaluating it
+  (`(acme.calendar/week-html …)` is an eval like any other) and it appears
+  as a block keyed by its eval id, newest basis first. A panel IS a
+  function that processes data and returns hiccup; nothing else.
+- **Delivery** — blocks are keyed by eval id or entity identity, so a
+  regeneration morphs only changed blocks (the existing keyframe/delta
+  packages).
+
+**Compaction, in all three.** SCI: the newest defining eval per name
+still wins; result bindings for compacted evals stay bound (the value is
+a fact). Prompt: the layout function renders compacted evals as their
+handle plus one line. Page: the transcript block list pages by time;
+nothing is dropped.
+
+**What is deliberately NOT here:** a stored transcript, a stored prompt,
+a stored page, a per-consumer data model. Three functions, one graph.
+
 ## 4. What we have EVIDENCE will work
 
 | claim | evidence |
