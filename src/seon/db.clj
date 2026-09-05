@@ -227,15 +227,43 @@
 
 (defn- stable-read-result
   [result]
-  (let [replayable? (volatile! true)
-        stable
-        (walk/prewalk
-         (fn [value]
-           (if (or (db.utils/db? value) (connector/connection? value))
-             (do (vreset! replayable? false) ::opaque-read-value)
-             value))
-         result)]
-    [@replayable? stable]))
+  (letfn [(stable [value]
+            (cond
+              (or (db.utils/db? value) (connector/connection? value))
+              [false nil]
+
+              (map? value)
+              (reduce-kv
+               (fn [[replayable? result] map-key child]
+                 (let [[key-replayable? stable-key] (stable map-key)
+                       [child-replayable? stable-child] (stable child)]
+                   [(and replayable? key-replayable? child-replayable?)
+                    (assoc result stable-key stable-child)]))
+               [true (empty value)]
+               value)
+
+              (vector? value)
+              (reduce (fn [[replayable? result] child]
+                        (let [[child-replayable? stable-child] (stable child)]
+                          [(and replayable? child-replayable?)
+                           (conj result stable-child)]))
+                      [true []]
+                      value)
+
+              (set? value)
+              (reduce (fn [[replayable? result] child]
+                        (let [[child-replayable? stable-child] (stable child)]
+                          [(and replayable? child-replayable?)
+                           (conj result stable-child)]))
+                      [true #{}]
+                      value)
+
+              (sequential? value)
+              (let [children (map stable value)]
+                [(every? first children) (mapv second children)])
+
+              :else [true value]))]
+    (stable result)))
 
 (defn- append-query-evidence!
   [request response result]
