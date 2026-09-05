@@ -82,7 +82,8 @@
     (is (= configuration
            (store/datahike-configuration "./tmp/x/store")))
     (is (true? (:fuse-index-roots? configuration)))
-    (is (= {:diff-buf-size 256} (:index-config configuration)))
+    (is (= (:index-config configuration) (:index-config non-temporal))
+        "index tuning is one creation decision, independent of history policy")
     (is (= {:backend :self} (:writer configuration)))
     (is (= :write (:schema-flexibility configuration)))
     (is (true? (:keep-history? configuration))
@@ -157,6 +158,8 @@
 (deftest create-settings-apply-only-to-fresh-stores
   (testing "a legacy store reopens by adopting its stored configuration"
     (let [dir (fresh-dir)
+          declared-index-config
+          (:index-config (store/datahike-configuration dir))
           legacy-configuration
           (dissoc (store/datahike-configuration dir)
                   :fuse-index-roots? :index-config)]
@@ -167,24 +170,26 @@
             (is (false? (:seon.store/created? opened)))
             (is (not (true? (get-in @(:seon.store/connection-object opened)
                                     [:config :fuse-index-roots?]))))
-            (is (not= 256
+            (is (not= declared-index-config
                       (get-in @(:seon.store/connection-object opened)
-                              [:config :index-config :diff-buf-size])))
+                              [:config :index-config])))
             (finally
               (store/release-store! opened))))
         (finally
           (test-support/delete-recursively! (str (io/file dir) "/.."))))))
-  (testing "a fresh store persists fused roots and the diff buffer"
-    (let [dir (fresh-dir)]
+  (testing "a fresh store persists fused roots and the declared index tuning"
+    (let [dir (fresh-dir)
+          declared-index-config
+          (:index-config (store/datahike-configuration dir))]
       (try
         (let [opened (store/open-store! {:seon.store/dir dir})]
           (try
             (is (true? (:seon.store/created? opened)))
             (is (true? (get-in @(:seon.store/connection-object opened)
                                [:config :fuse-index-roots?])))
-            (is (= 256
+            (is (= declared-index-config
                    (get-in @(:seon.store/connection-object opened)
-                           [:config :index-config :diff-buf-size])))
+                           [:config :index-config])))
             (finally
               (store/release-store! opened))))
         (finally
