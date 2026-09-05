@@ -437,6 +437,19 @@ in-flight `fn.clj` edit refused every other lane's base. Relaunch the
 three (`-2` names) the moment `init-speed` commits; then decide the
 `bin/test` base option (recommended: HEAD + the lane's own files).
 
+## 2026-09-05 (night) — print floor fixed in the tree, parked too
+
+`print-floor-strings`: root causes verified (fit reduced strings before
+breadth and depth to zero; `mcp-project` fitted only above the blob
+threshold; `mcp-get-value` treated strings as unpaged scalars); fix
+implemented — breadth → depth → strings with the existing 72-character
+print-width floor, unconditional fitting through a `:seon.render.profile/mcp`
+profile, character-offset string paging — with a GREEN focused tally
+(29 tests / 136 assertions) before a fixture refinement; the rerun was
+refused by the torn base like the others. Four lanes' verified changes now
+sit uncommitted in the tree on their owned paths; relaunch specs prepared
+(`tmp/lanes/*-2.md` + `_relaunch.md`) to fire when `init-speed` commits.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
