@@ -531,6 +531,24 @@ PRESERVES them untouched and does not edit the PRD until the owner says
 which session's version is authoritative. `store.clj`/`fn_test.clj`
 modifications are lane `datahike-bulk-commit`'s in-flight work.
 
+## 2026-09-05 (day 2, night) — the publication floor was fsync amplification
+
+`e8d218690` (lane `datahike-bulk-commit`): the 26.0 s population commit was
+konserve forcing EVERY index file to disk — persistent-set's default
+branching factor 512 produced 3,029 durable index writes for 207,915
+datoms (pure Datahike work 2.73 s; with force barriers off 2.62 s).
+Branching factor 4,096 at `store.clj:168` → 357 writes, commit 4.87 s
+(−81%); fresh `init` 39.6 s (from 63; JVM + operator load is the rest).
+Gate `seon.fn-test seon.cluster.source-test` 38 / 307 / 0. Decomposition,
+rejected levers (history on the publication branch, chunking, tempids),
+and the top-ten attribute census are in the publication issue. Fallout:
+`store_test.clj:85` kept the old literal (lane `store-config-expectation`
+fixes it and CONFIRMS the silence-backstop blocker is cleared by
+consequence); existing stores keep 512 until reset — the shared root was
+reset and `default` restarted on HEAD (all of today's fixes live at
+http://127.0.0.1:7994). The other session committed its PRD rewrite
+(`c965333cf`); this orchestrator has not read it yet.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
