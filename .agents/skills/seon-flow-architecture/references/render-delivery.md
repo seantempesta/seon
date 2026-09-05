@@ -20,12 +20,12 @@ One cluster render proc consumes:
 
 - database transaction reports;
 - streamed partial values; and
-- web-surface-demand signals.
+- context-demand signals.
 
 It retains serialized fragments, emits one revisioned package per changed
 web surface, and mults the latest package map to connected tabs. Every package carries
 both delta bytes and a complete keyframe
-(`src/seon/render/web.clj:553-600,631-735`).
+(`src/seon/render/web.clj:708-755,989-1072`).
 
 The built surface also includes canonical namespace pages, root/agent aliases,
 and namespace/agent debug variants in the one route table
@@ -70,7 +70,7 @@ The live delivery sequence is:
 6. Send the smaller delta for a contiguous revision; send the keyframe for a
    gap. Each tab retains only its delivered revision.
 
-Read `src/seon/render/web.clj:553-600,631-735,930-1026`.
+Read `src/seon/render/web.clj:708-755,989-1072,1431-1573`.
 
 The current protocol uses three delivery nouns:
 
@@ -81,7 +81,7 @@ The current protocol uses three delivery nouns:
 The render proc serializes shared bytes once, then mults the immutable package
 map to every tab. A revision gap selects the latest keyframe, and a new web surface
 load reuses the current fact-derived keyframe when its basis is current
-(`src/seon/render/web.clj:553-600,930-1026`).
+(`src/seon/render/web.clj:708-755,1400-1541`).
 
 ## Per-edge buffer law
 
@@ -98,8 +98,8 @@ Choose each buffer from its loss semantics:
 
 The research table and measured conditions are at
 `docs/prds/sci-execution-runtime/research/render-pipeline-design-2026-07-29.md`.
-Current concrete taps and inputs are visible at
-`src/seon/cluster.clj:1648-1818` and `src/seon/render/web.clj:930-1026`.
+Current concrete wake routing and taps are visible at
+`src/seon/cluster/wake.clj:150-235` and `src/seon/render/web.clj:1390-1573`.
 
 Never use a channel for state recovery. If dropping the value makes reconnect
 or restart incorrect, commit the required identity/receipt/final value as a

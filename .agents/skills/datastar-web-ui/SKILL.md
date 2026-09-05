@@ -73,31 +73,34 @@ Generic preparation enriches elisions and calls the single `seon.print/fit`
 owner (`src/seon/render/value.clj:220-269`;
 `src/seon/print.cljc:669-675,750-785`). The current agent profile derives from
 config facts (`src/seon/render.clj:37-57`; `config/default.edn:60-70`).
-Consumer-specific MCP, operator, runner, and log profiles remain **[TARGET]**;
-do not add local caps while those output-floor conversions are pending.
+The MCP projection already applies its own explicit `:seon.render.profile/mcp`
+fit profile (`src/seon/cluster.clj:377-389`; `test/seon/cluster/mcp_test.clj:156-171`).
+Operator, runner, and log profiles remain **[TARGET]**; do not add local caps
+for those consumers while their output-floor conversions are pending.
 
 ## Preserve the live delivery path
 
-The cluster graph owns one `:io` render proc. It derives complete snapshots for
-watched agents, suppresses unchanged complete pages, and publishes through a
-`mult` (`src/seon/render/web.clj:497-671`). The cluster's one Datahike listener
-offers one payload-free render wake for every transaction report
-(`src/seon/cluster/wake.cljc:163-228`). Equality suppression, not computed
-query interest, currently filters unchanged pages.
+The cluster graph owns one `:io` render proc. It derives revisioned packages
+for watched agents, suppresses unchanged pages, and publishes through a `mult`
+(`src/seon/render/web.clj:989-1072`). The cluster's one Datahike listener
+offers at most one payload-free render wake per transaction report when the
+report intersects the derived render interest
+(`src/seon/cluster/wake.clj:163-228`).
 
 For each tab, preserve this sequence:
 
-1. Register interest, tap the `mult` with `(sliding-buffer 1)`, and paint every
-   block from the current database value.
-2. Consume the newest complete namespace-page snapshot.
-3. Compare it with that tab's last delivered map.
-4. Send one Datastar patch for each changed block.
+1. Register interest, tap the `mult` with `(sliding-buffer 1)`, and paint the
+   current keyframe from the current database value.
+2. Consume the newest complete revisioned package.
+3. Select its delta when the delivered revision is contiguous; otherwise use
+   its complete keyframe.
+4. Send the selected Datastar patch event.
 5. Park the connection-owned virtual thread on http-kit's drain-or-close
    completion before the next event.
 
-The implementation is `src/seon/render/web.clj:692-804`. Complete snapshots
-make sliding-1 loss safe: a displaced snapshot is superseded by the newer
-complete answer. The maintained http-kit fork exposes pending bytes and the
+The implementation is `src/seon/render/web.clj:1390-1573`. Complete packages
+make sliding-1 loss safe: a displaced package is superseded by the newer
+package, whose keyframe repairs any revision gap. The maintained http-kit fork exposes pending bytes and the
 drain-or-close completion at
 `reference-code/http-kit/src/org/httpkit/server.clj:321-326`; do not infer
 drain from `send!` alone.
@@ -126,8 +129,10 @@ These mechanisms are current:
   (`src/seon/render/route.clj:5-16`);
 - namespace and agent debug variants over the AI/HTML walk
   (`src/seon/render/web.clj:1041-1102`);
-- one cluster render proc publishing complete snapshots and per-tab changed
-  blocks (`src/seon/render/web.clj:497-804`); and
+- one cluster render proc publishing revisioned packages carrying changed-block
+  deltas and complete keyframes,
+  with feed-side contiguous-revision selection
+  (`src/seon/render/web.clj:708-755,989-1072,1431-1573`); and
 - the fixed message form, `/data`, feed, and static-resource handlers
   (`src/seon/render/web.clj:1104-1220`).
 
@@ -140,11 +145,7 @@ Keep these distinct and explicitly **[TARGET]**:
   (`src/seon/render/web.clj:132-169,1027-1037`,
   `src/seon/render/route.clj:5-27`);
 - database-derived route trees: the live table is the `route/routes` Var
-  (`src/seon/render/route.clj:5-34`); and
-- revisioned packages, deltas, gap detection, and reconnect keyframes: the
-  current implementation is complete snapshots plus per-tab comparison, while
-  the package/keyframe contract remains **[TARGET]**
-  (`.agents/skills/seon-flow-architecture/references/render-delivery.md:55-94`).
+  (`src/seon/render/route.clj:5-34`).
 
 Do not bolt a target mechanism beside the live owner. Convert the existing
 owner in place only after its target contract is settled.
@@ -158,6 +159,5 @@ owns the palette and typography tokens. Read
 `references/design-principles.md` before visual changes.
 
 For protocol or performance work, also load
-`seon-flow-architecture/references/render-delivery.md`. It separates the live
-snapshot/per-tab comparison from the **[TARGET]** package/keyframe design and
-records the measured delivery probes.
+`seon-flow-architecture/references/render-delivery.md`. It records the live
+package/delta/keyframe delivery path and the measured delivery probes.

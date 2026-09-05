@@ -91,21 +91,26 @@ tracks the namespace in effect while reading
 - Markdown fence lines are stripped before reading because backticks otherwise
   read as plausible symbols.
 
-EVERY REPLY SOURCE CARRIES A READER EVENT. Prose alone is never a form source:
-a comment-only source has no event, so nothing evaluates it and no
-`:seon.cluster.eval` receipt is ever written, and the run closes with an
-unsettled form of its own — the 105-forms/102-receipts gap of 2026-08-08,
-whose three instances were deepseek-v4-flash chat-template control markup
-(`<assistant1>`, `<｜｜DSML｜｜AgentThoughts>…`) arriving in the completion's
-`content` field and reading as prose
+EVERY REPLY SOURCE THAT IS EXECUTED CARRIES A READER EVENT. Prose alone is
+never an executable form source: a comment-only source has no event, so no
+`:seon.cluster.eval` receipt is started for it. The turn still durably commits
+the raw reply and its empty source list, then settles a typed `::no-forms`
+refusal; prose cannot leave an unsettled form. The 105-forms/102-receipts gap
+of 2026-08-08 is historical evidence from before this intent and refusal
+settlement path, when deepseek-v4-flash chat-template control markup
+(`<assistant1>`, `<｜｜DSML｜｜AgentThoughts>…`) arrived in the completion's
+`content` field and read as prose
 (`docs/seon/issues/a-runs-last-form-can-close-without-a-receipt.md`).
 
 Those classifications and the exact-source return contract are current at
-`src/seon/cluster/reply.clj:20-60,155-268,330-389`. There is no delimiter
-auto-repair in this path. Unbalanced or malformed code returns
-`:seon.cluster.reply/unreadable`; a reply with no code — empty, or whole-text
-prose — returns `:seon.cluster.reply/no-forms` carrying that text
-(`src/seon/cluster/reply.clj:330-389`).
+`src/seon/cluster/reply.clj:20-60,155-268,330-389`. The reader-facing
+`sources` function reports unbalanced or malformed code as
+`:seon.cluster.reply/unreadable`; the turn loop then makes one bounded
+delimiter-repair pass over isolated `:unclosed` or `:stray-closer` spans with
+Parinfer indent mode, accepting a candidate only after the SCI reader confirms
+it (`src/seon/cluster/loop.clj:72-144,1456-1469`). A reply with no code —
+empty, or whole-text prose — returns `:seon.cluster.reply/no-forms` carrying
+that text (`src/seon/cluster/reply.clj:330-389`).
 
 Practical rule: write code as ordinary balanced Clojure. Agent-written source
 may use comments for thinking preserved beside a form. **[TARGET — owner
@@ -113,8 +118,9 @@ decision 11]** Displayed REPL content is the form followed by its actual
 computed value—never a comment-only pseudo-result, a `;; =>` annotation, or
 prose framed as comments. Current comment-output owners are recorded under the
 strict REPL display wave in `docs/seon/issues/index.md`; do not mistake those
-known implementation defects for the display contract. Do not expect parinfer
-or a repair pass to guess missing delimiters
+known implementation defects for the display contract. The repair pass handles
+only isolated reader delimiter errors; it does not infer arbitrary missing code
+or repair unrelated malformed syntax
 (`src/seon/cluster/reply.clj:20-48,210-244,310-355`;
 `docs/prds/sci-execution-runtime/research/messaging-state-design-notes-2026-08-03.md`,
 decision 11).
@@ -189,7 +195,7 @@ not program-graph indexing”).
 | Symptom | Surface and next move |
 |---|---|
 | Reply became prose or the wrong forms | Agent reply: call `seon.cluster.reply/sources` with the actual run/form namespace or the result of `seon.sci.eval/agent-namespace`. |
-| `:seon.cluster.reply/unreadable` | Agent reply: fix malformed Clojure; no repair layer will close it. |
+| `:seon.cluster.reply/unreadable` | Agent reply: the turn may repair one isolated delimiter span; other malformed Clojure remains a typed refusal. |
 | A def is live now but missing after restart | Agent turn: inspect its terminal receipt plus `:seon.def` row, then cold-acquire a fresh cluster context (`src/seon/cluster/loop.clj:1-1706`; `src/seon/sci/eval.clj:1270-1693`). |
 | Bare map/keyword evaluates and prints | Expected in `io-prepl` and raw JVM REPLs. |
 | A private function is unresolved | JVM probe: invoke `#'fully.qualified.ns/var`. |
