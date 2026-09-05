@@ -303,6 +303,22 @@ composition rule; pre-requisites derived per consumer; compaction touches
 no fact. Atlas v4 adds the "Three projections" view (raw datum → entity
 and links → the function and order each projection gives it).
 
+## 2026-09-05 (evening) — the Design Lab PRD
+
+Owner: the atlas is made-up data; he wants the real thing — a
+programmatically driven visualization of ACTUAL entities (all attributes
+namespaced, actual values, links both ways) where clicking shows the
+render candidates, their outputs on that data, and the assembly into the
+SCI environment, the completion prompt, and the page; Clojure against the
+real database so schemas and designs can be tried on branches before any
+production code. PRD:
+[design-lab-prd-2026-09-05.md](design-lab-prd-2026-09-05.md) — Cytoscape.js
+inside the existing Datastar page, one dev namespace `seon.dev.lab`, four
+waves (graph of real data → candidates + outputs → scenarios incl. diff
+against the real captured prompt → experiment branches + decision log).
+"Family" is retired as a word; the PRD says "entity schema". The atlas's
+hand-typed MODEL retires when W1 lands.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
