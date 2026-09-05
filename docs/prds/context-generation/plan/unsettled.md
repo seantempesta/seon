@@ -450,6 +450,21 @@ refused by the torn base like the others. Four lanes' verified changes now
 sit uncommitted in the tree on their owned paths; relaunch specs prepared
 (`tmp/lanes/*-2.md` + `_relaunch.md`) to fire when `init-speed` commits.
 
+## 2026-09-05 (afternoon, day 2) — publication: dumb work removed, the Datahike floor found
+
+`f557c3a17` (lane `init-speed`): source bytes/line offsets/ns forms derived
+ONCE per population (were re-derived per row); program references compiled
+to transaction-local tempids; namespaces, declarations, keyword facts, and
+calls enter Datahike in ONE population transaction (were five dependent
+ones). Instrumented publication 56.3 → 38.4 s; kondo 7.1 → 2.5 s (it
+analyzes only src/ + test/, 236 files, cache already used). Cold `init`
+68.4 → 63.3 s only, because the floor moved: ONE Datahike commit of
+207,915 datoms takes 26.0 s (~8k datoms/s) and JVM + operator load is the
+rest. Lane `datahike-bulk-commit` decomposes that commit (index type,
+`:keep-history?` on the publication branch, tempid/lookup resolution,
+derivable attributes ruled dead by 50, chunking, konserve flush). The
+four parked lanes relaunched as `-2` on the whole tree.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
