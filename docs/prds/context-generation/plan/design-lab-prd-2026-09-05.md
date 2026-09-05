@@ -208,6 +208,35 @@ read-only description is distinct from installing bindings in a fork.
 
 ### Visual overview
 
+**Agent-driven operation (owner clarification, 2026-09-05):** Codex drives
+the experiments through MCP/REPL, database transactions, source edits and the
+existing operator. Sean inspects outputs and directs design; manual editing of
+forms, schemas or datoms is never required to complete an experiment. The web
+controls expose the same functions Codex invokes, with inputs/results available
+for inspection rather than a browser-only experiment mechanism.
+
+Experiments include changing data shape and connections, not merely render
+functions: move facts from an agent record to referenced entities, attach or
+remove refs, change ownership/grouping and compare embedded EDN with entity refs
+where appropriate. Define reproducible transaction data against the selected
+experimental cluster, show before/after datoms and renders, and preserve the
+recipe in source. Live compatible assertions/retractions use seon.db/transact!;
+new schemas follow existing admission/installation. Incompatible persisted
+attribute semantics use an explicit disposable reset/refork, automated by the
+agent. No blanket promise that every schema change can mutate a live store.
+
+For every change, distinguish loaded host Vars, committed program definitions,
+Malli projections, and stored datoms. MCP JVM mode supplies explicit custody;
+MCP door mutates shared SCI state without creating ordinary run facts and is
+not the adoption mechanism. Execution experiments use the existing real agent
+path. File reload alone does not establish that an existing cluster adopted a
+new program. Show the exact branch/program/basis and refresh the visible result
+after each trial. Verify data/ref changes invalidate the relevant retained
+render, and measure transaction-to-visible-result plus reset-to-visible-result
+when a reset is necessary. The operational acceptance is: Codex performs a
+data-shape change and a connection change, reruns, compares and restores the
+baseline while Sean supplies only design feedback.
+
 ```mermaid
 flowchart TD
   P["0 · Verify execution, isolation and baseline costs"]
