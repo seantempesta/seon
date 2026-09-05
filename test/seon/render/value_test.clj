@@ -74,6 +74,27 @@
         (is (= "{:a [1 2 3]}" (value/render-ai-data projection)))
         (is (vector? (value/render-html-data projection)))))))
 
+(deftest structural-option-skips-domain-projection-but-keeps-floor-emission
+  (let [calls (atom 0)
+        original render/project-node
+        raw {:stored/attribute "value"}]
+    (with-redefs [render/project-node
+                  (fn [& args]
+                    (swap! calls inc)
+                    (apply original args))]
+      (let [structural (value/prepare
+                        (assoc (unit raw)
+                               :seon.render.value/options
+                               {:seon.render.value/structural? true}))
+            default (value/prepare (unit raw))]
+        (is (= 1 @calls))
+        (is (str/includes? (value/render-ai-data structural) "#:stored{:attribute"))
+        (is (str/includes? (hiccup/->string
+                            (value/render-html-data structural))
+                           "seon-print-keyword"))
+        (is (= (value/render-ai-data structural)
+               (value/render-ai-data default)))))))
+
 (deftest unregistered-values-keep-the-existing-fitted-print-floor
   (let [raw {:unregistered/value 1 :unregistered/detail [2 3]}
         floor-unit (unit raw)

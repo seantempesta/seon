@@ -10,9 +10,12 @@
                     [:int {:min 1, :seon.config/dial true}],
                     :options
                     [:map
-                     [:seon.render.value/max-collection
+                    [:seon.render.value/max-collection
                       {:optional true}
                       :seon.render.value/max-collection]
+                     [:seon.render.value/structural?
+                      {:optional true}
+                      :boolean]
                      [:seon.print/length
                       {:optional true}
                       [:maybe :seon.print/length]]

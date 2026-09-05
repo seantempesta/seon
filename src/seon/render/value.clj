@@ -491,11 +491,14 @@
                     (assoc :seon.render.data/total
                            (or (:seon.render.data/total unit)
                                (:seon.render.value/total display))))
-          projected-tree ((requiring-resolve 'seon.render/project-node)
-                          unit
-                          (:seon.render.value/semantic admitted)
-                          (:seon.render.value/tree admitted)
-                          output)
+          projected-tree (if (get-in unit [:seon.render.value/options
+                                           :seon.render.value/structural?])
+                           (:seon.render.value/tree admitted)
+                           ((requiring-resolve 'seon.render/project-node)
+                            unit
+                            (:seon.render.value/semantic admitted)
+                            (:seon.render.value/tree admitted)
+                            output))
           [projected-tree registered]
           (or (when registered (layout-tree projected-tree registered))
               [projected-tree nil])
