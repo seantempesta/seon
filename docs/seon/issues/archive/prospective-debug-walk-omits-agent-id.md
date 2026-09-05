@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, web, render, wave/context-fixes]
 ---
@@ -36,11 +36,33 @@ AI pane status was `unavailable`.
 ## Owner
 
 `seon.render.web/prospective-prompt` owns constructing the complete request it
-hands to `seon.render.walk/history`. That file is protected by the active
-`debug-page` lane.
+hands to `seon.render.walk/history`.
 
 ## Acceptance
 
 A fresh cluster with no active run serves a non-empty prospective prompt at
 `GET /agent/root/debug`, hands the requested agent ID to every
 `message-custody` call, and writes no `:seon.render.cost/*` facts.
+
+## Resolution
+
+Commit `e28de63bc` makes the shared production `walk-request` carry
+`:seon.cluster.agent/id`; `prospective-prompt` now hands that complete request
+to `seon.render.walk/history` instead of reconstructing a partial debug-only
+variant. The route regressions exercise the real HTTP request constructor,
+prove a never-captured agent renders a non-empty prospective prompt, observe
+the agent/run inputs passed to `message-custody`, and prove the debug read
+writes no render-cost facts.
+
+The debug route remains HTTP 200 when only its prospective AI pane is
+unavailable. The response is the composite debug document, whose HTML pane and
+diagnostic remain useful; the unavailable AI pane is therefore visibly marked
+`unavailable`, renders the evidence-complete diagnostic, and renders no
+healthy-looking prompt `<pre>`. `test/seon/render/web_test.clj:588-616` guards
+that decision.
+
+`bin/test seon.render.web-test` passed 40 tests and 330 assertions with zero
+failures and zero errors. A cold cluster forked after a fresh isolated
+publication served `GET /agent/root/debug` as HTTP 200 with prompt kind
+`prospective` and a non-empty prompt beginning with the root agent's cluster
+and configuration pulls.
