@@ -601,6 +601,32 @@ clojure-mcp pulled to v0.4.0; its ideas summarised to the owner (repair
 before eval, Edamame structured delimiter errors, error-flag discipline,
 clojure-mcp-light hook-based repair for CLI assistants).
 
+## 2026-09-05 (night, 3) — batched turn LANDED (`1f3c099d2`); the 191 GiB incident
+
+- **Landed:** rulings 67/68 as code — intent tx + in-memory eval with
+  `result/eN` + one settlement tx; definitions-only kondo batch without the
+  stub prelude; `:seon.db/read-result` retired; reader recovery invariants
+  and nine old regressions; span-local parinferish repair before reading
+  (fixed source stored, no flag). Six-form bookkeeping 9.9 s → 196 ms.
+  The orchestrator finished the last two regressions after stopping the
+  lane (owner: "kill the agent, make the changes yourself"). Left behind:
+  `seon.cluster.work` still derives retired E3 routing states (noted in the
+  velocity issue); the evaluator now refuses recovered error events.
+- **Incident:** `data/store` 0.29 → 191 GiB in 36 min (issue
+  `fault-facts-store-megabyte-evidence-inline-and-rewrite-gigabyte-leaves`):
+  fault facts inline 4.3 MB proc-state evidence × persistent-set leaf
+  copy-on-write at branching 4096 × history. Reset reclaimed it; the fresh
+  default then refilled 0.5 GiB in 3 min because `bin/seon reset` published
+  the TORN working tree (lane's half-done loop) — torn-tree class, second
+  bite today. The lab session owns the committer fix (`error/prepare` with
+  an inline limit is in its tree); owner: NO automatic wakes on these facts
+  yet. Follow-ups owed: a byte guard at the one `seon.db` write seam;
+  reset/init from committed HEAD; re-measure branching 4096 against leaf
+  bytes.
+- Lane orchestration lesson (owner, "2+ hours for this?"): four redirects
+  and a gate-everything-then-commit rule cost the afternoon; commit
+  coherent slices, name foreign breakage, redirect at most once.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
