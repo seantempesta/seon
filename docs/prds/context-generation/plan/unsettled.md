@@ -406,6 +406,23 @@ proof was impossible without their routing fix. Relaunch as
 `status-face-2` once `init-speed` has committed its `fresh_operator.clj`
 hunks; the proof of stale-green live is still owed.
 
+## 2026-09-05 (night) — run-loop velocity: one term removed, gate blocked by the in-flight tree
+
+`4e68150f5` (lane `run-loop-velocity`): receipt settlement rebuilt the
+COMPLETE schema projection inside every settlement transaction
+(`run.clj:1596`) although the outer `:db.fn/call` codec already carries it
+— 360–550 ms per form, removed; regression asserts settlement never
+re-enters `projection-from-database`. Measured per-form table: evaluation
+47–60 ms; `runtime-analysis` 227–309 ms (the cached prelude is reached but
+the form is reparsed — the next term); settle call 414–629 ms before the
+fix. The focused gate could not run: the shared test base's indexer
+refused `Conflicting upsert: "seon.fn.index/10477" resolves both to 593
+and 2994` — the test base compiles the WORKING TREE, which carried
+`init-speed`'s uncommitted `fn.clj` edits; a lane's gate is hostage to
+another lane's half-edit (the torn-tree class). Remeasure + the 200 ms
+target relaunch as `run-loop-velocity-2` after `init-speed` lands, together
+with `status-face-2`.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
