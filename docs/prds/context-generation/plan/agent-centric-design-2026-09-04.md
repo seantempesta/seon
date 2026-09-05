@@ -62,7 +62,8 @@ follow every ref in, and you have found all the data there is to render.
 ;; the agent — one entity; its running state is ITS attributes, not a separate run family
 #:seon.agent
 {:id            [:string {:seon.db/identity true}]
- :namespace     :seon.db/ref              ; → the :seon.ns row it stewards (referenced, not owned)
+ :namespace     :seon.db/ref              ; → its OWN home namespace (my.agents.<id> by default) — where its defs live
+ :stewards      [:set :seon.db/ref]        ; → namespaces it works on behalf of (my.note …); several agents may steward one
  :forked-from   :seon.db/ref              ; → agent
  :cluster       :seon.db/ref              ; → the cluster it runs in (referenced)
  ;; the turn, as facts on the agent: begin-turn asserts them in ONE transaction, close-turn retracts/advances them
@@ -118,8 +119,9 @@ without any join to an owner; the agent's "inbox" is just the view
 
 ### 2.3 What the agent references but does not own
 
-The namespace row and through it the program index (functions, arities,
-contracts, tests, usages); the cluster; other agents (through messages'
+Its home namespace row and the namespaces it stewards, and through them
+the program index (functions, arities, contracts, tests, usages); the
+cluster; other agents (through messages'
 `:from`/`:to` and `:forked-from`); the schema rows of every family it
 touches. These are read, never copied.
 
@@ -510,3 +512,11 @@ Then, and only then, generate and read `(help)` for one real agent.
    (count, newest, order, bounded page, requery) from database-side
    aggregates; the render function decides the view; teaching-before-use
    is limited to names the reader can resolve until the bridge lands.
+
+**Correction (owner, 2026-09-05):** an agent is independent of the
+namespace it works. Every agent has its OWN namespace (`:seon.agent/namespace`,
+its home, where its defs live) and may STEWARD other namespaces
+(`:seon.agent/stewards`, a set — several agents may steward one namespace,
+which resolves the reviewer's one-owner objection without collisions: defs
+land in each agent's home, stewardship is a ref). §2.1 carries both
+attributes.
