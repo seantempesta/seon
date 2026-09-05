@@ -128,11 +128,12 @@ The following remain **[TARGET]**:
   the fixed message form and browser-local floor checkbox
   (`src/seon/render/web.clj:132-169,1027-1037`);
 - agent-owned `::renders`: the live blueprint contains only mailbox and turn
-  (`src/seon/cluster/agent.clj:240-264`); and
-- revisioned packages and reconnect keyframes: current delivery is complete
-  snapshots plus per-tab comparison, and the replacement protocol is marked
-  **[TARGET]** at
-  `.agents/skills/seon-flow-architecture/references/render-delivery.md:55-94`.
+  (`src/seon/cluster/agent.clj:240-264`).
+
+Revisioned packages and reconnect keyframes are current. The render proc builds
+each package with a delta and complete keyframe, while each tab sends the delta
+for a contiguous revision and the keyframe after a gap
+(`src/seon/render/web.clj:1010-1055,1296-1385,1755-1769`).
 
 Canonical namespace pages, root/agent aliases, and both debug variants are
 current routes (`src/seon/render/route.clj:5-16`). Keep visual work inside those

@@ -224,6 +224,7 @@ See `README.md` for the convention.
 | [Carry schema source provenance as immutable admission data](schema-source-provenance-accumulates-in-a-global-atom.md) | cleanup | schema admission cleanup wave |
 | [Make fresh CLJC namespaces portable or name them CLJ](fresh-cljc-files-are-jvm-only.md) | cleanup | fresh portability cleanup wave |
 | [Select duplicate-identity refusal evidence deterministically](duplicate-identity-refusal-evidence-is-unordered.md) | cleanup | reconcile evidence cleanup wave |
+| [Fix render revision state overwriting its input atom](render-runtime-revision-overwrites-its-atom.md) | blocker | design-lab integration lane |
 | [Delete five readerless schema rows left by completed cuts](schema-population-retains-five-readerless-rows.md) | cleanup | schema population deletion wave |
 | [Keep the page body from scrolling sideways on a phone](agent-pages-overflow-a-phone-viewport.md) | cleanup | visual-QA fix wave |
 | [Fix the context wave's three small honesty defects](context-wave-leaves-three-small-honesty-defects.md) | cleanup | context wave fix lane |

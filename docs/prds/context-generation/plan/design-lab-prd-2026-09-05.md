@@ -208,13 +208,71 @@ read-only description is distinct from installing bindings in a fork.
 
 ### Visual overview
 
+**Data presentation clarification — 2026-09-05:** reuse the existing floor
+functions `seon.render.value/render-ai` and `seon.render.value/render-html`.
+These implement the `:seon.render/ai` and `:seon.render/html` outputs; they
+are not additional output types. Both use `seon.render.value/prepare` and
+the existing print/fit functions. Improve structural HTML formatting there
+instead of creating a debug-only data renderer. The schema still admits
+`:seon.render/form`; its removal remains unfinished, not evidence of a new
+approved output type.
+
+The owner proposes selecting an attribute to inspect its applicable render
+functions, ranked choices and outputs, and following refs to navigate the
+graph. Preserve the starting entity and viewing namespace when inspecting a
+different entity; changing the starting entity must be explicit. Placement
+of the graph, rendered entity and selection details remains a design proposal.
+The existing Cytoscape atlas is a prototype with authored data, not evidence
+that the live debug UI already supports graph inspection.
+
+The owner explicitly authorizes resetting and rebuilding experimental databases
+as often as useful, and requested a fresh main development database now.
+Reset-to-running verification remains required; a stopped old JVM or an attempted
+publication is not a successful reset. Coordinate source stability with active
+agents so the operator does not load an incomplete edit during cleanup or boot.
+
+**Performance and mutable state — owner clarification, 2026-09-05:** atoms
+require a demonstrated lifecycle need; persist durable facts and derive other
+values wherever possible. Removing a counter does not justify invalidating all
+rendered output on every wake. An unchanged input with unchanged rendering code
+and unchanged read dependencies must reuse its retained result. Verify relevant
+data changes, unrelated transactions, code changes and repeated unchanged reads
+separately, including query and renderer invocation counts. The owner observed
+roughly 30-second debug navigation; this is a defect, not an acceptable baseline.
+
+Initial HTTP probes of `/ns/seon.flow/debug` measured 2.674 seconds and then
+0.030 seconds warm (2026-09-05). A separate SSE probe returned HTTP 200 headers
+in 0.021 seconds but no data within its explicit 12-second observation window.
+These measurements distinguish response startup from first useful paint; they
+do not establish a healthy feed. A 15-second JFR profile was captured during
+these probes. Schema validation/registry work appears in samples, but call-count
+attribution and a successful rendering baseline remain outstanding.
+
+Reset evidence: the main root was deleted and rebuilt on 2026-09-05, reclaiming
+3,720,966,508 bytes. `default` forked publication
+`6a9c91b4-b607-5c90-b8ab-1aa11323d8a5`; PID 65956 then booted and MCP evaluation
+returned 42. Database pull found the new `seon.render/selection` contract and
+SCI resolved that symbol. The explicit hook-equivalent publication command
+`bin/seon init --changed src/seon/render.clj` subsequently exited successfully,
+publishing `6a9c9226-898c-5ec3-9099-61f8b8d07878`. This proves publication and
+fresh acquisition, not automatic adoption by existing cluster branches.
+
+The browser exposed a render-proc state collision between the runtime revision
+atom and the observed numeric revision. The numeric state now uses
+`::observed-runtime-revision`; a restart is required for a proc that already
+overwrote its atom. Bootstrap receipt settlement also produced an invalid
+database-argument contract error; investigation remains open. These failures
+prevent claiming the inspection milestone complete despite successful boot.
+
 **Milestone status — 2026-09-05, implementation authorized**
 
 - [x] Trace existing cluster/SCI/render ownership and record evidence.
-- [ ] 0: Prerequisites — **in progress**. Same-arity renderer fix assigned;
+- [ ] 0: Prerequisites — **in progress**. Same-arity renderer fix committed (`f0f28b086`), live-probed;
   SCI isolation awaits integration with the other session's turn-batching work;
   real-turn baseline remains unverified.
-- [ ] 1: Real data, candidate and output inspection.
+- [ ] 1: Real data, candidate and output inspection — **implementation active**.
+  Bounded Datahike pages and entity observation are live-probed; selection
+  explanation and debug-page/feed integration are being implemented.
 - [ ] 2: Agent-driven function/schema edit, rerun, compare and revert.
 - [ ] 3: Graph navigation and measured acquisition/render work.
 - [ ] 4: Complete bootstrapped context experiments and owner review.
@@ -247,7 +305,7 @@ MCP evaluation in the shared SCI context mutates shared SCI state without creati
 not the adoption mechanism. Execution experiments use the existing real agent
 path. File reload alone does not establish that an existing cluster adopted a
 new program. Show the exact branch/program/basis and refresh the visible result
-after each trial. Verify data/ref changes invalidate the relevant retained
+after each trial. Verify data/ref changes and runtime evaluation invalidate the relevant retained
 render, and measure transaction-to-visible-result plus reset-to-visible-result
 when a reset is necessary. The operational acceptance is: Codex performs a
 data-shape change and a connection change, reruns, compares and restores the
@@ -457,3 +515,18 @@ No new owner decision is needed to restate the goal. The next useful review is
 of a concrete step-1 screen and step-2 preference experiment. Distance/tie rules,
 raw-result handle behavior and the common projection boundary are decided with
 those outputs visible, not by treating historical prose as binding.
+
+## Active completion goal — 2026-09-05
+
+Keep implementation running until the first complete debug inspection is
+working in the browser: actual data/connections, selection evidence and actual
+output, with focused tests and live proof. Delegation and source edits alone
+do not complete the goal. The owner additionally requires runtime eval changes
+and data transactions to refresh the already-open view; a stale page is a defect
+to diagnose and fix, not a reason to substitute manual browser refresh.
+
+Current runtime repair: record a process-local render revision before the
+existing losable wake after a prepl evaluation. The render proc observes that
+revision and invalidates retained work when it differs. A database wake replacing
+the eval wake must not lose invalidation; verify this with the existing feed.
+The revision is disposable render state, not a second database/program identity.
