@@ -553,12 +553,8 @@
                 [?agent :seon.cluster.agent/run ?run]
                 [?run :seon.cluster.run/id ?run-id]]
               db agent-id)
-        request
-        (assoc (walk-request db caps agent-id :seon.render/ai
-                             connection render-context)
-               :seon.render.walk/lookup
-               [:seon.cluster.agent/id agent-id]
-               :seon.render/distance 2)]
+        request (walk-request db caps agent-id :seon.render/ai
+                              connection render-context)]
     (try
       (let [call-id (root-call-id :seon.render/ai agent-id)
             [acquisition _entry] (acquire-root request call-id)
@@ -1774,6 +1770,7 @@
 (defn- walk-request
   [db caps agent-id output connection render-context]
   (cond-> {:seon.db/db db
+             :seon.cluster.agent/id agent-id
              :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
              :seon.render/output output
              :seon.render/distance (:depth namespace-walk-options)

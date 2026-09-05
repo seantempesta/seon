@@ -505,29 +505,19 @@
 (deftest a-never-run-agents-debug-context-is-labeled-prospective
   (with-server
     (fn [connection server _context]
-      (db/transact!
-       connection
-       (cluster.agent/creation-tx
-        {:seon.cluster.agent/id "prospective-agent"
-         :seon.cluster/name "web-test"
-         :seon.ns/name 'my.agents.prospective-agent}))
       (let [observed (atom nil)
-            prospective
-            [{:seon.render.history/call-id
-              [[:seon.cluster.agent/id "prospective-agent"] []]
-              :seon.render.history/basis-transaction (db/basis-t @connection)
-              :seon.render.history/form '(help)
-              :seon.render.history/printed-value "prospective help"
-              :seon.render.history/bytes
-              "my.agents.prospective-agent=> (help)\nprospective help"}]]
+            history render.walk/history]
         (with-redefs [render.walk/history
                       (fn [request]
                         (reset! observed request)
-                        prospective)]
-          (let [response (fetch server "/agent/prospective-agent/debug")
+                        (history request))]
+          (let [response (fetch server "/agent/root/debug")
                 body (.body response)]
             (is (= 200 (.statusCode response)))
-            (is (= [:seon.cluster.agent/id "prospective-agent"]
+            (is (= agent-id
+                   (:seon.cluster.agent/id @observed))
+                "the production request carries history's agent input")
+            (is (= [:seon.cluster.agent/id agent-id]
                    (:seon.render.walk/lookup @observed)))
             (is (contains? @observed :seon.render.walk/root-acquisition)
                 "debug uses the next transition's compiled root acquisition")
@@ -535,7 +525,6 @@
                 "the prospective query reads the current immutable database")
             (is (str/includes? body
                                "seon-debug-context-status\">prospective"))
-            (is (str/includes? body "prospective help"))
             (is (not (str/includes? body
                                     "No recorded context capture exists")))))))))
 
@@ -559,21 +548,39 @@
         {:seon.cluster.agent/id agent-id
          :seon.cluster.agent/run [:seon.cluster.run/id "fresh-cluster-run"]}])
       (let [message-custody seon.context/message-custody
-            observed-run-ids (atom [])]
+            observed-custody-inputs (atom [])]
         (with-redefs [seon.context/message-custody
                       (fn [database run-id rendered-agent-id message-eid]
-                        (swap! observed-run-ids conj run-id)
+                        (swap! observed-custody-inputs
+                               conj
+                               {:seon.cluster.run/id run-id
+                                :seon.cluster.agent/id rendered-agent-id})
                         (message-custody database run-id rendered-agent-id
                                          message-eid))]
           (let [response (fetch server "/agent/root/debug")
                 body (.body response)]
             (is (= 200 (.statusCode response)))
+            (is (nil?
+                 (db/q '[:find ?capture .
+                         :where
+                         [?run :seon.cluster.run/id "fresh-cluster-run"]
+                         [?capture :seon.context.capture/run ?run]]
+                       @connection))
+                "the fresh agent has never reached context capture")
             (is (str/includes? body
                                "seon-debug-context-status\">prospective"))
             (is (not (str/includes? body "<pre></pre>"))
                 "the real walk contributes at least one byte to the prompt")
-            (is (= #{"fresh-cluster-run"} (set @observed-run-ids))
-                "history classifies messages against the agent's current run")
+            (is (= #{{:seon.cluster.run/id "fresh-cluster-run"
+                      :seon.cluster.agent/id agent-id}}
+                   (set @observed-custody-inputs))
+                "history receives the run and agent it uses for custody")
+            (is (empty?
+                 (db/q '[:find ?cost
+                         :where
+                         [?cost :seon.render.cost/estimated-tokens]]
+                       @connection))
+                "prospective debug remains a read-only observation")
             (is (not (str/includes?
                       body
                       "The prospective agent context is unavailable.")))))))))
@@ -590,6 +597,13 @@
           (is (= 200 (.statusCode response)))
           (is (str/includes? body
                              "seon-debug-context-status\">unavailable"))
+          (is (not (str/includes? body
+                                  "seon-debug-context-status\">prospective"))
+              "HTTP 200 does not label an unavailable pane as healthy")
+          (is (str/includes? body "class=\"seon-debug-diagnostic\"")
+              "the composite page keeps HTTP 200 only with a visible diagnostic")
+          (is (not (str/includes? body "<pre"))
+              "an unavailable prompt is not rendered as a healthy prompt")
           (doseq [field [":seon.error/kind"
                          ":seon.error/diagnostic-member"
                          ":seon.error/diagnostic-cause"
