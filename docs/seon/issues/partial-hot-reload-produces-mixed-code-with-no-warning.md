@@ -43,6 +43,26 @@ a schema rather than the actual problem ("your JVM is running mixed code").
 
 ## Owner
 
+### Live reload evidence, 2026-09-05
+
+Default PID 68696: reapplying `seon.instrument/apply!` with the running
+cluster's caps and error mode, but without its schema projection state,
+exceeded the 60-second MCP timeout. The evaluation continued running.
+A JVM thread dump showed `collect-contracts!` → Malli collection →
+`schema/active-forms` → `candidate-forms` → `packaged-forms` →
+`schema.edn/resource-population` → repeated schema file reads.
+The snapshot is `tmp/design-lab-instrument-threads.json`; reproduce by
+calling instrumentation outside `schema/call-with-projection-state`.
+This is a missing-input boundary defect, not evidence that a larger timeout
+is appropriate. Refuse missing projection before collection, and document
+the complete cluster-scoped call in the REPL skill.
+
+An independent stale-request defect also surfaced in this session:
+an open debug registration predating cursor support supplied nil to
+`seon.render.data/at`. Its contract failure aborted the shared render pass,
+leaving unrelated tabs stale. Normalize the optional cursor at its consuming
+boundary and prove the still-open stream receives the next update.
+
 The reload/staleness seam — the MCP eval path and/or `seon.instrument`, which
 already knows every instrumented var and could compare what is loaded against
 what is on disk.

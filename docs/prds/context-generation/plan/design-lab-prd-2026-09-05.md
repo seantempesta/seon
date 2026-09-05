@@ -525,8 +525,28 @@ do not complete the goal. The owner additionally requires runtime eval changes
 and data transactions to refresh the already-open view; a stale page is a defect
 to diagnose and fix, not a reason to substitute manual browser refresh.
 
-Current runtime repair: record a process-local render revision before the
-existing losable wake after a prepl evaluation. The render proc observes that
-revision and invalidates retained work when it differs. A database wake replacing
-the eval wake must not lose invalidation; verify this with the existing feed.
-The revision is disposable render state, not a second database/program identity.
+Current verification, 2026-09-05: the added runtime-revision atom was removed;
+it collided with a number under the same key and duplicated derived state.
+MCP evaluation currently offers the ordinary render wake. This does **not** yet
+prove that a changed helper invalidates cached HTML: code invalidation remains
+an explicit outstanding acceptance item.
+
+Unchanged relevant data, program definitions, projection and render inputs must
+reuse HTML before renderer discovery or invocation. Suppressing an identical
+package after expensive recomputation is insufficient. Measure discovery and
+invocation counts as well as request duration. An unrelated transaction must
+not force the whole debug page to render again merely because basis-t changed.
+
+The controlled real-socket regression
+`canonical-debug-feed-repaints-when-the-subject-changes` passes: the same stream
+receives a changed namespace doc after initial paint. The current default
+process initially remained stale while recording repeated
+`seon.render.data/at` input contract failures. Lifted error evidence named
+the cursor contract and offending nil: older retained debug registrations
+omitted the cursor. Normalizing the optional cursor at use fixed the pass.
+The already-open browser tab then received a changed namespace-doc datom at
+basis 536871434 and its restoration at basis 536871437 without a reload.
+Temporary namespace-doc markers have been restored. The complete
+`seon.render.data-test` gate passed: 5 tests, 107 assertions, no failures/errors.
+Code-change invalidation, cache-work counts and final visual inspection remain
+outstanding; this data-update proof does not complete them.
