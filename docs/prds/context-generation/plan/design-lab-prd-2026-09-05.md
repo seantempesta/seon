@@ -41,8 +41,10 @@ real population; the crash model recoverable from facts alone.
 
 ## 1. What it is, in one sentence
 
-The existing `/agent/{id}/debug` page, grown into a live, clickable model
-of one agent: its REAL attributes and connections as a graph; for any
+Not a separate system: the existing debug pages at the three levels the
+whole system operates on — global (`/`, the cluster), namespace
+(`/ns/{namespace}/debug`), and agent/function (`/agent/{id}/debug`) —
+grown into a live, clickable model of what is there: its REAL attributes and connections as a graph; for any
 node, the render functions that could apply and their actual output on
 that data; and the agent's context assembled three ways — the SCI
 bindings, the completion prompt, the page — from the same facts by the
@@ -86,15 +88,17 @@ same looked-up functions, with the ordering produced by live code.
    use — by the layout function that produces it; the page is ordered by
    layout (regions, then time). Each is a contracted `defn`; edit it, hot
    reload, refresh. No manual drag.
-6. **An agent is independent of the namespace it works.** Every agent has
-   its own home namespace (where its defs live, `my.agents.<id>` by
-   default) and may STEWARD other namespaces; several agents may steward
-   one namespace.
-7. **The first world is the steward of Seon's own code:** an agent
-   stewarding `my.note` — small, with its own schema, render functions,
-   tests, and a fact family agents write. Its data already exists (the
-   program graph), so loading it is creating the agent through the
-   existing creation route plus a few seed messages and plan items.
+6. **Do not overcomplicate the model to start.** No stewardship attribute
+   now: the first world is simply an agent whose namespace is `my.note`
+   (the existing creation path assigns a namespace at creation). The
+   agent/namespace independence (an agent's own home namespace, several
+   agents per namespace) stays in the design document as a later
+   accretion, tried in the lab when the basics are seen.
+7. **The first world is Seon's own code:** `my.note` — small, with its own
+   schema, render functions, tests, and a fact family agents write; its
+   data already exists in the program graph. Everything the lab shows for
+   it must also work at the namespace level (`/ns/my.note/debug`) and the
+   global level (`/`), because those are the same machinery.
 8. **Graph depth: one hop, expand on click.**
 9. **Vocabulary:** "entity schema" = the registered attribute-bearing
    `:map` schema a stored entity satisfies, found from its identity
@@ -178,17 +182,22 @@ same looked-up functions, with the ordering produced by live code.
 
 ## 5. The world the lab loads first
 
-An agent `my.agents.<id>` (home namespace) stewarding `my.note`. Created
-through the existing agent-creation route (which assigns a namespace at
-creation, `seon.cluster.agent`, `agent.clj:111` — extended to record
-stewardship if the current schema lacks it); seeded with two messages from
-root and one plan item. Its data is real and already present: `my.note`'s
+An agent whose namespace is `my.note`, created through the existing
+creation path (`seon.cluster.agent`, which assigns a namespace at
+creation; the namespace page already creates an agent for a namespace on
+first access, `web.clj:1752-1769`); seeded with two messages from root and
+one plan item as source-initialization rows. Its data is real and already present: `my.note`'s
 functions, arities, contracts, tests, schema, and any note facts. As the
 design matures the same steward gets the steward-scenario functions
 (ruling 54f) defined in real turns, and other worlds are added as further
 agents, not further files.
 
 ## 6. Waves and acceptance (each read at the bytes on the lab cluster; NO criterion may pass on absent data)
+
+**Three levels, one machinery.** Every observation value and every
+projection is computed for a ROOT that may be the cluster (global), a
+namespace, or an agent; the three debug pages are the same functions on
+three roots. A wave is not accepted until it works on all three.
 
 **Cross-wave negative criteria** (from the review): the debug prompt's
 status is never `unavailable` on a fresh cluster; every selected entity,
@@ -209,7 +218,7 @@ agent id production omits — absence green in the fixture).
 |---|---|---|
 | **1A · the observation contract** (pure, no UI) | `neighbourhood-page`: a total, bounded VALUE from an explicit database value, lookup ref, basis, stable order, page size, and continuation — subject-present evidence; every current datom with its transaction identity (cardinality-many: each assertion); direct, inbound, and cardinality-many refs counted independently by database-side aggregates (never materialize-then-take); one bounded page; typed refusals for missing, ambiguous (several identities / several entity schemas), and stale-basis subjects | proved against NON-EMPTY synthetic facts in the canonical fixture (≥1 direct, ≥1 inbound, ≥1 cardinality-many ref; a deliberately oversized value producing a real elision whose next page has no duplicates or omissions) and on one isolated live cluster against the fresh root agent; counts equal an independent Datalog count; latency recorded as p50/p95 for named entities at a named datom count, query only |
 | **1B · the graph** | the debug page renders that value as the inspector table and the Cytoscape graph; Cytoscape delivered as a LOCALLY VENDORED asset served by the existing static route (no network dependency); an explicit graph lifecycle (destroy/recreate on morph); an ordinary commit refreshes the open feed | on the fresh root agent the graph shows the same counts as 1A's value; a `</script>`-bearing string value renders safely; ten SSE morphs leave one live graph instance; the atlas's hand-typed model is retired |
-| **2 · candidates and outputs** | a PUBLIC `candidate-explanation` value in `seon.render` (the ordered candidate set with each rejection's reason — today's selection and the proposed ranking, side by side) and a read-only diagnostic render boundary that runs one candidate through the real kernel and fit profile WITHOUT transacting render-cost facts and REFUSING effectful candidates | fixtures independently establish, on named note and message identities with source transactions: one winner, one deterministic tie, the floor, a throwing producer (flat error shown), one external-sink exclusion; the expected symbols are asserted before their outputs; datom count unchanged after a diagnostic run |
+| **2 · candidates and outputs** | a `candidate-explanation` value in `seon.render` (the ordered candidate set with each rejection's reason — today's selection and the proposed ranking, side by side; `producer`/`candidates` are `defn-` by convention, which here restricts nothing — they become the contracted public entry when the page needs them) and a read-only diagnostic render boundary that runs one candidate through the real kernel and fit profile WITHOUT transacting render-cost facts and REFUSING effectful candidates | fixtures independently establish, on named note and message identities with source transactions: one winner, one deterministic tie, the floor, a throwing producer (flat error shown), one external-sink exclusion; the expected symbols are asserted before their outputs; datom count unchanged after a diagnostic run |
 | **3 · the three projections** | one shared ENTRY value (intent, form, result, selected producer, tokens, prerequisite edges, basis) produced by the render owners; a named SCI-description owner in `seon.sci.eval` deriving requires, newest defs, readable handles, and wrappers WITHOUT mutating a ctx; the layout function; the page and the prompt derived from the same entries; the current prospective prompt beside them, both labelled with their basis | ≥3 named entries with a real prerequisite edge; editing the layout function and refreshing changes the order while the entry identities and content digests are unchanged; per-entry token contributions sum to the calibrated estimate of the assembled prompt including separators (the existing `history-contributions` equality); the two prompts show their bases |
 | **4 · branches and experiments** | the connection owner, the compatibility fence, same-origin fork/compare POSTs, "copy as decision"; one storage-shape experiment carried end to end from a separate worktree | baseline asserts the new attribute ABSENT; the experiment asserts exact subject, attribute, value, and commit ids on both sides and a non-empty difference; each render reports its branch and basis; the full cycle (publish → refork → start → browser shows the new commit and basis) is MEASURED end to end and recorded — at HEAD publication + start is 71.9 s (measured 2026-09-05), so the 15 s figure is a platform TARGET, not this wave's acceptance |
 
