@@ -245,5 +245,25 @@ lands: the lab IS the visualization, over real data.
    Nothing needs deleting first; the lab shows old and new attributes side
    by side because it reads datoms.
 
-**Still open:** which first-party namespace the first steward works;
-where the default ordering function lives; the graph's default depth.
+9. **The first steward works `my.note`** — small, with its own schema,
+   render functions, tests, and a fact family agents write; every edge kind
+   is present and the whole namespace fits in the lab.
+10. **Ordering is a render concern, local to what is being rendered.** The
+   agent's context is ordered LOGICALLY — definitions before use, discovery
+   before use — by the layout render function that produces it; the page
+   is ordered by LAYOUT — regions, then time within the transcript. No
+   global ordering function: each projection's layout function owns its
+   order, and an agent overrides it like any render function.
+11. **Graph depth: one hop, expand on click** — the entity, its
+   attributes, every direct connection with counts; clicking a collection
+   edge expands a bounded page.
+
+**Correction to 7 (verified 2026-09-05):** the config manifest declares no
+agents today (`config/default.edn` has no agent or namespace key), so the
+seed world is created through the EXISTING agent-creation route
+(`seon.cluster.agent`, which already assigns a namespace at creation,
+`agent.clj:111`) plus seed messages — not a new manifest key. If a
+manifest-declared steward proves useful it is an accretion to the existing
+manifest, never a lab-only file.
+
+**Still open:** the steward agent's id; whether wave 1 starts now.

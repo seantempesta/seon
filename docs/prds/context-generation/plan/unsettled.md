@@ -319,6 +319,19 @@ against the real captured prompt → experiment branches + decision log).
 "Family" is retired as a word; the PRD says "entity schema". The atlas's
 hand-typed MODEL retires when W1 lands.
 
+## 2026-09-05 (night) — the Design Lab, ruled shape
+
+Owner rulings on the lab (PRD §9): a dev route in the existing server; the
+lab IS `/agent/{id}/debug` (no new names, no new infrastructure — the lab
+is a cluster run by the existing operator); fresh environments from a
+load definition kept as real Clojure; everything real (functions are
+program rows; agent functions via real turns); visualize the context to be
+sent through the existing debug machinery (no paid runs); ordering is
+algorithmic and live, local to each projection (context = logical order,
+page = layout); the first steward works `my.note`; depth one hop, expand
+on click; trying a storage format = a code branch + reset. Agent creation
+is the existing route (the manifest declares no agents — corrected).
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
