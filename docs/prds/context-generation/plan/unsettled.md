@@ -273,6 +273,22 @@ collection contract) and the first build = a transaction-only crash
 falsifier, not `(help)`. The design doc's §4–§6 carry the corrections and
 §9 the verdict. Lanes quiet.
 
+## 2026-09-05 — the graph perspective
+
+Owner: the model is agent-centric in the GRAPH sense — any attribute on
+any entity; the agent's plumbing (turn, process, trigger, context basis)
+are attributes ON the agent entity; evals, messages, faults, and domain
+rows point AT the agent by refs readable from both ends; no inbox table,
+no information hiding; refs to what it does not own (namespace, code,
+cluster). Context = discover the agent's attributes and connections →
+propose forms (intent comment + query WRAPPED in the render function it
+names) → derive the order → execute all in parallel → render; the
+transcript is discovery + wrapped queries + the agent's own forms. Root is
+the same discovery with a different projection (`agents-summary`).
+Written into the design doc §2–§3 with the inventory of what every agent
+cares about (§3.1) and root (§3.2); §9 records how this answers the
+reviewer's three decisions. Still no code; the crash falsifier is first.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
