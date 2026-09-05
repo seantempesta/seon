@@ -385,7 +385,10 @@ case "$command" in
       }
       atomic_lines "$state/prompt" "$prompt"
       write_launch_marker
-      start_stream append codex exec resume \
+      # resume must name the lane model too: without -m it falls back to
+      # ~/.codex/config.toml's default, which the installed CLI may reject.
+      start_stream append codex exec resume -m "$model" \
+        -c model_reasoning_effort="$effort" \
         -o "$state/summary.out" \
         "$sid" --dangerously-bypass-approvals-and-sandbox -
     else
