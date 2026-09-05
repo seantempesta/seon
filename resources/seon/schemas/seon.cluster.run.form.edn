@@ -21,15 +21,7 @@
                          [:seon.cluster.run.form/refreshes
                           {:optional true}
                           :seon.cluster.run.form/refreshes]
-                         [:seon.fn/calls
-                          {:optional true}
-                          :seon.fn/calls]
-                         [:seon.fn/keywords
-                          {:optional true}
-                          :seon.fn/keywords]
-                         [:seon.test/subject
-                          {:optional true}
-                          :seon.test/subject]],
+                         ],
                         :author [:enum :agent :system],
                         :id [:string {:min 1, :seon.db/identity true}],
                         :ns :seon.db/ref,

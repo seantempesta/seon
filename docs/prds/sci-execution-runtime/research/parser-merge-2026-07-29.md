@@ -6,19 +6,25 @@ tags: [research, parser]
 
 # Parser merge audit
 
+**Implementation status (2026-09-05): merged.** `seon.sci.reader` now carries
+the structured Edamame classification, proven top-level recovery anchors,
+strict-advance rule, closer-artifact suppression, and original-text slicing
+specified below. Turn arrival owns one bounded, span-local Parinfer indent-mode
+repair before the durable intent transaction; repair remains outside the reader.
+
 ## Verdict
 
-The best ideas of the old parser and the fresh SCI reader have **not** yet been
-merged into one robust reader.
+The best ideas of the old parser and the fresh SCI reader are now merged into
+one robust reader.
 
 The fresh reader is the correct surviving owner. It reads with SCI, fixes the
 old reader-conditional and read-eval boundary mistakes, attributes declarations
-while parsing, and lifts function and workload facts. However, it regressed the
-old parser's most expensive lessons:
+while parsing, and lifts function and workload facts. Before the 2026-09-05
+merge, it had regressed the old parser's most expensive lessons:
 
-- one malformed form currently replaces every successful event with one
+- one malformed form replaced every successful event with one
   whole-input error;
-- recovery no longer continues at a proven top-level boundary;
+- recovery did not continue at a proven top-level boundary;
 - malformed metadata, orphan closers, and invalid tokens can discard valid
   forms on both sides;
 - exact source text is taken from SCI's normalized reader buffer rather than

@@ -225,16 +225,8 @@
       :seon.db/source-argument-position 0
       :datahike.read/dependency-plan plan})))
 
-(defn- stable-read-result
-  [result]
-  (walk/postwalk (fn [value]
-                   (if (map? value)
-                     (dissoc value :seon.db/db)
-                     value))
-                 result))
-
 (defn- append-query-evidence!
-  [request response result]
+  [request response _result]
   (when *read-evidence-sink*
     (let [arguments (:args request)
           database-positions (into []
@@ -270,12 +262,11 @@
            replayable?
            (assoc :seon.db/read-request
                   {:seon.db/read-operation :q
-                   :seon.db/query-request replay-request}
-                  :seon.db/read-result (stable-read-result result)))))))
+                   :seon.db/query-request replay-request}))))))
   nil)
 
 (defn- append-pull-evidence!
-  [database arguments operation-key response result]
+  [database arguments operation-key response _result]
   (let [selector
         ((requiring-resolve 'datahike.pull-api/pull-plan-selector)
          (:datahike.pull/plan response))
@@ -290,8 +281,7 @@
       :seon.db/source-argument-position 0
       :datahike.read/dependency-plan (:datahike.read/dependency-plan response)
       :seon.db/read-request {:seon.db/read-operation operation-key
-                             :seon.db/pull-arguments replay-arguments}
-      :seon.db/read-result (stable-read-result result)})))
+                             :seon.db/pull-arguments replay-arguments}})))
 
 ;;; The committed identity a retained read's revision is keyed on. Datahike
 ;;; derives its OWN query-cache key exactly this way
@@ -381,8 +371,7 @@
             :datahike.read/revision
             (dependency-revision database plan source-position)}
             (:seon.db/read-request entry)
-            (assoc :seon.db/read-request (:seon.db/read-request entry)
-                   :seon.db/read-result (:seon.db/read-result entry))))
+            (assoc :seon.db/read-request (:seon.db/read-request entry))))
         captured))
 
 (declare decode-query-result decode-pull-result read-declarations)
@@ -398,37 +387,6 @@
           'datahike.pull-api/pull-many-plan-with-evidence)
          arguments))
 
-(defn- replay-read
-  [database request]
-  (case (:seon.db/read-operation request)
-    :q
-    (let [query-request
-          (update (:seon.db/query-request request) :args
-                  (fn [arguments]
-                    (mapv #(if (= ::database %) database %) arguments)))
-          response (d/q-with-evidence query-request)]
-      (decode-query-result (read-declarations database)
-                           query-request
-                           (query/memoized-parse-query
-                            (:query query-request))
-                           (:datahike.query/result response)))
-
-    :pull
-    (let [arguments (:seon.db/pull-arguments request)
-          response (apply pull-plan-with-evidence database arguments)]
-      (decode-pull-result (read-declarations database)
-                          (:datahike.pull/plan response)
-                          :datahike.pull/result
-                          (:datahike.pull/result response)))
-
-    :pull-many
-    (let [arguments (:seon.db/pull-arguments request)
-          response (apply pull-many-plan-with-evidence database arguments)]
-      (decode-pull-result (read-declarations database)
-                          (:datahike.pull/plan response)
-                          :datahike.pull-many/result
-                          (:datahike.pull-many/result response)))))
-
 (defn read-evidence-current?
   "True when `database` still satisfies every retained dependency revision."
   {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.error/value]
@@ -441,14 +399,9 @@
      (fn [{source-position :seon.db/source-argument-position
            plan :datahike.read/dependency-plan
            revision :datahike.read/revision
-           :as evidence}]
-       (or (and (not (false? (:datahike.read/cache-eligible? revision)))
-                (= revision (dependency-revision database plan source-position)))
-           (when-let [request (:seon.db/read-request evidence)]
-             (try
-               (= (:seon.db/read-result evidence)
-                  (stable-read-result (replay-read database request)))
-               (catch Throwable _ false)))))
+           :as _evidence}]
+       (and (not (false? (:datahike.read/cache-eligible? revision)))
+            (= revision (dependency-revision database plan source-position))))
      retained)))
 
 ;;; THE declaration population for ONE read operation. Every decode walker

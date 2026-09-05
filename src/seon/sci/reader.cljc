@@ -511,11 +511,21 @@
             column (sci/get-column-number source-reader)
             start (cursor-offset starts text-length line column)
             [form _]
-            (sci/parse-next+string
-             ctx source-reader
-             (parse-options
-              (merge reading-context
-                     (select-keys state [::ns ::aliases ::refers ::publics]))))
+            (try
+              (sci/parse-next+string
+               ctx source-reader
+               (parse-options
+                (merge reading-context
+                       (select-keys state [::ns ::aliases ::refers ::publics]))))
+              (catch #?(:clj Throwable :cljs :default) failure
+                (throw
+                 (ex-info
+                  (or (ex-message failure) (str failure))
+                  (merge (ex-data failure)
+                         {::partial-events events
+                          ::failure-start start
+                          ::reading-state state})
+                  failure))))
             end-line (sci/get-line-number source-reader)
             end-column (sci/get-column-number source-reader)
             end (cursor-offset starts text-length end-line end-column)]
@@ -561,6 +571,228 @@
                    {::nested-declarations nested}))]
             (recur (next-reading-context state form)
                    (conj events event))))))))
+
+(defn- reader-error
+  ([text failure]
+   (reader-error text failure nil))
+  ([text failure classification]
+  (let [data (ex-data failure)
+        refused? (::refusal data)
+        failure-line (or (:line data) (:row data))
+        failure-column (or (:column data) (:col data))
+        error-data
+        (cond-> {::text text
+                 ::phase (or (:phase data) "parse")}
+          failure-line (assoc ::line failure-line)
+          failure-column (assoc ::column failure-column)
+          classification (merge classification)
+          refused? (assoc ::tag (::tag data)))]
+    (error-value
+     (if refused? ::refused-tag ::unreadable)
+     (or (ex-message failure) (str failure))
+     error-data))))
+
+(defn- shift-event
+  [event offset line-offset column-offset]
+  (let [shift-position (fn [position]
+                         (when (integer? position) (+ offset position)))
+        form (::form event)
+        form-meta (meta form)
+        first-line? (= 1 (::line event))]
+    (cond-> (-> event
+                (update ::start shift-position)
+                (update ::end shift-position)
+                (update ::source-start shift-position)
+                (update ::source-end shift-position)
+                (update ::line #(+ line-offset %)))
+      first-line? (update ::column #(+ column-offset %))
+      form-meta
+      (assoc ::form
+             (with-meta form
+               (cond-> form-meta
+                 (:line form-meta) (update :line #(+ line-offset %))
+                 (and (= 1 (:line form-meta)) (:column form-meta))
+                 (update :column #(+ column-offset %))))))))
+
+(defn- cause-data
+  "The Edamame fact map beneath SCI's parse wrapper, when one exists."
+  [failure]
+  (some (fn [cause]
+          (let [data (ex-data cause)]
+            (when (= :edamame/error (:type data)) data)))
+        (take-while some? (iterate ex-cause failure))))
+
+(defn- closer?
+  [character]
+  (contains? #{\) \] \}} character))
+
+(defn- parse-classification
+  "Classify from Edamame's structured delimiter/cursor facts.
+
+  Edamame currently throws a bare IllegalArgumentException for invalid
+  metadata values. That dependency hole is retained as `:other`; recovery
+  never guesses a class from exception prose."
+  [text failure-start failure]
+  (let [data (or (cause-data failure) (ex-data failure))
+        starts (line-starts text)
+        line (or (:line data) (:row data) 1)
+        column (or (:column data) (:col data) 1)
+        failure-offset (cursor-offset starts (count text) line column)
+        opened (get data :edamame/opened-delimiter ::absent)
+        expected (get data :edamame/expected-delimiter ::absent)
+        at-offset (get text failure-offset)
+        previous (when (pos? failure-offset) (get text (dec failure-offset)))
+        delimiter-facts? (and (not= ::absent opened)
+                              (not= ::absent expected))
+        mismatched-closer
+        (or (and delimiter-facts?
+                 (closer? at-offset)
+                 (not= (str at-offset) expected))
+            (and delimiter-facts?
+                 (= failure-offset (count text))
+                 (closer? previous)
+                 (not= (str previous) expected)))
+        unclosed? (and (not= ::absent opened)
+                       (not (str/blank? (str opened)))
+                       (not mismatched-closer))
+        detail
+        (cond
+          unclosed? :unclosed
+          (or (= "" opened) mismatched-closer) :stray-closer
+          (and (map? data)
+               (= failure-offset failure-start)
+               (= \{ (get text failure-start))) :odd-map
+          (and (cause-data failure)
+               (> failure-offset failure-start)) :invalid-token
+          #?(:clj (some #(instance? IllegalArgumentException %)
+                        (take-while some? (iterate ex-cause failure)))
+             :cljs false) :bad-metadata
+          :else :other)]
+    {::recovery-kind (if unclosed? :unclosed :localized)
+     ::error-kind detail
+     ::failure-offset failure-offset}))
+
+(defn- line-start-anchor
+  [text floor accepted]
+  (some (fn [offset]
+          (when (and (> offset floor)
+                     (accepted (get text offset)))
+            offset))
+        (line-starts text)))
+
+(defn- preceding-comment-block
+  "Include the contiguous column-zero comment block narrating an anchor."
+  [text floor anchor]
+  (loop [candidate anchor]
+    (let [previous-newline (when (pos? candidate)
+                             (.lastIndexOf text "\n" (- candidate 2)))
+          previous-start (if (nil? previous-newline)
+                           0
+                           (inc previous-newline))]
+      (if (and (>= previous-start floor)
+               (< previous-start candidate)
+               (= \; (get text previous-start)))
+        (recur previous-start)
+        candidate))))
+
+(defn- token-end
+  [text start]
+  (loop [offset start]
+    (let [character (get text offset)]
+      (if (or (nil? character)
+              (str/blank? (str character))
+              (= \, character)
+              (contains? #{\; \" \( \[ \{} character))
+        (max (inc start) offset)
+        (recur (inc offset))))))
+
+(defn- recovery-point
+  [text failure-start {::keys [recovery-kind error-kind]}]
+  (let [text-length (count text)
+        point
+        (cond
+          (and (= :invalid-token error-kind)
+               (not= \( (get text failure-start)))
+          (token-end text failure-start)
+
+          (= :unclosed recovery-kind)
+          (when-let [anchor (line-start-anchor text failure-start #{\(})]
+            (preceding-comment-block text failure-start anchor))
+
+          :else
+          (line-start-anchor text failure-start #{\( \;}))
+        point (or point text-length)]
+    ;; Recovery is a terminating operation, not a hopeful retry.
+    (if (> point failure-start) point text-length)))
+
+(defn- closer-only?
+  [source]
+  (and (seq source)
+       (every? #(or (str/blank? (str %))
+                    (closer? %))
+               source)))
+
+(defn- error-event
+  [text start end state failure classification]
+  (let [[line column] (offset-cursor (line-starts text) start)
+        source (subs text start end)]
+    (cond-> {::form (with-meta '() {:line line :column column})
+             ::source source
+             ::start start
+             ::end end
+             ::source-start start
+             ::source-end end
+             ::line line
+             ::column column
+             ::error (reader-error text failure classification)}
+      (::ns state) (assoc ::ns (::ns state)))))
+
+(defn- recovering-events
+  "Recover only at proven top-level anchors or past one invalid token."
+  [text reading-context failure]
+  (let [starts (line-starts text)]
+    (loop [offset 0
+           state reading-context
+           pending failure
+           recovered []]
+      (let [data (ex-data pending)
+            [base-line base-column] (offset-cursor starts offset)
+            line-offset (dec base-line)
+            column-offset (dec base-column)
+            partial (mapv #(shift-event % offset line-offset column-offset)
+                          (::partial-events data))
+            local-start (long (or (::failure-start data) 0))
+            absolute-start (+ offset local-start)
+            local-text (subs text offset)
+            classification (parse-classification local-text local-start pending)
+            local-end (recovery-point local-text local-start classification)
+            absolute-end (+ offset local-end)
+            classification (update classification ::failure-offset + offset)
+            state-after (or (::reading-state data) state)
+            source (subs text absolute-start absolute-end)
+            recovered (into recovered partial)
+            recovered (if (closer-only? source)
+                        recovered
+                        (conj recovered
+                              (error-event text absolute-start absolute-end
+                                           state-after pending classification)))]
+        (if (= absolute-end (count text))
+          recovered
+          (let [suffix (subs text absolute-end)
+                [next-line _] (offset-cursor starts absolute-end)
+                attempt
+                (try
+                  {::events (read-events suffix state-after)}
+                  (catch #?(:clj Throwable :cljs :default) next-failure
+                    {::failure next-failure}))]
+            (if-let [events (::events attempt)]
+              (into recovered
+                    (map #(shift-event % absolute-end (dec next-line)
+                                       (dec (second (offset-cursor starts
+                                                                  absolute-end)))))
+                    events)
+              (recur absolute-end state-after (::failure attempt)
+                     recovered))))))))
 
 (defn read
   "Read accepted Clojure source into ordered read events or a flat error."
@@ -618,17 +850,8 @@
       (try
         (read-events text reading-context)
         (catch #?(:clj Throwable :cljs :default) failure
-          (let [data (ex-data failure)
-                refused? (::refusal data)
-                failure-line (or (:line data) (:row data))
-                failure-column (or (:column data) (:col data))
-                error-data
-                (cond-> {::text text
-                         ::phase (or (:phase data) "parse")}
-                  failure-line (assoc ::line failure-line)
-                  failure-column (assoc ::column failure-column)
-                  refused? (assoc ::tag (::tag data)))]
-            (error-value
-             (if refused? ::refused-tag ::unreadable)
-             (or (ex-message failure) (str failure))
-             error-data)))))))
+          (let [failure-data (ex-data failure)
+                refused? (::refusal failure-data)]
+            (if refused?
+              (reader-error text failure)
+              (recovering-events text reading-context failure))))))))

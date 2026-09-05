@@ -413,39 +413,6 @@
 
       :else nil)))
 
-(defn- stored-arglists
-  [serialized]
-  (when (string? serialized)
-    (try
-      (let [arglists (edn/read-string serialized)]
-        (when (and (seq arglists) (every? vector? arglists))
-          arglists))
-      (catch Throwable _ nil))))
-
-(defn- analysis-function-stub
-  [{:seon.fn/keys [sym private? arglists]}]
-  (let [qualified (symbol sym)
-        function-name (symbol (name qualified))
-        operation (if private? 'defn- 'defn)
-        arglists (stored-arglists arglists)]
-    (if (= 1 (count arglists))
-      (list operation function-name (first arglists) nil)
-      (list* operation function-name
-             (or (map #(list % nil) arglists)
-                 [(list '[& arguments] nil)])))))
-
-(defn- analysis-program-prelude
-  [function-rows]
-  (->> function-rows
-       (group-by #(some-> (:seon.fn/sym %) symbol namespace symbol))
-       (sort-by (comp str key))
-       (mapcat (fn [[namespace-name rows]]
-                 (cons (list 'ns namespace-name)
-                       (map analysis-function-stub
-                            (sort-by :seon.fn/sym rows)))))
-       (map pr-str)
-       (str/join "\n")))
-
 (defn- runtime-require-specs
   [{:seon.ns/keys [requires aliases refers]}]
   (let [aliases-by-target (group-by :seon.ns.alias/target-ns aliases)
@@ -479,24 +446,13 @@
      targets)))
 
 (defn- runtime-namespace-form
-  [namespace-name namespace-row function-rows]
-  ;; SCI makes every program-graph function callable. clj-kondo resolves a
-  ;; qualified call only when that namespace is in the current `ns` form, so
-  ;; the analysis-only form derives a bare require from every function row.
-  ;; The agent's real aliases/refers/imports stay intact, and none of these
-  ;; synthetic requires become durable namespace facts.
+  [namespace-name namespace-row referenced-namespaces]
   (let [program-requires
         (into #{}
-              (comp
-               (keep (fn [row]
-                       (some-> (:seon.fn/sym row)
-                               symbol
-                               namespace
-                               symbol)))
-               (remove #{namespace-name})
-               (map (fn [required-name]
-                      {:seon.ns/name required-name})))
-              function-rows)
+              (comp (remove #{namespace-name})
+                    (map (fn [required-name]
+                           {:seon.ns/name required-name})))
+              referenced-namespaces)
         requires
         (vec (runtime-require-specs
               (update namespace-row :seon.ns/requires
@@ -510,109 +466,172 @@
              (seq requires) (conj (apply list :require requires))
              (seq imports) (conj (apply list :import imports))))))
 
-(defn- function-population-revision
-  "A cheap invalidation key for the function-row population of `database`.
+(defn- resolvable-runtime-function-rows
+  [database analysis requests]
+  (let [batch-symbols
+        (into #{}
+              (keep (comp :seon.fn/sym :seon.program/row))
+              requests)
+        referenced-symbols
+        (into #{} (keep call-target) (::analyzer/var-usages analysis))
+        existing-symbols
+        (if-let [candidates (seq (set/difference referenced-symbols
+                                                   batch-symbols))]
+          (db/q '[:find [?symbol ...]
+                  :in $ [?symbol ...]
+                  :where [_ :seon.fn/sym ?symbol]]
+                database (vec candidates))
+          [])]
+    (mapv (fn [function-symbol] {:seon.fn/sym function-symbol})
+          (sort (into batch-symbols existing-symbols)))))
 
-  The newest transaction that touched any `:seon.fn/sym` datom plus the
-  population count: a new, renamed, or removed function row changes it;
-  ordinary domain transactions (message sends, eval settlements) do
-  not. One AVET scan, microseconds against the multi-second prelude
-  derivation it guards."
-  [database]
-  (let [rows (db/datoms database :avet :seon.fn/sym)]
-    [(count rows) (transduce (map :tx) max 0 rows)]))
+(defn- runtime-analysis-batch
+  "Run the analyzer once for an ordered batch of submitted forms.
 
-(def ^:private program-prelude-cache
-  ;; Derived state guarded by its own revision key (§2.1: the same
-  ;; defect that reads stale state also recomputes on every call —
-  ;; rebuilding this prelude per settled form put a 25-minute kondo
-  ;; parse storm on one curation replay). One entry: a new program
-  ;; population replaces the old wholesale.
-  (atom nil))
-
-(defn- runtime-function-rows
-  [database]
-  (mapv #(db/pull database
-                  [:seon.fn/sym :seon.fn/private? :seon.fn/arglists]
-                  %)
-        (sort (db/q '[:find [?function ...]
-                      :where [?function :seon.fn/sym]]
-                    database))))
-
-(defn- program-prelude-state
-  "The function rows and analysis prelude for `database`, revision-cached."
-  [database]
-  (let [revision (function-population-revision database)
-        cached @program-prelude-cache]
-    (if (= revision (::revision cached))
-      cached
-      (let [function-rows (runtime-function-rows database)
-            state {::revision revision
-                   ::function-rows function-rows
-                   ::prelude (analysis-program-prelude function-rows)}]
-        (reset! program-prelude-cache state)
-        state))))
-
-(defn- runtime-analysis
-  [database namespace-name source]
-  (let [namespace-row
-        (db/pull database
-                 '[:seon.ns/name
-                   {:seon.ns/requires [:seon.ns/name]}
-                   {:seon.ns/aliases [*]}
-                   {:seon.ns/imports [*]}
-                   {:seon.ns/refers [*]}]
-                 [:seon.ns/name namespace-name])
-        {function-rows ::function-rows prelude ::prelude}
-        (program-prelude-state database)
-        namespace-source (pr-str (runtime-namespace-form namespace-name
-                                                         namespace-row
-                                                         function-rows))
-        prefix (str prelude (when (seq prelude) "\n") namespace-source "\n")
-        first-source-row (inc (count (filter #{\newline} prefix)))
+  Every form gets its own synthesized real namespace form and exact source row
+  span. No population or function-stub prelude is constructed. Analyzer
+  entries are projected back to those spans below, so one form never acquires
+  another form's facts."
+  [database requests]
+  (let [{:keys [source spans]}
+        (loop [remaining requests
+               source ""
+               spans []]
+          (if-let [{:keys [namespace-name form-source]} (first remaining)]
+            (let [namespace-row
+                  (db/pull database
+                           '[:seon.ns/name
+                             {:seon.ns/requires [:seon.ns/name]}
+                             {:seon.ns/aliases [*]}
+                             {:seon.ns/imports [*]}
+                             {:seon.ns/refers [*]}]
+                           [:seon.ns/name namespace-name])
+                  referenced-namespaces
+                  (analyzer/referenced-program-namespaces
+                   namespace-name [form-source])
+                  namespace-source
+                  (pr-str (runtime-namespace-form namespace-name namespace-row
+                                                   referenced-namespaces))
+                  prefix (str source namespace-source "\n")
+                  first-source-row (inc (count (filter #{\newline} prefix)))
+                  last-source-row (+ first-source-row
+                                     (count (filter #{\newline} form-source)))]
+              (recur (next remaining)
+                     (str prefix form-source "\n")
+                     (conj spans [first-source-row last-source-row])))
+            {:source source :spans spans}))
         analysis
-        (with-in-str (str prefix source)
+        (with-in-str source
           (analyzer/analyze {::analyzer/paths ["-"]}))]
     {:seon.fn/analysis analysis
-     :seon.fn/first-source-row first-source-row
-     :seon.fn/function-rows function-rows}))
+     :seon.fn/source-spans spans
+     :seon.fn/function-rows
+     (resolvable-runtime-function-rows database analysis requests)}))
 
 (declare source-span)
 
-(defn- form-calls
-  [analysis resolvable-targets]
-  (into (sorted-set)
-        (comp
-         (keep call-target)
-         (filter resolvable-targets)
-         (map (fn [target] [:seon.fn/sym target])))
-        (::analyzer/var-usages analysis)))
-
-(defn- form-keywords
-  [analysis]
-  (into (sorted-set)
-        (comp
-         (keep (fn [entry]
-                 (when (and (::analyzer/ns entry) (::analyzer/name entry))
-                   (keyword (str (::analyzer/ns entry))
-                            (str (::analyzer/name entry)))))))
-        (::analyzer/keywords analysis)))
-
 (defn- source-analysis
-  "Keep only analyzer entries owned by the submitted form, after the prelude."
-  [analysis first-source-row]
+  "Keep only analyzer entries owned by one submitted form's row span."
+  [analysis first-source-row last-source-row]
   (reduce
    (fn [projected analysis-key]
      (update projected analysis-key
              (fn [entries]
-               (filterv #(>= (long (or (::analyzer/row %) 0))
-                              first-source-row)
+               (filterv #(<= first-source-row
+                              (long (or (::analyzer/row %) 0))
+                              last-source-row)
                         entries))))
    analysis
    [::analyzer/var-definitions
     ::analyzer/var-usages
     ::analyzer/keywords
     ::analyzer/findings]))
+
+(defn- analyzed-form
+  [analysis function-rows program-row]
+  (let [program-symbol (or (:seon.fn/sym program-row)
+                           (:seon.test/sym program-row))
+        first-party-functions
+        (cond-> (into #{} (map :seon.fn/sym) function-rows)
+          program-symbol (conj program-symbol))
+        calls-by-caller
+        (call-targets-by-caller analysis first-party-functions
+                                first-party-functions)
+        used-keywords (keywords-by-holder analysis)
+        program-facts
+        (when program-symbol
+          (let [qualified (symbol program-symbol)
+                definition
+                (some #(when (= program-symbol
+                                (str (symbol (str (::analyzer/ns %))
+                                             (str (::analyzer/name %)))))
+                         %)
+                      (::analyzer/var-definitions analysis))
+                subject (or (:seon.test/subject program-row)
+                            (test-subject (::analyzer/meta definition)))]
+            (cond-> {}
+              (::analyzer/macro definition) (assoc :seon.fn/macro? true)
+              (seq (get calls-by-caller program-symbol))
+              (assoc :seon.fn/calls
+                     (mapv (fn [target] [:seon.fn/sym target])
+                           (sort (get calls-by-caller program-symbol))))
+              (keyword-values used-keywords qualified)
+              (assoc :seon.fn/keywords
+                     (keyword-values used-keywords qualified))
+              subject (assoc :seon.test/subject subject))))
+        merged-row (when program-row (merge program-row program-facts))]
+    [{} merged-row]))
+
+(defn analyze-forms
+  "Analyze defining forms as one kondo batch, returning form-local facts."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value
+         [:vector [:map
+                   [:seon.cluster.run.form/source
+                    :seon.cluster.run.form/source]
+                   [:seon.cluster.run.form/ns
+                    :seon.cluster.run.form/ns]
+                   [:seon.program/row :seon.program/row]]]]
+    [:or [:vector [:tuple :map :seon.program/row]] :seon.error/value]]}
+  [database requests]
+  (let [resolved
+        (mapv
+         (fn [{source :seon.cluster.run.form/source
+               namespace-ref :seon.cluster.run.form/ns
+               :as request}]
+           (let [namespace-row (db/pull database [:seon.ns/name] namespace-ref)]
+             (if-let [namespace-name (:seon.ns/name namespace-row)]
+               (assoc request :namespace-name namespace-name
+                              :form-source source)
+               ((requiring-resolve 'seon.error/diagnostic)
+                {:seon.error/kind ::namespace-unresolvable
+                 :seon.error/message
+                 (str "Cannot analyze the form because its namespace reference "
+                      (pr-str namespace-ref)
+                      " does not resolve to :seon.ns/name.")
+                 :seon.error/diagnostic-layer :program-analysis
+                 :seon.error/diagnostic-operation 'seon.fn/analyze-forms
+                 :seon.error/diagnostic-member :namespace-ref
+                 :seon.error/diagnostic-expected :seon.ns/name
+                 :seon.error/diagnostic-offending namespace-ref
+                 :seon.error/diagnostic-cause ::namespace-unresolvable
+                 :seon.error/diagnostic-evidence
+                 {:seon.fn/namespace-ref namespace-ref
+                  :seon.fn/namespace-row namespace-row}}))))
+         requests)
+        refusal (some #(when (:seon.error/kind %) %) resolved)]
+    (if refusal
+      refusal
+      (let [{analysis :seon.fn/analysis
+             spans :seon.fn/source-spans
+             function-rows :seon.fn/function-rows}
+            (runtime-analysis-batch database resolved)]
+        (mapv (fn [request [first-row last-row]]
+                (analyzed-form
+                 (source-analysis analysis first-row last-row)
+                 function-rows
+                 (:seon.program/row request)))
+              requests spans)))))
 
 (defn analyze-form
   "Analyze one planned form through the static program-graph owner."
@@ -632,70 +651,12 @@
       [:maybe :seon.program/row]]
      :seon.error/value]]}
   [database source namespace-ref program-row]
-  (let [resolved-namespace (db/pull database [:seon.ns/name] namespace-ref)
-        namespace-name (:seon.ns/name resolved-namespace)]
-    (if-not namespace-name
-      ((requiring-resolve 'seon.error/diagnostic)
-       {:seon.error/kind ::namespace-unresolvable
-        :seon.error/message
-        (str "Cannot analyze the form because its namespace reference "
-             (pr-str namespace-ref) " does not resolve to :seon.ns/name.")
-        :seon.error/diagnostic-layer :program-analysis
-        :seon.error/diagnostic-operation 'seon.fn/analyze-form
-        :seon.error/diagnostic-member :namespace-ref
-        :seon.error/diagnostic-expected :seon.ns/name
-        :seon.error/diagnostic-offending namespace-ref
-        :seon.error/diagnostic-cause ::namespace-unresolvable
-        :seon.error/diagnostic-evidence
-        {:seon.fn/namespace-ref namespace-ref
-         :seon.fn/namespace-row resolved-namespace}})
-      (let [{:seon.fn/keys [analysis first-source-row function-rows]}
-            (runtime-analysis database namespace-name source)
-            program-symbol (or (:seon.fn/sym program-row)
-                               (:seon.test/sym program-row))
-            first-party-functions
-            (cond-> (into #{} (map :seon.fn/sym) function-rows)
-              program-symbol (conj program-symbol))
-            submitted-analysis (source-analysis analysis first-source-row)
-            calls-by-caller
-            (call-targets-by-caller submitted-analysis
-                                    first-party-functions
-                                    first-party-functions)
-            used-keywords (keywords-by-holder submitted-analysis)
-            program-facts
-            (when program-symbol
-              (let [qualified (symbol program-symbol)
-                    definition
-                    (some #(when (= program-symbol
-                                    (str (symbol (str (::analyzer/ns %))
-                                                 (str (::analyzer/name %)))))
-                             %)
-                          (::analyzer/var-definitions submitted-analysis))
-                    subject (or (:seon.test/subject program-row)
-                                (test-subject (::analyzer/meta definition)))]
-                (cond-> {}
-                  (::analyzer/macro definition)
-                  (assoc :seon.fn/macro? true)
-                  (seq (get calls-by-caller program-symbol))
-                  (assoc :seon.fn/calls
-                         (mapv (fn [target] [:seon.fn/sym target])
-                               (sort (get calls-by-caller program-symbol))))
-                  (keyword-values used-keywords qualified)
-                  (assoc :seon.fn/keywords
-                         (keyword-values used-keywords qualified))
-                  subject (assoc :seon.test/subject subject))))
-            form-facts
-            (cond-> {}
-              (seq (form-calls submitted-analysis first-party-functions))
-              (assoc :seon.fn/calls
-                     (form-calls submitted-analysis first-party-functions))
-              (seq (form-keywords submitted-analysis))
-              (assoc :seon.fn/keywords
-                     (form-keywords submitted-analysis))
-              (:seon.test/subject program-facts)
-              (assoc :seon.test/subject (:seon.test/subject program-facts)))
-            merged-row (when program-row (merge program-row program-facts))]
-        [form-facts merged-row]))))
+  (let [result (analyze-forms
+                database
+                [{:seon.cluster.run.form/source source
+                  :seon.cluster.run.form/ns namespace-ref
+                  :seon.program/row program-row}])]
+    (if (:seon.error/kind result) result (first result))))
 
 (def ^:private load-refusal-finding-types
   #{:syntax

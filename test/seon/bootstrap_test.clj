@@ -117,18 +117,16 @@
            (run/append-generated-tx
             {:seon.cluster.run/id (bootstrap/run-id agent-id)
              :seon.cluster.run/process cluster/boot-process-identity
+             :seon.cluster.eval/at (java.util.Date.)
              :seon.cluster.run.form/ordinal 0
              :seon.cluster.run.form/source opening-source
              :seon.ns/name namespace-name}))
           (db/transact!
            connection
-           [{:seon.cluster.eval/id
-             (pr-str [(bootstrap/run-id agent-id) 0])
-             :seon.cluster.eval/run
-             [:seon.cluster.run/id (bootstrap/run-id agent-id)]
+           (run/receipt-settle-tx
+            {:seon.cluster.run/id (bootstrap/run-id agent-id)
              :seon.cluster.eval/ordinal 0
-             :seon.cluster.eval/at (java.util.Date.)
-             :seon.cluster.eval/result-edn (pr-str node)}])
+             :seon.cluster.eval/result-edn (pr-str node)}))
           (let [post-receipt-pull
                 (bootstrap/pull-result (generator-request connection))
                 listing-candidates

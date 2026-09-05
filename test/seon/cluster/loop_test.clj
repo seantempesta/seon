@@ -659,19 +659,16 @@
         (run/append-generated-tx
          {:seon.cluster.run/id run-id
           :seon.cluster.run/process process
+          :seon.cluster.eval/at now
           :seon.cluster.run.form/ordinal 0
           :seon.cluster.run.form/source "(help)"
           :seon.ns/name 'my.agents.generated-agent}))
        (db/transact!
         connection
-        (into (run/receipt-start-tx
-               {:seon.cluster.run/id run-id
-                :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/at now})
-              (run/receipt-settle-tx
-               {:seon.cluster.run/id run-id
-                :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/result-edn "nil"})))
+        (run/receipt-settle-tx
+         {:seon.cluster.run/id run-id
+          :seon.cluster.eval/ordinal 0
+          :seon.cluster.eval/result-edn "nil"}))
        (db/transact!
         connection
         (run/generation-complete-tx
@@ -709,6 +706,7 @@
   [cluster body]
   (let [context-channel (async/chan)
         render-channel (async/chan (async/sliding-buffer 1))
+        runtime-eval-channel (async/chan (async/sliding-buffer 1))
         pages-channel (async/chan (async/sliding-buffer 1))
         stream-channel (async/chan (async/sliding-buffer 1))
         completion (async/promise-chan)
@@ -725,6 +723,7 @@
              #'web/render-step :io
              {:seon.env/environment @test-environment
               :seon.render.web/render-channel render-channel
+              :seon.render.web/runtime-eval-channel runtime-eval-channel
               :seon.render/context-channel context-channel
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/registration (atom {})
@@ -1447,13 +1446,13 @@
                              (ex-info
                               "a gate refusal must not re-enter evaluation"
                               {:seon.test/fake-evaluation true})))]
-              ((private-loop-fn 'settle-gate-outcome!)
+              (cluster.loop/settle!
                {:seon.cluster.loop/cluster cluster
                 :seon.cluster.loop/now now
                 :seon.cluster.agent/id "agent-a"
                 :seon.cluster.run/id "run-1"
                 :seon.cluster.run.form/ordinal 0
-                :seon.cluster.loop/gate-outcome gate-refusal}))
+                :seon.error/value gate-refusal}))
             receipt
             (db/q '[:find (pull ?receipt [*]) .
                     :in $ ?run-id ?ordinal

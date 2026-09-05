@@ -569,6 +569,9 @@
                              [::id ::id]
                              [::process ::process]
                              [::plan-digest ::plan-digest]
+                             [::reply {:optional true} ::reply]
+                             [::reply-blob {:optional true} ::reply-blob]
+                             [::reply-size {:optional true} ::reply-size]
                              [::starting-ns {:optional true} ::starting-ns]
                              [::sources :seon.cluster.reply/sources]]]
                   [:vector :some]]}
@@ -631,13 +634,16 @@
                         [::id ::id]
                         [::process ::process]
                         [::plan-digest ::plan-digest]
+                        [::reply {:optional true} ::reply]
+                        [::reply-blob {:optional true} ::reply-blob]
+                        [::reply-size {:optional true} ::reply-size]
                         [::starting-ns {:optional true} ::starting-ns]
                         [:seon.cluster.run.form/author
                          :seon.cluster.run.form/author]
                         [::sources :seon.cluster.reply/sources]]]
                   [:vector :some]]}
   [db request]
-  (let [{::keys [id plan-digest sources starting-ns]
+  (let [{::keys [id plan-digest reply reply-blob reply-size sources starting-ns]
          author :seon.cluster.run.form/author} request
         run (held-run db `plan-call request)
         run-eid (:db/id run)
@@ -705,9 +711,12 @@
                              (assoc :seon.cluster.run.form/ns
                                     (str "namespace:" namespace-name))))))
                       sources)]
-      (into [[:db/add run-eid ::plan-digest plan-digest]
-             [:db/add run-eid ::starting-ns
-              (str "namespace:" starting-namespace)]]
+      (into (cond-> [[:db/add run-eid ::plan-digest plan-digest]
+                     [:db/add run-eid ::starting-ns
+                      (str "namespace:" starting-namespace)]]
+              reply (conj [:db/add run-eid ::reply reply])
+              reply-blob (conj [:db/add run-eid ::reply-blob reply-blob])
+              reply-size (conj [:db/add run-eid ::reply-size reply-size]))
             cat
             [namespaces
              forms
@@ -779,6 +788,7 @@
                   [:vector :some]]}
   [db request]
   (let [{::keys [id]
+         receipt-at :seon.cluster.eval/at
          ordinal :seon.cluster.run.form/ordinal
          source :seon.cluster.run.form/source
          namespace-name :seon.ns/name} request
@@ -816,15 +826,23 @@
       (refuse! `append-generated-call ::generated-prefix-unsettled request))
     (let [form-id (form-identity id ordinal)
           namespace-id (str "namespace:" namespace-name)]
-      [{:db/id namespace-id :seon.ns/name namespace-name}
-       {:db/id form-id
-        :seon.cluster.run.form/id form-id
-        :seon.cluster.run.form/run run-eid
-        :seon.cluster.run.form/ordinal ordinal
-        :seon.cluster.run.form/author :system
-        :seon.cluster.run.form/source source
-        :seon.cluster.run.form/ns namespace-id}
-       [:db/add run-eid ::forms form-id]])))
+      (into
+       [{:db/id namespace-id :seon.ns/name namespace-name}
+        {:db/id form-id
+         :seon.cluster.run.form/id form-id
+         :seon.cluster.run.form/run run-eid
+         :seon.cluster.run.form/ordinal ordinal
+         :seon.cluster.run.form/author :system
+         :seon.cluster.run.form/source source
+         :seon.cluster.run.form/ns namespace-id}
+        [:db/add run-eid ::forms form-id]]
+       (receipt-start-call
+        db
+        {::id id
+         :seon.cluster.eval/ordinal ordinal
+         :seon.cluster.eval/at receipt-at
+         :seon.cluster.eval/source source
+         :seon.cluster.eval/ns [:seon.ns/name namespace-name]})))))
 
 (defn append-generated-tx
   "Transaction data appending one dependency-ready generated form."
@@ -1026,7 +1044,11 @@
    [:=> [:cat [:map
                [::id ::id]
                [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-               [:seon.cluster.eval/at :seon.cluster.eval/at]]]
+               [:seon.cluster.eval/at :seon.cluster.eval/at]
+               [:seon.cluster.eval/source {:optional true}
+                :seon.cluster.eval/source]
+               [:seon.cluster.eval/ns {:optional true}
+                :seon.cluster.eval/ns]]]
     [:vector :some]]}
   [request]
   [[:db.fn/call #'receipt-start-call request]])
@@ -1041,19 +1063,25 @@
          [:map
           [::id ::id]
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-          [:seon.cluster.eval/at :seon.cluster.eval/at]]]
+          [:seon.cluster.eval/at :seon.cluster.eval/at]
+          [:seon.cluster.eval/source {:optional true}
+           :seon.cluster.eval/source]
+          [:seon.cluster.eval/ns {:optional true}
+           :seon.cluster.eval/ns]]]
     [:vector :some]]}
   [db request]
   (let [{::keys [id]
-         :seon.cluster.eval/keys [ordinal at]} request
+         :seon.cluster.eval/keys [ordinal at source ns]} request
         run (receipt-run db `receipt-start-call request)
         receipt-id (receipt-identity id ordinal)]
     (when (some? (current-receipt db id ordinal))
       (refuse! `receipt-start-call ::receipt-exists request))
-    [{:seon.cluster.eval/id receipt-id
-      :seon.cluster.eval/run (:db/id run)
-      :seon.cluster.eval/ordinal ordinal
-      :seon.cluster.eval/at at}]))
+    [(cond-> {:seon.cluster.eval/id receipt-id
+              :seon.cluster.eval/run (:db/id run)
+              :seon.cluster.eval/ordinal ordinal
+              :seon.cluster.eval/at at}
+       source (assoc :seon.cluster.eval/source source)
+       ns (assoc :seon.cluster.eval/ns ns))]))
 
 (defn- settlement-form
   [database request]
@@ -1075,7 +1103,8 @@
 
 (defn- analyze-settlement
   [database request]
-  (if-let [form (settlement-form database request)]
+  (if-let [form (when (:seon.program/row request)
+                  (settlement-form database request))]
     (let [[form-facts program-row]
           (seon.fn/analyze-form
            database
@@ -1105,6 +1134,19 @@
         program-row (assoc :seon.program/row program-row)))
     request))
 
+(defn- receipt-settle-tx*
+  "Build receipt settlement transaction data without crossing a contract seam."
+  [request]
+  (let [request (cond-> request
+                  (and (:seon.cluster.eval/result-edn request)
+                       (not (contains? request :seon.cluster.eval/result-size)))
+                  (assoc :seon.cluster.eval/result-size
+                         (long (count (:seon.cluster.eval/result-edn request)))))
+        required-namespace-rows (::required-namespace-rows request)
+        request (dissoc request ::required-namespace-rows)]
+    (into (vec required-namespace-rows)
+          [[:db.fn/call #'receipt-settle-call request]])))
+
 (defn receipt-settle-tx
   "Transaction data settling one running receipt exactly once.
   Settling IS asserting terminal facts: `result-edn`, `error`, and/or
@@ -1117,19 +1159,22 @@
           :seon.cluster.eval/settle-request]
      [:vector :some]]]}
   ([request]
-   (receipt-settle-tx nil request))
+   (receipt-settle-tx* request))
   ([database request]
-   (let [request
-         (cond-> request
-           (and (:seon.cluster.eval/result-edn request)
-                (not (contains? request :seon.cluster.eval/result-size)))
-           (assoc :seon.cluster.eval/result-size
-                  (long (count (:seon.cluster.eval/result-edn request))))
-           database (->> (analyze-settlement database)))
-         required-namespace-rows (::required-namespace-rows request)
-         request (dissoc request ::required-namespace-rows)]
-     (into (vec required-namespace-rows)
-           [[:db.fn/call #'receipt-settle-call request]]))))
+   (receipt-settle-tx*
+    (if database
+      (analyze-settlement database request)
+      request))))
+
+(defn receipt-settle-batch-tx
+  "Transaction data settling an ordered turn batch in one commit.
+
+  Requests already carry the program rows produced by the turn's single
+  analysis batch, so this owner deliberately uses the non-analyzing arity."
+  {:malli/schema
+   [:=> [:cat [:vector :seon.cluster.eval/settle-request]] [:vector :some]]}
+  [requests]
+  (into [] (mapcat receipt-settle-tx) requests))
 
 (defn- affected-schema-attributes
   "Database attributes derived by the affected schema forms."
@@ -1370,7 +1415,7 @@
                     (program/changed-attributes
                      declaration {identity-attribute identity-value}))))
             declarations))
-    (let [row (or (program/declaration-row row :contracted :agent)
+    (let [row (or (program/declaration-row row :all :agent)
                   (refuse! `receipt-settle-call
                            ::row-not-admitted request))
           [identity identity-value] (program/row-identity row)
@@ -1396,7 +1441,9 @@
                  (not (:db/id (db/pull db [:db/id] namespace-ref))))
         (refuse! `receipt-settle-call ::program-namespace-missing request))
       (let [current-projection
-            (when (#{:seon.fn/sym :seon.schema/key} identity)
+            (when (or (= :seon.schema/key identity)
+                      (and (= :seon.fn/sym identity)
+                           (:seon.fn/spec row)))
               (schema/projection-from-database db))
             schema-redefinition?
             (and (= identity :seon.schema/key)
@@ -1431,10 +1478,11 @@
                {:seon.schema.admission/source :agent})
 
               :seon.fn/sym
+              (when (:seon.fn/spec row)
               (schema/projection-with-function-contract
                current-projection (symbol identity-value)
                (edn/read-string (:seon.fn/spec row))
-               {:seon.schema.admission/source :agent})
+               {:seon.schema.admission/source :agent}))
 
               nil)
             relation-row (select-keys row program-relation-attributes)

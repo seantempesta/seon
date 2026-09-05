@@ -37,6 +37,14 @@
   [value]
   (contains? value :seon.error/kind))
 
+(defn- read-kinds
+  [read-events]
+  (mapv #(if (:seon.sci.reader/error %) :error :form) read-events))
+
+(defn- first-read-error
+  [read-events]
+  (some :seon.sci.reader/error read-events))
+
 (defn- event-slices
   [text read-events]
   (mapv #(subs text
@@ -45,6 +53,11 @@
         read-events))
 
 (defn- source-round-trips?
+  "Sources and cursor spans are deterministic even when read-time gensyms are not.
+
+  Clojure expands syntax-quote auto-gensyms on each read, so equality of the
+  resulting forms is not a reader promise. The durable promise is that exact
+  source strings and their partitioning cursors round-trip unchanged."
   [file]
   (let [text (slurp file)
         first-read (events text)
@@ -55,10 +68,11 @@
            (str/join "\n"
                      (map :seon.sci.reader/source first-read))))]
     (and (vector? first-read)
+         (vector? second-read)
          (vector? source-read)
-         (= (mapv (comp pr-str :seon.sci.reader/form) first-read)
-            (mapv (comp pr-str :seon.sci.reader/form) second-read)
-            (mapv (comp pr-str :seon.sci.reader/form) source-read))
+         (= (mapv :seon.sci.reader/source first-read)
+            (mapv :seon.sci.reader/source second-read)
+            (mapv :seon.sci.reader/source source-read))
          (= text (apply str (event-slices text first-read)))
          (every?
           (fn [{:seon.sci.reader/keys
@@ -209,7 +223,7 @@
                   {:seon.sci.reader/aliases
                    {'str 'clojure.string}}))))
     (is (= :seon.sci.reader/unreadable
-           (:seon.error/kind (events "::str/word")))))
+           (:seon.error/kind (first-read-error (events "::str/word"))))))
   (testing "namespace and refers drive syntax quote without ambient state"
     (is (= 'clojure.core/inc
            (-> (events
@@ -236,7 +250,7 @@
                       [:seon.error/data
                        :seon.config.eval.result/max-source])))))
 
-(deftest every-refusal-is-a-flat-value-and-never-a-throw
+(deftest every-reader-failure-is-data-and-never-a-throw
   (let [mutation
         (gen/one-of
          [(gen/elements malformed-sources)
@@ -244,14 +258,21 @@
         property
         (prop/for-all [text mutation]
           (try
-            (let [result (events text)]
-              (and (error? result)
-                   (contains?
-                    #{:seon.sci.reader/unreadable
-                      :seon.sci.reader/refused-tag}
-                    (:seon.error/kind result))
-                   (string? (:seon.error/message result))
-                   (map? (:seon.error/data result))))
+            (let [result (events text)
+                  errors (if (vector? result)
+                           (keep :seon.sci.reader/error result)
+                           [result])]
+              (and (seq errors)
+                   (every?
+                    (fn [failure]
+                      (and (error? failure)
+                           (contains?
+                            #{:seon.sci.reader/unreadable
+                              :seon.sci.reader/refused-tag}
+                            (:seon.error/kind failure))
+                           (string? (:seon.error/message failure))
+                           (map? (:seon.error/data failure))))
+                    errors)))
             (catch Throwable _
               false)))]
     (support/assert-check!
@@ -271,7 +292,7 @@
                      [:seon.error/data
                       :seon.config.eval.result/max-source])))))
   (testing "unreadable source carries the parser position"
-    (let [result (events "(defn f\n  [x]")]
+    (let [result (first-read-error (events "(defn f\n  [x]"))]
       (is (= :seon.sci.reader/unreadable
              (:seon.error/kind result)))
       (is (pos-int?
@@ -282,7 +303,122 @@
                    [:seon.error/data :seon.sci.reader/column])))
       (is (= "parse"
              (get-in result
-                     [:seon.error/data :seon.sci.reader/phase]))))))
+                     [:seon.error/data :seon.sci.reader/phase])))))
+  (testing "one malformed line is an error event and later forms survive"
+    (let [result (events "(+ 1 ]\n(+ 2 3)")]
+      (is (vector? result))
+      (is (= 2 (count result)))
+      (is (= :seon.sci.reader/unreadable
+             (get-in result [0 :seon.sci.reader/error :seon.error/kind])))
+      (is (= '(+ 2 3) (:seon.sci.reader/form (second result)))))))
+
+(deftest read-failures-are-isolated
+  (doseq [[source expected]
+          [["(unbalanced\n(good)" [:error :form]]
+           ["(good)\n(unbalanced" [:form :error]]
+           ["(a)\n(broken\n(b)" [:form :error :form]]
+           ["\"unterminated" [:error]]
+           ["(a)\n#unknown-tag value\n(b)" :refused]
+           ["(a)\nshe said \"felt good\n(b)"
+            [:form :form :form :error :form]]]]
+    (testing (pr-str source)
+      (let [result (events source)]
+        (if (= :refused expected)
+          (is (= :seon.sci.reader/refused-tag (:seon.error/kind result)))
+          (do
+            (is (= expected (read-kinds result)))
+            (doseq [event result :when (:seon.sci.reader/error event)]
+              (is (string? (:seon.sci.reader/source event)))
+              (is (vector? [(:seon.sci.reader/start event)
+                            (:seon.sci.reader/end event)]))
+              (is (= :seon.sci.reader/unreadable
+                     (get-in event [:seon.sci.reader/error
+                                    :seon.error/kind]))))))))))
+
+(deftest structured-error-kind-classification
+  (doseq [[source expected]
+          [["(a b c" :unclosed]
+           ["[1 2 3" :unclosed]
+           ["{:a 1" :unclosed]
+           ["#{1 2" :unclosed]
+           ["(str \"oops" :unclosed]
+           ["(map #(+ % 1" :unclosed]
+           ["(a)) oops" :stray-closer]
+           ["(+ 1 3x)" :invalid-token]
+           ["(get m :)" :invalid-token]
+           ["{:a 1 :b}" :odd-map]
+           ["^123 (foo)" :bad-metadata]]]
+    (testing (pr-str source)
+      (is (= expected
+             (get-in (first-read-error (events source))
+                     [:seon.error/data :seon.sci.reader/error-kind]))))))
+
+(deftest closer-only-recovery-artifacts-are-dropped
+  (doseq [[source expected]
+          [["(message/user \"hi\")\n}" [:form]]
+           ["(message/user \"hi\")\n]" [:form]]
+           ["(a)\n}\n}\n}" [:form]]
+           ["(let [x 1]\n(f x)\n}" [:error :form]]]]
+    (is (= expected (read-kinds (events source))) (pr-str source))))
+
+(deftest recovery-never-anchors-on-inner-maps-or-vectors
+  (doseq [[source expected]
+          [["(db/transact! :seon [\n{:a 1}\n{:b 2}\n}]" [:error]]
+           ["{:a 1}" [:form]]
+           ["(good)\n{:a 1}" [:form :form]]
+           ["(broken [\n{:a 1}" [:error]]]]
+    (is (= expected (read-kinds (events source))) (pr-str source))))
+
+(deftest recovery-never-hides-a-real-failure
+  (let [broken (events "(+ 1 3x)")
+        eof (events "(db/transact! :seon [{:a 1}")]
+    (is (= [:error] (read-kinds broken)))
+    (is (not (str/blank? (:seon.sci.reader/source (first broken)))))
+    (is (= [:error] (read-kinds eof)))
+    (is (= [:form] (read-kinds (events "(str \"}\")"))))))
+
+(deftest eof-recovery-never-leaks-an-indented-inner-form
+  (let [source "(defn foo []\n;; do the thing\n  (bar)"
+        result (events source)]
+    (is (= [:error] (read-kinds result)))
+    (is (= source (:seon.sci.reader/source (first result))))
+    (is (= :unclosed
+           (get-in (first-read-error result)
+                   [:seon.error/data :seon.sci.reader/error-kind])))))
+
+(deftest recovery-strictly-advances
+  (let [point (deref (ns-resolve 'seon.sci.reader 'recovery-point))
+        unclosed {:seon.sci.reader/recovery-kind :unclosed
+                  :seon.sci.reader/error-kind :unclosed}]
+    (is (= (count ";; a\n;; b\n(c)")
+           (point ";; a\n;; b\n(c)" 0 unclosed)))
+    (is (> (point "(foo \"x\n;;c\n(g)" 0 unclosed) 0))
+    (let [result (deref (future (events ";; lead\n(open \"unclosed\n;; mid\n(inner)"))
+                        2000 ::timeout)]
+      (is (not= ::timeout result))
+      (is (vector? result)))))
+
+(deftest invalid-prose-tokens-recover-at-token-granularity
+  (doseq [source ["denied /etc/hosts(+ 1 2)"
+                  "80s(+ 2 3)"]]
+    (let [result (events source)]
+      (is (some #(= :invalid-token
+                    (get-in % [:seon.sci.reader/error :seon.error/data
+                               :seon.sci.reader/error-kind]))
+                result))
+      (is (some #(and (seq? (:seon.sci.reader/form %))
+                      (= '+ (first (:seon.sci.reader/form %))))
+                result)))))
+
+(deftest mined-digit-leading-result-symbols-never-leak-a-form
+  (doseq [source
+          ["(get-in result/0xO-2606281659 [:seon.render/text])"
+           "(str (get-in result/4IU-2606281655 [:seon.render/text]))"]]
+    (let [result (events source)]
+      (is (= [:error] (read-kinds result)))
+      (is (= :invalid-token
+             (get-in (first-read-error result)
+                     [:seon.error/data :seon.sci.reader/error-kind]))))))
 
 (defn- event-namespaces
   [text]

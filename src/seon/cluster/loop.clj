@@ -36,6 +36,7 @@
   in a state-machine property, per agent."
   (:require [clojure.core.async :as async]
             [clojure.string :as str]
+            [parinferish.core :as parinferish]
             [seon.ai :as ai]
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
@@ -44,7 +45,6 @@
             [seon.cluster.prompt :as prompt]
             [seon.cluster.reply :as reply]
             [seon.cluster.run :as run]
-            [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
@@ -54,6 +54,7 @@
             [seon.render :as render]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.reader :as reader]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
@@ -65,6 +66,81 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+;;; ---------------------------------------------------------------------------
+;;; Reply delimiter repair — one bounded pass per isolated failure span
+;;; ---------------------------------------------------------------------------
+
+(defn- read-source
+  [source namespace-name max-source]
+  (reader/read
+   {:seon.sci.reader/text source
+    :seon.sci.reader/ns namespace-name
+    :seon.sci.reader/defer-auto-resolve? true
+    :seon.config.eval.result/max-source max-source}))
+
+(defn- clean-source?
+  [source namespace-name max-source]
+  (let [events (read-source source namespace-name max-source)]
+    (and (vector? events)
+         (seq events)
+         (not-any? :seon.sci.reader/error events))))
+
+(defn- repairable-delimiter-error?
+  [event]
+  (contains?
+   #{:unclosed :stray-closer}
+   (get-in event [:seon.sci.reader/error
+                  :seon.error/data
+                  :seon.sci.reader/error-kind])))
+
+(defn- repaired-span
+  "One honest Parinfer indent-mode trial, or nil.
+
+  parinferish 0.8.0's source exposes exactly `(parse source {:mode :indent})`
+  followed by `(flatten parsed)`. Indent mode needs neither cursor nor other
+  options. A candidate is accepted only when it changed and the same SCI
+  reader finds no remaining error event."
+  [source namespace-name max-source]
+  (try
+    (let [parsed (parinferish/parse source {:mode :indent})
+          candidate (parinferish/flatten parsed)]
+      (when (and (not= source candidate)
+                 (clean-source? candidate namespace-name max-source))
+        candidate))
+    (catch Exception _ nil)))
+
+(defn- repair-source
+  "Repair each reader-isolated delimiter failure at most once.
+
+  Spans are processed from the end so earlier original offsets remain exact.
+  Odd maps, invalid tokens, bad metadata, and other failures are untouched."
+  [source namespace-name max-source]
+  (let [events (read-source source namespace-name max-source)]
+    (if-not (vector? events)
+      source
+      (reduce
+       (fn [result event]
+         (let [start (:seon.sci.reader/source-start event)
+               end (:seon.sci.reader/source-end event)
+               original (subs source start end)]
+           (if-let [fixed (repaired-span original namespace-name max-source)]
+             (str (subs result 0 start) fixed (subs result end))
+             result)))
+       source
+       (->> events
+            (filter repairable-delimiter-error?)
+            (sort-by :seon.sci.reader/source-start >))))))
+
+(defn- repair-sources
+  [sources namespace-name max-source]
+  (mapv
+   (fn [source]
+     (update source :seon.cluster.run.form/source
+             repair-source
+             (or (:seon.ns/name source) namespace-name)
+             max-source))
+   sources))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pure turn
@@ -227,6 +303,8 @@
       (:seon.program/row evaluation)
       (assoc :seon.program/row
              (:seon.program/row evaluation))
+      (::run/form-facts evaluation)
+      (assoc ::run/form-facts (::run/form-facts evaluation))
       (seq rows) (assoc :seon.def/rows rows)
       value (assoc :my.run/value value))))
 
@@ -242,14 +320,11 @@
 (defn- gate-function-install
   "Evaluate one function's complete green-to-install decision from one db."
   [cluster base-ctx agent-id receipt-id form evaluation]
-  (if-let [function-symbol (get-in evaluation [:seon.program/row :seon.fn/sym])]
+  (if-let [function-symbol
+           (when (get-in evaluation [:seon.program/row :seon.fn/spec])
+             (get-in evaluation [:seon.program/row :seon.fn/sym]))]
     (let [database @(:seon.db/connection cluster)
-          [_ analyzed-row]
-          (seon.fn/analyze-form
-           database
-           (:seon.cluster.run.form/source form)
-           (:seon.cluster.run.form/ns form)
-           (:seon.program/row evaluation))
+          analyzed-row (:seon.program/row evaluation)
           test-symbols (seon.fn/gate-set database function-symbol)
           seed (accretion/seed-for receipt-id)
           candidate
@@ -367,7 +442,7 @@
 ;;; The proc
 ;;; ---------------------------------------------------------------------------
 
-(declare turn settle-interruption!)
+(declare turn settle-interruption! resume-turn)
 
 (defn- submission-time-limit-evaluation
   "The evaluation value for a submission the backstop cut.
@@ -527,7 +602,8 @@
     ordinal :seon.cluster.run.form/ordinal
     evaluation :seon.sci.eval/evaluation
     problem :seon.problems/form-problem
-    trigger :seon.cluster.message/trigger}]
+    trigger :seon.cluster.message/trigger
+    batch? ::batch?}]
   (let [database @(get cluster :seon.db/connection)
         raw-settled (disposition (:seon.sci.admit/value evaluation))
         settled
@@ -603,26 +679,68 @@
                   ::settlement-evaluation settlement-evaluation}
            problem (assoc :seon.problems/form-problem problem)
            settled (assoc :my.run/value settled)))
-        tx-data
-        (into (run/receipt-settle-tx database receipt)
-              (concat
-               (when (or undisposed?
-                         (contains? #{:completed :wait}
-                                    (:my.run/disposition settled)))
-                 (run/close-tx
-                  (cond-> {:seon.cluster.run/id run-id
-                           :seon.cluster.run/process process
-                           :seon.cluster.run/closed-at now}
-                    undisposed?
-                    (assoc :seon.cluster.run/undisposed-at now))))
-               (:seon.cluster.message/rows delivery)
-               (:seon.error/values-tx delivery)))]
+        side-tx
+        (concat
+         (when (or undisposed?
+                   (contains? #{:completed :wait}
+                              (:my.run/disposition settled)))
+           (run/close-tx
+            (cond-> {:seon.cluster.run/id run-id
+                     :seon.cluster.run/process process
+                     :seon.cluster.run/closed-at now}
+              undisposed?
+              (assoc :seon.cluster.run/undisposed-at now))))
+         (:seon.cluster.message/rows delivery)
+         (:seon.error/values-tx delivery))
+        tx-data (if batch?
+                  (vec side-tx)
+                  (into (run/receipt-settle-tx database receipt) side-tx))]
     {::settled settled
      ::undisposed? undisposed?
      ::evaluation evaluation
      ::receipt receipt
      :seon.blob/staged-writes settlement-stages
      :seon.db/tx-data tx-data}))
+
+(declare settle-batch-refusal!)
+
+(defn- settle-batch!
+  "Settle every evaluated form and all turn side effects in one transaction."
+  [cluster requests]
+  (let [connection (:seon.db/connection cluster)
+        process (:seon.cluster.run/process cluster)
+        prepared (mapv #(evaluation-terminal-data
+                         (assoc % ::batch? true
+                                  :seon.cluster.run/process process))
+                       requests)
+        namespace-rows
+        (into []
+              (comp
+               (map ::receipt)
+               (map :seon.program/row)
+               (mapcat :seon.ns/requires)
+               (map second)
+               (remove nil?)
+               (distinct)
+               (map (fn [namespace-name] {:seon.ns/name namespace-name})))
+              prepared)
+        transaction
+        {:seon.blob/staged-writes
+         (into [] (mapcat :seon.blob/staged-writes) prepared)
+         :seon.db/tx-data
+         (into (into namespace-rows
+                     (run/receipt-settle-batch-tx (mapv ::receipt prepared)))
+               (mapcat :seon.db/tx-data)
+               prepared)}
+        outcome
+        (if-let [stages (seq (:seon.blob/staged-writes transaction))]
+          (blob/with-publication!
+           connection stages
+           #(db/transact! connection {:tx-data (:seon.db/tx-data transaction)}))
+          (db/transact! connection {:tx-data (:seon.db/tx-data transaction)}))]
+    (if (:seon.error/kind outcome)
+      (settle-batch-refusal! cluster requests prepared outcome)
+      {:prepared prepared :outcome outcome})))
 
 ;;; A REFUSED PHASE ESCALATES THROUGH `seon.error/commit-tx`, LIKE EVERY OTHER
 ;;; FAILURE. This site used to `dissoc` the escalation dial — silencing the one
@@ -678,6 +796,53 @@
                 :seon.cluster.run/process process
                 :seon.cluster.run/closed-at now}))
             recording])}))
+
+(defn- settle-batch-refusal!
+  "Settle every begun ordinal after the atomic turn settlement is refused."
+  [cluster requests prepared refusal]
+  (let [connection (:seon.db/connection cluster)
+        {now ::now
+         agent-id :seon.cluster.agent/id
+         run-id :seon.cluster.run/id}
+        (first requests)
+        process (:seon.cluster.run/process cluster)
+        recording (error-tx cluster @connection refusal now
+                            {:seon.cluster.agent/id agent-id
+                             :seon.cluster.run/id run-id})
+        value (error/value (first recording))
+        serialized (pr-str value)
+        receipts
+        (mapv
+         (fn [entry]
+           (-> (::receipt entry)
+               ;; `evaluation-terminal-data` already projected and staged the
+               ;; durable def values. Re-projecting raw in-memory defs here
+               ;; discarded those values and made a refused definition
+               ;; unrestorable on the next turn.
+               (dissoc :seon.program/row ::run/form-facts)
+               (assoc :seon.cluster.eval/result-edn serialized
+                      :seon.cluster.eval/result-size (long (count serialized))
+                      :seon.cluster.eval/error (:seon.error/message value)
+                      :seon.error/kind (:seon.error/kind value))))
+         prepared)
+        transaction
+        {:tx-data
+         (into (run/receipt-settle-batch-tx receipts)
+               cat
+               [(run/close-tx {:seon.cluster.run/id run-id
+                               :seon.cluster.run/process process
+                               :seon.cluster.run/closed-at now})
+                recording])}
+        outcome (db/transact! connection transaction)]
+    (when (:seon.error/kind outcome)
+      (throw
+       (ex-info "Batch refusal settlement was refused."
+                {:seon.error/kind ::terminal-refusal-settlement-refused
+                 ::settlement outcome
+                 ::refused-outcome refusal})))
+    {:prepared prepared
+     :outcome outcome
+     :refused-outcome refusal}))
 
 (defn settle!
   "The sole terminal writer for one run.
@@ -740,47 +905,6 @@
         (assoc refusal
                ::outcome refused
                ::refused-outcome outcome)))))
-
-(defn- settle-gate-outcome!
-  "Settle the typed union returned by the post-evaluation install gate."
-  [{cluster ::cluster
-    now ::now
-    agent-id :seon.cluster.agent/id
-    run-id :seon.cluster.run/id
-    ordinal :seon.cluster.run.form/ordinal
-    gate-outcome ::gate-outcome
-    trigger :seon.cluster.message/trigger}]
-  (if (:seon.error/kind gate-outcome)
-    (settle! {::cluster cluster
-              ::now now
-              :seon.cluster.agent/id agent-id
-              :seon.cluster.run/id run-id
-              :seon.cluster.run.form/ordinal ordinal
-              :seon.error/value gate-outcome})
-    (let [problem
-          (phase
-           #(problems/form-problem
-             @(:seon.db/connection cluster)
-             {:seon.cluster.run/id run-id
-              :seon.cluster.run.form/ordinal ordinal
-              :seon.sci.eval/evaluation gate-outcome}))]
-      (if (= ::phase-failed (:seon.error/kind problem))
-        (settle! {::cluster cluster
-                  ::now now
-                  :seon.cluster.agent/id agent-id
-                  :seon.cluster.run/id run-id
-                  :seon.cluster.run.form/ordinal ordinal
-                  :seon.error/value problem})
-        (settle!
-         (cond->
-          {::cluster cluster
-           ::now now
-           :seon.cluster.agent/id agent-id
-           :seon.cluster.run/id run-id
-           :seon.cluster.run.form/ordinal ordinal
-           :seon.sci.eval/evaluation gate-outcome}
-           problem (assoc :seon.problems/form-problem problem)
-           trigger (assoc :seon.cluster.message/trigger trigger)))))))
 
 (defn- attempt-id
   "One model attempt's identity: derived, so nothing allocates a uuid.
@@ -1280,79 +1404,84 @@
             (report :error 0))
           freeze!
           (fn [completion]
-            ;; Freeze the reply's exact ordered source. Static admission is
-            ;; part of the REPL reduce below because an earlier form may
-            ;; change the resolver state that makes the next form valid.
-            ;; The frozen plan FACT is the stream terminal; no lossy channel
-            ;; value carries "done".
-            (let [namespace-name (sci.eval/agent-namespace @connection agent-id)
+            ;; ONE INTENT COMMIT. The raw reply and every result-less eval row
+            ;; become durable together before any form runs. A later crash is
+            ;; therefore exactly the set difference between intent rows and
+            ;; terminal results; recovery never has to reconstruct or rerun it.
+            (let [reply-text (:seon.ai/text completion)
+                  database @connection
+                  namespace-name (sci.eval/agent-namespace database agent-id)
+                  parsed (reply/sources
+                          reply-text namespace-name
+                          (get-in cluster
+                                  [:seon.sci.admit/caps
+                                   :seon.config.eval.result/max-source]))
+                  max-source
+                  (get-in cluster
+                          [:seon.sci.admit/caps
+                           :seon.config.eval.result/max-source])
                   sources
-                  (reply/sources (:seon.ai/text completion)
-                                 namespace-name
-                                 (get-in cluster
-                                         [:seon.sci.admit/caps
-                                          :seon.config.eval.result/max-source]))]
+                  (cond
+                    (vector? parsed)
+                    (repair-sources parsed namespace-name max-source)
+                    (= ::reply/no-forms (:seon.error/kind parsed)) []
+                    :else [{:seon.cluster.run.form/source reply-text
+                            :seon.ns/name namespace-name}])
+                  threshold
+                  (db/q '[:find ?threshold .
+                          :where
+                          [_ :seon.config.eval.result/blob-threshold ?threshold]]
+                        database)
+                  reply-size (long (count reply-text))
+                  reply-stage (when (and threshold (> reply-size threshold))
+                                (blob/stage! connection reply-text))
+                  plan-request
+                  (cond-> {:seon.cluster.run/id run-id
+                           :seon.cluster.run/process process
+                           :seon.cluster.run/plan-digest (digest sources)
+                           :seon.cluster.run/reply-size reply-size
+                           :seon.cluster.run/sources sources}
+                    reply-stage
+                    (assoc :seon.cluster.run/reply-blob
+                           (:seon.blob/digest reply-stage))
+                    (nil? reply-stage)
+                    (assoc :seon.cluster.run/reply reply-text))
+                  intent-tx
+                  (into (run/plan-tx plan-request)
+                        (mapcat
+                         (fn [ordinal source]
+                           (run/receipt-start-tx
+                            {:seon.cluster.run/id run-id
+                             :seon.cluster.eval/ordinal (long ordinal)
+                             :seon.cluster.eval/at now
+                             :seon.cluster.eval/source
+                             (:seon.cluster.run.form/source source)
+                             :seon.cluster.eval/ns
+                             [:seon.ns/name
+                              (or (:seon.ns/name source) namespace-name)]}))
+                         (range) sources))
+                  outcome
+                  (blob/with-publication!
+                   connection (cond-> [] reply-stage (conj reply-stage))
+                   #(db/transact! connection {:tx-data intent-tx}))]
               (cond
-                ;; THE CLASS: an unreadable reply used to take `fail!`, whose
-                ;; absent ordinal can only close the run with `run/error`.
-                ;; The paid attempt survived, but the reply had no form and no
-                ;; receipt, so its source and typed reader refusal disappeared
-                ;; from the transcript. Freeze one exact-source form AND start
-                ;; its receipt in the same transaction: after that commit, a
-                ;; silent formless close is structurally impossible. Settle the
-                ;; receipt with the ordinary evaluation-result projection so a
-                ;; large refusal uses the existing inline/blob split.
-                (= ::reply/unreadable (:seon.error/kind sources))
-                (let [ordinal 0
-                      form {:seon.cluster.run.form/source
-                            (::reply/unreadable sources)}
-                      forms [form]
-                      frozen
-                      (db/transact!
-                       connection
-                       {:tx-data
-                        (into [] cat
-                              [(run/plan-tx
-                                {:seon.cluster.run/id run-id
-                                 :seon.cluster.run/process process
-                                 :seon.cluster.run/plan-digest (digest forms)
-                                 :seon.cluster.run/sources forms})
-                               (run/receipt-start-tx
-                                {:seon.cluster.run/id run-id
-                                 :seon.cluster.eval/ordinal ordinal
-                                 :seon.cluster.eval/at now})])})]
-                  (if (:seon.error/kind frozen)
-                    (fail! frozen)
-                    (do
-                      (settle!
-                       {::cluster cluster
-                        ::now now
-                        :seon.cluster.agent/id agent-id
-                        :seon.cluster.run/id run-id
-                        :seon.cluster.run.form/ordinal ordinal
-                        :seon.sci.eval/evaluation
-                        {:seon.sci.admit/value sources
-                         :seon.cluster.eval/result-edn (pr-str sources)
-                         :seon.cluster.eval/error
-                         (:seon.error/message sources)}})
-                      (report :error 1))))
-
-                (:seon.error/kind sources)
-                (fail! sources)
-
+                (:seon.error/kind outcome) (fail! outcome)
+                (empty? sources)
+                (fail! (if (:seon.error/kind parsed)
+                         parsed
+                         {:seon.error/kind ::reply/no-forms
+                          :seon.error/message
+                          "The model reply contained no forms."
+                          :seon.error/data
+                          {:seon.cluster.run/reply reply-text}}))
                 :else
-                (let [outcome (db/transact!
-                               connection
-                               (run/plan-tx
-                                {:seon.cluster.run/id run-id
-                                 :seon.cluster.run/process process
-                                 :seon.cluster.run/plan-digest
-                                 (digest sources)
-                                 :seon.cluster.run/sources
-                                 sources}))]
-                  (if (:seon.error/kind outcome)
-                    (fail! outcome)
-                    (report :released 0))))))
+                (resume-turn
+                 {::cluster cluster
+                  ::work (assoc work
+                                :seon.cluster.work/situation :resume
+                                :seon.cluster.run.form/ordinal 0)
+                  ::now now
+                  ::report report}))))
           ;; THE PROMPT REQUEST NAMES THE HELD RUN — `prompt` derives
           ;; the trigger from the run's own creating transaction
           ;; (`message/trigger`), never a re-asked queue: the recorded
@@ -1515,199 +1644,216 @@
               :else (fail! failure))))))))
 
 (defn- resume-turn
-  "Reduce one held run through value-returning phases and the sole settle! exit."
+  "Evaluate an intent-frozen turn in memory, then settle the whole batch once."
   [{cluster ::cluster work ::work now ::now report ::report}]
   (let [connection (:seon.db/connection cluster)
-        process (:seon.cluster.run/process cluster)
         agent-id (:seon.cluster.agent/id work)
         run-id (:seon.cluster.run/id work)
         base-ctx (:seon.sci.eval/ctx cluster)
         forked
-        (phase
-         #(sci.eval/fork-for-turn
-           {:seon.sci.eval/ctx base-ctx
-            :seon.db/db @connection
-            :seon.db/connection connection
-            :seon.cluster.agent/id agent-id}))]
-    (if (:seon.error/kind forked)
+        (phase #(sci.eval/fork-for-turn
+                 {:seon.sci.eval/ctx base-ctx
+                  :seon.db/db @connection
+                  :seon.db/connection connection
+                  :seon.cluster.agent/id agent-id}))
+        compiled-evaluate
+        (phase #(requiring-resolve (:seon.cluster.loop/evaluate cluster)))
+        trigger (phase #(message/trigger @connection run-id))]
+    (if-let [failure (some #(when (:seon.error/kind %) %)
+                           [forked compiled-evaluate trigger])]
       (do
         (settle! {::cluster cluster
                   ::now now
                   :seon.cluster.agent/id agent-id
                   :seon.cluster.run/id run-id
-                  :seon.error/value forked})
+                  :seon.error/value failure})
         (report :error 0))
       (let [{ctx :seon.sci.eval/ctx
              defs-notices :seon.sci.eval/defs-notices} forked
-            compiled-evaluate
-            (phase #(requiring-resolve (:seon.cluster.loop/evaluate cluster)))
-            trigger (phase #(message/trigger @connection run-id))]
-        (cond
-          (:seon.error/kind compiled-evaluate)
-          (do
-            (settle! {::cluster cluster
-                      ::now now
-                      :seon.cluster.agent/id agent-id
-                      :seon.cluster.run/id run-id
-                      :seon.error/value compiled-evaluate})
-            (report :error 0))
-
-          (:seon.error/kind trigger)
-          (do
-            (settle! {::cluster cluster
-                      ::now now
-                      :seon.cluster.agent/id agent-id
-                      :seon.cluster.run/id run-id
-                      :seon.error/value trigger})
-            (report :error 0))
-
-          :else
-          (let [evaluate
-                (fn [request]
-                  (let [database @connection
-                        read-evidence-sink (atom [])
-                        evaluation
-                        (binding [db/*read-evidence-sink* read-evidence-sink]
-                          (render/call-with-walk-context
-                           {:seon.db/db database
-                            :seon.db/connection connection
-                            :seon.cluster.agent/id agent-id
-                            :seon.sci.admit/caps
-                            (:seon.sci.admit/caps cluster)
-                            :seon.sci.eval/ctx ctx
-                            :seon.sci.eval/time-limit-ms
-                            (:seon.config.eval/time-limit-ms cluster)
-                            :seon.config/on-core-error
-                            (:seon.config/on-core-error cluster)}
-                           #(compiled-evaluate request)))
-                        read-evidence (db/read-evidence @read-evidence-sink)]
-                    (cond->
-                     (assoc evaluation
-                            :seon.cluster.eval/read-evidence read-evidence)
-                      (seq read-evidence)
-                      (assoc :seon.cluster.eval/read-basis-transaction
-                             (db/basis-t database)))))]
-            (loop [ordinal (:seon.cluster.run.form/ordinal work)
-                   ran 0
-                   namespace-name
-                   (fold-namespace @connection run-id
-                                   (:seon.cluster.run.form/ordinal work))]
-              (let [database @connection
-                    form
-                    (phase
-                     #(admitted-form
-                       {:seon.db/db database
-                        :seon.cluster.run/id run-id
-                        :seon.cluster.run.form/ordinal ordinal
-                        ::current-namespace namespace-name
-                        ::fallback-namespace
-                        (sci.eval/agent-namespace database agent-id)}))]
-                (if (:seon.error/kind form)
-                  (do
-                    (settle! {::cluster cluster
-                              ::now now
-                              :seon.cluster.agent/id agent-id
-                              :seon.cluster.run/id run-id
-                              :seon.error/value form})
-                    (report :error ran))
-                  (let [evaluation-namespace
+            database @connection
+            first-ordinal (:seon.cluster.run.form/ordinal work)
+            ordinals
+            (->> (db/q '[:find [?ordinal ...]
+                         :in $ ?run-id ?first
+                         :where
+                         [?run :seon.cluster.run/id ?run-id]
+                         [?form :seon.cluster.run.form/run ?run]
+                         [?form :seon.cluster.run.form/ordinal ?ordinal]
+                         [(<= ?first ?ordinal)]]
+                       database run-id first-ordinal)
+                 sort
+                 vec)
+            evaluate
+            (fn [request]
+              (let [snapshot @connection
+                    evidence-sink (atom [])
+                    evaluation
+                    (binding [db/*read-evidence-sink* evidence-sink]
+                      (render/call-with-walk-context
+                       {:seon.db/db snapshot
+                        :seon.db/connection connection
+                        :seon.cluster.agent/id agent-id
+                        :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                        :seon.sci.eval/ctx ctx
+                        :seon.sci.eval/time-limit-ms
+                        (:seon.config.eval/time-limit-ms cluster)
+                        :seon.config/on-core-error
+                        (:seon.config/on-core-error cluster)}
+                       #(compiled-evaluate request)))
+                    evidence (db/read-evidence @evidence-sink)]
+                (cond-> (assoc evaluation
+                               :seon.cluster.eval/read-evidence evidence)
+                  (seq evidence)
+                  (assoc :seon.cluster.eval/read-basis-transaction
+                         (db/basis-t snapshot)))))
+            evaluate-all
+            (fn []
+              (loop [remaining ordinals
+                     namespace-name
+                     (fold-namespace database run-id first-ordinal)
+                     results []]
+                (if-let [ordinal (first remaining)]
+                  (let [form
+                        (admitted-form
+                         {:seon.db/db database
+                          :seon.cluster.run/id run-id
+                          :seon.cluster.run.form/ordinal ordinal
+                          ::current-namespace namespace-name
+                          ::fallback-namespace
+                          (sci.eval/agent-namespace database agent-id)})
+                        evaluation-namespace
                         (second (:seon.cluster.run.form/ns form))
-                        receipt-id (pr-str [run-id ordinal])
-                        started
-                        (db/transact!
-                         connection
-                         (run/receipt-start-tx
-                          {:seon.cluster.run/id run-id
-                           :seon.cluster.eval/ordinal ordinal
-                           :seon.cluster.eval/at now}))]
-                    (if (:seon.error/kind started)
-                      (do
-                        (settle! {::cluster cluster
-                                  ::now now
-                                  :seon.cluster.agent/id agent-id
-                                  :seon.cluster.run/id run-id
-                                  :seon.error/value started})
-                        (report :error ran))
-                      (let [evaluation
-                            (phase
-                             #(submit-evaluation!!
-                               cluster
-                               evaluate
-                               receipt-id
-                               (evaluation-request
-                                (cond->
-                                 {::admitted-form form
-                                  ::evaluation-namespace evaluation-namespace
-                                  ::cluster cluster
-                                  :seon.sci.eval/ctx ctx
-                                  :seon.cluster.agent/id agent-id
-                                  :seon.cluster.run/id run-id
-                                  :seon.cluster.run.form/ordinal ordinal}
-                                  (and (zero? ran) (seq defs-notices))
-                                  (assoc :seon.sci.eval/output-prefix
-                                         (str/join "\n" defs-notices))))))]
+                        request
+                        (evaluation-request
+                         (cond->
+                          {::admitted-form form
+                           ::evaluation-namespace evaluation-namespace
+                           ::cluster cluster
+                           :seon.sci.eval/ctx ctx
+                           :seon.cluster.agent/id agent-id
+                           :seon.cluster.run/id run-id
+                           :seon.cluster.run.form/ordinal ordinal}
+                           (and (empty? results) (seq defs-notices))
+                           (assoc :seon.sci.eval/output-prefix
+                                  (str/join "\n" defs-notices))))
+                        evaluation (phase #(evaluate request))
+                        evaluation
                         (if (:seon.error/kind evaluation)
-                          (do
-                            (settle! {::cluster cluster
-                                      ::now now
-                                      :seon.cluster.agent/id agent-id
-                                      :seon.cluster.run/id run-id
-                                      :seon.cluster.run.form/ordinal ordinal
-                                      :seon.error/value evaluation})
-                            (report :error (inc ran)))
-                          (let [gate-outcome
-                                (phase
-                                 #(gate-function-install
-                                   cluster base-ctx agent-id receipt-id
-                                   form evaluation))
-                                terminal
-                                (settle-gate-outcome!
-                                 {::cluster cluster
-                                  ::now now
-                                  :seon.cluster.agent/id agent-id
-                                  :seon.cluster.run/id run-id
-                                  :seon.cluster.run.form/ordinal ordinal
-                                  ::gate-outcome gate-outcome
-                                  :seon.cluster.message/trigger trigger})
-                                outcome (::outcome terminal)
-                                refused? (some? (::refused-outcome terminal))
-                                failure (or (::failure terminal)
-                                            (:seon.error/value terminal))
-                                settled (::settled terminal)
-                                undisposed? (::undisposed? terminal)
-                                _
-                                (when (and (:seon.program/row gate-outcome)
-                                           (not refused?))
-                                  (let [row (:seon.program/row gate-outcome)
-                                        db-after (:db-after outcome)]
-                                    (sci.eval/install-row!
-                                     {:seon.sci.eval/ctx base-ctx
-                                      :seon.db/db db-after
-                                      :seon.program/row
-                                      (dissoc row :seon.sci.eval/evaluated?)})
-                                    (sci.eval/install-row!
-                                     {:seon.sci.eval/ctx ctx
-                                      :seon.db/db db-after
-                                      :seon.program/row row})))
-                                ran (inc ran)
-                                next-ordinal
-                                (when-not (or settled undisposed? failure refused?)
-                                  (:seon.cluster.run.form/ordinal
-                                   (work/next-agent-work
-                                    @connection
-                                    {:seon.cluster.agent/id agent-id
-                                     :seon.cluster.run/process process})))]
-                            (cond
-                              refused? (report :error ran)
-                              failure (report :error ran)
-                              settled (report :closed ran)
-                              undisposed? (report :closed ran)
-                              next-ordinal
-                              (recur next-ordinal ran
-                                     (or (:seon.sci.eval/ending-ns gate-outcome)
-                                         evaluation-namespace))
-                              :else (report :released ran))))))))))))))))
-
+                          {:seon.sci.admit/value evaluation
+                           :seon.cluster.eval/result-edn (pr-str evaluation)
+                           :seon.cluster.eval/error
+                           (:seon.error/message evaluation)
+                           :seon.error/kind (:seon.error/kind evaluation)}
+                          evaluation)]
+                    (sci.eval/bind-result!
+                     ctx ordinal (:seon.sci.admit/value evaluation))
+                    (recur (next remaining)
+                           (or (:seon.sci.eval/ending-ns evaluation)
+                               evaluation-namespace)
+                           (conj results {:ordinal ordinal
+                                          :form form
+                                          :evaluation evaluation})))
+                  results)))
+            ;; The run-loop proc already executes on the compute workload.
+            ;; Each SCI form has its own enforced `time-limit`; submitting each
+            ;; form (or this whole batch) back to the same executor adds a
+            ;; needless hand-off and can self-starve a single-worker launcher.
+            evaluated (evaluate-all)
+            defining
+            (into []
+                  (keep-indexed
+                   (fn [index {:keys [form evaluation]}]
+                     (when (:seon.program/row evaluation)
+                       [index
+                        {:seon.cluster.run.form/source
+                         (:seon.cluster.run.form/source form)
+                         :seon.cluster.run.form/ns
+                         (:seon.cluster.run.form/ns form)
+                         :seon.program/row
+                         (:seon.program/row evaluation)}])))
+                  evaluated)
+            analyzed
+            (if (seq defining)
+              (phase #(seon.fn/analyze-forms database (mapv second defining)))
+              [])]
+        (if (:seon.error/kind analyzed)
+          (do
+            (settle! {::cluster cluster
+                      ::now now
+                      :seon.cluster.agent/id agent-id
+                      :seon.cluster.run/id run-id
+                      :seon.error/value analyzed})
+            (report :error (count evaluated)))
+          (let [evaluated
+                (reduce
+                 (fn [all [[index _] [form-facts row]]]
+                   (-> all
+                       (assoc-in [index :evaluation :seon.program/row] row)
+                       (assoc-in
+                        [index :evaluation ::run/form-facts]
+                        (assoc form-facts
+                               :db/id
+                               [:seon.cluster.run.form/id
+                                (run/form-identity
+                                 run-id (:ordinal (nth all index)))]))))
+                 evaluated
+                 (map vector defining analyzed))
+                gated
+                (mapv
+                 (fn [{:keys [ordinal form evaluation] :as item}]
+                   (assoc item :evaluation
+                          (gate-function-install
+                           cluster ctx agent-id
+                           (run/receipt-identity run-id ordinal)
+                           form evaluation)))
+                 evaluated)
+                requests
+                (mapv
+                 (fn [{:keys [ordinal evaluation]}]
+                   (let [problem
+                         (phase
+                          #(problems/form-problem
+                            database
+                            {:seon.cluster.run/id run-id
+                             :seon.cluster.run.form/ordinal ordinal
+                             :seon.sci.eval/evaluation evaluation}))]
+                     (cond->
+                      {::cluster cluster
+                       ::now now
+                       :seon.cluster.agent/id agent-id
+                       :seon.cluster.run/id run-id
+                       :seon.cluster.run.form/ordinal ordinal
+                       :seon.sci.eval/evaluation evaluation
+                       :seon.cluster.message/trigger trigger}
+                       (and problem (not (:seon.error/kind problem)))
+                       (assoc :seon.problems/form-problem problem))))
+                 gated)
+                settlement (settle-batch! cluster requests)
+                outcome (:outcome settlement)
+                prepared (:prepared settlement)
+                last-prepared (peek prepared)]
+            (if (or (:seon.error/kind outcome)
+                    (:refused-outcome settlement))
+              (report :error (count gated))
+              (do
+                (sci.eval/install-evaluated-rows!
+                 {:seon.sci.eval/ctx base-ctx
+                  :seon.db/db (:db-after outcome)
+                  :seon.sci.eval/installations
+                  (into []
+                        (keep
+                         (fn [{evaluation :evaluation}]
+                           (let [row (:seon.program/row evaluation)]
+                             (when (and row
+                                        (sci.eval/committed-row?
+                                         (:db-after outcome) row))
+                               {:seon.program/row row
+                                :seon.sci.eval/evaluation evaluation}))))
+                        gated)})
+                (if (or (::settled last-prepared)
+                        (::undisposed? last-prepared))
+                  (report :closed (count gated))
+                  (report :released (count gated)))))))))))
 (defn- close-turn
   "Claim when needed and close one fully settled run."
   [{cluster ::cluster work ::work now ::now report ::report}]
@@ -1838,6 +1984,7 @@
              (run/append-generated-tx
               {:seon.cluster.run/id run-id
                :seon.cluster.run/process process
+               :seon.cluster.eval/at now
                :seon.cluster.run.form/ordinal ordinal
                :seon.cluster.run.form/source (bootstrap/entry-source entry)
                :seon.ns/name (sci.eval/agent-namespace @connection agent-id)}))]

@@ -287,9 +287,8 @@
 (declare deleted-schema-key)
 
 (defn- row
-  "Return the one reader declaration eligible for durable publication.
-  A function without its complete contract is deliberately absent."
-  [event projection]
+  "Return reader-owned rows; Var definitions are derived after evaluation."
+  [event _projection]
   (or
    (let [deletion (program/deletion-row event)]
      (when (deleted-schema-key deletion) deletion))
@@ -300,19 +299,8 @@
    (when (:seon.schema/key event)
      (assoc (select-keys event [:seon.schema/key :seon.schema/form])
             :seon.schema.admission/source :agent))
-   (let [row (program/declaration-row event :contracted :agent)]
-     (cond
-       (:seon.fn/sym row)
-       (let [function-symbol (symbol (:seon.fn/sym row))
-             definition (edn/read-string (:seon.fn/spec row))]
-         (schema/projection-with-function-contract
-          projection function-symbol definition
-          {:seon.schema.admission/source :agent})
-         row)
-
-       (:seon.test/sym row) row
-
-       :else nil))))
+   (when (:seon.ns/name event)
+     (program/declaration-row event :contracted :agent))))
 
 (defn- removed-program-identities
   "Function and test identities removed from SCI's own intern tables."
@@ -351,8 +339,8 @@
               intern-names))
            (sci/namespace-interns ctx)))))
 
-(defn- turn-intern-values
-  "Dereferenced roots owned by this SCI fork's generation.
+(defn- turn-interns
+  "Vars and dereferenced roots owned by this SCI fork's generation.
 
   `def`, `intern`, and inherited-root writes stamp SCI's current fork
   generation (`reference-code/sci/src/sci/impl/evaluator.cljc:25-49` and
@@ -369,15 +357,22 @@
     (if-not turn-generation
       {}
       (into {}
-            (filter
-             (fn [[qualified _value]]
-               (= turn-generation
-                  (:sci/generation
-                   (meta
-                    (get-in namespace-state
-                            [(symbol (namespace qualified))
-                             (symbol (name qualified))]))))))
+            (keep
+             (fn [[qualified value]]
+               (let [sci-var
+                     (get-in namespace-state
+                             [(symbol (namespace qualified))
+                              (symbol (name qualified))])]
+                 (when (= turn-generation (:sci/generation (meta sci-var)))
+                   [qualified {:seon.sci.eval/var sci-var
+                               :seon.sci.eval/value value}]))))
             values))))
+
+(defn- turn-intern-values
+  [ctx]
+  (into {} (map (fn [[qualified entry]]
+                  [qualified (:seon.sci.eval/value entry)]))
+        (turn-interns ctx)))
 
 (defn- same-intern-value?
   [left right]
@@ -397,6 +392,60 @@
                           [:sci.root/version :sci.root/ns :sci.root/name])
              :sci.root/unrestorable-reason
              "The SCI function root contains a value without a faithful stored representation."))))
+
+(defn- definition-row
+  "Derive one form's program row from the generation-stamped SCI Var."
+  [ctx projection before source]
+  (some
+   (fn [[qualified {sci-var :seon.sci.eval/var
+                    value :seon.sci.eval/value}]]
+     (when (and (not (identical? absent-intern value))
+                (not (same-intern-value?
+                      (get before qualified absent-intern) value)))
+       (let [metadata (meta sci-var)
+             namespace-ref [:seon.ns/name (symbol (namespace qualified))]
+             test? (boolean (:test metadata))
+             function? (fn? value)
+             event
+             (cond
+               test?
+               {:seon.test/sym (str qualified)
+                :seon.test/ns namespace-ref
+                :seon.test/source source}
+
+               function?
+               (cond-> {:seon.fn/sym (str qualified)
+                        :seon.fn/ns namespace-ref
+                        :seon.fn/source source
+                        :seon.fn/arglists (pr-str (or (:arglists metadata) '()))
+                        :seon.fn/private? (boolean (:private metadata))}
+                 (string? (:doc metadata))
+                 (assoc :seon.fn/doc (:doc metadata))
+                 (:macro metadata) (assoc :seon.fn/macro? true)
+                 (:malli/schema metadata)
+                 (assoc :seon.fn/spec (pr-str (:malli/schema metadata)))
+                 (contains? #{:io :compute} (:seon.workload metadata))
+                 (assoc :seon.fn/workload (:seon.workload metadata)))
+
+               :else nil)
+             row (when event
+                   (assoc (program/declaration-row event :all :agent)
+                          ::evaluated? true))]
+         (if (:seon.fn/spec row)
+           (let [definition (edn/read-string (:seon.fn/spec row))]
+             (schema/projection-with-function-contract
+              projection qualified definition
+              {:seon.schema.admission/source :agent})
+             (program/with-contract-facts
+              {:seon.program/row row
+               :seon.program/compile-options
+               (:seon.schema.projection/compile-options projection)
+               :seon.program/predicate-functions
+               (:seon.schema.projection/predicate-functions projection)
+               :seon.program/schema-keys
+               (set (keys (:seon.schema.projection/forms projection)))}))
+           row))))
+   (sort-by (comp str key) (turn-interns ctx))))
 
 (defn- defs
   [ctx _namespace-name before _source _form _observed-built-in-calls]
@@ -463,6 +512,15 @@
       (map? events)
       (throw (ex-info (:seon.error/message events) events))
 
+      ;; The reader recovers around a malformed form and returns it as an
+      ;; event carrying its flat error with a placeholder form. Evaluation
+      ;; refuses that event exactly as it refuses a whole-input failure —
+      ;; the placeholder must never run as if it were the agent's form.
+      (and (= 1 (count events))
+           (:seon.sci.reader/error (first events)))
+      (let [failure (:seon.sci.reader/error (first events))]
+        (throw (ex-info (:seon.error/message failure) failure)))
+
       (= 1 (count events))
       (first events)
 
@@ -471,6 +529,22 @@
                       {:seon.error/kind ::reader-event-count
                        ::reader-event-count (count events)
                        :seon.sci.reader/event-count (count events)})))))
+
+(defn bind-result!
+  "Bind one turn-local eval result as its stable `result/eN` symbol.
+
+  The turn fork supplies the agent/run portion of eval identity; the ordinal is
+  therefore the complete distinguishing projection inside that fork and is the
+  part later source can name before the intent transaction assigns database
+  entity ids."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :int :any] :symbol]}
+  [ctx ordinal value]
+  (let [namespace-name 'result
+        intern-name (symbol (str "e" ordinal))]
+    (when-not (sci/find-ns ctx namespace-name)
+      (sci/add-namespace! ctx namespace-name {}))
+    (sci/intern ctx namespace-name intern-name value)
+    (symbol (str namespace-name) (str intern-name))))
 
 (defn- binding-rows
   "Project SCI's effective resolver inputs into namespace components."
@@ -713,6 +787,24 @@
       {:seon.program/identity program-identity
        :seon.program/definition-attributes attributes})))
 
+(defn committed-row?
+  "True when `row` is the effective declaration in the terminal database.
+
+  A turn may redefine or delete one identity more than once before its single
+  settlement. Only the last effective row may advance the live SCI contexts;
+  earlier rows remain truthful eval evidence but are superseded install work."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] :boolean]}
+  [db row]
+  (let [[identity-attribute value] (program-row-identity row)]
+    (if (= identity-attribute :seon.program/delete-identities)
+      (not-any? #(remaining-definition-facts db %) value)
+      (let [committed (db/pull db '[*] [identity-attribute value])
+            source-attribute
+            (:seon.program/source-attribute (program/shape identity-attribute))]
+        (and (:db/id committed)
+             (= (get row source-attribute)
+                (get committed source-attribute)))))))
+
 (defn install-row!
   "Install one declaration from the terminal transaction's db-after.
   The exact committed row is resolved by identity. Receipts are never
@@ -720,8 +812,11 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/install-request] :map]}
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
-    row :seon.program/row}]
-  (let [projection (or (context-projection ctx)
+    row :seon.program/row
+    evaluated? ::evaluated?
+    prepared-projection ::prepared-projection}]
+  (let [projection (or prepared-projection
+                       (context-projection ctx)
                        (schema/projection-from-database db))
         [identity-attribute value] (program-row-identity row)
         committed (when-not (= identity-attribute
@@ -756,7 +851,8 @@
       (let [namespace-name (second (:seon.fn/ns row))
             function-symbol (symbol (:seon.fn/sym committed))
             next-projection
-            (schema/projection-from-database db projection)]
+            (or prepared-projection
+                (schema/projection-from-database db projection))]
         (kernel/cache-function!
          ctx function-symbol
          {::function-source (:seon.fn/source committed)
@@ -764,13 +860,15 @@
           ::function-private? (:seon.fn/private? committed)
           ::agent-authored? true})
         (cond
-          (::evaluated? row)
+          (or evaluated? (::evaluated? row))
           (do
             (kernel/mark-installed! ctx function-symbol)
-            (when-not (::skip-contract-install? row)
+          (when (and (:seon.fn/spec committed)
+                     (not (::skip-contract-install? row)))
               (install-function-contract! ctx committed next-projection db)))
 
-          (not (::skip-contract-install? row))
+          (and (:seon.fn/spec committed)
+               (not (::skip-contract-install? row)))
           (install-function-from-database! ctx db function-symbol))
         {:seon.schema/projection next-projection
          :seon.sci.eval/installed
@@ -778,12 +876,13 @@
 
       :seon.schema/key
       {:seon.schema/projection
-       (schema/projection-from-database db projection)
+       (or prepared-projection
+           (schema/projection-from-database db projection))
        :seon.sci.eval/installed 1}
 
       :seon.test/sym
       (let [namespace-name (second (:seon.test/ns row))
-            event (when-not (::evaluated? row)
+            event (when-not (or evaluated? (::evaluated? row))
                     (one-event (:seon.test/source committed)
                                namespace-name ctx
                                (count (:seon.test/source committed))))]
@@ -813,7 +912,8 @@
             (sci/binding [sci/ns (sci/create-ns namespace-name)]
               (sci/eval-form ctx (:seon.sci.reader/form event)))))
         {:seon.schema/projection
-         (schema/projection-from-database db projection)
+         (or prepared-projection
+             (schema/projection-from-database db projection))
          :seon.sci.eval/installed 1})
       {:seon.schema/projection projection
        :seon.sci.eval/installed 0})]
@@ -828,6 +928,91 @@
       (advance-context-projection!
        ctx db (:seon.schema/projection installed))
       installed)))
+
+(defn install-evaluated-rows!
+  "Install committed rows from the evaluations that produced them.
+
+  The turn fork already owns the exact evaluated Var roots. Transfer the
+  complete batch into the live base before advancing any database-derived
+  projection; installing one root at a time cannot resolve a same-turn test's
+  reference to a same-turn function, while replaying source would execute the
+  definitions twice after settlement."
+  {:malli/schema
+   [:=>
+    [:cat
+     [:map
+      [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+      [:seon.db/db :seon.db/database-value]
+      [:seon.sci.eval/installations
+       [:vector
+        [:map
+         [:seon.program/row :seon.program/row]
+         [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]]]]]]
+    [:vector :map]]}
+  [{ctx :seon.sci.eval/ctx
+    db :seon.db/db
+    installations :seon.sci.eval/installations}]
+  (let [row-symbols
+        (into #{}
+              (keep #(some-> % str symbol))
+              (mapcat (comp (juxt :seon.fn/sym :seon.test/sym)
+                            :seon.program/row)
+                      installations))
+        roots
+        (into []
+              (comp
+               (mapcat (comp :seon.sci.eval/defs
+                             :seon.sci.eval/evaluation))
+               (keep :seon.sci.eval/value)
+               (filter :sci.root/function)
+               (filter
+                (fn [root]
+                  (contains?
+                   row-symbols
+                   (symbol (str (:sci.root/ns root))
+                           (str (:sci.root/name root)))))))
+              installations)]
+    ;; `install-var-roots!` resolves the batch as one environment update, so a
+    ;; test closure can name a function produced earlier in the same reply.
+    (when (seq roots)
+      (sci/install-var-roots! ctx roots))
+    (:installed
+     (reduce
+      (fn [{projection :projection installed :installed}
+           {program-row :seon.program/row}]
+        (let [next-projection
+              (cond
+                (:seon.schema/key program-row)
+                (schema/projection-with-schema
+                 projection
+                 (:seon.schema/key program-row)
+                 (edn/read-string (:seon.schema/form program-row))
+                 {:seon.schema.admission/source :agent})
+
+                (deleted-schema-key program-row)
+                (schema/projection-without-schema
+                 projection (deleted-schema-key program-row))
+
+                (:seon.fn/spec program-row)
+                (schema/projection-with-function-contract
+                 projection
+                 (symbol (:seon.fn/sym program-row))
+                 (edn/read-string (:seon.fn/spec program-row))
+                 {:seon.schema.admission/source :agent})
+
+                :else projection)
+              result
+              (install-row!
+               {:seon.sci.eval/ctx ctx
+                :seon.db/db db
+                :seon.program/row program-row
+                ::evaluated? true
+                ::prepared-projection next-projection})]
+          {:projection (:seon.schema/projection result)
+           :installed (conj installed result)}))
+      {:projection (context-projection ctx)
+       :installed []}
+      installations))))
 
 (defn- admission-source
   [db source-tx]
@@ -1542,7 +1727,12 @@
     db :seon.db/db
     connection :seon.db/connection
     agent-id :seon.cluster.agent/id}]
-  (let [ctx (sci/fork base-ctx)
+  (let [ctx (cond-> (sci/fork base-ctx)
+              (env/environment? (env/of base-ctx))
+              (env/carry-state
+               (env/environment-state (env/of base-ctx)))
+              true
+              (assoc ::turn-fork? true))
         entry-ids
         (db/q '[:find [?entry ...]
                 :in $ ?agent
@@ -1960,7 +2150,8 @@
     namespace-ref :seon.cluster.run.form/ns
     output-prefix :seon.sci.eval/output-prefix
     time-limit-ms :seon.sci.eval/time-limit-ms
-    on-core-error :seon.config/on-core-error}]
+    on-core-error :seon.config/on-core-error
+    :as request}]
   (let [;; A supplied ctx keeps its accumulated defs. The only replacement is
         ;; the environment state: each form receives a turn-scoped immutable
         ;; value, so call preparation cannot read the long-lived cluster value
@@ -1978,8 +2169,14 @@
                 (env/scope turn-members))
         evaluation-ctx
         (if (env/environment? turn-environment)
-          (env/carry-state base-evaluation-ctx
-                           (env/environment-state turn-environment))
+          (if (::turn-fork? base-evaluation-ctx)
+            (do
+              (env/replace-environment!
+               (get base-evaluation-ctx env/state-carrier)
+               turn-environment)
+              base-evaluation-ctx)
+            (env/carry-state base-evaluation-ctx
+                             (env/environment-state turn-environment)))
           base-evaluation-ctx)
         ;; ARMING HAPPENS INSIDE THE BOUNDARY, and these reach it through
         ;; one volatile. `kernel/arm` refuses a DIFFERENT context already
@@ -2052,14 +2249,19 @@
         (let [_ (vreset! arm-state (kernel/arm evaluation-ctx time-limit-ms))
             before-reader-context
             (reader-context evaluation-ctx namespace-name)
-            event (one-event
-                   source namespace-name evaluation-ctx
-                   (:seon.config.eval.result/max-source caps))
+            event (or (:seon.sci.eval/event request)
+                      (one-event
+                       source namespace-name evaluation-ctx
+                       (:seon.config.eval.result/max-source caps)))
+            _ (when-let [reader-error (:seon.sci.reader/error event)]
+                (throw (ex-info (:seon.error/message reader-error)
+                                reader-error)))
             form (:seon.sci.reader/form event)
             namespace-unmap? (:seon.sci.reader/ns-unmap? event)
-            execution-ctx (if namespace-unmap?
-                            (sci/fork evaluation-ctx)
-                            evaluation-ctx)
+            ;; The turn already owns an isolated fork. Namespace mutations must
+            ;; be visible to later forms in that same reply; settlement decides
+            ;; whether the accumulated state advances the shared base context.
+            execution-ctx evaluation-ctx
             before-intern-values (turn-intern-values execution-ctx)
             _ (when-not namespace-unmap?
                 (vreset! session-observation
@@ -2125,7 +2327,7 @@
               :else (eval-form!))
             _ (when-let [declared-ns (:seon.ns/name base-declared-row)]
                 (vreset! ending-namespace declared-ns))
-            {row :seon.program/row
+            {reader-row :seon.program/row
              context-row :seon.sci.eval/context-row}
             (unmap-row
              {:seon.sci.eval/execution-ctx execution-ctx
@@ -2138,6 +2340,29 @@
               :seon.sci.eval/namespace-name namespace-name
               :seon.sci.eval/namespace-unmap? namespace-unmap?
               :seon.cluster.run.form/source source})
+            var-row (definition-row execution-ctx projection
+                                    before-intern-values source)
+            row (or var-row reader-row)
+            next-projection
+            (cond
+              (:seon.schema/key reader-row)
+              (schema/projection-with-schema
+               projection
+               (:seon.schema/key reader-row)
+               (edn/read-string (:seon.schema/form reader-row))
+               {:seon.schema.admission/source :agent})
+
+              (deleted-schema-key reader-row)
+              (schema/projection-without-schema
+               projection (deleted-schema-key reader-row))
+
+              :else nil)
+            _ (when next-projection
+                ;; Registration deltas are deliberately isolated per eval.
+                ;; The turn fork, however, is a REPL: later forms must see a
+                ;; schema admitted by an earlier form before the batch commits.
+                (advance-context-projection!
+                 evaluation-ctx @connection next-projection))
             ;; Durable declarations are installed only after the row commits.
             value (if context-row (:seon.ns/name context-row) evaluated-value)
               ;; INSIDE the boundary, BEFORE disarm: an infinite lazy

@@ -9,6 +9,7 @@
                    [:map
                     [:seon.cluster.run/id :seon.cluster.run/id]
                     [:seon.cluster.run/process :seon.cluster.run/process]
+                    [:seon.cluster.eval/at :seon.cluster.eval/at]
                     [:seon.cluster.run.form/ordinal
                      :seon.cluster.run.form/ordinal]
                     [:seon.cluster.run.form/source
@@ -30,6 +31,9 @@
                    :opening-commit-id :uuid,
                    :opened-at :inst,
                    :plan-digest [:string {:min 1}],
+                   :reply [:string {:seon.db/no-history? true}],
+                   :reply-blob :seon.blob/digest,
+                   :reply-size [:int {:min 0}],
                    :process [:string {:min 1}],
                    :starting-ns :seon.db/ref,
                    :supersedes [:set :seon.db/ref],
@@ -91,6 +95,15 @@
                     [:seon.cluster.run/plan-digest
                      {:optional true}
                      :seon.cluster.run/plan-digest]
+                    [:seon.cluster.run/reply
+                     {:optional true}
+                     :seon.cluster.run/reply]
+                    [:seon.cluster.run/reply-blob
+                     {:optional true}
+                     :seon.cluster.run/reply-blob]
+                    [:seon.cluster.run/reply-size
+                     {:optional true}
+                     :seon.cluster.run/reply-size]
                     [:seon.cluster.work/situation
                      {:optional true}
                      :seon.cluster.work/situation]

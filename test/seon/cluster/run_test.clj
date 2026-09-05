@@ -323,9 +323,21 @@
               (run/append-generated-tx
                {::run/id "generated-run"
                 ::run/process "generated-process"
+                :seon.cluster.eval/at t0
                 :seon.cluster.run.form/ordinal 0
                 :seon.cluster.run.form/source "(help)"
                 :seon.ns/name 'my.agents.generated}))))
+      (is (= {:seon.cluster.eval/ordinal 0
+              :seon.cluster.eval/at t0
+              :seon.cluster.eval/source "(help)"
+              :seon.cluster.eval/ns {:seon.ns/name 'my.agents.generated}}
+             (db/pull @connection
+                      '[:seon.cluster.eval/ordinal :seon.cluster.eval/at
+                        :seon.cluster.eval/source
+                        {:seon.cluster.eval/ns [:seon.ns/name]}]
+                      [:seon.cluster.eval/id
+                       (run/receipt-identity "generated-run" 0)]))
+          "the durable generated form and running evaluation are atomic")
       (is (= ::run/generated-prefix-unsettled
              (::run/rule
               (transact-or-refusal
@@ -333,15 +345,10 @@
                (run/append-generated-tx
                 {::run/id "generated-run"
                  ::run/process "generated-process"
+                 :seon.cluster.eval/at t0
                  :seon.cluster.run.form/ordinal 1
                  :seon.cluster.run.form/source "(dir 'my.run)"
                  :seon.ns/name 'my.agents.generated})))))
-      (db/transact!
-       connection
-       (run/receipt-start-tx
-        {::run/id "generated-run"
-         :seon.cluster.eval/ordinal 0
-         :seon.cluster.eval/at t0}))
       (db/transact!
        connection
        (run/receipt-settle-tx
@@ -354,6 +361,7 @@
               (run/append-generated-tx
                {::run/id "generated-run"
                 ::run/process "generated-process"
+                :seon.cluster.eval/at t1
                 :seon.cluster.run.form/ordinal 1
                 :seon.cluster.run.form/source "(dir 'my.run)"
                 :seon.ns/name 'my.agents.generated}))))
@@ -395,15 +403,10 @@
        (run/append-generated-tx
         {::run/id "appended-run"
          ::run/process "appended-process"
+         :seon.cluster.eval/at t0
          :seon.cluster.run.form/ordinal 0
          :seon.cluster.run.form/source "(help)"
          :seon.ns/name 'my.agents.appended}))
-      (db/transact!
-       connection
-       (run/receipt-start-tx
-        {::run/id "appended-run"
-         :seon.cluster.eval/ordinal 0
-         :seon.cluster.eval/at t0}))
       (db/transact!
        connection
        (run/receipt-settle-tx

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, class/n9, wave/run-loop-velocity]
 ---
@@ -98,24 +98,62 @@ forbid substituting a hand-rolled prepl client. The issue therefore remains
 open; removing one 360--550 ms duplicate phase is material but does not prove
 the under-200-ms per-form target.
 
-## Expected
+### 2026-09-05 turn-batch resolution
 
-A form that does 130 ms of work does not cost 2.4 s of run. The first task
-is attribution, not optimisation: instrument one run's per-form path so the
-2.3 s is assigned to named phases (work derivation, submission, settlement
-transaction, re-derivation, listener wake) rather than inferred from receipt
-gaps.
+The run loop now freezes the complete reply in one intent transaction,
+evaluates its ordered forms in one SCI fork, analyzes only generation-stamped
+definitions in one kondo batch, and writes one settlement transaction. Ordinary
+forms no longer invoke kondo, transact, install, or render independently.
+
+The regression
+`seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent`
+drove one six-form reply containing a repaired `defn` plus five ordinary forms.
+Its clock starts when the completed reply enters the reader and stops when the
+turn returns; the assertion subtracts nanoseconds spent inside SCI evaluation,
+leaving read/repair, both durable transactions, the one definition-analysis
+batch, program installation, and the single post-settlement render.
+
+| Six-form reply | Before | After |
+|---|---:|---:|
+| Wall/bookkeeping shape | ~9.9 s wall | 196.353334 ms bookkeeping |
+| Durable transactions | 2 per form | 2 per turn |
+| Kondo analysis | every form, 228--311 ms each | defining forms only, one batch |
+| Derive/render | after every form | once after settlement |
+
+The after sample ran in a fresh test JVM after canonical fixture construction;
+it did not pre-warm `seon.fn/analyze-forms`. The definition batch resolves only
+the call-target symbols kondo actually reports instead of pulling the complete
+function population before analysis.
+
+## Resolution
+
+A form that does 130 ms of work no longer pays a 2.4-second per-form loop. The
+algorithmic unit is the turn: two transactions, one definition-only analysis
+batch, and one derive/render pass.
 
 ## Owner
 
 `seon.cluster.run` owns settlement transaction construction;
-`seon.fn/analyze-form` owns the remaining measured per-form analysis floor.
+`seon.fn/analyze-forms` owns the one per-turn definition analysis batch.
 
 ## Acceptance
 
-- One run's per-form cost is attributed to named phases with measurements,
-  recorded in the owning PRD's `research/`.
-- The dominant phase is fixed at its owner, and the same five-form drive is
-  re-measured to show the change.
-- Per-form loop overhead is below 200 ms, or the remaining irreducible floor is
-  measured and written here with its dependency boundary.
+- The original per-form phases are attributed above.
+- The dominant repeated phases are removed at their owners.
+- A six-form reply's complete non-evaluation bookkeeping is measured below
+  300 ms and enforced by the turn regression.
+
+### Left behind by the batched turn (orchestrator, 2026-09-05 night)
+
+- `seon.cluster.work/form-settlement` still derives the retired E3 routing
+  states (`:routed`, `:unrouted-red`, `:owner-fixed`, assignment and
+  declination messages) that the batched loop no longer produces: a red form
+  is a flat error on its own eval and the turn settles. Per the owner
+  (2026-09-05) automatic routing of problems to a namespace owner is a LATER
+  capability, so this derivation is dead code awaiting deletion with its
+  schema enum; `turn-test/a-red-form-routes-to-its-namespace-owner-and-the-fold-continues`
+  now asserts the ruled behavior directly from eval facts.
+- The lane's brief asked for the reader recovery corpus; the evaluator also
+  had to refuse a recovered error event instead of running its placeholder
+  form (`seon.sci.eval/one-event`), found by
+  `an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence`.

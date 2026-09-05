@@ -280,7 +280,9 @@
        (map pr-str)
        (str/join "\n")))
 
-(defn- referenced-program-namespaces
+(defn referenced-program-namespaces
+  "Namespaces named by qualified symbols in ordered source forms."
+  {:malli/schema [:=> [:cat :symbol [:vector :string]] [:set :symbol]]}
   [namespace-name sources]
   (try
     (into #{namespace-name}

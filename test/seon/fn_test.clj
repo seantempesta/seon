@@ -49,6 +49,59 @@
                        [:seon.error/data
                         :seon.error/diagnostic-offending])))))))
 
+(deftest defining-forms-share-one-form-local-kondo-batch
+  (test-support/with-database
+    (fn [connection]
+      (db/transact! connection
+                    {:tx-data [{:seon.ns/name 'sample.runtime-batch}]})
+      (let [namespace-ref [:seon.ns/name 'sample.runtime-batch]
+            shadow-source
+            "(defn shadowed [x] (identity (let [map identity] (map x))))"
+            qualified-source
+            "(defn qualified [] (seon.fn/tests-reaching nil \"x\"))"
+            requests
+            [{:seon.cluster.run.form/source shadow-source
+              :seon.cluster.run.form/ns namespace-ref
+              :seon.program/row
+              {:seon.fn/sym "sample.runtime-batch/shadowed"
+               :seon.fn/ns namespace-ref
+               :seon.fn/source shadow-source
+               :seon.fn/arglists "([x])"
+               :seon.fn/private? false
+               :seon.schema.admission/source :agent}}
+             {:seon.cluster.run.form/source qualified-source
+              :seon.cluster.run.form/ns namespace-ref
+              :seon.program/row
+              {:seon.fn/sym "sample.runtime-batch/qualified"
+               :seon.fn/ns namespace-ref
+               :seon.fn/source qualified-source
+               :seon.fn/arglists "([])"
+               :seon.fn/private? false
+               :seon.schema.admission/source :agent}}]
+            analyze analyzer/analyze
+            calls (atom 0)
+            results
+            (with-redefs [analyzer/analyze
+                          (fn [request]
+                            (swap! calls inc)
+                            (analyze request))]
+              (seon.fn/analyze-forms @connection requests))
+            shadow-row (second (first results))
+            qualified-row (second (second results))
+            called-symbols
+            (fn [row]
+              (into #{} (map second) (:seon.fn/calls row)))]
+        (is (= 1 @calls) "all defining sources enter kondo together")
+        (is (contains? (called-symbols shadow-row) "clojure.core/identity"))
+        (is (not (contains? (called-symbols shadow-row) "clojure.core/map"))
+            "a let-bound map is a local, never a clojure.core/map call")
+        (is (= #{"seon.fn/tests-reaching"}
+               (called-symbols qualified-row))
+            "a qualified namespace absent from the stored ns row is synthesized")
+        (is (not (contains? (called-symbols shadow-row)
+                            "seon.fn/tests-reaching"))
+            "analysis facts stay inside their defining source span")))))
+
 (deftest progress-observation-cannot-change-index-transaction-shapes
   (let [commit-phase! (deref (ns-resolve 'seon.fn 'commit-index-phase!))
         transactions-with
@@ -412,18 +465,19 @@
           {:seon.cluster.run/id run-id
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/result-edn ":done"}))
-        ;; ruling 42b: core targets (here the do wrapper) are edges too
-        (is (= #{"clojure.core/do" "my.run/complete" "seon.db/q"}
-               (set
-                (db/q '[:find [?symbol ...]
-                        :in $ ?form-id
-                        :where
-                        [?form :seon.cluster.run.form/id ?form-id]
-                        [?form :seon.fn/calls ?function]
-                        [?function :seon.fn/sym ?symbol]]
-                      @connection
-                      (run/form-identity run-id 0))))
-            "callability comes from the program graph, not stored requires")))))
+        (is (empty?
+             (db/q '[:find [?attribute ...]
+                     :in $ ?form-id
+                     :where
+                     [?form :seon.cluster.run.form/id ?form-id]
+                     [?form ?attribute]
+                     [(contains? #{:seon.fn/calls
+                                   :seon.fn/keywords
+                                   :seon.test/subject}
+                                 ?attribute)]]
+                   @connection
+                   (run/form-identity run-id 0)))
+            "ordinary eval rows carry no duplicate program-graph facts")))))
 
 (deftest settled-agent-form-has-static-index-edge-parity
   (let [root (fixture-root)
@@ -544,14 +598,8 @@
                 (edge-facts :seon.cluster.run.form/id
                             (run/form-identity "settlement-parity-run" 0))]
             (is (= expected program-facts))
-            ;; The form and declaration retain only graph-resolvable calls;
-            ;; analyzer built-ins without program rows are not edges.
-            (is (= (set (:seon.fn/calls expected))
-                   (set (:seon.fn/calls form-facts))))
-            (is (= (:seon.test/subject expected)
-                   (:seon.test/subject form-facts)))
-            (is (every? (:seon.fn/keywords form-facts)
-                        (:seon.fn/keywords expected)))
+            (is (nil? form-facts)
+                "the definition row is the sole owner of graph facts")
             (is (= :agent
                    (db/q '[:find ?author .
                            :in $ ?form-id

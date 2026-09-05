@@ -4,6 +4,7 @@
                     :interrupted-at :inst,
                     :ns :seon.db/ref,
                     :ordinal [:int {:min 0}],
+                    :source [:string {:min 1, :seon.db/no-history? true}],
                     :output
                     [:string {:min 1, :seon.db/no-history? true}],
                     :read-evidence
@@ -19,10 +20,7 @@
                       :seon.db/dependency-revision]
                      [:seon.db/read-request
                       {:optional true}
-                      :seon.db/read-request]
-                     [:seon.db/read-result
-                      {:optional true}
-                      :seon.db/read-result]],
+                      :seon.db/read-request]],
                     :triage-edn [:string {:min 1}],
                     :receipt
                     [:map
@@ -36,6 +34,9 @@
                      [:seon.cluster.eval/ordinal
                       :seon.cluster.eval/ordinal]
                      [:seon.cluster.eval/at :seon.cluster.eval/at]
+                     [:seon.cluster.eval/source
+                      {:optional true}
+                      :seon.cluster.eval/source]
                      [:seon.cluster.eval/ns
                       {:optional true}
                       :seon.cluster.eval/ns]
