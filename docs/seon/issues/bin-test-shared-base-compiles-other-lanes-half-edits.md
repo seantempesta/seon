@@ -30,6 +30,26 @@ compiles files the lane does not own.
 
 ## Owner
 
+Additional observation, 2026-09-05: direct focused tests also encounter an
+unclassified `IndexOutOfBoundsException` at `seon.fn/exact-source:142`
+during fixture population. The generated-form test reported zero passes and
+one error before its body; a subsequent invocation reached 81 passes and no
+failures or errors. The web evaluation-wake regression independently saw the
+same pre-body failure, then reached 80 passes and no failures or errors.
+`build-manifest` reads source contexts before asking the analyzer to reread
+the paths. Concurrent changes can therefore make source spans inconsistent;
+the offending file was not captured, so that cause remains a hypothesis for
+these two failures. The boundary must identify the file and span rather than
+silently clip or publish inconsistent source.
+
+Commit coordination exposed the same missing snapshot at the history seam.
+One lane checked `HEAD`, another lane committed, and the first lane's pending
+`git commit --amend --only` then amended the newly arrived commit instead of
+the commit it had inspected. No content was lost, but two independently owned
+changes became one commit. Any operation that intends to replace a specific
+commit must compare the expected object ID at the mutation boundary; a prior
+`git log` is not authority once another lane can advance the shared branch.
+
 `bin/test` (the shared published base preparation) and the indexer's
 behavior on an inconsistent tree (`seon.fn/index!` / publication).
 
