@@ -423,6 +423,20 @@ another lane's half-edit (the torn-tree class). Remeasure + the 200 ms
 target relaunch as `run-loop-velocity-2` after `init-speed` lands, together
 with `status-face-2`.
 
+## 2026-09-05 (night) — three verified fixes parked by the torn tree
+
+`prospective-prompt` verified its root cause and fix (the shared
+`walk-request` now carries `:seon.cluster.agent/id`; the debug page went
+from `unavailable` to a non-empty prospective prompt on a hot-reloaded
+isolated cluster; regressions go through the production route) but could
+not run its gate; same for `run-loop-velocity`'s remeasure and
+`status-face`. Cause, filed as a blocker:
+[bin-test-shared-base-compiles-other-lanes-half-edits](../../../seon/issues/bin-test-shared-base-compiles-other-lanes-half-edits.md)
+— the shared test base compiles the WORKING TREE, so `init-speed`'s
+in-flight `fn.clj` edit refused every other lane's base. Relaunch the
+three (`-2` names) the moment `init-speed` commits; then decide the
+`bin/test` base option (recommended: HEAD + the lane's own files).
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
