@@ -105,6 +105,21 @@ Applying those datoms immutably with `datahike.api/with` took 2.728 s cold and
 1.286-1.356 s warm. Flushing that value produced 3,035 pending index values;
 root fusion removed six, leaving **3,029 durable key/value writes**.
 
+The largest asserted attribute populations were:
+
+| attribute | datoms |
+|---|---:|
+| `:seon.fn/calls` | 46,450 |
+| `:seon.fn/keywords` | 23,531 |
+| `:seon.schema.admission/source` | 5,663 |
+| `:seon.fn.ast/type` | 5,104 |
+| `:seon.fn/ns` | 4,059 |
+| `:seon.fn/sym` | 4,059 |
+| `:seon.schema.map-entry/key-fingerprint` | 3,817 |
+| `:seon.schema.map-entry/key-keyword` | 3,817 |
+| `:seon.schema.map-entry/key-kind` | 3,817 |
+| `:seon.schema.map-entry/key-edn` | 3,817 |
+
 That count names the dominant cost. Datahike flushes EAVT, AEVT, AVET and,
 when history is retained, all three temporal indexes
 (`reference-code/datahike/src/datahike/writing.cljc:48-84`), collects their
