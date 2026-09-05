@@ -498,6 +498,24 @@ caches ignored. Lanes reported the MCP tools "unavailable" during the
 window when the shared root was being reset (ctxprobe down, default
 starting) — not a config regression.
 
+## 2026-09-05 (day 2, evening) — status face landed; the silence backstop now blocks gates
+
+`status-face-2`: gate `bin/test seon.test-runner-test
+seon.dev.fresh-operator-test` 60 / 447 / 2 failures / 0 errors — the two
+failures are ONE class: the isolated confirmation of
+`live-init-reloads-schema-runtime-and-moved-predicate-owners-before-admission`
+trips the prepl silence backstop (30 s) while the population commit runs
+silent (`fn.clj:1965`) — the already-filed blocker
+[init-program-population-can-still-trip-the-silence-backstop](../../../seon/issues/init-program-population-can-still-trip-the-silence-backstop.md).
+The status-face code itself (bounded default face, `status --verbose`,
+`SEON_TEST_RESULT_ROOT` precedence, regressions) is committed
+(`b3ba7d998`) and its own regressions passed. STILL OWED: the after-status
+output and the isolated stale-green live proof — both blocked by the same
+backstop. Priority: the population commit must report progress inside the
+transaction (or be split/fast) — owner `seon.fn/index!`'s progress path;
+lane `datahike-bulk-commit` (running) owns that seam and gets the note on
+its return.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
