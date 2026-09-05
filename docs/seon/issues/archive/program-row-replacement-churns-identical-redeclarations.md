@@ -75,4 +75,4 @@ data, while a changed source still emits and commits the real replacement.
 
 `seon.program-test` proves the correct `[database row]` argument order plus
 both identical and changed cases: 13 tests and 61 assertions passed. The real
-boot-tower gate additionally passed 28 tests and 137 assertions.
+boot gate additionally passed 28 tests and 137 assertions.

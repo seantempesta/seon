@@ -89,7 +89,7 @@ optional attribute (`[:enum :io :compute]`), populated from var meta at
 index time exactly like `:seon.fn/doc`. It is NOT required anywhere —
 the owner's constraint. In practice almost no annotations are needed:
 the fs/web/llm/db capability leaves are a closed, known set behind the
-one guarded door (`seon.effect`), and pure corpus code needs no tag
+one bounded evaluation (`seon.effect`), and pure corpus code needs no tag
 because purity is already computed (below).
 
 **The propagation rule** (owner's rule encoded, fail-closed per
@@ -157,7 +157,7 @@ because the architecture already forces the shape:
   `docs/seon/architecture/agent-runtime.md:140-150`), entered through
   `seon.flow/submit!!` — that IS the `:compute` hop;
 - any genuine capability (fs, web, llm, db) leaves the eval as a
-  request through the one guarded door (`seon.effect`) and is serviced
+  request through the one bounded evaluation (`seon.effect`) and is serviced
   by the run loop / capability leaf on `:io` — that IS the `:io` hop.
 
 So an agent chain that is pure runs entirely on `:compute`; the moment

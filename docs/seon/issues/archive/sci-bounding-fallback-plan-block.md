@@ -30,7 +30,7 @@ The candidate ("require aliases not stored") was right, with a precise
 mechanism: `seon.agent.ctx.namespaces/full-source-ns?` excluded HIDDEN nses
 (`hidden-ns-name?` — any `*.internal`) before the `my.*` rule, so the boot
 indexer (`seon.client/ns-row`) stored only the `(ns my.plan.internal)` STUB as
-`:seon.ns/source`. The SCI cage rebuilds a render fn's lexical environment —
+`:seon.ns/source`. The SCI context rebuilds a render fn's lexical environment —
 its `:require` `:as` aliases — from that stored source; the stub carries no
 `(:require [seon.db :as db])`, so `db/*conn*` could not resolve and the fn
 fell off the bounded path. (`*conn*` itself enumerates fine off the live

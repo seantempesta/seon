@@ -22,7 +22,7 @@ Four gaps, three of them coordinates and one of them semantics:
    lane scratch work, a second deployment — is invisible. The isolation
    seam hardened on 2026-08-02 and the probe surface do not compose.
 2. **Degraded boots are unreachable, which inverts the priority.** The
-   boot tower opens the prepl at second zero from the bootstrap config,
+   boot sequence opens the prepl at second zero from the bootstrap config,
    BEFORE store/facts/flow, and the composition guarantees the REPL
    survives any later-layer failure (the degraded instance rides the
    throw as `:seon.boot/instance`). But the ADVERTISEMENT is written by
@@ -31,7 +31,7 @@ Four gaps, three of them coordinates and one of them semantics:
 3. **Namespace.** Every form lands in `user`; there is no way to
    evaluate in a chosen namespace.
 4. **The agent's view is unreachable.** `eval_clj` runs on the JVM's
-   own io-prepl. Nothing can evaluate THROUGH THE DOOR — the cluster's
+   own io-prepl. Nothing can evaluate THROUGH SCI EVALUATION — the cluster's
    live SCI ctx, in an agent's namespace, under admission caps, the
    print grammar, contract enforcement, the time limit — so debugging
    "why did the agent see that?" is done by reasoning across a gap
@@ -47,16 +47,16 @@ Four gaps, three of them coordinates and one of them semantics:
   generation) plus the bootstrap config's prepl bind — so a
   live-REPL/failed-cluster JVM IS reachable, with the tool stating that
   the cluster layer is degraded.
-- A door mode evaluating via `seon.sci.eval/evaluate` against that
+- A SCI evaluation mode evaluating via `seon.sci.eval/evaluate` against that
   cluster's live ctx in the given namespace, returning what an agent
   would receive. Two properties to state explicitly in the tool's own
-  description, because both are load-bearing: the door mode MUTATES the
+  description, because both are load-bearing: the SCI evaluation mode MUTATES the
   shared per-cluster ctx (a debug `def` enters the agents' world —
   authentic, per ruling #31, and worth knowing), and it creates NO run
-  or receipts (the loop commits those, not the door), which is what
+  or receipts (the loop commits those, not the SCI evaluator), which is what
   makes it a probe rather than a turn.
 - Regressions: reach a `--root` cluster; reach a JVM whose cluster boot
-  failed; evaluate in a chosen namespace both ways; one form whose door
+  failed; evaluate in a chosen namespace both ways; one form whose SCI evaluator
   result differs visibly from its JVM result (a capped collection or a
   contract violation) proving the two modes are genuinely different
   views.
@@ -77,7 +77,7 @@ Dependency ledger for the implemented boundary:
   form evaluation grounded in `reference-code/sci/src/sci/core.cljc:354-405`;
 - the operator's one observation derivation in
   `script/seon/fresh_operator.clj:434-458,636-651,788-895`; and
-- the live cluster context and exact door request in
+- the live cluster context and exact SCI evaluation request in
   `src/seon/cluster.clj:1039-1086,1337-1363` and
   `src/seon/sci/eval.clj:1392-1578`.
 
@@ -93,7 +93,7 @@ ordinary MCP error values.
 
 The tool schema now supplies `root`, `namespace`, and `mode` (`jvm` or `door`).
 JVM mode enters the requested namespace, explicitly refers `clojure.core`, and
-evaluates the one already-read form. Door mode calls `seon.sci.eval/evaluate`
+evaluates the one already-read form. SCI evaluation mode calls `seon.sci.eval/evaluate`
 with the selected instance's shared context and the loop handle's admission
 caps, time limit, and core-error decision. Its published description states
 both load-bearing properties verbatim: it mutates the shared per-cluster
@@ -130,9 +130,9 @@ Live acceptance used only the isolated operator root
 
 - `default` booted at pid `88188`, prepl `64754`; `runtime_status` and JVM
   evaluation selected that explicit root. JVM namespace `mcp.live.jvm`
-  returned `[:jvm mcp.live.jvm (0 ... 199)]`. Door namespace
+  returned `[:jvm mcp.live.jvm (0 ... 199)]`. SCI evaluation namespace
   `mcp.live.door` returned `[:door "mcp.live.door" (0 ... 199)]`, and a
-  second door call returned the prior `marker` value `:door`, proving shared
+  second SCI evaluator call returned the prior `marker` value `:door`, proving shared
   context mutation.
 - A forced failure of `stack-tower!` after `seon.cluster/start!` opened the
   REPL produced the carried `:seon.boot/refused` instance `failed-boot` at
@@ -144,9 +144,9 @@ Live acceptance used only the isolated operator root
   `[mcp.failed.no-ad :reachable-without-file]`; the file was then restored.
 - The identical form `(java.lang.System/getProperty "user.dir")` returned the
   repository path in JVM mode and the flat
-  `:seon.sci.eval/evaluation-failed` value "Unable to resolve symbol" in door
+  `:seon.sci.eval/evaluation-failed` value "Unable to resolve symbol" in SCI evaluator
   mode, visibly proving different evaluation views.
-- Run/receipt counts were `[1 13]` immediately before a door-only debug `def`
+- Run/receipt counts were `[1 13]` immediately before a SCI-only debug `def`
   and `[1 13]` immediately after it. The definition appeared in the shared SCI
   context while no run or receipt was created.
 

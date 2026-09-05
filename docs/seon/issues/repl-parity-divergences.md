@@ -10,7 +10,7 @@ tags: [issue, sci, test, wave/print-path]
 `test/seon/repl_parity_test.clj` is the standing discovery gate built
 2026-08-01 from the mined checklist
 (`research/repl-parity-test-mining-2026-08-01.md`). It runs behavior
-rows through the PRODUCTION door (`fork → acquire! → evaluate`) and
+rows through the PRODUCTION SCI evaluator (`fork → acquire! → evaluate`) and
 asserts STOCK Clojure's behavior, so our failings surface as named
 divergences instead of passing tests that hide the gap. Known
 divergences are derived from test metadata, reported loudly, and the

@@ -104,7 +104,7 @@ Worst namespaces before the fix:
 | Namespace | Total | Tests | Dominant cause |
 |---|---:|---:|---|
 | `seon.dev.fresh-operator-test` | 243.575s | 26 | fresh JVM/operator lifecycle |
-| `seon.cluster.boot-test` | 234.917s | 27 | boot-tower behavior |
+| `seon.cluster.boot-test` | 234.917s | 27 | boot behavior |
 | `seon.repl-parity-test` | 185.242s | 69 | 164.240s pre-BEGIN fixture setup |
 | `seon.cluster.message-test` | 167.510s | 12 | generated histories with fresh databases |
 | `seon.problems-test` | 154.337s | 9 | generated projections with fresh databases |
@@ -187,7 +187,7 @@ the fixture cause was proved. Eighteen are the subject of their tests. Five are
 setup convenience and could be replaced with direct, isolated branch seeding;
 one unrelated packaged-source test also creates an unused private root. They
 remain the next named optimization boundary after a clean-tree full profile;
-boot-tower subjects retain their real boots. No test launches a new JVM unless
+boot subjects retain their real boots. No test launches a new JVM unless
 a process boundary is itself under test.
 
 ## Retained-run reaping

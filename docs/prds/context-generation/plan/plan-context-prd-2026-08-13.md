@@ -104,7 +104,7 @@ functions.
 ## T3 amendments — 2026-08-13 evening (owner rulings, conversational)
 
 T3 is UNBLOCKED: the membership ruling landed as ruling 2 of the
-2026-08-13 batch (approved as specced above), and the producer-side
+2026-08-13 batch (approved as specced above), and the rendering-side
 kind→class migration (W2 `2aacc58fe`–`5423c5a10`, W2b `d5f7c7a08`) freed
 the owned files. Four rulings from the evening's design session ride into
 T3's scope, recorded in the

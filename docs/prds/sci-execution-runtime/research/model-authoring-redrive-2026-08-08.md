@@ -123,7 +123,7 @@ hot-reloadable) and a render-contract design decision with blast radius across
 every walk — an owner/render-owner call, which is why I did not make it.
 
 **No independent path exists.** The outage is universal across all agents, so
-creating a fresh agent would fail identically; door-mode eval bypasses the model
+creating a fresh agent would fail identically; SCI evaluation bypasses the model
 entirely. The milestone cannot be proven until this schema is fixed and the
 cluster reforked from the fixed HEAD. Reported to main; lifecycle is the
 orchestrator's.

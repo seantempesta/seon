@@ -102,7 +102,7 @@ visible `:bypass` or `:unresolved` path. Indexed AI and HTML sinks name their
 projection boundary; provider HTTP, codec, and test-runner sinks are not
 misclassified as agent-visible text.
 
-Live door evidence for
+Live SCI evaluator evidence for
 `(seon.fn/tests-reaching (seon.db/db) 'seon.cluster.run/open-tx)` changed from
 a 9,266-character artifact with one digest repeated six times to the complete
 1,296-character semantic refusal, inline and uncapped. The unresolved-symbol

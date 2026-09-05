@@ -118,7 +118,7 @@ wraps. The pane scrolls horizontally (parent `overflow-x: auto`), but the
 widest line measures **23,552 px** in a 615 px container. Interleaved are the
 rendered results (`Cluster default.`, `Configuration default · manifest
 637c5f03a6ad.`, the getting-started instruction with its fenced `(defn greet
-…)` example, and the `dir` outputs for each toolkit namespace).
+…)` example, and the `dir` outputs for each capability namespace).
 
 The right pane initially read `Loading the current HTML projection…`; it
 populated within 5 s (not an infinite spinner) with the walk's HTML — `{} 4

@@ -256,7 +256,7 @@ Per-variant behaviour, read from each drive's ending database value:
 
 **HALF is the minimum defensible opening context; FULL is the only variant
 that finished.** The break is not gradual: between HALF and QUARTER the agent
-stops ACTING and starts SURVEYING. The seven distance-2 toolkit namespace
+stops ACTING and starts SURVEYING. The seven distance-2 agent-facing namespace
 entries that HALF drops cost nothing observable — HALF still produced the
 correct contracted `defn` on its first turn — but the `dir my.message` /
 `dir my.run` pair plus the worked `defn`-with-`:malli/schema` example that

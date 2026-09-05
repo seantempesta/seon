@@ -247,7 +247,7 @@ gym predicate, no convergence loop, no op-axis, no sentinel.
 ## 4. What the design got RIGHT (brief)
 
 - **Lowering onto proven/source-grounded primitives is honest.** Clamp (`:1034`), infill
-  (`gpu_worker.py:335`), `span_to_positions`, the parser oracle, the eval cage — every
+  (`gpu_worker.py:335`), `span_to_positions`, the parser oracle, the evaluation context — every
   mechanism cites a real artifact, and the "infill is mechanically proven, content can be
   wrong → that's the loop's job" framing (TL;DR) is exactly the right read of the live
   evidence.

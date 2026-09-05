@@ -47,7 +47,7 @@ model *mid-generation* guides generation. Four capabilities, in build order:
    holes. Bidirectional attention sees code *after* the cursor (AR cannot). The
    cheapest "clearly better than AR" win; needs no Seon integration.
 2. **Whole-form refinement + eval feedback** — generate a form, eval it in Seon's
-   SCI cage, and on `:seon/error` **re-noise only the failing span** and
+   SCI context, and on `:seon/error` **re-noise only the failing span** and
    re-denoise in place (AR must regenerate forward).
 3. **Retrieval-augmented denoising** — when a symbol region commits with high
    entropy, embed the partial code-buffer, hit Seon's Vertex + Proximum/HNSW program
@@ -226,7 +226,7 @@ Pick one, set `REGISTRY`, run `build-image.sh`, then the remaining ordered steps
 4. **Max-context measurement** on A100-80 BF16 (how far past 100k).
 5. **`accept_code-buffer` observability** — surface the per-step code-buffer/entropy.
 6. **The 4 dynamic-context experiments** (infill → eval-renoise → retrieval →
-   live feedback), wiring Seon's eval cage + Proximum index as oracles over HTTP.
+   live feedback), wiring Seon's evaluation context + Proximum index as oracles over HTTP.
 
 ## Pointers
 

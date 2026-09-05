@@ -14,13 +14,13 @@ cluster's pod SCI runtime programmatically. The unified MCP can address any
 cluster-qualified runtime advertised through its Shadow server, but preserved
 ACME runs an unwatched legacy `out-acme` bundle from another worktree and is
 not owned or advertised by the current operator. Its writer REPL is CLJ, not
-the CLJS SCI cage.
+the CLJS SCI context.
 
 ## Impact
 
 Surfaced by the eval-tier masked-divergent measurement
 ([[parser-as-generation-oracle-2026-06-28]]): it needed to eval ~250 forms in
-the SCI cage, but had to run them on the DEFAULT pod's `:client` runtime instead
+the SCI context, but had to run them on the DEFAULT pod's `:client` runtime instead
 of acme. That was SAFE only because every form was a pure expression (no db
 writes / defs / agent state, verified by construction) — but it means any
 acme-side live-eval measurement, or a probe that must run in acme's isolated

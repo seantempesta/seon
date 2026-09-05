@@ -238,7 +238,7 @@ Owner of `seon.sci.eval` and `seon.cluster.loop` for the whole wave.
 #### Slice 1.0 — make `seon.sci.eval` hot-reloadable (do this first)
 
 *Deliverable.* `(require 'seon.sci.eval :reload)` in a live cluster JVM
-followed by a door evaluation either succeeds or refuses loudly naming
+followed by a SCI evaluation either succeeds or refuses loudly naming
 the restart requirement. The cause is the `EvaluationArm` `deftype`
 (`src/seon/sci/eval.clj:265-272`) gaining a new class on reload while
 the `defonce` guard (`:296-297`) retains the old one. The design-doc
@@ -696,7 +696,7 @@ Named so nobody plans against them:
   designed. Also a design hole.
 - **The bootstrap content.** An experiment we have not run. No amount of
   further design substitutes for running it.
-- **`seon.effect` / the capability door.** Does not exist. Its absence is
+- **`seon.effect` / the capability request handler.** Does not exist. Its absence is
   why every stored defining form is pure by construction today, and why
   1C's `unrestorable` case is currently empty.
 - **The parked hot ctx** (`stateless-resume…` §6). An optimization over a

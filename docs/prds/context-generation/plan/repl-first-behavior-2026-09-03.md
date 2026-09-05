@@ -155,7 +155,7 @@ equal coverage, the one whose namespace is CLOSEST to the viewing agent
 wins (a namespace the agent requires is one hop; a namespace one of
 those requires is two; …), then the most recently settled.
 ❓ B3.3 Inline naming (rung a): the value carries `:seon.render/ai
-'some/fn` [REAL as the explicit-producer rung]. Keep as is?
+'some/fn` [REAL as the explicit render function selection]. Keep as is?
 
 ---
 
@@ -173,7 +173,7 @@ carrying the requery form to dive into that part.
 **What the floor does today [REAL, `seon.print/fit`, print.cljc ~900-935]:**
 the fit loop halves the STRING limit first, down to ZERO, then halves
 `max-children` (32 → 16 → 8 → 4 → 2), then decrements depth. Observed at
-the door on a 116-row query result: every string printed as
+the MCP result projection on a 116-row query result: every string printed as
 `""… 36 more characters of 36` (zero characters of a 36-character string),
 every collection at every level showed 2 children, and each cut printed a
 full `requery by [:seon.blob/digest …] at path […] offset … with
@@ -280,7 +280,7 @@ replays its stored result and is never re-run for a diff.
 already computes `:changed-attributes`) or `-` then `+`.
 ❓ B5.3 Diff entries accumulate until compaction; compaction re-shows the
 initial value at the compaction basis (recommended) — confirm.
-❓ B5.4 Cost: the probe's diff took 626 ms at the door (two reads plus the
+❓ B5.4 Cost: the probe's diff took 626 ms through MCP evaluation (two reads plus the
 projection); the projection cache landed since (`768c6a0e0`); re-measure
 before the ladder is frozen.
 
@@ -624,7 +624,7 @@ For `/html` the same field rides the block (`data-rendered-by`), taken
 from the same stored metadata — one decision, two displays.
 
 ❓ G.1 `dir` per required namespace at hop 1: for `seon.db` (31 names)
-and the toolkit namespaces this is compact; for a large first-party
+and the capability namespaces this is compact; for a large first-party
 namespace `dir` could be long. Cap by the render profile like any value,
 or show `dir` only for namespaces a later entry actually uses?
 (Recommendation: `dir` every REQUIRED namespace — the agent's own `ns`
@@ -780,7 +780,7 @@ and the agent learned the first three from its own arrival screen.
 form carries inline entry schemas, the system deriving and installing
 the attribute rows on commit through a Datahike transition
 (`:db.fn/call`) — pure facts, one form (recommended, shown above);
-(C) `(seon.schema/declare! ::expense [:map …])` — a function door,
+(C) `(seon.schema/declare! ::expense [:map …])` — a function call,
 one form, but a second idiom beside `transact!`.
 ❓ B15.2 Mark-read: a `:seon.cluster.message/read-at` fact the agent
 transacts (recommended — data, sortable, queryable) vs no such fact

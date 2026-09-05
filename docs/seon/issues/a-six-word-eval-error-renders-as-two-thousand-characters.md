@@ -66,7 +66,7 @@ faces here before closure.
 This member remains open. The shared contract-refusal constructor repair
 reduced the reproduced wrong-argument artifact from 9,266 to 1,296
 characters, but a genuinely unresolved symbol still misses this note's
-`<200`-character acceptance. Door evaluation of
+`<200`-character acceptance. SCI evaluation of
 `my.web/no-such-fetch` returned a 4,493-character retrievable artifact. Its
 agent-facing text was:
 
@@ -87,7 +87,7 @@ agent-facing text was:
     "Unable to resolve symbol: my.web/no-such-fetch"}, :seon.error/kind :seon.sci.eval/evaluation-failed}
 ```
 
-The remaining choke point is the door/MCP evaluation face: it still emits the
+The remaining choke point is the MCP evaluation output: it still emits the
 admitted error map instead of selecting `seon.error/render-ai` through the
 terminal `seon.render/render-ai` fit. `src/seon/cluster.clj`, which owns that
 projection, is modified-uncommitted by another lane and was protected from

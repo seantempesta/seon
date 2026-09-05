@@ -216,7 +216,7 @@ owners. Core.async, Malli, clj-kondo, and Reitit pins were verified accurate.
 `my.branch` is not yet present under `src/my/`, so the correction must remain
 explicitly target-marked rather than pretending it shipped.
 
-### D11 — Medium: render producer vocabulary slips back to the value schema
+### D11 — Medium: render function vocabulary slips back to the value schema
 
 `docs/seon/architecture/architecture.md:92-100` says a function returns
 `:seon.render/hiccup` as a render twin. Current

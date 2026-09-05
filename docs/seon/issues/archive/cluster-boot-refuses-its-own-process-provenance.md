@@ -22,15 +22,15 @@ Datahike resolves tx-meta datoms **before** tx-data: `transact-tx-data`
 prepends `meta-entities` to the entity list on a history-keeping database, so
 `transact-add` calls `entid-strict` on `[:seon.db.process/id …]` while that
 entity still does not exist. The transaction aborts, `require-committed!`
-refuses, and the tower dies between config apply and the root-agent seed.
+refuses, and the boot sequence dies between config apply and the root-agent seed.
 
 Every other site does this correctly — the process row is committed by an
 earlier transaction (`missing-process-rows` for the boot and config-managing
 identities, `seon.render.web:1106-1108` for the web process) and only then
 named as provenance. `seed-cluster!` is the one place that inverted it.
 
-The tower is otherwise sound: with the ordering corrected in-process, the same
-HEAD boots the complete tower (store → fork → schema accretion → recovery →
+The boot sequence is otherwise sound: with the ordering corrected in-process, the same
+HEAD boots the complete boot sequence (store → fork → schema accretion → recovery →
 config → cluster seed → root agent → work launcher → agent arm → web) and runs
 real turns end to end.
 
@@ -68,7 +68,7 @@ real turns end to end.
 
 ## Acceptance
 
-`bin/seon start <name>` stands the tower on an operator root that has never
+`bin/seon start <name>` stands the boot sequence on an operator root that has never
 booted before, and a recurring test covers the class rather than this one call
 site: a boot-path assertion that every transaction naming
 `:seon.db/process` provenance resolves that entity at `db-before`. The current

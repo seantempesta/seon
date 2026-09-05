@@ -10,7 +10,7 @@ tags: [issue, mcp, repl, context]
 ## Problem
 
 Every successful `eval_clj` response includes the complete server-generated
-remote wrapper in the terminal event's `form`. A trivial door `(+ 20 22)`
+remote wrapper in the terminal event's `form`. A trivial SCI evaluator `(+ 20 22)`
 therefore returns the user's result beside a long implementation form containing
 `project-next-prepl-value!`, `running-instances`, cluster lookup, the degraded
 cluster error branch, and the complete `seon.sci.eval/evaluate` request.
@@ -32,7 +32,7 @@ returned the event and before it enters the caller's context.
   redundant form when the response already identifies the request.
 - The generated remote form is available only through an explicit diagnostic
   projection when debugging the bridge itself.
-- JVM and door modes preserve their raw io-prepl semantics, including named
+- JVM and SCI evaluation modes preserve their raw io-prepl semantics, including named
   session `*1`, while routine results no longer carry the wrapper bulk.
 - Focused bridge tests assert exact user-source fidelity in both modes.
 
@@ -43,7 +43,7 @@ wrapper in every returned event's `:form` with the exact source string supplied
 by the caller. It leaves event tags, values, namespaces, output, exception
 flags, and degraded results unchanged.
 
-The direct response-construction proof passed for JVM and door modes across
+The direct response-construction proof passed for JVM and SCI evaluation modes across
 both successful and evaluation-error responses. The combined owned gate passed
 35 tests and 193 assertions across `seon.cluster.mcp-test`,
 `seon.render.value-test`, and `seon.dev.mcp-bridge-test`.

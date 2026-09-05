@@ -15,7 +15,7 @@ cluster `ctxprobe`, 2026-09-03) returns
 `{:seon.render.value/window "seon.sci.admit/elided", :shown 0, :total nil}`
 — the tool elides the string and offers no offset paging over characters,
 so the value is unreachable through the tool that exists to reach it. The
-same door output elsewhere windows strings to ZERO characters
+same SCI evaluation output elsewhere windows strings to ZERO characters
 (`""… 36 more characters of 36; requery by … offset 0`) — a requery that
 returns the same nothing. Absence-as-signal at a diagnostic surface: the
 orchestrator had to bypass the tool with a raw JVM `subs`.

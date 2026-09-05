@@ -32,7 +32,7 @@ The two blocking compression points are:
    query surface even though the component AST retains much of the underlying
    parse as string-valued nodes (`src/seon/program.cljc:116-251`).
 
-Ambient injection therefore cannot distinguish these declarations:
+Call preparation therefore cannot distinguish these declarations:
 
 ```clojure
 [:=> [:cat :seon.db/database-value :string] :string]
@@ -50,7 +50,7 @@ The complete repair is one shared schema-shape graph plus joined per-arity
 argument facts. It should replace the lossy ref sets, not sit beside them as a
 second authority. The same shape identity should cover named and inline Malli
 schemas. Analyzer occurrences should likewise become occurrence facts rather
-than declaration-level sets. Then ambient injection, documentation, impact
+than declaration-level sets. Then call preparation, documentation, impact
 selection, portability, and code exploration all query the same program graph.
 
 ## Reading record and dependency ledger
@@ -165,7 +165,7 @@ transitive result (`src/seon/fn.clj:402-439,716-770`).
 | Namespace usages | **DROP after normalization.** The analyzer retains usage occurrences (`src/seon/fn/analyzer.clj:59-63,157-159`), but `seon.fn` reconstructs only declaration-level requires/aliases/refers/imports from the exact `ns` form (`src/seon/fn.clj:118-207`) and never consumes analyzer namespace usages (`src/seon/fn.clj:371-385`). | Where is an alias or referred namespace used? Which namespace dependency is declared but unused? Which source occurrence introduced a dependency? |
 | Protocol implementations | **DROP.** The output is opt-in and includes protocol, method, implementation namespace, defining form, and exact spans (`reference-code/clj-kondo/analysis/README.md:25,181-189`). It is not requested (`src/seon/fn/analyzer.clj:15-29`). | Which vars implement protocol P/method M? Which defining form owns an implementation? Which implementation is portable? |
 | Java class/member definitions and usages; instance invocations | **DROP.** All are opt-in (`reference-code/clj-kondo/analysis/README.md:27-30,201-223`) and none is requested (`src/seon/fn/analyzer.clj:15-29`). | Which functions depend on which JVM classes or methods? Which `.cljc` function has platform residue? Which Java member is called at a source span? |
-| Quoted/data symbols | **DROP.** `:symbols` identifies namespaced symbols in quoted forms and EDN (`reference-code/clj-kondo/analysis/README.md:26,191-200`). | Which program rows name a render producer, provider, or other function as data rather than invoke it? Which source forms refer to a qualified symbol without a call edge? |
+| Quoted/data symbols | **DROP.** `:symbols` identifies namespaced symbols in quoted forms and EDN (`reference-code/clj-kondo/analysis/README.md:26,191-200`). | Which program rows name a render function, provider, or other function as data rather than invoke it? Which source forms refer to a qualified symbol without a call edge? |
 
 ### Priority 2 — loses diagnostics, metadata, and future extensibility
 
@@ -525,7 +525,7 @@ are part of the same wave, while lifecycle role keys remain distinct:
 
 - **KEEP `:seon.boot/cluster-connection`.** It is the optional connection held
   by a boot instance and may be observed during teardown after release, so it
-  is not the live ambient value (`resources/seon/schemas/seon.boot.edn:37-55`).
+  is not the live supplied default (`resources/seon/schemas/seon.boot.edn:37-55`).
   Its 77 current occurrences are: schema
   `resources/seon/schemas/seon.boot.edn:49`; production
   `src/seon/cluster.clj:155,185,259,334,361,1889,2123,2220`,
@@ -593,7 +593,7 @@ Current skill examples also name it at
 uses an unqualified `*conn*` at
 `.agents/skills/data-oriented-clojure/SKILL.md:186-189`.
 
-After ambient injection lands, only the evaluation binding and declared
+After call preparation lands, only the evaluation binding and declared
 provider should read `*conn*`. Delete `current-database-value` and
 `current-connection` as per-function bespoke elision owners
 (`src/seon/db.clj:95-119`); injected explicit arguments then flow through the
@@ -796,7 +796,7 @@ zero superseded live-connection spellings; lifecycle roles and `*conn*` remain
 only where the census says they are distinct; schema removal succeeds because
 no contract references remain.
 
-### Unit 7 — ambient injection consumes one queryable plan
+### Unit 7 — call preparation consumes one queryable plan
 
 1. Declare provider rows for:
    - key `:seon.db/db`, schema-shape fingerprint of
@@ -812,12 +812,12 @@ no contract references remain.
    cache.
 4. Empty result is the hot path: one cache lookup and direct invocation. No
    per-call database query, schema walk, allocation, or map construction.
-5. For a present map argument, fill only missing declared ambient keys. A
+5. For a present map argument, fill only missing declared supplied default keys. A
    supplied key—including supplied nil—wins and then ordinary contract
    validation decides validity.
 6. For positional injection, exact full-arity calls always win. A shorter call
    may be expanded only when exactly one target arity and one ordered set of
-   ambient positional slots produce a valid arity. Insert values at their
+   supplied default argument positions produce a valid arity. Insert values at their
    recorded indexes. Refuse an ambiguous plan at plan compilation rather than
    guessing between overloaded arities.
 7. A variadic ambient tail is not auto-filled in the first implementation; it

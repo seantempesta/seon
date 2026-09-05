@@ -151,7 +151,7 @@ calls, zero-invocation counters) but never says it.
 **Fix.** Covered by How-this-works consequence 1 (WTF-1). Additionally,
 insert one sentence at the top of "Printer behavior by agent-history entry":
 *"None of this evaluates any form: the printer consumes stored/derived
-values, and the only executed code is a declared render producer whose
+values, and the only executed code is a declared render function whose
 argument is the value being rendered, invoked through the existing guarded
 kernel (`src/seon/render.clj:238-265`)."*
 
@@ -377,7 +377,7 @@ Each item is one insertion at its first occurrence:
   P-in-REPL framing lives only in the ruling doc; the PRD must not assume
   the reader sat through it.
 - **"door mode"** (Storage verification heading, line 573): no reader knows
-  this term. Replace with the plain condition it names (the effect-door
+  this term. Replace with the plain condition it names (the effect-request
   configuration the probe ran under) or delete it from the heading; if it
   matters to reproduction, one sentence in the section body must say what it
   is.

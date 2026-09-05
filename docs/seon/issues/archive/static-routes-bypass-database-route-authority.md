@@ -17,7 +17,7 @@ the second literal product-route catalog during the web transition.
 Implementation-ready design (owner ruling 2026-07-20 — route datoms are the
 single authority; symbol-resolved handlers; router re-derives through
 `seon.reactive`; tested-closed bootstrap set = readiness + assets; operator
-doors gate on launch capabilities at dispatch; `/feed` → `/sse` rides the
+endpoints check on launch capabilities at dispatch; `/feed` → `/sse` rides the
 collapse in stage 4):
 [[../../prds/source-cleanup/research/route-authority-collapse-2026-07-20]].
 
@@ -33,7 +33,7 @@ lifecycle, debug, and operator routes.
 `src/seon/web/router.cljs:228-305` declares `/data`, its live endpoint,
 `/chat`, `/stop`, `/resume`, `/clear`, `/log`, `/agents/run`, agent completion,
 configuration apply, and four operator evidence/control routes as literal
-reitit rows. Its own comment says the secondary POST doors should become route
+reitit rows. Its own comment says the secondary POST endpoints should become route
 facts. `src/seon/route.cljs:89-113` separately owns the seeded database route
 population.
 

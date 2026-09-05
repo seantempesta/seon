@@ -33,7 +33,7 @@ contract. Later owner rulings are folded in as marked revisions.
    use the same order.
 5. Instructions are explicit datoms, mutated in place; cluster owns the
    authoritative set.
-6. Agent-authored renderers execute ONLY through the sci door
+6. Agent-authored renderers execute ONLY through the SCI evaluation
    (`:interrupt-fn` + `time-limit` + output caps). Flow's
    `compute-timeout-ms` reports and cancels nothing.
 7. Scheduling is global through flow. Render procs pin `:io` (Datahike
@@ -180,7 +180,7 @@ yields:
   admission — the durability gate, unchanged).
 - First-party renderers run inline on the owning `:io` proc (C1: db reads
   can block on lazy index restore).
-- Agent-authored renderers execute ONLY via the sci door, as a THIRD door
+- Agent-authored renderers execute ONLY via the SCI evaluation, as a third
   operation beside `evaluate`/`acquire!` (sci-door-ctx-sharing report §5):
   arm once per render PASS, invoke the installed sci fn VALUES directly
   (never `requiring-resolve` — it throws on corpus fns), bound by the
@@ -242,7 +242,7 @@ One property per failure class, driven by schema generators:
   produce byte-identical rendered prefixes for those blocks.
 - P6 elision loudness: any cap (depth, node budget, collection, tokens)
   that drops content leaves a marker; total bytes stay within budget.
-- P7 door totality: a generated looping/allocating renderer is interrupted
+- P7 evaluation totality: a generated looping/allocating renderer is interrupted
   within `time-limit`, yields a flat error value, and the assembling proc
   and its siblings complete their pass (fairness floor).
 - P8 walk purity: assembly performs no writes; same db value in, identical

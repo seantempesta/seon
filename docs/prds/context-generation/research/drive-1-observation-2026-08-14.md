@@ -12,7 +12,7 @@ tags: [research, agent, context, runtime, live-drive]
 I read `prds/context-generation/plan/live-drive-spec-2026-08-13.md`
 end to end and observed without contacting, messaging, or waiting on the
 driver lane. I did not mutate the drive through an agent message, transaction,
-operator lifecycle command, or SCI door evaluation. I did not use the
+operator lifecycle command, or SCI evaluation. I did not use the
 driver-authored report as evidence for this account.
 
 The requested live session did not complete an evolve → rebirth → continue
@@ -148,7 +148,7 @@ GET /                      -> 10.009215 s, 0 bytes, timeout
 ```
 
 A subsequent body request eventually returned the agent page. Its visible walk
-contained configuration and large toolkit namespace/schema material, but also
+contained configuration and large capability namespace/schema material, but also
 repeated bare failures between ordinary blocks:
 
 ```html
@@ -265,7 +265,7 @@ as instructed, then verified its claims against the preserved specimen rather
 than treating the report as evidence. I used only JVM-mode MCP reads and HTTP
 GETs against isolated root `tmp/drive-1-root`, cluster `default`, PID 53761,
 prepl 51058, and web UI `http://127.0.0.1:51063`. I sent no message, evaluated
-nothing through the SCI door, transacted no fact, and issued no lifecycle
+nothing through the SCI context, transacted no fact, and issued no lifecycle
 command. The specimen remained running.
 
 `mcp__seon__runtime_status` was degraded with the already-filed exact error:
@@ -315,7 +315,7 @@ Cluster default.
 Configuration default; 1 shared instruction and 9 toolkit namespaces.
 ```
 
-It contains large toolkit faces, including a 3,318-character `(dir my.web)`,
+It contains large namespace renders, including a 3,318-character `(dir my.web)`,
 3,268-character `(dir my.edit)`, 3,301-character `(dir my.shell)`, and similar
 entries for `my.fs`, `my.message`, `my.note`, and `my.plan`. The first
 snapshot's rendered values alone occupy 32,574 characters and approximately
@@ -377,7 +377,7 @@ No namespace: my.agents.drive-one-agent-attempt-4 found
 
 No durable function, test, plan item, or completion resulted. The context was
 well-served only in narrow mechanics: it accurately showed the cluster,
-configuration, REPL grammar, toolkit directory forms, both message facts, and
+configuration, REPL grammar, namespace directory forms, both message facts, and
 the current run. It failed at priority and economy: it duplicated almost the
 entire history, repeated a superseded task twice, buried the current task near
 the end, and supplied enough low-signal directory output to make one opening
@@ -443,7 +443,7 @@ live acquisitions recorded 130 agent-context render-cost facts.
 
 I observed isolated root `tmp/drive-1-root`, cluster `default`, PID 69568,
 prepl 55155, and web UI `http://127.0.0.1:55156` through JVM-mode MCP reads and
-filesystem census only. I sent no message, used no SCI door evaluation,
+filesystem census only. I sent no message, used no SCI evaluation,
 transacted no fact, and issued no lifecycle or collection command. The
 specimen remained running.
 
@@ -503,7 +503,7 @@ grammar.
 The instruction was therefore not absent or initially hidden, but it was
 remote from the decision point: `Your reply is read as forms...` begins at
 character 970, while the actual task begins at character 34,253. Roughly
-33,200 characters of toolkit directory output intervene. The sentence
+33,200 characters of namespace directory output intervene. The sentence
 `Prose lines are kept as ;; comments` also omits the decisive exception that
 prose alone carries no reader event. The best-supported reading is a medium
 execution lapse under weak recency: the model understood the work, narrated

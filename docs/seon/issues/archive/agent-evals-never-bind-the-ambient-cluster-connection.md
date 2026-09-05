@@ -5,7 +5,7 @@ severity: blocker
 tags: [issue, sci, database, runtime]
 ---
 
-# Bind the agent's cluster connection for ambient `seon.db` reads and writes
+# Bind the agent's cluster connection for implicit-connection `seon.db` reads and writes
 
 ## Problem
 
@@ -19,11 +19,10 @@ The code half-implements that intent. `seon.db/q`, `pull`, and
 (`src/seon/db.clj:10`, `:40-51`), but the ONLY site that ever binds it
 is the render walk (`seon.render/call-with-walk-context`,
 `src/seon/render.clj:106-109`). The run loop threads the branch
-connection explicitly to its own call sites and never binds the ambient
-custody around `seon.sci.eval/evaluate`, so inside an agent's
-evaluation the ambient `seon.db` reads fail.
+connection explicitly to its own call sites and never binds the connection binding around `seon.sci.eval/evaluate`, so inside an agent's
+evaluation the implicit-connection `seon.db` reads fail.
 
-Live proof (2026-08-02, cluster `default`, through the door —
+Live proof (2026-08-02, cluster `default`, through the SCI evaluator —
 `seon.sci.eval/evaluate` against the live cluster ctx with the
 cluster's own caps):
 
@@ -31,11 +30,11 @@ cluster's own caps):
   → `{:seon.error/kind :seon.db/missing-connection-binding, …}`.
 - `seon.cluster.store/transact!` IS installed in the ctx, and an agent
   CAN reach a live connection today — but only by derefing a private
-  var (`@@#'seon.cluster/running-instances` evaluates through the door
+  var (`@@#'seon.cluster/running-instances` evaluates through the SCI evaluator
   and returns the instance map). Capability without a surface: the
   blessed path fails while the hack path works.
 
-Schema validation on writes is already in place at the one door:
+Schema validation on writes is already enforced by the database:
 `:schema-flexibility :write` (`src/seon/cluster/store.clj:88,179`)
 refuses undeclared attributes, and `transact!` returns refusals as
 values. So "any declared attribute, schema-checked" is the reality the
@@ -50,16 +49,16 @@ NOT this issue).
   loop's evaluate boundary or inside `evaluate` from a request field —
   whichever the owning namespace argues for; do not bind it in two
   places).
-- Through the door, ambient `(seon.db/q …)` answers from the agent's
+- Through the SCI evaluator, implicit-connection `(seon.db/q …)` answers from the agent's
   cluster branch; a second cluster in the same JVM answers from ITS
   branch (no cross-cluster leak).
-- Through the door, `(seon.cluster.store/transact! …)` with a declared
+- Through the SCI evaluator, `(seon.cluster.store/transact! …)` with a declared
   domain attribute commits and is readable in the next evaluation;
   with an undeclared attribute it returns Datahike's own
   `:seon.db/rejected` value.
 - The render walk's existing binding keeps working (it may become a
   caller of the same mechanism, never a second one).
-- Regression: a door-mode test proving the ambient read, the committed
+- Regression: a SCI-mode test proving the implicit-connection read, the committed
   write, and the schema refusal; the missing-binding error stays for
   genuinely unbound contexts.
 
@@ -112,7 +111,7 @@ The test proves, in one JVM:
 
 - ambient `seon.db/q` returns only `ambient-a` from connection A, only
   `ambient-b` from connection B, then `ambient-a` again;
-- a through-door `seon.cluster.store/transact!` of declared
+- a SCI-evaluated `seon.cluster.store/transact!` of declared
   `:seon.cluster.message/id` commits and the next evaluation reads
   `"ambient-message"`;
 - an undeclared `:seon.sci.eval-test/undeclared` write returns
@@ -130,7 +129,7 @@ post-fix gate passed 82 tests / 399 assertions / 0 failures / 0 errors across
 An isolated operator root at `tmp/ambient-connection-live-root` published
 current source commit `6a6f5f22-bd18-51ba-8df5-83a54bd87894` and booted
 clusters `ambient-fixed-a` and `ambient-fixed-b` in the same JVM, PID `88210`.
-A direct through-door evaluation against each cluster's live ctx returned:
+A direct through-SCI evaluation against each cluster's live ctx returned:
 
 ```clojure
 {:a ["ambient-fixed-a"]
@@ -144,7 +143,7 @@ A direct through-door evaluation against each cluster's live ctx returned:
 ```
 
 `seon.cluster.store/transact!` retains an explicit connection parameter. The
-door proof dereferences the now-publicly-bound Var as `@#'seon.db/*conn*`;
+SCI evaluation proof dereferences the now-publicly-bound Var as `@#'seon.db/*conn*`;
 ambient `seon.db/q` needs no connection argument. The separate open issue
 `host-bound-first-party-vars-break-in-value-position.md` owns why a compiled
 host Var in bare SCI value position currently yields the Var rather than its

@@ -16,7 +16,7 @@ side. Read end to end: `src/sci/core.cljc`, `src/sci/ctx_store.cljc`,
 `doc/interop-control.md`, plus the relevant regions of
 `src/sci/impl/analyzer.cljc` and `src/sci/impl/evaluator.cljc`; and, for the
 Seon side, the complete
-[ambient injection r2 PRD](../plan/ambient-injection-prd-2026-08-05-r2-draft.md)
+[call preparation r2 PRD](../plan/ambient-injection-prd-2026-08-05-r2-draft.md)
 and the ctx-construction and turn-fork regions of `src/seon/sci/eval.clj`.
 
 ## Verdict first
@@ -332,7 +332,7 @@ Five falsifiable invariants:
 5. **The environment is required, never defaulted.** A missing
    `:seon/environment` must be a flat `:seon.error` value at the door, not a
    `nil` that a provider papers over. Same rule the r2 PRD already sets for
-   unavailable ambients.
+   unavailable defaults.
 
 **What we do NOT need:** a second registry, a ctx-store variant, per-agent
 interpreter contexts, or any conveyance machinery. SCI already conveys the ctx

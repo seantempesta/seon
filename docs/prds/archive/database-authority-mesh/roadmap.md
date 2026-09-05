@@ -462,7 +462,7 @@ not displace this order.
 
 - [x] Build and start the canonical watcher, sole JVM writer, and Bun pod from
   one frozen artifact snapshot; `bin/seon up` reports all three ready.
-- [x] Pass every maintained correctness door: operator 231 tests/1,339
+- [x] Pass every maintained correctness test suite: operator 231 tests/1,339
   assertions, writer 214 tests/1,794 assertions, and Bun-executed CLJS 1,078
   tests/4,790 assertions, all with zero failures and zero errors.
 - [x] Make an invocation arriving during child retirement wait for the old
@@ -503,7 +503,7 @@ not displace this order.
   resource spike at its owning seam. Prefer removing repeated work, broad
   acquisition, serialization, retained state, or duplicate ownership; reject
   speculative micro-optimization and new cache or rendering authorities.
-- [ ] Re-run the complete correctness doors and the real browser/concurrent-
+- [ ] Re-run the complete correctness test suites and the real browser/concurrent-
   agent/recovery/multi-cluster journeys after each architectural correction.
 - [ ] Replace the remaining Node-shaped process, Unix-socket, and HTTP/SSE host
   mechanics in place with measured Bun-native interfaces, including
@@ -2483,7 +2483,7 @@ package-size measurement is added for this test.
   focused gate passes 16 tests/72 assertions. The remaining proof invokes cold,
   warm, changed, canceled, and synchronous-loop authored renders through the
   real web/context owners, then proves the same ordinary result reaches pure
-  rendering while deleting the SCI and in-pod authored-render door.
+  rendering while deleting the SCI and in-pod authored render invocation.
 - **Dependency-ready parallel portfolio:** commit `72bcf3ba` owns the
   flavor-specific execution artifact and native `Bun.spawn` host; its focused
   proof passes 5 tests/23 assertions and its artifact/config/process proof
@@ -2643,7 +2643,7 @@ package-size measurement is added for this test.
   inventories; the focused test artifact compiles before the known replica
   import stops namespace startup.
 - Restore completion recording, retry adoption, startup attachment validation,
-  and the HTTP readiness door now use one coordinate-pinned four-member
+  and the HTTP readiness endpoint now use one coordinate-pinned four-member
   `execute-many` acquisition over schema, completion, publication facts, and
   generated-ID policy. Readiness is pure over ordinary values; successful
   publication reads back at the returned commit coordinate, while a failed
@@ -3315,8 +3315,8 @@ assertions. After a source-frozen rebuild, 32 simultaneous births returned 32
 HTTP 200 responses with 32 distinct IDs in 8.25 seconds.
 
 The maintained gates are green but their checkpoint qualification is explicit:
-the complete writer door passed 218 tests/1,813 assertions in 19.65 seconds and
-the operator door passed 243/1,393 in 26.14 seconds immediately before the
+the complete writer test suite passed 218 tests/1,813 assertions in 19.65 seconds and
+the operator test suite passed 243/1,393 in 26.14 seconds immediately before the
 mutation-budget edit. The next complete writer run must cover `1579954e` before
 graduation. Browser-client tooling was unavailable, but server-side route and
 gzip-feed inspection found three correctness owners now ahead of model load:
@@ -3326,8 +3326,8 @@ loading shell whose feed returns 404. Those are the current ordered falsifiers.
 
 ### 2026-07-18 correctness and feed checkpoint
 
-The complete maintained writer door now covers the mutation-admission change:
-218 tests and 1,814 assertions pass. The complete operator door passes 243
+The complete maintained writer test suite now covers the mutation-admission change:
+218 tests and 1,814 assertions pass. The complete operator test suite passes 243
 tests and 1,393 assertions. Both ran against the source-frozen mutation-load
 artifact.
 
@@ -3885,7 +3885,7 @@ roughly 400 MiB of transient startup pressure but only about 12 MiB of settled
 process footprint; fixed non-heap/classpath/native allocation remains a later
 measured owner rather than being misclassified as live Datahike data.
 
-Four real agents then ran concurrently through the public `/agents/run` door.
+Four real agents then ran concurrently through the public `/agents/run` endpoint.
 All four completed normally in 27.3--36.4 seconds with one or two turns and no
 writer, query, child, or out-of-memory fault. During that interval G1 performed
 76 young collections totaling 149 ms and 14 concurrent collections totaling

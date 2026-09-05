@@ -69,7 +69,7 @@ namespace (an `ns` form plus an error map — both data).
 
 | # | result positions | producing seam |
 |---|---|---|
-| 1 | 74 | the whole value replaced by its family's declared `:seon.render/ai` producer |
+| 1 | 74 | the whole value replaced by its family's declared `:seon.render/ai` render function |
 | 2 | 45 | a nested `/ai` render spliced UNQUOTED inside otherwise-EDN maps |
 | 3 | 15 | the value floor's non-EDN `label: value` map face |
 | 4 | 6 | an elision rendered as an English tail inside a quoted string |
@@ -78,9 +78,9 @@ namespace (an `ns` form plus an error map — both data).
 ## Seam 1 — the value is replaced by a sentence (74 positions)
 
 `seon.render/project-node*` (`src/seon/render.clj:445-495`) walks a print node
-and, whenever the sub-value is a map with a declared producer for the requested
+and, whenever the sub-value is a map with a declared render function for the requested
 output, REPLACES that subtree with a `:seon.print/projected` node holding the
-producer's string. At depth 0 that means the agent's query result is discarded
+render function's string. At depth 0 that means the agent's query result is discarded
 and its family's English summary is delivered instead.
 
 Attribution is verbatim, not inferred. Live in the drive JVM:
@@ -190,7 +190,7 @@ This is the worst finding in the audit and it is not filed anywhere.
                    (pr-str value))))
 ```
 
-Because `project-node*` substitutes producers at EVERY depth, a ref sitting at
+Because `project-node*` substitutes render functions at EVERY depth, a ref sitting at
 map-value depth becomes an English sentence with no quotes, no escaping, and
 embedded newlines — spliced into the middle of a map that is otherwise perfect
 EDN. The result is not merely ugly: **the whole value stops being readable**.
@@ -351,7 +351,7 @@ One line per seam: what it must return instead.
 
 | # | seam | file:line | returns today | must return |
 |---|---|---|---|---|
-| 1 | `project-node*` producer substitution at depth 0 | `src/seon/render.clj:445-495` | the family's English summary in place of the queried value | the queried value as data; the `/ai` producer is for context BLOCKS, never for a value in result position |
+| 1 | `project-node*` render function substitution at depth 0 | `src/seon/render.clj:445-495` | the family's English summary in place of the queried value | the queried value as data; the `/ai` render function is for context BLOCKS, never for a value in result position |
 | 1a | run family `/ai` | `src/seon/cluster/run.clj:1913-1966` | `"Run X, opened …. It completed."` | the run's pulled attributes; disposition is `:seon.cluster.run/closed-at` presence, already a fact |
 | 1b | form family `/ai` | `src/seon/cluster/run.clj:1978-1983` | `"Form N: <source>"` | the exact submitted source (filed) |
 | 1c | stale-var steering | `src/seon/problems.clj:434-438` | `"Restart the JVM to remove stale loaded Var …"` | the `:seon.fn` row when it exists; a flat `:seon.error` VALUE naming the stale symbol when it does not — never an instruction in place of a row |
@@ -361,7 +361,7 @@ One line per seam: what it must return instead.
 | 2 | text sink emits `/ai` fragments raw | `src/seon/print.cljc:107-112` | an unquoted sentence at map-value depth, breaking the whole value | never splice `/ai` below the root: nested positions take the `:seon.render/form` projection, or the identity ref, or `pr-str` — a fragment inside a data structure is a quoted string or it is a bug |
 | 3 | value floor's map face | `src/seon/render/value.clj:365-372, 393-398` | `nominal-at: #inst …, :db/id: 29995` with no braces | readable EDN with qualified keys through the one `seon.print/fit` owner; delete the second map face |
 | 4 | elision as an English tail | `src/seon/print.cljc:283-301`, `src/seon/db.clj:1666` | `… 1641 more characters of 3279; requery by …` | the elision VALUE that the other nine entries already show — one representation, always data |
-| 5 | instruction entity in result position | declared instruction producer | a bare paragraph indistinguishable from narration | prose that is data is a quoted string; the instruction is the one legitimate prose block and should be the only unquoted one |
+| 5 | instruction entity in result position | declared instruction render function | a bare paragraph indistinguishable from narration | prose that is data is a quoted string; the instruction is the one legitimate prose block and should be the only unquoted one |
 
 Order of value: seam 2 first (it is unfiled, it corrupts results that are
 otherwise correct, and it is the narrowest change), then seam 1 (largest count,

@@ -60,7 +60,7 @@ prove the expected compact contract was present, then a later turn must prove
 the model selected and executed it. Use the four already designed namespace
 falsifier rows rather than adding Inspect tools. A fixed agent id may preserve
 the two-turn navigation trajectory; exact prompt/reply/coordinate evidence
-already crosses the pod door.
+already crosses the pod HTTP endpoint.
 
 Shortest falsifier: start an ordinary agent without the target namespace in
 its required set, ask it to inspect or require that namespace, and on the next
@@ -184,7 +184,7 @@ shared error rendering only for a demonstrably global defect; transcript caps
 in `src/seon/agent/ctx.cljs`; Inspect admission/scorer only to classify and
 measure recovery.
 
-### 5. Replace the blocking pod door before claiming streaming cancellation
+### 5. Replace the blocking pod HTTP endpoint before claiming streaming cancellation
 
 Inspect proves that a single in-flight tool can be cancelled without killing
 its siblings and records a typed timeout result for the target
@@ -204,7 +204,7 @@ published logs and finalizes new evidence on `BaseException`
 (`src-inspect-ai/src/seon_inspect/catalog.py:256-305`), while finalization
 copies, hashes, reads back, status-checks, and admission-checks each `.eval`
 (`src-inspect-ai/src/seon_inspect/source_admission.py:240-284`). But the active
-pod door is a blocking `urllib` read inside `anyio.to_thread.run_sync`
+pod HTTP endpoint is a blocking `urllib` read inside `anyio.to_thread.run_sync`
 (`src-inspect-ai/src/seon_inspect/solver.py:49-81` and `:317-336`). Cancelling
 the solver cannot yet prove that the addressed pod request or provider stopped.
 
@@ -215,7 +215,7 @@ retained, and the native scorer runs. A second fixture cancels before the form
 and must retain a cancelled `.eval` with no capability score.
 
 Ordered owners: addressable request/cancellation contract in the existing pod
-composition door, provider abort acknowledgement in the existing adapter,
+HTTP composition endpoint, provider abort acknowledgement in the existing adapter,
 then an async cancellable client in `src-inspect-ai/src/seon_inspect/solver.py`.
 Do not simulate cancellation solely in Python.
 

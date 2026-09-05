@@ -25,7 +25,7 @@ strip/abort fabrication fix).
 | `src/seon/agent/CLAUDE.md` | engine (loop/run/turn/ctx) | **MINOR DRIFT** | "We-are-here: `docs/prds/agent-fsm/roadmap.md`" (wrong PRD). "Known gaps (in flight)" from 2026-07-02 mostly shipped; no repl-mode / cross-turn current-ns invariant. |
 | `src/seon/ai/CLAUDE.md` | LLM providers | **CURRENT** | (freshest leaf, updated 07-10; catalog pointer valid) |
 | `src/seon/render/CLAUDE.md` | render engine + ui tiles | **CURRENT** | none material (last touched 07-02 but contract is stable) |
-| `src/seon/web/CLAUDE.md` | HTTP/SSE front door | **CURRENT** | none material; `/agents/run` + datastar morph descriptions match code |
+| `src/seon/web/CLAUDE.md` | HTTP/SSE interface | **CURRENT** | none material; `/agents/run` + datastar morph descriptions match code |
 | `src/my/CLAUDE.md` | agent-owned toolkit | **CURRENT** | shortest + tightest file; matches reality |
 | `docs/prds/agent-ctx/CLAUDE.md` | ACTIVE PRD index (auto-loads on branch) | **MISLEADING** | Entire "Current state / Open tensions / Build order" is the 2026-07-02 two-lanes eval phase; ZERO mention of the context-rebuild arc that is the current focus. |
 | `docs/prds/agent-fsm/CLAUDE.md` | MERGED PRD index | **MISLEADING** | Lists #42/#73/#74 as "Core-gated / open"; the leaf files say #73/#56 CLOSED. Frozen "Current state (2026-07-02)". 276 lines of it. |
@@ -118,7 +118,7 @@ engine contract this file describes. Stable.
 
 ### `src/seon/web/CLAUDE.md` — CURRENT
 
-`POST /agents/run` door (`handle-agent-run!`), reitit-from-datoms router, the
+`POST /agents/run` endpoint (`handle-agent-run!`), reitit-from-datoms router, the
 datastar whole-element gzip morph with `!last-tree` explicitly dead, debug page
 via `inspect/ctx-preview`, no-agent-touches-SSE rule — all verified against
 `serve.cljs`/`router.cljs`/`datastar.cljs`. NOTE: this file (correctly) treats

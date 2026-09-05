@@ -15,7 +15,7 @@ division of lifecycle ownership:
 
 - the outer launcher owns OS process creation, stdio/log capture, and any fence
   that must exist before the JVM can safely open the physical store;
-- `seon.cluster` owns the REPL-first cluster boot tower and its reverse unwind;
+- `seon.cluster` owns the REPL-first cluster boot sequence and its reverse unwind;
 - core.async.flow owns proc and graph lifecycle; and
 - the database owns durable desired state, outcomes, and queryable control
   facts.
@@ -61,7 +61,7 @@ maintained core.async Flow implementation and SPI.
 | Integrant | `bcad6bcf35b62d3a32a453dc26b6d3a4d659dc01`, described as `1.0.1-2-gbcad6bc` | Gitlink and URL are recorded at `.gitmodules:341-343`; `project.clj:1` declares 1.0.1. `deps.edn:1-4` selects `weavejester/dependency` 0.2.1, while `project.clj:6-7` selects 1.0.0; any adoption must resolve that maintained-coordinate mismatch rather than copying either blindly. |
 | core.async Flow | `dc35f3e0d7bc2eef502e77982f48641f025c8051`, `v1.10.874-alpha3` | `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:76-163,165-245`; `flow/impl.clj:94-197,199-323`; `flow/spi.clj:11-58`. Flow already owns graph/proc start, pause, resume, stop, ping, injection, transitions, error channels, and resource cleanup. |
 | Seon process-root custody | current tree at `67e92bec9` | `resources/seon/operator/runtime.clj:1-28` holds only running instances, store/flock custody, and shared executors outside every cluster program graph. |
-| Seon cluster tower | same | `src/seon/cluster.clj:1472-1571,1573-1677,1780-1867` publishes each stood layer, keeps the REPL alive after later failure, unwinds an addressed instance in reverse, and reforks through the one registry owner. |
+| Seon cluster boot sequence | same | `src/seon/cluster.clj:1472-1571,1573-1677,1780-1867` publishes each stood layer, keeps the REPL alive after later failure, unwinds an addressed instance in reverse, and reforks through the one registry owner. |
 | Seon graph lifecycle | same | `src/seon/cluster.clj:1251-1469`; `src/seon/cluster/agent.clj:344-407`; `src/seon/flow.clj:418-455,626-676`. Cluster, agent, work-launcher, and fault-committer runtime activity already uses Flow's lifecycle. |
 | Current architecture target | same | [docs/seon/architecture/architecture.md](../../../seon/architecture/architecture.md#L30-L54) makes the process root own one fenced physical store and shared executors, while each cluster branch owns its connection, REPL, graphs, web endpoint, and facts. |
 
@@ -164,7 +164,7 @@ that a generic ref graph would not make safer.
 ### Option 1 — no Integrant; strengthen the tower in place (recommended)
 
 **Guarantee.** One lifecycle mechanism per layer: OS launcher for the foreign
-process, `seon.cluster` for the boot tower and branch instance, Flow for every
+process, `seon.cluster` for the boot sequence and branch instance, Flow for every
 proc/graph, database facts for durable requested and observed state. Runtime
 functions such as source publication, branch creation/refork, config apply,
 status/readiness, and cluster stop remain ordinary functions callable through

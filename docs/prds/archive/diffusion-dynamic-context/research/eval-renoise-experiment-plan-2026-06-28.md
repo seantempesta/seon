@@ -26,7 +26,7 @@ tags: [research, agent, web]
   already-written tail it must stay consistent with).
 - **This is a ROUND-TRIP architecture, not a sampler trick.** GPU worker denoises
   → returns `{text, canvas_tokens, offset_map}` over HTTP → **Seon** evals in the
-  SCI cage + locates the failing span (the oracle Seon already owns) → tells the
+  SCI context + locates the failing span (the oracle Seon already owns) → tells the
   GPU `{canvas_tokens, renoise_positions}` → GPU re-masks those positions and
   re-denoises in place → returns the revised canvas. Loop until clean-eval or a
   step cap. The worker is a **stateless denoiser**; Seon owns the eval oracle and
@@ -60,7 +60,7 @@ calls**:
    92.7% of injected errors caught instantly, split into SAFE (mechanically
    repairable — `seon.repair`/parinfer, no model and no re-noise) vs FLAG (the
    model must re-decide). **`:span` is literally the canvas region to re-mask.**
-2. **Semantic — the SCI eval cage.** `seon.eval` runs the form; a failure becomes
+2. **Semantic — the SCI evaluation context.** `seon.eval` runs the form; a failure becomes
    `:seon/error` with a crystal-clear `:seon.error/message` (the deepest real
    message — `render-error-string` in `seon.eval`). An undeclared-var throw names
    the exact offending symbol; Seon locates that symbol's char span by substring.
@@ -77,7 +77,7 @@ re-noise + clamp is one more override of the same per-step commit decision that
 Capability #1 (infill) overrides — `current_canvas` positions forced to MASK for
 the failing span, forced to their committed ids everywhere else.
 
-## The round-trip architecture (GPU worker ↔ Seon eval cage over HTTP)
+## The round-trip architecture (GPU worker ↔ Seon evaluation context over HTTP)
 
 ```
             ┌──────────────────────── Seon pod (SCI cage + oracles) ───────────────────────┐
@@ -257,7 +257,7 @@ the model (parinfer can't fix a semantic error):
 (defn mean [xs] (/ (reduce + xs) (count ys)))
 ```
 
-- **Eval in the SCI cage →** `:seon/error`, `:seon.error/message` names the
+- **Eval in the SCI context →** `:seon/error`, `:seon.error/message` names the
   undeclared symbol: `"Unable to resolve symbol: ys"` (SCI's undeclared-var throw;
   Seon's `render-error-string` surfaces the deepest real message). This is a
   RUNTIME error — the form **parses clean** (`parse-forms` returns a `:form`
@@ -310,7 +310,7 @@ spot, AUROC 0.471, entropy can't self-detect it).
 3. `generate_canvas` the primary prompt → confirm a coherent `(defn mean …)`
    canvas + a clean `offset_map`. (If the first denoise happens to be correct,
    inject the `ys` corruption to exercise the loop deterministically.)
-4. Eval in Seon's SCI cage (this leg runs in the pod, not the GPU), get the span,
+4. Eval in Seon's SCI context (this leg runs in the pod, not the GPU), get the span,
    map to positions, `renoise` → confirm the divisor span re-commits to `xs` and
    ALL other positions are byte-identical (the clamp held).
 5. Eval again → clean. Record rounds-to-clean. Run the secondary `:invalid-token`

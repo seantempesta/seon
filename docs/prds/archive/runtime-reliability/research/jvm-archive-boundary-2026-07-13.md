@@ -183,7 +183,7 @@ namespaces. The exact disposition is below.
 | `src/seon/ui/html.cljc` | KEEP SHARED/PORT | Canonical pure hiccup serialization contract; a future JVM adapter may consume the same input. |
 | `src/seon/indexing.clj` | KEEP SHARED/PORT | Compile-time Shadow macro required by active `seon.client`, test preload, and downstream builds. It is `.clj` but not the paused application. |
 | `src/seon/server/client.clj` | KEEP SHARED/PORT | Move to `test/` as the integration-test client; do not ship it as server production source. |
-| `src/seon/dev/markdown.clj` | KEEP SHARED/PORT | Pure useful linter, but port behind a direct Babashka/CLI door rather than the retired nREPL hook. |
+| `src/seon/dev/markdown.clj` | KEEP SHARED/PORT | Pure useful linter, but port behind a direct Babashka/CLI command rather than the retired nREPL hook. |
 | `src/seon/dev/docstring.clj` | KEEP SHARED/PORT | Same: retain behavior only if invoked directly by the one lightweight developer check. |
 
 ### Delete dead duplicates and scratch code
@@ -203,7 +203,7 @@ namespaces. The exact disposition is below.
 | `src/seon/dev/context.clj` | DELETE DEAD DUPLICATE | Ephemeral hook/edit state for the retired JVM hook pipeline. |
 | `src/seon/dev/hook.clj` | DELETE DEAD DUPLICATE | nREPL-hosted hook orchestrator; retain only direct Babashka behaviors in `bin/seon-hook`. |
 | `src/seon/dev/instrumentation.clj` | DELETE DEAD DUPLICATE | Integrant/JVM sibling superseded by `seon.instrument`. |
-| `src/seon/dev/lint.clj` and `src/seon/dev/suggestions.clj` | DELETE DEAD DUPLICATE | Old in-process hook lint/suggestion path; use one direct syntax/kondo door. |
+| `src/seon/dev/lint.clj` and `src/seon/dev/suggestions.clj` | DELETE DEAD DUPLICATE | Old in-process hook lint/suggestion path; use one direct syntax/kondo command. |
 | `src/seon/dev/repair.clj` | DELETE DEAD DUPLICATE | Superseded by `src/seon/repair.cljc`; the old cljfmt side effect is not part of repair. |
 | `src/seon/dev/review.clj` | DELETE DEAD DUPLICATE | Duplicate Gemini reviewer; `bin/seon-hook` already has one runtime-independent bounded reviewer. |
 | `src/seon/dev/test.clj`, `src/seon/dev/test_select.clj`, `src/seon/dev/verify.clj` | DELETE DEAD DUPLICATE | Old all-JVM test selection/execution framework. Focused CLJS and writer test doors replace it. |
@@ -275,7 +275,7 @@ named server capability rather than retaining every old sidecar operation.
 
 | Surface | Classification | Action |
 |---|---|---|
-| `bin/seon` | KEEP SHARED/PORT | Rewrite as the one robust supervisor door, preferably Babashka. Remove the `jvm` process, ports 7888/8080, and old start/help branches. Keep writer, CLJS build/watch, pod, status, logs, and reset. |
+| `bin/seon` | KEEP SHARED/PORT | Rewrite as the one robust supervisor command, preferably Babashka. Remove the `jvm` process, ports 7888/8080, and old start/help branches. Keep writer, CLJS build/watch, pod, status, logs, and reset. |
 | `bin/test-cljs` | KEEP SHARED/PORT | Keep as the active CLJS behavioral gate. |
 | `bin/mcp-server-cljs` | KEEP SHARED/PORT | Keep as the active multi-runtime MCP bridge. |
 | `bin/seon-server-call` | DECISION NEEDED | Temporary writer-admin bridge. Replace arbitrary Clojure eval with typed admin operations before calling the server artifact production-ready. |

@@ -171,7 +171,7 @@ the more important defect.
   authority.
 - **Wrong or stale:** no factual claim used here proved wrong.
 - **Missing:** the skill has no degraded-start runbook for the case where a
-  scratch cluster fails partway through the boot tower during shared-tree
+  scratch cluster fails partway through the boot sequence during shared-tree
   churn. I had to inspect advertisements, prove that no scratch cluster
   survived, and fall back to an isolated in-memory JVM manually. That is the
   only flow-related hard part of this task, and the skill did not help with it.

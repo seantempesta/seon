@@ -10,7 +10,7 @@ tags: [research, prd, database, web]
 ## Decision
 
 Make `seon.agent.debug/turn` the one semantic owner of turn reconstruction.
-The web composition door remains the one JSON boundary, but it only projects
+The web HTTP composition endpoint remains the one JSON boundary, but it only projects
 the ordinary turn bundle returned by that owner. It does not reconstruct a
 second turn model from copied database identity, reopen local database
 connections, or replay captured eval operations.
@@ -313,7 +313,7 @@ authority diagnostic or a persisted-domain-fact oracle.
 5. Reduce eval evidence to retained eval facts and delete operation replay.
 6. Delete the stale client bootstrap attribute and obsolete tests.
 7. Update Inspect consumers in the same response-contract commit.
-8. Reconcile the composition-door paragraphs in
+8. Reconcile the HTTP composition endpoint paragraphs in
    `docs/seon/architecture/observability.md` and the localized web authority;
    neither may continue to promise eval operation blobs or copied attempt
    coordinates.

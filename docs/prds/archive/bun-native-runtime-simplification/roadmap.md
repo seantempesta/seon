@@ -140,7 +140,7 @@ with explicit rollback and expands into replacements for analyzer-backed
 namespace, warning, test, instrumentation, and introspection semantics. That is
 a new compatibility layer, not a dependency swap. Seon retains official
 `cljs.js` for agent-authored evaluation and exact ClojureScript semantics.
-Commit `436596c6` then removed the redundant renderer cage and the SCI
+Commit `436596c6` then removed the redundant renderer SCI context and the SCI
 dependency: production authored rendering was already inside the same
 disposable execution child, so the second evaluator added semantics and memory
 without adding containment. Build-time indexing still publishes compiled
@@ -350,7 +350,7 @@ make an intermediate package runnable.
 ### Pre-cut: freeze identity, contracts, and deletion manifest
 
 Bind Bun executable identity into the release/launch artifact and make every
-maintained JavaScript execution door derive from it. Inventory Node imports,
+maintained JavaScript execution path derive from it. Inventory Node imports,
 Node-only npm requirements, wrapper lines, mutable atoms/listeners, and artifact
 members. Retain Node only as the exact-artifact differential oracle.
 
@@ -514,7 +514,7 @@ clear contracts.
 - `Bun.spawn`, `Bun.serve`, and native Bun sockets are confined to the three
   internal capability owners.
 - Node is absent from runtime requirements, production artifacts, operator
-  doctor checks, and maintained execution doors.
+  doctor checks, and maintained execution commands.
 - Shell/search share one bounded subprocess implementation with explicit child
   lifecycle and resource evidence.
 - Datastar has no per-feed compressor and bounded slow-client behavior.

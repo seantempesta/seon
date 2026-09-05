@@ -49,7 +49,7 @@ reach it (finding 6). Its fixtures are built and waiting.
 
 ## How the exercises were driven
 
-The MCP `door` mode is NOT a path to the capability door. It evaluates in the
+The MCP `door` mode is NOT a path to the capability request handler. It evaluates in the
 cluster's shared ctx but creates no run, so `seon.effect/request!` refuses
 before anything crosses:
 
@@ -65,7 +65,7 @@ caller-supplied form sources — the same mechanism
 `seon.cluster.curate/prove!` uses for a proof — and drives
 `seon.cluster.loop/turn` until it closes. No model call is involved; the
 sources ARE the agent's forms. The exercised path is therefore the full one:
-sci eval → call preparation → effect door → `:io` executor → receipt →
+sci eval → call preparation → effect request handler → `:io` executor → receipt →
 settled value → committed facts.
 
 Harness and raw results are preserved for the fix lanes at

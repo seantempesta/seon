@@ -31,7 +31,7 @@ A strong **autoregressive** model (Opus) sets DIRECTION; a **diffusion** model
 (DiffusionGemma) drives **the verified code-buffer** — guided, verified generation
 that refines whole blocks of Clojure *fast*, taking feedback **between denoise
 steps**. The control signal is Seon itself —
-its **parser**, its **eval cage**, and its **program-graph retrieval** — fed back
+its **parser**, its **evaluation context**, and its **program-graph retrieval** — fed back
 into the generation loop, not waited on after it. AR completion is left-to-right
 and blind to what comes after the cursor; a diffusion code-buffer is **bidirectional
 and revisable in place**, so Seon can pin the good spans, re-noise the bad ones,

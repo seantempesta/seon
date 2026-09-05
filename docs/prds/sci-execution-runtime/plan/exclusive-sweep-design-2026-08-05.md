@@ -497,7 +497,7 @@ Each fire and collection result is an ordinary durable receipt. Success stays
 turn-free; an error commits the receipt and sends one ordinary message to wake
 root for judgment. Root's initial forms query a concise green/red projection
 of these receipts. The schedule declaration, function fact, receipts, and
-render producer make the whole portfolio queryable; no maintenance task hand
+render function make the whole portfolio queryable; no maintenance task hand
 list is introduced.
 
 Recurring collection may overlap ordinary prior-head commits. It refuses new

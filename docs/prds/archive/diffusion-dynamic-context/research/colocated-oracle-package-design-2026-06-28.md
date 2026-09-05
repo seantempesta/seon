@@ -57,7 +57,7 @@ tags: [research, agent, web, flow]
   **superset entry that REUSES `validate`**, never reimplements it.
 
 - **Eval tier = bare `sci.core` + `sci.interrupt`, DB-free.** The full
-  `seon.eval` cage is too heavy (pulls cljs.js self-host, the analyzer,
+  `seon.eval` evaluator is too heavy (pulls cljs.js self-host, the analyzer,
   `seon.db`, the program graph, instrumentation), and even
   `seon.render.sci` is coupled to `seon.db`/`seon.eval`
   (`src/seon/render/sci.cljs:69-70` — it reconstitutes agent-ns source from
@@ -431,7 +431,7 @@ fidelity, not just speed:
    `eval-form` shape below.
 3. **cljs.js self-host (Node)** — the only **TRUE CLJS** semantics (real
    compiler → real JS). Heaviest (the ~MB self-host compiler; this is what the
-   full `seon.eval` cage uses). Reserve for forms whose correctness genuinely
+   full `seon.eval` evaluator uses). Reserve for forms whose correctness genuinely
    depends on interop/async — the faithful tier.
 
 **Recommendation:** the *fast* eval check is cljs-SCI (#2) in the Node bundle
@@ -439,9 +439,9 @@ fidelity, not just speed:
 verdict is required. bb-SCI (#1) is the front-door pre-filter ONLY in the
 hybrid (§2) — its CLJS infidelity makes it unsafe as the sole eval oracle.
 
-### Why SCI (#2), not the full cage and not `seon.render.sci`
+### Why SCI (#2), not the full evaluator and not `seon.render.sci`
 
-- `seon.eval/eval` (`src/seon/eval.cljs:970`) is the full pod cage: it pulls
+- `seon.eval/eval` (`src/seon/eval.cljs:970`) is the full pod evaluator: it pulls
   `cljs.js` (self-host compiler), `cljs.analyzer`, `seon.db`, `seon.schema`,
   `seon.instrument`, the analyzer-info/program-graph, and `test.runner`
   (`eval.cljs:36-58`). Megabytes, DB-coupled, instrumented — wrong for a
@@ -618,7 +618,7 @@ migrates from bb to Node — only the spawned binary does.
   rewrite-clj + clojure.string only → why bb runs it faithfully).
 - `src/seon/render/sci.cljs:149-156` — the proven bare-SCI eval+interrupt
   pattern the eval tier copies (DB-free slice of it).
-- `src/seon/eval.cljs:36-58,970` — the full cage, documented here as
+- `src/seon/eval.cljs:36-58,970` — the full evaluator, documented here as
   TOO HEAVY for the worker.
 - `docs/prds/agent-runtime/sidecar-spike/prd.md:21,211` — the repo evidence
   that in-process GraalVM Substrate-VM cohabitation crashes.

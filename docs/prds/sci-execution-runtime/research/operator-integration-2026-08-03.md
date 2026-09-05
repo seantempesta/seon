@@ -10,7 +10,7 @@ tags: [research, runtime, operator, boot]
 
 Keep a tiny OS launcher, but move the reachable control plane into the
 packaged JVM as ordinary functions at the owners that already perform each
-operation. Do **not** adopt Integrant. The current boot tower and
+operation. Do **not** adopt Integrant. The current boot sequence and
 `core.async.flow` already own ordered construction, teardown, readiness, and
 long-running lifecycle; Integrant would add a second dependency graph and a
 second set of lifecycle verbs without deleting either owner.
@@ -69,7 +69,7 @@ opened. Those are bootstrap/supervision exceptions, not a competing runtime.
 | Process-root custody | hidden runtime namespace | `resources/seon/operator/runtime.clj:1-28` |
 | Store and lifetime flock | `seon.cluster.store` | `src/seon/cluster/store.clj:183-239,270-351` |
 | Branch lifecycle | `seon.cluster.registry` | `src/seon/cluster/registry.clj:92-111,160-284` |
-| Cluster tower and readiness | `seon.cluster` | `src/seon/cluster.clj:1472-1677,1697-1740,1780-1867` |
+| Cluster boot sequence and readiness | `seon.cluster` | `src/seon/cluster.clj:1472-1677,1697-1740,1780-1867` |
 | Database-backed configuration | `seon.config` | `src/seon/config.clj:137-275`; `script/seon/fresh_operator.clj:1719-1751` |
 | Source publication | `seon.cluster` and `seon.cluster.source` | `src/seon/cluster.clj:550-872`; `script/seon/fresh_operator.clj:1753-1932` |
 | Packaged initialization | `seon.artifact` plus build-produced pages | `build.clj:57-100,154-178`; `src/seon/artifact.clj:45-100` |
@@ -203,7 +203,7 @@ Two current seams prove this split is not merely a rename:
   start need one uninterrupted process-root store hold. The open issue is
   [docs/seon/issues/artifact-releases-the-fence-between-install-and-start.md](../../../seon/issues/artifact-releases-the-fence-between-install-and-start.md).
 
-### Full cluster tower
+### Full cluster boot sequence
 
 After the base is reachable, the surviving current order remains valid:
 
@@ -332,7 +332,7 @@ diagnosable with zero cluster instances.
 
 The recommended endpoint is one process-root control REPL, not “the first
 cluster” as a permanent controller. Current `start!` creates a prepl and
-advertisement per cluster, so this intentionally changes the tower contract.
+advertisement per cluster, so this intentionally changes the boot contract.
 MCP/control functions must select the cluster explicitly; degraded cluster
 instances remain inspectable from the root endpoint. Whether per-cluster REPLs
 remain as separate eval surfaces or are removed must be owner-ruled before the
@@ -426,7 +426,7 @@ the surviving boundaries rather than preserve script internals.
 **Guarantee.** The OS layer retains only responsibilities a dead JVM cannot
 perform. Once the base is reachable, every control operation is an ordinary
 Seon function over explicit data, durable decisions/receipts are database
-facts, and runtime status is derived. The current tower and Flow remain the
+facts, and runtime status is derived. The current boot sequence and Flow remain the
 only lifecycle mechanisms.
 
 **Cost and risk.** Medium. It requires a real base/cluster split, stable request
@@ -446,7 +446,7 @@ Seon keeps direct, domain-named lifecycle and cheap Flow topology rebuilds.
 **Guarantee.** Integrant deterministically orders selected component init and
 reverse halt, while the outside launcher still owns process supervision.
 
-**Cost and risk.** High. Every tower layer needs an Integrant key/method and
+**Cost and risk.** High. Every boot layer needs an Integrant key/method and
 reference graph; each long-running component still needs Flow; database facts
 still own config and recovery; readiness and partial cleanup still need Seon
 code. The highest risk is divergent teardown between Integrant, Flow, and the
@@ -510,4 +510,4 @@ production edits:
    fence.
 
 None of these rulings require Integrant. They decide facts and transaction
-boundaries; the existing tower and Flow can then execute them.
+boundaries; the existing boot sequence and Flow can then execute them.

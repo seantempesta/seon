@@ -200,7 +200,7 @@ only fire if a launcher is started outside `impl/create-flow`. Declaring
 **it is documentation, not a gate.**
 
 Consequence for the design: the refusal must be Seon's own, at Seon's own
-construction door. `seon.flow/var-process` already throws on a non-Var step
+construction function. `seon.flow/var-process` already throws on a non-Var step
 and on a `:mixed` workload (`src/seon/flow.clj:100-110`); requiring
 `:seon.env/environment` in its `args` map is the same one-line refusal in the
 same place, and it is the only place that actually runs. Likewise `submit!`

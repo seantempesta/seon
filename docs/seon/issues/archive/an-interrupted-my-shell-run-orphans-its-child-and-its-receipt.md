@@ -151,7 +151,7 @@ deadline with the shell's own limit at 600 s: the handler returns in seconds
 with a refusal naming the evaluation limit and the `:interrupted` disposition,
 and no matching OS process survives. Its sibling
 `time-limit-reaps-the-process-tree-and-marks-the-receipt-interrupted` covers
-the receipt half through the door.
+the receipt half through the SCI evaluator.
 
 Remaining, filed rather than fixed: the elision inside the error text that
 refuses its own requery is untouched, and is the render-quality half of this

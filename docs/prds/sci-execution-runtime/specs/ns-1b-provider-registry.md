@@ -107,9 +107,9 @@ CORE by owner ruling (implementable without diffusion).
    datoms — verify and report if you find a persisted exception). It
    self-registers its agent adapter and the typeahead step backing on
    load.
-5. **Opt-in load door (D12)**: the default client build entry must NOT
+5. **Opt-in load hook (D12)**: the default client build entry must NOT
    require the diffusion tree. Wire the opt-in as a build-override /
-   preload entry require (the `seon.demo`-proven shadow door) so a
+   preload entry require (the `seon.demo`-proven shadow-cljs build override) so a
    diffusion-enabled build loads `seon.diffusion.gemma` and gets the
    registrations. Show in your summary exactly where the door lives
    and how it is activated.
@@ -117,7 +117,7 @@ CORE by owner ruling (implementable without diffusion).
    its single eval.cljs allowlist row — dispatch/typeahead no longer
    require any diffusion ns. Do not weaken the gate.
 7. **Docs**: update `src/seon/ai/AGENTS.md` (adapter list, registry
-   mechanism, opt-in door) and `src/seon/diffusion/AGENTS.md`
+   mechanism, opt-in configuration) and `src/seon/diffusion/AGENTS.md`
    (membership row for `gemma`) in the same change.
 
 ## Owned paths (touch nothing else)
@@ -125,7 +125,7 @@ CORE by owner ruling (implementable without diffusion).
 - `src/seon/ai/dispatch.cljs`, `src/seon/ai/provider.cljc`,
   `src/seon/ai/typeahead.cljs`
 - `src/seon/ai/diffusiongemma.cljs` → `src/seon/diffusion/gemma.cljs`
-- the build-config opt-in door (`shadow-cljs.edn` — the minimal edit
+- the build-config opt-in configuration (`shadow-cljs.edn` — the minimal edit
   for the D12 door only)
 - `src/seon/ai/AGENTS.md`, `src/seon/diffusion/AGENTS.md`
 - tests for dispatch/typeahead/gemma (rg for their test files; move or
@@ -156,5 +156,5 @@ merge stays reviewable.
   (follow the existing stub/steering idiom; do not invent a new error
   shape).
 
-No feature loss: with the opt-in door active, the diffusion-backed
+No feature loss: with the opt-in configuration active, the diffusion-backed
 paths must behave identically at the wire.

@@ -191,7 +191,7 @@ the newest publication.
 Agent-side the gap is total: the agent-facing surface is `my.run` (two
 dispositions) and `my.message` (`src/my/`), plus **read-only** `seon.db/q` and
 `seon.db/pull` (`src/seon/db.clj:118,185` — there is no transact). There is no
-capability door (`seon.effect` is referenced as not-yet-existing in
+capability request handler (`seon.effect` is referenced as not-yet-existing in
 `src/my/message.cljc:24`). A grader agent today cannot fork, cannot boot, and
 cannot transact anything except the program rows its own declarations produce
 (`eval.clj:1006-1016` + `install-program-row!`, `eval.clj:552-648`).
@@ -215,9 +215,9 @@ dependency order:
 2. one driver function `fork-and-boot` returning the running instance's
    advertisement + branch commit id — the harness's unit of work;
 3. only then, if the *overseer agent* is to drive generations from inside the
-   system, one capability request through the guarded door. Ruling needed:
+   system, one capability request through the bounded evaluation. Ruling needed:
    the plan says "mediated by the harness/driver (an effectful capability)",
-   and the effect door does not exist yet, so generation zero should be driven
+   and the effect request handler does not exist yet, so generation zero should be driven
    by compiled harness code, not by an agent.
 
 ## Q3 — Tests through the door
@@ -382,7 +382,7 @@ by humans. Ranked by what blocks what:
    at all.
 3. **One driver function `fork-and-boot`** returning branch, commit id, and
    advertisement — the harness's unit, compiled, not agent-facing. Generation
-   zero is driven by compiled harness code; the effect door is not needed yet.
+   zero is driven by compiled harness code; the effect request handler is not needed yet.
 4. **Branch-facts test running** in `seon.test.runner`: run installed
    `:seon.test` vars from a supplied database value with `report` captured,
    return `:seon.test.runner/results`, commit with the existing `record-tx`;
@@ -396,5 +396,5 @@ by humans. Ranked by what blocks what:
    install their namespace environment (E2). Both are owner rulings, and both
    should be made before an agent is invited to "rewrite any seon function".
 
-Explicitly **not** needed for generation zero: an effect door, an agent-facing
+Explicitly **not** needed for generation zero: an effect request handler, an agent-facing
 fork capability, blobs, and the overseer loop. Those arrive with generation N.

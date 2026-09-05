@@ -86,7 +86,7 @@ host or resume agents, seed or recover facts, record replay faults, open the
 public web surface, synchronize provider/brand data, install the ticker, or
 react to Shadow build admission.
 
-The existing `/_seon/ready` route is the only observable preparation door. Its
+The existing `/_seon/ready` route is the only observable preparation endpoint. Its
 restore projection returns 200 only when the expected completion entity is
 exact, its identity datom was asserted by the current main-branch head `C`, and
 admission remains `:publishing`. Its body is the shared closed

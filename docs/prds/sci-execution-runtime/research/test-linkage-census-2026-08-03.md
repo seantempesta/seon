@@ -584,7 +584,7 @@ not apply.
   response, said the recorded JVM's prepl was unreachable. MCP runtime status
   immediately observed the same cluster and prepl. That contradictory status
   face is noisy and should be reported by its owner.
-- A door-mode read-only query failed with a flat `NoClassDefFoundError` from
+- A read-only query in SCI failed with a flat `NoClassDefFoundError` from
   the live stale SCI context. JVM mode against the store-owning process worked
   and kept the census read-only. The error was visible rather than swallowed,
   which was useful.

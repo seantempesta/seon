@@ -92,7 +92,7 @@ only its sources differ.
 | S6 | trigger | `seed-tx` passes none; `::trigger` is optional (run.clj:261) | DECISION: pointing the curated run at the original's trigger message makes it findable by `eval.drive/objective-run-ids` (drive.clj:110-119) and keeps grading queries unchanged. Recommended |
 | S7 | custody | `seed-tx` claims for the boot process | the replay driver's process claims it on the FORK; the adopted copy on the cluster branch carries no `::process` (it is closed) |
 | S8 | receipt identity | `(pr-str [run-id ordinal])`, "at most one attempt per form, EVER" (run.clj:484-491) | this is why curation is a NEW RUN and never a re-execution of the old one. The model forbids the alternative by construction — a feature, not an obstacle |
-| S9 | effects | the fold's forms may call the guarded door (`seon.effect/request!`) | replay RE-EXECUTES real capability requests (fs writes, web, shell, llm). Curation of an effectful run repeats those effects. Recorded here as the one genuine semantic constraint of any replay design; §6 states the containment |
+| S9 | effects | the fold's forms may call the bounded evaluation (`seon.effect/request!`) | replay RE-EXECUTES real capability requests (fs writes, web, shell, llm). Curation of an effectful run repeats those effects. Recorded here as the one genuine semantic constraint of any replay design; §6 states the containment |
 
 The refactor is therefore: extract `seon.cluster.run`-shaped
 `system-run-tx {db, agent-id, run-id, sources, process, opened-at,
@@ -440,7 +440,7 @@ append-only transaction plus a supersession ref.
 
 **Constraints this design accepts and states rather than hides:**
 
-- **Effects re-execute (S9).** A replayed form that calls the guarded door
+- **Effects re-execute (S9).** A replayed form that calls the bounded evaluation
   performs its capability request again. Curation is therefore safe for
   computation-and-declaration runs and NOT automatically safe for runs
   that wrote files, sent web requests, or messaged peers. The honest

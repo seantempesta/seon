@@ -5,18 +5,18 @@ severity: friction
 tags: [issue, mcp, sci, runtime]
 ---
 
-RESOLVED 2026-08-03 by `a54b8bddb` (Bound MCP door value projections):
+RESOLVED 2026-08-03 by `a54b8bddb` (Bound MCP SCI evaluator value projections):
 recursive collection windowing, nested string clipping with the print
 grammar's elision markers, and shipped `:seon.print/length 32` /
 `:seon.print/level 8` defaults. Live proof, independently re-verified
-by the orchestrator on the reforked default: door `(vec (range 50000))`
+by the orchestrator on the reforked default: SCI evaluator `(vec (range 50000))`
 envelope 304,265 → ~4,332 bytes with `windowed? true`, digest, and
 `retrievable? true`; `get_value` pages the admitted artifact correctly
 (offset 8000 → `[8000..8007]`; past the admitted 8,192 length returns
 empty honestly). One mechanism, no MCP-only budget; the MCP server
 script was untouched, so no client restart was needed.
 
-# MCP door eval envelope leaks nested bulk through the top-level window
+# MCP SCI evaluator eval envelope leaks nested bulk through the top-level window
 
 ## Observed (2026-08-03, fresh `default` JVM at HEAD after reset)
 
@@ -40,14 +40,14 @@ window" itself:
 
 Direct probe evidence: `(mcp-project "default" eff (vec (range 50000)))` on a
 RAW value returns an 8-element window + digest correctly. The defect only
-manifests when the projected value nests large children — exactly what door
+manifests when the projected value nests large children — exactly what SCI evaluator
 mode always produces, since it wraps `evaluate`'s whole result map.
 
 ## Expected
 
 Ruling #44 (2): a bounded projected window plus a retrievable digest, one
 mechanism, no MCP-only budget. Ruling #25: result-edn over the blob threshold
-settles to a blob with a bounded window at the RECEIPT seam — door mode has no
+settles to a blob with a bounded window at the RECEIPT seam — SCI evaluation mode has no
 receipt, so nothing bounds its result-edn today.
 
 ## Fix direction (one mechanism, not an MCP budget)
@@ -62,7 +62,7 @@ receipt, so nothing bounds its result-edn today.
 
 ## Acceptance
 
-Door-mode `(vec (range 50000))` returns an envelope a few KB at most, with
+SCI-mode `(vec (range 50000))` returns an envelope a few KB at most, with
 digest + honest counts; `get_value` drills the digest to any depth/offset;
 the same nested-bulk value through `mcp-project` in a test proves the window
 bounds every level; no second truncation mechanism exists.

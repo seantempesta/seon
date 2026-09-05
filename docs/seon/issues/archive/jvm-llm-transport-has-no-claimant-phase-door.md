@@ -5,7 +5,7 @@ tags: [issue, agent, runtime]
 severity: blocker
 ---
 
-# JVM LLM transport has no driver phase door
+# JVM LLM transport has no driver phase transition
 
 ## Problem
 
@@ -63,7 +63,7 @@ entry arms under `src/seon/ai/**`.
 
 ## Resolution
 
-The spine landed the portable durable phase and run-holding process door in `e34194bf8`
+The spine landed the portable durable phase and run-holding process transition in `e34194bf8`
 and `34f0373e8`. Commit `200e847e9` installs the pure JVM transport, and the
 focused real-socket plus real-Datahike gate is green (6 tests, 23 assertions).
 The remaining paid named-cluster run is graduation evidence, not a missing

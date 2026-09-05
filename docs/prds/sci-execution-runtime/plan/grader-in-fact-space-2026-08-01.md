@@ -48,7 +48,7 @@ branches related by **commit IDs**:
 branch fork (~17 ms, registry/branch!), per-turn basis records, agents
 authoring functions as facts (w3d1), the door installing interpreted
 corpus from rows, `seon.db/q`+`pull` for grader inspection (landed
-5599d72b2 with the fresh-JVM door proof), `:seon.test` facts +
+5599d72b2 with the fresh-JVM SCI evaluation proof), `:seon.test` facts +
 seon.test.runner.
 
 ## Open design questions (grounding audit before any implementation)

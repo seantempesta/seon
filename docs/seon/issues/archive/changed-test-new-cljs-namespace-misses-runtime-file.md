@@ -18,7 +18,7 @@ development gate after P4 and is not covered by runtime cutover acceptance.
 The automatic changed-test path selected a newly added `.cljc` namespace and
 its test, then launched an immutable CLJS bundle whose entrypoint referenced
 the namespace while its `cljs-runtime/` directory omitted the compiled module.
-The test door reported a false infrastructure failure until an explicit focused
+The test runner reported a false infrastructure failure until an explicit focused
 compile rebuilt the bundle.
 
 ## Evidence

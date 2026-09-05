@@ -147,7 +147,7 @@ process-local by construction. But note the ladder — a `(def counter (atom
 0), just not by its value. Only two things are genuinely unrestorable:
 
 1. a value whose defining form is not re-runnable (it crossed the
-   capability door) AND whose value does not serialize; and
+   capability request handler) AND whose value does not serialize; and
 2. a value bound by interning from outside the session (none today).
 
 For those the entry carries `unrestorable` with the honest reason, the name
@@ -368,7 +368,7 @@ and it is what creates the closure — there is no other way, because a
 exactly where it was: **the driver never re-executes; the agent's session
 is re-derived.**
 
-The capability door does not exist yet, so today every stored form is pure
+The capability request handler does not exist yet, so today every stored form is pure
 by construction (`sci-session-persistence-2026-08-01.md` §6) and the
 `unrestorable` case is empty. When the door lands, a crossing is recorded
 on the receipt, and an entry whose defining form crossed takes the value
@@ -459,7 +459,7 @@ restore:
   call at `:phase analysis` — live-proven), no capability-leaf
   reachability over `:seon.fn/calls` (leaves annotated at their own
   definition site, chains derived — the workload precedent), and no
-  effect-door receipt once `seon.effect` exists (effectfulness is a
+  effect-request receipt once `seon.effect` exists (effectfulness is a
   recorded fact, not an inference). Fail-closed: unproven ⇒ not
   re-evaluated.
 - **Everything unproven restores from its stored value**, gated by the

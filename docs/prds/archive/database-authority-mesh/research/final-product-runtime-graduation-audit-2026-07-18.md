@@ -15,7 +15,7 @@ ahead of the last complete maintained-test checkpoint and one production change
 ahead of the last immutable source-free package and resource measurements.
 
 The earliest missing contract is therefore an exact-current correctness
-checkpoint: run the complete ClojureScript, writer, and operator doors from one
+checkpoint: run the complete ClojureScript, writer, and operator test suites from one
 source freeze containing `4aa2f409`, then build one immutable package from that
 same source identity. The five-minute execution-child retention change is only
 a two-line behavior/test cut, but it changes process lifetime, post-load

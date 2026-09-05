@@ -116,10 +116,10 @@ nothing hand-maintains it.**
   dialogue, 2026-08-17):** the pull discovers EDGES and identities,
   never content. The call that materializes an edge is selected like
   every face: (1) EXPLICIT — the attribute schema names its reader;
-  (2) DERIVED — the producers-of-key query: functions whose declared
+  (2) DERIVED — a query for functions returning the attribute: functions whose declared
   OUTPUT refs (alias-chased through the registry) cover the discovered
   identity attributes, filtered to those whose declared INPUTS are
-  satisfiable from ambient bindings (db, self-id, discovered
+  satisfiable from supplied defaults (db, self-id, discovered
   identities); unique fit wins, ambiguity is a loud error; (3) FLOOR —
   the identity pull. The message case: `my.message/inbox` declared
   outputs over `:my.message/id` (≡ `:seon.cluster.message/id`) and
@@ -132,18 +132,18 @@ nothing hand-maintains it.**
 
   **Refinement — stored provenance outranks inference (owner,
   2026-08-17):** receipts accrete the STRUCTURED call pair —
-  `:seon.fn/sym` + `:seon.render/inputs` (named non-ambient args;
-  ambient db/self supplied by call preparation, so rebuilt forms are
+  `:seon.fn/sym` + `:seon.render/inputs` (named caller-supplied arguments;
+  db/self supplied by call preparation, so rebuilt forms are
   portable across namespaces; the recorded basis is the db arg's
   serialization). Reversal becomes a splice, not a parse. The full
   selection ladder, priority-ordered, all queries: (0) STORED
   PROVENANCE — this data came from this call, no inference; (1)
   explicit attribute-declared reader; (2) contract inference
-  (producers-of-key, alias-chased, input-satisfiable),
+  (functions returning an attribute, alias-chased, input-satisfiable),
   DISTANCE-WEIGHTED — the nearest declared reader/face wins,
   in-namespace before N-hops, equal distance a loud ambiguity; (3)
   the floor identity pull. Robustness ladder for inputs: none/
-  ambient-only → admissible named-map EDN → `result/<id>` handles
+  supplied-defaults-only → admissible named-map EDN → `result/<id>` handles
   (provenance chains = the uses-result edges by storage rather than
   extraction) → non-admissible degrades honestly to inference/floor.
   Guard: provenance of CALLS is stored; derived VIEWS never become
@@ -223,10 +223,10 @@ before its wave lands.
 | M3 | Pull | Selector size scales with the installed-schema count (~2.4k), not with data | `root-selector` enumerates every ref attribute bidirectionally; cost unmeasured at scale — needs a measurement, may be fine |
 | M4 | Family | **Entities without an identity attribute have no family** (component children, arity nodes) — fingerprint-by-attrs collides under open maps | Principle candidate, UNRULED: family = identity attribute ONLY; identityless values are reached through their owners and take the floor |
 | M5 | Family | Alias chasing measured nearly vacuous: `:seon.entity/id-attr` covers 37/2231 keys | Verification lane A4 note; ruling 43a (name unification) dissolves the need, but selection must survive the TRANSITION window — the chasing code is the suspect code until wave D |
-| M6 | Producers | **Shape is not in the index** — `output-refs` flattens collection-of-family vs single-entity away, so ruling 44's shape matching has no index support | Needs either an accreted per-arity output-shape fact or AST interrogation at selection time; UNDECIDED |
-| M7 | Producers | **"Offers faces" is an undefined predicate** — faces are declared mostly on the FAMILY schema, not the reader; does a family face qualify any reader, or must the reader's own output schema carry faces? | One rule needed; recommend: family faces qualify (faces attach to data, not to callers) — UNRULED |
-| M8 | Producers | **Distance weighting is unbuilt and its failure mode is tie explosion** — in a flat toolkit world most readers sit at equal require-distance, making equal-distance-is-error fire constantly | Recommend the colocation principle FIRST: the reader in the namespace that owns the family's schema wins outright; hop distance only breaks remaining ties — UNRULED |
-| M9 | Producers | **Auto-run vs offered** — collection-edge readers auto-run; single-entity dig-ins (`read` on one message) must be OFFERED (help/requery), not executed, or openings explode | Stated here for the first time; needs the ruling |
+| M6 | Data-returning functions | **Shape is not in the index** — `output-refs` flattens collection-of-family vs single-entity away, so ruling 44's shape matching has no index support | Needs either an accreted per-arity output-shape fact or AST interrogation at selection time; UNDECIDED |
+| M7 | Data-returning functions | **"Offers faces" is an undefined predicate** — faces are declared mostly on the FAMILY schema, not the reader; does a family face qualify any reader, or must the reader's own output schema carry faces? | One rule needed; recommend: family faces qualify (faces attach to data, not to callers) — UNRULED |
+| M8 | Data-returning functions | **Distance weighting is unbuilt and its failure mode is tie explosion** — in a flat namespace graph most readers sit at equal require-distance, making equal-distance-is-error fire constantly | Recommend the colocation principle FIRST: the reader in the namespace that owns the family's schema wins outright; hop distance only breaks remaining ties — UNRULED |
+| M9 | Data-returning functions | **Auto-run vs offered** — collection-edge readers auto-run; single-entity dig-ins (`read` on one message) must be OFFERED (help/requery), not executed, or openings explode | Stated here for the first time; needs the ruling |
 | M10 | Ordering | `form-symbols` is spelling-syntactic (no alias resolution, no env); `explained-symbol?` compares spellings | Substrate report §2; the env-grounding rewrite (wave B1) is the fix; until then ordering correctness is luck |
 | M11 | Execution | **Rendering that TRANSACTS** (cost facts written during derivation) — a derivation that writes can stale itself; self-triggering loop risk | Substrate report threat list; must move to settlement or a separate proc before wave B |
 | M12 | Execution | **No generation-failure retry policy** — a generated read that errors re-qualifies as stale next turn and re-fires forever (error → stale → error) | Rule needed: a failed system read is retried only when its READ INPUTS change, not on schedule; the error fact carries the suppression basis — UNRULED |
@@ -296,7 +296,7 @@ seam with its query and drift regression
    schemas) as same-family refs, with the drift regression that makes
    the stored edge legal under derive-or-die. → schema closure and
    impact analysis as Datalog.
-3. **Producers-of-key query** — the edge exists; the work is the query
+3. **Query for functions returning an attribute** — the edge exists; the work is the query
    owner + alias chasing + typed-unknown for undeclared outputs.
 4. **Session dataflow edges** (§4) — the one genuinely new family.
 5. **Test→schema edges** — a 3-hop join today; an attribute would be a
@@ -433,7 +433,7 @@ launch, never parallel.
   write carrier (unskippable receipt stamp; honest-boundary stop);
   then A5b the remaining dataflow deltas (uses-result + `result/<id>`,
   queryable reads, defines/requires) — L, blocks wave B; A4 the
-  producers query — S. A6 deferred (O-8).
+  data-returning functions query — S. A6 deferred (O-8).
 - **B — the regeneration generator:** B1 env-grounded readiness in
   `ordered-episode` (sci/resolve + namespace-bindings exist); B2
   settled-as-input, three modes one function; B3 liveness reachability

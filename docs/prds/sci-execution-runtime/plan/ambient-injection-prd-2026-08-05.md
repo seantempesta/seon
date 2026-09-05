@@ -4,7 +4,7 @@ status: active
 tags: [prd, runtime, platform, sci, database]
 ---
 
-# Ambient injection — the platform supplies what a function declares
+# Call preparation — the platform supplies what a function declares
 
 Owner direction (2026-08-05): *"at the eval function level we are auto
 injecting the db for all functions… it's a battery included feature and
@@ -18,7 +18,7 @@ providing this as a runtime or platform benefit."*
 ## 1. The vision, in one sentence
 
 **A function's `:malli/schema` is a request to the platform**: whatever
-ambient capability it declares as an input, the runtime supplies when the
+supplied default it declares as an input, the runtime supplies when the
 caller did not — so writing a function that needs the database means
 writing `[:map [:seon.db/db :seon.db/database-value]]` and nothing else.
 
@@ -42,7 +42,7 @@ alone: 42 functions declare `:seon.db/database-value` and 9 declare
 `:seon.db/connection` (the worked examples in the repository
 authority). They currently receive those values by being threaded them.
 
-**The ambient values are already assembled per evaluation.**
+**The supplied defaults are already assembled per evaluation.**
 `seon.effect/*request-context*` (`src/seon/effect.clj:26`) is bound at
 `src/seon/sci/eval.clj:1600-1608` for every run form and carries
 `:seon.db/connection`, `:seon.cluster.run/id`,
@@ -62,8 +62,8 @@ the answers; the graph already knows the questions.
 
 ## 3. The batteries
 
-A battery is an ambient key plus the declared provider that computes it
-from the current evaluation context. Providers are fully qualified
+A supplied default is a key plus the declared provider that computes it from
+the current evaluation context. Providers are fully qualified
 symbols in a declared registry (ruling #50's producer representation —
 never an inline fn, never a hand list in code). **Adding a battery is
 declaring one row.** That is the whole extensibility story.
@@ -87,7 +87,7 @@ immutable value; `:seon.db/connection` is WRITE custody. The
 repository authority frames the 9 connection-declaring functions as
 exactly "which functions need cluster custody". Auto-supplying custody to
 anything that declares it is consistent with ruling #20 and the
-no-hobbling ruling — the guarded door bounds effects, not callability —
+no-hobbling ruling — the bounded evaluation bounds effects, not callability —
 but it is recorded here as a deliberate choice so nobody later reads it
 as an oversight.
 
@@ -103,7 +103,7 @@ recomputed per call.** Concretely:
    derivation at index time, nothing stored that is derived.
 2. A function's **injection plan** is that fact intersected with the
    battery registry: the (usually empty, occasionally 1-2 element) set of
-   ambient keys it declares. This is a set intersection over data already
+   supplied default keys it declares. This is a set intersection over data already
    in hand.
 3. The plan is memoized per function identity in a process-local cache,
    invalidated when the program row changes (hot reload / redefinition
@@ -133,10 +133,10 @@ declared batteries should be indistinguishable from today.
 - **Unavailable is an error, never nil.** `*request-context*` is nil outside a
   run form (bare probes, some system paths). A declared battery that
   cannot be provided returns a flat `:seon.error` naming the missing
-  ambient — never a silently injected nil, which would violate
+  supplied default — never a silently injected nil, which would violate
   no-stored-nil and hand the function a lie.
 - **One mechanism.** `seon.db`'s bespoke elision is DELETED once the
-  general seam exists, or the PRD records precisely why the ambient-conn
+  general seam exists, or the PRD records precisely why the connection
   case is genuinely different.
 
 ## 6. Seams — where injection happens
@@ -148,7 +148,7 @@ Decide by measurement, in this order:
 2. **Scheduled fires** — the fire's argument map gains declared
    batteries, so a maintenance function declaring `:seon.db/db` simply
    gets one (contract already requested by the scheduler lane).
-3. **The effect door** — invocations crossing the door.
+3. **The effect request handler** — invocations that request capabilities.
 
 Deep internal calls (a function calling another function inside one
 evaluation) are NOT injected per call in v1: the dynamic vars remain
@@ -164,7 +164,7 @@ step — not a v1 assumption.
 - a caller-supplied value is never overwritten;
 - an undeclared function receives nothing;
 - an injected-but-unused key changes no behavior;
-- an unavailable ambient yields a flat error naming what was missing;
+- an unavailable default yields a flat error naming what was missing;
 - a scheduled fire's function receives its declared battery;
 - **measurement**: empty-plan call overhead versus today, reported as a
   number;

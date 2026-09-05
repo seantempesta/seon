@@ -22,9 +22,9 @@ submission never starts and `submit!!` parks forever — the
 
 ## Expected owner
 
-`seon.flow` — the one `:compute` door. The wait-for-start is honest
+`seon.flow` — the one `:compute` work submission. The wait-for-start is honest
 backpressure by design (a full queue parks the submitter), but "all
-workers wedged" is an observable state the door already accounts
+workers wedged" is an observable state the work submission already accounts
 (`::wedged-submissions` in `capacity-facts`), so the unbounded deref is
 a clock standing in for an event the launcher can observe.
 

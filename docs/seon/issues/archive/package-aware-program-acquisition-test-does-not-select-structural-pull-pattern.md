@@ -23,7 +23,7 @@ assertions / 0 failures / 0 errors.
 
 ## Original problem
 
-The package-door change made authored-program acquisition select its queries
+The package-loading change made authored-program acquisition select its queries
 and pull patterns from the immutable database value's installed schema. The
 existing full-path acquisition test neither controlled that selection nor
 admitted both structurally selected pull-pattern families, so it took the

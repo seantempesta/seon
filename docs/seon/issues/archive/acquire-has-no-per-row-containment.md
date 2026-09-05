@@ -30,7 +30,7 @@ that fails to install becomes a recorded flat error (visible to the
 agent as a problems-family fact naming the row), the remaining rows
 install, and evaluation continues without the poisoned definition.
 The alias-resolution edge itself (interpreted install must resolve the
-namespace's aliases the way the door's reader already does) is part of
+namespace's aliases the way the SCI evaluator's reader already does) is part of
 the same fix.
 
 Acceptance: transact a deliberately-failing program row on a scratch

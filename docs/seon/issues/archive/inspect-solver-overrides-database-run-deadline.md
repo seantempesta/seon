@@ -9,7 +9,7 @@ tags: [issue, agent, flow]
 
 ## Problem
 
-The pod composition door derived an absent request timeout from database run
+The pod HTTP handler derived an absent request timeout from database run
 policy, but the common Inspect solver always replaced absence with a
 300-second Python constant. Native milestone and planning callers repeated
 that fallback, so admitted Inspect tasks never exercised the database-owned

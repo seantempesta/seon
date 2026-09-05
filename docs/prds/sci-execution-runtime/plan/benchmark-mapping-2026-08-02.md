@@ -12,7 +12,7 @@ agent-eval surface, the crossing is one warm JVM plus per-sample clusters over
 prepl, and grading is `clojure.test`/`test.check` on the ending commit's fork
 with DeepSeek-thinking judges advising. That document designed the *episode*.
 This one designs the *demand side*: which external benchmarks that episode can
-already satisfy, which ones a capability door would unlock, which ones would be
+already satisfy, which ones a capability request handler would unlock, which ones would be
 benchmark-washing if we claimed them, and the conventions that make a benchmark
 task become a Seon episode **without per-benchmark code**.
 
@@ -140,7 +140,7 @@ family often wraps.
 | `gorilla-bfcl` | `reference-code/gorilla-bfcl` | function-calling; class **C**; wrapped as `inspect_evals/bfcl` |
 | `tau2-bench` | `reference-code/tau2-bench` | simulated-user tool dialogues; class **C**; wrapped as `inspect_evals/tau2` |
 | `cybench`, `mle-bench`, `re-bench`, `deepswe` | `reference-code/*` | container CTF / ML-engineering / research-engineering; class **B** |
-| `osworld`, `webarena`, `browsergym`, `browsecomp-plus` | `reference-code/*` | GUI and web environments; class **B**/**C**, need a browser door and a desktop |
+| `osworld`, `webarena`, `browsergym`, `browsecomp-plus` | `reference-code/*` | GUI and web environments; class **B**/**C**, need a browser capability and a desktop |
 
 None of the standalone suites changes the class arithmetic: every one of them
 lands in **B** or **C**, which is precisely the door-gated half.
@@ -316,7 +316,7 @@ capabilities.
   with `java.nio` from a Clojure REPL" changes the artefact, the toolchain, and
   the difficulty. It would be benchmark-washing to report a SWE-bench number
   earned that way. The honest path is the real one: the agent gets a genuine
-  shell in a genuine container through the effect door, and until then SWE-bench
+  shell in a genuine container through the effect request handler, and until then SWE-bench
   is **not runnable**, not "runnable with interop."
 - **`terminal-bench`, `cybench`, `gdm_intercode_ctf`, `gdm_in_house_ctf`,
   `threecb`, `mle_bench`, `re-bench`.** Same argument: the shell *is* the
@@ -327,7 +327,7 @@ capabilities.
 - **Class X (12 families / 31 tasks).** No image input path exists on any Seon
   surface. Not a door question; a modality question. Out of scope entirely.
 - **`osworld`, `webarena`, `browsergym`, `mind2web_sc`.** A GUI/browser
-  environment is a different substrate from a capability door; even a web door
+  environment is a different substrate from a capability request handler; even a web capability
   would not make these runnable.
 
 ### The specific trap: "REPL-fs equivalence"
@@ -394,7 +394,7 @@ alone.
 
 ### 6.3 Multi-turn tool loops → not adapted, refused
 
-Per §4.3. When the effect door exists, the mapping becomes concrete and is
+Per §4.3. When the effect request handler exists, the mapping becomes concrete and is
 already anticipated by their interface: `basic_agent`/`react` pass `tools:
 list[ToolInfo]` into `generate`, and the door's capability requests are the
 natural other side of that. The design is deliberately **not** written here,
@@ -463,7 +463,7 @@ schedule.
 |---|---|---|---|---|---|
 | **1** | **shell/exec in a container** (`bash`, `python`, a POSIX process) | **~22** | **~63** | `swe_bench(2) gdm_self_proliferation(20) gdm_self_reasoning(11) gaia(4) cti_realm(4) frontier_cs(3) mle_bench(3) cybench(1) gdm_intercode_ctf(1) gdm_in_house_ctf(1) agent_bench(1) core_bench(1) paperbench(2) scbench(1) threecb(1) …` | **the single largest unlock by a wide margin.** Also unlocks every standalone shell suite (`terminal-bench`, `commit0`, `re-bench`, `deepswe`) |
 | **2** | **filesystem** (read/write a per-sample root) | 0 external | 0 external | — | zero *external* families move; it is a prerequisite of rank 1 and the enabler of ruling #36 slice 2 (our own artifact goals). Ranked here for honesty, not to demote it |
-| **3** | **typed tool calls** (the agent emits a tool call the harness dispatches) | ~7 | ~13 | `bfcl(1) tau2(4) agent_threat_bench(3) agentharm(2) tac(2) b3(1)` | independent of the shell door; it is a *protocol* change in how an episode ends a turn, not a capability |
+| **3** | **typed tool calls** (the agent emits a tool call the harness dispatches) | ~7 | ~13 | `bfcl(1) tau2(4) agent_threat_bench(3) agentharm(2) tac(2) b3(1)` | independent of the shell capability; it is a *protocol* change in how an episode ends a turn, not a capability |
 | **4** | **web** (fetch/search) | ~4 | ~11 | `browse_comp(1) assistant_bench(5) mind2web_sc(1) gaia(4, overlaps rank 1)` | mostly overlaps rank 1 in practice, since these agents also want a shell |
 | **n/a** | browser/GUI automation | ~4 | ~5 | `osworld(2) webarena browsergym mind2web_sc(1)` | a substrate, not a door; out of scope |
 | **n/a** | vision | 12 | 31 | class X | a modality, not a door; out of scope |
@@ -476,7 +476,7 @@ otherwise is the washing failure.
 Cumulative picture:
 
 - **today, provider seam only: 86 families / 133 tasks (53%)**
-- **plus the shell door: ~108 families / ~196 tasks (79%)**
+- **plus the shell capability: ~108 families / ~196 tasks (79%)**
 - **plus typed tools: ~115 families / ~209 tasks (84%)**
 - the remaining ~16% is vision and GUI substrates, which are not door questions
 
@@ -542,7 +542,7 @@ two halves of the charter are one system.
 
 ### Slice 4+ — door-gated
 
-Not scheduled here. §8's table **is** the effect-door PRD's demand schedule:
+Not scheduled here. §8's table **is** the effect-request PRD's demand schedule:
 rank 1 first, with SWE-bench as its acceptance benchmark precisely because §5
 refuses every cheaper substitute for it.
 

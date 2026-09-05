@@ -84,7 +84,7 @@ procs, and once complete — same cluster, same connection, same projection,
 one extra member — for the ctx and every later carrier. This is recorded
 explicitly in `stand-cluster-runtime!` rather than smoothed over.
 
-### The refusal is fail-closed at the construction door
+### The refusal is fail-closed at the construction function
 
 `var-process` refuses `args` with no `:seon.env/environment`, exactly as it
 already refuses a non-Var step and a `:mixed` workload. The Phase 0 flow

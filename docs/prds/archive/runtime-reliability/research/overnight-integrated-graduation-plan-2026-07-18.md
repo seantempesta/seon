@@ -542,7 +542,7 @@ plan inspection, and timed out after 13 turns. The next falsifier is therefore
 the existing plan-done/run-completion seam, followed by the unchanged
 `reuse_repair` scorer; no second priority or completion mechanism is allowed.
 
-Exit: Inspect AI drives the real pod door and scores durable facts/evals rather
+Exit: Inspect AI drives the real pod HTTP endpoint and scores durable facts/evals rather
 than a special harness runtime or transcript regex.
 
 ### 6. Browser and Datastar graduation

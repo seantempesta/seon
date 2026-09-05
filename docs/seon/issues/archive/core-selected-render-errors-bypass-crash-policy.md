@@ -48,7 +48,7 @@ escalates. There is no second crash switch, renderer, or error registry.
 - Prompt-block and canvas-render selection share the same classification
   boundary.
 - The supervising host reports the process exit and can start a fresh child;
-  no persisted bad program can remove the normal repair door.
+  no persisted bad program can remove the normal repair evaluation path.
 - Audit the remaining web UI conversions from execution errors to rendered
   values so a core fault cannot be silently downgraded at another boundary.
 
@@ -133,7 +133,7 @@ removed that function from the current database program. That stale authored
 reference is an application error, not evidence that Seon's loader lost a
 published function. The old unconditional missing-runtime branch repeatedly
 recorded `:core` faults and retired each replacement child, obstructing the
-agent's repair door.
+agent's repair evaluation path.
 
 `call-selected!` now uses the exact current program already retained by the
 child. A function present in that program but absent from the runtime remains a

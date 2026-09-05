@@ -11,7 +11,7 @@ tags: [issue, agent, runtime, database, architecture]
 
 The surviving claim-native driver does not commit the function, namespace, and
 schema facts produced by an authored form. The capability disappeared when
-`seon.host.record/tee-tx-data` was deleted with the old guarded door.
+`seon.host.record/tee-tx-data` was deleted with the old bounded evaluator.
 
 ## Evidence
 

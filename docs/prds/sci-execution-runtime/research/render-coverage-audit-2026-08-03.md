@@ -4,7 +4,7 @@ status: complete
 tags: [research, render, schema, context]
 ---
 
-# Render producer coverage audit — 2026-08-03
+# Render function coverage audit — 2026-08-03
 
 ## Verdict
 

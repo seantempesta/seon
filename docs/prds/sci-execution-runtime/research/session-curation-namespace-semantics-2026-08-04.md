@@ -335,7 +335,7 @@ all changed definition namespaces.
 The check is consistent with ruling #20 if and only if its guarantee is narrow:
 every agent can still resolve and call every function in the cluster program
 graph; only durable definition writes into a namespace assigned to a different
-agent are refused. Ruling #20 defines `my.*` as a curated front door, never a
+agent are refused. Ruling #20 defines `my.*` as a curated entry point, never a
 wall
 ([docs/prds/sci-execution-runtime/plan/README.md:1663-1678](../plan/README.md)). The
 architecture separately says namespace ownership coordinates who should edit

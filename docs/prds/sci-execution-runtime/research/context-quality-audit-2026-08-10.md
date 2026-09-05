@@ -36,7 +36,7 @@ Root's context: **18 units, 63,669 characters, 15,917 estimated tokens.**
 | `d0 [:seon.cluster.agent/id "root"]` (transcript) | 5,581 | 35% |
 | `d2 [:seon.ns/name my.fs]` | 2,843 | 18% |
 | `d2 [:seon.ns/name my.web]` | 2,249 | 14% |
-| `d2 [:seon.ns/name my.web]`…`my.background` (7 toolkit namespaces total) | 9,552 | **60%** |
+| `d2 [:seon.ns/name my.web]`…`my.background` (7 agent-facing namespaces total) | 9,552 | **60%** |
 | `d1 [:seon.ns/name my.agents.root]` (own namespace) | 200 | 1% |
 | cluster, config, run, message, bootstrap-note units (6 units) | 320 | 2% |
 | `d2 [:seon.ns/name clojure.edn]` + `clojure.string` | 39 | 0.2% |

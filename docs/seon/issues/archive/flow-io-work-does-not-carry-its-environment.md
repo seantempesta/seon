@@ -19,7 +19,7 @@ same dynamic-binding carrier, so they all drop together — probed and confirmed
 for the schema declaration population, `seon.db/*conn*` ("the current cluster's
 live branch connection"), and `seon.effect/*request-context*` ("the current
 evaluation's durable identity"). Every capability request that crosses the
-guarded door on `:io` — fs, web, llm, db — therefore runs with no cluster
+bounded evaluator on `:io` — fs, web, llm, db — therefore runs with no cluster
 identity, no declarations, and no request identity. Under one cluster this is
 invisible because the process-wide fallback happens to be right, which is why it
 survived.
@@ -71,7 +71,7 @@ stale frame.
   recorded in the source as a stopgap, not as the design. The source grounding
   above raises the bar on that stopgap: flow's author declined binding
   conveyance throughout flow, so a third `bound-fn*` would make Seon's
-  capability door depend on a mechanism the dependency deliberately does not
+  capability execution boundary depend on a mechanism the dependency deliberately does not
   use. The flow-native shape is `:args` → init arity → state
   (`flow/impl.clj:48`, `:155`, `:263`, `:271`, `:304`), which a graph rebuild
   re-delivers for free because `spi/start` re-reads args on every start

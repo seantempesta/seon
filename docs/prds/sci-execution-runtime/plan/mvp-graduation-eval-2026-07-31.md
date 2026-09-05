@@ -111,7 +111,7 @@ one CLJ JVM per operator root, reached over its cluster's io-prepl.
 
 Everything in this suite rides **one** new module,
 `seon_inspect/seon_cluster.py`, exposing a scratch-cluster lease over the
-fresh operator. No second driver, no HTTP door, no bespoke script.
+fresh operator. No second driver, no HTTP endpoint, no bespoke script.
 
 ```
 lease  = start_scratch_cluster(prefix="mvpeval")   # bin/seon start <name>
@@ -229,7 +229,7 @@ describing the renderer with no receipt).
 ### B. Walk reading — an answer that exists only in the context
 
 **Setup.** Seed the nonce into a place reachable ONLY by the agent's own walk
-at d2: the contract string of one function in a toolkit namespace the agent
+at d2: the contract string of one function in an agent-facing namespace the agent
 sees as a compact card. Concretely, publish one extra schema key
 `:my.archive/retention-days-<nonce>` and one contracted function in a toolkit
 namespace whose `:seon.fn/spec` references it.

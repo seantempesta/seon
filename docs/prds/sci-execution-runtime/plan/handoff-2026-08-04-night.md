@@ -38,7 +38,7 @@ Plus two platform incidents and a disk emergency, all resolved or scheduled.
   verification proof), editor deliverable is DATA (the revision), only a clean
   proof adopts, adoption supersedes, all other futures deleted. Single-future
   adoption — there is never a merge.
-- **Destructive = WRITES, not door-crossings.** Reads (web/fs) are curable;
+- **Destructive = WRITES, not capability requests.** Reads (web/fs) are curable;
   writes that left the branch are pinned. Mutation classification by leaf
   METADATA (the workload-classification pattern), reachability derives chains.
 - **Open maps EVERYWHERE** (#48 extended to agent-authored fn contracts) —

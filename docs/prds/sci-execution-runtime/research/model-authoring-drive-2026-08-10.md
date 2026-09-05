@@ -36,7 +36,7 @@ It defined it, called it — `(token-pressure [{:prompt-tokens 100
 closed the run with `my.run/complete`. A later turn queried both of its own
 contracts back out of the database on its own.
 
-**Stage 2 — ACHIEVED.** The model authored a render producer and the selector
+**Stage 2 — ACHIEVED.** The model authored a render function and the selector
 picked it up with zero wiring:
 
 ```clojure

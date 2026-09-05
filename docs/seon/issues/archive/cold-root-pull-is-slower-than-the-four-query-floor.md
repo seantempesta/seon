@@ -18,7 +18,7 @@ slower on cold acquisition even though unchanged acquisition is read-free.
 
 The clock started after fixture and SCI request construction and surrounded
 only `seon.render.walk/root-acquisition`. The result contained one member. The
-door counter independently proved the operation sequence was exactly
+query observer counter independently proved the operation sequence was exactly
 `[:pull]`; projection acquisition issued no hidden query.
 
 Full measurement context is recorded in

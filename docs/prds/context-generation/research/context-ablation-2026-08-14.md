@@ -3,7 +3,7 @@ type: research
 title: Context ablation — why Attempt 5 replied without a form
 date: 2026-08-14
 status: complete
-subject: agent reply medium, prompt recency, toolkit context volume
+subject: agent reply medium, prompt recency, namespace documentation volume
 ---
 
 # Context ablation — why Attempt 5 replied without a form
@@ -19,7 +19,7 @@ Weak recency is the clean causal flip. Appending one 123-character reminder at
 the task tail produced one reader-accepted Clojure form in both calls (2/2).
 The full prompt and the identical-byte complete-demo control produced no forms.
 
-Toolkit volume also contributes. Reducing the toolkit span to 31.48% with no
+Namespace documentation volume also contributes. Reducing the namespace documentation span to 31.48% with no
 tail reminder produced forms twice (2/2), but it was a worse intervention: the
 first reply ran away into a very long repetitive survey, and the retained
 repeat emitted 16 exploratory forms without completing the task. Volume
@@ -32,7 +32,7 @@ Ranked implied fix:
    line: `Your reply is read as forms and evaluated in your namespace. Prose
    alone runs nothing; include at least one Clojure form.` This is the smallest
    demonstrated fix and flipped 2/2.
-2. **Enforce the existing namespace render budget and trim toolkit volume.**
+2. **Enforce the existing namespace render budget and trim namespace documentation volume.**
    Keep task-relevant API/schema blocks rather than the whole directory wall.
    This cut billed prompt tokens from 11,476 to 4,188 in the retained V4 repeat,
    but it is secondary because its replies were noisy.
@@ -60,7 +60,7 @@ prepl 55155):
   (seon.db/pull database ...))
 ```
 
-No elided database arity, `config/effective`, lifecycle operation, SCI-door
+No elided database arity, `config/effective`, lifecycle operation, SCI
 evaluation, or database transaction touched the specimen. Request assembly in
 the live JVM required the explicit
 `projection-from-database` → `sci.eval/projection-state` →
@@ -120,9 +120,9 @@ Every verdict below comes from `seon.cluster.reply/sources` in namespace
 | V1 | Requested demo repair is a no-op because the capture already has the whole `defn`; identical-byte control | 34,955 / 34,962 | `8422c3e1…e4b355b` | no forms |
 | V2 | Append exactly `\n\nYour reply is read as forms and evaluated in your namespace. Prose alone runs nothing; include at least one Clojure form.` | 35,078 / 35,085 | `29623272…52f9a4fa` | 1 form |
 | V3 | Whole-demo repair plus reminder; because repair is a no-op, byte-identical to V2 | 35,078 / 35,085 | `29623272…52f9a4fa` | 1 form |
-| V4 | Keep the complete prefix through the demo, `my.message`, `my.plan`, the agent namespace, `seon.db`, and the exact task suffix; delete the other toolkit blocks | 12,921 / 12,926 | `1e16b130…1ea7e884` | 16 forms in retained repeat; forms in first noisy call too |
+| V4 | Keep the complete prefix through the demo, `my.message`, `my.plan`, the agent namespace, `seon.db`, and the exact task suffix; delete the other namespace blocks | 12,921 / 12,926 | `1e16b130…1ea7e884` | 16 forms in retained repeat; forms in first noisy call too |
 
-V4's original toolkit interval was 32,159 characters. It retained 10,125
+V4's original namespace documentation interval was 32,159 characters. It retained 10,125
 characters (31.484%). The task-turn suffix is byte-identical.
 
 ## Results and raw replies
@@ -229,7 +229,7 @@ I'll start by examining the current state of my namespace and understanding the 
 Production reader: one source. The leading prose was retained as a single-`;`
 comment before the fenced form.
 
-### V4 — toolkit trimmed to 31.48%: forms, but noisy
+### V4 — namespace documentation trimmed to 31.48%: forms, but noisy
 
 The first V4 call emitted reader-accepted forms but ran away into a repetitive
 reply large enough to overflow the terminal evidence window. Its complete raw

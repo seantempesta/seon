@@ -103,7 +103,7 @@ rides arities + spans, no AST interrogation needed at selection time).
 | `form-calls` spelling-syntactic filter over var-usages (`fn.clj:528+`) | the settled form's own usage children, `:seon.fn.usage/arity` present = a call |
 | bare-gate reachability from `:seon.fn/calls` edges | transitive closure over `usage/to` refs — same Datalog rule, richer base |
 | `tests-reaching` 3-hop join through calls sets | closure over usage refs from `:seon.test` rows — arity-exact |
-| producers-of-key + composition join (`output-refs ∩ input-refs`) | unchanged inputs, but suggestion ranking gains real usage counts/locations |
+| functions returning an attribute + composition join (`output-refs ∩ input-refs`) | unchanged inputs, but suggestion ranking gains real usage counts/locations |
 | mention-tracing `form-symbols` spelling match (M10) | resolved `usage/to` refs at the recorded site — alias-proof by construction |
 | error-adjacency "which code touches this keyword" via `:seon.fn/keywords` sets | keyword SITES with locations — adjacency lands on the line, not the function |
 | `renderer unavailable`-era "who calls help" unanswerable | `[?u :seon.fn.usage/to ?help-row]` — one clause |

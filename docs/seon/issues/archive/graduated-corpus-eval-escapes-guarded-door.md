@@ -5,7 +5,7 @@ severity: blocker
 tags: [issue, runtime, agent]
 ---
 
-# Graduated corpus source compiles with host eval, escaping the guarded door
+# Graduated corpus source compiles with host eval, escaping the bounded evaluator
 
 ## Problem
 
@@ -24,7 +24,7 @@ admission.
 
 R48 selects proven-pure compilation: native compilation may reopen only after
 P4/R33 proves the exact transitive call graph pure, capability-free, and
-door-equivalent. Differential testing remains a sanity check, not admission.
+equivalent to bounded evaluation. Differential testing remains a sanity check, not admission.
 
 ## Resolution
 

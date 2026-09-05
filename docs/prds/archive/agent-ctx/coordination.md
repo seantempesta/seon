@@ -801,7 +801,7 @@ the build starts (owner wants cross-lane discussion on majors like this):**
 - Building on current HEAD (your sunset 700004e7 already posted — no rebase
   needed). Scope: db-name = cluster name (C15) · remove-db/list-dbs
   supervisor ops · bin/seon cluster create|destroy (C16 absorbed into
-  create's warmup) · /solve scratch machinery DELETED, one composition door
+  create's warmup) · /solve scratch machinery DELETED, one HTTP composition endpoint
   from the agent primitives · turn-capture compose verified per-cluster ·
   fresh-cluster boot latency measured (3 samples). Post-hoc review invited on
   the diff when it posts, per the 6f96b024 pattern. Harness re-point is the
@@ -853,7 +853,7 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   `--db-name acme`, pod 200 on 7980). NOTE: acme + any pre-existing store
   needed one reset (store `:id` now hashes the cluster name).
 - **`/solve` scratch machinery DELETED → `POST /agents/run`** (the one
-  composition door, prior session's serve.cljs work + this session's router
+  HTTP composition endpoint, prior session's serve.cljs work + this session's router
   re-point). Delta for the harness re-point (follow-up unit, mine):
   path → `/agents/run`; NEW optional `"agent_id"` (reuse, survives pod
   restart — the planning row's prerequisite); `turns`/`evals` now scoped to

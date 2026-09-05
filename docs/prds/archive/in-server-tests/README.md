@@ -199,7 +199,7 @@ current owner on both sides:
 - no second runner, reporter, changed-test analyzer, or namespace roster;
 - no `System/exit`, `Runtime.halt`, or fatal backstop in a live cluster;
 - no in-server `--full`, process/boot tests, or classpath mutation machinery;
-- no test-code capability door — effects inside tests use the existing effect
+- no separate test-code capability handler — effects inside tests use the existing effect
   owner; and
 - no direct root-agent shortcut around one-value messaging, wait custody, or
   terminal eval receipts.

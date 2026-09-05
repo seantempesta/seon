@@ -104,7 +104,7 @@ remains the JVM compiler while Bun may run development pods, test/worker
 artifacts, and packaged pods. Shadow 3.4.10 already declares Bun support and its
 `:node-script` output needs no new compiler target. The first implementation
 boundary is one manifest/launch runtime coordinate replacing Seon's hard-coded
-Node execution doors. Bun-native HTTP is now a measured priority: direct
+Node execution commands. Bun-native HTTP is now a measured priority: direct
 `Bun.serve` improved sequential throughput by 24% and bounded-concurrency
 throughput by 62%, while plain idle SSE used 43.09 MiB at 100 feeds. Per-feed
 gzip is the dominant avoidable feed cost; shared encoding reduced isolated

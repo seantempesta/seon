@@ -133,7 +133,7 @@ fully bound submitter:
 `seon.effect/*request-context*` (`src/seon/effect.clj:26-28`, "the current
 evaluation's durable identity") are not schema state at all, yet they vanish
 together because they ride the same carrier. Every capability request crossing
-the guarded door on `:io` — fs, web, llm, db — runs with no cluster identity, no
+the bounded evaluation on `:io` — fs, web, llm, db — runs with no cluster identity, no
 declarations, and no request identity. Under one cluster this is invisible
 because the fallback happens to be right, which is exactly why it survived.
 

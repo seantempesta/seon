@@ -65,7 +65,7 @@ hardening comes later (recommendation at the end).
   in that copy). DeepSeek resolves repl-mode **`:stream`** (per-model
   default) — one form per turn, form-limit 60, 10-min run deadline; so
   "turns" below are stream turns (≈ forms), not batch turns.
-- Drive door: `POST /agents/run` (`{"input", "timeout_ms"}`), fresh
+- Execution endpoint: `POST /agents/run` (`{"input", "timeout_ms"}`), fresh
   agent per scenario; observations read back from the store over the
   wire REPL (eval log, plan rows, status tx history, faults) — no
   coaching, no mid-run edits.

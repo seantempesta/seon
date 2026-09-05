@@ -270,7 +270,7 @@ The function queries four open families by their existing identity/connection
 attributes: render calls, error facts, attempts/captures/evals, and program
 graph sink paths. It derives counts, ratios, recurrence, thresholds, and
 current unresolved paths at read time. Adding a new error kind, print face,
-renderer producer, attempt observation, or external sink automatically appears
+render function, attempt observation, or external sink automatically appears
 through those family queries; there is no quality-class enum, threshold row,
 notification queue, stored report, or per-class renderer.
 

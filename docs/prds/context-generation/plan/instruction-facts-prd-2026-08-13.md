@@ -85,8 +85,8 @@ this PRD ([design-ideas ledger](design-ideas-ledger-2026-08-13.md)).
 | Current self-fade precedent | Opening generation already derives own-namespace public functions plus green usage results and shortens linked demonstrations when those results exist (`src/seon/bootstrap.clj:136-173,182-243`). | Generalize this query from a namespace-wide special case to instruction subjects; do not add seen/acknowledged facts. |
 | Program/test facts | Static indexing records usage metadata, call refs, keyword facts, and optional test subject refs (`src/seon/fn.clj:284-303,313-380`). Test reachability and current failures are Datalog rules (`src/seon/fn.clj:668-710`). Test result counts are stored on test rows (`resources/seon/schemas/seon.test.edn:1-78`). | Discovery, suite ownership, and self-fade are queries over existing facts. |
 | Schema idioms | `my.note` uses an identity, an optional validated `:about` ref, open entity maps, and declared AI/HTML/form renders (`resources/seon/schemas/my.note.edn:1-21`; `src/my/note.clj:95-107,137-169`). `my.plan` uses cardinality-many validated `:about` refs and refuses missing subjects inside its transition (`resources/seon/schemas/my.plan.item.edn:1-29`; `src/my/plan.clj:117-139`). | Reuse identity/ref/open-map semantics and validate every subject in the same atomic seed transition. |
-| Executable-teaching precedent | `my.run/walkthrough` is a zero-argument contracted producer of `:seon.repl/entries`; its usage test is indexed with `:seon.test/usage true` (`src/my/run.clj:41-83`; `test/my/run_test.clj:99-114`). | Reuse the producer-plus-usage-test relationship, but not its current scratch-then-overwrite content; ruling 37 requires the five new demonstrations to be schema-first. |
-| Curation | The settled design is editor → ordered source revision → proof on a fresh fork → atomic adoption through `:seon.cluster.run/supersedes` ([session-curation PRD](session-curation-prd-2026-08-04.md)); current adoption commits proof receipts and supersession refs (`src/seon/cluster/curate.clj:272-345`). | Mining is a possible producer of canonical teaching data, not a new replay/adoption mechanism. Decision 5 sets its phase. |
+| Executable-teaching precedent | `my.run/walkthrough` is a zero-argument contracted function returning `:seon.repl/entries`; its usage test is indexed with `:seon.test/usage true` (`src/my/run.clj:41-83`; `test/my/run_test.clj:99-114`). | Reuse the function-plus-usage-test relationship, but not its current scratch-then-overwrite content; ruling 37 requires the five new demonstrations to be schema-first. |
+| Curation | The settled design is editor → ordered source revision → proof on a fresh fork → atomic adoption through `:seon.cluster.run/supersedes` ([session-curation PRD](session-curation-prd-2026-08-04.md)); current adoption commits proof receipts and supersession refs (`src/seon/cluster/curate.clj:272-345`). | Mining can generate canonical teaching data, not a new replay/adoption mechanism. Decision 5 sets its phase. |
 
 Dependency ledger: Datahike supplies identity lookup refs, cardinality-many set
 semantics, atomic transactions, and history; Seon's Malli-to-Datahike bridge
@@ -224,7 +224,7 @@ meaning changes.
   artifact source (`src/seon/cluster/instruction.clj:74-79`).
 - `instruction-form` returns the honest current pull form when the lesson has
   no linked executable demonstration. When the row's subject refs include one
-  admitted usage test with one zero-argument producer returning
+  admitted usage test with one zero-argument function returning
   `:seon.repl/entries`, it returns those entries. Decision 3 chooses whether
   that relationship stays derived or receives a direct ref.
 - Render-contract coherence is checked by the existing admission gate; a
@@ -353,24 +353,24 @@ Each of the five law instruction rows links to a distinct
 `^{:seon.test/usage true}` test. Under Decision 3's recommended graph shape:
 
 1. the usage test's `:seon.test/subject` points to one public zero-argument
-   producer whose output ref is `:seon.repl/entries`;
+   function whose output ref is `:seon.repl/entries`;
 2. the instruction's subjects include that usage-test row plus the real
    functions/schemas the lesson teaches;
-3. `instruction-form` derives the producer through those facts and returns its
+3. `instruction-form` derives the function through those facts and returns its
    entries; and
 4. the usage test executes the same entries through a fresh SCI fork and the
    canonical database fixture, then asserts the receipts and durable facts.
 
 This copies no form source into the instruction row. The current
-`my.run/walkthrough` plus its usage test proves the producer/test relationship
+`my.run/walkthrough` plus its usage test proves the function/test relationship
 exists (`src/my/run.clj:41-83`; `test/my/run_test.clj:99-114`), while ruling 37
 governs the new content. This PRD intentionally contains no invented worked
 episode forms. Implementation authors must first obtain the exact entries from
-the real producer, then commit those same entries and their receipts as the
+the real function, then commit those same entries and their receipts as the
 test evidence.
 
 For a negative lesson—at minimum every executable `:ban` or `:scar` row—the
-producer contains exactly one wrong call. The test executes it and asserts:
+function contains exactly one wrong call. The test executes it and asserts:
 
 - the call was attempted;
 - its actual receipt is a flat typed `:seon.error` naming the failed boundary;
@@ -418,11 +418,11 @@ the concrete resolution of ledger item 10 proposed for owner approval.
 ### Decision 3 — How does an instruction identify executable teaching?
 
 1. **Derive it from a linked usage test and that test's unique zero-argument
-   `:seon.repl/entries` producer (recommended).** Guarantee: program facts and
+   `:seon.repl/entries` function (recommended).** Guarantee: program facts and
    the suite are the one relationship; copied forms cannot drift. Cost: a loud
-   uniqueness/shape query at admission/render. Give up: arbitrary producer
+   uniqueness/shape query at admission/render. Give up: arbitrary function
    signatures.
-2. **Add a direct instruction → producer ref.** Guarantee: simpler lookup and
+2. **Add a direct instruction → function ref.** Guarantee: simpler lookup and
    explicit intent. Cost: a second relationship that must agree with the usage
    test's call/subject edges. Give up: derivation from existing program facts.
 3. **Store form sources on instruction rows.** Guarantee: rows are
@@ -468,8 +468,8 @@ depend on the preceding fact shape and artifact contract.
 | I1 — fact model and one seed tx | `resources/seon/schemas/seon.cluster.instruction.edn`; one checked-in instruction seed resource chosen by Decision 2; `src/seon/cluster/instruction.clj`; `src/seon/cluster.clj`; `test/seon/cluster/instruction_test.clj` | Registry-query-first schema accretion; consume all 167 catalogue rows under Decision 1; replace `instruction-ids` and insert-only population; run one atomic reconciliation after program indexing. | Fresh canonical database contains the exact expected live id set; every source component validates; every subject resolves; maps accept an undeclared extra key; a missing subject, duplicate id/ordinal, gap, or malformed source aborts the whole transaction; a second identical seed is a no-op; changed text mutates the same id and history retains the old datom. |
 | I2 — render-equality artifact | `src/seon/cluster/instruction.clj`; the small dev/build entry point selected by Decision 2; `AGENTS.md`; `test/seon/cluster/instruction_test.clj` | Pure ordered artifact render; generate root instructions; replace the old coverage mirror with byte equality and non-vacuity falsifiers. | Fresh-db render equals `AGENTS.md` byte for byte including final newline; missing/extra/reordered/mutated/empty inputs all fail loudly; a second generation changes zero bytes. |
 | I3 — subject discovery and self-fade | `src/seon/bootstrap.clj`; `src/seon/render/walk.clj` only if its generic candidate seam needs accretion; `test/seon/bootstrap_test.clj`; `test/seon/render/history_test.clj` | Add instruction candidates from reverse subject refs; use the existing budget and explained-set order; replace namespace-special demonstration shortening with Decision 4's instruction query. | Refless opening remains byte-identical; adding one subject adds exactly its admitted lesson; unrelated lessons remain absent; own artifact + green usage result fades the lesson; missing/zero/failing result does not; current facts + empty history makes the same decision; no new wake occurs. |
-| I4 — five laws and negative receipts | `src/seon/cluster/instruction.clj`; `test/seon/cluster/instruction_test.clj`; the five law instruction rows in the seed resource | One real zero-arg entries producer and one `^{:seon.test/usage true}` test per law; spec-first forms only; negative `:ban`/`:scar` lessons execute one wrong call. | Five discovered usage tests run under `bin/test`; each rendered demonstration equals the tested producer's entries; all forms execute in a fresh SCI fork; each negative lesson records exactly one typed refusal and continues; corrupting a producer or removing its usage test makes the suite red before publication. |
-| I5 — mined lessons, only if Decision 5 chooses now | `src/seon/cluster/curate.clj`; `resources/seon/schemas/seon.cluster.curate.edn`; instruction owner above; focused curation + instruction tests | Promote only an accepted proof's ordered receipt span into a canonical usage producer/ref; reuse revision, proof, and supersession rather than replaying again. | An unproved/editor-only/failed proof cannot publish; an accepted proof publishes once with provenance and reproduces its receipt-derived entries; identical promotion is a no-op; artifact equality stays green. |
+| I4 — five laws and negative receipts | `src/seon/cluster/instruction.clj`; `test/seon/cluster/instruction_test.clj`; the five law instruction rows in the seed resource | One real zero-arg entries function and one `^{:seon.test/usage true}` test per law; spec-first forms only; negative `:ban`/`:scar` lessons execute one wrong call. | Five discovered usage tests run under `bin/test`; each rendered demonstration equals the tested function's entries; all forms execute in a fresh SCI fork; each negative lesson records exactly one typed refusal and continues; corrupting a function or removing its usage test makes the suite red before publication. |
+| I5 — mined lessons, only if Decision 5 chooses now | `src/seon/cluster/curate.clj`; `resources/seon/schemas/seon.cluster.curate.edn`; instruction owner above; focused curation + instruction tests | Promote only an accepted proof's ordered receipt span into a canonical usage function/ref; reuse revision, proof, and supersession rather than replaying again. | An unproved/editor-only/failed proof cannot publish; an accepted proof publishes once with provenance and reproduces its receipt-derived entries; identical promotion is a no-op; artifact equality stays green. |
 | I6 — integration and live proof | The owners above; `bin/test` as the one gate | Run focused namespaces, bare changed-code selection, then `bin/test --all`; publish current source and fork a fresh isolated cluster. | Gate green with nonzero tests; fresh cluster has one reconciled instruction transaction; generated `AGENTS.md` is equal; one subject miss teaches, one proved lesson self-fades, rebirth preserves both decisions, and no handwritten prompt fragment or second instruction path remains. |
 
 ## Acceptance checklist for owner markup

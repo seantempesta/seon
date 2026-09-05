@@ -104,9 +104,9 @@ one background terminal that DID read a conveyed binding —
 `seon.effect/settle-value!` reaching for admission dials — now receives them
 as data read once on the requesting thread (`f3b8eabda`).
 
-The named remainder is at the OTHER door, not here: `seon.effect/dispatch`
+The named remainder is at the OTHER effect execution boundary, not here: `seon.effect/dispatch`
 still uses `bound-fn` for the foreground handler, because
 `src/seon/shell/jvm.clj:290` and its peers have not yet been converted to
 take their environment as an argument. That conversion is Phase 3's, and it
 is tracked on
-[the effect-door issue](../the-effect-door-runs-capability-handlers-unarmed.md).
+[the effect-execution issue](../the-effect-door-runs-capability-handlers-unarmed.md).

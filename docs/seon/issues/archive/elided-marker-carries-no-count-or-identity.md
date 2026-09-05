@@ -74,7 +74,7 @@ count, knowable total, path, next offset, profile identity, and either a stable
 requery identity or an explicit refusal. AI and HTML sinks consume the same
 node. A regression asserts both faces and their digest identity.
 
-Fresh door proof on isolated root `tmp/universal-floor-live-0804` rendered a
+Fresh SCI evaluation proof on isolated root `tmp/universal-floor-live-0804` rendered a
 100,000-element vector as 32 retained children plus 99,968 omitted of 100,000,
 with next offset 32 and blob digest
 `f09029ee10a50fbde2ea1fb3459502f769df6b8779a95f7158fc6c7c4f793f38`.

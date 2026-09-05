@@ -9,7 +9,7 @@ severity: blocker
 
 ## Problem
 
-The JVM guarded door accepts a missing guard-policy query result as a complete
+The JVM bounded evaluator accepts a missing guard-policy query result as a complete
 policy. `every?` over the empty `vals` sequence returns true, so invocation
 execution reaches the guard with nil fuel and fails before any authored or
 compiled function can run.

@@ -5,13 +5,13 @@ severity: blocker
 tags: [issue, agent, flow]
 ---
 
-# Derive the composition-door timeout from run policy
+# Derive the HTTP handler timeout from run policy
 
 ## Problem
 
 `POST /agents/run` used a hardcoded five-minute request timeout when the caller
 omitted `timeout_ms`. The run owner already derived a 30-minute default from
-the database config singleton, so the Inspect composition door could terminate
+the database config singleton, so the Inspect HTTP handler could terminate
 a healthy task under a different, invisible bound.
 
 ## Dependency ledger
@@ -21,7 +21,7 @@ a healthy task under a different, invisible bound.
 - `seon.agent.ctx/run-policy` reads the frozen `:seon.config` singleton and
   falls back through the registered config schema.
 - `seon.web.serve/run-agent-task!` is the one `POST /agents/run` composition
-  door used by `seon_inspect.solver`; no second evaluator or lifecycle exists.
+  HTTP handler used by `seon_inspect.solver`; no second evaluator or lifecycle exists.
 - Focused behavioral owners are `seon.agent.run-test` and
   `seon.web.serve-test`.
 
@@ -36,7 +36,7 @@ a healthy task under a different, invisible bound.
 ## Resolution
 
 The resolving commit extracts one pure `effective-deadline-ms` owner in
-`seon.agent.run`, reuses it when opening a run and when the composition door
+`seon.agent.run`, reuses it when opening a run and when the HTTP handler
 receives no explicit request timeout, and preserves explicit Inspect bounds.
 Focused `run` and `serve` tests pass 15 tests and 65 assertions. The running
 ACME pod resolves 1,800,000 ms from its live database for root through the

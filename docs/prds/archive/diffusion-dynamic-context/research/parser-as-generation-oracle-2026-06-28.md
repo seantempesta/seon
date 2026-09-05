@@ -21,8 +21,8 @@ diverse real-LLM programs and 124 injected corruptions:
   `seon.repair` — recovery is a guarantee, not a label, so a generation loop
   fixes them in place with **zero model round-trips**.
 - The remaining **3.2% are "masked-divergent"** — the corruption still parses but
-  *means something else*; only the eval cage can catch these. This is the
-  syntactic/semantic boundary the diffusion papers predicted. **The eval cage
+  *means something else*; only the evaluator can catch these. This is the
+  syntactic/semantic boundary the diffusion papers predicted. **The evaluator
   catches ~91.5% of masked-divergent corruptions** (62.5% as a hard error, no
   reference needed); its ~8.5% residual is dead-data mutation (data off the
   program's live path) — the semantic/factual boundary one tier further out. See
@@ -46,7 +46,7 @@ measures exactly that collar's economics:
   embedding/program-graph lookup earns its keep (the wrong-fn-name / wrong-API
   blind spot the Transformer Lab paper measured at AUROC 0.471 — entropy can't
   self-detect them, so an external oracle must).
-- **Masked-divergent → eval cage.** 3.2%. Syntax is clean but meaning changed;
+- **Masked-divergent → evaluator.** 3.2%. Syntax is clean but meaning changed;
   only running it (Seon's SCI eval) catches the divergence. Two-tier detection,
   exactly as predicted: syntactic (parser) → semantic (eval) → factual
   (retrieval).
@@ -95,7 +95,7 @@ the pod recovery eval (`seon.repair`). Inner-loop test gate: `bin/test-parser`
   canvases** once the RunPod env is unblocked (still blocked on the custom torch
   image; see [[index]]).
 - The **3.2% masked-divergent** rate is a genuine parser blind spot by
-  construction — it is the eval tier's job. **NOW MEASURED:** the SCI cage catches
+  construction — it is the eval tier's job. **NOW MEASURED:** the SCI evaluator catches
   **~91.5%** of masked-divergent corruptions (62.5% via a hard error alone, no
   reference needed); the ~8.5% it misses are **dead-data mutations** — corruption
   of data off the program's live path. See "Eval-tier catch of masked-divergent"
@@ -223,7 +223,7 @@ delimiters → parser, token-substitution-that-parses → eval.
 
 ### Method
 
-Each masked-divergent variant's source is evaluated through the real cage —
+Each masked-divergent variant's source is evaluated through the real evaluator —
 `(seon.eval/eval @seon.repl/!compile-state src)` on the live `:client` runtime
 (the bootstrap-cljs self-host compiler + always-on Malli instrumentation;
 `seon.eval/eval` never throws, returns `{:ok true :value v}` | `{:ok false
@@ -232,10 +232,10 @@ original's result. Forms are **pure expressions** so eval mutates no store — s
 on the live runtime. Classification per divergent variant:
 
 - **CAUGHT-BY-ERROR** — divergent `{:ok false}` (analyzer/instrument/runtime
-  throw) while original `{:ok true}`. The strong catch: the cage flags it with
+  throw) while original `{:ok true}`. The strong catch: the evaluator flags it with
   **no reference needed**.
 - **DIVERGES-IN-VALUE** — both `{:ok true}` but `(not= div-value orig-value)`.
-  The cage ran it clean; catching the divergence needs an external check (a
+  The evaluator ran it clean; catching the divergence needs an external check (a
   comparator / a test / the reference value).
 - **MISSED** — both `{:ok true}` and `(= div-value orig-value)`. Truly silent.
 
@@ -274,7 +274,7 @@ Natural-distribution-weighted over all 928 masked-divergent corruptions:
   `[people …]` — a structurally different sexpr that references undefined
   `people` → eval throws *"people is not defined — this form ran NOTHING."* A
   delimiter deletion that *rebalances* (rather than unbalancing) lands in the
-  parser's blind spot, and the cage catches it the instant it runs.
+  parser's blind spot, and the evaluator catches it the instant it runs.
 - **DIVERGES-IN-VALUE (digit):** `(merge {:a 1 :b 2} {:b 20 :c 30} {:d 40})` with
   a digit dropped → `:c 30`→`:c 3`. Parses clean, evals clean, but returns
   `{:a 1 :b 20 :c 3 :d 40}` ≠ original `{… :c 30 …}` — observable iff you have

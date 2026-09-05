@@ -57,7 +57,7 @@ layout, or acceptance may depend on that namespace's name.
 - The current Web UI is not a design requirement. Retain useful mechanisms,
   redesign its information hierarchy and layout.
 - Work with real program rows and data. Agent-authored functions used as proof
-  must have settled through the existing turn path; no shared door-context defs.
+  must have settled through the existing turn path; no reliance on unsettled defs in the shared SCI context.
 - First graph expansion is one hop, with further expansion on demand. Context
   traversal depth is a separate explicit input; a depth config may follow.
 - No paid model calls for inspection. A generated-form proof can use
@@ -208,6 +208,22 @@ read-only description is distinct from installing bindings in a fork.
 
 ### Visual overview
 
+**Milestone status — 2026-09-05, implementation authorized**
+
+- [x] Trace existing cluster/SCI/render ownership and record evidence.
+- [ ] 0: Prerequisites — **in progress**. Same-arity renderer fix assigned;
+  SCI isolation awaits integration with the other session's turn-batching work;
+  real-turn baseline remains unverified.
+- [ ] 1: Real data, candidate and output inspection.
+- [ ] 2: Agent-driven function/schema edit, rerun, compare and revert.
+- [ ] 3: Graph navigation and measured acquisition/render work.
+- [ ] 4: Complete bootstrapped context experiments and owner review.
+- [ ] 5: Generalization, adoption and deletion of replaced mechanisms.
+
+Terminology review is complete; integration checks continue alongside milestone 0. Simple edits
+and checks use smaller models; architectural and integration work retains
+stronger review. The owner inspects and directs; Codex performs the changes.
+
 **Agent-driven operation (owner clarification, 2026-09-05):** Codex drives
 the experiments through MCP/REPL, database transactions, source edits and the
 existing operator. Sean inspects outputs and directs design; manual editing of
@@ -227,7 +243,7 @@ agent. No blanket promise that every schema change can mutate a live store.
 
 For every change, distinguish loaded host Vars, committed program definitions,
 Malli projections, and stored datoms. MCP JVM mode supplies explicit custody;
-MCP door mutates shared SCI state without creating ordinary run facts and is
+MCP evaluation in the shared SCI context mutates shared SCI state without creating ordinary run facts and is
 not the adoption mechanism. Execution experiments use the existing real agent
 path. File reload alone does not establish that an existing cluster adopted a
 new program. Show the exact branch/program/basis and refresh the visible result

@@ -16,7 +16,7 @@ namespaced attribute set whose PRESENCE makes it what it is, validated by a
 registered schema carrying the `{:seon.error/class true}` Malli property;
 `matching-shapes-in` finds the class. ONE MODEL covers in-flight error values
 and committed fault facts (historical facts stay as history — never migrated).
-Errors get renderers: one default producer pair for any class-carrying value,
+Errors get renderers: one default render function pair for any class-carrying value,
 per-class overrides only where a class earns richer display.
 
 The complete authority is the census:
@@ -123,7 +123,7 @@ namespaces (error_test, turn_test, problem_routing_test) are rewritten
 against the surviving mechanism here, never green-washed.
 
 **W5 — spec branches + advisory gate.** `[:or …]` error branches on the
-capability and door entry points first, then the advisory install-gate
+capability and SCI evaluation entry points first, then the advisory install-gate
 check (observed class not in declared output-refs → one teaching line).
 Composes with the accretion-testing PRD's gate; the check itself is a
 query over `:seon.fn.arity/output-refs` × `:seon.error/class`.
@@ -159,7 +159,7 @@ query over `:seon.fn.arity/output-refs` × `:seon.error/class`.
   its class schema; the seven local constructors die in W2;
 - no regex over source to find or rewrite sites (standing regex ruling; the
   census is the work list, `seon.edit`/rewrite-clj are the tools);
-- no second renderer path beside the declared-producer discovery query;
+- no second renderer path beside the declared render function discovery query;
 - no blame taxonomy resurrection — who-is-at-fault is the channel's answer;
 - no migration of historical kind-carrying facts.
 

@@ -397,7 +397,7 @@ items. Absence from an agent's partial or elided todo view must never mean
 “delete the underlying message/run/test.” Even for authored items, a small
 add/complete surface may be enough; whole-document replacement makes omission
 destructive and title-based ID recovery creates a costly ambiguity protocol.
-The old reconciliation should therefore not be copied as a union-wide door.
+The old reconciliation should therefore not be copied as a union-wide admission function.
 If later evidence earns bulk editing, its scope must be only the complete
 authored-item projection, with explicit stable IDs preferred over inference.
 

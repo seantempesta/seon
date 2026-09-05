@@ -334,7 +334,7 @@ back — everywhere, for every agent, with no maintained list of forms.
     todo is derived-first (unanswered messages, open runs, failing tests —
     rebirth-proof by construction) extended with authored item FACTS for
     agent decomposition; the render is the union, completed items vanish.
-    The my.plan toolkit (never implemented) is removed from the target
+    The my.plan namespace (never implemented) is removed from the target
     vocabulary; agent-authored intentions live as todo items under the
     survivability law.
 

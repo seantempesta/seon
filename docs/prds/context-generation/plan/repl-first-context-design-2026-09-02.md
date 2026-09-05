@@ -119,7 +119,7 @@ declares the data's schema as its INPUT and `:seon.render/ai` (text) or
 Selection is then a QUERY over program-graph contracts, in priority
 order, ties loud (43):
 
-1. an inline `:seon.render/ai` on the value itself [REAL: explicit producer];
+1. an inline `:seon.render/ai` on the value itself [REAL: explicit render function];
 2. a public function in the AGENT'S OWN namespace whose arity accepts
    the value's family and returns `:seon.render/ai`
    [REAL mechanism: `render/candidates` does this by Malli validation
@@ -149,7 +149,7 @@ this chain. The agent customizes printing the way Clojure does, by
 defining the function (Clojure's `print-method` is the precedent; ours
 dispatches on the declared schema instead of the JVM type). [?] whether
 an explicit agent-callable exists at all (`seon.render/ai`?) or the
-printer is the only door.
+printer is the only output function.
 
 ## 4. Teaching — `doc` and `dir`, tailored, polymorphic, demand-driven
 

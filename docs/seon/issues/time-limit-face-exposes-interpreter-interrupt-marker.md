@@ -16,7 +16,7 @@ marker is neither actionable nor stable agent-facing data.
 ## Evidence
 
 On 2026-08-04, isolated cluster `edgefaces0804` evaluated this through the
-real SCI door and reached the configured 30-second limit:
+real SCI evaluator and reached the configured 30-second limit:
 
 ```clojure
 (loop [n 0] (recur (inc n)))

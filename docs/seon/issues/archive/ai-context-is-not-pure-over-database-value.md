@@ -20,7 +20,7 @@ The triage's L sizing below is therefore stale on the input side. What
 remains for this issue's closure: I5 file-block fingerprints (ctx.cljs:118-208,
 :262-276), the SOUL env read (:248-256), the NEW host-timezone impurity in
 cacheable timestamps (ctx.cljs:297-303 → transcript.cljs:348), the 11
-ambient-db fallback doors (`(await (db/db))` tier), vestigial
+implicit database lookup fallbacks (`(await (db/db))` tier), vestigial
 `::result-handles?` dial deletion, and the unbuilt stage-5 byte-identity
 gate. Full ledger: research doc §2; fold into the ruling-20(d) render-move
 unit (stage R0) as already ordered.

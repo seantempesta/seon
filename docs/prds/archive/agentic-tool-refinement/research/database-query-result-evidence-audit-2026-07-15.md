@@ -60,10 +60,10 @@ The existing mechanisms and first-party call sites are:
 - `test/seon/web/serve_test.cljs`: directly proves request scoping and stable
   eval projection;
 - `src-inspect-ai/src/seon_inspect/solver.py`: `_record_result` preserves the
-  door's coordinate, turn evidence, and eval evidence in `TaskState.metadata`;
+  endpoint's coordinate, turn evidence, and eval evidence in `TaskState.metadata`;
 - `src-inspect-ai/src/seon_inspect/milestone.py`: `check_store_recall` consumes
   only eval source/ok plus reply today; `pod_milestone_driver` accepts only the
-  door response and introduces no side channel;
+  endpoint response and introduces no side channel;
 - `src-inspect-ai/src/seon_inspect/tasks/milestone_lift.py`: retains the
   generated oracle only in host-side sample metadata and uses native Inspect
   solvers/scorers;
@@ -94,7 +94,7 @@ The current live path is:
 3. `pod_run` posts only the task text to `/agents/run`.
 4. The Seon loop persists each eval as a component of its turn. Each eval has
    id, time, source, ok, result display or error, and agent ref.
-5. The door reads one final immutable database value, selects only runs opened
+5. The endpoint reads one final immutable database value, selects only runs opened
    by this request, selects their turns and evals, and sorts evals by
    `[wall-clock, eval-id]`.
 6. `project-eval-evidence` emits only eval id, time, ok, source, and optional
@@ -184,11 +184,11 @@ run -> turn -> eval -> operation-evidence blob
 
 The eval's identity datom transaction is the durable eval order. The
 operation position is order within that one eval. The transaction/query
-coordinates establish operation order, and the door's final coordinate must
+coordinates establish operation order, and the endpoint's final coordinate must
 be on the same database attachment and no earlier than every accepted proof
 coordinate.
 
-### Project bounded descriptors at the composition door
+### Project bounded descriptors at the HTTP composition endpoint
 
 From the same final database snapshot already used by `/agents/run`, add an
 `operation_evidence` vector to each selected eval row only when its blob ref is
@@ -220,7 +220,7 @@ For a generated database workflow it requires:
    database attachment, whose normalized request names the oracle measure and
    strict threshold and whose actual scalar result equals the oracle answer;
 4. transaction coordinate before query coordinate, both no later than the
-   door's final coordinate;
+   endpoint's final coordinate;
 5. the existing later human and completion reports, both equal to the actual
    observed scalar result; and
 6. exact eval/turn membership and eval-transaction ordering from the request
@@ -271,7 +271,7 @@ receives the oracle.
 - An explicit foreign/historical database read is labeled and cannot satisfy
   a current-attachment workflow proof.
 - A large result produces a bounded descriptor with hash and honest sizes; no
-  tail, stack, source dump, or runtime handle appears in the door response.
+  tail, stack, source dump, or runtime handle appears in the endpoint response.
 - An eval without database operations has no evidence attribute.
 - Pod restart followed by read-back from the same final coordinate reproduces
   the same evidence descriptor bytes.
@@ -319,7 +319,7 @@ Implement in this dependency order, with one owner per mechanism:
    existing scorer consume it fail-closed.
 6. The admitted native-run/read-back tests: prove Inspect's public metadata and
    log APIs preserve the result without another artifact format.
-7. Rebuild only ACME, inspect the exact database facts and door response through
+7. Rebuild only ACME, inspect the exact database facts and endpoint response through
    the repository REPL boundary, then replay only the one admitted database
    sample.
 
@@ -328,7 +328,7 @@ artifact. Unit tests alone do not close P0b.
 
 ## Coordinate-containment correction — 2026-07-15
 
-The first composition-door implementation did not prove the retained
+The first HTTP composition endpoint implementation did not prove the retained
 operation coordinate. `operation-coordinate-valid?` accepted any complete map
 on the final attachment whose `t` was no later than the final `t`; it never
 resolved the named commit. Replacing a real operation commit with a random,
@@ -338,7 +338,7 @@ later containing commit with the same transaction number had the same defect.
 The shortest correction reuses the authoritative original-transaction
 coordinate resolver already owned by `seon.db`; it does not add another
 history walker in the web or Inspect boundary. For every distinct operation
-point, the door supplies the request-scoped final immutable head and the
+point, the endpoint supplies the request-scoped final immutable head and the
 operation `t` to `resolve-transaction-coordinate!`, then accepts the point only
 when the writer returns that exact complete coordinate. The writer walks raw
 retained Konserve commits, verifies the frozen head is retained and remains an

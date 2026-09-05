@@ -134,7 +134,7 @@ before Phase 3 converts the named readers would break custody. What was
 missing is the honest note that a MUST constraint is unmet, plus the proof
 that closes it.
 
-### 4. FRICTION — the effect door runs capability handlers unarmed, and background work inherits a turn deadline
+### 4. FRICTION — the effect request handler runs capability handlers unarmed, and background work inherits a turn deadline
 
 [Issue](../../../seon/issues/the-effect-door-runs-capability-handlers-unarmed.md).
 

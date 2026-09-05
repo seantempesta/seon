@@ -52,4 +52,4 @@ rather than accidentally executable.
 Behavioural proof: the full gate (203 tests / 911 assertions / 0 / 0)
 includes `seon.cluster.turn-test`, which drives `:open` through the map
 arm, and `seon.cluster.armed-test`, which boots a real cluster whose
-loop transacts through the same door.
+loop transacts through the same transaction function.

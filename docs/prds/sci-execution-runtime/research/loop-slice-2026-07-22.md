@@ -78,7 +78,7 @@ The isolated cluster `loop-slice-live` used port 7898 and its own database,
 process, socket, log, and package directories. The same agent arc produced:
 
 - package segment: 12 turns, 33 receipts; fully-qualified
-  `fast-deep-equal/equal?` returned true through the existing Bun loader door;
+  `fast-deep-equal/equal?` returned true through the existing Bun loader;
 - heat turn 1: 20 turns, 186 receipts; durable `my.plan` root
   `zsjr0gfiy1qv`, authored `my.heat-resilience` schema, candidates
   `library-downtown` and `community-center-east`, set-valued services, EDN

@@ -4,11 +4,11 @@ status: complete
 tags: [research, operator, runtime, boot]
 ---
 
-# Operator integration: boot-tower seams (2026-08-03)
+# Operator integration: boot seams (2026-08-03)
 
 ## Verdict
 
-The surviving boot tower already is the lifecycle mechanism. Do not put a
+The surviving boot sequence already is the lifecycle mechanism. Do not put a
 component framework or a process-root scheduler beside it. Extract one small
 process-control owner around the existing process-local custody, keep
 `seon.cluster/start!` and its reverse unwind as the cluster mechanism, and make
@@ -90,7 +90,7 @@ that custody, so the Babashka operator currently reaches private state with
 `ns-resolve` (for example `script/seon/fresh_operator.clj:1385-1398,1719-1732,
 1811-1819`).
 
-### The cluster tower publishes incremental process-local readiness
+### The cluster boot sequence publishes incremental process-local readiness
 
 `start!` establishes the cluster io-prepl and its advertisement before entering
 the rest of the tower (`src/seon/cluster.clj:1594-1642`). `stack-tower!` then
@@ -199,7 +199,7 @@ database.
    (`java/seon/ArtifactMain.java:11-22`); `seon.artifact/-main` installs packaged
    pages, releases the store, then calls `cluster/start!`
    (`src/seon/artifact.clj:72-100`). The target needs one root-store hold and an
-   early control REPL, then page install and cluster tower inside that substrate.
+   early control REPL, then page install and cluster boot sequence inside that substrate.
 
 2. **“REPL first” still compiles cluster config first.** `start!` calls
    `config/compile-manifest` at lines 1594-1604 before binding the server at
@@ -250,7 +250,7 @@ database.
    replacements land.
 2. Split process substrate readiness from cluster start: exact process identity,
    store hold and control REPL first; then packaged-page install if required;
-   then call the existing cluster tower. Pass or ref-count the same held store so
+   then call the existing cluster boot sequence. Pass or ref-count the same held store so
    install and start have no fence gap.
 3. Route `init`, named fork/refork, config apply and live status through those
    functions over the existing REPL/MCP transport. Their implementations should
@@ -276,7 +276,7 @@ source, registry, config, readiness and lifecycle owners. REPL/MCP call them
 directly; agent lifecycle requests are interpreted after eval.
 
 Guarantee: one lifecycle mechanism, one branch owner, one uninterrupted flock,
-and an available control transport even when a cluster tower is degraded.
+and an available control transport even when a cluster boot sequence is degraded.
 Cost/risk: moderate extraction around the current private root-store holder and
 careful separation of agent-returned lifecycle values from direct operator
 calls. Capability retained: multi-cluster control and degraded-instance repair

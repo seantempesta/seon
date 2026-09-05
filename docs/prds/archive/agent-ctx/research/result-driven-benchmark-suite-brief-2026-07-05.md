@@ -58,7 +58,7 @@ best way to structure this is unknown and wants a fresh plan — hence this brie
 
 - **The harness:** `src-inspect-ai/` — a real Python package on Inspect AI.
   `catalog.py` (bench wiring, `swap_generate`, the `BENCH_ADAPTERS` seam),
-  `solver.py` (`/agents/run` door), `cluster.py` (ephemeral cluster lifecycle:
+  `solver.py` (`/agents/run` endpoint), `cluster.py` (ephemeral cluster lifecycle:
   create/restart/destroy, frozen bench bundle, N=2 parallelism), `freeze.py` +
   `evals/datasets.lock` (seeded dev/milestone/test splits, canary GUIDs, tier
   discipline — test blind by construction), `scorecard.py` (the ledger + pass^k

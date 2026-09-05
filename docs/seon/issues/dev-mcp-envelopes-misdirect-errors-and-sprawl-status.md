@@ -221,7 +221,7 @@ face.
 Recurring proof:
 
 - `seon.dev.mcp-bridge-test/evaluation-response-reports-the-exact-caller-source-once`
-  exercises JVM and door modes on success and failure, proves one source echo,
+  exercises JVM and SCI evaluation modes on success and failure, proves one source echo,
   and proves every returned event is free of a form copy;
 - `seon.dev.mcp-bridge-test/capped-list-tail-is-a-declared-elision-value`
   proves a capped list stays a list and its tail is the complete declared

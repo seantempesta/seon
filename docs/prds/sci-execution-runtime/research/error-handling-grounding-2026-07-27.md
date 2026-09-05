@@ -111,7 +111,7 @@ channel is read with `:priority true` both in the main `alts!!`
   broadcasts `::flow/stop` to `::flow/all`, and **rethrows out of
   `flow/start`** (`impl.clj:163-165`). This is a boot failure delivered
   to the caller as a Throwable, not a fault fact. The boot must catch it
-  the way `seon.cluster/start!` already catches tower failures
+  the way `seon.cluster/start!` already catches boot failures
   (`cluster.clj:522-531`).
 - **A throw in `describe` (arity-0)** happens during `create-flow`
   (`impl.clj:39`) — same class.
@@ -176,7 +176,7 @@ core.async channel; **throws** = escapes as a Throwable;
 | 15 | `seon.flow/start-error-fanout!` | the fault buffer overflows | `commit-drop!` with the dropped fault | as 14 | `flow.clj:422-450, 534-536` |
 | 16 | `seon.flow/submit!!` | compute work threw | rethrown to the submitter | **throws** | `flow.clj:416-417` |
 | 17 | `seon.flow` launcher | required config facts missing / launcher absent | `ex-info {:seon.error/kind :configuration}` | **throws** | `flow.clj:304-307, 381-384` |
-| 18 | `cluster/start!` | any tower layer failed | `ex-info {:seon.error/kind :seon.boot/refused, :seon.boot/instance <degraded>}` | **throws**, with the degraded instance carried | `cluster.clj:522-531` |
+| 18 | `cluster/start!` | any boot layer failed | `ex-info {:seon.error/kind :seon.boot/refused, :seon.boot/instance <degraded>}` | **throws**, with the degraded instance carried | `cluster.clj:522-531` |
 | 19 | `store/open-store!`, `registry`, `ancestor`, `export` | a refusal rule | `ex-info {… ::refused ::rule …}` | **throws** (caught by 18 at boot) | `store.clj:166`, `registry.clj:91`, `ancestor.clj:93`, `export.clj:88` |
 | 20 | `config/apply!`, `reconcile` | a refusal | `{:seon.error/kind ::refused …}` | **value** | `config.cljc:59`; `reconcile.cljc:62` |
 | 21 | `schema.cljc` | bad user input / a core bug | `ex-info` with `:seon.error/kind :user-input` or `:core-bug` | **throws** | `schema.cljc:112, 172, 724, 1513…` |
@@ -798,7 +798,7 @@ function, `instrument.clj:52`) rather than `collect!` (the macro,
 
 1. **At boot**, at the end of `stack-tower!` — after `config/apply!`, so
    the dial is a fact before the reporter is built. It must be the last
-   tower layer: instrumenting mid-boot would validate half-built values.
+   boot layer: instrumenting mid-boot would validate half-built values.
 2. **On reload**, explicitly. Measured in §4.3: a `defn` re-eval
    silently strips the wrapper and no watch fires. Options:
 

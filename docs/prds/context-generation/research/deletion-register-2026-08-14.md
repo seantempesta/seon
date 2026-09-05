@@ -81,7 +81,7 @@ selectors, the Malli-grounded closure, the compact/full data faces.
 | 2.3 | `output-tokens` — takes the MAX of AI text and serialized-HTML estimates, so markup bytes evict prompt content (reaudit §2.10) | transcript.clj:792-797 | 6 | DELETE | seam A measures the AI text only |
 | 2.4 | `fits?` | transcript.clj:799-801 | 3 | DELETE | — |
 | 2.5 | `best-summary` — the `:summary` tier: re-tests the identical candidate and always fails once `:full` failed (reaudit §2.7) | transcript.clj:803-807 | 5 | DELETE | — |
-| 2.6 | the `detail` parameter plumbing that made `:summary` look real: four producers take `_detail` and ignore it, plus the `::detail` key and its data attribute (partial) | transcript.clj:583, 624, 635, 666, 692, 769, 805 | ~7 | DELETE | — |
+| 2.6 | the `detail` parameter plumbing that made `:summary` look real: four render functions take `_detail` and ignore it, plus the `::detail` key and its data attribute (partial) | transcript.clj:583, 624, 635, 666, 692, 769, 805 | ~7 | DELETE | — |
 | 2.7 | `minimum-token-budget` | transcript.clj:863-867 | 5 | DELETE | — |
 | 2.8 | `transcript-unit` (derives a budget from admission caps) | transcript.clj:984-989 | 6 | DELETE | — |
 | 2.9 | `bounded-scalar` (function-side bounding) | transcript.clj:560-564 | 5 | DELETE | values flow whole |

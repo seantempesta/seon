@@ -34,7 +34,7 @@ mistakes (~500 estimated tokens).
 "(largest)"
 ```
 
-Live `seon.db/q` over `:seon.error/run`, default cluster, door mode:
+Live `seon.db/q` over `:seon.error/run`, default cluster, SCI evaluation mode:
 
 ```text
 ["bootstrap:seon.db"     :user-input  "seon.db/largest uses :any in an agent-authored contract. …"]
@@ -87,7 +87,7 @@ core-fault facts. The duplicate recording is deleted; phase failures,
 delivery refusals, model failures, and terminal transaction refusals retain
 their existing durable error paths.
 
-The real-tower regression in `test/seon/cluster/boot_test.clj` failed before
+The real-boot regression in `test/seon/cluster/boot_test.clj` failed before
 the repair with exactly two error facts bound to `bootstrap:root`. After the
 repair the same fresh-cluster test renders the refusal before the corrected
 definition, settles all 13 bootstrap receipts, closes the run, and finds zero

@@ -16,7 +16,7 @@ The audit covered:
 - exact default, explicit, dynamic, and result bindings;
 - source, symbol, value, and lookup ingress;
 - R32 result-symbol lifecycle behavior;
-- eval-pool and guarded-door coverage;
+- eval-pool and bounded evaluation coverage;
 - remaining break-8-style data-to-code construction;
 - non-production SCI harnesses that could be mistaken for production mechanisms.
 
@@ -36,13 +36,13 @@ The strongest findings are:
 
 - **Critical, verified:** graduated corpus source is compiled with host `clojure.core/eval` and installed behind an SCI var. Its body therefore has native JVM reach and is invisible to SCI interpreter-step accounting.
 - **Critical, verified:** the maintained Bun agent path executes native JavaScript with inherited process, filesystem, network, module-loader, Bun, and artifact-global reach.
-- **High, verified:** stored agent definitions and graduation tests execute outside the guard door and eval pool.
+- **High, verified:** stored agent definitions and graduation tests execute outside the evaluation boundary and eval pool.
 - **High, verified:** Malli constructs a second, unguarded SCI environment for schema code.
 - **High, verified:** the JVM result surface does not implement R32; direct run-holding process batches discard their retained-value map and never bind `result/<id>` in SCI.
 - **High, verified:** `seon.agent.ctx/read-file-text` and `list-skill-files` bypass the filesystem grant.
 - **High, verified:** break #8’s data-to-code construction remains in several test fixtures.
 
-The target contracts are unambiguous: every JVM eval enters the bounded pool (`docs/seon/architecture/agent-runtime.md:110-113`); every SCI invocation uses one guarded door (`docs/seon/architecture/agent-runtime.md:179-211`); R32 requires process-identity-backed result handles (`docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md:421-426`); R33 requires one corpus-loaded SCI interpreter everywhere (`program-synthesis-2026-07-21.md:462-478`); R35 requires ordinary wire data or tracked handles (`program-synthesis-2026-07-21.md:492-505`); and R43 derives authorship from source-datom provenance (`program-synthesis-2026-07-21.md:826-835,1491-1499`).
+The target contracts are unambiguous: every JVM eval enters the bounded pool (`docs/seon/architecture/agent-runtime.md:110-113`); every SCI invocation uses one bounded evaluation (`docs/seon/architecture/agent-runtime.md:179-211`); R32 requires process-identity-backed result handles (`docs/prds/sci-execution-runtime/program-synthesis-2026-07-21.md:421-426`); R33 requires one corpus-loaded SCI interpreter everywhere (`program-synthesis-2026-07-21.md:462-478`); R35 requires ordinary wire data or tracked handles (`program-synthesis-2026-07-21.md:492-505`); and R43 derives authorship from source-datom provenance (`program-synthesis-2026-07-21.md:826-835,1491-1499`).
 
 ## Complete environment-construction inventory
 
@@ -424,7 +424,7 @@ Successful result receipt and ownership registration belong to one transaction b
 
 Both JVM and Bun must consume the same ownership facts until Bun agent execution is deleted.
 
-## Guarded-door and eval-pool coverage
+## Bounded evaluation and eval-pool coverage
 
 | Path | Pool | Guard | Verdict |
 |---|---:|---:|---|

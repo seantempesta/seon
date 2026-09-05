@@ -8,7 +8,7 @@ tags: [research, repl, sci, diagnostics]
 
 ## Verdict
 
-The real SCI door safely terminated or admitted every stressed value, and the
+The real SCI evaluation safely terminated or admitted every stressed value, and the
 good faces are genuinely good: Unicode survives, nil is ordinary, a 5,000-item
 blob pages correctly, repeated references do not recurse, and a timed-out spin
 shows `:seon.eval/fn-entries` prominently. The pass nevertheless found four
@@ -46,7 +46,7 @@ and the [issue convention](../../../seon/issues/README.md) and
 - Each large envelope was summarized inside the cluster rather than copied
   wholesale. Blob re-reads used the real MCP value drill by digest, path, and
   offset.
-- A session-only function cannot become a declared render producer through
+- A session-only function cannot become a declared render function through
   the MCP door because that surface intentionally performs no terminal program
   publication. The requested "throws while rendering its own result" edge was
   therefore exercised at the shared realization seam: a function returned a

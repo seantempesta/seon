@@ -11,7 +11,7 @@ tags: [research, sci, repl, database]
 I read the following required authorities in full before designing or probing:
 
 - the complete root `AGENTS.md` supplied with this task;
-- the complete **AMBIENT INJECTION r2 IS RULED** block in
+- the complete **Call preparation r2 IS RULED** block in
   `docs/prds/sci-execution-runtime/plan/README.md:704-731`;
 - all of
   `docs/prds/sci-execution-runtime/plan/ambient-injection-prd-2026-08-05-r2-draft.md`;

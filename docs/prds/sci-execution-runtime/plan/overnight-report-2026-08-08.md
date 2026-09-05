@@ -96,7 +96,7 @@ truth-checks, not gates.
 
 - Adversarial audit (`ae98ef06a`) — refuted "declaration-population done"
   (admission seam dominant: 54,884 fallbacks/hour); third DECLARED
-  identity-collision family; effect door unarmed + background deadline
+  identity-collision family; effect request handler unarmed + background deadline
   inversion; calibration: boot-as-only-constructor, schema-derived
   members, sci refusal, arm structure all held.
 - Warning-yield sweep (`8019a79d4`, `7dd61703f`) — warning wall fixed at
@@ -180,7 +180,7 @@ truth-checks, not gates.
   sites deleted (dependence falsifier written first, fails both ways
   when wraps restore); arm capture DERIVED from the surface — awaited
   submissions carry the submitter's arm, detached ones don't (no flag);
-  the effect door adopts the arm (unbounded handler now interrupted at
+  the effect request handler adopts the arm (unbounded handler now interrupted at
   ~300 ms; 0 → ≥20000 attributed entrances); the background connection
   loss fixed at cause (worker rebuilds the request frame from the
   submission's environment); a LATENT break found that conveyance had
@@ -232,7 +232,7 @@ bound-fn* deletion) · schema-environment (Defect I root owner).
 
 - Per-node admission resolution (blocker; lane on it).
 - Third identity-collision family, declared shape (appended to issue).
-- Effect door unarmed / background deadline inversion (lane on it).
+- Effect request handler unarmed / background deadline inversion (lane on it).
 - selection.clj `(partial instance? File)` contract broke 33 tests
   (flagged to owning lane mid-flight).
 - MCP envelope echoes the submitted form in every event (5× duplication;

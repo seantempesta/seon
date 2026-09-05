@@ -10,14 +10,14 @@ tags: [issue, mcp, repl, sci, render]
 ## Problem
 
 An oversized top-level string is stored as a retrievable blob, but the MCP
-door response also returns 262,147 characters inline. The envelope therefore
+SCI evaluation response also returns 262,147 characters inline. The envelope therefore
 claims `:seon.dev.mcp/windowed? true` while bypassing its own value window at
 the most common scalar edge.
 
 ## Evidence
 
 On 2026-08-04, isolated cluster `edgefaces0804` evaluated this through the
-real SCI door:
+real SCI evaluator:
 
 ```clojure
 (apply str (repeat 1048576 "x"))
@@ -45,7 +45,7 @@ in `test/seon/cluster/mcp_test.clj` constructs an evaluation-shaped value whose
 
 ## Owner
 
-`seon.cluster/mcp-project` owns the one MCP value-window decision for door
+`seon.cluster/mcp-project` owns the one MCP value-window decision for SCI evaluator
 evaluation faces.
 
 ## Acceptance

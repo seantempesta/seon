@@ -341,7 +341,7 @@ run yet", which is the truth. No dangling state, no repair path needed.
 
 **Capability-touching tests are excluded from the automatic run.** A test
 whose closure reaches a capability leaf (derivable today from
-`:seon.fn/workload` `:io` metadata and the effect-door call sites) does
+`:seon.fn/workload` `:io` metadata and the effect-request call sites) does
 real fs/web/llm/db work; running it automatically on every install would
 make an agent's edit spend money and touch the world. Such tests are
 listed in the impacted set, marked, and NOT run — the agent or the gate

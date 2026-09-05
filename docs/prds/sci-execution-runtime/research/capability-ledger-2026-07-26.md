@@ -10,7 +10,7 @@ This is the owner-keyed index of functionality removed by the execution
 deletion program through commit `1832764de`. It is an index of capabilities,
 not a request to restore deleted namespaces. The conversion test is
 simplification: pure returned values, genuine capability requests through one
-guarded door, and durable facts committed by the driver are the only
+bounded evaluation, and durable facts committed by the driver are the only
 agent-facing shapes.
 
 The primary deletion is `8dc8623ad` (48 files, 155 insertions, 12,110
@@ -279,7 +279,7 @@ current namespace from that basis.
 - **Verdict:** **RE-IMAGINED** — O15/O16: one JVM build indexes at compile time and emits mandatory initialization pages; fresh boot loads pages and resume reads config overrides then the database. Shadow indexing, runtime source reading, runtime derivation, and `seon.db.program/compile-tx-data` as a runtime reconciler disappear.
 - **Simpler?** Yes: two runtime states consume facts; neither indexes source.
 
-#### 24. Derive toolkit bindings and discovery from the compiled corpus
+#### 24. Derive agent-facing bindings and discovery from the compiled corpus
 
 - **Capability:** An agent can discover and call the maintained `my.*`, database, messaging, blob, filesystem, shell, and web surface without hand-maintained lists.
 - **Deleted implementation:** `8dc8623ad^:src/seon/host/context.clj:616-636,638-1018,1020-1383` and authored alias setup at `fbc6b28b5^:src/seon/eval.cljs:1616-1684`.
@@ -351,16 +351,16 @@ current namespace from that basis.
 - **Verdict:** **NOT NEEDED** — the stored tier and runtime router died. Future `plan-execution` derives leaf placement from the compiled call graph; current cluster-JVM code needs no placement record.
 - **Simpler?** Yes: stored classification and parallel routing disappear.
 
-#### 34. Admit portable toolkit blocks with a source regex
+#### 34. Admit portable agent-facing blocks with a source regex
 
-- **Capability:** The old host guessed portability from source text before evaluating toolkit blocks.
+- **Capability:** The old host guessed portability from source text before evaluating agent-facing blocks.
 - **Deleted implementation:** `8dc8623ad^:src/seon/host/context.clj:1020-1203`, especially `pure-block?` at 1063-1068.
 - **Verdict:** **NOT NEEDED** — O15's JVM compile index and transitive call graph replace name/source heuristics.
 - **Simpler?** Yes: regex admission, dependency-sort duplication, and runtime filesystem reads disappear.
 
-#### 35. Maintain two literal toolkit binding lists
+#### 35. Maintain two literal agent-facing binding lists
 
-- **Capability:** The old host used literal lists to decide which toolkit namespaces and functions existed.
+- **Capability:** The old host used literal lists to decide which agent-facing namespaces and functions existed.
 - **Deleted implementation:** `8dc8623ad^:src/seon/host/context.clj:1301-1311` plus the library-by-library installer at 638-1018.
 - **Verdict:** **NOT NEEDED** — the compiled corpus is the inventory.
 - **Simpler?** Yes: two lists become zero lists and one query.
@@ -435,7 +435,7 @@ current namespace from that basis.
 - **Capability:** An agent can perform the genuine external/read/idempotent operations required to complete real work.
 - **Deleted implementation:** the only complete binding/routing path at `8dc8623ad^:src/seon/host/context.clj:411-495,638-1018,1301-1383` and session invocation at `host/invoke.clj:64-263`.
 - **Verdict:** **GAP** — current `src/seon/sci/ctx.clj:15-35` exposes lifecycle only. The portable function families survive, but no accepted one-door JVM binding/dispatch design connects them to SCI. Observably, an authored form cannot call `seon.db/query`, `my.blob/get`, filesystem, shell, or web.
-- **Simpler?** Not yet. The closing design must be one guarded door with computed bindings; recreating the registry or per-family session routes would be an equally complex port.
+- **Simpler?** Not yet. The closing design must be one bounded evaluation with computed bindings; recreating the registry or per-family session routes would be an equally complex port.
 
 #### 46. Bound captured print output and stored result bytes
 
@@ -560,7 +560,7 @@ This is the owner's work queue. `RE-IMAGINED` rows that are not yet implemented
 remain real work, but they have settled shapes and therefore do not dilute this
 list.
 
-1. **Agent capability door (`seon.sci.ctx` / capability dispatcher).**
+1. **Agent capability request handler (`seon.sci.ctx` / capability dispatcher).**
    **Broken now:** the base exposes lifecycle only, so agent code cannot use
    database, blob, filesystem, shell, web, messaging, or LLM functions.
    **Closing change:** install one computed, schema'd binding table whose
@@ -588,7 +588,7 @@ list.
    change:** choose and prove one package-native compile/install-time surface
    source; fresh/resume runtime must only read its committed facts.
 
-The earliest unsettled contract is the agent capability door. Its integrated
+The earliest unsettled contract is the agent capability request handler. Its integrated
 proof is a real cluster-JVM reply that discovers and calls the complete
 agent-facing surface through one door, commits its receipts, and survives
 restart. The next dependency-ready portfolio is bounded value admission,

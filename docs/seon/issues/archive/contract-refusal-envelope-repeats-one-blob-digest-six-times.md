@@ -9,7 +9,7 @@ tags: [issue, render, sci, mcp, class/n1, wave/class-kill-queue]
 
 ## Problem
 
-A door-mode contract violation for a simple wrong-argument-type call
+A SCI-mode contract violation for a simple wrong-argument-type call
 rendered a ~9 KB envelope in which the same blob digest (`7ccbab2e…`)
 appears SIX times at six different paths, burying the one useful sentence
 ("should be a string") under repeated requery scaffolding. A one-line typed
@@ -18,7 +18,7 @@ substructure in an admitted envelope should be emitted once.
 
 ## Evidence
 
-2026-08-13 comprehension test deployment: `mcp__seon__eval_clj` (door) of
+2026-08-13 comprehension test deployment: `mcp__seon__eval_clj` (SCI evaluator) of
 `(seon.fn/tests-reaching (seon.db/db) 'seon.cluster.run/open-tx)` — the
 symbol-vs-string violation. The envelope repeated the identical elision
 value/digest at six paths.
@@ -47,7 +47,7 @@ handed. The constructor now retains one bounded semantic problem and the
 kernel preserves an existing flat refusal while accreting only the new eval
 record.
 
-The identical door form was read from an isolated live cluster before and
+The identical evaluated form was read from an isolated live cluster before and
 after. Before, the admitted artifact was 9,266 characters and the same digest
 appeared six times:
 

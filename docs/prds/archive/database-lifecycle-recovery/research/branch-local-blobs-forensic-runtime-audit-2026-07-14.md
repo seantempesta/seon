@@ -180,7 +180,7 @@ the connection in that order.
 An explicit forensic action may later mint one agent on the writable branch and
 drive it intentionally through existing agent primitives. It must not turn on
 the ambient ticker or resume inherited agents. The existing `POST /agents/run`
-composition door requires a focused audit before reuse because its normal path
+HTTP composition endpoint requires a focused audit before reuse because its normal path
 delivers through wake/drive machinery; the admission rule is the behavior to
 preserve, not the endpoint name.
 

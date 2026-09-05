@@ -207,7 +207,7 @@ hand-rolled second bound is a defect.
 
 ### 2.1 Landed proof: four doors already share the one codec
 
-- eval results at the guarded door; the error normalizer projects the WHOLE
+- eval results at the bounded evaluation; the error normalizer projects the WHOLE
   flow error map — including `::flow/state` holding a live connection —
   through `admit` with `(constantly nil)` interrupt
   (`src/seon/error.clj:316-319`); the instrumentation reporter bounds `:args`

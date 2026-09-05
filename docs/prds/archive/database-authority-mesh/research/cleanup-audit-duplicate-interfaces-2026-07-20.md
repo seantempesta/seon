@@ -81,7 +81,7 @@ logging, and `.clj` JVM-residue classification belong to other lanes.
 - **`seon.reactive` vs `seon.web.reactive.*`** — unrelated concerns despite
   the shared word: `seon.reactive` is registered reactive reads over writer
   interests; `web.reactive.call`/`web.reactive.transform` are the third
-  sandboxed-execution door (hiccup-authored calls) and the Datastar
+  sandboxed evaluation path (hiccup-authored calls) and the Datastar
   event-handler rewrite. No shared responsibility.
 - **`seon.repl` vs `seon.eval` vs `seon.worker-eval`** — `seon.eval` is the
   one agent eval boundary; `seon.repl` is the dev iteration surface

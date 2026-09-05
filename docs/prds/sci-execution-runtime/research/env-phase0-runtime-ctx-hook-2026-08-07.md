@@ -105,7 +105,7 @@ fork `2db3358` returns `:probe/verdict :no-edit-not-viable`.
 The one no-edit workaround that does work — installing each leaf per fork as a
 closure over that fork's environment — was measured (~30 µs per ctx
 construction) and rejected in the report's findings: the leaf's arity must be
-authored *without* the ambient slot, nothing prepares a declared-and-absent
+authored *without* the supplied default argument, nothing prepares a declared-and-absent
 argument for a shared Var, and every fork must re-intern every capability leaf.
 
 ## The edit

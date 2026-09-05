@@ -102,7 +102,7 @@ returned 17 selected namespace rows. Their ordinary `pr-str` was 683,063
 characters. This is not the Transit byte count, but it independently proves
 that the selected response is nowhere near a 64 KiB-safe bound; the restored
 4 MiB session is what allowed it through. The exact selected names were the
-fresh home namespace, eight `my.*` toolkit namespaces, six `seon.agent.*`
+fresh home namespace, eight `my.*` agent-facing namespaces, six `seon.agent.*`
 namespaces, `seon.db`, and `seon.schema`.
 
 ## History

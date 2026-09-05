@@ -21,12 +21,12 @@ carries a `file:line` or a live probe on the scratch cluster
 `research/workload-classification-2026-07-28.md` end to end before writing §4.
 
 The short version: **one of the four effect channels is fully queryable and
-three are not.** The capability door records everything curation needs. Message
+three are not.** The capability request handler records everything curation needs. Message
 delivery, agent-issued database writes, and static pre-execution prediction
 each have a specific missing fact, and in two cases the missing fact makes an
 existing safety derivation silently answer "safe".
 
-## 1. The capability door — complete, and the query works today
+## 1. The capability request handler — complete, and the query works today
 
 ### What is recorded
 
@@ -53,7 +53,7 @@ state. The entity is declared at
 
 Two structural properties matter for curation, both verified live:
 
-**No door request can happen outside a form.** With `*context*` unbound the
+**No capability request can happen outside a form.** With `*context*` unbound the
 door refuses:
 
 ```text
@@ -98,7 +98,7 @@ a `my.message/send`, and a `seon.db/transact!`; folded through the real
 ⟹ ([1 0 "my.fs/read" seon.fs.jvm/read "[\"probe-effects-1\" 1 0]"])
 ```
 
-Form 1 issued one door request; the capability family is named twice over —
+Form 1 issued one capability request; the capability family is named twice over —
 by the owner symbol's namespace (`my.fs`) and by the declared handler
 (`seon.fs.jvm/read`). Adding `(get-else $ ?receipt :seon.effect/interrupted-at
 ...)` and `:seon.effect/result-edn` distinguishes pending, returned, and
@@ -497,7 +497,7 @@ There are already two implementations of "what capabilities does this reach"
 fail-closed semantics and different inputs. Curation would be the third. One
 owner should answer, for a candidate form at a basis:
 
-- the door receipts already recorded for that form (§1) — ground truth;
+- the capability receipts already recorded for that form (§1) — ground truth;
 - the messages and transactions referencing that form (§6.3) — ground truth;
 - the capability set statically reachable from the form's resolved Vars (§6.1,
   §6.2) — prediction, fail-closed;

@@ -11,7 +11,7 @@ severity: friction
 
 **FOLD-INTO-UNIT — U9 deletion.** The observed generation was repaired, and
 preserving the remaining self-host loader would strengthen the wrong owner;
-U9 retains the parity falsifier at the guarded host door.
+U9 retains the parity falsifier at the bounded host evaluator.
 
 ## Problem
 

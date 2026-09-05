@@ -11,7 +11,7 @@ tags: [issue, render, context, doc, ugly-output, agent-facing]
 
 `(doc f)` is the ONE surface a dropped-in agent uses to learn a
 function, and its contract lines at HEAD are both ugly and wrong in
-three ways (observed 2026-09-02 on cluster `ctxprobe`, door mode,
+three ways (observed 2026-09-02 on cluster `ctxprobe`, SCI evaluation mode,
 `(doc seon.db/pull)` and `(doc my.message/inbox)`):
 
 1. **Schema bodies where the key suffices.** Every input ref prints its

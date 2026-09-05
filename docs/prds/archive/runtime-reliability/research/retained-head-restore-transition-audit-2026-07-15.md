@@ -29,7 +29,7 @@ currently cross the operator boundary:
 
 - one typed writer lifecycle read returning the exact main coordinate, the
   complete native branch-to-coordinate map, and the full native branch roster;
-- one loopback-only pod door that observes and materializes the retained blob
+- one loopback-only pod HTTP endpoint that observes and materializes the retained blob
   set against one frozen database value.
 
 Do not infer either observation from lifecycle files, process records, MCP
@@ -84,10 +84,10 @@ all native branch coordinates, and the complete native roster. Completion
 branches and externally created branches may have no open branch-pod record,
 so operator files cannot be the roster authority.
 
-### Retained blob door
+### Retained blob endpoint
 
 Strengthen the existing `my.blob` and `seon.web`/router boundary with a
-loopback-only operator door. Against one locally constructed frozen database
+loopback-only operator endpoint. Against one locally constructed frozen database
 value it must:
 
 - observe the exact retained coordinate and reachable-hash digest; and
@@ -157,7 +157,7 @@ reconciliation loop so ordinary startup and restore startup both consume
   actual latest main as the new redo point.
 
 Focused tests must cover exact/complete lifecycle observation, loopback and
-coordinate fencing on the blob door, pre-intent rejection, atomic intent
+coordinate fencing on the blob endpoint, pre-intent rejection, atomic intent
 publication, exact adoption of `U` and `P`, blob/containment/artifact failures
 before admin launch, every admin result boundary, crash cuts around force and
 completion, ordinary-descriptor convergence after cleanup, and undo with an

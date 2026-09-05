@@ -12,7 +12,7 @@ tags: [issue, effect, sci, runtime, concurrency]
 W2 made the interrupt arm a value that travels with the work
 (`seon.sci.kernel/current-arm` + `adopt-arm`,
 `src/seon/sci/kernel.clj:310-352`), and W1 wired it into flow's four
-crossings. The **effect door's own thread hop was not wired**, and the
+crossings. The **effect execution boundary's own thread hop was not wired**, and the
 background half was wired in a way that needs an owner ruling.
 
 Two halves, two problems.
@@ -25,7 +25,7 @@ db capability request therefore executes on a thread with no arm at all.
 The consequences are the ones the arm work already named as defects
 elsewhere: `:seon.eval/fn-entries` and the allocation sample under-report
 whatever the handler does, and `interrupt!` cannot reach that thread. This
-is the same shape as the ThreadLocal hole W2 closed — the door was simply
+is the same shape as the ThreadLocal hole W2 closed — the effect execution boundary was simply
 not on the list. (Host calls remaining sci's interruption ceiling is a
 separate, documented fact; it does not explain an ABSENT arm, only a
 non-interruptible one.)
@@ -140,7 +140,7 @@ ruling. Implemented and proved the same night:
 - **The override.** `my.background/background` takes an optional leading
   options map, so the surface reads
   `(background {:seon.effect/time-limit-ms 3600000} (my.web/fetch …))`. It
-  merges into the same `:seon.effect/execution-options` the door already
+  merges into the same `:seon.effect/execution-options` the effect execution boundary already
   takes; the caller's value simply WINS, tighter or looser, exactly the
   elide-for-default/pass-to-override idiom the environment PRD names.
 - **The arm.** `seon.sci.kernel/detached-arm` builds a FRESH arm at that
@@ -199,7 +199,7 @@ The three shapes worth ruling between:
    turn's. Bounded by construction, one dial, and the arm mechanism already
    supports it (`kernel/arm` on the worker, nothing new).
 2. **The capability's own bound only** — status quo made explicit: every
-   capability owner must declare a bound, and the door refuses one that does
+   capability owner must declare a bound, and the effect execution boundary refuses one that does
    not. Pushes the constraint to where the resource actually lives.
 3. **Agent-supplied, capped** — the submitting form names a limit, clamped by
    a config fact.

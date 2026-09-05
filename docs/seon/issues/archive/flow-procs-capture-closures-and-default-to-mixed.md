@@ -16,7 +16,7 @@ probes (2026-07-28):
    `(flow/process (flow/map->step {...closures...}))`. The flow loop calls the
    step it was constructed with (`reference-code/core.async/.../flow/impl.clj:258-261`),
    so hot reload of proc behavior works only when the step-fn is a **var**
-   (`#'f`), as the boot-tower doc claims ("graph definitions reference
+   (`#'f`), as the boot doc claims ("graph definitions reference
    transforms as vars"). Measured: after `alter-var-root`, a var-backed proc
    switched behavior immediately while an identical closure-built proc kept the
    old code (probe `hotreload` section). Today's zero-restart live-update story

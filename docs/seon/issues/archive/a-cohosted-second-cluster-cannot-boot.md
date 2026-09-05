@@ -125,7 +125,7 @@ absent IS the empty set in Datahike — not a substituted default.
 ## Acceptance criteria
 
 - [x] Two clusters start into one operator JVM, both reaching a completed boot
-      tower, each holding its own projection state.
+      sequence, each holding its own projection state.
 - [x] A test proves it as a class: `test/seon/cluster/cohost_boot_test.clj`
       applies instrumentation under cluster A's projection state and then
       boots cluster B, asserting B's own contracts, B's own projection state,

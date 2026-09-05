@@ -16,7 +16,7 @@ tags: [research, agent, capability]
   step through `src-inspect-ai/src/seon_inspect/bfcl_adapter.py`.
 - `seon.agent.lifecycle/complete` is the existing agent-facing run-result and
   close function. `seon.web.serve` returns its delivered message through the
-  existing `POST /agents/run` door.
+  existing `POST /agents/run` endpoint.
 - The first-party focused proof is
   `src-inspect-ai/tests/test_bfcl_adapter.py`; the live evidence source is the
   exact turn bundle retained by `seon_inspect.solver`.
@@ -58,7 +58,7 @@ The identical live ACME sample with `Qwen/Qwen3.5-2B` then produced:
 
 - one turn and one eval;
 - raw reply `(complete "[{...}]")`;
-- door completion containing the correct JSON array;
+- endpoint completion containing the correct JSON array;
 - close reason `:completed` in 6,154 ms; and
 - unchanged BFCL score 1.0.
 

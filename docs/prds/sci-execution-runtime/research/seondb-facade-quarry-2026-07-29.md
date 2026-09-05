@@ -1074,7 +1074,7 @@ census exposes them:
 | `src/seon/test/runner.clj` | `transact` at 201 |
 | `src/seon/cluster/ancestor.clj` | `transact` at 215, 218 |
 
-The existing fresh write door is `seon.cluster.store/transact!`. These callers
+The existing fresh transaction function is `seon.cluster.store/transact!`. These callers
 should be reviewed by that owner. This report does not design or authorize a
 second `seon.db/transact!`.
 

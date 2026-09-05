@@ -121,7 +121,7 @@ construction trick (mask = holes, fixed = typed). Risk: vLLM may not expose
 canvas-clamping without a small patch to `prepare_inputs()`.
 
 ### 2. Whole-form refinement + eval feedback — HIGH VALUE, MODERATE FORK
-Generate form → eval in the SCI cage → on `:seon/error`, re-noise only the span
+Generate form → eval in the SCI context → on `:seon/error`, re-noise only the span
 the error implicates, keep the rest clamped, re-denoise. In-place patch vs AR's
 "regenerate from here forward." Requires a sampler fork to (a) reset entropy on a
 sub-region and (b) accept an externally supplied mask between blocks.

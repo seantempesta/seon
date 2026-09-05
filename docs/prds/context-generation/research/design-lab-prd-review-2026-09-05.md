@@ -234,14 +234,14 @@ real data” hides the critical half.
 
 What exists:
 
-- HEAD selection really is explicit producer, then the unique contract-fitting
-  public function in one explicit namespace, then a schema-declared producer,
+- HEAD selection really is explicit render function, then the unique contract-fitting
+  public function in one explicit namespace, then a schema-declared render function,
   then floor (`src/seon/render.clj:218-320`). It returns deterministic
   ambiguity data rather than choosing insertion order (`:207-216,313-320`).
 - `render-ai`, `render-html`, and `render-call` execute through the guarded SCI
   boundary and the one fit owner (`src/seon/render.clj:369-400,509-573,622-650`;
   `src/seon/print.cljc:908-943`). `call-static-evidence` already knows the
-  selected producer, declaration row, argument, and floor status
+  selected render function, declaration row, argument, and floor status
   (`src/seon/render.clj:322-340`).
 - Schema matching over actual pulled/transaction forms already handles
   several candidate entity schemas and most-specific required attributes
@@ -302,7 +302,7 @@ What is missing or wrongly assumed:
   and message eid. This is absence of the prompt hidden by transport success.
 - Prospective history entries carry call id, basis, form, printed value, and
   bytes (`src/seon/render/walk.clj:780-793`). They do **not** carry token count,
-  intent/provenance, selected producer, handle, or prerequisite edges.
+  intent/provenance, selected render function, handle, or prerequisite edges.
 - Durable prompt contributions carry tokens and a generic block name `:walk`,
   but not the producing render function (`src/seon/cluster/prompt.clj:172-179`;
   `src/seon/context.clj:143-152`). The current path cannot populate the proposed
@@ -392,7 +392,7 @@ Several criteria currently read absence of their subject as health.
    vacuously when the current candidate set is empty—the PRD's own risk says
    this will often happen (`:198-199`). Require fixtures that independently
    establish one winner, a deterministic tie/refusal, a floor, a throwing
-   producer, and a projection-boundary/external-sink exclusion. Assert the
+   render function, and a projection-boundary/external-sink exclusion. Assert the
    expected symbols before asserting their buttons work.
 5. **Wave 2 real values.** `my.note` being indexed does not prove a note or
    message value exists in the cluster. Require named note and message

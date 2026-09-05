@@ -228,18 +228,18 @@ numerically and a bare cross-citation is a defect to fix on sight.
     nothing before seeing real context and real DeepSeek agent behavior
     live. Consequence: THE LIVE DRIVE MOVES UP — it now runs as soon as
     the drain lands and the generated-opening live-pull wedge is fixed,
-    BEFORE W3-W5 (the producer accretion is complete and behaviorally
+    BEFORE W3-W5 (the render function accretion is complete and behaviorally
     inert, so the system is clean for a drive; the consumer migration
     waits behind the drive rather than in front of it).
 27. **Floor-first rendering** (owner direction, same round): lean on
     `seon.render.value` — the total floor (`render-ai-data`,
     `window`, `prepare`, elision values) — rather than hand-declaring
-    producers per shape. The floor should DERIVE good concise output
+    render functions per shape. The floor should DERIVE good concise output
     for any registered shape (identity attr first, required attrs as
     columns, windowing, requery elision) from the schema facts it
-    already has; declared producers remain for genuinely special
+    already has; declared render functions remain for genuinely special
     surfaces (errors, messages), not as the price of decency. This
-    supersedes the earlier inbox-fix framing (declare producers per row
+    supersedes the earlier inbox-fix framing (declare render functions per row
     shape) — the exemplar becomes: make the floor render
     `:my.message/inbox` well WITHOUT a declaration.
 
@@ -272,7 +272,7 @@ numerically and a bare cross-citation is a defect to fix on sight.
     2026-08-14 midday): the agent view renders the SAME history blocks
     the `/ai` projection feeds the model — input is the agent's history
     unit (never the namespace), each entry rendered per-block via its
-    declared `:seon.render/html` producer or the derived floor; entries
+    declared `:seon.render/html` render function or the derived floor; entries
     with no real html face elide to a compact chip (honest elision
     value: value kind, size, basis) that EXPANDS INLINE (owner
     amendment, same day): expanded, the chip pretty-prints the full
@@ -296,18 +296,18 @@ numerically and a bare cross-citation is a defect to fix on sight.
     [transcript-view-design-2026-08-14](../research/transcript-view-design-2026-08-14.md);
     folds into ui-overhaul with the chat-projection package.
 
-32. **Producers hand back whole values — bounding lives at exactly two
+32. **Render functions hand back whole values — bounding lives at exactly two
     seams** (owner, 2026-08-14 afternoon, correcting the clip rip-out
     mid-flight): content gets smaller ONLY at (1) the render boundary —
     `seon.print`/the value floor applying the profile budget for both
     `/ai` and `/html`, emitting elision values — and (2) declared
     storage-admission caps (the `seon.sci.admit` config-fact family).
     `bounded-text` is internal machinery of those two seams, never a
-    public convenience; a producer containing ANY bounding call is the
-    defect. The census regression asserts producers bound nothing and
+    public convenience; a render function containing ANY bounding call is the
+    defect. The census regression asserts render functions bound nothing and
     the two seams are bounded-text's only callers (graph query). THE
     ONE RENDERER IS THE WORKHORSE: investment goes INTO the universal
-    print system, never beside it — declared producers stay the
+    print system, never beside it — declared render functions stay the
     exception for genuinely special surfaces.
 
 33. **REPL parity is framing fidelity; elision is for extremes; the
@@ -406,10 +406,10 @@ numerically and a bare cross-citation is a defect to fix on sight.
     live material through the namespace's reverse ref (namespace ←
     agent → runs, messages, plan). NOT ruled in: rooting at the agent
     entity; following every installed ref bidirectionally; dragging
-    the cluster entity (config, instruction set, toolkit refs) into
+    the cluster entity (config, instruction set, namespace refs) into
     every context — the live capture
     ([root-context-example](../research/root-context-example-2026-08-14.md))
-    shows exactly that wrong root: nine toolkit namespaces dir'd from
+    shows exactly that wrong root: nine capability namespaces dir'd from
     CLUSTER refs while root's own ns requires only four. Cluster-level
     instructions/config appear in a context only if the namespace or
     agent genuinely refs them — the parked instruction-facts design
@@ -714,7 +714,7 @@ numerically and a bare cross-citation is a defect to fix on sight.
     kondo-parsed like settled forms (51), so everything ever shown to
     an agent accretes usage edges — rendering, teaching, and
     graph-linking are one mechanism. Args are explicit in the form;
-    ambient db rides call preparation with the basis rendered beside
+    db is supplied by call preparation with the basis rendered beside
     the result (17), so any context line replays verbatim. The schema
     property's split codifies: STRING = direct content, instruction
     entities only; SYMBOL = the face function the generator composes.
@@ -726,7 +726,7 @@ numerically and a bare cross-citation is a defect to fix on sight.
     CREATED (the 42c write-stamp join) and its own namespace's
     functions — self first, world by graph distance, never curation.
 
-54. **The write door, the missile rule, and the steward scenario**
+54. **The database transaction function, the missile rule, and the steward scenario**
     (owner, 2026-08-29): (a) the GRAPH BOUNDARY is the discovery
     boundary — data enters an agent's world only through `transact!`,
     and a graph write must carry its provenance (eval ref → agent,
@@ -759,7 +759,7 @@ numerically and a bare cross-citation is a defect to fix on sight.
     calls** (owner dialogue, 2026-08-29): the generator never guesses
     args — acquisition discovers CONCRETE identity values on ref
     edges; a reader's declared input schema is satisfiable from
-    exactly two sources — ambient (db, self via call preparation) and
+    exactly two sources — supplied defaults (db, self via call preparation) and
     the discovered identities, plugged into the parameter slot the
     contract names. Type-level fit (output-refs → family) × instance
     knowledge (the pull) = the composed call. COLLECTION-FIRST:
@@ -927,13 +927,13 @@ numerically and a bare cross-citation is a defect to fix on sight.
     wait/complete) are demonstrated `seon.db/transact!`/`q`/`pull` forms
     over their fact families, keeping only their render functions; the
     effect-shaped surfaces (`my.fs`, `my.shell`, `my.web`, `my.edit`,
-    `my.background`) stay functions because they cross the effect door.
+    `my.background`) stay functions because they invoke the effect handler.
     Verified at HEAD: `seon.schema/register!` exists but no agent-facing
     schema declaration does — the one gap this ruling opens.
 
 63. **Data-first corollaries** (owner, 2026-09-04): (a) a message is a
     fact — sending is `seon.db/transact!` of a message row; the write
-    door stamps provenance and the wake delivers (the returned-value
+    effect handler stamps provenance and the wake delivers (the returned-value
     protocol of `my.message/send` retires); (b) an on-the-fly calculation
     stays a form in history (referenceable by its `result/<id>`) and
     becomes a function ONLY when it becomes a surface (a render function)

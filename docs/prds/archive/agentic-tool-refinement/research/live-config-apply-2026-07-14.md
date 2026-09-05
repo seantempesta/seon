@@ -17,7 +17,7 @@ tags: [research, config, database, runtime, acme]
   exact managed-subset compiler and full-head fence.
 - Reitit through the maintained CLJS dependency:
   `src/seon/web/router.cljs` owns the one pod route vector, same-origin
-  middleware, and Node-to-Ring adapter. The operator door is one static
+  middleware, and Node-to-Ring adapter. The operator endpoint is one static
   supplement until operator routes become database route facts.
 - Babashka process/fs plus system `curl`:
   `script/seon/dev/cli.clj` already owns target selection, readiness, locking,

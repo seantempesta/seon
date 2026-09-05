@@ -136,7 +136,7 @@ on the cluster JVM:
 - `seon.agent.search/grep-graph` — the one literal search over `:seon.fn`
   source/doc/name — is not registered at all, and its only implementation is
   `src/seon/agent/search.cljs` (CLJS, deletion path).
-- `my.ns/functions` / `full!` / `compact!` — the "what can I call in X?" door —
+- `my.ns/functions` / `full!` / `compact!` — the "what can I call in X?" API —
   is `src/my/ns.cljs`, `^{:async true}`, so `pure-block?` (context.clj:1060)
   excludes it from the portable slice, and it is absent from
   `host-toolkit-bindings` (context.clj:1298), so it never loads.

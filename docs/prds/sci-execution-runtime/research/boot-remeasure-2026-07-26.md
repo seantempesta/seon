@@ -4,7 +4,7 @@ status: active
 tags: [research, runtime]
 ---
 
-# JVM boot remeasurement after the guarded-door deletion, 2026-07-26
+# JVM boot remeasurement after the bounded evaluation deletion, 2026-07-26
 
 ## Question
 
@@ -23,7 +23,7 @@ boot breakdown on the post-deletion tree.
 |---|---|
 | measured | 2026-07-26 |
 | checkout | `4dbaeda0ef905c07600637e86df5d5de8fc7e725` |
-| named change | guarded-door deletion `8dc8623ad5053d90f34e84803638735937778715` |
+| named change | bounded evaluation deletion `8dc8623ad5053d90f34e84803638735937778715` |
 | machine | Apple M5 Max, 18 available processors, 128 GiB RAM |
 | operating system | Darwin 25.5.0, arm64 |
 | JDK | OpenJDK 26.0.1, Homebrew build, 64-Bit Server VM, mixed mode, sharing |
@@ -194,7 +194,7 @@ was measured.
 | AOT, archive off | 3,976 | 3,068 | 2,916–3,208 | **−908 ms** | **−22.9%** |
 | AOT + AppCDS | 3,886 | 2,794 | 2,537–2,903 | **−1,092 ms** | **−28.1%** |
 
-The named intervening change is the guarded-door deletion
+The named intervening change is the bounded evaluation deletion
 `8dc8623ad`, especially removal of the prior ~900 ms
 `seon.host.context` load; the checkout also now reports Clojure 1.12.5 rather
 than the prior 1.12.0, so the observed delta must not be attributed to the

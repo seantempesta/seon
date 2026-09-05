@@ -334,7 +334,7 @@ Delete after parity:
   compiled-helper exposure, interpreter deadline, and fire-and-forget recovery;
 - the local-Datahike branch inside source reconstruction;
 - production replay of `:seon.test/source` into invocation children;
-- direct `lookup-value` invocation from reactive call and other in-pod doors;
+- direct `lookup-value` invocation from reactive call and other in-pod invocation paths;
 - the redundant set-of-symbols `::capabilities`; and
 - any timeout path that returns while leaving a canceled child reusable.
 

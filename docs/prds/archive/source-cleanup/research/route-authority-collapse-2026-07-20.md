@@ -12,8 +12,8 @@ SYMBOL in the datom and resolved at dispatch; the reitit router is a pure
 derivation that re-derives on route-datom transactions through the existing
 `seon.reactive` registration mechanism; the only static remainder is a fixed,
 tested-closed bootstrap set (readiness + static assets + the config-apply
-repair door) that must route before a database session exists or
-independently of the database route state it repairs. Operator doors gate on launch-bound capabilities at
+repair endpoint) that must route before a database session exists or
+independently of the database route state it repairs. Operator endpoints gate on launch-bound capabilities at
 dispatch. The `/agent/{id}/feed` → `/agent/{id}/sse` rename is a seed-row edit
 riding this collapse in stage 4, not the stage-2 freeze.
 
@@ -57,9 +57,9 @@ rows upserted by `:seon.route/name`; new attributes are defined in §2.
 | `/resume` | POST | **datom** (lifecycle) | `{… ::name ::resume ::handler 'seon.web.serve/handle-resume! ::admitted? true}` | |
 | `/clear` | POST | **datom** (lifecycle) | `{… ::name ::clear ::handler 'seon.web.serve/handle-clear! ::admitted? true}` | |
 | `/log` | POST | **datom** (product) | `{… ::name ::log ::handler 'seon.web.serve/handle-log! ::admitted? true}` | |
-| `/agents/run` | POST | **datom** (product/composition door) | `{… ::name ::agents-run ::handler 'seon.web.serve/handle-agent-run! ::admitted? true}` | downstream clusters may drop it via manifest `:removes` |
+| `/agents/run` | POST | **datom** (product/HTTP composition endpoint) | `{… ::name ::agents-run ::handler 'seon.web.serve/handle-agent-run! ::admitted? true}` | downstream clusters may drop it via manifest `:removes` |
 | `/agent/{id}/complete` | POST | **datom** (lifecycle) | `{::pattern "/agent/{id}/complete" ::method :post ::name ::agent-complete ::handler 'seon.web.serve/handle-complete-agent!}` | not admitted today; handler reads id from `:path-params` after refactor |
-| `/_seon/operator/config` | POST | **bootstrap** (repair door) | — stays in the fixed bootstrap set (§5) | the repair door must route independently of the database route state it repairs — same justification class as `/_seon/ready`. It keeps same-origin + admitted + (per this design) loopback/capability gating, applied statically in the bootstrap row. This closes the forward crossing: `bin/seon config apply` works on any old-database boot and seeds the new rows non-destructively. Loopback tightening flagged in §Risks |
+| `/_seon/operator/config` | POST | **bootstrap** (repair endpoint) | — stays in the fixed bootstrap set (§5) | the repair endpoint must route independently of the database route state it repairs — same justification class as `/_seon/ready`. It keeps same-origin + admitted + (per this design) loopback/capability gating, applied statically in the bootstrap row. This closes the forward crossing: `bin/seon config apply` works on any old-database boot and seeds the new rows non-destructively. Loopback tightening flagged in §Risks |
 | `/_seon/operator/quiesce` | POST | **capability datom** | `{… ::name ::operator-quiesce ::handler 'seon.web.serve/handle-operator-quiesce! ::capability :seon.launch/operator-doors?}` | unadmitted by design (test pins it) |
 | `/_seon/operator/blobs` | POST | **capability datom** | `{… ::name ::operator-blobs ::handler 'seon.web.serve/handle-operator-blobs! ::capability :seon.launch/operator-doors?}` | |
 | `/_seon/operator/processes` | GET | **capability datom** | `{… ::method :get ::name ::operator-processes ::handler 'seon.web.serve/handle-operator-processes! ::capability :seon.launch/operator-doors?}` | |
@@ -103,7 +103,7 @@ literals (no hand-maintained lists):
 - **Same-origin on every POST.** Today's router docstring already states the
   invariant ("a reitit middleware on every state-changing POST route");
   `same-origin?` allows absent-Origin callers (`serve.cljs:1592-1596`), so
-  applying it to all POSTs including operator doors is behavior-preserving and
+  applying it to all POSTs including operator endpoints is behavior-preserving and
   secure-by-construction — an agent-added POST route can never forget it.
   `projection->routes` adds `same-origin-mw` to every `:post` entry; the
   per-row `::middleware ::same-origin` literals disappear from the seed.
@@ -264,10 +264,10 @@ session exists (the readiness-only server serves ONLY `GET /_seon/ready` and
 assets nor consults the router); static assets are disk build artifacts with
 zero database dependency that the NORMAL server must route during the
 pre-database window before the derived router's first value exists — not
-because the readiness-only server needs them; the config-apply door must
+because the readiness-only server needs them; the configuration endpoint must
 route independently of the database route state it repairs, so that
 `bin/seon config apply` works on any old-database boot (same class as
-readiness). The door keeps its same-origin + admitted + loopback/capability
+readiness). The endpoint keeps its same-origin + admitted + loopback/capability
 gating applied statically in its bootstrap row.
 
 ## 6. The `/feed` → `/sse` rename (seed-row edit, stage 4)
@@ -346,7 +346,7 @@ proof).
    `route.cljs`/`router.cljs` docstrings; document the crossing runbook
    (below) in the same pass; live proof on the default cluster:
    `bin/seon cluster reset default`, drive `/chat`, `/stop`, `/data`, an
-   operator door, and the renamed `/sse` feeds; close the issue with evidence.
+   operator endpoint, and the renamed `/sse` feeds; close the issue with evidence.
    Owns: docs listed, `docs/seon/issues/static-routes-bypass-database-route-authority.md`.
 
 **Crossing runbook (both directions).** Boot-time reconciliation of
@@ -358,7 +358,7 @@ reconciliation without the manifest cannot apply the manifest's `:removes`
 - **Forward crossing (new code + old database).** Migrated routes 302-home
   until an explicit `config apply` or an explicit-manifest boot seeds the
   new rows; `POST /_seon/operator/config` itself routes from the bootstrap
-  set (§5), so the repair door is always reachable. Non-destructive
+  set (§5), so the repair endpoint is always reachable. Non-destructive
   alternatives: `bin/seon config apply <manifest>`, or `bin/seon up
   <manifest>` / `restart <manifest>` with the manifest explicitly selected.
   `bin/seon cluster reset` remains the destructive path, never the only
@@ -371,9 +371,9 @@ reconciliation without the manifest cannot apply the manifest's `:removes`
   the new rows via reconcile's managed identity `:seon.route/name` —
   BEFORE relying on the old router. Duplicate-path build behavior across
   the crossing is pinned by the step-5 test.
-- **Legibility fallback** (only if the owner rejects the bootstrap door):
+- **Legibility fallback** (only if the owner rejects the bootstrap endpoint):
   `apply-live-config!` (cli.clj:339-358) must treat a 3xx/empty response
-  from the door as the specific "route catalog predates the collapse —
+  from the endpoint as the specific "route catalog predates the collapse —
   reboot with the manifest selected" error rather than a nil-response
   throw.
 
@@ -387,9 +387,9 @@ CLAUDE.md checkpoint rules.
 
 - **Version crossing (highest risk).** New code reopening an existing
   cluster config-free leaves the old datoms in place while the static
-  supplement is gone: migrated routes (`/chat`, `/stop`, operator doors)
+  supplement is gone: migrated routes (`/chat`, `/stop`, operator endpoints)
   302-home until a config apply or explicit-manifest boot. This is a real,
-  user-visible window, not a safe no-op; the bootstrap config door (§5)
+  user-visible window, not a safe no-op; the bootstrap configuration endpoint (§5)
   keeps the repair path reachable, and the crossing runbook above is the
   operator recipe for both directions. The reverse crossing additionally
   produces duplicate route paths and two-arity dispatch mismatches and
@@ -397,7 +397,7 @@ CLAUDE.md checkpoint rules.
   atomically per checkpoint; follow the runbook at every deploy/rollback
   boundary.
 - **`/_seon/operator/config` loopback tightening.** Adding loopback-peer to
-  the config door is a deliberate behavior change (today
+  the configuration endpoint is a deliberate behavior change (today
   same-origin+admitted only). The only known caller is `bin/seon config
   apply` on loopback. Loopback here is a containment contract — the server
   already binds 127.0.0.1, so the predicate adds defense-in-depth against
@@ -405,7 +405,7 @@ CLAUDE.md checkpoint rules.
   config-apply consumer exists downstream, that cluster overrides at its
   own boundary — surfaced for owner confirmation.
 - **Same-origin-on-all-POST.** Behavior-preserving for every current row
-  (operator doors gain a check that passes for header-less callers), but it
+  (operator endpoints gain a check that passes for header-less callers), but it
   is a structural rule replacing explicit per-row middleware; ui.md should
   state it so agents adding POST routes know the gate is automatic.
 - **`admission/unavailable` message coupling.** The `admitted` middleware
@@ -416,6 +416,6 @@ CLAUDE.md checkpoint rules.
   that unrelated transactions do not demand route recomputation (measure via
   `reactive/measurements`).
 - **Open: capability key granularity.** One `:seon.launch/operator-doors?`
-  gates all five operator rows. If per-door granularity is ever needed, the
+  gates all five operator rows. If per-endpoint granularity is ever needed, the
   mechanism already supports it (each row names its own key); do not
   pre-split now.

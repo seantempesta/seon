@@ -833,7 +833,7 @@ This is the **same database-codec class** as
 [`wildcard-receipt-pull-refuses-a-stored-dependency-plan.md`](../../../seon/issues/archive/wildcard-receipt-pull-refuses-a-stored-dependency-plan.md),
 not a separate `:seon.db/read-request` defect. Both that attribute and
 `:datahike.read/dependency-plan` select the heterogeneous-union EDN fallback in
-`seon.schema.datahike`. Its write seam used ambient `pr-str`, so
+`seon.schema.datahike`. Its write seam used dynamically resolved `pr-str`, so
 `*print-namespace-maps*` and map/set iteration order could change durable bytes;
 the strict reader then correctly refused a stored string unequal to its
 canonical re-encoding. That was a two-sided contract break created by the

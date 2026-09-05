@@ -7,7 +7,7 @@ tags: [issue, sci, eval, error, context]
 
 # A wrong-arity agent call surfaces as `:malli.core/invalid-schema`
 
-Observed live (2026-08-01, default cluster, real door probe):
+Observed live (2026-08-01, default cluster, real SCI evaluation probe):
 
 ```clojure
 ;; through seon.sci.eval/evaluate in my.agents.tally
@@ -40,7 +40,7 @@ history beat needs legible arity bytes).
 ## Closed 2026-08-01
 
 Fixed in commit c6db32f56 ("Make the eval door REPL-native"). Live
-proof through the real door in the default cluster JVM:
+proof through the real SCI evaluator in the default cluster JVM:
 `(my.message/send)` now returns a flat error whose message is
 `Wrong number of args (0) passed to: my.message/send` with
 `:seon.instrument/arglists [[to content] [to content about]]` in the

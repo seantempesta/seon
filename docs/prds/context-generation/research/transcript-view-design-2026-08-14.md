@@ -334,7 +334,7 @@ The lint tool was proven against the preserved drive specimen: isolated root
 read-only. The root namespace page's Hiccup was extracted by calling
 `seon.render.walk/neighborhood` at distance 2 for agent `root` — the exact
 request `seon.render.web/page-result` builds — and each unit's
-`:seon.render/output` collected. No message, transaction, door evaluation, or
+`:seon.render/output` collected. No message, transaction, SCI evaluation, or
 lifecycle command was issued.
 
 ```clojure

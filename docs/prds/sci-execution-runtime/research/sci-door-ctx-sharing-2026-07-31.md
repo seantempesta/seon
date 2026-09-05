@@ -4,7 +4,7 @@ status: active
 tags: [research, sci, render, caching]
 ---
 
-# The guarded door, renderers through it, and ctx/schema sharing
+# The bounded evaluation, renderers through it, and ctx/schema sharing
 
 Research lane, 2026-07-31. Question set: (1) what the door actually is
 today, file:line; (2) what it costs to put agent-authored RENDERER
@@ -140,7 +140,7 @@ door?** Yes, three, all confirmed:
    `:seon.render/ai` / `:seon.render/html` declaration is first-party
    (block declarations are installed by `seon.render.block/install-tx`,
    `src/seon/render/block.clj:1059`). The moment an agent can write a
-   render declaration fact, this becomes a door-free call into
+   render declaration fact, this becomes a direct call into
    first-party JVM code and must be constrained to symbols the agent
    could have authored.
 

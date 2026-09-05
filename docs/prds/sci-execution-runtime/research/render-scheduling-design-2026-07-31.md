@@ -17,7 +17,7 @@ Read-only lane: no `src/`, `test/`, or `resources/` file changed.
    synchronous call, and `:compute` is the only tag that hops
    (`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:243-263`).
 2. Every current Seon proc is correctly pinned `:io` or `:compute` at the one
-   construction door (`src/seon/flow.clj:83-127`), and there is **no `:mixed`
+   construction function (`src/seon/flow.clj:83-127`), and there is **no `:mixed`
    proc anywhere in `src/`** — but the *cluster render proc* does heavy
    derivation on `:io`, which is a contract violation flow does not police
    (`src/seon/render/web.clj:400` + `:445-480`).
@@ -47,7 +47,7 @@ Read-only lane: no `src/`, `test/`, or `resources/` file changed.
 | SCI | vendored fork | `reference-code/sci/doc/interrupt.md`, `src/sci/interrupt.cljc:25-42` |
 | Seon flow door + launcher | tree at `ef8cc6f77` | `src/seon/flow.clj:83-127,129-137,199-360,381-432,481-523` |
 | Seon procs | same | `src/seon/cluster.clj:156-180,918-935`, `src/seon/cluster/agent.clj:123-149,166-240,246-270`, `src/seon/render/web.clj:360-480,502-608`, `src/seon/cluster/wake.cljc:163-228` |
-| Seon eval door | same | `src/seon/cluster/loop.cljc:289-320`, `src/seon/sci/eval.clj:225-282` |
+| Seon evaluation boundary | same | `src/seon/cluster/loop.cljc:289-320`, `src/seon/sci/eval.clj:225-282` |
 | prior research | — | `workload-classification-2026-07-28.md`, `workload-scheduling-truth-2026-07-29.md`, `flow-mechanics-2026-07-28.md`, `agent-flow-render-falsification-2026-07-29.md`, `render-pipeline-design-2026-07-29.md` |
 
 ---

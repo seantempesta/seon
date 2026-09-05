@@ -92,7 +92,7 @@ The exact fault therefore moved to the actual guarded call inside
 `seon.render/render`; no production fault branch was retained.
 
 Artifact `2d1401a968d371ef454df7839849872b99531d2db1d81c871f6b9efa50f32078`
-then drove a fresh execution child through the ordinary `/agents/run` door.
+then drove a fresh execution child through the ordinary `/agents/run` endpoint.
 The database committed core error entity `17690` in transaction `536874764` at
 `2026-07-19T06:26:10.375Z`. Its stack begins at the artifact's
 `seon/render.cljs:778` and continues through the transcript renderer. The pod

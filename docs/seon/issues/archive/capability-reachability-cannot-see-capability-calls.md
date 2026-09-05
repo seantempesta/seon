@@ -40,7 +40,7 @@ capability leaf. `seon.sci.eval/resolved-form-vars` and
 agent-facing capability functions as host `clojure.lang.Var` objects. Those
 symbols are therefore dropped from BOTH the referenced set and the unproven
 set, and `seon.cluster.loop/capability-free-references?` answers `true` for a
-form that calls the filesystem, shell, edit, or web door directly.
+form that calls the filesystem, shell, edit, or web effect execution boundary directly.
 
 This fails OPEN at exactly the boundary the walk exists to guard. The
 docstring at `src/seon/sci/eval.clj:382-385` states the intended fail-closed

@@ -28,11 +28,11 @@ A = user message posted. B = agent's committed facts + reply visible in the UI.
 | 2 | Open run | `seon.agent.loop` (`wake-handler`, `open-or-renew-message-run!`) → `seon.agent.run/open-run!` | CAS-guarded run row: bounds, trigger, started-at | NECESSARY |
 | 3 | Claim | `seon.agent.driver.pod/dispatch-run!` → `seon.agent.driver/claim!` → `seon.agent.run.core/claim-plan` | `acquire-run-state!` (26-attr run pull + config pull + pending-input query), claim transition CAS tx, then a **second** full `acquire-run-state!` re-read | claim: NECESSARY; the double acquisition and 5-way transition taxonomy (acquire/attach-acquire/reacquire/held/steal): DEFENSIBLE |
 | 4 | Step loop | `seon.agent.driver/drive-claim!` + `seon.agent.loop.core` (`eligible?`, `next-step`) | close-reason check, capability eligibility, phase → step dispatch through a leaf map | phase cursor: NECESSARY-ish; the capability/eligibility layer exists **only because one turn spans two processes** — see WTF-1 |
-| 5 | `:render` (Bun pod) | `seon.agent.turn/render-phase!` → `render-prompt` → `seon.agent.ctx.driver/render-prompt!` → `seon.agent.ctx` + `ctx/*` block families | 3-member `execute-many` acquisition; stored blocks resolved; **authored render fns round-trip to the JVM over the UDS frame protocol** (`seon.host.session.leaf` → `seon.host` server → `seon.host.invoke/begin-invocation!` → guarded door → frame back), per block; second resolve pass for derived blocks; prompt blob put; turn row + `:rendered` tx under fence | derivation itself: NECESSARY. Doing it on the pod while eval lives on the JVM: WTF-1. The pod→JVM→pod bounce per authored block: WTF-2 |
+| 5 | `:render` (Bun pod) | `seon.agent.turn/render-phase!` → `render-prompt` → `seon.agent.ctx.driver/render-prompt!` → `seon.agent.ctx` + `ctx/*` block families | 3-member `execute-many` acquisition; stored blocks resolved; **authored render fns round-trip to the JVM over the UDS frame protocol** (`seon.host.session.leaf` → `seon.host` server → `seon.host.invoke/begin-invocation!` → bounded evaluation → frame back), per block; second resolve pass for derived blocks; prompt blob put; turn row + `:rendered` tx under fence | derivation itself: NECESSARY. Doing it on the pod while eval lives on the JVM: WTF-1. The pod→JVM→pod bounce per authored block: WTF-2 |
 | 6 | Handoff pod→JVM | `release!` tx → JVM `db.host/listen!` (interest = `:all`) → `scan!` re-queries **every** open run → new vthread → `claim!` again (epoch+1) | full release/wake/scan/reclaim cycle mid-turn | WTF-1 (cost of the split); the `:all`-dependency listener rescanning everything on every commit: DEFENSIBLE at current scale, won't survive load |
 | 7 | `:open-attempt`/`:settle-attempt` (JVM) | `seon.agent.driver.host/execute-step!` → `seon.agent.turn.llm/llm-phase!` → `durable-attempt!` → `seon.ai.core` transport | pull turn; `as-of` at rendered-tx; `resolve-llm-context!` (2 more config pulls); read prompt blob; split on a magic boundary string; pull turn **again** inside `durable-attempt!`; crash-mark stale open attempt; allocate attempt id; open-attempt tx; transport with watchdog interrupt + partial-text no-history sink; reply blob put; terminal tx → `:reply-ready` | durable attempt rows + resume: NECESSARY for "LLM call survives run-holding process death". The ~40-optional-key attempt evidence row built by **two** overlapping builders (`turn.core/open-attempt-row` vs `turn.llm/attempt-row`, the open row derived by calling `attempt-row` with `{}` then dissoc'ing): WTF-5 |
 | 8 | `:eval` — plan | `seon.agent.driver.host/eval-step!` → `seon.program.plan/acquire-planning-projection` + `plan-execution` → `seon.program.edge` → `seon.agent.driver/execution-plan-disposition` | read reply blob, parse once; then **three unbounded corpus queries** (every `:seon.program.edge` bundle, every schema, every fn contract), reconstruct bundles, digest the whole graph, statically analyze every reply form (`edge/analyze-function`), fold the call graph to a placement, build schema + capability manifests, classify into 6 dispositions | WTF-3. ~1,240 lines (`plan.cljc` 671 + `edge.cljc` 567) on the hot path of **every** reply, to answer "run here or hand to bun," with exactly one JVM tier inventory installed and the bun tier being retired |
-| 9 | `:eval` — execute | `run-eval-batch!` → `seon.host.invoke/execute-invocation!` → `seon.host.guard` → `seon.host.eval/eval-batch-result` → `seon.host.preflight` / `seon.host.record` / `seon.host.graduate` / `seon.host.instrument` / `seon.host.context` | `:reply-ready→:evaling` tx; per-session context fork; provision bindings; eval-pool submit; guard policy pull (`sample/acquire-guard-policy!`); guard reset/arm; **standalone fence-only tx** (`claim-run-fence!`); per form: receipt tx → preflight (repair + `:malli/schema` admission) → sci eval with step budget + output cap → terminal tx (fence + eval row + `:seon.fn`/`:seon.ns`/`:seon.schema` tees) → nursery install → instrument reconcile → projection publish; then `resolve-head!`, pull turn, `:evaling→:evaled` tx | guard door, receipt-before-run, terminal-with-tees: NECESSARY — this is the actual product. The fence asserted at four layers (claim tx, standalone pre-batch tx, every receipt, every terminal): WTF-6 |
+| 9 | `:eval` — execute | `run-eval-batch!` → `seon.host.invoke/execute-invocation!` → `seon.host.guard` → `seon.host.eval/eval-batch-result` → `seon.host.preflight` / `seon.host.record` / `seon.host.graduate` / `seon.host.instrument` / `seon.host.context` | `:reply-ready→:evaling` tx; per-session context fork; provision bindings; eval-pool submit; guard policy pull (`sample/acquire-guard-policy!`); guard reset/arm; **standalone fence-only tx** (`claim-run-fence!`); per form: receipt tx → preflight (repair + `:malli/schema` admission) → sci eval with step budget + output cap → terminal tx (fence + eval row + `:seon.fn`/`:seon.ns`/`:seon.schema` tees) → nursery install → instrument reconcile → projection publish; then `resolve-head!`, pull turn, `:evaling→:evaled` tx | evaluation boundary, receipt-before-run, terminal-with-tees: NECESSARY — this is the actual product. The fence asserted at four layers (claim tx, standalone pre-batch tx, every receipt, every terminal): WTF-6 |
 | 10 | Handoff JVM→pod | release → listener → scan → reclaim | second full mid-turn handoff, because `:publish` is a pod capability | WTF-1 |
 | 11 | `:publish` (pod) | `seon.agent.turn/publish-phase!` → `my.plan/publish-generated-program!` | pull turn, read reply blob **again**, **re-parse the reply a second time** (`turn.core/reply-program` again), publish program, `:evaled→:published` tx, turn `:done` | the re-read/re-parse: WTF-4; the phase itself could be part of eval settlement |
 | 12 | Close + UI | `drive-claim!` close tx (retract run-holding process + agent pointer); writer feed → `seon.reactive` → render units → Datastar SSE morph | | NECESSARY. The reactive/UI derivation path genuinely matches the pitch |
@@ -62,7 +62,7 @@ config singleton.
    §1)." Interim or not, this is the single largest hop generator.
 
 2. **Two IPC mechanisms execute agent code on the JVM inside the same turn.**
-   The eval phase reaches the guarded door via the database claim cursor. The
+   The eval phase reaches the bounded evaluation via the database claim cursor. The
    render phase reaches the *same door* via a UDS socket frame protocol
    (`seon.host.clj` server, `seon.host.session.leaf` client, frames,
    `begin-invocation!`/`settle!`/`cancel-active!`), because authored render fns
@@ -175,12 +175,12 @@ binding. That is the entire admissible-here decision. The program-graph edge
 analysis survives as a background indexer feeding context/search/purity facts
 — off the turn's critical path.
 
-**Keep**: guard door unchanged; receipt/terminal/tee recording unchanged;
+**Keep**: evaluation boundary unchanged; receipt/terminal/tee recording unchanged;
 errors-as-values unchanged; UI derivation unchanged.
 
 The resulting A→B path: message tx → listener wake → claim CAS → derive
 context (local pure fn over the pinned db value, authored blocks through the
-same in-process guarded door) → prompt blob tx → LLM call under watchdog →
+same in-process bounded evaluation) → prompt blob tx → LLM call under watchdog →
 reply blob tx → per-form receipt/eval/terminal → close tx → feed morph.
 **~7 hops, ~6 + 2N transactions, zero mid-turn process handoffs, zero IPC**,
 with the identical crash story: epoch steal + resume from three checkpoints.
@@ -194,7 +194,7 @@ with the identical crash story: epoch steal + resume from three checkpoints.
 - **Delete** the UDS invocation frame protocol for authored renders
   (`seon.host.session.leaf`, frame/settle/cancel machinery in
   `seon.host.invoke`, the `seon.host.clj` socket server) — same-process call
-  through the guarded door replaces it.
+  through the bounded evaluation replaces it.
 - **Remove from the hot path** `seon.program.plan/plan-execution` +
   `acquire-planning-projection` + `execution-plan-disposition` + both
   manifests; replace with binding-resolution checks at eval time. `edge.cljc`

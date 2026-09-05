@@ -19,7 +19,7 @@ The dependency order is:
 1. deterministic fake-door trajectory and cutoff falsifiers;
 2. an owned run cancellation/result handshake;
 3. retained partial turn/eval evidence;
-4. strict database deadline, door timeout, then Inspect wall-clock ordering;
+4. strict database deadline, endpoint timeout, then Inspect wall-clock ordering;
 5. isolated database-derived mode/config arms; and
 6. batch/stream plus multi-form local-model experiments.
 
@@ -30,7 +30,7 @@ The dependency order is:
   `src-inspect-ai/evaluation-sources.lock.json`.
 - Seon Inspect boundary: `src-inspect-ai/src/seon_inspect/solver.py` and the
   admitted `catalog.run_native_task` path.
-- Seon live door: `src/seon/web/serve.cljs`.
+- Seon live endpoint: `src/seon/web/serve.cljs`.
 - Seon run policy: `src/seon/agent/run.cljs`, `src/seon/agent/loop.cljs`, and
   database-derived configuration in `src/seon/config.cljs` and
   `src/seon/agent/ctx.cljs`.
@@ -48,7 +48,7 @@ latest `TaskState`, records an operator `EvalSampleLimit`, proceeds to scoring,
 and is neither counted as an ordinary error nor retried.
 
 The current Seon solver awaits blocking
-`anyio.to_thread.run_sync(pod_run)`. The live door can close on its own timeout
+`anyio.to_thread.run_sync(pod_run)`. The live endpoint can close on its own timeout
 and return final evidence, but the caller has no owned cancellation handle.
 The shortest falsifier is a fake `/agents/run` that publishes one turn and then
 blocks: interrupt the active Inspect sample and require prompt return, an
@@ -71,9 +71,9 @@ The source laws are:
 Every started or cancelled sample remains accounted for with its error,
 messages, transcript events, and completion time. A task-local cancellation
 does not tear down siblings, and external cancellation is distinct from retry.
-Seon's door already returns partial `turn_evidence` and `eval_evidence` on an
+Seon's endpoint already returns partial `turn_evidence` and `eval_evidence` on an
 honest bounded close; the solver retains them only after an HTTP response.
-First prove a fake door returning one completed turn plus one in-progress or
+First prove a fake endpoint returning one completed turn plus one in-progress or
 error turn. Then add the interruption handshake. Solo proof precedes concurrent
 sibling behavior.
 
@@ -106,7 +106,7 @@ Seon's internal pod model calls because the native solver never calls Inspect
 
 Seon's database owns turn/form/deadline policy. Inspect owns only a looser
 outer wall-clock backstop. Prove the order with a scripted never-complete run:
-the database deadline closes first with truthful partial evidence, the door
+the database deadline closes first with truthful partial evidence, the endpoint
 budget cuts second, and Inspect's time limit records only if both lower layers
 fail. The required order is:
 

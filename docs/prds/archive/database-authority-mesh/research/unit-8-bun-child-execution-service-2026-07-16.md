@@ -8,7 +8,7 @@ tags: [research, agent, flow, architecture, database]
 
 ## Decision
 
-Replace the three in-process execution doors with one child service: execute a
+Replace the three in-process invocation paths with one child service: execute a
 granted function for an agent at a complete database coordinate and return
 ordinary data. Eval, authored AI/HTML renders, and later interactions differ
 only in granted functions, input/result schemas, deadline, and publication

@@ -11,7 +11,7 @@ tags: [issue, database, flow]
 
 `bin/seon test changed --path src/seon/db/writer.clj` fails before selecting or
 running tests because Babashka cannot resolve `java.nio.channels.SelectionKey`
-while loading `seon.db.transport.uds`. The focused JVM writer doors themselves
+while loading `seon.db.transport.uds`. The focused JVM writer test suites themselves
 remain green.
 
 ## Evidence

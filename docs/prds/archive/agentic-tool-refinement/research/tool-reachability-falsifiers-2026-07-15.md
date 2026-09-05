@@ -102,7 +102,7 @@ before run waits for a clean admitted ACME artifact.
 ## Shared evidence contract
 
 Every row runs as one fixed `Sample`, one epoch, through the existing static
-ACME native door. The scorer consumes only these retained fields:
+ACME native endpoint. The scorer consumes only these retained fields:
 
 - start and end source admission plus byte-identical static-target identity;
 - the final complete database coordinate;
@@ -174,7 +174,7 @@ as `tool absent`. Once the row is present, choosing another operation is
 ## Row 2 — ordinary namespace discovery
 
 Run with the normal nil `agent_id`, which mints an ordinary agent through the
-existing door.
+existing endpoint.
 
 ### Exact prompt
 

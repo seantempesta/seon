@@ -63,7 +63,7 @@ The data and control flow is:
 1. `run_native_task(task_identity("db"), milestone_lift, ...)` verifies the
    frozen selected-source closure.
 2. `static_target_snapshot` requires the semantic ACME operator to report ready
-   at the exact `http://127.0.0.1:7994/agents/run` door.
+   at the exact `http://127.0.0.1:7994/agents/run` endpoint.
 3. The new required callback calls `mlx_model_server_snapshot` and produces the
    immutable model-server start map before `milestone_lift` constructs a task.
 4. `milestone_lift(milestone="db", endpoint="pod", epochs=1, seed=1,

@@ -232,7 +232,7 @@ crash supervisor are currently implemented belongs in their roadmap chunks.
 **Keep:** one block with AI/HTML twins, one guarded render engine, dedicated
 canvas, surface/card distinction, page-specific layouts, root system view,
 chat-first transcript, lazy debug/data units, Reitit routes as data, one
-capability-gated call door, Datastar signals for transient state, gzip SSE, and
+capability-gated function invocation, Datastar signals for transient state, gzip SSE, and
 runtime-observed reads as correctness authority.
 
 **Update now:**
@@ -300,7 +300,7 @@ one allocator, `my.canvas`, `my.plan`, `my.kb`, and discoverability from code.
 **Keep:** exact turn coordinate plus byte-ground-truth prompt/reply blobs,
 transaction-metadata provenance, queryable errors, turn/turn-diff/ctx-preview,
 branch-qualified debugging, non-autonomous forensic views, and Inspect through
-the production one-shot door.
+the production one-shot execution endpoint.
 
 **Update now:**
 
@@ -354,7 +354,7 @@ Replace it with a short table organized by architectural concept, for example:
 | Malli candidate/projection/instrumentation | vendored Malli registry/instrument source, `seon.schema`, `seon.instrument` | publish only validated complete candidates |
 | Reitit route derivation | vendored core/ring source, `seon.route`, `seon.web.router` | routes are compiled values; streaming remains Seon-owned |
 | Datastar morph/feed | vendored Datastar SDK/client and tiny gzip example, `seon.web.datastar` | stable-ID element patches, signals, and flushed gzip SSE |
-| SCI bounded invocation | vendored SCI source, `seon.render.sci` | one capability/bounding door |
+| SCI bounded invocation | vendored SCI source, `seon.render.sci` | one bounded invocation function |
 | Changed tests | vendored Shadow and clj-kondo sources, Seon test artifact/selector | conservative namespace/macro dependency selection |
 
 Move the existing source quotes, validation summaries, historical bugs, and

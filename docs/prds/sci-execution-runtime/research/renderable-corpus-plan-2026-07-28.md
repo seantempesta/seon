@@ -520,7 +520,7 @@ The renderer decides *whether* to delegate; the walk does the arithmetic.
 :seon.render.walk/remaining  ; shared node budget (a volatile, as `expand` already uses)
 ```
 
-Budgets come from the same `:seon.sci.admit/caps` the eval door and `expand`
+Budgets come from the same `:seon.sci.admit/caps` the evaluation boundary and `expand`
 already use — **no second set of dials**. At distance 0 a delegation returns
 the **name only**; on a path member it is a cycle refusal in place; on an
 exhausted budget it is a legible hole.

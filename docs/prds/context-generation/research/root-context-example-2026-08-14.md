@@ -127,7 +127,7 @@ AGENT via reverse `:seon.cluster.agent/namespace` → through the agent:
 its open run, its messages (`bootstrap-task:root`, the maintenance
 notices), its plan, its routed errors, by arrival. What is GONE versus
 the live capture: the cluster entity's config lines, the
-instruction-set dump, and the five never-required toolkit namespaces
+instruction-set dump, and the five never-required capability namespaces
 (`my.note`, `my.fs`, `my.shell`, `my.web`, `my.edit`, `my.plan`) —
 reachable tomorrow by root simply requiring them, which then shows in
 its ns form: the context explains itself.

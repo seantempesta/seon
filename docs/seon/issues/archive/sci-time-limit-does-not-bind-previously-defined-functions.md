@@ -51,7 +51,7 @@ stop the thread. The spinning work permanently consumes one slot of the
 bounded compute launcher.
 
 This blocks the ruled design that agent-authored RENDERER functions
-execute through the one guarded door: a renderer is defined once and
+execute through the one bounded evaluator: a renderer is defined once and
 invoked on every re-render, which is exactly the escaping shape.
 
 ## Evidence

@@ -45,7 +45,7 @@ process-local channel.
 - Agent: `accretion-graduate`
 
 All live inspection used JVM-mode io-prepl with the explicit read-only
-`(seon.operator/connection "default")`. No door evaluation, transaction,
+`(seon.operator/connection "default")`. No SCI evaluation, transaction,
 channel take, wake, graph transition, or process signal was performed. Channel
 contents were inspected through the live Flow values and non-removing buffer
 inspection. The specimen remained running until this report and its issue were

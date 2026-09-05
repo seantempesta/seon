@@ -62,7 +62,7 @@ Verified at HEAD by the [parallel-paths register](../research/parallel-paths-reg
   discarded before the context is assembled; 34 hardcoded opening/
   narration sites (census 2026-08-28).
 - **What is right**: eval facts with result EDN/blob and read-evidence
-  revisions; schema-derived root selection; the four-rung producer
+  revisions; schema-derived root selection; the four-rung render function
   chain's shape; `seon.print` elision values; the exact prompt capture;
   the def-restore seam; the web delta packages; `seon.db/since`/`as-of`.
 
@@ -400,7 +400,7 @@ N shrinking per depth), then depth (subtrees → shape summaries `{…7 keys}`
 requery form per elided subtree; the per-value token budget is the
 profile's `:seon.render.profile/token-budget` (a config fact; default to
 be ruled, ~5k). Every consumer — agent context, `/data` windows, the MCP
-door, HTML blocks — calls THIS fit unconditionally with an explicit
+result projection, HTML blocks — calls THIS fit unconditionally with an explicit
 profile; no consumer keeps a ladder of its own (register §5 count: six
 places decide omission today; after: one).
 
@@ -446,7 +446,7 @@ optional); never a fact per function call (59b). `render-cost-fact`
 | 3.8 `seon.bootstrap` | keep generated-eval settlement and trigger-last; delete candidates/supervision/second reader (§4) as §2.1 absorbs them | register §1 rows 6–7 |
 | 3.9 `seon.render.value` | keep explicit window/requery; delete the authored suffix; fit through §2.4 only | register §5 row 4 |
 | 3.10 `seon.cluster/mcp-project` | fit unconditionally with an explicit MCP profile; blob spill stays storage policy (kills the zero-character strings) | register §5 row 7; the filed get_value issue |
-| 3.11 `seon.render/walk`'s ambient `*walk-context*` | inputs declared and supplied by call preparation; delete the dynamic var | register §8 row 1 |
+| 3.11 `seon.render/walk`'s dynamic `*walk-context*` binding | inputs declared and supplied by call preparation; delete the dynamic var | register §8 row 1 |
 
 ## 4. What we DELETE — each with its replacement and the proof that gates it
 

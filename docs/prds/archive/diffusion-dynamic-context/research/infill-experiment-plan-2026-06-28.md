@@ -160,7 +160,7 @@ suffix WITHHELD — that is the real AR handicap (an editor's AR completion neve
 sees what's after the cursor). Score: did the fill, concatenated with the suffix,
 (a) parse (Seon's `seon.repl.internal/parse-forms`, instant, no model call — see
 [[parser-as-generation-oracle-2026-06-28]]) and (b) eval to the right value in
-Seon's SCI cage? The parser is the free syntactic oracle; eval is the semantic
+Seon's SCI context? The parser is the free syntactic oracle; eval is the semantic
 one. Metric: % of holes filled correctly when the suffix constrains the answer,
 diffusion vs suffix-blind AR.
 

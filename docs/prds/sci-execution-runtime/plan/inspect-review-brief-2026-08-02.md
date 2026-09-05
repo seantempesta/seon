@@ -24,7 +24,7 @@ grading substrate:
   tasks): Seon registers as an Inspect MODEL PROVIDER, so every task
   whose solver ends in `generate()` runs verbatim — upstream files
   untouched. 53% of the catalog runs today with zero capability doors;
-  the shell door raises it to ~79%.
+  the shell capability raises it to ~79%.
 
 Both ramps use: the bootstrap-drive episode (landed, six graded O1
 drives), one warm JVM + per-sample clusters (0.9 s each) over prepl,
@@ -40,7 +40,7 @@ grading-fork pattern (~17 ms, never the live branch).
    non-empty tools list (never silently score tool work); a mandatory
    eval-log metadata label naming episode semantics.
 4. Benchmark-washing refusals by name: SWE-bench, terminal-bench,
-   commit0, aider-polyglot wait for the REAL shell door — REPL
+   commit0, aider-polyglot wait for the REAL shell capability — REPL
    equivalence would distort what those numbers mean.
 5. Judge default: deepseek-v4-flash, thinking enabled high, via
    Inspect's own DeepSeek provider path (raw `thinking` body, no
@@ -53,7 +53,7 @@ grading-fork pattern (~17 ms, never the live branch).
 - Runnable now: 86 families / 133 tasks (A1 text 113 + A2 code-gen 20
   — Docker lives in THEIR scorer, not our agent).
 - Door demand schedule: shell/exec container ≈ +22 families/+63 tasks;
-  typed tool calls ≈ +7/+13; fs door alone unlocks zero external
+  typed tool calls ≈ +7/+13; filesystem capability alone unlocks zero external
   (prerequisite of shell, ranked honestly).
 - Deletion: ~11k lines of pod-era Python out; ~600–800 in.
 

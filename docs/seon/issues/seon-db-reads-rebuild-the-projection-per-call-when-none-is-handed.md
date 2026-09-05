@@ -18,7 +18,7 @@ delay and DERIVES THE COMPLETE PROJECTION FROM THE DATABASE PER CALL.
 Measured 2026-09-02 on `ctxprobe` (2,362 schema rows): raw
 `datahike.api/q` 0.11 ms; the same query through `seon.db/q` 2,373 ms,
 of which forcing the projection = 5,680 ms on the next call (GC
-variance; 587–651 ms on repeats). The handed (door) path is 48 ms —
+variance; 587–651 ms on repeats). The supplied-projection SCI path is 48 ms —
 still ~500× raw, unexplained.
 
 This is the fetch-at-call-time class named in AGENTS.md §2.1 ("the same
@@ -50,7 +50,7 @@ anything weaker. Then measure the handed path's remaining 48 ms
 Ten consecutive `seon.db/q` calls in jvm mode on one database value
 cost within 2× of raw `datahike.api/q` after the first; a schema
 transaction invalidates (the next call derives anew — asserted, not
-assumed); the door path drops below 5 ms for the family query above.
+assumed); the SCI evaluation path drops below 5 ms for the family query above.
 One regression per claim.
 
 ## 2026-09-03 implementation and measurement

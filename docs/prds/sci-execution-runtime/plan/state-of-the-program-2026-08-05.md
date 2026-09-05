@@ -71,7 +71,7 @@ in [README.md](README.md). Per-problem status after the session:
 
 **08-04 night:** per-run fork contexts; session curation sealed
 (editor/revision/proof/adopt, three branches, single-future adoption);
-destructive = WRITES not door-crossings, classified by leaf metadata;
+destructive = WRITES not capability requests, classified by leaf metadata;
 open maps EVERYWHERE (#48 extended to fn contracts); platform failures
 are highest priority; the root agent owns ALL system maintenance and
 escalates to the user by message; continuous REPL dogfooding.
@@ -82,7 +82,7 @@ retired entirely in favour of `:seon.def/*`; database value = key
 `:seon.db/connection` (Datahike's own word) with
 `:seon.store/branch-connection` deleted; **NO MIGRATION, NO PARALLEL
 CODE** (format/reset/rebuild instead); indexing keeps the whole parse;
-ambient injection driven by a function's own `:malli/schema`; initial
+call preparation driven by a function's own `:malli/schema`; initial
 forms exist at both cluster and agent level with **most specific wins**;
 storage reclamation uses a **preemptible sweep** (superseded by an open
 problem — see P1); reset deletes everything with no exceptions; the
@@ -240,7 +240,7 @@ be superseded *documentation*, not unfinished code.
 ### P12 — Indexing drops parse information
 
 Complete per-arity argument facts, inline-schema fingerprints, and the
-computed coverage guard are designed and unbuilt. Ambient injection is
+computed coverage guard are designed and unbuilt. Call preparation is
 blocked on them.
 [indexing-completeness](../research/indexing-completeness-2026-08-05.md).
 
@@ -283,7 +283,7 @@ lack owner/recovery guidance; `registry.clj:349` extends the GC mark via
 `schedule`/`task`/`fire` fall to the generic value floor. Under the
 standing order that is a defect.
 
-### P17 — Ambient injection unbuilt
+### P17 — Call preparation unbuilt
 
 PRD written ([ambient-injection-prd](ambient-injection-prd-2026-08-05.md)),
 blocked on P12. The gap that stopped it: `input-refs` records only the
@@ -455,7 +455,7 @@ result that speaks to it (O1 inverted) was never followed up.** The
 right for velocity; leaving the datum uninvestigated was not.
 
 **R7 — Three PRDs were written in one night** (curation, output floor,
-ambient injection) plus five ruling batches. The curation and floor PRDs
+call preparation) plus five ruling batches. The curation and floor PRDs
 rest on paired independent research and I trust them. **The ambient
 injection PRD rests on one lane and my own reading, and its central
 premise was found wrong within an hour** (input-refs granularity). Treat
@@ -490,7 +490,7 @@ Not a plan — an opinion, to be re-decided.
    us, whether it duplicates program facts) — it is upstream of P12/P17.
 3. **Then the rename + reset + rebuild** as one clean pass, per the
    no-migration ruling, with the boot+query proof bar.
-4. **Then P12 → P17** (indexing → ambient injection) as the platform
+4. **Then P12 → P17** (indexing → call preparation) as the platform
    payoff.
 5. **P7 and P8** (curation trigger + fork contexts) to make the runtime
    story real.

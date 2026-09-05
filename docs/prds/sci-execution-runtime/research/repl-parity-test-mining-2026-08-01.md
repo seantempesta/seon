@@ -223,7 +223,7 @@ door behind a harness shim; **(b)** adapt into a `test/seon/` regression;
 | I2 | the closed admitted-node grammar is total (P-TOTAL) | print-path §"Acceptance evidence" |
 | I3 | text and hiccup sinks cannot disagree (P-TEE) | print-path §"Acceptance evidence" |
 | I4 | `result-edn` round-trips from a stored fact and re-renders identically | print-path decision 1(c) |
-| I5 | capability door — `fs`/`web`/`llm`/`db` are the only host reach | `seon.effect` |
+| I5 | capability request handler — `fs`/`web`/`llm`/`db` are the only host reach | `seon.effect` |
 | I6 | scratch-state lifetime across runs (facts survive, defs do not) | audit honesty question 1 |
 | I7 | loud "N of M shown" capping line | audit honesty question 2; ruling #25 |
 | I8 | the time limit is uncatchable and not maskable | sci `interrupt_fn_test.cljc` (our fork upstreamed it) |
@@ -339,7 +339,7 @@ precedent on the other side, and the audit records neither.
 
 Family I above, in short: admission budget accounting, the closed-grammar
 totality property, the text/hiccup tee property, receipt round-trip
-determinism, the capability door, cross-run scratch lifetime, and the
+determinism, the capability request handler, cross-run scratch lifetime, and the
 loud capping line. These are our genuine differences and **must not be
 smoothed** — they are the audit's honesty questions. The one exception is
 the interrupt/time-limit corpus, which we already wrote and upstreamed

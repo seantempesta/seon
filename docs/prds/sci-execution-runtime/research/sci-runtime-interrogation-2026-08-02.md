@@ -39,7 +39,7 @@ mutation and cross-cluster consequences remain under isolated probe.
   submission owners are `src/seon/cluster/agent.clj:240-264` and
   `src/seon/flow.clj:479-499`.
 - First-party owners: context acquisition/evaluation
-  `src/seon/sci/eval.clj:156-228,908-1234,1393-1593`; cluster tower and
+  `src/seon/sci/eval.clj:156-228,908-1234,1393-1593`; cluster boot sequence and
   process-global owners `src/seon/cluster.clj:158-271,1309-1406`; evaluation
   submission `src/seon/cluster/loop.cljc:546-562,1375-1408`.
 - Live target: `default`, PID 4717, prepl `127.0.0.1:63956`, observed through
@@ -50,7 +50,7 @@ mutation and cross-cluster consequences remain under isolated probe.
   Claims cite and probe the live loaded code as well as the current file tree;
   no production path is owned or edited by this audit.
 
-The shortest falsifier is an actual door evaluation using `#'` against a
+The shortest falsifier is an actual SCI evaluation using `#'` against a
 private first-party Var. That distinguishes what an agent reaches from what a
 host JVM REPL reaches.
 
@@ -147,7 +147,7 @@ until the isolated interleaving probe.**
 
 ## B. Reachability — first live census
 
-Every form below ran through the live SCI door, not the host JVM REPL.
+Every form below ran through the live SCI evaluation, not the host JVM REPL.
 
 ### Private Vars and process-global owners: reachable
 

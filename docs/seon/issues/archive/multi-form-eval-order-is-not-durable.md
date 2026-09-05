@@ -162,7 +162,7 @@ receipt/recovery proof passes 9 tests/82 assertions, including a real
 proof and the canonical position work above remain separate acceptance gates:
 the receipt closes attempted-form addressability, not durable sequence order.
 
-The source-frozen operator runbook found one remaining live-proof door on
+The source-frozen operator runbook found one remaining live-proof execution path on
 2026-07-15. No public supervisor operation can submit one controlled real turn
 and crash exactly the owned pod generation after observing the middle running
 receipt. `bin/seon restart` is clean quiescence; direct PID/process-group kill,

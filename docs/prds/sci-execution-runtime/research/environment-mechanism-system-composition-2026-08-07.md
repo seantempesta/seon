@@ -160,10 +160,10 @@ transfers directly: if Seon wants a REPL convenience for "the current cluster",
 it belongs in a dev namespace that is obviously not the mechanism, never in the
 runtime owner.
 
-### 1.8 Lessons for Seon's boot tower
+### 1.8 Lessons for Seon's boot sequence
 
 1. **The environment is the return value of a reduce over declared units in
-   derived dependency order** (`core.cljc:453-455`). Seon's boot tower —
+   derived dependency order** (`core.cljc:453-455`). Seon's boot sequence —
    process → store → facts → flow — is already a dependency order; making it a
    *derived* order over declared units means nobody hand-maintains it.
 2. **Resolve dependencies by substitution before construction, not by lookup

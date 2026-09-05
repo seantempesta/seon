@@ -33,14 +33,14 @@ extended from six files to eleven. Every "in flight" mark below is true at
 that snapshot and must be re-derived, not trusted, before a wave starts.
 
 Method: every claim is a `file:line` read at the snapshot, or a derived count
-from the schema registry. Producer inventory is derived, not hand-listed:
+from the schema registry. Render function inventory is derived, not hand-listed:
 
 ```bash
 cat resources/seon/schemas/*.edn | tr '\n' ' ' \
   | grep -oE ":seon\.render/ai +[a-z][a-zA-Z0-9.*+!?<>=_-]*/[a-zA-Z0-9.*+!?<>=_-]+"
 ```
 
-→ **42 distinct declared `/ai` producers**, 285 of the 358 references being
+→ **42 distinct declared `/ai` render functions**, 285 of the 358 references being
 the one error-family `seon.error/render-ai`. That derivation is the member
 list; the table below names the ones with proven or read defects.
 
@@ -64,11 +64,11 @@ The eight stages, with what actually checks the boundary today.
 
 | # | Stage | Owner (file) | Boundary contract today | Verdict |
 |---|---|---|---|---|
-| 1 | production (whole value) | ~42 declared producers + every `my.*` read | Malli `:malli/schema` on public producers, instrumented from the program graph | **partial** — the contract types the SHAPE, nothing asserts the value is whole/unbounded/unnarrated |
+| 1 | production (whole value) | ~42 declared render functions + every `my.*` read | Malli `:malli/schema` on public render functions, instrumented from the program graph | **partial** — the contract types the SHAPE, nothing asserts the value is whole/unbounded/unnarrated |
 | 2 | storage admission | `src/seon/sci/admit.clj:236-244`, `print.cljc:841` (`admit-string`, in flight) | declared caps as config facts; `::truncated-string` → counted elision at `print.cljc:735-800` | **sound in mechanism**, see #B1 for the honesty gap |
 | 3 | derivation (history / walk membership) | `render/walk.clj:511` `neighborhood`, `:893` `history`, `render/transcript.clj` | `neighborhood` has a schema; several walk publics do not (6 of 12 in `walk.clj`) | **weak** — the derivation's output is not contract-checked before projection |
 | 4 | projection selection | `render.clj:178-320` | `candidates` + `producer` are schema'd; ambiguity is a typed error | **the strongest stage** — see §4 audit |
-| 5 | producer or floor | `render.clj:369-400` `invoke-selected`; floor `render/value.clj:626,633` | `valid-projection?` (`render.clj:402-406`) checks the producer's output against the projection's output schema — **then silently discards the result on failure** (`:468-474`) | **checked and swallowed** — the single largest §0 gap |
+| 5 | render function or floor | `render.clj:369-400` `invoke-selected`; floor `render/value.clj:626,633` | `valid-projection?` (`render.clj:402-406`) checks the render function's output against the projection's output schema — **then silently discards the result on failure** (`:468-474`) | **checked and swallowed** — the single largest §0 gap |
 | 6 | fit | `print.cljc:909` `fit`, `:854` `fit-text` | `fit` is schema'd; profile derived per call when absent | **sound in shape, unsound in policy** (#F1, #F2) |
 | 7 | face assembly | `render.clj:517` `fit-terminal`; `render/web.clj:259` `surface-html`; `cluster/prompt.clj` | `render-ai`/`render-html` type the terminal output; `surface-html` is schema'd | **partial** — nothing checks the assembled page or prompt against a contract before delivery |
 | 8 | delivery | `render/hiccup.clj:479` `->string`; the SSE feed at `web.clj:1643` | `->string` is the only schema'd public in `hiccup.clj` (1 of 6) | **weakest** — a non-hiccup value reaching the serializer is the escaped-EDN defect (#G2) |
@@ -87,18 +87,18 @@ Columns: **§** = the PRD property violated (§0 stage number, or §1 property);
 rip-out row where one exists; **blast** = estimated files touched / test
 namespaces affected; **flight** = in-flight status at the snapshot.
 
-### A. Stage 1 — production: producers that narrate or bound
+### A. Stage 1 — production: render functions that narrate or bound
 
 | # | Seam (`file:line`) | § | Named by | Disposition | Blast | Flight |
 |---|---|---|---|---|---|---|
-| A1 | `src/seon/render.clj:437-496` `project-node*` substitutes a declared `/ai` producer for the VALUE at every depth | §1 results-are-data | results-as-data seam 1 | §2 #1 DELETE | 1 src / 4-6 tests (`render_test`, `walk_test`, `transcript_test`, `print_test`) | not started |
+| A1 | `src/seon/render.clj:437-496` `project-node*` substitutes a declared `/ai` render function for the VALUE at every depth | §1 results-are-data | results-as-data seam 1 | §2 #1 DELETE | 1 src / 4-6 tests (`render_test`, `walk_test`, `transcript_test`, `print_test`) | not started |
 | A2 | `src/seon/cluster/run.clj:1869` `render-ai` | §1 results-are-data | audit 1a | §2 #3 REPLACE with attribute face | 1 src + 1 schema / 2 | not started |
 | A3 | `src/seon/cluster/run.clj:1977` `render-form-ai`, `:1993` `render-receipt-ai` | §1 results-are-data | audit 1b + `run-renderer-narrates-forms-and-receipts` | §2 #3 | (same as A2) | not started |
 | A4 | `src/seon/problems.clj:432` `stale-var-ai`, `:448` `missing-model-ai`, `:363` prose pair | §1 results-are-data | audit 1c | §2 #3 — the `:seon.fn` row, or a typed error VALUE | 1 src + 1 schema / 1 | not started |
 | A5 | `src/seon/cluster/message.clj:437` `render-ai` | §1 results-are-data | audit 1d | §2 #3 | 1 src + 1 schema / 2 | not started |
-| A6 | `src/seon/error.clj:1044` `render-ai` + the 9 prose variants (`ai-prose`, `index-refusal-prose`, `mcp-prose`, `edit-prose`, `unclassified-prose`, `time-limit-prose`, `refusal-prose`, `instrumentation-prose`, `elision-prose`) — 325 of 358 declarations | §1 declared-producers-for-special-surfaces | audit 1e | KEEP as the error card family (PRD `e8e545ca1` makes this the seat of the prod error face) — but the result-position substitution (A1) must stop applying it to pulled error ROWS | 1 src / 3 | not started |
+| A6 | `src/seon/error.clj:1044` `render-ai` + the 9 prose variants (`ai-prose`, `index-refusal-prose`, `mcp-prose`, `edit-prose`, `unclassified-prose`, `time-limit-prose`, `refusal-prose`, `instrumentation-prose`, `elision-prose`) — 325 of 358 declarations | §1 declared render functions for special surfaces | audit 1e | KEEP as the error card family (PRD `e8e545ca1` makes this the seat of the prod error face) — but the result-position substitution (A1) must stop applying it to pulled error ROWS | 1 src / 3 | not started |
 | A7 | `src/seon/cluster.clj:152` `render-ai` + the config family `/ai` | §1 results-are-data | audit 1f | §2 #3 | 2 src + 2 schema / 2 | not started |
-| A8 | The remaining narrating producers found by the derivation and read at the snapshot: `seon.effect/render-ai` (`effect.clj:60`), `seon.db/render-transaction-ai` (`db.clj:1911`), `seon.db/render-diff-ai` (`db.clj:1642`), `seon.ai/model-ai` (`ai.clj:194`), `seon.ai/provider-ai` (`ai.clj:261`), `seon.maintenance/render-report-ai` (`maintenance.clj:410`), `my.run/render-namespace-ai` (`my/run.clj:17`), `my.plan/render-item-ai` (`my/plan.clj:881`), `my.note/render-note-ai` (`my/note.clj:54`), `my.background/render-ai` (`my/background.clj:10`), `seon.test.accretion/render-ai` (`accretion.clj:311`), `seon.cluster.agent/render-situation-ai` (`agent.clj:122`) | §1 results-are-data | **NEW** — the audit named 8 families from one capture; the registry derivation finds 12 more that narrate | §2 #3, same class. Owner question §6.1 decides whether each keeps a tiny ORDERING face | 12 src + 12 schema / ~10 | not started |
+| A8 | The remaining narrating render functions found by the derivation and read at the snapshot: `seon.effect/render-ai` (`effect.clj:60`), `seon.db/render-transaction-ai` (`db.clj:1911`), `seon.db/render-diff-ai` (`db.clj:1642`), `seon.ai/model-ai` (`ai.clj:194`), `seon.ai/provider-ai` (`ai.clj:261`), `seon.maintenance/render-report-ai` (`maintenance.clj:410`), `my.run/render-namespace-ai` (`my/run.clj:17`), `my.plan/render-item-ai` (`my/plan.clj:881`), `my.note/render-note-ai` (`my/note.clj:54`), `my.background/render-ai` (`my/background.clj:10`), `seon.test.accretion/render-ai` (`accretion.clj:311`), `seon.cluster.agent/render-situation-ai` (`agent.clj:122`) | §1 results-are-data | **NEW** — the audit named 8 families from one capture; the registry derivation finds 12 more that narrate | §2 #3, same class. Owner question §6.1 decides whether each keeps a tiny ORDERING face | 12 src + 12 schema / ~10 | not started |
 | A9 | `src/seon/cluster/instruction.clj:73` `instruction-ai` | §1 prose-on-purpose | audit seam 5 | KEEP — this becomes the ONE-LINE predicate ("is this an instruction entity") after A1. Needs a marker so it is distinguishable in result position | 1 src / 1 | working tree modified |
 | A10 | `src/seon/print.cljc:283` `render-elision-ai` declared at `seon.print.edn:250` as the elision's `/ai` | §1 one-elision-representation | audit seam 4 | §2 #5 UNIFY — delete the English tail; the elision VALUE is the representation | 1 src + 1 schema + 2 callers (`my/plan.clj:948,985`) / 2 | see F3 |
 | A11 | `src/seon/db.clj:1666` — second spelling of the same elision sentence | §1 one-elision-representation | audit seam 4 | §2 #5 | 1 src / 1 | not started |
@@ -124,19 +124,19 @@ namespaces affected; **flight** = in-flight status at the snapshot.
 
 | # | Seam | § | Named by | Disposition | Blast | Flight |
 |---|---|---|---|---|---|---|
-| D1 | `src/seon/render.clj:218-222` `explicit-producer` reads `(get value output)` — any value map carrying a `:seon.render/ai` KEY has that value invoked as a producer symbol | §0 unconstructable | **NEW — needs one probe** | If a pulled registry/schema row can carry `:seon.render/ai` as data, this is a live confusion of data with declaration. Probe before ruling | 1 src / 1 | not started |
-| D2 | `src/seon/render.clj:159-170` `producer-argument` merges the value's own keys into the render unit before `function-accepts-in?` | §0 stage-4 contract | **NEW — behavioural note, not yet a proven defect** | Selection fits against a MERGED map, so a producer declaring one common key can be selected for an unrelated value; the `schema-producer` specificity filter (`:253-262`) only mitigates pulled entities | 1 src / 1 | not started |
+| D1 | `src/seon/render.clj:218-222` `explicit-producer` reads `(get value output)` — any value map carrying a `:seon.render/ai` KEY has that value invoked as a render function symbol | §0 unconstructable | **NEW — needs one probe** | If a pulled registry/schema row can carry `:seon.render/ai` as data, this is a live confusion of data with declaration. Probe before ruling | 1 src / 1 | not started |
+| D2 | `src/seon/render.clj:159-170` `producer-argument` merges the value's own keys into the render unit before `function-accepts-in?` | §0 stage-4 contract | **NEW — behavioural note, not yet a proven defect** | Selection fits against a MERGED map, so a render function declaring one common key can be selected for an unrelated value; the `schema-producer` specificity filter (`:253-262`) only mitigates pulled entities | 1 src / 1 | not started |
 
-### E. Stage 5 — producer or floor
+### E. Stage 5 — render function or floor
 
 | # | Seam | § | Named by | Disposition | Blast | Flight |
 |---|---|---|---|---|---|---|
-| E1 | `src/seon/render.clj:468-474` — when `valid-projection?` is false, or when the producer returned an error VALUE, `project-node*` returns the unprojected `node` and says nothing | §0 **panic-hard-in-dev**, honest | **NEW — the largest §0 gap** | PANIC at the boundary in dev naming producer + value + contract; in prod emit the one error card. This is where "the wrong shape silently becomes something else" lives | 1 src / 4-6 | not started |
+| E1 | `src/seon/render.clj:468-474` — when `valid-projection?` is false, or when the render function returned an error VALUE, `project-node*` returns the unprojected `node` and says nothing | §0 **panic-hard-in-dev**, honest | **NEW — the largest §0 gap** | PANIC at the boundary in dev naming render function + value + contract; in prod emit the one error card. This is where "the wrong shape silently becomes something else" lives | 1 src / 4-6 | not started |
 | E2 | `src/seon/render/value.clj:365-372` `attribute-label`, `:374-391` `map-components`, `:393-398` `components-text` — the floor's second, non-EDN map face (`nominal-at: …`, `:db/id:`, no braces) | §1 one readable EDN face | audit seam 3 | §2 #4 DELETE the second face | 1 src / 2-3 | not started |
 | E3 | `src/seon/render/value.clj:194-203` `admitted-projection` pins `:seon.config/on-core-error :record` | §0 panic policy | **NEW** | The floor can never panic in dev regardless of the dial. Thread the request's dial | 1 src / 1 | not started |
 | E4 | `src/seon/render/value.clj:130-133` `counted-size` swallows to nil; `:165-175` `window` catch → typed error | §0 honest | **NEW (first half)** | `counted-size` nil is indistinguishable from "not counted"; `window`'s catch is honest and stays | 1 src / 1 | not started |
-| E5 | 12 producer-side bounding sites (clipping census tier 1-2 #1-#12) | §1 values-flow-whole (ledger 32) | clipping census | §2 #6 DELETE the bounds | 11 src / ~9 | **IN FLIGHT** — `my/note.clj`, `my/message.clj`, `render/agent.clj`, `render/ns.clj` done in tree; `effect.clj`, `sci/eval.clj`, `ai.clj`, `cluster.clj`, `edit.clj`, `flow.clj`, `test/runner.clj` moving |
-| E6 | The in-flight lane's own first shape routed producer sites through a public `print/bounded-text` and converted the elision to English with `render-elision-ai` — i.e. producer-side bounding plus seam-4 narration, the exact two things ledger 32 and audit seam 4 forbid. `bounded-text` has since been deleted from `print.cljc` and replaced by the private `bounded-text` (`:834`) + public `admit-string` (`:841`) | §1 two-seams | **NEW (this census)** | The correction is already underway; the register row exists so the wave asserts it rather than assuming it. The unconstructability lock (§5.1) is what makes it stick | — | in flight, mid-correction |
+| E5 | 12 rendering-side bounding sites (clipping census tier 1-2 #1-#12) | §1 values-flow-whole (ledger 32) | clipping census | §2 #6 DELETE the bounds | 11 src / ~9 | **IN FLIGHT** — `my/note.clj`, `my/message.clj`, `render/agent.clj`, `render/ns.clj` done in tree; `effect.clj`, `sci/eval.clj`, `ai.clj`, `cluster.clj`, `edit.clj`, `flow.clj`, `test/runner.clj` moving |
+| E6 | The in-flight lane's own first shape routed render function sites through a public `print/bounded-text` and converted the elision to English with `render-elision-ai` — i.e. rendering-side bounding plus seam-4 narration, the exact two things ledger 32 and audit seam 4 forbid. `bounded-text` has since been deleted from `print.cljc` and replaced by the private `bounded-text` (`:834`) + public `admit-string` (`:841`) | §1 two-seams | **NEW (this census)** | The correction is already underway; the register row exists so the wave asserts it rather than assuming it. The unconstructability lock (§5.1) is what makes it stick | — | in flight, mid-correction |
 
 ### F. Stage 6 — fit
 
@@ -164,7 +164,7 @@ namespaces affected; **flight** = in-flight status at the snapshot.
 | # | Seam | § | Named by | Disposition | Blast | Flight |
 |---|---|---|---|---|---|---|
 | H1 | `src/seon/render/hiccup.clj` — 1 of 6 publics carries a contract; `->string` (`:479`) accepts whatever it is handed | §0 stage 8 | **NEW** | Contract the serializer's input as `:seon.render/hiccup`; a non-hiccup value must panic in dev (this is G2's root) | 1 src / 1 | not started |
-| H2 | `docs/seon/issues/render-package-proc-reruns-unchanged-renderers.md` — `web.clj:329-378` derives the complete walk before comparing retained evidence | §2 #10 cache invalidation | PRD §2 #10 | Invalidate on producer change; suppress renderer execution, not just serialization | 1 src / 1 | filed |
+| H2 | `docs/seon/issues/render-package-proc-reruns-unchanged-renderers.md` — `web.clj:329-378` derives the complete walk before comparing retained evidence | §2 #10 cache invalidation | PRD §2 #10 | Invalidate on render function change; suppress renderer execution, not just serialization | 1 src / 1 | filed |
 | H3 | `docs/seon/issues/data-page-takes-five-and-a-half-seconds-for-three-kilobytes.md`; `agent-pages-overflow-a-phone-viewport.md` | §0 delivery | ui-verification | Fold into the delivery wave | 2 src + css / 2 | filed |
 
 ### I. Cross-stage — silent swallows and the panic-policy gap
@@ -175,8 +175,8 @@ target.
 
 | # | Swallow site | What absence reads as | Dev panic today? |
 |---|---|---|---|
-| I1 | `render.clj:468-474` producer output fails its contract → unprojected node | "the floor rendered it" | **no** |
-| I2 | `render.clj:469-470` producer returned an error value → unprojected node | "no producer was declared" | **no** |
+| I1 | `render.clj:468-474` render function output fails its contract → unprojected node | "the floor rendered it" | **no** |
+| I2 | `render.clj:469-470` render function returned an error value → unprojected node | "no producer was declared" | **no** |
 | I3 | `render.clj:790-802` + 4 emission sites | "the renderer is unavailable" (67 times on one page) | **no** — and the div is BANNED by §0 |
 | I4 | `render/value.clj:194-203` floor pins `on-core-error :record` | "the value had no faults" | **no, structurally** |
 | I5 | `render/ns.clj:105-111`, `:113-127` catch → nil | "this schema references nothing" | **no** |
@@ -189,26 +189,26 @@ target.
 
 **Where R41's dial does not reach the render path.** The dial
 (`:seon.config/on-core-error`) is threaded correctly into `sci.kernel/invoke`
-from `render.clj:369-400`, so a producer BODY throwing respects it. It does
+from `render.clj:369-400`, so a render function BODY throwing respects it. It does
 not reach: (a) the floor, which hardcodes `:record` (I4); (b) any of the
 contract checks — `valid-projection?`, `hiccup?`, `render-ai`'s
 `invalid-ai-output`, `render-html`'s `invalid-html-output` — none of which
 consult the dial at all; (c) stages 7 and 8, which have no dial-aware seam.
 So the §0 policy is currently **unimplemented for every contract violation**
-and implemented only for thrown exceptions inside producer bodies. That is
+and implemented only for thrown exceptions inside render function bodies. That is
 one concentrated piece of work (a dial-aware `stage-refusal` helper called at
 each of the eight boundaries), not eleven scattered ones.
 
 ## Part 3 — §4 "what stays exactly as is": verified, with three corrections
 
-§4 lists: candidates selection, the declared-producer mechanism, the
+§4 lists: candidates selection, the declared render function mechanism, the
 elision-value schema, `seon.ai.tokens/estimate`, the render profile, block
 identity and Datastar morphs, the capture facts.
 
 | §4 item | Verdict | Evidence |
 |---|---|---|
 | `seon.render` candidates selection | **SOUND, keep.** Ordered chain, deterministic sort so insertion order cannot decide, ambiguity is a typed error, self-re-entrance made unconstructable by carrying `:seon.render/rendering` | `render.clj:178-320`, `:437-460` |
-| the declared-producer mechanism | **SOUND as a mechanism**; what changes is only WHERE it is consulted (never in result position) | `render.clj:293-320` |
+| the declared render function mechanism | **SOUND as a mechanism**; what changes is only WHERE it is consulted (never in result position) | `render.clj:293-320` |
 | the elision-value schema | **SOUND, keep** — count, path, offset, total, requery identity all present | `seon.print.edn:232-271` |
 | `seon.ai.tokens/estimate` as the size unit | **SOUND, keep** | `print.cljc:909-943` |
 | the capture facts as the honesty baseline | **SOUND, keep** — proven to 3 tokens in Drive 1 | transcript-view-design, ground truth |
@@ -244,7 +244,7 @@ not.** `seon.print.edn:250` declares `:seon.render/ai seon.print/render-elision-
 on the elision value itself. That declaration IS audit seam 4 — the English
 tail. §2 #5 ("unify on the elision value") and §4 ("the elision-value schema
 stays") are consistent only if §4 is read as *the schema, not its narration*.
-Worth one clarifying clause so a lane does not preserve the producer while
+Worth one clarifying clause so a lane does not preserve the render function while
 deleting its callers.
 
 ## Part 4 — the dependency-ordered wave plan
@@ -255,13 +255,13 @@ render/print/transcript system) gates it.
 
 **Wave 0 — settle the in-flight tree (blocks everything).** The clipping
 lane's eleven files must land in their ledger-32 shape (bounds DELETED, no
-producer calling any bounding primitive, no `render-elision-ai` at a producer
+render function calling any bounding primitive, no `render-elision-ai` at a render function
 site) before any wave edits the same files. Gate: `bin/test` on the affected
 namespaces plus a re-derived working-tree snapshot. *Archaeology: no.*
 
 **Wave 1 — the stage-contract spine (E1, I1-I9, H1, E3, G8).** One
 dial-aware refusal seam called at all eight boundaries; dev panics naming
-producer + value + contract; prod emits the one error card
+render function + value + contract; prod emits the one error card
 (`seon.error` family, per `e8e545ca1`). Everything else in this census
 reports through it, which is why it is first and not last. **Precedes** every
 face wave, because the `renderer unavailable` rip-out (G1) has nothing to
@@ -272,9 +272,9 @@ declared output contract without the refusal seam firing.
 
 **Wave 2 — results are data (A1-A8, A10-A11, E2).** Delete the result-position
 substitution, delete the floor's second map face, unify the elision. Requires
-wave 1 (a producer whose face is deleted must fail loudly, not silently fall
+wave 1 (a render function whose face is deleted must fail loudly, not silently fall
 back). Requires the owner's §6.1 answer (do the narrated shapes keep tiny
-ORDERING faces?) before A8's twelve producers are touched — that answer sizes
+ORDERING faces?) before A8's twelve render functions are touched — that answer sizes
 this wave between 8 and 20 files. Lock: §5.3, the results-as-data fraction as
 a suite property (baseline 30.5%, target 100% minus declared instruction
 entities). *Archaeology: no.*
@@ -301,7 +301,7 @@ property `text = text-content ∘ highlight`. *Archaeology: **YES**.*
 
 **Wave 5 — identity and delivery (G3, G4, G2, H2, H3, G5).** Unify the three
 block-identity derivations, fix Hiccup-as-escaped-EDN at its stage-8 root,
-invalidate packages on producer change. Requires wave 4, because the faces
+invalidate packages on render function change. Requires wave 4, because the faces
 decide which identities must be shared. G4's probe should run in wave 0 —
 it is one command and it decides this wave's size. Lock: §5.4 lint as a
 standing regression over the standard pages with subject-present enforcement.
@@ -320,7 +320,7 @@ One line: **0 settle → 1 stage contracts → 2 results-are-data → 3 fit
 
 | Disposition | Seams |
 |---|---|
-| DELETE (rip-out) | 17 (A1-A5, A7-A8 as one class of 12 producers counted once each where read, A10, A11, E2, E5, F2, G1) |
+| DELETE (rip-out) | 17 (A1-A5, A7-A8 as one class of 12 render functions counted once each where read, A10, A11, E2, E5, F2, G1) |
 | FIX in the owner | 9 (F1, F3, E1, E3, H1, G2, G6, G8, H2) |
 | ACCRETE / declare | 5 (C1, B2, C4, G3, I-seam refusal) |
 | KEEP, asserted by a lock | 6 (B1, A6, A9, and the four sound §4 items) |
@@ -328,12 +328,12 @@ One line: **0 settle → 1 stage contracts → 2 results-are-data → 3 fit
 | FILED, folded into a wave | 8 (C5, F3, G5, G7, H2, H3, and the two ui-verification performance notes) |
 
 **Named by:** 21 seams were named by the three prior audits; **17 are NEW in
-this census** (A8's twelve extra narrating producers counted as one row, C2,
+this census** (A8's twelve extra narrating render functions counted as one row, C2,
 C3, C4, D1, D2, E1, E3, E4, G3, G4, G8, H1, I-series).
 
 **The three biggest-blast items:** (1) **E1 + the I-series panic-policy gap** —
 one seam, but every stage boundary and every render test's expectations move
-with it; (2) **A1 `project-node*` plus the ~20 narrating producers** — 12-20
+with it; (2) **A1 `project-node*` plus the ~20 narrating render functions** — 12-20
 source files, 12-20 schema files, ~10 test namespaces, and it is the single
 change that takes the agent's result positions from 30.5% data to ~100%;
 (3) **G3 block-identity unification** — three derivations across `block.clj`,

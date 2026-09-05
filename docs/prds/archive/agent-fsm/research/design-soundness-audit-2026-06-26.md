@@ -96,19 +96,19 @@ detail are in the run transcript; this is the synthesis.
 
 **Avoid the band-aid:** Adding a bare-:text passthrough, widening one request schema to accept both id shapes, copy-pasting pr-str/read-string to the next map attr, or leaving the turn loop uncontracted because 'closures can't be specced' — each re-types a value at a boundary instead of pointing it at the registered shape.
 
-## DE-6 — One sandboxed-exec service with multiple doors, but only the interaction door was hardened — the render door mints interactions and trusts a fn-symbol's namespace as both author-identity and run-as-identity
+## DE-6 — One sandboxed-exec service with multiple invocation paths, but only the interaction handler was hardened — the render invocation mints interactions and trusts a fn-symbol's namespace as both author-identity and run-as-identity
 
 **Severity:** major · **Confidence:** medium
 
-**Root cause:** The exec model is 'one sandboxed-exec service, three doors (eval/render/interaction)', but the security invariants were applied to only one door. /call was hardened to resolve-and-apply-by-value and authorizes by the fn's namespace — yet the RENDER door, which MINTS the interactions /call later authorizes, neither enforces that the interaction's AUTHOR owns the target fn nor avoids interpolating agent-controlled symbol text into an eval-string. So namespace is overloaded to mean both 'who authored this' and 'whose authority it runs under', and the data-into-source pattern the /call fix removed still lives in the render door.
+**Root cause:** The exec model is 'one sandboxed-exec service, three doors (eval/render/interaction)', but the security invariants were applied to only one invocation path. /call was hardened to resolve-and-apply-by-value and authorizes by the fn's namespace — yet the RENDER invocation, which MINTS the interactions /call later authorizes, neither enforces that the interaction's AUTHOR owns the target fn nor avoids interpolating agent-controlled symbol text into an eval-string. So namespace is overloaded to mean both 'who authored this' and 'whose authority it runs under', and the data-into-source pattern the /call fix removed still lives in the render invocation.
 
 **Symptoms:**
 - F17: render-agent-tile transforms a tile's content symbol with no check that its namespace is the rendering agent's home ns, so agent A's tile can emit [:button {:on-click 'B/foo}] which /call then runs AS B with A-supplied args — cross-agent confused deputy (render.cljs:445-451; transform.cljs:140-161; call.cljs:63-115)
-- F19: SCI invoke-bounded builds an eval-string by str-concatenating agent-controlled (namespace value) and (name sym), allowing form injection via a crafted symbol — the exact data-into-source anti-pattern /call removed, left in the render door (render/sci.cljs:404-416)
+- F19: SCI invoke-bounded builds an eval-string by str-concatenating agent-controlled (namespace value) and (name sym), allowing form injection via a crafted symbol — the exact data-into-source anti-pattern /call removed, left in the render invocation (render/sci.cljs:404-416)
 
-**Unifying fix:** Establish ONE capability invariant shared by every door: an interaction may only target a fn the AUTHORING agent owns. Bind the authoring-agent identity (the canvas/section owner) through transform into the /call URL and refuse any handler symbol whose namespace differs from the authoring ns; and make the render door resolve-and-call-by-value exactly like the interaction door — invoke the resolved var, never build the call site from agent-controlled symbol text. Author-identity and run-as-identity become two distinct, explicitly-bound facts instead of one overloaded namespace.
+**Unifying fix:** Establish ONE capability invariant shared by every invocation path: an interaction may only target a fn the AUTHORING agent owns. Bind the authoring-agent identity (the canvas/section owner) through transform into the /call URL and refuse any handler symbol whose namespace differs from the authoring ns; and make the render invocation resolve-and-call-by-value exactly like the interaction handler — invoke the resolved var, never build the call site from agent-controlled symbol text. Author-identity and run-as-identity become two distinct, explicitly-bound facts instead of one overloaded namespace.
 
-**Avoid the band-aid:** Escaping/sanitizing the SCI eval-string, or adding a namespace-equality check only inside /call — leaves the render door minting interactions under a different rule than the door that authorizes them.
+**Avoid the band-aid:** Escaping/sanitizing the SCI eval-string, or adding a namespace-equality check only inside /call — leaves the render invocation minting interactions under a different rule than the handler that authorizes them.
 
 ## Loose bugs (do not cluster into a design error)
 

@@ -91,7 +91,7 @@ former (see Part 4).
 
 ### What closes a run and what the harness reads as "reply"
 
-`serve.cljs/run-agent-task!` (the `/agents/run` door every bench uses) injects
+`serve.cljs/run-agent-task!` (the `/agents/run` endpoint every bench uses) injects
 the task as a user message via the real wake path, polls derived state to
 `:idle`, then reads the reply with this query (L576-586):
 

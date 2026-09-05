@@ -92,7 +92,7 @@ with real time:
    found 34 sites; ruling 43's "no hardcoded openings" claim was
    REFUTED at HEAD).
 2. **The reader-selection ladder was the complexity trap.** Family
-   fingerprints, producers-of-key inference, distance weighting,
+   fingerprints, inference from function output attributes, distance weighting,
    auto-run-vs-offered — the mechanics register grew fifteen unruled
    rows (M1–M15). "It's all queries" dissolves most of them; the ones
    that survive are M13 (the diff result has no designed face — it
@@ -204,7 +204,7 @@ live record; this list is its explanation):
    the init timing gate.
 4. **Result projections at settlement** (48b) and **output shape at
    registration** (55).
-5. **The write door validates provenance** (54a) — a graph write
+5. **The database transaction function validates provenance** (54a) — a graph write
    without its eval/call/basis provenance is refused, so "in the graph
    ⟹ discoverable" holds by construction.
 6. Smaller, but real: the MCP `runtime_status` "missing-projection"

@@ -22,7 +22,7 @@ its old-model shape is a ported defect, not a conversion.
 
 | what | lines | commit | read it |
 |---|---:|---|---|
-| The old guarded door: `src/seon/host.clj` + all of `src/seon/host/` | 5,715 src + ~7,000 test | `8dc8623ad` | `git show 8dc8623ad^:src/seon/host/context.clj` |
+| The old bounded evaluation: `src/seon/host.clj` + all of `src/seon/host/` | 5,715 src + ~7,000 test | `8dc8623ad` | `git show 8dc8623ad^:src/seon/host/context.clj` |
 | The documentation archive: 83 files including two competing plans | 25,632 | `24053c64e` | `git show 24053c64e --stat` |
 | `seon.eval` whole, taking `result_var_test.cljs` | 5,362 | `fbc6b28b5` | `git show fbc6b28b5 --stat` |
 | The pod turn phase stack | — | `f6f6673b6` | `git show f6f6673b6 --stat` |
@@ -62,7 +62,7 @@ In order. The audit trail the owner asked to keep.
 | `dc62c30b5` | Inventoried every abandoned path before cutting anything |
 | `63099a523` | Recorded owner rulings O13/O14 in the plan authority |
 | `2953a3b2f` | Vendored http-kit as a submodule — the only loose dir of 99 |
-| `8dc8623ad` | **Deleted the 5,715-line guarded door.** 12,110 deletions; `host.clj` 424 → 58 lines |
+| `8dc8623ad` | **Deleted the 5,715-line bounded evaluation.** 12,110 deletions; `host.clj` 424 → 58 lines |
 | `ef1f815a5` | Filed the two seams that deletion created |
 | `7d435fbb2` | Corrected my own ordinal/index evidence after a lane refused to act on it |
 | `71f3cb0e0` | Stopped duplicate JVM run admission |

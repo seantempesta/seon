@@ -536,7 +536,7 @@ the anchor stays the state ledger.
   run. Create with `Thread/ofVirtual().unstarted`, win the map CAS, then start;
   identity-check cleanup (`seon.agent.driver.host/start!`).
 - **Validate config-query cardinality before `every?`.** `every?` over the
-  empty values of a missing policy is true. The guard door then receives nil
+  empty values of a missing policy is true. The evaluation boundary then receives nil
   `time-limit` and collapses every host invocation with an
   implementation NPE. Require
   the complete five-field row before validating positive values; remain loud
@@ -695,7 +695,7 @@ the anchor stays the state ledger.
 
 - **Classify a stored symbol before resolving it.** A trusted renderer lookup
   is a literal compiled symbol-to-function table. An authored symbol enters
-  only the injected guarded SCI door. Never try a dynamic lookup first and
+  only the injected bounded SCI evaluation. Never try a dynamic lookup first and
   classify the result afterward: a hostile core-looking symbol would inherit
   unguarded compiled authority.
 - **A guard steering error is the render-slot value.** Do not stringify
@@ -1282,7 +1282,7 @@ the anchor stays the state ledger.
   instrumentation may then throw a different schema error. The guarded holder
   must retain the fired policy kind independently of the throwable and report
   it exactly once after a normal return or a replacement throw.
-- **Passing tests cannot prove native code door-equivalent.** Differential
+- **Passing tests cannot prove native code equivalent to bounded SCI evaluation.** Differential
   tests remain useful sanity evidence, but only the P4/R33 transitive call
   graph can admit native compilation. Until that proof exists, accretion
   refuses loudly and every legacy `:graduated` row derives an effective
@@ -1400,7 +1400,7 @@ the variable-weight values they select.
   including compact identity, config digest, deadline, and reply evaluation,
   so fail-closed production validation proves ordering and drift rather than
   rejecting an impossible test row first.
-- **A policy split is incomplete until producer-result contracts move too.**
+- **A policy split is incomplete until function-result contracts move too.**
   `seon.agent.ctx.driver/render-prompt!` correctly returned the two explicit
   reply-policy axes while `seon.agent.turn/render-prompt` still required the
   retired `:seon.config/repl-mode` projection. Malli output instrumentation
@@ -1490,7 +1490,7 @@ the variable-weight values they select.
 ## HTTP terminal-catch fault scar (2026-07-24)
 
 - **Returning HTTP 500 does not record a caught core fault.** A terminal
-  Promise catch at an HTTP composition door must call `seon.error/record!`
+  Promise catch at an HTTP handler must call `seon.error/record!`
   with `:seon.error/fault :core` before it logs and constructs the bounded
   response. Console output is operational evidence, not the durable fault
   datom. Regress the boundary with the real injected persistence hook and
@@ -1604,7 +1604,7 @@ the variable-weight values they select.
   settlement recreates a heartbeat-only wedge (`094e7a7e6`).
 - **Fact-first namespace replay is not schema acquisition.** The cluster JVM
   correctly reconstructs corpus definitions without executing top-level
-  `schema/register!` side effects. Any toolkit schema introspection that then
+  `schema/register!` side effects. Any schema introspection for agent-facing functions that then
   reads the process-local candidate registry sees an empty `my.*` world even
   though the committed schema rows are complete. Bind
   `seon.schema/schema-definition` to the writer session's retained committed
@@ -1629,7 +1629,7 @@ the variable-weight values they select.
   `:unresolved-symbol` uncertainty; `plan-execution` then returns ordinary
   fail-closed steering data. Do not regex-filter prose or call `namespace` on
   an absent target (`7f49d4674`).
-- **The claimed-phase call itself is inside the settlement door.** A phase
+- **The claimed-phase call itself is inside the settlement function.** A phase
   leaf can violate its value contract by throwing before it returns. Catch the
   throw at the portable `execute-step!` invocation, project it to the flat
   core-bug value, and feed that value through the same
@@ -1688,7 +1688,7 @@ the variable-weight values they select.
   between the settled render and a slow socket. A burst regression must count
   fewer frames than transactions and prove the last frame carries the newest
   basis (`b9439599d`).
-- **The terminal HTTP catch is the fault-recording door.** Per-handler catches
+- **The terminal HTTP catch is the fault-recording handler.** Per-handler catches
   that log and return 500 make core failures disappear from database
   forensics. Wrap every live handler once, record the caught value through
   `seon.error/record!`, then return one bounded flat error response. Test both

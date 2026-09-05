@@ -119,7 +119,7 @@ Both halves proven, neither traded for the other:
   start x` boots to every layer, `1/1 clusters alive`;
 - in that started cluster's ctx, `my.web/fetch` and `my.web/search` both
   resolve alongside `my.fs`, `my.shell`, `my.edit`, `my.background`, and
-  `my.run`, and one real `my.web/fetch` crossed the door with status 200 in
+  `my.run`, and one real `my.web/fetch` crossed the effect execution boundary with status 200 in
   148 ms.
 
 Recurring regression: `the-context-binds-only-the-graph-this-process-can-serve`

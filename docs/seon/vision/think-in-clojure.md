@@ -80,7 +80,7 @@ is its projection.
 This composes with the rest of the runtime: the plan lives in the plan
 tree, the foreign index in the graph, the translation functions are specced
 fns, and the whole loop is drivable and measurable (SWE-bench-class
-benchmarks through the same `/solve` door are the natural fitness
+benchmarks through the same `/solve` endpoint are the natural fitness
 function for translate-quality).
 
 ## 4. Horizon: seon writes seon

@@ -9,7 +9,7 @@ tags: [issue, sci, runtime, database]
 
 ## Problem
 
-An agent evaluating through the door reaches every cluster in the JVM
+An agent evaluating through the SCI evaluator reaches every cluster in the JVM
 and the process's mutable runtime roots. Probed live on cluster
 `default`, 2026-08-02, via `seon.sci.eval/evaluate` against the live
 cluster ctx:

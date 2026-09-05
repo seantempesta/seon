@@ -90,7 +90,7 @@ join holds, under a DISTINCT curated run id (receipt ids derive from the
 run id — the distinct id is the collision mechanism, not a convention).
 
 **S5 — Pinning derives from observed effects; prediction is advisory
-only.** The capability door already records per-form provenance — the
+only.** The capability request handler already records per-form provenance — the
 request identity IS `[run-id form-ordinal effect-ordinal]` with owner
 and handler refs — so "which forms in run R crossed the door" is one
 join today. Message delivery is traceable through the form's terminal
@@ -156,7 +156,7 @@ independently identified; none requires new mechanism.
 | F5 | `:seon.fn/author` on program rows (rows carry no author today) | `row-tx` | provenance, curation attribution |
 | F6 | message → issuing-form ref. Commit `7cfb2435f` records the source-vector position as numeric `:seon.cluster.message/ordinal`, so ordering no longer depends on provenance embedded in the id; the direct form ref remains absent for S5 pinning. | message commit | S5 pinning |
 | F7 | tx provenance on agent-issued `seon.db/transact!` (`:tx-meta` from the already-bound `effect/*request-context*`: run + form ordinal) | `seon.db/transact!` | lifts the S5 fail-closed barrier |
-| F8 | normalized capability FAMILY on door receipts (owner/handler recorded; fs/web/llm/db family is a derivation away) | effect door | pinning policy by family |
+| F8 | normalized capability FAMILY on capability receipts (owner/handler recorded; fs/web/llm/db family is a derivation away) | effect request handler | pinning policy by family |
 | F9 | `:seon.fn/calls` edges for agent-authored defns (today only clj-kondo-indexed first-party source has edges; agent code is a graph leaf) | program row install | advisory prediction, workload derivation |
 | F10 | session-image rows bypass the `row-tx` choke point | session image | closes the "one admission seam" claim |
 | F11 | test→function call edge (`:seon.test` rows carry only sym/ns/source) | test indexing | Q6 quality gate; definition-time accretion testing |
@@ -280,7 +280,7 @@ See [plan/README.md](README.md), “Rulings 2026-08-04.”
   the vector is self-contained (a vector depending on state the editor
   built up mid-session fails the clean replay and is not adopted).
 - **Q3b (sharpening, same session): destructive means WRITES, not
-  door-crossings.** Database writes are branch-immutable and always
+  capability requests.** Database writes are branch-immutable and always
   curable. READ effects (web reads, fs reads) are fine ground: the
   replay re-executes them, and the acceptance equivalence gate catches
   material divergence. WRITES that left the branch (delivered messages,

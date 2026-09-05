@@ -45,11 +45,11 @@ my.fs/write violated its contract (invalid-input):
 
 Tool-exercise lane, 2026-08-07. Five consecutive `my.fs/write` forms written
 directly from the docstring were all refused this way, producing five eval
-receipts with contract-violation errors and ZERO effect receipts — the door
+receipts with contract-violation errors and ZERO effect receipts — the effect execution boundary
 was never crossed. Complete result:
 `docs/prds/sci-execution-runtime/research/probes/tool-exercise/fs-write-preconditions.edn`.
 
-The refusal is correctly loud and the door correctly stayed shut; the defect
+The refusal is correctly loud and effect execution correctly did not start; the defect
 is that the surface taught a shape it does not accept.
 
 ## The same defect in `my.shell/run`

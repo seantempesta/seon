@@ -241,7 +241,7 @@ entry-point role rather than pretending the test runner requires it directly.
 | `seon.cluster.agent-namespace-test` | 94 | keep | `test/seon/cluster/agent_namespace_test.clj:1`; current namespace ownership proof |
 | `seon.cluster.agent-test` | 1,679 | keep | `test/seon/cluster/agent_test.clj:1`; current per-agent graph proof |
 | `seon.cluster.armed-test` | 589 | keep | `test/seon/cluster/armed_test.clj:1`; live armed/reset boundary |
-| `seon.cluster.boot-test` | 1,307 | keep | `test/seon/cluster/boot_test.clj:1`; boot tower proof |
+| `seon.cluster.boot-test` | 1,307 | keep | `test/seon/cluster/boot_test.clj:1`; boot sequence proof |
 | `seon.cluster.curate-test` | 173 | keep | `test/seon/cluster/curate_test.clj:1`; current proof/adoption tests |
 | `seon.cluster.export-test` | 216 | delete candidate | `test/seon/cluster/export_test.clj:1`; only reader of readerless export namespace |
 | `seon.cluster.instruction-test` | 172 | merge candidate | `test/seon/cluster/instruction_test.clj:83-105`; keep current proofs, delete migration case |

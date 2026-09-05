@@ -30,7 +30,7 @@ eval-time definition), wrapping the interpreted fn with the same
 vars get. Never a per-call validation sprinkled through the loop.
 
 Acceptance: an agent-authored contracted fn called with violating
-input through the door returns the same flat
+input through the SCI evaluator returns the same flat
 `::contract-violated` error value a host var produces; output
 violations likewise; the `:record` dial removes the wrappers; a
 recurring test covers agent→agent calls through the live ctx.

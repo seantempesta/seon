@@ -92,7 +92,7 @@ The real run-loop turn returned:
         :run-id "curation-effects-run-1"}}
 ```
 
-## 1. The effect door records a request receipt before dispatch
+## 1. The effect request handler records a request receipt before dispatch
 
 `seon.effect` defines request identity as
 `[run-id form-ordinal effect-ordinal]`, commits the receipt before invoking the
@@ -120,7 +120,7 @@ independently carry the same run and ordinal
 (`resources/seon/schemas/seon.cluster.run.form.edn:8-18`;
 `resources/seon/schemas/seon.cluster.eval.edn:17-27`).
 
-### Exact query: door requests issued by forms in run R
+### Exact query: capability requests issued by forms in run R
 
 This query includes open, settled, and interrupted requests because it uses
 only required receipt attributes:
@@ -306,7 +306,7 @@ This conclusion is limited to branch-contained database state. A transaction
 can itself assert routed attributes such as `:seon.cluster.message/to`, and a
 live cluster routes that attribute as a wake
 (`src/seon/cluster/wake.clj:78-93`). It can also write facts later interpreted
-by code that crosses the effect door. Until direct transaction causation and
+by code that crosses the effect request handler. Until direct transaction causation and
 the resulting externally visible consequences are queryable, arbitrary
 agent-issued writes should fail closed for curation even though the database
 storage operation itself is fork-replayable.
@@ -358,7 +358,7 @@ call edges, capability set, or uncertainty facts.
 The distinction matters:
 
 - For a known indexed function root, `seon.effect/capabilities` answers whether
-  its recorded call graph reaches a declared door owner.
+  its recorded call graph reaches a declared effect request handler.
 - For a direct form, there is no root function row to give that query. The
   existing form analyzer currently returns source plus lint findings, not call
   roots (`src/seon/fn/analyzer.clj:319-365`).
@@ -373,7 +373,7 @@ The distinction matters:
   resolved first-party caller/target pairs (`src/seon/fn.clj:209-237`).
 - Workload is a scheduling fact, not an effect fact. `:io` does not by itself
   say external state changed, and both pure value messaging and direct
-  database writes correctly reach no door owner.
+  database writes correctly reach no effect request handler.
 
 There is one useful nearby mechanism, but it is not a pre-execution form
 query. After a defining form executes, SCI gathers resolved referenced Vars,
@@ -394,7 +394,7 @@ The complete per-form effect trace is blocked by these missing facts:
 1. **Database transaction causation.** A transaction issued through ambient
    `seon.db/transact!` has no ref to the run, form, or eval that caused it. The
    transaction's datoms exist, but "which form wrote them?" is not a query.
-2. **Normalized capability family.** Door receipts join to an exact owner and
+2. **Normalized capability family.** Capability receipts join to an exact owner and
    handler, but no declared fact says `fs`, `web`, `llm`, or `db`. Namespace
    parsing would be a forbidden inferred classification.
 3. **Per-form analyzed call roots.** A run form stores source but no resolved
@@ -416,13 +416,13 @@ The complete per-form effect trace is blocked by these missing facts:
    that relationship directly. This is an explicitness and referential
    integrity gap, not a blocker for the current query.
 8. **A derived per-form curation answer.** There is no query owner that unions
-   door receipts, message delivery, database-write causation, and static
+   capability receipts, message delivery, database-write causation, and static
    uncertainty into `replayable` versus `pinned` with concrete reasons. The
    answer should remain derived from the facts above rather than stored as a
    mutable boolean.
 
 These gaps also expose one architectural falsifier: any external effect that
-bypasses `seon.effect` will be invisible to door receipts. That is not a reason
+bypasses `seon.effect` will be invisible to capability receipts. That is not a reason
 for text scanning or a second tracing mechanism; it is evidence that the
 capability leaf or its call graph is undeclared.
 

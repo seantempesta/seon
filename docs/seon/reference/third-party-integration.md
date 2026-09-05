@@ -10,7 +10,7 @@ Fresh Seon is one JVM process that can host multiple sovereign clusters. Each
 agent owns its own `core.async.flow` graph; the process also hosts the
 cluster-specific database connections, web renderer, and shared root
 executors. There is no ClojureScript pod, separate writer process, preload
-door, or downstream source-injection environment variable.
+entry point, or downstream source-injection environment variable.
 
 ## Run a cluster
 

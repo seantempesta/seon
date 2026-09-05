@@ -14,7 +14,7 @@ references combine several facts that were true on July 31 but were overturned
 on August 1. They teach a cached platform process-root I/O executor supplied to
 the work-launcher graph, one SCI fork per evaluation, and an operator-root
 isolation defect as current. They also omit the live cluster ctx and session
-image from the boot tower.
+image from the boot sequence.
 
 These are not harmless line-number drift. They control where agents put
 blocking work, whether they preserve a live SCI session, and whether they stop
@@ -33,7 +33,7 @@ at a private-operator proof boundary that has already been repaired.
   in “one fork per evaluation.” `src/seon/sci/eval.clj:1218-1275` says and
   implements the opposite: a supplied cluster ctx is used as given so defs
   accumulate; only the namespace-unmap isolation case forks.
-- The skill's tower at lines 59-74 omits coherent program validation, creation
+- The skill's boot sequence at lines 59-74 omits coherent program validation, creation
   and restoration of the cluster's one live ctx, and the session image.
   `src/seon/cluster.clj:1310-1360` builds `cluster-ctx` after recovery and before
   agent graphs; `src/seon/sci/eval.clj:1130-1216` restores session values and
@@ -72,7 +72,7 @@ first-party `seon.cluster`, `seon.flow`, `seon.sci.eval`, and operator source.
   executor after `4ac039c7b`.
 - Evaluation guidance preserves the one live ctx per cluster, explains the
   narrow fork exception, and names session-image restoration in the boot
-  tower.
+  boot sequence.
 - Operator-root guidance cites current reconciled behavior and never links a
   resolved issue as a live stop condition.
 - Process and cluster identity use their owning source terms.
@@ -86,7 +86,7 @@ references were re-grounded against core.async
 `a27e2c0e079476196477b533e76a2a6a8095017d`, and current first-party source.
 They now distinguish dependency-owned default I/O, Seon's fixed compute pool,
 and the work task executor; preserve the one live cluster ctx and narrow
-namespace-unmap fork; place session-image restoration in the boot tower; use
+namespace-unmap fork; place session-image restoration in the boot sequence; use
 process identity `(pid, start-instant)`; and describe operator-root isolation
 as repaired current behavior. The package-wide stale-claim scan is clean,
 skill and Markdown validation pass, and the package worktree is clean.

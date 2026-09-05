@@ -296,7 +296,7 @@ breakpoint. `render/chat.cljc`'s bubble shape is small enough to
 
 ## §3 item 4 — Turn segmentation, block identity, cache invalidation
 
-The PRD's rip-out #10 (retained render packages serving stale producers)
+The PRD's rip-out #10 (retained render packages serving stale render functions)
 has real prior art, and it is better than what we have.
 
 `ctx.cljc:1856-1959` derives **per-block chain hashes**, mirroring vLLM's
@@ -320,7 +320,7 @@ The invariants it commits to:
 ```
 
 **The load-bearing lesson: the hash keys on the block's rendered OUTPUT
-BYTES, not on its input identity or its producer's name.** A producer
+BYTES, not on its input identity or its render function's name.** A render function
 change changes the text, which changes the hash, which invalidates from
 exactly that block forward. Staleness is unconstructable rather than
 patched — no invalidation hooks to remember to call. `chain-root-hash` is
@@ -538,7 +538,7 @@ with the default inverted and with the census enforced by query.
 | **`dominant-string-entry`** | `seon/render/value.cljc:1028-1068` | Near-verbatim. Kills the payload-as-stub ugliness class |
 | **Drill admission triad** (closed request, narrow-only limits, non-drillable key indexes) | `seon/render/value.cljc:1284-1360`, `:589-632` | Adapted onto the requery seam, single profile not seven dials. Gates §3 item 5 |
 | **Chat bubble shapes** | `seon/render/chat.cljc` | Adapted for the chat page. Gates §3 item 3 |
-| **One envelope unwrap** | `seon/render.cljc:290-325` | Adapted as the producer-output stage contract |
+| **One envelope unwrap** | `seon/render.cljc:290-325` | Adapted as the render output stage contract |
 
 ### Lessons only
 

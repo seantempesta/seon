@@ -101,7 +101,7 @@ references are `resources/public/css/input.css` (`output.css` is generated).
 - **Private render token dials.**
   `docs/seon/issues/render-token-budgets-are-private-dials-no-producer-supplies.md`
   — `::token-budget` in `src/seon/render/transcript.clj:813` and
-  `src/seon/render/ns.clj:323-326` is not a config fact and no producer sets
+  `src/seon/render/ns.clj:323-326` is not a config fact and no render function sets
   it, so the transcript's budget defaults to `0` and renders nothing but its
   elision marker while `ns`'s defaults to nil meaning unbounded. That is the
   same law from the other side: the bound is honest but the FACT is missing.
@@ -184,7 +184,7 @@ named in §2.2, so the checker must not grep for `subs`. The system already has
 `:seon.fn/projection-boundary` leaf facts, and `seon.fn/output-path-report`
 already derives projected / bypass / unresolved paths
 (`resources/seon/schemas/seon.fn.edn` ↔ `src/seon/fn.clj`). The regression is:
-**every function reachable from a declared render producer or an agent-facing
+**every function reachable from a declared render function or an agent-facing
 `my.*` read must reach `seon.print/fit` or `seon.render.value/window` on its
 outward path, or be declared a projection boundary.** A function that calls
 `clojure.core/subs` on its outward path without reaching the owner is a BYPASS
@@ -230,7 +230,7 @@ duplicates; `index.md` was not touched (owner-ranked, lanes do not edit it).
 ## Rip-out outcome — 2026-08-14
 
 The later owner correction superseded this census's proposed public helper:
-producers return whole values. Text becomes smaller only inside
+render functions return whole values. Text becomes smaller only inside
 `seon.print/fit` or declared `seon.sci.admit` storage admission. The shared
 `bounded-text` operation is private to `seon.print`; its only direct callers
 are `seon.print/fit-text` and `seon.print/admit-string`. The graph report
@@ -244,23 +244,23 @@ The twelve Clojure members landed as:
 - **admission-cap-declared:** #12 in `fd75232f3`. The raw source crosses the
   declared reader admission fact; it is refused whole when over cap, never
   clipped.
-- **routed-to-boundary:** no producer required a new local route. Every
-  declared AI and HTML producer already reaches the shared terminal
+- **routed-to-boundary:** no render function required a new local route. Every
+  declared AI and HTML render function already reaches the shared terminal
   `seon.print/fit`; durable nested values already reach `seon.sci.admit`.
 
 Before/after source evidence: production no longer contains `clip-str`,
 `bounded-output`, `bounded-fault-string`, the runner's local `bounded-text`,
-`soft-clip`, `[clipped]`, or any producer call to the private owner. A source
+`soft-clip`, `[clipped]`, or any render function call to the private owner. A source
 census finds `bounded-text` only at its private definition, its two print-owner
 calls, and the graph-lock target string.
 
 Focused gates:
 
 - print/admission/graph lock: 45 tests, 320 assertions;
-- agent-context producers: 88 tests found four owned fixture/API updates;
+- agent-context render functions: 88 tests found four owned fixture/API updates;
   the complete affected rerun passed 72 tests, 417 assertions, while the
   note/message/token tests had already passed;
-- diagnostic producers: 94 tests, 591 assertions;
+- diagnostic render functions: 94 tests, 591 assertions;
 - reader/reply focused rerun: 28 tests, 214 assertions. The wider source run
   executed 165 tests and 905 assertions; the remaining unrelated red is the
   stale launcher-projection expectation recorded in the resolved source-cap

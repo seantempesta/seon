@@ -32,7 +32,7 @@ constructing the HTTP 500 response.
 
 The overnight class audit then found the same omission in the other
 `seon.web.serve` handler catches. Commits `19f044328` and `59d57b55c` replace
-those local terminal catches with one handler-boundary door. The door records
+those local terminal catches with one exception handler. The exception handler records
 both a synchronous throw and a rejected promise before returning the same
 bounded, flat JSON 500 shape; expected readiness/configuration responses keep
 their existing non-core status paths.

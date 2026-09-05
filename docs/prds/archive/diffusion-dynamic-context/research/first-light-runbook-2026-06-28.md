@@ -233,7 +233,7 @@ edits are needed. Move only the capability you're ready to run; leave the others
 
 - **Success:** the hole denoises to `(reduce + xs)`; concatenated with the suffix
   it (a) parses (`seon.repl.internal/parse-forms`, no model call) and (b) evals to
-  `5/2` in the SCI cage. Then run cases 2–4 + the suffix-blind AR baseline
+  `5/2` in the SCI context. Then run cases 2–4 + the suffix-blind AR baseline
   (`gemma-4-26B-A4B-it`, suffix WITHHELD) and tabulate the win rate.
 - **Gate (T2):** if diffusion shows no edge over suffix-blind AR, the structural
   premise is weak — stop and reassess.
@@ -254,7 +254,7 @@ edits are needed. Move only the capability you're ready to run; leave the others
   .venv/bin/python gpu_worker_renoise.py generate_canvas
   ```
 
-  Then in the **pod** (not the GPU): eval `text` in the SCI cage → `:seon/error`
+  Then in the **pod** (not the GPU): eval `text` in the SCI context → `:seon/error`
   "Unable to resolve symbol: ys" → locate `ys`'s char span → `span_to_positions`
   via the returned `offset_map` → call `renoise {canvas_tokens,
   renoise_positions}`.

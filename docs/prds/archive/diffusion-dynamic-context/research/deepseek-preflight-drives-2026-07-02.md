@@ -180,7 +180,7 @@ inspect-ai 0.1.dev1), `SEON_SOLVE_URL=http://127.0.0.1:7980/solve`,
 6. Per-sample timeout sized from the DeepSeek variance (51-300s on memory
    tasks): set solve timeouts ≥ 3× the observed median, and use pass^k.
 7. Scorers portable to inspect-ai (owner direction): host-side scorer +
-   `/solve` door, so the same dataset/scorer pair runs on the GPU model by
+   `/solve` endpoint, so the same dataset/scorer pair runs on the GPU model by
    switching the pod's provider row — no gym dependency.
 8. `bin/acme build` immediately before every `cluster reset` on the shared
    tree (stale-bundle vs fresh-seed race, §5) — one dead boot costs minutes;

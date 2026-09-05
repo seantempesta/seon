@@ -42,7 +42,7 @@ then states how the winner renders.
 - **Render integration:** already declared and already correct in shape —
   `seon.db.diff.edn:18` names `seon.db/render-diff-ai` on the result map, and
   `seon.render/candidates` selects it by contract fit. Three defects: no
-  `:seon.render/html` producer, the renderer hand-builds strings instead of
+  `:seon.render/html` render function, the renderer hand-builds strings instead of
   crossing `seon.print/fit`, and the elision reports one estimate for the
   whole result rather than a per-slot elision value.
 
@@ -71,7 +71,7 @@ note as `scripts/probe_index_identity_2026_08_13.clj`,
 `src/seon/db.clj:1607-1636` performs the identity-keyed `clojure.data/diff`,
 `src/seon/db.clj:1638-1663` renders it, and
 `resources/seon/schemas/seon.db.diff.edn:16-24` declares the result map with
-its `:seon.render/ai` producer. Everything below is measured against that
+its `:seon.render/ai` render function. Everything below is measured against that
 implementation, and every design states its migration from it.
 
 ## 1. Datahike internals
@@ -496,10 +496,10 @@ which Seon can afford but pays nothing for today.
 
 ## 4. Render integration
 
-`seon.render/candidates` (`src/seon/render.clj:156-183`) selects a producer by
+`seon.render/candidates` (`src/seon/render.clj:156-183`) selects a render function by
 **contract fit**: public functions in the owning namespace whose declared
 input accepts the value and whose declared output is `:seon.render/ai`. A
-schema may also name its producer directly, which is what the diff result
+schema may also name its render function directly, which is what the diff result
 does today (`resources/seon/schemas/seon.db.diff.edn:16-24`):
 
 ```clojure
@@ -512,7 +512,7 @@ does today (`resources/seon/schemas/seon.db.diff.edn:16-24`):
 
 That mechanism is right and needs no change. Three defects in how it is used:
 
-1. **No `:seon.render/html` producer.** The web UI falls to the floor
+1. **No `:seon.render/html` render function.** The web UI falls to the floor
    renderer for every delta. One `seon.db/render-diff-html` returning Hiccup,
    declared beside the `/ai` key, closes it.
 2. **The renderer hand-builds its string** (`src/seon/db.clj:1638-1663`) and

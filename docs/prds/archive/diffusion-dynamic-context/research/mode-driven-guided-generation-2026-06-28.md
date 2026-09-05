@@ -26,7 +26,7 @@ tags: [research, agent, diffusion, schema, flow]
   `reference-code/transformers/.../generation_diffusion_gemma.py:1034`), the `infill`
   worker mode (`gpu_worker.py:335-412`), `span_to_positions`/`build_offset_map`
   (`diffgemma_common.py:184-222`), the parser oracle (`seon.repl.internal/parse-forms`,
-  `:span`/`:error-kind`/`:source`, `repl/internal.cljc:561-677`), and the eval cage.
+  `:span`/`:error-kind`/`:source`, `repl/internal.cljc:561-677`), and the evaluation context.
 - **The model invokes a mode with a sentinel call** the parser already recognizes —
   `(mode/enter :defn-with-specs {…})` — NOT a new token and NOT a fine-tune.
   The seam is the same one Seon already uses to turn agent replies into actions: the
@@ -375,7 +375,7 @@ making the `:malli/schema` in/out two mandatory infill slots.
     failed.
 - **Quality gate:** `[:parse :eval :instrument]`. Promotion requires:
   1. **parse** — no `:read` entries (`parse-forms`).
-  2. **eval** — the whole form `{:ok true}` in the SCI cage (`seon.eval/eval`).
+  2. **eval** — the whole form `{:ok true}` in the SCI context (`seon.eval/eval`).
   3. **instrument** — the registered `:malli/schema` is wellformed AND a probe call
      through the instrumented fn does not throw `:malli.core/invalid-input/-output`
      for a generator-produced input. Grounded: instrumentation validates every
@@ -625,7 +625,7 @@ The gate is a custom diffusion stopping criterion. GROUNDED:
 `DiffusionGemmaAdaptiveStopping` is an ABC (`generation_diffusion_gemma.py:466`);
 override `_prepare_diffusion_stopping_criteria` (`:1207`) to inject a subclass whose
 `__call__(argmax_canvas, processed_logits)` decodes the canvas, runs the parser (and,
-for the `:eval` rung, the SCI cage), and returns "stop" once the partial canvas clears
+for the `:eval` rung, the SCI context), and returns "stop" once the partial canvas clears
 the mode's gate rungs. This runs on the default non-compiled DynamicCache path
 (`is_compiling=False`, `:692`) so a Python parse/eval doesn't break torch.compile
 (`:1258-1263`). This is the CORRECT mechanism per the source-grounding doc §3/§5 item
@@ -635,7 +635,7 @@ The ladder per rung:
 
 - **`:parse`** — decode → `parse-forms` → stop iff no `:read` entries
   (`internal.cljc:561-677`). Cheap, no model call (the parser-oracle's 92.7% detection).
-- **`:eval`** — additionally `seon.eval/eval` the form in the SCI cage; stop iff
+- **`:eval`** — additionally `seon.eval/eval` the form in the SCI context; stop iff
   `{:ok true}` (the eval tier's 91.5% catch). Idempotent forms (`def`/`defn`/`register!`/
   `deftest`) are safe to eval-check (CLAUDE.md "eval cage").
 - **`:instrument`** — additionally confirm the fn's `:malli/schema` registers and a
@@ -701,7 +701,7 @@ but by refusing to advance until the artifact provably clears the rung.
 | Rung | Check | Oracle | Measured economics |
 |---|---|---|---|
 | **parse** | `parse-forms` → no `:read` entries | `seon.repl.internal` | 92.7% of corruptions detected, no model call |
-| **eval** | `seon.eval/eval` → `{:ok true}` | SCI cage | 91.5% of masked-divergent caught (62.5% reference-free) |
+| **eval** | `seon.eval/eval` → `{:ok true}` | SCI context | 91.5% of masked-divergent caught (62.5% reference-free) |
 | **instrument** | `:malli/schema` registers + probe call doesn't throw | Malli instrumentation | always-on, validates in/out/arity |
 | **generative-test** | `deftest` passes on N `mg/sample` inputs | generative testing | property-level |
 

@@ -295,7 +295,7 @@ the accrete-first admission rule. It emits ordinary Clojure forms. The strong
 model spends its limited episode on data model, complete Malli contracts,
 relational properties and behavioral tests before implementation.
 
-Forms use the existing source splitter, frozen run plan, SCI door and durable
+Forms use the existing source splitter, frozen run plan, SCI evaluation and durable
 receipt path. There is no second evaluator. One attempt/batch identity links
 the vision to resulting receipts and test facts.
 

@@ -41,7 +41,7 @@ database-operation recorder exists.
   `:seon.db/expected-db` write fence.
 - Focused tests prove native allocation and transaction reports, direct
   database errors, and the runtime database-value handoff.
-- The composition door derives bounded eval result evidence from ordinary
+- The HTTP handler derives bounded eval result evidence from ordinary
   database facts and does not reconstruct a second database execution trace.
 
 ## Resolution

@@ -462,7 +462,7 @@ Steps 1–4 are the contract; 5–8 are independent consumers.
 
 ## 8. Disagreements with the prior report
 
-1. **The `/call` door cannot carry expansion/hover** (prior §6.3 "expansion
+1. **The `/call` endpoint cannot carry expansion/hover** (prior §6.3 "expansion
    is a fresh server `/call`", and badge-click "via the existing `/call`
    door"). The capability gate (`call.cljs:63-98`) admits only agent-
    authored non-private `:seon.fn` facts and refuses core functions — the

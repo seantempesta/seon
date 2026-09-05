@@ -167,7 +167,7 @@ measurement.
 
 `docs/seon/architecture/ui.md:161-166` says “invokes authored code with the one
 `:interrupt-fn`, door, and exposes…”. The intended sentence is: “The cluster
-JVM invokes authored code **through the one guarded door, with its one
+JVM invokes authored code **through the one bounded evaluation, with its one
 `:interrupt-fn`, and exposes only deeply realized, bounded ordinary data** to
 trusted render functions.” The missing “through” is editorial; the missing
 deep-realization contract is architectural.

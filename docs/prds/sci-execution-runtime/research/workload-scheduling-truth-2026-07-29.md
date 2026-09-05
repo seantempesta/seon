@@ -4,7 +4,7 @@ status: active
 tags: [research, flow, scheduling]
 ---
 
-# Workload scheduling truth: blocking, parking, and the compute door
+# Workload scheduling truth: blocking, parking, and the compute submission function
 
 Owner question, verbatim intent:
 

@@ -628,7 +628,7 @@ graduation. A persisted action namespace referenced a schema namespace without
 requiring it. Warm eval order masked the missing edge; after restart, complete
 program preparation failed before the same agent could evaluate the corrective
 `ns` form. This violates the self-healing invariant: persisted authored code
-must never remove the supervised repair door for persisted authored code.
+must never remove the supervised repair endpoint for persisted authored code.
 [[../../seon/issues/persisted-program-error-prevents-agent-repair]] owns the
 exact evidence and acceptance criteria. The ordered spine is now: retain the
 trusted child compiler and exact source map after program-load failure, prove a
@@ -640,7 +640,7 @@ is admissible.
 Commit `d34cbc2e` now closes the repair-capability half of that boundary. In an
 isolated real database, valid `my.broken/run` was followed by deliberately
 invalid current namespace source and a complete clean restart. The fresh child
-retained the same supervised eval door, committed a corrective `ns` and `defn`
+retained the same supervised evaluation path, committed a corrective `ns` and `defn`
 in two successful evals, restarted cleanly again, and returned `:repaired`
 through the ordinary shared-function action path. The trusted compiler, exact
 source map, and normal program transaction remain the only mechanism. Direct
@@ -933,7 +933,7 @@ uses the current transaction-report-or-error contract already used by brand
 seeding. Focused proof passes 11 tests/40 assertions; the archived issue records
 the exact database evidence.
 
-The provider blocker is now closed. A one-turn product-door request completed
+The provider blocker is now closed. A one-turn product API request completed
 through `deepseek-v4-pro` in 12.14 seconds with successful model-transport,
 turn, eval, and database evidence. A coherent DeepSeek reset then logged the
 fixed seed transaction as successful, and an ordinary supervised restart
@@ -1809,7 +1809,7 @@ and successor-PRD work.
 Cross-lane research was reconciled without importing its implementation diary.
 The reviewed repl-autosuggest/plan/Inspect changes already on this branch remain
 the source baseline; standard Inspect tasks measure a model while pod-backed
-tasks measure Seon through the production one-shot door. The protected
+tasks measure Seon through the production one-shot execution endpoint. The protected
 `shared-schema-section-2026-07-13.md` report found only about eight percent
 namespace-block savings, so shared schema placement remains profiling-gated and
 does not create a second context section now. Runtime-observed invalidation,
@@ -2168,7 +2168,7 @@ in place by a seven-line launcher over one Babashka process graph. Kernel file
 locking, exact process identity, bounded readiness-log reads, relevant-
 environment digests, artifact manifests, scoped reset, and fail-closed process-
 group ownership pass 10 focused tests/29 assertions. Phase 3 remains open for
-active caller and test-door migration; the default-cluster cold live proof now
+active caller and test-entry-point migration; the default-cluster cold live proof now
 passes, so ACME and Inspect can follow.
 
 The latest 2026-07-13 cold reset rebuilt a fresh default database and returned
@@ -2661,7 +2661,7 @@ is evaluated behaviorally, not by asserting prose.
 | Database browser | The obsolete inventory surfaces are deleted. `/data` uses the canonical shared gzip feed, cheap shell, schema navigator, and bounded AEVT cursor pages. Entity/ref/transaction/history units remain. |
 | Developer hooks | The direct Babashka hook is repository-contained before config/artifact access, runtime-independent, locally deterministic, and log-bounded under a cross-process lock. Automatic model review is deleted. The operator gate includes its Markdown/docstring checks. |
 | Operator | The Babashka graph and thin launcher are built and focused-tested; default and ACME share one admitted artifact identity and serve healthy pages/feeds. Task-independent process identity is closed at `74530d90`; destructive restore remains the current live gate. |
-| Tests | Public pod/database/operator doors delegate to one runner each; focused pod builds use compile-time namespace selection, one bundle lock, and exact freshness fingerprints. Disabled/paused-application tests and remaining intentional expected-failure noise still need removal. |
+| Tests | Public pod/database/operator endpoints delegate to one runner each; focused pod builds use compile-time namespace selection, one bundle lock, and exact freshness fingerprints. Disabled/paused-application tests and remaining intentional expected-failure noise still need removal. |
 | UI | The four dormant context renderers and their unconditional boot load are deleted. Active symbols, CSS, DOM, docs, and ACME still need the tile-to-surface/card vocabulary cut; skill teaching is already converged. |
 | Live rendering | Agent surfaces and the whole debug/data targets use runtime-observed reads; normalized subscriptions suppress identical consecutive output. Per-region debug/data unitization, layout/focus browser proof, and grown-database profiling remain. |
 | Recent activity reads | `seon.render.default/recent-messages`, `seon.agent.ctx/messages`, transcript/activity queries, `seon.derive/real-eval-oks`, and the function menu independently scan and sort growing message/eval history before taking a small tail. Root's current cross-agent activity does the same over the whole database. |
@@ -2785,7 +2785,7 @@ cleanly. No paused application or nREPL namespace loads.
 6. Remove global nuke. Reset only a named cluster after proving its writer and
    readers are drained.
 7. Port the few useful syntax/markdown/docstring checks to a direct
-   Babashka/tool door. Delete the dead nREPL hook pipeline and update hook
+   Babashka/tool command. Delete the dead nREPL hook pipeline and update hook
    configuration atomically.
 8. Delete the paused Integrant/core.async JVM application, old agent/providers,
    context/graph/session/embedded DB, JVM renderer/web/SSE, old MCP/REPL, app

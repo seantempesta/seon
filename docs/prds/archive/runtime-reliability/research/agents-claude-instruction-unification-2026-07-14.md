@@ -213,7 +213,7 @@ semantics apply to the other.
 - Do not retain the claim that Codex auto-loads a descendant whenever it edits a
   file. It does not in the installed client.
 - The vocabulary table's GET `/agents` page is stale. Current route datoms define
-  `/` as root's dashboard, `POST /agents` as the creation door, and
+  `/` as root's dashboard, `POST /agents` as the creation endpoint, and
   `/agent/{id}` as an ordinary agent page.
 - The web-UI implementation list must not omit `router.cljs`, `datastar.cljs`,
   and the current view-unit mechanism; the deepest `src/seon/web/AGENTS.md`

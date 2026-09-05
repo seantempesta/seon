@@ -345,7 +345,7 @@ for the inherited case to render. If it does not, the fix is the walk's depth
 Changing your model is a durable FACT, so it is the third agent-facing shape,
 constructed exactly like `my.message/send`: a pure constructor returning a
 value; the LOOP commits it in its terminal transaction. Nothing about model
-selection happens inside an eval, and no capability door is involved.
+selection happens inside an eval, and no capability request handler is involved.
 
 ```clojure
 (ns my.model

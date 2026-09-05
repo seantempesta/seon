@@ -95,7 +95,7 @@ boundary measured in [[parser-as-generation-oracle-2026-06-28]]:
 |---|---|---|
 | **commit-entropy** (model-internal) | code-*shape* uncertainty (AUROC 0.749) | **wrong fn/API name (AUROC 0.471 ≈ random)** — the model is confidently wrong |
 | **parser** (`parse-forms` `:span`/`:error-kind`) | 92.7% of corruptions; SAFE auto-fix vs FLAG | `:invalid-token`/unresolved-name is FLAGGED but **not fixable** without a name source |
-| **eval** (SCI cage) | +91.5% of masked-divergent (62.5% reference-free) | **dead-data + wrong-name on the live path** — "only an intent-level oracle can" |
+| **eval** (SCI context) | +91.5% of masked-divergent (62.5% reference-free) | **dead-data + wrong-name on the live path** — "only an intent-level oracle can" |
 | **retrieval (THIS capability)** | the wrong-name residual — supplies the *correct existing name* | bounded by index coverage (a name absent from the graph can't be retrieved) |
 
 The key insight: **entropy and the program graph are complementary, not
@@ -415,7 +415,7 @@ graph catches it.
 
 - **Why entropy misses it:** `reduce-kv` is a real, common Clojure fn — the model
   commits it with high confidence (low entropy). The AUROC-0.471 band exactly.
-- **Trigger B fires:** evaluate in the SCI cage → `reduce-kv` on a vector throws
+- **Trigger B fires:** evaluate in the SCI context → `reduce-kv` on a vector throws
   (or `symbol-resolves?` / the eval `:seon/error` flags it). The span is
   `reduce-kv`'s char range → `offset_map` → its canvas token positions.
 - **Retrieval (Part 1, real infra):** `span_context` = `"(defn sum [xs] (… + 0
@@ -462,7 +462,7 @@ Trigger A end-to-end; the primary case proves Trigger B (the gap-closer).
 4. `generate_canvas` the primary prompt → if it denoises clean, inject the
    `reduce-kv` corruption to exercise the loop deterministically. Confirm the
    `entropy[256]` + `committed_symbols` come back.
-5. Eval in the SCI cage (pod side) → flag `reduce-kv` (Trigger B) → `spec-for-
+5. Eval in the SCI context (pod side) → flag `reduce-kv` (Trigger B) → `spec-for-
    span` → `inject` → confirm the span re-commits to `reduce` and all other
    positions are byte-identical (L's clamp held).
 6. Eval again → clean. Record rounds-to-clean. Run the no-injection re-noise

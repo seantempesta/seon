@@ -412,7 +412,7 @@ These are API/vocabulary checks, not tests that assert exact context prose.
   `db/store-inventory`, `SEON_SKILLS_DIR`, or file-backed skill body. Ordinary
   English and explicitly historical documents are not blindly banned.
 
-Run focused CLJS and Babashka/tool doors for this slice rather than the whole
+Run focused CLJS and Babashka/tool commands for this slice rather than the whole
 legacy suite. The final proof is a cold default reset and browser/context
 observation, followed by ACME only after default succeeds.
 
@@ -425,7 +425,7 @@ observation, followed by ACME only after default succeeds.
   source-only contract. Report that limitation at import; package-resource
   storage is a later measured feature.
 - Generated tool files can be accidentally edited. The committed manifest,
-  check door, source-mode sync, and clear generated-tree ownership make the
+  check command, source-mode sync, and clear generated-tree ownership make the
   mistake loud and repairable.
 - Provider browser commands genuinely differ and require proof in both tool
   environments. This is the one known overlay, not permission for arbitrary

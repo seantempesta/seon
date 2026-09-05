@@ -36,7 +36,7 @@ clojure.core.async$pipeline_STAR_$fn__7259.invoke(async.clj:597)
 
 This is exactly the scaling cliff `seon.flow/var-process` refuses at proc
 construction ("the `:mixed` default pins one platform thread per proc forever
-and is the one measured scaling cliff"). The refusal guards the proc door;
+and is the one measured scaling cliff"). The refusal guards the proc construction boundary;
 the fan-out walks in through a different one.
 
 ## Evidence

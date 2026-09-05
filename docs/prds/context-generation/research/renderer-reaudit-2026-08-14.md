@@ -109,7 +109,7 @@ acquisition-scoped — flagged for multiplicity, not as a hack.
 
 ### 2.7 The transcript's `:summary` tier is a provable no-op
 
-All four text producers ignore their `detail` argument
+All four text render functions ignore their `detail` argument
 (`transcript.clj:584, 625, 636, 667`), so `:summary` output is
 byte-identical to `:full` and `best-summary` (`transcript.clj:804`)
 re-tests the identical candidate and always fails once `:full` failed.
@@ -176,9 +176,9 @@ both hand-written twins.
 ### 2.13 The stylesheet is the tell
 
 75 of 171 CSS classes in `resources/public/css/input.css` have no
-producer (e.g. `seon-transcript-human/agent/peer/system`, `plan-tree`,
+render function (e.g. `seon-transcript-human/agent/peer/system`, `plan-tree`,
 `seon-data-drill`). Someone designed the page ui.md describes; the
-producers never caught up.
+render functions never caught up.
 
 ### 2.14 Live defect: the totality branch's own error value is broken
 

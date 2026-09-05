@@ -237,7 +237,7 @@ straight to `(schema/schema-definition :seon.agent.turn)`.
 `data-panel` (render.cljs:522) header row: primary schema key as the
 leading label, remaining matches as small badges (a structure satisfying
 several schemas shows all of them; click a badge → that schema's definition
-via the existing `/call` door + `schema/schema-definition`). When a matched
+via the existing `/call` endpoint + `schema/schema-definition`). When a matched
 schema is an entity-catalog row with a registered `:seon.render/html`
 symbol, offer it as the alternate rendering of that node (the portal
 "switch viewer" move) — but the DEFAULT stays the structural drill-down;
@@ -247,7 +247,7 @@ value arrives as a walked node.
 Drill-down/nav state: **keep the current model** — the whole bounded tree
 ships in one morph, expand/collapse is client-side `<details>` (no state to
 own), and deeper-than-the-bound expansion is a path-based re-sample of
-`result/<id>` through the existing `/call` door (value.cljs:704-714 already
+`result/<id>` through the existing `/call` endpoint (value.cljs:704-714 already
 specifies this). No URL state, no Datastar signal registry for tree state —
 signals would be a second stored-state path for what CSS already does.
 

@@ -155,7 +155,7 @@ system never cashed in.
 
 | commit | what |
 |---|---|
-| `126d6f8e5` | reitit front door for the pod HTTP surface (Lane-U) |
+| `126d6f8e5` | reitit entry point for the pod HTTP surface (Lane-U) |
 | `39375852e` | `:seon.route` schema + seeded core routes (Phase 5) |
 | `3c7cfb723` | pod router is a pure derived value of `:seon.route/*` datoms (#16) |
 | `df6249f57` | invalidate derived routes from database facts |
@@ -181,7 +181,7 @@ That was an honest deferral, not an oversight. What it costs today:
 | **Reverse routing** (`r/match-by-name` + `r/match->path`, `reference-code/reitit/modules/reitit-core/src/reitit/core.cljc:49,70-76`) | no — 11 hand-built path strings (below) | **YES.** A namespace page's URL is generated from a name + params in dozens of render sites; hand-built strings are the exact thing that rots when a route line changes. |
 | **Route data as plain edn** (arbitrary keys ride through; only HTTP methods are special-cased — `reference-code/reitit/modules/reitit-ring/src/reitit/ring.cljc:19` `group-keys`) | no — behavior is Clojure control flow, not a value | **YES.** Ruling #17 says "adding a namespace page is adding a route line." A line is only addable if the table is a value; `cond` branches are not. An agent can *query* an edn table; it cannot query a `cond`. |
 | **Build-time path + name conflict detection** (`core.cljc:292,371-375`; legible messages `exception.cljc:32-51`) | no — a `cond` silently shadows | **YES**, and increasingly: every added page raises overlap risk. |
-| **Per-route / per-subtree middleware with keyword registry** | no — `same-origin?` is an inline `if` at `web.clj:935` | Medium. One gate today; the guarded-door and capability seams will want more. |
+| **Per-route / per-subtree middleware with keyword registry** | no — `same-origin?` is an inline `if` at `web.clj:935` | Medium. One gate today; the bounded evaluation and capability seams will want more. |
 | **Path/query coercion** (`reitit.coercion` + `reitit-malli`) | no | **Low/no.** We have exactly one path param shape (an agent id) and Malli already owns contracts at the function boundary. Do **not** adopt `reitit-malli` now. |
 | **Path-param decoding** (percent-decode in the trie, `trie.cljc:206-259`; `impl.cljc:239-250`) | yes, hand-done via `URLDecoder` at `web.clj:888` | Parity, not a gain. |
 

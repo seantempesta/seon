@@ -814,7 +814,7 @@ then deletes flattening. Domain data lives under `value`, custody under
 
 This proves the page-one claim: both halves of every exchange are already
 stored facts, so this is render-side unification plus deletions, with no new
-history storage. The probe used the live default cluster's effect-door
+history storage. The probe used the live default cluster's effect-request
 configuration and this exact query:
 
 ```clojure
@@ -987,7 +987,7 @@ explicit-or-declared-schema; contract-fit remains a top-level
 convenience; the acquired-candidates nested mechanism is DROPPED (the
 probe stands as evidence it was affordable — simplicity outranked it).
 The taught habit replaces the machinery: DECLARE YOUR SHAPE as a schema
-key carrying its render producer property and it renders through its
+key carrying its render function property and it renders through its
 face at every depth via the existing door. The red test
 `nested-values-render-their-declared-faces` is a defect in that
 EXISTING door (a declared face not honored nested), not a missing third
@@ -1103,9 +1103,9 @@ These are before-values, not targets.
 |---|---:|---|
 | Root stage-1 provider prompt | 12,161 tokens | Drive table, `model-authoring-drive-2026-08-10.md:100-108` |
 | Root audited exact context | 15,917 estimated tokens, 18 rendered values | `context-quality-audit-2026-08-10.md:30-42` |
-| Audited toolkit namespaces combined | 9,552 estimated tokens | `context-quality-audit-2026-08-10.md:36-40` |
+| Audited agent-facing namespaces combined | 9,552 estimated tokens | `context-quality-audit-2026-08-10.md:36-40` |
 | Audited `my.fs` / `my.web` rendered values | 2,843 / 2,249 estimated tokens | `context-quality-audit-2026-08-10.md:36-39` |
-| Latest live-capture `my.background` | 801 estimated tokens | Effect-door configuration measurement in this PRD lane, cluster `default`, latest root capture |
+| Latest live-capture `my.background` | 801 estimated tokens | Effect-request configuration measurement in this PRD lane, cluster `default`, latest root capture |
 | Latest live-capture `my.edit` | 1,010 estimated tokens | Same probe |
 | Latest live-capture `my.fs` | 990 estimated tokens | Same probe; current source reads the profile at `src/seon/render/ns.clj:320-325` |
 | Latest live-capture `my.message` | 744 estimated tokens | Same probe |

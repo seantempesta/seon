@@ -107,7 +107,7 @@ Full measurement: [[research/parser-as-generation-oracle-2026-06-28]].
   (`:eof`/`:unmatched-delimiter`) are **100%** mechanically recovered by `seon.repair`
   with zero model round-trip; only the FLAG class (`:invalid-token`) and eval failures
   re-noise.
-- **`seon.eval/eval` (the SCI cage)** — never throws, returns `{:ok true :value v}` |
+- **`seon.eval/eval` (SCI evaluation)** — never throws, returns `{:ok true :value v}` |
   `{:ok false :error …}`. The semantic tier: **62.5%** of masked-divergent
   corruptions caught reference-free (a hard error), **91.5%** with a comparator; the
   ~8.5% residual is dead-data mutation (off the live path) — the factual/retrieval

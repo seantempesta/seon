@@ -12,7 +12,7 @@ tags: [issue, agent, runtime, database, architecture]
 Cluster-JVM boot no longer installs durable agent-authored corpus functions
 into the shared SCI base. The capability disappeared when
 `seon.host.graduate/install-nursery!` and `rebuild!` were deleted with the old
-guarded door.
+bounded evaluator.
 
 ## Evidence
 

@@ -106,7 +106,7 @@ submission wait. Filed as
 #### B3. Agent-authored renderers cannot enter the SCI program context
 
 The settled rule says agent render and context code runs through the guarded
-SCI door (`docs/prds/sci-execution-runtime/plan/README.md:1333-1352,1671-1682`).
+SCI evaluation (`docs/prds/sci-execution-runtime/plan/README.md:1333-1352,1671-1682`).
 The router instead does JVM-only `requiring-resolve` and direct invocation
 (`src/seon/render.clj:282-305,331-382`); the live SCI program context is a
 separate value (`src/seon/sci/eval.clj:1210-1233`).

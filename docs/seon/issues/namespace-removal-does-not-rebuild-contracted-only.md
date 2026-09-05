@@ -16,7 +16,7 @@ definition returns and the uncontracted session definition stays removed.
 ## Evidence
 
 Agent B declared `streams.victim2/contracted` as a contracted function and
-`streams.victim2/ephemeral` as an uncontracted Var. A live-only door
+`streams.victim2/ephemeral` as an uncontracted Var. A live-only SCI evaluator
 `ns-unmap` removed both immediately and made B's next form a lint-rejection,
 but left both database rows intact; a restart resurrected both.
 

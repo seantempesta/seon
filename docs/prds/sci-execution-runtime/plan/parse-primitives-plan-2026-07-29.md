@@ -531,7 +531,7 @@ error, not a nil, not an exception. Consumers can therefore ship before N5 and
 will simply get the conservative answer until facts exist.
 
 Consumption is at **two seams only**: flow proc workload tags, and the
-eval/effect submission door (`seon.flow/submit!!`). Never per frame, never per
+eval/effect submission function (`seon.flow/submit!!`). Never per frame, never per
 call. Migrating execution at every function frame does not exist on the JVM and
 would be exactly the complication the owner rejected.
 

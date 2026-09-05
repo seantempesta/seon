@@ -399,11 +399,11 @@ builds:
    keys and env names — they do NOT rename with the namespace.
 4. Loading: the default client build entry does not require the
    diffusion tree. A one-line opt-in entry require (build override /
-   preload — the same shadow build-override door `seon.demo`
+   preload — the same shadow build override `seon.demo`
    demonstrates, or the diffusion flavor's own build) loads
    `seon.diffusion.gemma`, which registers itself. Fence intact: no
    main NAMESPACE requires diffusion; the build config edge is the
-   sanctioned opt-in door and is explicit config, honoring the
+   sanctioned opt-in configuration and is explicit config, honoring the
    "never activate as a side effect" standing rule.
 
 Sequencing caution: `seon.ai.typeahead` and the step-loop surface are
@@ -632,7 +632,7 @@ first, alternative second; nothing executes without a ruling.
   segment at the cost of stutter; or keep the file under `src/seon/ai/`
   with a path-based fence exception — rejected as a standing exception
   list (computed-rule preference).
-- **D12 — default-build opt-in door for the diffusion provider.**
+- **D12 — default-build opt-in configuration for the diffusion provider.**
   Recommend the build-override entry require (the `seon.demo`-proven
   door) so the DEFAULT client artifact carries zero diffusion code and
   the diffusion flavor/dev build carries the provider. Alternative:

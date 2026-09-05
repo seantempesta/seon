@@ -38,7 +38,7 @@ refuses identically.
 ## Evidence
 
 Tool-exercise lane, 2026-08-07, cluster `tools` in an isolated operator root,
-driven through a real run (sci eval → effect door → `:io` → receipt). Fixture:
+driven through a real run (sci eval → effect execution boundary → `:io` → receipt). Fixture:
 a 33,554,432-byte ASCII file. Complete result:
 `docs/prds/sci-execution-runtime/research/probes/tool-exercise/fs-read-bounds.edn`.
 
@@ -113,7 +113,7 @@ the path, the observed size, and the key that reads a window instead — its own
 declaration always said it must identify the path and never did.
 
 Live proof, cluster `x` in isolated operator root `tmp/repairs-check`, driven
-as a REAL capability request through the full path (sci eval → effect door →
+as a REAL capability request through the full path (sci eval → effect execution boundary →
 `:io` → receipt), on a 20,971,520-byte file with a 16 MiB ceiling:
 
 ```clojure

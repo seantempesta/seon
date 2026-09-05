@@ -4,7 +4,7 @@ status: active
 tags: [prd, runtime, schema]
 ---
 
-# P17 ambient injection — implementation slice order (2026-08-05)
+# P17 call preparation — implementation slice order (2026-08-05)
 
 P12 graduated 2026-08-05 (714 arities, zero incomplete; census in the
 p12-indexing lane summary), so P17 is dependency-ready. The RULED

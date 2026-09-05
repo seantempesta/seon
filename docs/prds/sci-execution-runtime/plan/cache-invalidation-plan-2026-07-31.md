@@ -14,7 +14,7 @@ proves the shape: waves W5 and W6 of the sealed contract
 (`context-render-data-model-spec.md:266-272`).
 
 Nothing here is new machinery. Every unit is flow procs
-(`src/seon/flow.clj:83-115`), the one guarded door
+(`src/seon/flow.clj:83-115`), the one bounded evaluation
 (`src/seon/flow.clj:481-523`), or Datahike's own revision facts carried on the
 database value (`reference-code/datahike/src/datahike/query.cljc:2568-2589`).
 
@@ -394,7 +394,7 @@ No agent holds more than one permit while 17 other agents each need an eval.
 Second falsifier: a renderer blocked in a HOST call — the known interrupt
 ceiling — must be bounded by permit release, not by the interrupt.
 
-**Tests.** P7 (door totality). Catch sites must mirror `admit`'s interrupt
+**Tests.** P7 (evaluation totality). Catch sites must mirror `admit`'s interrupt
 pass-through; a bare `catch Throwable` swallowing the uncatchable interrupt is
 itself the defect (spec `:202-205`).
 
@@ -467,7 +467,7 @@ delivery-side and conflicts with nothing.
 | P4 ordering stability | U5 |
 | P5 prefix sharing | U4 |
 | P6 elision loudness | unchanged from W1/W2 |
-| P7 door totality | U8 |
+| P7 evaluation totality | U8 |
 | P8 walk purity — same db value in, identical bytes out, cache transparent | U2 + U4, and it is the single most important regression of this wave |
 
 Every proof must be claimed by a recurring surface. The µs-level numbers stay

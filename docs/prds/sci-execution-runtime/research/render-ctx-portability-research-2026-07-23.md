@@ -103,7 +103,7 @@ over passed database. (b) 3-tier doors ×3: `warnings-block` (:370),
 `rendered-canvas-text` `selected-canvas-response`. `acquire-canvas!`
 (:122) is pure over its passed database (history via
 `(assoc database :history true)` — value-level, good). (b) `canvas-block`
-3-tier door (:342) — **L8**. Guarded-door consumer:
+3-tier door (:342) — **L8**. Bounded evaluation consumer:
 `selected-canvas-call`/`invoke-selected!` for the wired render fn (§4).
 
 ### 1.8 `src/seon/agent/ctx/render_fns.cljs` — 131 LOC
@@ -230,7 +230,7 @@ new rows found by this audit.
 | L6 | ctx.cljs:248-256 (`soul-file-path`) | load-time env `SEON_SOUL`/`SEON_SOUL_FILE` | I5 sibling, OPEN | config→db manifest fact (the config singleton already exists) |
 | L7 | ctx.cljs:297-303 (`host-timezone` Intl) consumed INSIDE the cacheable body by transcript timestamps (:348 `clock`, message/eval `hh:mm:ss`) | host timezone | **NEW** — not an I-row; cross-POD divergence (two pods in different zones render different bytes at one coordinate), not time drift | tz becomes a `:seon.config` database fact or an explicit render input; the free-tail readline may keep the live Intl read |
 | L8 | 3-tier fallback door `(or (::db/db input) (::db/db (db/current-tx-context)) (await (db/db)))` ×11: subagents:248,:345 · canvas:342 · menu:370 · namespaces:507 · transcript:1087 · warnings:370,:462,:515 · typeahead:55,:163 | ambient LATEST value (tier 3) | **NEW class** — pinned in practice (the child's tx-context carries the invocation value; the driver never passes `::db/db` in `block-call`, runtime.cljs:129-138), falls to latest only for direct callers | the render port makes `:seon.db/db` a REQUIRED block input (driver injects it in `block-call`); tiers 2-3 deleted for a loud `:core-bug` error — the exact I8 precedent already applied at the turn spine |
-| L9 | render.cljs:353,:703,:884,:996 `eval/lookup-value` | process-local compiled-fn population via `js/globalThis` munge walk | the re-seam (§3) | authored syms resolve through the guarded eval door (sci); core converter syms through a static trusted table |
+| L9 | render.cljs:353,:703,:884,:996 `eval/lookup-value` | process-local compiled-fn population via `js/globalThis` munge walk | the re-seam (§3) | authored syms resolve through the bounded SCI evaluation (sci); core converter syms through a static trusted table |
 | L10 | render/canvas.cljs:451-462 (`welcome` greeting `js/Date.` + Intl) | wall clock | web-tier html default | acceptable in the web view; derive from the request instant if the byte gate ever covers html |
 | L11 | render/system.cljs:127 (`system-view` query with no `::db/db`) | ambient latest | web tier | pass the page's database value |
 | L12 | debug.cljs:99,:177,:283,:399,:494 `(or database (await (db/db)))` | ambient latest DEFAULT | debug tool; explicit pin exists | document; not part of the cacheable-context gate |
@@ -250,7 +250,7 @@ in the family and their replacements:
 
 | Caller | seon.eval fn | What it actually is | Replacement |
 |---|---|---|---|
-| render.cljs :353/:703/:884/:996 | `lookup-value` (eval.cljs:502) | munged `js/globalThis` walk over the compiled-fn population | THE structural seam: split `resolve-render` into (i) core/trusted syms → a static symbol→fn table (ordinary compiled requires — the handlers, block fns, defaults) and (ii) authored syms (`err/agent-authored-sym?`, error.cljc:211-225) → the guarded eval door's sci resolution (`sci.core/eval-form`/env lookup over the corpus-loaded context). No corpus reparse: the sci host already loads `:seon.ns` source |
+| render.cljs :353/:703/:884/:996 | `lookup-value` (eval.cljs:502) | munged `js/globalThis` walk over the compiled-fn population | THE structural seam: split `resolve-render` into (i) core/trusted syms → a static symbol→fn table (ordinary compiled requires — the handlers, block fns, defaults) and (ii) authored syms (`err/agent-authored-sym?`, error.cljc:211-225) → the bounded SCI evaluation's sci resolution (`sci.core/eval-form`/env lookup over the corpus-loaded context). No corpus reparse: the sci host already loads `:seon.ns` source |
 | ctx.cljs :671 | `sanitize-result-edn` (eval.cljs:2864) | PURE read-side re-projection (cljs.reader + `seon.render.value/project-plain`) | relocate to `seon.render.value` (its docstring already names it as that projection's net); needs a portable tagged-reader table |
 | ctx.cljs :724 | `scratch-def-note` (eval.cljs:2213) | PURE source-string predicate | relocate to a portable source-analysis owner (`seon.repl.parse` / the ns-source owner) |
 | menu.cljs :271 | `edges->require-info` (eval.cljs:2636) | PURE fold over `:seon.ns/require-edges` component rows | relocate beside the `:seon.ns.require` schema owner |
@@ -260,12 +260,12 @@ in the family and their replacements:
 Conclusion: ctx needs NO receipts or new facts from the eval replacement —
 its three imports are pure helpers to relocate. The render walker needs
 exactly one thing: a symbol-resolution seam with a trusted/authored split,
-which is the same guarded-eval-door contract the scoping-hold research is
+which is the same bounded-SCI-evaluation contract the scoping-hold research is
 already designing.
 
-## 4. The guarded-door boundary
+## 4. The bounded evaluation
 
-Render entry points that MUST pass through the one guarded eval door
+Render entry points that MUST pass through the one bounded SCI evaluation
 (authored, untrusted — deadline/fuel, output caps, `:agent` fault):
 
 1. Stored block `:seon.render/ai` / `:seon.render/html` SYMBOLS that are
@@ -315,7 +315,7 @@ Move the prompt driver out of the dying child into the pod:
 runtime.cljs:1-420) become pod-owned (natural owner: `seon.agent.ctx`
 side, since blocks/`selected-agent-blocks`/`rendered-context-from-entity`
 already live there); `invoke-selected!` is replaced by (i) direct calls
-for core block fns and (ii) the guarded eval door for §4 items 1-5. No
+for core block fns and (ii) the bounded SCI evaluation for §4 items 1-5. No
 `.cljc` conversion; the ctx/render namespaces are already loaded in the
 pod. **Fold the purity fixes here per ruling 21 + triage #1**: L8
 (required `:seon.db/db` block input; delete fallback tiers loudly), L7

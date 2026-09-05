@@ -138,7 +138,7 @@ broadcast used below.
 
 ## 3. Mint one fresh proof agent
 
-Use the real one-shot door so the same agent, turns, evals, replies, and usage
+Use the real one-shot execution endpoint so the same agent, turns, evals, replies, and usage
 are persisted. Preserve the JSON response verbatim.
 
 ```bash

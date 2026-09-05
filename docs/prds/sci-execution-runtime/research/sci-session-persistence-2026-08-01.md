@@ -320,7 +320,7 @@ fix, not before it.
 
 The owner's concern is the missiles case — a replayed form that fires
 something twice. The intended derivation is: effects flow through the ONE
-capability door, therefore a form whose receipt records no capability
+capability request handler, therefore a form whose receipt records no capability
 crossing is replay-safe by construction, and a form that crossed has its
 recorded RESULT rehydrated instead. That derivation is sound. **It is not
 yet available, because the door does not exist yet.** Measured through
@@ -450,7 +450,7 @@ about replay.
 
 **Slice 2** is the §5 fix (it blocks honest replay costing and taxes
 every live turn today). **Slice 3** is replay-on-wake with the §4 policy
-table restricted to its trivially-safe subset (no capability door exists
+table restricted to its trivially-safe subset (no capability request handler exists
 yet, so every stored form qualifies) plus the loud refusal when a form's
 receipt carries a crossing that the future door will record.
 

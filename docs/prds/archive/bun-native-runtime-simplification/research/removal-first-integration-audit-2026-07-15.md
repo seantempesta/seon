@@ -113,7 +113,7 @@ order. Each must be confirmed against current source immediately before its cut.
 | Node response backpressure | Web stream feed | drain listeners and writable-state inference replaced by desired-size/cancel semantics |
 | `node:net.createConnection` | framed socket transport | Node socket event adapter and queued-write assumptions |
 | repeated `Buffer.concat` receive prefix | framed decoder | quadratic prefix copies |
-| hard-coded Node execution doors | launch/runtime identity | Node-only doctor/package/test commands after Bun graduation |
+| hard-coded Node execution commands | launch/runtime identity | Node-only doctor/package/test commands after Bun graduation |
 | Node production dependency | release package | Node executable requirement and Node compatibility declarations |
 | dual-runtime differential flags | release manifest | temporary Node rollback selector after the final checkpoint |
 

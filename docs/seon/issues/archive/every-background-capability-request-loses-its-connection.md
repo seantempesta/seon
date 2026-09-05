@@ -34,7 +34,7 @@ The asymmetry is one function apart in `src/seon/effect.clj`:
 so every background `my.shell/run` fails, whatever it runs.
 
 This is [Defect I of the parallel isolation audit](../../prds/sci-execution-runtime/research/parallel-isolation-audit-2026-08-07.md)
-— "Every capability request crossing the guarded door on `:io` runs with no
+— "Every capability request crossing the bounded evaluator on `:io` runs with no
 cluster identity today; it survives only because with one cluster the
 fallback happens to be right" — except here there is no fallback that
 happens to be right, so it does not survive at all. The audit predicted the
@@ -110,7 +110,7 @@ arm is unchanged, so the two arms are symmetric for the first time.
 Regression: `seon.effect-test/background-work-outlives-the-deadline-of-the-turn-that-started-it`
 drives a REAL background submission through `effect/request!` and the work
 launcher, and asserts the settled receipt reports a live connection. That is
-the class this note names, and it is asserted at the door where the class
+the class this note names, and it is asserted at the effect execution boundary where the class
 lives rather than in one capability.
 
 Still open because the acceptance criterion asks for more than the class

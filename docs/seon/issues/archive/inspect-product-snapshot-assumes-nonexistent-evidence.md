@@ -85,7 +85,7 @@ remains part of the live-cluster issue rather than a scorer workaround.
 - Replacement count is either proven at the parent host boundary or removed
   from the scorer. It is never inferred from model narration or invented as a
   database field.
-- One native Inspect task drives the branch lease, product doors, and scorer;
+- One native Inspect task drives the branch lease, product endpoints, and scorer;
   fixture tasks remain only deterministic scorer discrimination.
 
 ## Resolution

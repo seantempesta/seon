@@ -391,7 +391,7 @@ agent into a turn:
                       :seon.message/text (str "Human submitted via tile: " note)}))
 ```
 
-So the same `/call` door supports both reactive shapes the prompt asks about:
+So the same `/call` endpoint supports both reactive shapes the prompt asks about:
 **a TX** (entity update → reactive re-render, the counter) and **a MESSAGE**
 (lands in the transcript + wakes the agent, the note). The agent CHOOSES by what
 its handler fn does — the mechanism doesn't fork. (NB: `message/user` has a known
@@ -408,7 +408,7 @@ This is already the design; stating it as the contract for #22:
    agent's home ns (`granted-fn?`, `call.cljs:82-96`). There is no separate
    "exposed actions" registry to maintain — defining the fn IS granting it; a
    `forget!`/redefine changes the surface. This is the same code-as-data corpus
-   the eval + render doors read.
+   the eval + render invocations read.
 2. **Refusal precedes invocation, always** (`call.cljs:24-36, 104-115`). The gate
    is a pure fn of a db value; it never executes the symbol to decide.
 3. **Args stay data, never code** (`call.cljs:38-50`): fn-CALL args are

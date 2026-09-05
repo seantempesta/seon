@@ -182,7 +182,7 @@ Reproduced verbatim: 17 rows, 16 `state=missing`, 1 `state=alive`,
    advertisement whose pid is dead, `:170-174` — is the genuinely
    interesting state and did not occur here.)
 3. **`store` is listed as a cluster.** `data/clusters/store` is the
-   PROCESS-ROOT Datahike store (`CLAUDE.md`, boot tower step 2), not a
+   PROCESS-ROOT Datahike store (`CLAUDE.md`, boot sequence step 2), not a
    cluster. `valid-cluster?` (`:106-109`) is a name-shape check only, so
    the store directory passes and is reported with `state=missing`.
 
@@ -236,7 +236,7 @@ stays green.
 
 Sort `:alive` first (the check at `:131-138` already computes it), exclude
 the process-root `store` directory by deriving it from the store path the
-boot tower owns rather than by name-matching, and collapse
+boot sequence owns rather than by name-matching, and collapse
 advertisement-less directories into one summary line ("12 clusters with no
 advertisement: …") while keeping `:stale`, `:invalid`, and `:unreadable`
 rows individually visible — those are real anomalies. Fold

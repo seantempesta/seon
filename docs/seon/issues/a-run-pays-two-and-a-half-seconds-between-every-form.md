@@ -39,7 +39,7 @@ Successive effect `opened-at` instants within ONE five-form run:
 02:41:55.848   +1.36 s
 ```
 
-Per-effect door cost over the same run, largely independent of the work:
+Per-effect execution cost over the same run, largely independent of the work:
 
 ```text
 my.fs/stat   on one file          131 ms
@@ -48,7 +48,7 @@ my.fs/read   refusing after 16MiB 125 ms
 ```
 
 So of ~2.4 s between forms, ~0.12 s is the capability request. The finder
-attributes the door's own 110–130 ms to two transactions (open + settle), a
+attributes the effect handler's own 110–130 ms to two transactions (open + settle), a
 `config/effective`, and two admissions per request; the remaining ~2.3 s per
 form is unattributed and is the number worth chasing first.
 

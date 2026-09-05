@@ -49,7 +49,7 @@ renderer code:
 - `:seon.cluster.agent/readline` on the agent entity holds the producer:
   a fully qualified function symbol (ruling #50's producer
   representation) or an inline string. The referenced function runs in
-  the one guarded door like any render producer and returns the
+  the one bounded invocation function like any render producer and returns the
   `:seon.render/ai` string (an `:seon.render/html` producer pairs it for
   the web page).
 - The BOOTSTRAP sets the shipped default via an ordinary form the agent

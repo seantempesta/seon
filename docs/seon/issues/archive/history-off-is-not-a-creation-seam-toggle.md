@@ -130,7 +130,7 @@ The six-part integration reached the protected live boundary:
 - `:seon.config.db/keep-history?` is declared beside the other config leaves
   and the shipped default explicitly retains history
   (`resources/seon/schema.edn:592-593`, `config/default.edn:1-4`).
-- `start!` compiles the selected manifest once before the tower, passes the
+- `start!` compiles the selected manifest once before the boot sequence, passes the
   effective boolean into process-root store acquisition, applies the same
   compiled value after the branch opens, and refuses a conflicting policy on
   an already-held store (`src/seon/cluster.clj:220-253,1301-1347,1420-1430`).
@@ -146,7 +146,7 @@ The six-part integration reached the protected live boundary:
   focus passed 7 tests / 32 assertions. The boot plus config-application gate
   ran 31 tests / 142 assertions with one error at the live history-off boundary.
 
-The remaining blocker is reproduced, not inferred. A real history-off tower
+The remaining blocker is reproduced, not inferred. A real history-off boot sequence
 opens the non-temporal main and cluster branches and applies its config row,
 then `cluster-ctx` refuses `:seon.ai/usage` because its shipped declaration is
 still `[:map-of :string :any]` (`resources/seon/schema.edn:172`). Without
@@ -210,7 +210,7 @@ blob collection log zero Datahike temporal exceptions. Reopen without an
 explicit setting derived persisted `false`; conflicting explicit `true` was
 refused with zero connect calls.
 
-The full isolated tower independently stopped at the same remaining boundary:
+The full isolated boot independently stopped at the same remaining boundary:
 `:seon.ai/usage` was classified agent-authored when temporal first-assertion
 evidence was unavailable, then its `:any` was refused. The API migration is
 correct and quiet; history-off boot remains ungraduated. Exact results are in

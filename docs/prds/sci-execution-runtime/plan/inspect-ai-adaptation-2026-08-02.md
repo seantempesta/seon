@@ -387,7 +387,7 @@ harness must gain before benchmark goals land:
   sample is directly useful here.
 - **File/artifact outputs.** No objective writes a file. The design needs
   `seon.eval/*artifact-root*` per sample, a capability path the agent can
-  actually reach (`seon.fs` through the one guarded door), and goal tests that
+  actually reach (`seon.fs` through the one bounded evaluation), and goal tests that
   read it. This is the "just functions that we can run to validate correctness,
   in case it's writing a file" half of the charter and is currently unbuilt.
 - **Multi-namespace generated code.** The graph already supports it (agents own

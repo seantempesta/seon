@@ -821,7 +821,7 @@ independent async fibers observe the update; otherwise keep live acquisition
 at the owning operation/session boundary. Collapse the second product-route
 catalog in `seon.web.router/static-supplement`: route facts own product,
 lifecycle, debug, and data-browser routes; launch capabilities own optional
-operator doors; only proven pre-database assets/readiness may remain static.
+operator endpoints; only proven pre-database assets/readiness may remain static.
 
 ### Stage 5 — deletions and small unifications
 

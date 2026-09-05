@@ -48,10 +48,10 @@ Sources:
 | # | Pattern | piscina / tinypool source | Maps to our worker tier | Adopt / Adapt / Skip |
 |---|---------|---------------------------|--------------------------|----------------------|
 | 1 | **Warm pool** — spawn `minThreads` at construction; during `startingUp` mark them ready immediately instead of awaiting the ready handshake | `index.ts:217-219` (`_ensureMinimumWorkers` in ctor), `:266-275` (startingUp marks ready + `queueMicrotask`); tinypool `:779-783` | Warm 4-8 SCI-ready workers pre-bootstrapped so the ~30ms SCI init is paid once, off the critical path | **Adopt** |
-| 2 | **Bootstrap-preload** — worker preloads/caches the task handler on the startup message before posting `ready` | `worker.ts:95-110` (`getHandler` on `StartupMessage`, then post `{[READY]:true}`) | Worker boots → load CLJS bundle → build the SCI cage/ctx → post ready. The "handler" is our fixed `eval-batch!`, bundled, not file-loaded | **Adapt** (handler is fixed, drop the `import(filename)` machinery) |
+| 2 | **Bootstrap-preload** — worker preloads/caches the task handler on the startup message before posting `ready` | `worker.ts:95-110` (`getHandler` on `StartupMessage`, then post `{[READY]:true}`) | Worker boots → load CLJS bundle → build the SCI context → post ready. The "handler" is our fixed `eval-batch!`, bundled, not file-loaded | **Adapt** (handler is fixed, drop the `import(filename)` machinery) |
 | 3 | **Acquire / dispatch / release** — balancer picks a ready worker; on done, `taskDone` re-marks it available and drains the queue | `index.ts:397-447` (`_onWorkerAvailable` + drain loop), `:449-474` (`_distributeTask` via balancer), `worker_pool/base.ts:93` (`maybeAvailable`) | Same loop. With single-concurrency the balancer is "any idle worker" | **Adopt** (drop the pluggable `loadBalancer`) |
 | 4 | **Worker recycle on memory bound** — each response carries `usedMemory: heapUsed`; after the task's done-callback, `shouldRecycleWorker` checks the bound and, if over, removes+respawns | tinypool `entry/worker.ts:118` + `:138` (report heapUsed), `index.ts:561-562` (`_handleResponse` stores `usedMemory`), `:1046-1068` (`shouldRecycleWorker`), `:948-953` (recycle in done-callback then `_ensureMinimumWorkers`) | Our "terminate + restart-from-DB". Recycle runs **after** the result is captured in the callback, so nothing in-flight is lost. New worker reads known-good state from datahike — no state to carry | **Adopt** (this is the key copy; even simpler for us) |
-| 5 | **Isolate-every-task recycle** — `isolateWorkers:true` recycles the worker after *every* task | tinypool `index.ts:1052-1055` | Optional "fresh cage per turn" mode if SCI eval proves leaky; our default is recycle-on-memory-bound or recycle-every-N-turns | **Adapt** (keep as a flag, default off) |
+| 5 | **Isolate-every-task recycle** — `isolateWorkers:true` recycles the worker after *every* task | tinypool `index.ts:1052-1055` | Optional "fresh SCI context per turn" mode if SCI eval proves leaky; our default is recycle-on-memory-bound or recycle-every-N-turns | **Adapt** (keep as a flag, default off) |
 | 6 | **Task cancellation via AbortSignal** — `onAbort`: if running, `_removeWorker` (which calls `worker.terminate()`) + `_ensureMinimumWorkers`; if still queued, remove from queue; reject with `AbortError` | `index.ts:528-554` (onAbort branch), `worker_pool/index.ts:102-117` (`destroy()` = `terminate()` + `port.close()` + fail taskInfos); tinypool `index.ts:963-985` | **The deadline watchdog.** Per-run `AbortController`; watchdog `setTimeout(deadline)` → `abort()` → pool terminates the worker → run closes `:deadline-exceeded`. `terminate()` is the CPU-proof kill (our measure: 0.8ms on a sync hang) | **Adopt** |
 | 7 | **Backpressure / bounded queue** — `maxQueue` cap; reject when queue ≥ capacity; `needsDrain`/`drain` events; `concurrentTasksPerWorker` | `index.ts:556-597` (queue+capacity+reject), `:604-631` (`_maybeDrain`/needsDrain); tinypool `:1076-1080` (simpler `_maybeDrain`) | Many agents/components contend for the pool. Bounded queue + reject-at-limit gives backpressure to the agent loop. `concurrentTasksPerWorker = 1` (SCI eval is CPU-bound) | **Adopt queue+cap; Skip the drain *events*** (derive contention in the inspector instead) |
 | 8 | **Crash supervisor** — worker `error`/`exit` → snapshot+clear its taskInfos, `_removeWorker`, respawn to `minThreads`, fail the in-flight tasks; `workerFailsDuringBootstrap` flag stops respawn storms | `index.ts:326-366` (`onWorkerError`/`onWorkerExit` → `_onError`); tinypool `:815-833` | restart-from-DB supervisor: fail the in-flight turn, respawn, the new worker re-derives from the DB. Keep the bootstrap-failure circuit breaker so a broken bundle doesn't spin | **Adopt** |
@@ -97,7 +97,7 @@ recycle**, and we can cut even more than tinypool did (below).
 ```
 worker start
   → load CLJS bundle
-  → build the SCI cage (eval ctx + allowed var/ns surface)
+  → build the SCI context (eval ctx + allowed var/ns surface)
   → postMessage {:seon.worker/ready true}
 ```
 
@@ -147,22 +147,22 @@ its own infinite loop; the OS thread kill can.
   (tinypool `:1058-1065`), evaluated **in the task done-callback after the
   result is captured** (`:948`) so no in-flight loss.
 - Recycle = `_removeWorker` (terminate) → `_ensureMinimumWorkers` (respawn).
-  The fresh worker boots its SCI cage and **re-reads state from datahike** —
+  The fresh worker boots its SCI context and **re-reads state from datahike** —
   there is no in-memory state to preserve, so our recycle is strictly simpler
   than tinypool's (no `teardown`, no channel handoff).
 - Optionally `isolateWorkers`-style recycle-every-N-turns as a flag if SCI eval
   proves to leak.
 
-### SCI-cage-inside-worker layering (two layers, two jobs)
+### SCI-context-inside-worker layering (two layers, two jobs)
 
 - **Process boundary (`worker_thread`) = the real isolation.** It is the only
   thing that contains a CPU hang or a native crash; `terminate()` is its kill.
-- **SCI cage (inside the worker) = hallucination guard.** It limits the
+- **SCI context (inside the worker) = hallucination guard.** It limits the
   var/ns/API surface the LLM-authored code can touch. Per the repo's settled
   rule, the SCI sandbox is *not* a security boundary — it catches LLM mistakes;
   isolation comes from the process boundary + the wire capability surface.
 - Net: a runaway turn is killed by `terminate()` (layer 1); a malformed/over-
-  reaching turn is rejected by the cage (layer 2) and reported back as
+  reaching turn is rejected by the context (layer 2) and reported back as
   `:seon.worker/error`.
 
 ## What we DON'T need from these libs

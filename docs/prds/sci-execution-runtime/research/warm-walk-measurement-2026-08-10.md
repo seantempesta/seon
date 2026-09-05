@@ -149,7 +149,7 @@ per-attribute `datoms` calls even when every producer output reuses.
 The null hypothesis holds. The semantic inputs to root's session context are
 available in four bounded family reads over one immutable database value:
 
-1. agent, cluster, instruction, root namespace, and cluster toolkit namespace
+1. agent, cluster, instruction, root namespace, and cluster agent-facing namespace
    rows;
 2. messages addressed to the agent;
 3. the agent's runs, with component forms and reverse receipt results in one

@@ -19,7 +19,7 @@ drops the oldest core faults.
 
 `src/seon/cluster.clj:418-447` builds only the store, branch connection,
 recovery, and config layers, and `src/seon/cluster.clj:449-534` returns that
-tower without Flow or wake composition. `src/seon/cluster/wake.cljc:99-134`
+boot sequence without Flow or wake composition. `src/seon/cluster/wake.cljc:99-134`
 requires an injected `:seon.cluster.wake/fault-channel`.
 `reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:99-102`
 creates the error channel with `(sliding-buffer 100)`, and lines 169-172 merely

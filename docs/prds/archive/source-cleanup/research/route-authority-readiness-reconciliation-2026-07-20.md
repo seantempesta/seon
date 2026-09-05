@@ -57,7 +57,7 @@ The current source still implements the pre-collapse design:
 | Manifest route curation | `src/seon/config.cljs:1506-1519` | `resolve-routes` removes seed rows by `:seon.route/name`; absence of an explicit manifest preserves existing database facts. |
 | Declarative reconciliation | `src/seon/client.cljs` (`apply-config!`) | The desired route population reconciles through `seon.state/reconcile!` with managed identity `:seon.route/name`; converged application writes nothing. |
 | Launch capability schema | `src/seon/client/schema.cljc` and `src/seon/launch.cljc` | The current closed capability has only `:seon.client/autonomous?`; every descriptor constructor and validator must understand the new optional operator-door grant. |
-| Operator descriptor construction | `script/seon/dev/config.clj` (`load!` calling `launch/default-descriptor`) | The operator, rather than the pod or database, is the place that explicitly grants operator doors. |
+| Operator descriptor construction | `script/seon/dev/config.clj` (`load!` calling `launch/default-descriptor`) | The operator, rather than the pod or database, is the place that explicitly grants operator endpoints. |
 | SSE reference idiom | `reference-code/datastar-clojure/src/dev/examples/tiny_gzip.clj` | The page shim and long-lived stream remain separate GET routes; this cut changes their route names, not the feed mechanism. |
 
 ## Atomic ownership groups
@@ -124,9 +124,9 @@ pattern/method pairs:
 | `/css/{*path}` | GET | Disk artifact needed independently of database route facts |
 | `/js/{*path}` | GET | Disk artifact needed independently of database route facts |
 | `/_seon/ready` | GET | Health/readiness must answer while database admission is unavailable |
-| `/_seon/operator/config` | POST | Repair door for new-code/old-database crossing |
+| `/_seon/operator/config` | POST | Repair endpoint for new-code/old-database crossing |
 
-The configuration repair door retains same-origin, admission, kernel-loopback,
+The configuration repair endpoint retains same-origin, admission, kernel-loopback,
 and launch-capability gates. The open issue's shorter “readiness + assets”
 wording is stale; the later owner ruling and implementation design correctly
 retain this fourth route. No product, lifecycle, debug, data-browser,
@@ -140,7 +140,7 @@ grant.
 
 The capability must not be inferred from `:seon.client/autonomous?`:
 
-- the `bin/seon` operator-built descriptor grants operator doors explicitly;
+- the `bin/seon` operator-built descriptor grants operator endpoints explicitly;
 - operator-created branch and shared-writer cluster descriptors preserve the
   grant even when a branch is non-autonomous;
 - embedded or downstream fallback descriptors omit the grant unless their own
@@ -150,7 +150,7 @@ The capability must not be inferred from `:seon.client/autonomous?`:
 
 Adding the key unconditionally inside `launch/default-descriptor` would grant
 embedded fallback pods accidentally. Dropping it from non-autonomous branch
-descriptors would break Inspect and lifecycle evidence doors. Therefore
+descriptors would break Inspect and lifecycle evidence endpoints. Therefore
 `script/seon/dev/config.clj`, every descriptor derivation, the closed
 capability schema, and their tests are one ownership group.
 
@@ -200,7 +200,7 @@ Rollback is the highest-risk contract. Vendored Reitit does not safely prefer
 the old static row or the new datom row when their paths overlap. Default
 router construction reports unresolved duplicate/conflicting paths and throws.
 Old code opening a database that already contains the migrated rows can
-therefore fail in `router/attach!` before the HTTP configuration repair door is
+therefore fail in `router/attach!` before the HTTP configuration repair endpoint is
 available.
 
 The existing prose “run old-code config apply before relying on the old
@@ -219,7 +219,7 @@ rows before the old router builds.
 
 Forward crossing remains repairable: new code over an old config-free database
 starts with the four bootstrap routes, migrated product paths initially fall
-through, and the bootstrap configuration door applies an explicitly selected
+through, and the bootstrap configuration endpoint applies an explicitly selected
 manifest to install the new rows. A second apply must be a no-op.
 
 ## Shortest source falsifiers
@@ -254,7 +254,7 @@ manifest to install the new rows. A second apply must be a no-op.
   reconciliation precedes route attachment; reach readiness and an old static
   product route with no Reitit conflict.
 - Exercise `/chat`, `/stop`, `/data`, `/agents/run`, configuration apply, and
-  one operator evidence/control door, preserving their status and response
+  one operator evidence/control endpoint, preserving their status and response
   contracts.
 - Use server-side clients to receive `datastar-patch-elements` from all three
   renamed SSE paths; reload an old page rather than expecting its stale

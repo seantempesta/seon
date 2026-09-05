@@ -126,7 +126,7 @@ U9 S0a SOURCE INTEGRATED (09:09; R45 publisher block cleared at 09:58):
 `seon.agent.ctx.driver`, calls it directly from the Datastar feed at
 the feed's exact immutable database value, resolves trusted renderers
 in the pod, and sends only authored renderer leaves through
-`prepare-invocations!` plus the guarded host door. The dying
+`prepare-invocations!` plus the bounded host evaluation. The dying
 `seon.execution.runtime/render-agent-view!` compiled-function entry is
 gone. Focused proofs are green: driver 5/30, Datastar 18/84, and UI
 projection 1/4. The required real-agent feed gate has NOT run, but a valid
@@ -146,13 +146,13 @@ awaiting the fix-quality audit verdict before re-opening.
 OWNER RULINGS (2026-07-24 ~08:40, recorded same-turn):
 - R47 pod-LLM removal RATIFIED (e21c85417 stands).
 - R48 GRADUATION = PROVEN-PURE COMPILE: native compile ONLY after
-  P4/R33 pure-call-graph admission proves door-equivalence; the
+  P4/R33 pure-call-graph admission proves equivalence to bounded SCI evaluation; the
   differential test stays as sanity; the invocation deadline stays
   the runaway backstop. Until P4 lands, `graduate!` must refuse
   loudly (no silent nursery downgrade) — no fn may reach host eval
   through the tests-pass gate.
 - R49 MALLI [:fn] PREDICATES THROUGH THE DOOR: schema-predicate
-  sci compilation/execution uses the one guarded door; delete the
+  sci compilation/execution uses the one bounded evaluation; delete the
   private unguarded contexts.
 - Owner-reserved queue RELEASED: C1 codec totality + db-call
   deadlines (WHEN: S3 returns — shares protocol.cljc), graduation
@@ -178,7 +178,7 @@ containment issues are archived; native graduation reopens only at P4/R33.
 FIX-QUALITY AUDIT ACCEPTED (research/overnight-fix-quality-audit-
 2026-07-24.md): 7 CLASS / 6 INSTANCE / 2 docs; no weakened tests.
 Weakness queue (owner package + WHEN):
-- W-serve-fault-door: ONE terminal-catch fault door in serve.cljs
+- W-serve-fault-door: ONE terminal-catch fault handler in serve.cljs
   replacing ~10 open-coded 500 catches (WHEN: web-UI lane after
   u9s0a returns; check U9 route-death first).
 - W-no-roots-arm: add `:no-roots → :no-dispatch` disposition arm in
@@ -453,7 +453,7 @@ ctx/driver + turn + datastar local · reactive/call = this ruling.
 RULING REVERSAL (~17:20, recorded honestly): orchestrator sci-in-pod
 ruling was WRONG — u9delete stop-and-quote caught it; deletion plan
 §4 is explicit: pod keeps NO eval engine; the surviving boundary is
-HOST-LANE DISPATCH (narrow pod UDS client → JVM eval door). Lane now
+HOST-LANE DISPATCH (narrow pod UDS client → JVM evaluation boundary). Lane now
 building that client fresh in the session family (CLJS leaf) from
 the server-side protocol; authored renders rewired to it; then S2
 self-host death. The earlier "no new RPC" override was too broad —
@@ -798,7 +798,7 @@ MORNING ITEMS (accumulating):
 - GRADUATION SEMANTICS (from the containment audit): graduated fns
   currently escape the door via host eval. Recommendation: graduation
   = proven-pure compilation — native compile ONLY after P4/R33
-  pure-call-graph admission proves door-equivalence; the door's exit
+  pure-call-graph admission proves equivalence to bounded SCI evaluation; the door's exit
   exam. Decide (a) stay-interpreted / (b) recommended / (c) ruled
   status quo.
 - CODEX CREDITS: Sol is the cheap implementation fleet and is dry
@@ -850,7 +850,7 @@ MORNING ITEMS (accumulating):
   builds complete. Default restart was safely refused by unrelated dirty
   `reference-code/datahike` dependency work; proof log:
   `tmp/orchestrator/homeschema-gate.log`.
-- CONVERSION FIRST WAVE COMPLETE AND ACCEPTED: guarded door (U1) ·
+- CONVERSION FIRST WAVE COMPLETE AND ACCEPTED: bounded evaluation (U1) ·
   writer pipelining + fork basis fix, pushed (U3) · render purity +
   byte identity (U4) · JVM web/SSE tier (U5) · claim-native portable
   driver both tiers, legacy loop DELETED, live cross-tier handoff +
@@ -1250,7 +1250,7 @@ MORNING ITEMS (accumulating):
   transient mid-edit state — attributed, no action). SPINE DOOR SWAP
   LANDED (cd7d3ebf8): authored prompt renders route through
   :seon.render/invoke-authored! behind the U1 guard; the option-A
-  window is CLOSED; invoke-plans! prompt arm deleted; guarded-door
+  window is CLOSED; invoke-plans! prompt arm deleted; bounded evaluation
   issue resolved; byte identity green. Pod render containment is
   door-complete.
 - EXECUTION-PLANNING DESIGN ACCEPTED (research/execution-planning-
@@ -1898,7 +1898,7 @@ MORNING ITEMS (accumulating):
   11/11 DeepSeek attempts :success with NON-EMPTY replies (reply-text
   fix proven; claimant2 lane independently replicated it — 163-byte
   reply), 9/9 EVAL receipts :done :seon.eval/ok? true (config-identity
-  fix unblocked eval — agent code runs through the guarded door on the
+  fix unblocked eval — agent code runs through the bounded evaluation on the
   JVM claimant). LAST-LAYER blocker: my.plan schema projection EMPTY
   on the claimant ('Accepted my.plan keys: .') → plan!/memory blocked;
   A timeout also orphaned an :evaling turn (nothing-wedges gap). planschema
@@ -2468,7 +2468,7 @@ MORNING ITEMS (accumulating):
 - TRADEOFF AUDITS DISPATCHED (owner, 2026-07-23 eve — 'understand
   the tradeoff better'): (1) interp-bench — sci-on-JVM vs compiled
   JVM vs (if still executable) Bun self-host on a representative
-  workload matrix, through the REAL guarded door, guard cost
+  workload matrix, through the REAL bounded evaluation, guard cost
   isolated, plus a COMPUTED glue-vs-compute-heavy classification of
   the actual corpus (program-rows.edn sample) feeding P6 placement;
   (2) runtime-cost — 10-15 agent live load on an isolated cluster:
@@ -2592,7 +2592,7 @@ MORNING ITEMS (accumulating):
   said "JVM side for sure", floated writer — orchestrator pushback
   recorded: R26 keeps the writer tx+feed only; cluster JVM creates
   CAS-idempotent fire facts keyed schedule×nominal-minute, races
-  safe; scheduled FUNCTION executes behind the guarded sci door;
+  safe; scheduled FUNCTION executes behind the bounded SCI evaluation;
   cron strings parsed as data by the core parser). Remaining 22
   design questions ruled by existing laws (frozen fire basis;
   content-addressed source blob under its OWN attribute — reply-blob

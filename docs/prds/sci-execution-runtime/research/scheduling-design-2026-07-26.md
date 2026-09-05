@@ -86,7 +86,7 @@ First-party call sites demonstrating each idiom (symbols preferred):
   (`src/my/blob.cljc:290-431`).
 - deleted code read from git for inspiration (owner-authorized, not
   wholesale): `git show 8dc8623ad^:src/seon/host/context.clj` — the old
-  capability door's `install!` wrapper registry with per-entry `::effect`
+  capability request handler's `install!` wrapper registry with per-entry `::effect`
   stamps (region around `:740-815`).
 
 Measured evidence reused with conditions, from
@@ -649,7 +649,7 @@ the D12 fix, present at HEAD.
 | `lease-wakes` atom + `*await-lease!*` sleeping vthreads | `arm-lease-wake!` | **legitimate with a condition** — the timer implements the committed lease instant (event-driven off the lease commit, per the D2 fix); the condition: a fresh process must scan on boot to re-arm, and `start!` does (`scan-body!` before returning). The firing of a wake that finds nothing stale is normal; a *missed* wake with no surviving process to re-arm is impossible only while every boot scans |
 | `seon.sci.eval/compute-pool` (hand-rolled cached pool) | `sci/eval.clj:33-38` | **legitimate as process resource, wrong as construction** — replace with `executor-for :compute` (§3.5); the docstring's claim is currently ahead of the code |
 | `permits` Semaphore | `sci/eval.clj:40-56` | **legitimate today, deleted by this design** — it is the `:compute` submission bound spelled as a semaphore; §3.6 replaces its queueing job with the class channel's buffer and its concurrency job with the launcher's slot count, one owner, no public gate. Its observable projection (what is executing) stays derivable from running receipts, fully so after row 4(d) |
-| `seon.sci.ctx/base` delay | `ctx.clj:15-35` | **legitimate** — compiler-state cache (149.454 bytes / 321.747 ns per fork against the real base, M §3.2, is what it buys). Standing condition: base vars hold only functions and immutable values — the fork-leak class is real on an unsafe base and **nothing enforces the invariant** (F §1); it must become a startup assertion when the capability door installs into the base |
+| `seon.sci.ctx/base` delay | `ctx.clj:15-35` | **legitimate** — compiler-state cache (149.454 bytes / 321.747 ns per fork against the real base, M §3.2, is what it buys). Standing condition: base vars hold only functions and immutable values — the fork-leak class is real on an unsafe base and **nothing enforces the invariant** (F §1); it must become a startup assertion when the capability request handler installs into the base |
 | `db.host/writer-session` pool/interest atoms | `host.clj:40-76` | **legitimate** — connection state; dies with the wire (§7) except for web-render |
 | `interrupt/time-limit-timer` | `interrupt.clj:36-44` | **legitimate** — process resource |
 | `*nano-time*` / `*now*` dynamic vars | `driver.clj:185-191` | **legitimate** — test seams |
@@ -734,7 +734,7 @@ whether the schedule ticker has a surviving JVM owner planned.
    rollup a constant. The workload axiom key (§3.2) and the effects-map
    producer must land together; core purity must be computed (the filed
    issue's acceptance), not hand-listed.
-3. **The capability door itself** (roadmap row 1). The dispatch site of
+3. **The capability request handler itself** (roadmap row 1). The dispatch site of
    §3.5 rule 2 must exist before the fact has a reader. The door is
    already the earliest unsettled contract for unrelated reasons; this
    design adds its workload-consultation duty to row 1's spec, it does

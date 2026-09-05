@@ -79,7 +79,7 @@ The route has no `:seon.route/same-origin` middleware. That middleware is the
 existing cross-site request forgery defense for state-changing POST requests;
 this route is GET and performs no write. The server's default loopback bind and
 browser same-origin policy remain the read boundary. The route also has no
-loopback-operator middleware: that gate identifies lifecycle/operator doors
+loopback-operator middleware: that gate identifies lifecycle/operator endpoints
 and would incorrectly reject ordinary proxied or embedded product UI reads.
 
 The route does not widen `/agent/{id}/call`, register its sampler as

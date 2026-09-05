@@ -589,7 +589,7 @@ nothing (§4). This makes every question the ownership check was reaching for a
 query: which agent defined this, which functions did a curated re-execution
 author, did the curator write outside its own surface.
 
-**Unchanged:** ruling #20 (calling is never gated), the guarded door, exact
+**Unchanged:** ruling #20 (calling is never gated), the bounded evaluation, exact
 upsert semantics, everything about who may call what.
 
 ### What stays unchanged overall
@@ -598,7 +598,7 @@ upsert semantics, everything about who may call what.
 - Agent id stays an independent `:seon.db/identity` string.
 - One SCI ctx per cluster; every agent sees every definition immediately
   (rulings #20 and #27).
-- The guarded door still bounds effects, never callability.
+- The bounded evaluation still bounds effects, never callability.
 - `form-owner`'s routing of red receipts to the namespace's owner, with the
   run's author as the total fallback.
 - No new refusal, no allowlist, no per-agent grant.

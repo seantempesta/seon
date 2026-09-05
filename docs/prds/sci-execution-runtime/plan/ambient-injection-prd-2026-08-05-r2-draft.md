@@ -4,7 +4,7 @@ status: complete
 tags: [prd, runtime, platform, sci, database, program-graph]
 ---
 
-# Ambient injection r2 — RULED (owner, 2026-08-05)
+# Call preparation r2 — RULED (owner, 2026-08-05)
 
 > Design complete under the 2026-08-05 ruling batch in [the active plan](README.md); implementation is owned by [the P17 slice plan](p17-ambient-slices-2026-08-05.md).
 
@@ -33,7 +33,7 @@ Preparation for this revision included complete reads of:
 - the complete P12 and P17 sections of
   [the 2026-08-05 state of the program](state-of-the-program-2026-08-05.md);
   and
-- the complete **Indexing keeps the whole parse** and **Ambient injection**
+- the complete **Indexing keeps the whole parse** and **Call preparation**
   rulings in [the active plan](README.md)'s 2026-08-04 ruling batch.
 
 The current implementation owners named below were read directly, including
@@ -45,12 +45,12 @@ inferred from APIs.
 
 The ruled direction survives, but the first PRD's claimed input is false.
 
-**A function's own `:malli/schema` is its complete ambient request.** There is
+**A function's own `:malli/schema` is its complete request for supplied defaults.** There is
 no function-side injection metadata. At a call originating in an agent's SCI
-evaluation, the runtime supplies only ambient values that the selected arity
+evaluation, the runtime supplies only supplied defaults that the selected arity
 declares and the caller omitted. A caller-supplied value, including supplied
 nil, is never replaced. A function that declares no matching input is called
-unchanged. An unavailable ambient is a flat `:seon.error` value and is never
+unchanged. An unavailable default is a flat `:seon.error` value and is never
 injected as nil.
 
 The missing prerequisite is a typed call address. Today
@@ -64,11 +64,11 @@ The r2 design has four owners, in dependency order:
 
 1. P12 publishes exact per-arity argument, binding, map-entry, and return
    facts.
-2. Declared ambient-provider rows join those facts to named provider
+2. Declared default-provider rows join those facts to named provider
    functions.
 3. One SCI call-preparation seam compiles and applies invocation plans under
    the existing calling cluster's `seon.db/*conn*` binding.
-4. The bespoke ambient elision inside `seon.db` is deleted after every agent
+4. The bespoke argument elision inside `seon.db` is deleted after every agent
    call uses the general seam.
 
 ## Ruled invariants this draft does not reopen
@@ -284,7 +284,7 @@ P17 dependency at the current revision: the broad
 left live `resources/`, `src/`, and `test/`. Remaining role-specific connection
 keys require their own semantics and are not a reason to reopen that wave here.
 
-## Declared ambient-provider rows
+## Declared default-provider rows
 
 ### Row contract
 
@@ -305,7 +305,7 @@ never captures a function root.
 
 The declarations live as initialization rows, following the existing
 descriptor-row pattern in `config/default.edn`; the schema lives under
-`resources/seon/schemas/`. There is no Clojure map of ambient keys, no case
+`resources/seon/schemas/`. There is no Clojure map of supplied default keys, no case
 expression, and no naming convention. Adding a third battery adds one row and
 one ordinary contracted provider function.
 
@@ -324,7 +324,7 @@ target function's Malli violation.
 
 ### Initial registry
 
-| Ambient key | Declared value schema | Named provider behavior |
+| Supplied-default key | Declared value schema | Named provider behavior |
 |---|---|---|
 | `:seon.db/db` | `:seon.db/database-value` | Read the already-bound `seon.db/*conn*` once and return its current immutable database value; unavailable without a live calling-agent binding. |
 | `:seon.db/connection` | `:seon.db/connection` | Return the already-bound live connection itself; unavailable without a live calling-agent binding. |
@@ -408,16 +408,16 @@ For each fixed arity, plan compilation derives the accepted supplied-argument
 patterns:
 
 - an exact full-arity call always invokes unchanged;
-- for a shorter call, consider subsets of declared ambient positional slots
+- for a shorter call, consider subsets of declared supplied default argument positions
   whose removal makes the supplied count fit;
 - map supplied values left-to-right onto the remaining indexes, then insert
-  provider values at the recorded ambient indexes; and
+  provider values at the recorded supplied default argument indexes; and
 - accept the expansion only when exactly one arity and one omitted-slot subset
   fit. Otherwise return the ambiguity error without calling the target.
 
 This is the only rule that permits a leading or middle ambient to be elided.
 It also makes the reinterpretation explicit: a shorter call's arguments name
-the non-ambient positions only when the plan is unique. A variadic ambient tail
+the explicit-argument positions only when the plan is unique. A variadic ambient tail
 is indexed but never auto-filled until a declared provider fact can answer how
 many repetitions to supply.
 
@@ -454,7 +454,7 @@ logic at two entrances.
 
 The installed hook receives the context, a provable program-function identity,
 the resolved callable, and evaluated arguments. It returns either prepared
-arguments or the flat ambient error. The normal call then proceeds, so Malli
+arguments or the flat default-supply error. The normal call then proceeds, so Malli
 validates the completed arguments and the ordinary function body remains
 unchanged. `kernel/invoke` continues to own arming, admission, and failure
 classification; the shared SCI primitive owns only call preparation and
@@ -481,7 +481,7 @@ Both `evaluate` and `kernel/invoke` already establish the correct dynamic
 provider therefore compose with one custody path. Turn-free scheduled operator
 handlers remain explicit system-side JVM calls under their sealed `:io` proc
 contract. No new flow proc, channel, effect request, dynamic Var, or cluster
-lookup is introduced by ambient injection.
+lookup is introduced by call preparation.
 
 ## Failure faces
 
@@ -502,7 +502,7 @@ Recommended value shape:
 ```
 
 For map placement, data also carries the typed map path. The headline names
-the target and missing ambient in user vocabulary; it does not expose a
+the target and missing default in user vocabulary; it does not expose a
 dynamic Var. The zero-argument provider returns a local flat unavailable cause
 instead of nil. Call preparation preserves that cause in error data, adds the
 target/key/schema/provider/address facts from the plan, constructs the honest
@@ -641,7 +641,7 @@ published or acquired.
 
 ## Deletion and migration boundary
 
-Once the general seam proves both database ambients:
+Once the general seam proves both database defaults:
 
 1. remove `current-database-value` and `current-connection` from
    `src/seon/db.clj`;
@@ -659,7 +659,7 @@ Once the general seam proves both database ambients:
    supply values; and `seon.db`'s retained transaction boundary may read the
    same binding only to reject foreign write custody and select the existing
    agent-facing transaction-report projection. No other function resolves a
-   missing ambient from it.
+   missing default from it.
 
 The required current-reader sweep is explicit, not deferred to a vague final
 `rg`:
@@ -684,7 +684,7 @@ The required current-reader sweep is explicit, not deferred to a vague final
   `src/seon/web/jvm.clj:301-303,384-389`.
 
 System-side compiled Clojure callers outside SCI are not silently granted
-ambient injection. They pass database values/connections explicitly. If a
+call preparation. They pass database values/connections explicitly. If a
 current system caller relies on `seon.db`'s bespoke elision, the P17 consumer
 sweep converts it before deletion.
 
@@ -712,7 +712,7 @@ share it.
 only explicit named entrances. It gives up ordinary nested function calls and
 therefore does not satisfy the ruled direction. Not recommended.
 
-The effect door is not an option: it would misclassify ordinary call
+The effect request handler is not an option: it would misclassify ordinary call
 preparation as a capability effect.
 
 Provider matching by P12's normalized shape fingerprint is not an open choice.
@@ -804,7 +804,7 @@ P17 graduates only when all of these are simultaneously true:
 - unavailable custody is an honest flat error and the target body is not
   entered;
 - empty-plan overhead is measured and accepted;
-- bespoke `seon.db` ambient elision and lossy `input-refs` consumers are gone;
+- bespoke `seon.db` argument elision and lossy `input-refs` consumers are gone;
   and
 - complete publication, fresh acquisition, stop/reopen, and two-cluster live
   proof all agree with the recurring suite.

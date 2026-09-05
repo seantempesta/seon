@@ -9,4 +9,4 @@ tags: [archive, component, database]
 This page described the deleted pod replica, socket protocol, and separate JVM
 writer. It is historical and is not an operational database surface. Current
 database ownership lives in [[../architecture/data-model]] and the root
-`AGENTS.md` runtime tower.
+`AGENTS.md` boot sequence.

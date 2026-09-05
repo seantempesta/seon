@@ -259,7 +259,7 @@ not to persisted cache entities.
 
 ## Datastar-grounded mechanism
 
-### One feed, one one-shot door
+### One feed, one one-shot execution endpoint
 
 Keep `seon.web.datastar/open-feed!` as the only long-lived browser channel.
 Debug and data should become view plans handled by it; delete

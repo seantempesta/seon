@@ -96,7 +96,7 @@ forms-only — the honest core, cache later, derived not tuned). The
   do everything within reason."
 - **Java interop policy.** A computed rule over sci's `:classes`, never
   a hand list — mechanism not yet designed.
-- **The effect door.** `seon.effect` does not exist; capability
+- **The effect request handler.** `seon.effect` does not exist; capability
   crossings (fs, web, llm) are unbuilt, which is why replay-safety is
   trivially true today and will not stay that way.
 - **Store economics at generation scale.** ~1.5 MB per transaction

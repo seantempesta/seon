@@ -451,7 +451,7 @@ re-decide under the locked signature).
 ```
 
 6. **Seon writes the new step → the feed morphs → the human sees the fix.** Eval in
-   the SCI cage (free, the #2 oracle) → clean: `(mean [1 2 3 4]) ;=> 5/2`. Loop
+   the SCI context (free, the #2 oracle) → clean: `(mean [1 2 3 4]) ;=> 5/2`. Loop
    terminates (no pending feedback, `done`).
 7. **The decisive contrast:** the accepted signature is **byte-identical** across
    the round-trip (proves accept = a real lock the model could not override), and

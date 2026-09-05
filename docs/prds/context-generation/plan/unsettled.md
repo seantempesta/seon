@@ -121,12 +121,12 @@ run), `reap-nil-path`.
 now carries §G (the walk as forms), B4 with the MEASURED fit ladder
 (strings halve to zero first — the dumb clipping), B5 with real diff
 bytes and the `since` lookup-ref trap, G6 render provenance (cost fact
-lacks the producer symbol). Rulings 56–57 sealed. Open ❓ listed at its
+lacks the render function symbol). Rulings 56–57 sealed. Open ❓ listed at its
 foot; the owner rules them, then implementation talk begins.
 
 **Tool defects this round:** `get_value` elides large strings with no
 paging ([issue](../../../seon/issues/mcp-get-value-elides-large-strings-with-no-way-to-page-them.md));
-MCP door prints zero-character strings above the blob threshold (same
+MCP result projection prints zero-character strings above the blob threshold (same
 issue). `runtime_status` fix landed but the live `ctxprobe` JVM serves
 pre-fix code until restart.
 
@@ -383,7 +383,7 @@ running: `prospective-prompt` (the fresh debug page's unavailable prompt;
 its test passes on a fixture that supplies what production omits),
 `init-speed` (publication 60.6 s measured — profile the phases, remove
 the dumb work), `print-floor-strings` (zero-character string windows +
-`get_value` paging + unconditional fit at the MCP door), `status-face`
+`get_value` paging + unconditional fit at the MCP result projection), `status-face`
 (bound the 100 KB UNKNOWN wall + PROVE stale-green live end to end),
 `run-loop-velocity` (2.4 s between every form). Queued behind
 loop.clj: reply durability (prose-only replies as facts; no-forms
@@ -490,7 +490,7 @@ reached but the form is REPARSED; next lane `analyze-form-speed` (fn.clj)
 once `datahike-bulk-commit` releases fn.clj. Also open from that drive: the
 scripted terminal `my.run/complete` form hits an admission refusal.
 `print-floor-strings-2`: `d5b212f88` (breadth → depth → strings, one-line
-floor; the MCP door fits every result under a `:seon.render.profile/mcp`)
+floor; the MCP result projection fits every result under a `:seon.render.profile/mcp`)
 and `ba3518afb` (`get_value` pages strings by character offset; never an
 empty window) — issue archived. Owner asked for a clean tree: two lanes'
 in-flight work committed path-limited (`b3ba7d998`, `25adaeaf8`), tool
@@ -612,7 +612,7 @@ result projections + the rename pass scope (48), keys-law as amended
 graph closure + settled-form usages + derived self-improvement (51),
 VIEW-1-ONLY stable regeneration + coverage-set help + backward
 demand-driven generation (52/52a/52b), faces return forms (53), the
-write door + missile rule + steward drive scenario (54), instance
+database transaction function + missile rule + steward drive scenario (54), instance
 args (55). The consolidation of 47–55 + the
 [render-data plan](render-data-plan-2026-08-28.md) into one
 implementable generator spec is OFFERED, awaiting the owner's go.
@@ -698,3 +698,19 @@ first — it is the entry document for the next session (the goal, the
 owner's "it's all queries" idea to explore WITHOUT rushing, the trials,
 and the platform gate). Then THIS file end to end, then the ledger's
 newest rulings, then `bin/seon status` + `git log --oneline -15`.
+
+## Design lab implementation resumed — 2026-09-05
+
+The owner authorized implementation and smaller models for simple delegated
+work. The current checklist and visual sequence live in the
+[design lab PRD](design-lab-prd-2026-09-05.md#visual-overview); ownership and
+REPL evidence live in its linked investigation. Terminology review is complete.
+The same-arity renderer selection fix is in progress in `seon.schema` and
+`seon.render`, with schema and candidate-selection regressions. Candidate SCI
+metadata isolation must integrate with the concurrent turn-batching edits in
+`seon.sci.eval`; preserve that work. No milestone is complete merely because
+the helper exists: focused tests and a named live proof remain required.
+
+At this checkpoint MCP `runtime_status` answered for `default` (PID 94171,
+start 2026-09-05T19:02:38Z), reporting eight stale Vars and four errored
+receipts. This is connectivity evidence, not a clean runtime baseline.

@@ -401,7 +401,7 @@ inspected. Most of this exists; it is scattered, and one part is missing.
 | the agent's defs | yes | `:seon.def` rows | by agent/ns/name |
 | the per-turn NEIGHBOURHOOD entries (what the walk renders each turn: messages, runs, errors, namespace dirs) | **NO** — rendered bytes only | `seon.render.walk/history` builds `:seon.render.history/bytes` in the render proc; retained in `seon.render.web`'s proc state; NO schema row exists for `:seon.render.history/*` or `:seon.render.call/*` — a process memo, lost on restart, invisible to queries | — |
 | the prompt actually sent | yes, as BYTES | `:seon.context.capture` (one per run) + `:seon.context.contribution` rows carrying `hash`, `position`, `tokens`, `:seon.render.block/name :walk` — fingerprints of segments, not forms or values | by run |
-| what each render cost | partly | `:seon.render.cost` facts (shape key, profile, tokens, at) — no producer symbol | by run |
+| what each render cost | partly | `:seon.render.cost` facts (shape key, profile, tokens, at) — no render function symbol | by run |
 
 So: the OPENING already does what the design asks — the system types
 forms on the agent's behalf, they run through the loop, and comments,
@@ -546,7 +546,7 @@ def-restore seam; change the render selection into the contract query,
 contract, the print ladder; delete the transcript projection, the prompt
 distance shrink, private presentation ladders, bootstrap's candidate
 lists and supervision strings, narration faces, `membership-diff`,
-`editscript`, stored `read-result`, the ambient walk context — each only
+`editscript`, stored `read-result`, the dynamically bound walk context — each only
 when its replacement is live and proven.
 
 ## 8. The first thing to build, when the owner says go

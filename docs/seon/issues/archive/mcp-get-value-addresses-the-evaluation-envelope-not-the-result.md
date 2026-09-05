@@ -9,13 +9,13 @@ tags: [issue, mcp, repl, render]
 
 ## Problem
 
-Door `eval_clj` stores the whole `seon.sci.eval/evaluate` result map as the
+SCI evaluator `eval_clj` stores the whole `seon.sci.eval/evaluate` result map as the
 MCP artifact. `get_value` therefore defaults to drilling that evaluation
 envelope, not the value whose printed face and digest the caller just saw.
 The useful path is the undocumented `[:seon.sci.admit/value]`.
 
 This makes the natural root drill actively expensive and confusing. On
-2026-08-03, door `(vec (range 50000))` returned digest
+2026-08-03, SCI evaluator `(vec (range 50000))` returned digest
 `adb10ba93c250287c21b6b2ff0f7196bd97efb1f0ac35cc2947bc0fdf1a85973`.
 `get_value` with its default `path []` returned the entire evaluation-shaped
 map, clipped a nested `result-edn` string, and minted a second 689,315-byte
@@ -53,7 +53,7 @@ evaluation record beside the text face. Non-evaluation values keep the same
 artifact semantics.
 
 The focused and drill-owner gate passed 16 tests and 60 assertions across
-`seon.cluster.mcp-test` and `seon.render.value-test`. Live door evaluation of
+`seon.cluster.mcp-test` and `seon.render.value-test`. Live SCI evaluation of
 `(vec (range 50000))`, after `(require 'seon.cluster :reload)`, returned a
 digest whose root window began `[0 1 2 3 4 5 6 7]`; offset 7 began
 `[7 8 9 10 11 12 13 14]`; projecting either drill minted no second digest.

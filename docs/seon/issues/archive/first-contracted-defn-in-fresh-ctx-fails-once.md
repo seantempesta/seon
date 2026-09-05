@@ -14,7 +14,7 @@ candidate projection, while the identical rerun succeeded.
 
 ## Evidence
 
-Curriculum research probe, 2026-08-03 (isolated root, door mode —
+Curriculum research probe, 2026-08-03 (isolated root, SCI evaluation mode —
 [bootstrap-curriculum-2026-08-03.md](../../prds/sci-execution-runtime/research/bootstrap-curriculum-2026-08-03.md)
 §Gaps): the first `defn` carrying a `:malli/schema` evaluated in a fresh
 cluster context fails with a 276,363-character error; the IDENTICAL form
@@ -75,7 +75,7 @@ Reset-boundary live proof, 2026-08-03: a new isolated operator root
 `tmp/first-defn-fix-root-final` published current source commit
 `6a7104d4-40b2-556a-8043-17d9263818b3`, forked and started cluster `probe`,
 then evaluated the curriculum's contracted `largest` as the first durable
-definition through door mode. The first evaluation returned
+definition through SCI evaluation mode. The first evaluation returned
 `"my.agents.root/largest"` with outcome `ok` in 154 ms. Its immediate
 contracted call returned the largest row in 1 ms while accepting an undeclared
 extra key, and a database query returned

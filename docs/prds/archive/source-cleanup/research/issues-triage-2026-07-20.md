@@ -116,7 +116,7 @@ the persist-time-or-pure-render constraint):
   never a stored acknowledgement flag.
 - `persisted-program-error-prevents-agent-repair` — the strongest steering
   gap in the folder: after restart, a persisted program-preparation error
-  closes the very eval door the agent needs to repair its program. This is
+  closes the very evaluation path the agent needs to repair its program. This is
   runtime-corrects-the-agent at the program boundary, but it is
   execution/eval-owned and bigger than a persist-time rewrite — recommend a
   named bounded-repair-door unit in the execution owner's roadmap

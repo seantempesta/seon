@@ -17,7 +17,7 @@ coherent structural value nor a standalone table.
 ## Evidence
 
 On 2026-08-03, the curriculum's nested pull for `my.fs/read` was evaluated
-through the live `default` cluster's door. Its top-level value is a vector
+through the live `default` cluster's SCI evaluator. Its top-level value is a vector
 containing an arity map. The input refs remained structural EDN, but the two
 output-ref maps became a Markdown table between `:output-refs` and the closing
 map delimiter. `table-data` in `src/seon/print.cljc:251-278` selects table form
@@ -33,7 +33,7 @@ recursively at `src/seon/print.cljc:492-498`.
 A sequence of maps nested inside another structural value renders as coherent
 bounded structural text. Standalone tabular query results retain their useful
 table face. A recurring regression covers both cases through the ordinary
-print floor and the live door projection.
+print floor and the live SCI result projection.
 
 ## Resolution
 

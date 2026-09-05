@@ -231,7 +231,7 @@ derive). AND nothing in this system is allowed to run indefinitely: every
 execution surface carries its declared bound, enforced at the seam that
 admits the work — sci evals run under the one `time-limit`/`:interrupt-fn`
 ([interrupt](reference-code/sci/doc/interrupt.md)); capability calls cross
-the effect door with deadline and output caps as config facts; test events
+the effect request handler with deadline and output caps as config facts; test events
 wait under the declared `seon.test-support/event-backstop-seconds`; the
 suite has a liveness watchdog that dumps every worker JVM. A bound firing
 is itself a bug report naming what never arrived — never a silent retry.
@@ -377,7 +377,7 @@ writing.
 | functions, schemas, tests | ordinary Clojure constructs | verbs |
 | database, `db` | the `seon.db` authority | store, inventory, memory |
 | boot / environment / running | boot is the 0→1 construction in dependency order (REPL first); the environment is the one per-cluster value it produces (`seon.env` ↔ `resources/seon/schemas/seon.env.edn`), scoped per agent; running code receives it | the runtime, the platform, the tower, ambient |
-| call preparation, supplied defaults | sci's hook seam supplying a function's declared-and-absent arguments from the environment; caller wins; unavailable is a flat error (`reference-code/sci/src/sci/core.cljc` init docstring) | ambient injection, batteries |
+| call preparation, supplied defaults | sci's hook seam supplying a function's declared-and-absent arguments from the environment; caller wins; unavailable is a flat error (`reference-code/sci/src/sci/core.cljc` init docstring) | call preparation, batteries |
 | **[TARGET] canvas** | the focal agent surface; design lives in `docs/seon/architecture/ui.md`; no declared attribute exists yet — update this row when it lands | tile, live-tile, world |
 | surface; card (CSS only) | a context render; a visual component | tile |
 | web UI | `/`, `/agent/{id}`, debug, and `/data` | inspector |
@@ -429,7 +429,7 @@ writing.
 | the agent's defs, `:seon.def/*` | the agent's temporary defs + atoms, committed as agent-scoped facts at turn settlement | the desk, session image |
 | the agent's history; a form + value entry | the ordered derivation of an agent's REPL session from message/run-form/result facts ([PRD](docs/prds/sci-execution-runtime/plan/repl-transcript-context-prd-2026-08-10.md)) | session units, transcript entries |
 | `doc`, `dir` (bare, injected); printed value | the injected REPL documentation functions over public program rows. **[TARGET]** the bulk `docs` plural is ruled, not yet installed | faces tool, print face |
-| candidates (per-render selection) | the contract-fitting render producer selection consulted per render call (`src/seon/render.clj`) | roster, acquired index |
+| candidates (per-render selection) | the contract-fitting render function selection consulted per render call (`src/seon/render.clj`) | roster, acquired index |
 
 ## 4. REPL-driven development
 

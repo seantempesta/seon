@@ -658,7 +658,7 @@ Change `src/seon/sci/eval.clj:932` from `(ns-interns host-namespace)` to
   so its visibility does not depend on a metadata flag. Invariant 8 below is what
   pins this.
 
-### RECOMMENDED ALONGSIDE — Option 2A: custody validation at the one write door
+### RECOMMENDED ALONGSIDE — Option 2A: custody validation at the one transaction function
 
 Every write in `seon.db` (which per ruling #41 is *every* write, since `transact!`
 moves there and the 16 bypassing `d/transact` sites migrate — `README.md:1846-1852`)
@@ -1083,17 +1083,17 @@ definitions, and session state, so a cluster supervisor agent that reads all of 
 needs no new mechanism. **Nothing in §5 touches that.** `ns-publics` filters
 *first-party compiled* namespaces by the program graph's own `:seon.fn/private?`
 fact; it does not touch agent-authored namespaces, which install through
-`install-program-row!`, a different path. The write-door custody check compares a
+`install-program-row!`, a different path. The transaction custody check compares a
 target connection against the caller's cluster and is a no-op for same-cluster work.
 
 **Deliberate cross-cluster supervision is not foreclosed — it is made
 implementable.** Today cross-cluster reach is ambient: everyone has it, nobody is
 accountable for using it, and no fact records that it happened. After the
-recommendations it becomes a named capability with exactly the shape the effect-door
+recommendations it becomes a named capability with exactly the shape the effect-request
 model wants: one first-party function that takes a cluster name explicitly, is the
 one thing able to resolve the roster (because the roster moved to an operator-owned
 namespace), and commits a durable fact for each crossing. The custody check at the
-write door compares against the caller's cluster, so a supervisor path that
+transaction function compares against the caller's cluster, so a supervisor path that
 *declares* its target passes by construction rather than by exemption. The root
 relocation is what makes supervision attributable instead of ambient — a prerequisite
 for the feature, not an obstacle to it.

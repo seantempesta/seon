@@ -87,8 +87,8 @@ body is entirely the named boundary is proof cost, not an inferred wait.
 | `boot-test/selected-config-repairs-locked-state-before-consumers-arm` | 53.139 s | Real boot + locked-state repair + restart + pre-arm facts | **IRREDUCIBLE-FOR-NOW.** Boot ordering proof; long. |
 | `boot-test/same-jvm-same-name-restart-releases-the-registered-prepl` | 49.939 s | Real start/stop/start under one registered prepl name | **IRREDUCIBLE-FOR-NOW.** Generation/release interaction; long. |
 | `cluster.armed-test/an-escaped-throwable-becomes-a-fact-and-a-message` | 48.642 s | Real armed boot + injected core fault + fault fact/message delivery | **IRREDUCIBLE-FOR-NOW.** Live fault route; namespace long. |
-| `boot-test/repl-is-live-after-the-boot-tower` | 47.230 s | Published clone + real boot tower + live prepl call + stop | **IRREDUCIBLE-FOR-NOW.** External prepl boundary; long. |
-| `boot-test/the-tower-stands-in-one-start` | 46.987 s | Complete real boot tower + sibling acquisition + independent config reads | **IRREDUCIBLE-FOR-NOW.** Composed boot proof; long. |
+| `boot-test/repl-is-live-after-the-boot-tower` | 47.230 s | Published clone + real boot sequence + live prepl call + stop | **IRREDUCIBLE-FOR-NOW.** External prepl boundary; long. |
+| `boot-test/the-tower-stands-in-one-start` | 46.987 s | Complete real boot sequence + sibling acquisition + independent config reads | **IRREDUCIBLE-FOR-NOW.** Composed boot proof; long. |
 
 ## Bounded fixes
 
@@ -217,7 +217,7 @@ share the displayed reason.
   — 158.206 s pool: published real store plus child-JVM operator refork and
   collision/read-back proof.
 - `seon.cluster.boot-test/repl-is-live-after-the-boot-tower` — 47.230 s pool:
-  published-base clone, real cluster boot tower, live prepl call, and stop.
+  published-base clone, real cluster boot sequence, live prepl call, and stop.
 - `seon.cluster.boot-test/same-jvm-same-name-restart-releases-the-registered-prepl`
   — 49.939 s pool: real start/stop/start generation proves registered prepl
   release.
@@ -225,7 +225,7 @@ share the displayed reason.
   — 53.139 s pool: real boot, locked-state config repair, restart, and pre-arm
   fact proof.
 - `seon.cluster.boot-test/the-tower-stands-in-one-start` — 46.987 s pool:
-  complete real boot tower plus sibling-cluster acquisition and independent
+  complete real boot sequence plus sibling-cluster acquisition and independent
   config proof.
 - Nine pre-existing boot proofs remain long for their declared real boundary:
   `a-delayed-stop-never-kills-a-replacement`,

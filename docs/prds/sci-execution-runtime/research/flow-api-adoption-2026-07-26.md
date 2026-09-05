@@ -44,7 +44,7 @@ integration contract.
 | flow-monitor | vendored at `421d56c3e904` | Its own dependency is the older `1.9.808-alpha1` (`reference-code/core.async.flow-monitor/deps.edn:1-4`), but its calls still match alpha3. |
 | Datahike | `caf526850084` | Its `:self` writer already has a transaction-processing channel and a batched commit channel per connection (`reference-code/datahike/src/datahike/writer.cljc:85-91,94-200,202-269,286-306`). |
 | SCI | `8fac6e88f32d` | `:interrupt-fn` runs at every interpreted function and loop body entrance (`reference-code/sci/doc/interrupt.md:6-8,50-52`); `interrupt!` is uncatchable by evaluated code (`reference-code/sci/src/sci/interrupt.cljc:32-42`). |
-| Seon runtime target | seven base constructs | Database value, transaction, plan fold, guarded eval, capability door, corpus, and derived view are the complete set (`docs/prds/sci-execution-runtime/plan/README.md:123-163`). |
+| Seon runtime target | seven base constructs | Database value, transaction, plan fold, guarded eval, capability request handler, corpus, and derived view are the complete set (`docs/prds/sci-execution-runtime/plan/README.md:123-163`). |
 
 The exact alpha2 Flow source can be inspected without moving the submodule:
 

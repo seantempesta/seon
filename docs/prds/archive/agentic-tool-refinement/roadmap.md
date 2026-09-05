@@ -253,7 +253,7 @@ That evidence contract is implemented through the existing global database
 observer rather than a benchmark hook. Awaited evals retain ordered normalized
 read and transaction observations; nonempty vectors are serialized as stable,
 round-trippable EDN through `my.blob` and attached to the eval in its accepted
-transaction. The composition door derives request eval membership and order
+transaction. The HTTP composition endpoint derives request eval membership and order
 from the final immutable database value, validates the blob and operation
 coordinates, and exposes only bounded tagged JSON or a bounded failure status.
 The generated database scorer now requires the exact successful transaction
@@ -535,7 +535,7 @@ readiness from this paragraph.
   reloads; structured status retained the non-secret artifact/environment
   digests and PID start identity needed to explain the transition. The focused
   operator gate passes 25 tests and 95 assertions.
-- The Inspect composition door no longer substitutes a hardcoded five-minute
+- The Inspect HTTP composition endpoint no longer substitutes a hardcoded five-minute
   timeout for the database-owned run deadline. An absent `timeout_ms` follows
   the same global/agent precedence as `open-run!`; an explicit Inspect value
   remains part of the experiment. The common Python solver and its milestone
@@ -619,7 +619,7 @@ readiness from this paragraph.
   effective adapter and outer timeouts, outcomes, and present provider response
   identity; zero temperature and false thinking remain present values. The
   database-configured caps now come from that immutable request resolution.
-  The final composition door reads its display bound once from the frozen final
+  The final HTTP composition endpoint reads its display bound once from the frozen final
   database, re-derives adapter identity from each attempt's historical
   resolution, and re-derives stream mode from the linked turn's frozen rendered
   coordinate. Exact transaction-origin validation rejects random, sibling, and

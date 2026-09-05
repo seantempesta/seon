@@ -250,7 +250,7 @@ derive). AND nothing in this system is allowed to run indefinitely: every
 execution surface carries its declared bound, enforced at the seam that
 admits the work — sci evals run under the one `time-limit`/`:interrupt-fn`
 ([interrupt](reference-code/sci/doc/interrupt.md)); capability calls cross
-the effect door with deadline and output caps as config facts; test events
+the effect execution boundary with deadline and output caps as config facts; test events
 wait under the declared `seon.test-support/event-backstop-seconds`; the
 suite has a liveness watchdog that dumps every worker JVM. A bound firing
 is itself a bug report naming what never arrived — never a silent retry.
@@ -375,6 +375,16 @@ branch, branch head, transaction report.
 
 ### Vocabulary — grounded names, never invented ones
 
+Use the actual operation or value when speaking and writing: SCI context,
+SCI evaluation, JVM REPL, agent turn, effect execution, Datahike branch,
+database value, and boot sequence. Do not use a metaphor as their common name.
+In particular, the legacy MCP mode string `door` is an API spelling, not a
+concept: explain it as **SCI evaluation mode**. Preserve literal tool arguments,
+identifiers and historical quotations where accuracy requires them, but do not
+carry those spellings into new prose. Rendering functions are functions;
+dependency-specific producers/consumers remain producers/consumers when that is
+what the dependency actually calls them.
+
 Inventing new vocabulary causes serious system problems: invented nouns
 drift from the dependency, hide existing mechanisms, and poison every later
 reader. The law, in order of preference:
@@ -478,9 +488,10 @@ The loop:
    the cluster when several are live — ambiguity must fail). Its `jvm`
    mode is the host prepl with NO cluster custody bound — `seon.db`'s
    elided db/conn arities refuse there; `(seon.operator/connection
-   "default")` supplies explicit custody. `door` mode evaluates through
+   "default")` supplies explicit custody. SCI evaluation mode (the tool's
+   current literal argument is `mode: "door"`) evaluates through
    the cluster's SCI ctx where elision holds (and mutates that shared ctx,
-   so keep door probes disposable). **If these
+   so keep SCI evaluation probes disposable). **If these
    tools are down, degraded, or missing, SAY SO IMMEDIATELY** — report it
    to the orchestrator/owner and file the issue before working around it. A
    silent workaround (hand-rolled prepl senders, blind file edits) is how
@@ -658,6 +669,11 @@ writes) — a restriction is admissible only after evidence of a real
 problem.
 
 ## 7. Collaborating
+
+Use smaller models for straightforward documentation edits, mechanical checks
+and other bounded simple tasks. Reserve stronger models for architectural
+reasoning, ambiguous implementation and integration review. Give each agent
+only the context needed for its assignment and verify its output.
 
 **The orchestrator designs, grounds specs, reviews diffs, and runs serial
 integration gates; implementation goes to capable code agents.** One

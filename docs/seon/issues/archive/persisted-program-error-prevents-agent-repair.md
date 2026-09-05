@@ -11,7 +11,7 @@ severity: friction
 
 **FOLD-INTO-UNIT — U9 deletion.** The remaining source/form diagnostic is tied
 to outgoing self-host program preparation; U9 must preserve its falsifier at
-the SCI loader door.
+the SCI loader.
 
 ## Evidence
 
@@ -33,7 +33,7 @@ value at:
 
 The immediate application error is an ordinary Clojure dependency bug. The
 runtime defect is that a persisted program error removes the agent's normal
-repair door after restart.
+repair evaluation path after restart.
 
 ## Expected owner
 
@@ -81,7 +81,7 @@ for the first acceptance item: the initial program-load failure must expose its
 source namespace and form directly instead of requiring an IPC value-path
 diagnostic.
 
-Triage 2026-07-23 — **DISSOLVES into post-P4 `eval.cljs` self-host deletion**; repairability must survive through the landed loader door and SCI path.
+Triage 2026-07-23 — **DISSOLVES into post-P4 `eval.cljs` self-host deletion**; repairability must survive through the landed loader and SCI path.
 
 ## 2026-07-26 post-indexer residual
 

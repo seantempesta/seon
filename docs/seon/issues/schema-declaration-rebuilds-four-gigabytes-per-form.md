@@ -58,5 +58,5 @@ using it once inside the declaration boundary.
 - Adding one schema validates only the new declaration and the dependency
   closure it changes; unrelated registry forms are not rebuilt.
 - Doubling unrelated registry forms does not double one declaration's work.
-- The two exact door probes retain the same admitted keyword result and schema
+- The two exact SCI evaluation probes retain the same admitted keyword result and schema
   refusal semantics without gigabyte-scale allocation.

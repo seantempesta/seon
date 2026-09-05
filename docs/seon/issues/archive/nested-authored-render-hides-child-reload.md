@@ -84,7 +84,7 @@ and canvas/AI twins still use `seon.execution.host/invoke-plans!`. This keeps
 the existing child reload/containment behavior above intact while avoiding a
 second prompt driver. The code comment in `seon.agent.turn/render-prompt`
 names U7 as the closing unit: U7 must route these authored render symbols
-through the U1 guarded door and remove this temporary child dependency.
+through the U1 bounded evaluator and remove this temporary child dependency.
 
 ## U7 render-boundary progress — 2026-07-23
 
@@ -92,13 +92,13 @@ Commit `8bd19774e` removes `seon.eval/lookup-value` from the portable render
 walker. Resolution is now structural: core handler/default symbols exist only
 in the immutable `seon.render.core/renderers` table, while an
 `seon.error/agent-authored-sym?` symbol can execute only through the injected
-`:seon.render/invoke-authored!` door. A JVM regression proves a hostile
+`:seon.render/invoke-authored!` SCI evaluator. A JVM regression proves a hostile
 core-looking stored symbol cannot fall through to SCI, and an authored
 infinite renderer returns the U1 guard's `:budget` steering value in its render
 slot while another host future completes.
 
 This closes the unbounded fallback at entity/custom-render resolution (guarded
-door boundary item 5), but it does **not** close this issue. The remaining
+SCI evaluator boundary item 5), but it does **not** close this issue. The remaining
 temporary dependency is exact and protected: `seon.agent.turn/render-prompt`
 still supplies `seon.agent.ctx.driver/render-prompt!` with
 `invoke-prompt-calls!`; its authored arm constructs
@@ -109,7 +109,7 @@ option A. Replacing that callback requires a change in the protected turn/host
 spine, so U7 stopped at the consumer contract instead of adding another host
 surface or editing the protected owner.
 
-## Resolution — guarded pod render door complete, 2026-07-23
+## Resolution — guarded pod render SCI evaluator complete, 2026-07-23
 
 Commit `8bd19774e` established the render-owned
 `:seon.render/invoke-authored!` contract. The claim-driver follow-up now binds
@@ -125,10 +125,10 @@ render functions, and canvas twins—cross the render seam and the U1
 slot value, preserving its kind and governing config key.
 
 Focused regressions prove a normal authored symbol renders through the
-single-call door, a hostile authored symbol retains its `:budget` steering
+single-call evaluator, a hostile authored symbol retains its `:budget` steering
 value in the slot, and the restart-stable default-context byte oracle remains
 identical. The option-A window is closed; the pod render containment path is
-door-complete.
+bounded-evaluation complete.
 
 The closing implementation is `cd7d3ebf8` on top of `8bd19774e`.
 `src/seon/agent/turn.cljs:393-411` now sends authored render calls through the

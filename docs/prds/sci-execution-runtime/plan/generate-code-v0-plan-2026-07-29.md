@@ -787,14 +787,14 @@ Order and parallelism — three tracks, only one of which is serialized:
 
 **The critical path is E3 → E5**, because it is the only serialized pair;
 E2′'s two gates (probe, reader) both resolve in parallel with it. Nothing here
-waits on E1, P1, N5, the effect door, or E4.
+waits on E1, P1, N5, the effect request handler, or E4.
 
 ---
 
 ## 15. Sequencing
 
 **Blocked on E2′, E3, E5**, in §14's order — the only serialized pair is
-E3 → E5 (shared files). Not blocked on P1, N5, E1, E4, or the effect door, and
+E3 → E5 (shared files). Not blocked on P1, N5, E1, E4, or the effect request handler, and
 must not acquire those dependencies during implementation. Coordinated with
 the parse-primitives plan through X1 and with the cold-resume blocker through
 X2. It occupies a parallel product slot, never the F-series spine; its first

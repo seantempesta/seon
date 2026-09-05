@@ -57,7 +57,7 @@ let them define the eventual design's vocabulary.
    ruling #47's mechanism), never a hand list or namespace convention.
    Truth 1 requires the distinction to exist and be queryable; every
    candidate design consumes it.
-4. **Explicit commit destination at the effect door** — which branch a
+4. **Explicit commit destination at the effect request handler** — which branch a
    durable fact lands on becomes explicit request data (today implicit
    in the connection). Composes with ingredient 3: destination derived
    from the attribute's classification.
@@ -100,7 +100,7 @@ exists today already needs it. Sorted:
 
 - fact classification property (system vs work-product) — cheap to add
   the day a sync policy exists; meaningless before;
-- explicit commit destination at the effect door — only the carve
+- explicit commit destination at the effect request handler — only the carve
   needs it;
 - merge-impact queries beyond the standards pair — the basis-pair data
   invalidation and the warnings-as-renders blocks wait for the design;

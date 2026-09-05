@@ -8,7 +8,7 @@ tags: [research, mcp, repl]
 
 ## Verdict
 
-All three tools were bound and usable. Door evaluation, JVM evaluation,
+All three tools were bound and usable. SCI evaluation, JVM evaluation,
 ambient database custody, shared SCI definitions, named JVM sessions, blob
 retrieval, and path/offset drilling all worked. The new text face is a major
 improvement over the previously archived 304 KB response, but the surrounding

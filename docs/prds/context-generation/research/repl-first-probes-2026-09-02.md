@@ -7,7 +7,7 @@ tags: [research, context, render, database, performance, teaching]
 # REPL-first probes — what an agent dropped into its namespace actually meets
 
 *Live probes on scratch cluster `ctxprobe` (HEAD `43e5e2fff`, booted
-2026-09-02 19:54Z; door mode = the cluster's shared SCI ctx, jvm mode =
+2026-09-02 19:54Z; SCI evaluation mode = the cluster's shared SCI ctx, jvm mode =
 the host prepl with explicit `(seon.operator/connection "ctxprobe")`).
 Every number below is one measured call at THIS population: 322
 namespaces, 4,033 `:seon.fn` rows (core name-only rows included), 2,362
@@ -19,7 +19,7 @@ chain prefers.*
 
 ## 1. The first thing a competent agent would type
 
-| Form (door, ns `my.agents.root`) | Result | ms |
+| Form (SCI evaluation, ns `my.agents.root`) | Result | ms |
 |---|---|---|
 | `(seon.db/pull '[*] [:seon.ns/name 'my.agents.root])` | ns row: `:seon.ns/refers` (help/dir/doc → seon.bootstrap), `:seon.ns/requires` as FOUR bare `#:db{:id N}` refs | 141 |
 | `(seon.db/q '[:find [(pull ?m [*]) ...] :where [?m :seon.cluster.message/to ?a] [?a :seon.cluster.agent/id "root"]])` | the one message; `:to` is a bare `#:db{:id 30962}` | 139 |
@@ -30,7 +30,7 @@ chain prefers.*
 | `(dir seon.db)` | 31 names, one line each — compact, teachable | 6 |
 | `(doc my.message/inbox)` | docstring + arglists + per-arity contract lines (see §3) | 8 |
 | `(doc my.message)`, `(doc :seon.cluster.message/message)` | `nil` — doc accepts only function symbols today | 25 |
-| `(help)` / `(my.message/inbox "root")` in DOOR mode | `:seon.call-preparation/unavailable` — the door ctx carries no agent id; expected for the door, but it means the zero-arg reader spelling is only exercisable by a real turn | 113 / 136 |
+| `(help)` / `(my.message/inbox "root")` in SCI evaluation mode | `:seon.call-preparation/unavailable` — the shared SCI context carries no agent id; expected for the shared SCI context, but it means the zero-arg reader spelling is only exercisable by a real turn | 113 / 136 |
 
 Findings: **(a)** `[*]` pulls hand the agent bare `:db/id` refs — the
 naive first query yields nothing to follow; the identity attribute on
@@ -52,7 +52,7 @@ For the pulled message map:
 | `seon.schema/matching-shapes-in` over the projection (2,362 shape forms; today's `schema-producer`) | 0.32 / 0.018 | `[:seon.cluster.message/message]` |
 | Datalog family-from-identity-attribute: `[?r :seon.schema/key :seon.cluster.message/id] [?s :seon.schema/references ?r] [?s :seon.db/attributes true] [?s :seon.schema/key ?key]`, **raw `datahike.api/q`** | 0.11 / 0.024 | same |
 | the same query through **`seon.db/q`, jvm mode (no handed projection)** | **2,373** (repeat 587–651) | same |
-| the same query through `seon.db/q`, **door mode (projection handed)** | 48 | same |
+| the same query through `seon.db/q`, **SCI evaluation mode (projection handed)** | 48 | same |
 
 Decomposition of the jvm-mode `seon.db/q` call: `read-declarations`
 0.02 ms (a delay) → **forcing it = `schema/projection-from-database`
@@ -118,7 +118,7 @@ when the eval family is redesigned (48b).
 ## 6. Tool health met on the way
 
 - `mcp__seon__runtime_status`: the known `seon.config/missing-projection`
-  smell (lane `mcp-status-2` running). `eval_clj` jvm + door and
+  smell (lane `mcp-status-2` running). `eval_clj` JVM REPL + SCI evaluation and
   `get_value` all answered correctly.
 - `GET /agent/root/debug` on the fresh cluster: "The prospective agent
   context is unavailable." with the cause swallowed (lane `debug-page`
@@ -148,18 +148,18 @@ when the eval family is redesigned (48b).
   cluster's projection-state: family face selected, 4.9 ms first call,
   3.5–4.0 ms repeats; output "From outside this cluster to root: …" —
   a narration face (census cat. 3), the text the agent gets today.
-- An agent-namespace render function defined AT THE DOOR
+- An agent-namespace render function defined IN THE SHARED SCI CONTEXT
   (`my.agents.root/inbox-view`, contract `[:=> [:cat :seon.render/unit]
   [:maybe :string]]`) was NOT selected with `:seon.render/namespace
   'my.agents.root`: `render/candidates` reads
   `sci.kernel/public-functions-in` from the ctx's PROGRAM SNAPSHOT and
   `schema/function-accepts-in?` from the projection's
-  `function-contracts` — both program-row facts. A door def mints no
+  `function-contracts` — both program-row facts. A definition evaluated in the shared SCI context mints no
   row, so it is invisible by construction; a real turn's contracted
   `defn` settles as a row and would be found. Consistent with facts over
   inference (§2.2): the render function has to be a FACT before the
   generator may prefer it. Trial P-OWN-RENDER-WINS must therefore run
-  through a settled turn, never a door def.
+  through a settled turn, never a definition evaluated in the shared SCI context.
 
 ## 8. Pull grammar and doc/dir internals (2026-09-03, after ruling 56)
 
@@ -170,10 +170,10 @@ when the eval family is redesigned (48b).
   option lists): `(seon.db/pull '[:seon.ns/name {:seon.ns/requires 2}]
   [:seon.ns/name 'my.agents.root])` returned requires-of-requires two
   levels deep; `{:seon.cluster.message/_to [...]}` on the agent row
-  returned its messages; 287 ms door-side for three pulls. The teaching
+  returned its messages; 287 ms through SCI evaluation for three pulls. The teaching
   examples ruled in 56(d) are therefore ordinary Datahike pull specs — no
   Seon extension needed.
-- The door's print floor under `:seon.render.profile/agent` elided the
+- The MCP result printer under `:seon.render.profile/agent` elided the
   4-element `:seon.ns/requires` collection to 2 children ("… 2 more
   children of 4; requery by …") — the collection width the agent sees by
   default is tiny; measured against the config below (§8a).

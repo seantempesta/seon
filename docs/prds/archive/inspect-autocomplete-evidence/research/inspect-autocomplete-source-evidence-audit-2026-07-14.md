@@ -89,7 +89,7 @@ Current source contains these maintained, test-backed mechanisms:
   fallback run. This matches Inspect's actual solver protocol.
 - `catalog.BENCHES` identifies case-1 text/final-answer tasks, BFCL's
   host-side AST subset, and the separate SWE-bench sandbox arm. It does not
-  pretend HumanEval, GAIA, or sandbox/tool tasks fit the plain pod door.
+  pretend HumanEval, GAIA, or sandbox/tool tasks fit the plain pod HTTP endpoint.
 - BFCL retains the upstream scorer and synthesizes `ToolCall` values from a
   bounded adapter. The historical Clojure-form A/B remains evidence that a
   text form is not equivalent to an eval-native registered function.

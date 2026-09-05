@@ -25,7 +25,7 @@ fallback when it is not text).
 
 Tool-repairs lane, 2026-08-08, cluster `x` in isolated operator root
 `tmp/repairs-check`, driven as a real run through the full path (sci eval →
-effect door → `:io` → receipt) with the tool-exercise harness. The complete
+effect execution boundary → `:io` → receipt) with the tool-exercise harness. The complete
 settled effect result:
 
 ```clojure

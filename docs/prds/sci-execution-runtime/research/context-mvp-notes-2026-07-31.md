@@ -36,7 +36,7 @@ function nor sent the self-message, so no second turn existed. The context
 failed it at four concrete points:
 
 - the instruction advertises `(seon.render/walk)`, but that Var is absent;
-- the walk shows toolkit namespace names but not their callable contracted
+- the walk shows agent-facing namespace names but not their callable contracted
   functions at d2;
 - repeated leaf-level distance markers lead the useful facts; and
 - the reply-as-forms rule was not strong enough to prevent prose/fenced output.

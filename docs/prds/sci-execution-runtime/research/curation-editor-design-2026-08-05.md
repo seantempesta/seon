@@ -25,8 +25,8 @@ forms are the existing per-form entities, each carrying ordinal and source.
 There is no second ordered vector of bare sources.
 
 Automatic eligibility must fail closed on writes outside the database branch.
-Current receipts prove exact effect-door crossings and, indirectly by terminal
-transaction, delivered messages. They do not classify a door request as read
+Current receipts prove exact capability requests and, indirectly by terminal
+transaction, delivered messages. They do not classify a capability request as read
 or write and do not attribute bare `seon.db/transact!` calls to a run/form.
 Consequently the production trigger cannot certify an arbitrary real session
 until leaf-declared read/write receipt facts and F7 transaction provenance
@@ -327,7 +327,7 @@ compatibility arity; reset/rebuild is the repository policy.
 
 ## 4. Destructive-span gate
 
-The ruled boundary is **writes outside the database branch**, not effect-door
+The ruled boundary is **writes outside the database branch**, not effect-request
 crossing:
 
 - database writes are replayable on the scratch/proof branch;
@@ -379,7 +379,7 @@ request EDN, or a hand-maintained roster.
   pass; declared external writes and delivered messages reject; missing
   classification or missing F7 provenance is unknown and fails closed. Store
   evidence, not a mutable status; the verdict derives.
-- **Option B: pin every door-crossing form and replay it unchanged.** This is
+- **Option B: pin every form issuing a capability request and replay it unchanged.** This is
   safe only for duplicate branch-local work. Replaying a message or external
   write still duplicates the effect, so pinning does not solve destructiveness.
 - **Option C: reject every effect receipt.** Safe but contradicts the ruled

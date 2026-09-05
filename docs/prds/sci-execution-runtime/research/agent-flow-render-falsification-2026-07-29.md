@@ -65,7 +65,7 @@ Two honest breaks, both about interest NARROWNESS rather than the proc:
 | Datahike dependency-plan API | pinned fork `reference-code/datahike` | `src/datahike/api/specification.cljc:460-475,523-549,595-622` (`q-with-evidence`, `query-dependency-plan`, `dependency-plan-attributes`, `pull-dependency-plan`, `pull-with-evidence`) |
 | the wake router being extended | current tree | `src/seon/cluster/wake.cljc:98-175` |
 | the agent graph being extended | current tree | `src/seon/cluster/agent.clj:246-282` (`graph-definition`), `:283-380` (`arm!`/`disarm!`) |
-| proc construction door | current tree | `src/seon/flow.clj:83-127` (`var-process`) |
+| proc construction function | current tree | `src/seon/flow.clj:83-127` (`var-process`) |
 | the registration shape already in the tree | current tree | `src/seon/render/agent.clj:440-499` (`blocks`), `src/seon/render/block.clj:266-292` (`membership`), `:362-438` (`surface`) |
 | the delivery tier this feeds | current plan | `research/render-pipeline-design-2026-07-29.md` (composite package, per-tab sliding-1) |
 | parked-proc baseline being compared against | 2026-07-28 | `research/flow-mechanics-2026-07-28.md` §1 (~8.5 KB/parked proc) |

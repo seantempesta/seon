@@ -17,7 +17,7 @@ WP-S2 as landed.
 ## Problem
 
 The first clean-or-force coordinator draft could report a missing process
-record as absent while its readiness door was still accepting, combine a pod
+record as absent while its readiness endpoint was still accepting, combine a pod
 quiescence response with a different generation re-read by `stop!`, accept a
 successful response body under an error HTTP status, and return clean for an
 empty or unknown target set. Its nominal operation deadline also stopped at
@@ -59,8 +59,8 @@ the pod supplies it from its containment-injected environment.
 
 ## Acceptance
 
-- A missing record plus any accepting managed door is containment-uncertain;
-  only proved door absence is absent.
+- A missing record plus any accepting managed endpoint is containment-uncertain;
+  only proved endpoint absence is absent.
 - The pod response generation equals the exact record passed unchanged into
   `stop!`; a record swap or stale endpoint can never classify clean.
 - HTTP `200` pairs only with `quiesced? true`; typed error statuses pair only

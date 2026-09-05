@@ -31,7 +31,7 @@ that no longer exists:
 Simultaneously there is **no skill for the architecture agents actually
 work in**: `core.async.flow` (procs, workloads, buffers, graph
 construction, live update), agents-as-flows, the cluster/store/boot
-tower, the render pipeline, and the code-as-facts corpus. That
+boot sequence, the render pipeline, and the code-as-facts corpus. That
 knowledge lives only in `docs/prds/sci-execution-runtime/research/`
 and must be re-derived by every lane.
 

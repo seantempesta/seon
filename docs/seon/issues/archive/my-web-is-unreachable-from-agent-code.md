@@ -13,7 +13,7 @@ tags: [issue, toolkit, runtime]
 public, contracted, with declared `:seon.effect/capability` owners and a
 `:seon.ns` row — and they are the ONLY agent-facing capability functions the
 SCI context cannot resolve. Agent code calling them gets sci's analyzer
-error before anything reaches the door:
+error before anything reaches the effect execution boundary:
 
 ```text
 Unable to resolve symbol: my.web/fetch
@@ -71,7 +71,7 @@ derived from the graph rather than enumerated.
 ## Acceptance
 
 An agent form that calls `my.web/fetch` against a local HTTP server reaches
-the door and produces an effect receipt. A regression asserts that the set
+the effect execution boundary and produces an effect receipt. A regression asserts that the set
 of public contracted `my.*` functions in the program graph and the set
 resolvable in a fresh cluster ctx are equal — so a future namespace cannot
 fall off silently.

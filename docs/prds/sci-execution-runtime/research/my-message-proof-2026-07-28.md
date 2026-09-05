@@ -27,7 +27,7 @@ through the one admission gate, the loop recognises it exactly as it
 recognises a `my.run` disposition, and the LOOP commits the message in the
 same terminal transaction as that form's receipt.
 
-**Why option (a), the value, and not option (b), the guarded door.** The three
+**Why option (a), the value, and not option (b), the bounded evaluation.** The three
 agent-facing shapes are values the driver interprets, capability REQUESTS
 through one door, and durable FACTS the driver commits. A message is the
 third: its entire effect is a transaction the loop is already making, against

@@ -15,7 +15,7 @@ Bun pod system. It cannot exercise the fresh single-JVM cluster and therefore
 cannot supply the repository's required model-evaluation or SWE-bench proof.
 
 The adapter tests preserve the obsolete command shape with mocks. They prove
-tar/compose assembly and fabricated readiness/door responses, not that the
+tar/compose assembly and fabricated readiness/SCI evaluation responses, not that the
 injected runtime boots or serves the current agent surface.
 
 ## Evidence
@@ -37,7 +37,7 @@ injected runtime boots or serves the current agent surface.
 - The retained tests assert the stale shape. For example,
   `src-inspect-ai/tests/test_tb_agent.py:68-79` checks only that the tar contains
   the entrypoint, while its adapter proof uses `_FakeExec` to synthesize pod
-  readiness, wire-REPL, and door replies (`:118-221`).
+  readiness, wire-REPL, and evaluation replies (`:118-221`).
   `test_tb2_agent.py:79-164` and `test_swebench_arm.py:36-156` likewise validate
   mocked commands/compose text. No recurring test boots this entrypoint against
   fresh `src/`.

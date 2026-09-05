@@ -58,7 +58,7 @@ and custody defaults to the calling agent's cluster.
    `seon.db` itself and the store/registry custody owners. Each of the
    16 write sites is classified (runtime / boot / fixture) with its
    failure semantics stated before migration.
-4. Through the door, an agent can ambiently `q`, `pull`, `transact!` a
+4. Through the SCI evaluator, an agent can with implicit cluster arguments `q`, `pull`, `transact!` a
    declared attribute, read it back, walk `history`, and get Datahike's
    own refusal value for an undeclared attribute.
 5. AGENTS.md's database-access law, `architecture/data-model.md`, and
@@ -86,7 +86,7 @@ Commit `7661c0214` lands acceptance items 1, 2, and the namespace part of
   `src/seon/cluster.clj` and `src/seon/cluster/loop.clj`; regression callers
   `test/seon/cluster/armed_test.clj`, `boot_test.clj`, `store_test.clj`,
   `store_transact_test.clj`, `turn_test.clj`, `test/seon/instrument_test.clj`,
-  and the two through-door forms in `test/seon/sci/eval_test.clj`. No other
+  and the two SCI evaluation forms in `test/seon/sci/eval_test.clj`. No other
   call site was migrated in this wave.
 - The dependency order is now Datahike + `seon.schema` +
   `seon.schema.datahike` + the leaf `seon.error.refusal` → `seon.db` →
@@ -112,7 +112,7 @@ Commit `7661c0214` lands acceptance items 1, 2, and the namespace part of
   assertions, zero failures or errors.
 - Fresh live proof used the isolated operator root `tmp/r41-one-db`, forked
   cluster `r41` from the newly published source, and booted it without a
-  cyclic load. One SCI-door evaluation ambiently exercised positional and
+  cyclic load. One SCI evaluation with implicit cluster arguments exercised positional and
   Datahike argument-map forms of `q`, `pull`, and `transact!`; both writes
   returned transaction reports, both queries returned
   `#{"r41-map" "r41-positional"}`, both pulls returned their matching

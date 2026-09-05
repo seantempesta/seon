@@ -4,11 +4,11 @@ status: active
 tags: [research, agent]
 ---
 
-# Agentic-benchmark adoption plan — what to wire into the /agents/run door, in what order
+# Agentic-benchmark adoption plan — what to wire into the /agents/run endpoint, in what order
 
 Which ESTABLISHED agentic benchmarks (tool-calling / SWE / terminal / web-nav /
 computer-use) to adopt into the inspect-ai harness over our `POST /agents/run`
-pod door, ranked by product-signal × published-DeepSeek-anchor × cost-to-wire.
+pod HTTP endpoint, ranked by product-signal × published-DeepSeek-anchor × cost-to-wire.
 Paper survey off the vendored source (`reference-code/inspect-evals/`,
 `reference-code/{terminal-bench,gorilla-bfcl,tau2-bench,swe-bench,agentbench}`)
 and our catalog (`src-inspect-ai/`). No cluster runs, no implementation.
@@ -16,7 +16,7 @@ and our catalog (`src-inspect-ai/`). No cluster runs, no implementation.
 ## TL;DR — the ranked adopt-list
 
 The one structural fact that orders everything: **`catalog.swap_generate`
-replaces a task's SOLVER, never its SCORER.** So a bench fits our door iff its
+replaces a task's SOLVER, never its SCORER.** So a bench fits our endpoint iff its
 scorer grades the pod's final TEXT reply host-side (gsm8k `match`, gpqa
 `choice`, an LLM grader, a pure-Python AST match). A bench whose scorer must
 EXECUTE the model's output in an environment it controls — a docker image
@@ -29,10 +29,10 @@ against the grain of the DeepSeek anchors.
 EMPTY, and that is the headline finding.** Every DeepSeek **Non-Think**-anchored
 agentic bench (SWE Verified 73.6 / Pro 52.1 / Multilingual 69.8, Terminal Bench
 2.0 59.1, LiveCodeBench 56.8, MCPAtlas 69.4, Toolathlon 46.3) needs scorer-side
-execution or a tool/VM environment our text door doesn't host. Every bench that
-DOES fit the door cheaply (bfcl-AST, browse_comp) has **no** published Non-Think
+execution or a tool/VM environment our text endpoint doesn't host. Every bench that
+DOES fit the endpoint cheaply (bfcl-AST, browse_comp) has **no** published Non-Think
 number. The intersection the owner hoped for is genuinely empty through the
-current door — so the real decision is which tier-2 to pull forward first.
+current endpoint — so the real decision is which tier-2 to pull forward first.
 
 **Tier 2 — valuable, needs modest integration (adopt in this order):**
 
@@ -42,7 +42,7 @@ current door — so the real decision is which tier-2 to pull forward first.
    maximally aligned with the pod — which natively emits Clojure calls. Cost to
    wire = a small call-extraction adapter (text `(f :a v)` → BFCL's AST target)
    + a pinned GitHub dataset download. **This is the single best first pick.**
-   Caveat: no NT anchor (shared by every door-fitting agentic bench).
+Caveat: no NT anchor (shared by every endpoint-fitting agentic bench).
 2. **LiveCodeBench (plain, from source)** — the best ANCHORED pick (NT **56.8**),
    self-contained competitive-code with stdin/stdout test cases → a light
    self-hosted subprocess runner (no per-task docker), plays to the pod's
@@ -54,14 +54,14 @@ current door — so the real decision is which tier-2 to pull forward first.
    text, written into the sample sandbox); the blocker is the scorer's
    docker-per-instance apply-and-test (multi-GB images). Highest value, heaviest
    tier-2 infra — the strategic target once we host a docker sandbox scorer.
-4. **browse_comp** — fits the door (drop its docker+web_browser solver; pod
+4. **browse_comp** — fits the endpoint (drop its docker+web_browser solver; pod
    browses with its own `web-fetch`; LLM-grader on the final answer). Established
    web-nav. But no NT anchor, live-web non-hermetic (fence to milestone/test),
    and BrowseComp is brutally hard for a single-fetch agent → predictably near-0
    → collides with the "0 scores → suspect harness first" rule. Adopt AFTER the
    pod's web tool is stronger, or only as a milestone/test-tier reserve.
 
-**Tier 3 — impractical through the current door (blocker named):**
+**Tier 3 — impractical through the current endpoint (blocker named):**
 
 | Bench | Anchor | Blocker |
 |---|---|---|
@@ -90,7 +90,7 @@ for a sharper reason than "it's tool-calling."**
   with an empty env. tau2 is tier-3 for us, not tier-1. (It's also NOT a
   DeepSeek-anchored bench — DeepSeek reports Toolathlon/MCPAtlas, not tau2.)
 
-- **bfcl-AST wins the door constraint.** `bfcl/utils/task_categories.py`:
+- **bfcl-AST wins the endpoint constraint.** `bfcl/utils/task_categories.py`:
   `is_executable` (the `exec_*`/`rest` categories) and `is_multi_turn` are the
   only ones needing execution; the multi-turn scorer uses inspect's
   `generate(tool_calls="loop")` with backend classes as Tools — the tool bridge
@@ -114,15 +114,15 @@ for a sharper reason than "it's tool-calling."**
   extracts that call from the pod's text reply into the shape `ast_match`
   consumes. This adapter is small and *natural* for a Clojure agent — arguably a
   better-motivated bench for Seon than for a JSON-tool model. The missing NT
-  anchor is not a bfcl-specific loss: NO door-fitting agentic bench has one.
+  anchor is not a bfcl-specific loss: NO endpoint-fitting agentic bench has one.
 
 ## Full scoring table
 
 Scored 1–5 where relevant; ✓/✗ for boolean. "Signal" = real agentic capability
 (vs QA). "NT anchor" = a DeepSeek-V4-Pro **Non-Think** published number (our
-mode). "Door fit" = scorer grades final text host-side (swap-solver suffices).
+mode). "Endpoint fit" = scorer grades final text host-side (swap-solver suffices).
 
-| Bench | Agentic signal | DeepSeek NT anchor | inspect-ready | Door fit (scorer host-side?) | Scoring | Rough cost | Tier |
+| Bench | Agentic signal | DeepSeek NT anchor | inspect-ready | Endpoint fit (scorer host-side?) | Scoring | Rough cost | Tier |
 |---|---|---|---|---|---|---|---|
 | **bfcl** (single-turn AST) | tool-calling (5) | ✗ | ✓ | ✓ (needs call-extract adapter) | deterministic AST oracle | 1 turn, cheap | **2 → FIRST** |
 | **LiveCodeBench** (plain, from source) | code gen+run (5) | ✓ **56.8** | ✗ (build) | ✓ (self-host stdin/stdout runner) | deterministic test-pass | medium | **2** |
@@ -166,7 +166,7 @@ mode). "Door fit" = scorer grades final text host-side (swap-solver suffices).
   agent with `web_browser`/`web_search` tools and an LLM `GRADER_TEMPLATE`.
   swap-solver drops the docker+react+browser (all solver-side); dataset pinned
   (`browse_comp_test_set.csv`, SHA `7b2447…`); scorer is the LLM grader → keep
-  it. Fits the door, but: no NT anchor (DeepSeek reports High 80.4 / Max 83.4,
+  it. Fits the endpoint, but: no NT anchor (DeepSeek reports High 80.4 / Max 83.4,
   NT "—"), non-hermetic live web, and designed to require hundreds of page-hops
   → a single-fetch pod scores ~0. Milestone/test-tier candidate, not a dev-tier
   first pick.
@@ -233,14 +233,14 @@ on a genuinely agentic/code capability the pod is actually good at.
 ## Surprises
 
 - **Unexpectedly BLOCKED — browse_comp.** I expected it to be the cleanest
-  door-fit ("question in, short answer out, string match"). It ships a docker
+  endpoint-fit ("question in, short answer out, string match"). It ships a docker
   sandbox + containerized `web_browser` react solver AND an LLM grader; the fit
   only works because swap-solver discards its solver+sandbox. Even then it's a
   poor FIRST pick (no anchor, near-0 expected, live-web flake) — the opposite of
   my going-in assumption.
 - **Unexpectedly BLOCKED — tau2 (my prior).** Not a light multi-turn chat bench:
   its scorer grades simulated-DB final state, so it structurally requires the
-  tool-bridge our door deliberately rejects. A clean case of reading the source
+  tool-bridge our endpoint deliberately rejects. A clean case of reading the source
   flipping the answer.
 - **Unexpectedly CHEAP — BFCL's AST subset.** The single-turn non-exec/non-live
   categories are pure host-side AST match with zero sandbox — and even the
@@ -249,9 +249,9 @@ on a genuinely agentic/code capability the pod is actually good at.
   foundational-agentic bench that fits our correctness gate almost exactly —
   gated only by a small, Seon-natural call-extraction adapter.
 - **The structural surprise that ordered the whole survey:** the DeepSeek
-  Non-Think anchors and the door-fitting benches are **anti-correlated**. Every
+  Non-Think anchors and the endpoint-fitting benches are **anti-correlated**. Every
   bench DeepSeek anchors in NT (SWE, Terminal, LiveCodeBench, MCPAtlas,
-  Toolathlon) needs execution hosting; every bench that fits our text door
+  Toolathlon) needs execution hosting; every bench that fits our text endpoint
   (bfcl, browse_comp) is unanchored. Calibration and cheap-adoption pull in
   opposite directions — so the roadmap is: adopt bfcl now for signal, then make
   the ONE infra investment (a sandbox/execution scorer host) that unlocks the

@@ -66,7 +66,7 @@ same shape recurs for any `(into (sorted-map) …)` over string keys.
 ## Acceptance
 
 - A value whose keys are not keywords projects as an ordinary value. The
-  door-evaluation recognition test cannot throw on a well-formed Clojure map,
+  SCI-evaluation recognition test cannot throw on a well-formed Clojure map,
   whatever its key type or sortedness.
 - No projection failure ever renders as a raw stack trace in the caller's
   context; a projection that genuinely cannot proceed returns a flat error

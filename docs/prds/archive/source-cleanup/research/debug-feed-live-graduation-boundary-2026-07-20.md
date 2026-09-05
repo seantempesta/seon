@@ -32,7 +32,7 @@ Concurrent tracked edits outside this report were present and are not evidence.
 | Datastar | `bb9ed6fbe78cf5690f5ad23a5faf86407a44982f` | Datastar supplies the morph event vocabulary. The maintained Seon framing owner remains `seon.web.datastar/patch-elements`; no debug-specific stream is authorized. |
 | Datastar Clojure | `1cef624e9e59a2ea79ffe2f65df2e7b06f8198d2` | `reference-code/datastar-clojure/src/dev/examples/tiny_gzip.clj` grounds a separate long-lived SSE GET and flushable frames. Browser automation cannot reliably hold that stream, so the feed proof is server-side. |
 | Execution IPC | current Seon revision | `seon.execution/terminal-message` already carries the child's optional `:seon.db/read-evidence` in the closed result frame. No protocol addition is needed. |
-| Prompt owner | current Seon revision | `seon.agent.turn/render-prompt` is the one prompt orchestration door and validates the returned database value. It currently selects only `::execution/result`, losing sibling child evidence. Strengthen this owner in place. |
+| Prompt owner | current Seon revision | `seon.agent.turn/render-prompt` is the one prompt assembly function and validates the returned database value. It currently selects only `::execution/result`, losing sibling child evidence. Strengthen this owner in place. |
 | Reactive owner | current Seon revision | `seon.web.datastar/render-read` combines parent-captured and renderer-embedded evidence; `seon.reactive` installs and replaces the one writer interest from that evidence. The downstream mechanism already exists. |
 
 First-party behavioral precedents are

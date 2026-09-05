@@ -34,7 +34,7 @@ that result at `script/seon/fresh_operator.clj:2021-2035` even when the cluster
 row itself remains alive.
 
 The REPL edge dogfood pass independently reproduced the contradiction on
-2026-08-04. MCP completed every door probe through `edgefaces0804` on prepl
+2026-08-04. MCP completed every SCI evaluation probe through `edgefaces0804` on prepl
 port 56068. Immediately afterward, root-scoped status printed PID 11892 and
 that same port as `alive`, then emitted the identical `roster unreadable` /
 `prepl is unreachable` sentence. This rules out a default-root mix-up and a

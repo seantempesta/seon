@@ -179,7 +179,7 @@ A generated-workflow probe exposed one remaining static-path contradiction.
 `planning.fetch_eval_rows` still sent a raw sentinel-printing form to the
 writer socket, but the writer now speaks io-prepl event maps. The query reached
 the writer while the Python parser failed as `JSONDecodeError`, leaving the
-native milestone scorer without rows. The composition door now derives an
+native milestone scorer without rows. The HTTP handler now derives an
 ordered `eval_evidence` projection from the same final database value and exact
 request turn set already used for counts. It includes only eval id/time/source,
 success, and present narration; results, stdout, and error stacks stay out.
@@ -280,7 +280,7 @@ states on 2026-07-19. Its admitted Python request ended as
 opening root turns. A controlled 30-second request preserved the response and
 made the behavior inspectable: five successful evals were `message/user`,
 `my.plan/active!`, `plan/status`, `seon.agent/delegate!`, and another
-`my.plan/active!`; the door timed out truthfully, but the delegated child kept
+`my.plan/active!`; the HTTP handler timed out truthfully, but the delegated child kept
 running. An independent representative run then consumed 37 turns in 211.126
 seconds, including 27 successful `my.plan/active!` calls. The loop currently
 resets its no-progress streak for every successful eval, so read-only status

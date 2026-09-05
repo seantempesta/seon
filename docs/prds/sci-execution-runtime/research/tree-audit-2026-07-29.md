@@ -42,7 +42,7 @@ a persisted taxonomy.
 
 ## Ranked findings
 
-### Blocker — agent turns bypass the bounded compute door
+### Blocker — agent turns bypass the bounded compute submission function
 
 The agents-as-flows rebuild says evals leave the `:io` turn proc through
 `seon.flow/submit!!`, but the implementation does not.

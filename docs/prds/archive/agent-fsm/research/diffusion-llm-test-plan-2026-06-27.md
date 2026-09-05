@@ -71,13 +71,13 @@ copy-paste setup: [[diffusion-llm-runpod-runbook-2026-06-27]].
 Standalone **Python service on the rented box** (transformers + the hook). Seon
 is reached over a **thin HTTP bridge** as two oracles only:
 
-- **eval oracle** — POST a Clojure form → Seon `seon.eval` SCI cage → `:seon/error`
+- **eval oracle** — POST a Clojure form → Seon `seon.eval` SCI context → `:seon/error`
   or value back. (The feedback signal for T3.)
 - **retrieval oracle** — POST a partial canvas / symbol → embed (Vertex
   `gemini-embedding-2`) → Proximum/HNSW over `:seon.fn`/`:seon.schema` → top-k
   specs/docstrings back. (The injection for T4.)
 
-Seon already has all three pieces (eval cage, embeddings, program graph). The
+Seon already has all three pieces (evaluation context, embeddings, program graph). The
 bridge is a few handlers, not a runtime change. Pod integration (canvas → a
 `block` render, SSE-streamed partial canvases) is **Phase 2**, only after a probe
 shows traction. This keeps the live pod stable (standing guidance) and the
@@ -153,7 +153,7 @@ thesis.** This is a buy.
 
 ## What Seon provides (already built)
 
-- `seon.eval` SCI cage → the T3 feedback oracle.
+- `seon.eval` SCI context → the T3 feedback oracle.
 - Vertex `gemini-embedding-2` + Proximum/HNSW over the program graph → the T4
   retrieval oracle.
 - `:seon/error` as data + the warnings block → the error text injected into the

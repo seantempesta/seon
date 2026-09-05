@@ -8,7 +8,7 @@ tags: [issue, sci, eval, agent]
 # CLOSED not-a-bug: shared Vars across forks are the INTENDED model
 
 Measured 2026-08-01 (`tmp/sci-session/probe5_isolation.clj`, and
-`probe4_surface.clj` reproducing it through the real door):
+`probe4_surface.clj` reproducing it through the real SCI evaluator):
 
 ```
 parent ctx:  (ns agent1) (def x :parent)

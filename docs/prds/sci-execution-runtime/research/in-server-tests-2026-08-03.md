@@ -320,7 +320,7 @@ namespace, no second runner.
 copy-on-write clone (so no test may write an operator root); classpath-fresh
 load proofs and load-order/namespace-conflict detection (a warm image hides
 both — this is exactly what `--full` exists to keep); process-identity,
-flock, and boot-tower coverage; and the ability to `halt` out of a truly wedged
+flock, and boot coverage; and the ability to `halt` out of a truly wedged
 thread. All four are why the spawned path is kept, not deprecated.
 
 ## Defects filed by this research

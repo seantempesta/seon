@@ -5,7 +5,7 @@ tags: [agent, runtime, issue]
 severity: blocker
 ---
 
-# Guarded eval door lacks a Bun installation and config owner
+# Guarded eval evaluator lacks a Bun installation and config owner
 
 ## Problem
 
@@ -77,7 +77,7 @@ deletion of the production Bun `cljs.js` engine, so U1 proves the portable
 CLJS guard directly without inventing a second production evaluator. The
 config owner committed first and then granted U1's exact guard section.
 Finally, the stable mutable holder is retained-context-owned and reset by the
-door for every invocation; no dynamic binding sits in the hot path. U1's
+evaluator for every invocation; no dynamic binding sits in the hot path. U1's
 second-session regression proves that a function defined before the second
 session consumes the second invocation's freshly reset budget.
 

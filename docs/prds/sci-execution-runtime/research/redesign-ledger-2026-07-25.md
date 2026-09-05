@@ -579,7 +579,7 @@ that gate can never open on its current input.
    hands it to the source-named `install-nursery!`, `registry-load-fn`
    (`context.clj:613`) serves it to every other `ctx` on first `require`.
    Genuinely data-only.
-2. **A new `my.*` toolkit namespace — the MOST expensive.** A `src` file, a hand
+2. **A new `my.*` agent-facing namespace — the MOST expensive.** A `src` file, a hand
    `require` in `client.cljs` (L140-197), passage of the `pure-block?` **source
    regex** (`context.clj:1060`), and — if effectful — hand entries in BOTH
    `host-toolkit-bindings` (`context.clj:1298`) and

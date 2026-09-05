@@ -72,7 +72,7 @@ added it to the existing JVM at PID 3885. `runtime_status` immediately reported
 15 `:seon.problems/stale-vars`.
 
 Current source at commit `89fe1a287` makes an absent configuration row return
-one bounded `:seon.config/missing-effective` error. The new cluster's real door
+one bounded `:seon.config/missing-effective` error. The new cluster's real SCI evaluator
 still exercised the old Var:
 
 ```clojure

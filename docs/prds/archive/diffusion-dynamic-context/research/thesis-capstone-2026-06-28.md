@@ -40,14 +40,14 @@ positions/gen).
 The buzzsaw needs a cheap, tight feedback collar between denoise steps. This
 session **measured that collar's economics** end-to-end ([[research/parser-as-generation-oracle-2026-06-28]]),
 using Seon's *real* shipping parser (`seon.repl.internal/parse-forms`, rewrite-clj),
-its parinfer repair (`seon.repair`), and its SCI eval cage (`seon.eval`) — no model
+its parinfer repair (`seon.repair`), and its SCI evaluation context (`seon.eval`) — no model
 calls. The detection story is three tiers, each with a **provable blind spot the
 next tier covers**, exactly as the diffusion papers predicted:
 
 | tier | mechanism (Seon, shipping) | catches | measured | provable blind spot |
 |---|---|---|---|---|
 | **syntactic** | `parse-forms` `:span`/`:error-kind` + `seon.repair` | delimiter/token corruption | **92.7%** of 124 injected errors, instant; SAFE class **100% (95/95)** re-parses clean after parinfer with **zero model calls** | a corruption that still *parses* but means something else (3.2% masked-divergent) |
-| **semantic** | the SCI eval cage (`seon.eval`, errors-as-data `:seon/error`) | masked-divergent (parses clean, meaning changed) | **91.5%** of masked-divergent caught; **62.5% via a hard error alone, no reference needed**; 29% diverges-in-value (needs a comparator/test) | **dead-data mutation** — corruption off the program's live computation path (8.5% residual) |
+| **semantic** | the SCI evaluation context (`seon.eval`, errors-as-data `:seon/error`) | masked-divergent (parses clean, meaning changed) | **91.5%** of masked-divergent caught; **62.5% via a hard error alone, no reference needed**; 29% diverges-in-value (needs a comparator/test) | **dead-data mutation** — corruption off the program's live computation path (8.5% residual) |
 | **factual** | program graph (`:seon.fn/source` + Vertex/Proximum) | wrong fn/API name committed *confidently* | the AUROC-0.471 band the model cannot self-detect; **not yet measured live** | a correct name absent from the index can't be retrieved |
 
 **Combined parser + eval catch 93.5%** of all meaning-altering corruptions

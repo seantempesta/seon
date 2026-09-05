@@ -36,7 +36,7 @@ before any fix; see [[research/model-mechanics-grounding-2026-06-28]].)
 
 Capabilities #2 (eval-renoise) and #3 (retrieval) are **round-trip** designs:
 the worker denoises a canvas → ships it back to the Seon pod (over the internet)
-→ Seon parses (`parse-forms`) + evals (SCI cage) + retrieves (Proximum/HNSW) →
+→ Seon parses (`parse-forms`) + evals (SCI context) + retrieves (Proximum/HNSW) →
 ships the re-noise/inject instruction back to the worker. That internet hop, per
 denoise segment, is the dominant latency in the feedback loop — and the loop is
 the whole point ("responsiveness and control").
@@ -64,7 +64,7 @@ the Python worker shells out to (or a local HTTP/UDS call), not a remote pod.
 - **Bundling shape:** Node sidecar process in the image vs a local HTTP/UDS
   endpoint the Python worker calls. The pod is already loopback-UDS-only
   (`#3`'s reachability note) — co-location makes that a feature, not a blocker.
-- **Which Seon pieces:** `parse-forms` + the SCI eval cage are clearly needed
+- **Which Seon pieces:** `parse-forms` + the SCI evaluation context are clearly needed
   on-worker. The Proximum/HNSW retrieval index is heavier — does the embedding
   index live on the worker (co-located, fast) or stay a remote knn-search call
   (the one round-trip we might keep, since retrieval fires rarely)?

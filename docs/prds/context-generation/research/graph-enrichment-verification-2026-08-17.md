@@ -96,7 +96,7 @@ already materializes name-only rows for external namespaces
 `:seon.fn/fn` — `/ns`, `/source`, `/admission-source` optional — lets a
 target row be `{:seon.fn/sym "clojure.core/map" :seon.fn/ns [:seon.ns/name clojure.core]}`.
 That is widening (accretion), not breakage: no key changes meaning and no
-producer promises less. The alternative — a second attribute such as
+render function promises less. The alternative — a second attribute such as
 `:seon.fn/calls-external` holding bare symbols — creates two call
 mechanisms for one noun and is refused by §2.5.
 

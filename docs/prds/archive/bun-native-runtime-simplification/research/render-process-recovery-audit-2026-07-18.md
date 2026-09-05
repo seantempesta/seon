@@ -350,7 +350,7 @@ After graduation, remove:
 - `SEON_CANVAS_SCI` and the renderer-specific SCI budget/configuration;
 - the authored-symbol branch in `seon.render` that calls
   `render-sci/invoke-bounded`;
-- SCI cage tests and old spike documentation whose contracts are replaced by
+- SCI context tests and old spike documentation whose contracts are replaced by
   process-boundary tests; and
 - analyzer/index support used only to rebuild SCI aliases/host namespaces.
 

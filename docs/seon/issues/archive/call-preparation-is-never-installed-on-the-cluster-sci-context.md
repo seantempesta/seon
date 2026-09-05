@@ -116,7 +116,7 @@ All three calls failed identically:
 Wrong number of args (2) passed to: seon.cluster/ensure-entity!
 ```
 
-Reproduced independently through `eval_clj` in door mode against the same
+Reproduced independently through `eval_clj` in SCI evaluation mode against the same
 shared ctx, so it is not a turn-local condition.
 
 The plan itself is correct. Derived live from the same database value:

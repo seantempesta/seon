@@ -5,19 +5,19 @@ severity: cleanup
 tags: [issue, architecture, web, agent]
 ---
 
-# Remove the flat call compatibility door
+# Remove the flat call compatibility endpoint
 
 ## Problem
 
 The web UI had two public POST addresses for the same capability handler. The
-database-seeded route `/agent/{id}/call` was the documented action door, while
+database-seeded route `/agent/{id}/call` was the documented action endpoint, while
 the static router also published `/call` as a compatibility route. Keeping
 both made route ownership ambiguous and preserved an address that could not
 express the owning agent.
 
 ## Evidence
 
-- `src/seon/route.cljs` calls `/agent/{id}/call` the one action door and seeds
+- `src/seon/route.cljs` calls `/agent/{id}/call` the one action endpoint and seeds
   it as database route data.
 - `src/seon/web/router.cljs` sent the static `/call` route to the same
   `seon.web.reactive.call/handle!` owner.

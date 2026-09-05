@@ -206,7 +206,7 @@ Wedge-continuation classes (host crossings, orderly-stop joins, web
 delivery) interleave where file-disjoint from W3.
 
 **db-diff LANDED** (`42a32183c`: positional `seon.db/diff`, identity
-with alias chasing, typed refusals, AI render producer, 30/286/0
+with alias chasing, typed refusals, AI render function, 30/286/0
 focused, live verbatim map whose `:seon.db.diff/requery-id` form
 replayed identically). plan-t3 and dump-kill RELEASED in parallel to
 verify + commit. **R3 RULED (option 2) AND LAUNCHED** (`r3-store-layout` lane: layout
@@ -975,7 +975,7 @@ reviewing"):
    provider rows + plan derivation against the LANDED hook (r2 as
    amended by PRD ruling 2). Queued behind them: activation-closure
    vacuity, one-identity-string second instance, cohosted-boot 11×,
-   refused-messages render producer, shadowed-var wall.
+   refused-messages render function, shadowed-var wall.
 5. PRE-SLEEP AMENDMENTS (owner answers, 2026-08-07 late): RUN HOT until
    morning, no wind-down; parallelism UNCAPPED until empirical
    degradation is measured (load is a deliberate stress test — find
@@ -1187,7 +1187,7 @@ per-run override, the git framing with `my.branch`). Maintenance is
 TURN-FREE with root's green/red report
 ([operations-and-maintenance-spec-2026-08-05.md](operations-and-maintenance-spec-2026-08-05.md)
 sealed: five recommendations + explicit ephemeral root claims).
-Ambient injection r2 RULED
+Call preparation r2 RULED
 ([ambient-injection-prd-2026-08-05-r2-draft.md](ambient-injection-prd-2026-08-05-r2-draft.md):
 SCI-fork hook seam; derived all-or-nothing shorter arities with
 `db?`/`connection?` predicate dispatch — ruling #41's positional
@@ -1303,7 +1303,7 @@ and derives classified sink reachability through
 unresolved, and codec paths plus the shortest bypass counterexample; the long
 diagnostic records the current totals without a ratchet assertion. Focused
 gate: 18 tests / 118 assertions, zero failures or errors. Fresh published-fork
-door proof: 9 indexed sinks, 34 AI path classes, 41 HTML path classes, 1 codec
+SCI evaluation proof: 9 indexed sinks, 34 AI path classes, 41 HTML path classes, 1 codec
 path class, 0 projected, 0 unresolved, 75 bypasses. That measurement remains
 baseline evidence. Conversion step 1 subsequently landed recursive producers,
 the single `seon.print/fit` owner, profiles, and structured elisions; step 2
@@ -1767,7 +1767,7 @@ declared and queryable, and a question you cannot answer by query means
 a missing FACT, not a missing convention.
 
 WHAT IS BUILT AND PROVEN: reachability closed and live-proven with a
-real model turn; ctx-derived custody; the write-door custody fence;
+real model turn; ctx-derived custody; the transaction connection check;
 stream integrity; suite isolation, progress output and a loud silence
 backstop; `disarm!`'s readiness protocol (the real cause of an 87-minute
 hang, and NOT the child JVMs everyone assumed); bounded Flow submission
@@ -2441,7 +2441,7 @@ render unit in both projections with NO static scaffold path; walk =
 discovery over schema'd data; per-function-call render caching; attribute
 commit-id + conservative + code-revision staleness; dumb last-changed
 ordering with branch tie-clustering; instructions as explicit mutate-in-
-place datoms; the sci door as the only agent-code execution path with the
+place datoms; the SCI evaluation as the only agent-code execution path with the
 safety guarantee and time-limit smart defaults; accept-and-warn base-var
 redefinition under the distributed ownership protocol (message the
 namespace's owner agent; unowned namespaces get an agent on demand). The
@@ -2623,7 +2623,7 @@ before acting on it.
   measured 239,188 bytes against the 524,288 bound; before: 12 MB
   unbounded). **Upstream PR against http-kit #180/#474 pending owner
   go** — the fork retires if upstream merges.
-- **Fixes**: compute-door (evals through the bounded launcher on
+- **Fixes**: compute submission (evals through the bounded launcher on
   virtual threads, both startup-wait defects dead); CRLF exact source
   spans; Integer→Long coercion at the ONE transact choke point; failed
   stop stays addressable; S8 goal-chain routing scope; schema-cycle
@@ -2646,7 +2646,7 @@ before acting on it.
 `code-graph-end-to-end` (the living graph, three generations, five
 gaps), `config-aero-quarry` (the workflow was the loss, not the files),
 `parser-merge` (NOT merged; 24 bug classes; the repair pass is the
-front door), `old-context-assembly` (rendering was derived, MEMBERSHIP
+entry point), `old-context-assembly` (rendering was derived, MEMBERSHIP
 was hand-built — the scaling wall), `transcript-aging-quarry` (aging
 was always render-derived; no compaction job ever existed),
 `query-invalidation` (read-tracing FALSIFIED — misses absence; Datahike
@@ -3184,7 +3184,7 @@ is that auditing a moving tree measures other lanes' half-finished work.
    owner review; then the 27-file migration in owner-lane groups.
 4. Context-walk S2 (the live guinea-pig) — unfenced now that the code
    graph exists; needs the owner's S1 read first.
-5. The parser merge wave (S1–S6 + the repair front door) and the
+5. The parser merge wave (S1–S6 + the repair entry point) and the
    test-dissolution waves (8 classes, ~84 tests) — both design-gated.
 6. UI restoration stays TABLED until the context rendering system is
    proven (owner ruling 12).
@@ -3609,7 +3609,7 @@ night).** The boot COMPOSITION (task #9) is sealed (f2fecffea: start!
 threads the whole tower, REPL survives any later-layer failure, the
 throw carries the degraded instance under :seon.boot/instance) with
 seal-side EDN fixes at 35a938872 (boot.edn instance gains the three
-optional tower keys; provenance.edn gains the :seon.db.process/id
+optional environment keys; provenance.edn gains the :seon.db.process/id
 identity plus :seon.db/index facets on the two refs). ACTIVATION FIXED (e02dcfd9b,
 2026-07-27 night): the load-order coupling was real — ALL of
 reconcile's registrations moved to seon/schema/reconcile.edn (one
@@ -3937,7 +3937,7 @@ interface — "it's really just different context blocks that return
 :seon.render/ai and :seon.render/html" so BLOCKS are central to N4
 and root/agent views are one mechanism; translate the old UI's
 interaction (don't reinvent), FASTER + MORE RESPONSIVE as named
-goals; canvas unified — all renders through the guarded sci door now
+goals; canvas unified — all renders through the bounded SCI evaluation now
 (the old infinite-loop special-casing comes free from N3), target =
 agent picks ANY function returning hiccup, order is orchestrator's
 pick (problems → block pages → canvas); LOOK: port the old design
@@ -4175,7 +4175,7 @@ throwaways generated. Architecture confirmed: one JVM = one store +
 two executors; PER-CLUSTER web server stays (isolation is
 load-bearing); the HOME CLUSTER (stable port, root page = blocks
 over the advertisement inventory — every cluster listed/linked with
-liveness + problems rollup) is the single front door, a named later
+liveness + problems rollup) is the single entry point, a named later
 package. Operator v1 (babashka, ads as the ONLY truth, old bb
 operator as quarry, lands as bin/seon-fresh):
 start/status/open/stop/logs. Boot UX: full readiness banner (URL,
@@ -4579,7 +4579,7 @@ had been hiding a real hole: a nested evaluation asking for 600,000 ms
 under an outer 50 ms arm is now cut at 54 ms. Deleted from
 `seon.sci.eval`: the arm re-keying wrapper, the `invoke` pass-through,
 its `failure-value` copy, its `interrupted?` pass-through.
-Live proof on the default cluster: a door-authored spinning renderer was
+Live proof on the default cluster: a SCI-authored spinning renderer was
 deadline-stopped at 64 ms under a 60 ms limit through `render/render-ai`
 and `render-html` (1,185,678 fn-entries recorded as the spin diagnostic),
 and ordinary AI/HTML renders round-tripped on the same request.
@@ -4799,7 +4799,7 @@ cascade: `seon.cluster.armed-test`, background-work's isolated
 await/wake proof, my-edit's fresh-root receipt proof, my-shell's
 commits, the TIMED fast tier, then `bin/test --full`, then refork the
 live `default` so the running system serves the day's work, then verify
-one door eval and one operator verb.
+one SCI eval and one operator verb.
 
 OWNER RULING PENDING IMPLEMENTATION (my.web): DELETE the SSRF-style
 blocking `my-web` shipped — the hand-maintained `blocked-hostnames` set

@@ -275,7 +275,7 @@ and the authority is reconciled rather than repealed.
 
 A new `my.*` name is not free: the `:my/*` key set is under open owner
 veto (`repl-session-context-2026-08-01.md:131-134`), and ruling #20
-already frames `my.*` as "the CURATED, documented surface — a front door,
+already frames `my.*` as "the CURATED, documented surface — a entry point,
 never a wall". A `my.db/q` delegating to a `seon.db/q` that must exist
 anyway is a second name for one mechanism.
 
@@ -299,7 +299,7 @@ function of an immutable value; there is nothing to authorize (the agent
 already receives that same data rendered into its context every turn —
 the walk *is* a bulk read), nothing to serialize, nothing recovery needs
 (reads re-derive; a lost read is free by the transport law), and no
-external service on the far side. Forcing it through the effect door
+external service on the far side. Forcing it through the effect request handler
 would mean routing a pure function call through request identity and
 receipt machinery to read bytes already in this JVM's heap — the exact
 wire-shaped mistake `README.md:1825` records as State A's defect.
@@ -312,7 +312,7 @@ derivation, never a per-call agent choice. Agent code cannot opt in or
 out, so it is not an agent-facing capability at all.
 
 **Proposed reconciliation to record in the same beat as whichever option
-is chosen:** reads are ambient context; writes are the guarded door. The
+is chosen:** reads are ambient context; writes are the bounded evaluation. The
 `AGENTS.md:39` "db" family means transacting.
 
 ## Three options
@@ -383,7 +383,7 @@ exists.
 
 - **Guarantee.** Consistency with the toolkit family: it appears in
   `(dir my.db)`, its docstring renders through the program-derived `doc`
-  (`eval.clj:681-724`), and the agent's front door is one namespace
+  (`eval.clj:681-724`), and the agent's entry point is one namespace
   family.
 - **Cost / risk.** It is a second name for one mechanism. The internal
   `seon.db` still has to exist for renders (ruling 22a) and for

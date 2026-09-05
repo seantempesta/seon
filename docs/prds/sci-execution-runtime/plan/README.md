@@ -207,7 +207,7 @@ Known opens carried into that spine:
 
 | owner | what | discharged by |
 |---|---|---|
-| `src/seon/host.clj` + all `src/seon/host/` | the old guarded door, 5,715 src + ~7,000 test lines. Took with it: per-agent ctx retention (R-8a leak *and* the rejected model), the fixed 10-thread pool, D9's walk-away cancel, `policy-either`-style resource-as-agent-fault mis-filing, the second IPC path, and D7's tools.reader `*read-eval*` path | `8dc8623ad`, seams filed `ef1f815a5` |
+| `src/seon/host.clj` + all `src/seon/host/` | the old bounded evaluation, 5,715 src + ~7,000 test lines. Took with it: per-agent ctx retention (R-8a leak *and* the rejected model), the fixed 10-thread pool, D9's walk-away cancel, `policy-either`-style resource-as-agent-fault mis-filing, the second IPC path, and D7's tools.reader `*read-eval*` path | `8dc8623ad`, seams filed `ef1f815a5` |
 | `seon.error.frame` | ordering vocabulary reconciled to one spelling, `ordinal` | `ee000a4e7` |
 | `seon.sci.ctx` / `seon.sci.eval` | D15 catch-class surface; the interrupt marker proven un-swallowable by `(catch Throwable …)` | `ce5e061f2` |
 | `seon.agent.driver` | duplicate run admission; D5's residual wake loop; D2 lease readiness | `71f3cb0e0`, `1832764de`, `3946b7192` |
@@ -508,7 +508,7 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   speculative branches — are deleted; blobs need no copying (shared
   physical store, digest references). Branch-head adoption
   (`force-branch!`) is permitted only on an exclusive or frozen parent.
-- **Curation is bounded by WRITES, not by door-crossings** (owner
+- **Curation is bounded by WRITES, not by capability requests** (owner
   refinement, same session): database updates are branch-immutable and
   always curable; READ effects (web reads, fs reads) are fine ground —
   the replay re-executes them and the acceptance equivalence gate
@@ -521,7 +521,7 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   additionally rejects with a reason when it judges its task
   destructive (the honest fallback for what receipts cannot see). The
   missing fact this names: per-request read/write classification on
-  door receipts, declared by the capability leaf, never guessed (joins
+  capability receipts, declared by the capability leaf, never guessed (joins
   F8's capability family). Bare agent `transact!` spans stay uncurated
   until write provenance (F7) lands.
 - **Naming rulings (owner, 2026-08-05).** `:seon.code.*` is RETIRED
@@ -561,12 +561,12 @@ Evidence base: eight paired sol/Opus research lanes (indexed in the PRD).
   accepts this shape" and "has anyone named this" are queries. A
   computed coverage guard proves no analyzer field is silently dropped
   in future.
-- **Ambient injection** (owner, 2026-08-05): a function's own
+- **Call preparation** (owner, 2026-08-05): a function's own
   `:malli/schema` IS its request — no injection metadata, ever. The
-  runtime supplies declared-and-absent ambient values (`:seon.db/db`,
+  runtime supplies declared-and-absent supplied defaults (`:seon.db/db`,
   `:seon.db/connection`, and further batteries as declared provider
   rows); the caller always wins, undeclared functions receive nothing,
-  unavailable ambients are flat errors never nil. Design:
+  unavailable defaults are flat errors never nil. Design:
   [ambient-injection-prd](ambient-injection-prd-2026-08-05.md).
 - **Initial forms exist at BOTH levels; the most specific wins** (owner,
   2026-08-05): a cluster declares initial forms and an agent may declare
@@ -793,16 +793,16 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   interaction goes through the owner's public API by convention,
   composing with the distributed-ownership message-the-owner protocol;
   nothing enforces it as a wall.
-- **AMBIENT INJECTION r2 IS RULED (owner, same day):**
+- **Call preparation r2 IS RULED (owner, same day):**
   [ambient-injection-prd-2026-08-05-r2-draft.md](ambient-injection-prd-2026-08-05-r2-draft.md)
   graduates from draft with four rulings. (1) SEAM: one optional
   hook-aware call-preparation primitive in the maintained SCI fork —
   SCI's analyzed call path and `kernel/invoke` both route through it;
   accepted only with the ubiquitous hot-path benchmark. (2) ARITY
   MODEL — the owner's own reframing, superseding the draft's subset
-  expansion: the author writes ONE arity with the ambient slot in its
+  expansion: the author writes ONE arity with the supplied default argument in its
   schema; the runtime derives AT MOST ONE shorter call shape per arity
-  (the arity minus ALL its ambient slots), disambiguated by Datahike's
+  (the arity minus ALL its supplied default arguments), disambiguated by Datahike's
   own `db?`/`connection?` predicate on the first argument; the derived
   shape renders in `(doc f)` and the program graph like a declared
   arity; a hand-declared arity always wins. No middle-argument
@@ -1564,7 +1564,7 @@ forks, THEN farm out the production deletion sweep as specced slices.
   any contract authoring for the code-as-facts rung.
   (9) SCOPE FENCE (owner): NO multi-runtime/leaf-tier work now —
   everything stays plain Clojure with sci interpreting untrusted
-  code. Scheduling designs must not depend on a capability door that
+  code. Scheduling designs must not depend on a capability request handler that
   does not exist yet.
   (11) CONFIG UNFUCK APPROVED (owner): implement the config-aero-quarry
   reconciled design — one manifest compiler, shared apply!,
@@ -1986,7 +1986,7 @@ forks, THEN farm out the production deletion sweep as specced slices.
   (4) the ported structural floor. The port must reconcile with
   seon.sci.admit's bounded projection honestly — one walk discipline,
   no second-walker duplication without a named reason (admission =
-  safety caps at the eval door; rendering = presentation skeleton).
+  safety caps at the evaluation boundary; rendering = presentation skeleton).
   UNIFICATION (owner, same session): "the graph db walking is just an
   extension of these ideas" — the entity/distance walk IS the value
   renderer's bounded-skeleton discipline applied where nesting is
@@ -2076,7 +2076,7 @@ forks, THEN farm out the production deletion sweep as specced slices.
   workload-classification-2026-07-28.md and
   workload-scheduling-truth-2026-07-29.md, never a new mechanism.
   **Rulings 2026-07-31 #4 (owner, decision batch 2 — instruction facts,
-  ordering unification, the sci-only render door):** (1) SHARED
+  ordering unification, the SCI-only render invocation):** (1) SHARED
   INSTRUCTIONS ARE EXPLICIT DATOMS: system message, reply grammar, the
   user's global instruction files — inserted as instruction rows
   (cluster population seeds them; cluster owns the authoritative ref
@@ -2089,7 +2089,7 @@ forks, THEN farm out the production deletion sweep as specced slices.
   history keeps forensics. (3) BANDS AND PRIORITY DIE ENTIRELY:
   `:seon.render.block/band`/`priority` retire; the HTML page orders by
   recency like context (the described UX — last ~3 modified visible)
-  — one ordering mechanism everywhere. (4) THE SCI DOOR IS THE ONLY
+  — one ordering mechanism everywhere. (4) THE SCI evaluation IS THE ONLY
   WAY agent-authored render code executes, BOTH projections — every
   agent renderer is untrusted, may loop, and runs under the one
   `:interrupt-fn` + `time-limit` (flow's compute-timeout is a report,
@@ -2239,7 +2239,7 @@ forks, THEN farm out the production deletion sweep as specced slices.
   everything from scratch — creation seeds enough to get them
   acquainted and productive. The MVP-as-data: (a) THE REQUIRES ARE
   THE CURRICULUM — creation seeds the agent's namespace with requires
-  of the agent-facing toolkit namespaces (a COMPUTED set from the
+  of the agent-facing namespaces (a COMPUTED set from the
   corpus, never a hand list), so the walk renders each as a compact
   card at d2; (b) detail is INVERSE to distance — own namespace
   renders full verbatim source at d1, required namespaces render the
@@ -2859,7 +2859,7 @@ forks, THEN farm out the production deletion sweep as specced slices.
   **Ruling 2026-08-02 #44 (owner, evening): THE MCP SURFACE IS
   RATIFIED, AND STORE ECONOMICS IS UNDERSTOOD BEFORE IT IS FIXED.**
   (1) MCP per `docs/prds/mcp-surface/README.md`: THREE tools —
-  `eval_clj` (JVM and SCI-door modes), `runtime_status` (inventory,
+  `eval_clj` (JVM and SCI evaluation modes), `runtime_status` (inventory,
   health, flow), and `get_value` for drilling an elided result;
   `list_sessions` is deleted atomically when its data moves into
   status. Defaults are repository root, selected/default cluster,
@@ -3182,7 +3182,7 @@ forks, THEN farm out the production deletion sweep as specced slices.
   enforcement. Benchmark implication accepted: Inspect class C
   (typed tool-loop tasks, 7 families / 13 tasks ≈ 5%) cannot ride the
   provider seam; if ever wanted, a thin Inspect-side adapter may
-  translate their tool protocol into door-backed function calls
+  translate their tool protocol into capability function calls
   without making Seon internally tool-callful. #40 KEEP-HISTORY IS A
   PER-CLUSTER DIAL: default ON (grading forks, session restore, and
   debug archaeology read the past); scratch/eval clusters may run
@@ -3196,7 +3196,7 @@ forks, THEN farm out the production deletion sweep as specced slices.
   `plan/benchmark-mapping-2026-08-02.md`. Seon registers as an Inspect
   model provider (`@modelapi("seon")`), so benchmark tasks whose
   solvers end in `generate()` run VERBATIM (86 families / 133 tasks =
-  53% of inspect-evals today, zero doors; the shell door raises it to
+  53% of inspect-evals today, zero doors; the shell capability raises it to
   ~79%). Guardrails are constitutive: the provider RAISES on a
   non-empty tools list (an episode never silently scores tool work it
   did not do — surfaced as the sample's error, never a score), and
@@ -3204,7 +3204,7 @@ forks, THEN farm out the production deletion sweep as specced slices.
   episode semantics behind the completion interface. Benchmark-washing
   refusals recorded by name: SWE-bench/terminal-bench/commit0/
   aider-polyglot are NOT served through REPL-equivalence — their
-  toolchain is the measured object; they wait for the real shell door.
+  toolchain is the measured object; they wait for the real shell capability.
   Slice 1 = gpqa_diamond (198 samples, choice()-scored — the one-run
   falsifier of the whole seam), slice 2 = humaneval, upstream files
   untouched as the acceptance criterion.
@@ -3317,7 +3317,7 @@ forks, THEN farm out the production deletion sweep as specced slices.
   sci analysis (sci resolves every interop call at `:phase analysis`,
   proven live), no capability-leaf reachability over `:seon.fn/calls`
   (the workload-classification precedent: leaves annotated at their own
-  definition site with reasons, chains derived), and no effect-door
+  definition site with reasons, chains derived), and no effect-request
   receipt once the door exists (effectfulness is OBSERVATIONAL — a
   recorded crossing, not an analysis). Everything unproven restores
   from its stored value; a value is storable iff it passes the COMPUTED

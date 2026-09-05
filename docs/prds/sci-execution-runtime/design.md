@@ -104,7 +104,7 @@ support it and heals when they don't. No notification queue.
   per-context. Fast enough for orchestration (12 ms p50 turns).
 - Tier 1 (graduated): native compilation is admitted only after the P4/R33
   transitive call graph proves the exact source pure, capability-free, and
-  door-equivalent. The compiled projection is installed in the shared binding
+  equivalent to bounded SCI evaluation. The compiled projection is installed in the shared binding
   table; a var-epoch bump re-links every call site safely.
 - The GATE is a trust promotion, not a speed switch. Schema validity, test
   coverage, and same-result differential tests remain mandatory sanity checks,

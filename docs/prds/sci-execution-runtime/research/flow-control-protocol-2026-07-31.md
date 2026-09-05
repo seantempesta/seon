@@ -260,7 +260,7 @@ Where a verb invocation lives: in the **runtime owner namespace for that
 graph** — `seon.cluster.agent` for agent graphs, `seon.cluster` for the cluster
 graph, `seon.flow` for the work launcher — as an ordinary function taking one
 namespaced request map. Each is therefore callable from the REPL, from the
-operator's prepl form, and from the capability door. There is no lifecycle
+operator's prepl form, and from the capability request handler. There is no lifecycle
 service, registry, or manager namespace, and nothing outside those owners
 holds a graph.
 
@@ -281,7 +281,7 @@ there: in-eval runtime mutation is exactly the old-engine residue the standing
 goal rejects.
 
 An agent pausing or resuming a **child agent it created** is a genuine
-capability request through the one guarded door, because it mutates another
+capability request through the one bounded evaluation, because it mutates another
 sovereign graph's lifecycle:
 
 ```clojure

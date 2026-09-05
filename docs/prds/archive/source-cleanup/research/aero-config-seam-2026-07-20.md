@@ -110,7 +110,7 @@ overlays** (owner ruling honored; no source contradiction found).
    `state/reconcile!`; **a converged apply submits no transaction**
    (docstring :1904 — this is the idempotence contract). Cold boot calls
    it only when a manifest was explicitly selected (client.cljs:2135-2147);
-   `bin/seon config apply` is the explicit repair door (stays
+   `bin/seon config apply` is the explicit repair command (stays
    explicit-only per owner ruling).
 5. Runtime read — **two distinct paths, with different adjustability**:
    - **Per-operation acquisition (live-adjustable TODAY).** Consumers

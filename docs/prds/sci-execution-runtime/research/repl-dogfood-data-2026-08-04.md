@@ -10,7 +10,7 @@ tags: [research, repl, database, schema]
 
 The ordinary happy path is usable: registry discovery, `q`, `pull`, `entity`,
 lookup refs, a small ambient transaction, and the owner-named unique-conflict
-rejection all returned bounded ordinary data through the real SCI door. The
+rejection all returned bounded ordinary data through the real SCI evaluation. The
 session found six agent-facing defects, three newly filed and three added to
 existing notes. The highest-risk failure is silent false absence on invalid
 reads. The ugliest face is a 10,000-row transaction whose entire result became
@@ -41,7 +41,7 @@ Selected dependency revisions and boundaries:
 |---|---|---|
 | Datahike fork | `574c5f0f0db9` | `reference-code/datahike/src/datahike/api/impl.cljc:30-48`, accepted transaction shapes |
 | Malli fork | `80138076960e7820523b4cb932c5b5d1936d4e7f` | registered request/entity contracts |
-| SCI fork | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | guarded door evaluation and admission |
+| SCI fork | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | bounded evaluation and admission |
 | Seon database owner | `src/seon/db.clj:540-711,862-1113` | ambient reads, writes, bounded transaction projection, rejections |
 | Schema admission | `src/seon/schema.clj:913-950,1774-1786` | one top-level runtime declaration and projection validation |
 | Door and print owners | `src/seon/sci/eval.clj`, `src/seon/sci/admit.clj`, `src/seon/print.cljc`, `script/seon/dev/mcp.clj:532-570` | actual value face, elision, MCP blob retention |
@@ -74,7 +74,7 @@ The new schema declaration used the real top-level form:
 ```
 
 It passed the isolated agent-admission projection and returned
-`:my.dogfood/score`. MCP door evaluation intentionally creates no run, receipt,
+`:my.dogfood/score`. MCP SCI evaluation intentionally creates no run, receipt,
 or terminal transaction, so this declaration was not published as a durable
 program row. The session did not fake publication with raw Datahike schema
 maps. Durable data exercises therefore used the discovered, already admitted

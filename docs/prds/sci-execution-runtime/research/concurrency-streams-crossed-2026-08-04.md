@@ -59,7 +59,7 @@ therefore used the current shared cluster context intentionally.
 - Initial process: PID `15056`, prepl `56903`
 - Rebuild process: PID `23418`, prepl `59359`
 - Inputs: system-authored model-free runs created through
-  `seon.cluster.run/system-run-tx`, plus door evaluations for explicitly
+  `seon.cluster.run/system-run-tx`, plus SCI evaluations for explicitly
   live-only controls
 - Facts: queried through `seon.db/q`, `pull`, `pull-many`, and database history;
   no log line was treated as state
@@ -233,7 +233,7 @@ B's facts before removal were:
  :session-defs [["streams.victim2/ephemeral" 536871098]]}
 ```
 
-A door eval removed both live names. B's following form became a durable
+A SCI eval removed both live names. B's following form became a durable
 `:seon.cluster.loop/lint-rejected` receipt, but B still reached its explicit
 completion. Because the door owns no terminal transaction, both database rows
 remained. Restart restored **both** `contracted` and `ephemeral`.

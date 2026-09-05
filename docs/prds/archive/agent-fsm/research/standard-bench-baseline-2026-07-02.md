@@ -65,7 +65,7 @@ The owner names long-term planning as the capability to benchmark: a plan that
 survives interruption and spans many turns/sessions. Survey of the catalog: the
 benches that touch long-horizon agency (`gaia`, `assistant_bench`, `tau2`,
 `theagentcompany`, `swe_bench`, `osworld`, `mind2web`) are ALL case-2 — they
-need a web/tool/OS/repo sandbox the `/solve` door doesn't provide. None isolates
+need a web/tool/OS/repo sandbox the `/solve` endpoint doesn't provide. None isolates
 *planning durability across a restart*, which is the Seon-specific claim (plan
 items are DB rows, so a `bin/… restart pod` mid-task should resume from open
 items). That is why it stays a bespoke task, shaped like the spike's

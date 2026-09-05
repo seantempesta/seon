@@ -10,13 +10,13 @@ tags: [research, agent, database, pod]
 
 Namespace-targeted launch, cross-agent function reuse and repair,
 execution-child recovery, and pod restart use one native Inspect mechanism.
-The agent work enters through the existing `POST /agents/run` door. The scorer
+The agent work enters through the existing `POST /agents/run` endpoint. The scorer
 does not trust replies: after the work, it consumes one ordinary database
 snapshot containing the exact agents, namespace refs, messages, function
 history, eval/turn status, recovery facts, diagnostic-blob ref, child process
 identities, and post-restart read result required by that scenario.
 
-The static HTTP door intentionally cannot prove the whole scenario alone. It
+The static HTTP endpoint intentionally cannot prove the whole scenario alone. It
 returns only the driven agent's request-window evidence; it neither owns a pod
 restart nor exposes arbitrary cross-agent database pulls. Live execution
 therefore needs the pending ownership-fenced Inspect target lease to provide

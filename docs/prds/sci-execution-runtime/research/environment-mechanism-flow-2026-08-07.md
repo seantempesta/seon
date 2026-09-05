@@ -347,7 +347,7 @@ every submission and in every proc's `:args`. No `bound-fn*` survives.**
    quietly re-becoming the real mechanism.
 
 Why this and not "wrap io work in `bound-fn*` too" — the one-line patch that
-would make today's symptom disappear: it would make Seon's capability door
+would make today's symptom disappear: it would make Seon's capability request handler
 depend on a mechanism flow's own author declined to use anywhere in flow, and
 it would keep the environment invisible in `describe`, in `datafy`, in `ping`,
 and in the submission value itself. `impl.clj` shows the alternative is not a

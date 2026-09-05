@@ -95,7 +95,7 @@ classifying changed declarations as identical and suppressing the replacement
 transaction. `seon.cluster.run/declared-content` now calls the comparison with
 the correct argument order; the SCI install-source guard remains unchanged.
 
-The recurring boot-tower test now waits for `bootstrap:root` to close and
+The recurring boot test now waits for `bootstrap:root` to close and
 asserts all 13 receipts. The complete `seon.cluster.boot-test` gate passed 28
 tests and 137 assertions; the declared-content unit gate passed 13 tests and
 61 assertions, including identical/no-op and changed/replacement cases.

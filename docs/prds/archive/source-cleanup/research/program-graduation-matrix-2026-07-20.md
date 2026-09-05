@@ -86,7 +86,7 @@ or a written scope disposition in the register.
 
 | Finding family | Required disposition |
 |---|---|
-| Persisted program repair door | Execution/database-authority successor; do not fold into the small persist/render steering unit. |
+| Persisted program repair endpoint | Execution/database-authority successor; do not fold into the small persist/render steering unit. |
 | Frozen turn inputs and context purity | `docs/prds/archive/frozen-turn-inputs/`; its independent roadmap owns provider-retry and historical-byte purity. Source-cleanup records the dependency, not duplicate implementation. |
 | Callable projection correctness | Bounded successor unit for `compact-fn-head`, `callable-contract`, and program indexing, unless explicitly authorized into Stage 5. |
 | Context block cache-gradient ordering | Context architecture successor after volatility measurement. |

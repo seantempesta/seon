@@ -56,7 +56,7 @@ open issue with acceptance criteria
 
 Method: a branch forked from the live cluster branch (so the full 171-attribute
 schema and its facts are present) opened with `seon.cluster.store/open-branch!`
-and written through Seon's one write door `seon.cluster.store/transact!`.
+and written through Seon's one transaction function `seon.cluster.store/transact!`.
 Nothing listens on that branch, so this is Datahike's serial writer over the
 file store with no wake or render work attached. 50–100 untimed warm-ups, then
 the stated sample count. Probes: `db.clj`, `db4.clj`.
@@ -86,7 +86,7 @@ almost linearly (n=20 each, `db4.clj`):
 
 | Layer | median | rate |
 |---|---|---|
-| Seon's write door (`schema.datahike/encode-transaction`) | 0.001 ms | 1.84 M/s |
+| Seon's transaction function (`schema.datahike/encode-transaction`) | 0.001 ms | 1.84 M/s |
 | Datahike transact, in-memory backend, history on | 0.816 ms | 1,088 tx/s |
 | Datahike transact, in-memory backend, history off | 0.800 ms | 1,129 tx/s |
 | Datahike transact, **file backend** | 125.0 ms | 8 tx/s |

@@ -213,7 +213,7 @@ That attribute exists and is populated: `:seon.fn.arity/input-refs` /
 `:seon.schema/key` rows (`resources/seon/schemas/seon.fn.arity.edn:5,15`;
 written at `src/seon/program.cljc:516,554`; already consumed by the doc face at
 `src/seon/sci/eval.clj:996,1067`). Run against the live `default` cluster
-(`eval_clj`, door mode, read-only):
+(`eval_clj`, SCI evaluation mode, read-only):
 
 ```clojure
 {:input-refs  (seon.db/q '[:find ?k :where [?f :seon.fn/sym "my.message/inbox"]

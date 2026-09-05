@@ -41,7 +41,7 @@ from forms + function contracts; adding one contract should be an
 incremental validation of that contract against the existing projection,
 not a whole-registry rebuild.
 
-Acceptance: a contracted `defn` through the door costs the same order as
+Acceptance: a contracted `defn` through the SCI evaluator costs the same order as
 an uncontracted one (target < 2 ms at the current registry size), the
 admission semantics are unchanged (a bad contract is still refused with
 the same error), and a recurring test pins the cost class (e.g. the
@@ -58,7 +58,7 @@ still invokes it for every contracted definition. The destination is the
 contract-projection performance follow-up, not the completed per-cluster live-
 context wave.
 
-## Live door dogfood 2026-08-04
+## Live SCI evaluation exercise 2026-08-04
 
 An isolated `edgefaces0804` cluster reproduced the same cost class through MCP
 `eval_clj` in `door` mode, but the evaluation diagnostic made the allocation

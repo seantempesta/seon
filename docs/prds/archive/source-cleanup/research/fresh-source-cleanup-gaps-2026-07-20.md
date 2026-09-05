@@ -23,7 +23,7 @@ route datoms. Tracked by
 [[../../../seon/issues/static-routes-bypass-database-route-authority]].
 
 Do not blindly turn every row into an agent-writable datom. Classify first:
-ordinary product/debug routes are database route data; optional operator doors
+ordinary product/debug routes are database route data; optional operator endpoints
 derive from launch-bound capabilities; static assets and a proven
 pre-database readiness endpoint may remain bootstrap code.
 

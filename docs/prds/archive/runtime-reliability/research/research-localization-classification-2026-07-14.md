@@ -40,7 +40,7 @@ must not copy its findings or treat the umbrella folder as current authority.
 | `agents-claude-instruction-unification-2026-07-14` | Completed repository-wide instruction-authority cutover evidence. |
 | `architecture-target-drift-audit-2026-07-14` | The program-level architecture/roadmap carve-out decision, not one successor's source audit. |
 | `automatic-test-feedback-infrastructure-audit-2026-07-14` | Completed unit-0 edit-feedback/operator mechanism. |
-| `cljs-test-suite-speed-and-quality-audit-2026-07-12` | Historical baseline for the completed unit-0 test-door correction. |
+| `cljs-test-suite-speed-and-quality-audit-2026-07-12` | Historical baseline for the completed unit-0 test-entry-point correction. |
 | `config-coherence-audit-2026-06-28` | Broad pre-refactor configuration/provider inventory with no single remaining successor owner. |
 | `dependency-shadow-mcp-acme-audit-2026-07-14` | Crosses dependency bases, artifact flavors, MCP, ACME, and Inspect; it is the pre-integration unit-0 checkpoint. |
 | `dependency-shadow-mcp-acme-post-integration-audit-2026-07-14` | Cross-flavor integration and current simultaneous-runtime proof. |

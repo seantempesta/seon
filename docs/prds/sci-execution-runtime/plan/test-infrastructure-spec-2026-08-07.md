@@ -222,7 +222,7 @@ vendored dependency source at the boundaries below.
 | SCI | `2db3358cba91` | `reference-code/sci/src/sci/core.cljc` | `sci/fork` creates a generation-aware fork with a copied environment atom |
 | Seon store and branches | current checkout | `src/seon/cluster/store.clj`, `src/seon/cluster/registry.clj`, `src/seon/cluster.clj` | One process-root store under `flock`; one sovereign branch and connection per cluster |
 | Seon SCI | current checkout | `src/seon/sci/eval.clj` | `projection-state`, `cluster-ctx`, and `fork-for-turn` own acquisition, projection, and isolated interpreter forks |
-| Seon graphs | current checkout | `src/seon/flow.clj`, `src/seon/cluster/agent.clj`, `src/seon/cluster.clj` | `var-process` is the proc-construction door; production blueprints own graph contents |
+| Seon graphs | current checkout | `src/seon/flow.clj`, `src/seon/cluster/agent.clj`, `src/seon/cluster.clj` | `var-process` is the proc-construction function; production blueprints own graph contents |
 | Operator claims | current checkout | `resources/seon/operator/state.clj`, `src/seon/operator.clj`, `src/seon/maintenance.clj` | External claim-first authority, exact process identity, footprint observation, and no-follow cleanup already exist |
 | Test selection and runner | current checkout | `script/seon/dev/changed_test.clj`, `src/seon/test/runner.clj`, `bin/test` | Changed-test selects affected namespaces; `bin/test` is the one fresh gate |
 

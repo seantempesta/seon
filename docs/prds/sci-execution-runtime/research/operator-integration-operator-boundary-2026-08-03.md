@@ -40,7 +40,7 @@ edge and operator-related rulings in
 [`docs/prds/sci-execution-runtime/plan/README.md`](../plan/README.md), and
 [`docs/seon/architecture/architecture.md`](../../../seon/architecture/architecture.md)
 before reaching this verdict. It then read `bin/seon`,
-`script/seon/fresh_operator.clj`, and the relevant boot-tower, store, registry,
+`script/seon/fresh_operator.clj`, and the relevant boot, store, registry,
 process, runtime-custody, and operator-test owners. This report changes no
 production source.
 
@@ -58,7 +58,7 @@ only owned path.
   writer, while Seon owns the process-root file lock and branch-open refusal.
 - `core.async`/Flow is selected at
   `dc35f3e0d7bc2eef502e77982f48641f025c8051` (`1.10.874-alpha3`). Flow owns
-  cluster and agent graph lifecycle after the boot tower reaches that layer;
+  cluster and agent graph lifecycle after the boot sequence reaches that layer;
   it does not own OS process launch or the store fence.
 - Konserve is selected at
   `737697d9205e5e8f0bc08a666e4c97dad55e9dbe`; it is reached through the
@@ -234,7 +234,7 @@ lifetime:
 2. acquire the process-root store once under the lifetime fence;
 3. retain the store and root executors until process shutdown, not until the
    last cluster stops; and
-4. call the existing cluster tower for any requested branch.
+4. call the existing cluster boot sequence for any requested branch.
 
 Today `stack-tower!` acquires the store as its first cluster layer and
 `stop!` releases the last holder (`src/seon/cluster.clj:1472-1497,1780-1810`).
@@ -324,7 +324,7 @@ Recommendation: make the root REPL the sole JVM-control coordinate and make
 cluster selection an explicit argument to MCP/control functions. Cluster web
 URLs and readiness are returned by root status. Delete per-cluster prepl files
 after MCP and `bin/seon` use the root advertisement. This intentionally changes
-the current tower contract and needs an owner ruling plus architecture update;
+the current boot contract and needs an owner ruling plus architecture update;
 quietly retaining both is worse.
 
 ### Agent invocation is not the first slice

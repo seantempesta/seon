@@ -13,7 +13,7 @@ from messages it receives; message channels for messaging and error
 propagation; metadata to the database (shared), huge values over
 channels with buffers and backpressure.
 
-Grounding: `src/seon/cluster.clj` (the boot tower and today's one-proc
+Grounding: `src/seon/cluster.clj` (the boot sequence and today's one-proc
 graph), `src/seon/cluster/loop.cljc`, `src/seon/cluster/wake.cljc`,
 `src/seon/render/web.clj`, `src/seon/ai.cljc` + `src/seon/ai/stream.clj`,
 `src/seon/flow.clj`, `reference-code/core.async/.../flow.clj` +
@@ -108,7 +108,7 @@ a graph:
 | embeddings (`SEON_EMBED`) | **(c) a capability owner on `:io`** | one blocking call through the effect owner like any other leaf; bulk (re)indexing, if it ever exists, is a build-graph pipeline, not cluster machinery. |
 | corpus / N5 indexer | **(a) its own build-scoped graph**: source-enumerator (`:io`) → indexer (`:compute`) → committer (`:io`) | different lifecycle (publish command / dev watch, process-scoped) and a genuine parallel pipeline with backpressure between stages; the testbed procs in `flow.clj` are already this shape. |
 | operator advertisement | **(d) one file write at boot/stop** | the interface publishes its own readiness; a reader validates (pid, start-instant) against the process table — nothing runs. |
-| config apply / reconcile / recovery pass | **(d) boot-tower steps, strictly ordered** | each layer reads only the one below it; converged = zero writes; ordering is the contract, concurrency would be a bug. |
+| config apply / reconcile / recovery pass | **(d) boot steps, strictly ordered** | each layer reads only the one below it; converged = zero writes; ordering is the contract, concurrency would be a bug. |
 | problems / readiness / banner | **(d) pure derivations of a database value** | derive, never store; nothing to schedule. |
 | process work launcher | **(a) one process-root graph, both workload classes** | the execution substrate every cluster shares — like the root executors it must not die with any one cluster; extend the existing compute launcher to `:io` per the dispatcher design rather than building a second one (§3.4). |
 
@@ -290,7 +290,7 @@ Naming these prevents the machinery-first mistake at review time:
   lines, two prohibitions, measured.
 - **transactions and transitions** — the writer is one serial loop
   (L11); "a flow of writes" would be a second writer.
-- **the boot tower** — strictly ordered layers; readiness is published
+- **the boot sequence** — strictly ordered layers; readiness is published
   per layer, not scheduled.
 - **derivations** (prompt, problems, blocks, banner) — pure functions
   of a database value; the render proc SCHEDULES them, it does not

@@ -150,7 +150,7 @@ the current tree.
   (owner clarification 2026-07-05).** A cluster is a SWARM: one root agent
   plus any worker agents it starts, all sharing the one cluster DB
   (the owner-ratified swarm design — cross-agent coordination through the
-  shared DB, one pod). The bench door drives the ROOT agent
+  shared DB, one pod). The bench endpoint drives the ROOT agent
   (`POST /agents/run`); whether the root does the work itself or delegates
   to workers is the system's own business — capability, not configuration.
   "Done" detection is therefore root-anchored: the sample ends when the
@@ -203,7 +203,7 @@ task's environment while the bench's official oracle runs unchanged. Three
 options, argued:
 
 **Option A — Seon runtime INTO the task container (RECOMMENDED).** The
-agent's shell, fs, and cwd are natively the task env; the pod's HTTP door
+agent's shell, fs, and cwd are natively the task env; the pod's HTTP endpoint
 is the container's; no transport verb exists at all. Two mechanisms:
 
 - **A-overlay (primary): mount, don't build.** Extract the canonical
@@ -315,7 +315,7 @@ just the compiled CLJS).
   `src-inspect-ai/src/seon_inspect/cluster.py:121` — now delivered over
   `docker exec nc 127.0.0.1 <repl-port>` into the in-container wire REPL
   instead of a host loopback port), (4) drives `POST /agents/run` with the
-  issue statement (the existing door, `solver.py`), (5) hands back to the
+  issue statement (the existing endpoint, `solver.py`), (5) hands back to the
   UNCHANGED official scorer.
 - **terminal-bench (their harness, our adapter):** a `BaseAgent` subclass
   run via `tb run --agent-import-path seon_inspect.tb_adapter:SeonAgent`.
@@ -328,7 +328,7 @@ just the compiled CLJS).
   their compose files; copying ~1 GB locally is seconds per task, measured
   in slice 5 before acceptance), (2) `exec_run`s the entrypoint to boot the
   cluster, (3) drives `POST /agents/run` — since tb published no ports for
-  us, the door is driven via `exec_run(["curl", "-s", "-X", "POST",
+  us, the endpoint is driven via `exec_run(["curl", "-s", "-X", "POST",
   "http://127.0.0.1:7890/agents/run", ...])` from the harness side (an
   operator channel, not an agent-facing surface), (4) returns an
   `AgentResult`; a bridge script converts their results JSON into
@@ -351,7 +351,7 @@ just the compiled CLJS).
 One cluster per sample — now the in-container process pair booted from the
 overlay, with `POD_MAX_SAMPLES=1` trivially true (one container, one
 sample, destroyed with the sandbox). Evidence retention to
-`evals/runs/<date>-<name>/` and honest door metadata (`pod_turns`,
+`evals/runs/<date>-<name>/` and honest endpoint metadata (`pod_turns`,
 `pod_closed_reason`, `pod_model_config` — `solver.py:_record_result`)
 unchanged. The cluster and the task container are no longer independent
 processes — the cluster LIVES in the container — but the restart-resume
@@ -423,7 +423,7 @@ seon-image digest.
 - **Operational:** `--n-concurrent 1` to start (their harness parallelizes
   via ThreadPoolExecutor, `harness.py:1125`; JVM-per-task-container
   compounds host contention). The adapter translates tb's
-  `max_agent_timeout_sec` into the door's `timeout_ms` (pod cuts first,
+  `max_agent_timeout_sec` into the endpoint's `timeout_ms` (pod cuts first,
   with margin — the `config.HTTP_MARGIN_S` rule). New: the adapter measures
   and logs the runtime-injection time (`put_archive` + boot) SEPARATELY
   from agent time, so their timeout accounting is not silently eaten by
@@ -434,7 +434,7 @@ seon-image digest.
 Plan-survives-restart has no public equivalent — it stays ours, composed
 with both anchors. The choreography exists whole in `pod_planning_driver`
 (create → phase 1 → restart → phase 2 same agent → snapshot → destroy —
-`planning.py:234-298`; `agent_id` reuse is a door feature).
+`planning.py:234-298`; `agent_id` reuse is an endpoint feature).
 
 - **The structural fact, now in-container:** the task container keeps
   running; the kill target is the pod PROCESS inside it (`docker exec
@@ -449,7 +449,7 @@ with both anchors. The choreography exists whole in `pod_planning_driver`
   mid-task; the score does not change." `check_plan_trajectory`
   (`planning.py:72-121`) stays a SECONDARY diagnostic column, never a gate.
 - **Mechanics per bench:** SWE-bench — a solver variant kills/re-execs the
-  pod at a fixed wall-clock fraction (or turn count from door metadata)
+  pod at a fixed wall-clock fraction (or turn count from endpoint metadata)
   and re-posts; terminal-bench — the adapter does the same inside
   `perform_task` via `exec_run`. Rows: `swe_bench_resume` /
   `terminal_bench_resume`; headline comparison is resume-row vs plain-row
@@ -489,7 +489,7 @@ Rows: `swe_bench_verified` (+ `_resume`), `terminal_bench` (+ `_resume`),
 one `scorecard.append_row` line per run with model provenance
 (runtime-derived via `pod_model_config`), pass^k via epochs where cost
 allows (state k honestly per row), the standing regression alarm unchanged.
-tb rows enter through the bridge script; evidence (their run dir + our door
+tb rows enter through the bridge script; evidence (their run dir + our endpoint
 metadata) lands in `evals/runs/<date>-<name>/`.
 
 The **`behavior_miss`** class is unchanged and MORE essential at these
@@ -508,7 +508,7 @@ retained as evidence). Both are flake classes, never fails.
 
 Turn budgets: SWE-bench trajectories will not fit the default turn-limit 20
 (`run.cljs:92-109`) or 300s (`config.py`). Per-sample `timeout_ms` threads
-through the door (`solver.py:_resolve_timeout_ms`); the **cluster-level
+through the endpoint (`solver.py:_resolve_timeout_ms`); the **cluster-level
 default run bounds remain the standing cross-lane ask (§9) — REQUIRED for
 this suite**, sized from dev-slice turn distributions.
 
@@ -520,7 +520,7 @@ this suite**, sized from dev-slice turn distributions.
    -e DEEPSEEK_API_KEY=… seon:<tag>`. Drive `POST /agents/run` with a
    trivial task from the host. **Accept when:** the container boots to
    "agent roster" with zero host mounts of the repo; the agent returns a
-   terminal reply through the door; `docker restart` of the container with
+   terminal reply through the endpoint; `docker restart` of the container with
    the volume shows the cluster db intact (core NOT re-seeded from
    scratch); the image digest is recorded. This slice is EXPECTED to flush
    linux-first-boot surprises (the brotli4j-style markers, path
@@ -550,7 +550,7 @@ this suite**, sized from dev-slice turn distributions.
    with flake attribution, and the run-bounds ask in §9 carries measured
    evidence.
 5. **terminal-bench adapter + dev subset.** The `BaseAgent` adapter
-   (`put_archive` + exec boot + exec-curl door + results-JSON→ledger
+   (`put_archive` + exec boot + exec-curl endpoint + results-JSON→ledger
    bridge); resolve the TB 2.0 pin question (§4); freeze the subset; run
    tb's mini-swe-agent baseline + Seon arm at `--n-concurrent 1`.
    **Accept when:** `terminal_bench` rows exist for both arms on the same

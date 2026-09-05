@@ -160,7 +160,7 @@ two drivers from allocating two turns on the same open run.
   serialization. `parse-next`/`eval-form` (core.cljc:373-404) exist, but
   pre-parsing saves only the edamame pass, not analysis — not worth a
   second eval path (one mechanism).
-- **`load-fn` is the namespace-lazy door** (load.cljc:161-234), shared
+- **`load-fn` is the namespace load hook** (load.cljc:161-234), shared
   by all forks — registering a namespace makes it lazily requirable in
   every live context, and re-registering upgrades the shared vars in
   place (host/context.clj:2-15). Portable cores load through the same

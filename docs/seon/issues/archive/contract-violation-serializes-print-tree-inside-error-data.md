@@ -17,7 +17,7 @@ parse strings to recover data the runtime already had structurally.
 ## Evidence
 
 On 2026-08-04, isolated cluster `edgefaces0804` evaluated this through the
-real SCI door:
+real SCI evaluator:
 
 ```clojure
 (my.fs/read 42)

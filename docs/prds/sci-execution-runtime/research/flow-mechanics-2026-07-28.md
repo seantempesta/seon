@@ -96,7 +96,7 @@ while paused sit in the input buffer and run on resume. The same holds for
 `.get compute-timeout-ms` on the futurized transform (`flow/impl.clj:258-260`);
 a timeout raises into the error channel but the compute future itself is
 **not cancelled** — a wedged compute transform leaks its thread until it
-returns, which is why the eval door's `:interrupt-fn` remains the real
+returns, which is why the evaluation boundary's `:interrupt-fn` remains the real
 stop for agent code.
 
 ## 3. Dynamic lifecycle — 0.084 ms per full cycle, no leak
@@ -107,7 +107,7 @@ stop) of a 3-proc, 2-conn graph = 84.2 ms total, **0.084 ms/cycle**. Heap
 cached dispatch pool (idle-timeout, not per-cycle growth), 0 virtual
 residue. No leak. A graph can also be restarted after `stop`
 (`flow.clj:123-126`), state re-derived by `init` — same rebuild-freely
-economics the cluster graph already relies on (~0.3 ms, boot tower doc).
+economics the cluster graph already relies on (~0.3 ms, boot sequence doc).
 
 ## 4. Per-graph diagnostics — ping, report, error
 

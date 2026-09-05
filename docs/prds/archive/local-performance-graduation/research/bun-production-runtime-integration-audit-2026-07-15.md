@@ -18,7 +18,7 @@ descriptor must name the selected engine and exact executable identity; a Bun
 process is never an ambient `bun main.js` shortcut.
 
 The first implementation is deliberately small: generalize every maintained
-JavaScript execution door from a hard-coded `node` executable to the one closed
+JavaScript execution path from a hard-coded `node` executable to the one closed
 runtime selection, bind it into artifact/process identity, and reuse every
 existing lifecycle and readiness mechanism. Do not change the CLJS build
 target, add a second launcher, or introduce Bun-native application code in this

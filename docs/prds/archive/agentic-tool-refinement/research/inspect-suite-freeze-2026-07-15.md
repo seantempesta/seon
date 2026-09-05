@@ -84,7 +84,7 @@ rewarding plausible prose.
 ### Established benchmark boundary
 
 BFCL is the only currently integrated upstream task that directly exercises
-tool selection and composition through the ordinary pod door while retaining
+tool selection and composition through the ordinary pod HTTP endpoint while retaining
 its upstream scorer. The selected AST subset has four strata:
 `simple_python`, `multiple`, `parallel`, and `parallel_multiple`.
 

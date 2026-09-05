@@ -34,7 +34,7 @@ already-derived keyword, without adding another classifier or fallback.
 
 `eval-step!` now cases directly on the derived disposition keyword. The R52
 writer regression then traverses the same run-holding process namespace and completes an
-interaction through the guarded JVM door, terminal result facts, request
+interaction through the bounded JVM evaluator, terminal result facts, request
 transaction provenance, and the database-derived render.
 
 ## Proof

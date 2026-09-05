@@ -138,7 +138,7 @@ editing another lane's file.
 
 Landed and verified tonight: the reachability fix (agents no longer
 receive private vars, live-proven with a real model turn), ctx-derived
-custody, the write-door custody fence (`:seon.db/foreign-connection`),
+custody, the transaction connection check (`:seon.db/foreign-connection`),
 `seon.db` as the one database namespace with dual interfaces, stream
 integrity (a malformed chunk fails the completion instead of splicing),
 suite isolation and liveness, the `disarm!` readiness protocol, bounded

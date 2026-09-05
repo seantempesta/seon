@@ -52,7 +52,7 @@ three dogfood reports
 
 | Dependency or owner | Selected revision / path | Boundary read |
 |---|---|---|
-| SCI fork | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | guarded door, admission placement |
+| SCI fork | `2db3358cba913b6fbbe49c7b5b34d7ac72715924` | bounded evaluation, admission placement |
 | Datahike fork | `574c5f0f0db9411d1982769f14512cb24ef719da` | `datahike.db.DB` is a `defrecord`; transaction report shape |
 | Malli fork | `80138076960e7820523b4cb932c5b5d1936d4e7f` | `m/properties` carries arbitrary namespaced keys (ruling #47) |
 | Print grammar | `src/seon/print.cljc`, `resources/seon/schemas/seon.print.edn` | sinks, options, node faces |
@@ -83,7 +83,7 @@ an independent path.
 | Guarded producer return | `src/seon/sci/kernel.clj:315-354` | producer output is admitted with the caller's caps before leaving |
 | Receipt `result-edn` | `src/seon/sci/admit.clj:484-521` | canonical EDN of the finite node |
 | Contract-violation evidence | `src/seon/instrument.clj:123-143` | admits correctly — then discards the value (§2.1) |
-| MCP non-door face | `src/seon/cluster.clj:268-293` | `admit-value` + `print-node-window` — the correct arm |
+| MCP JVM evaluation output | `src/seon/cluster.clj:268-293` | `admit-value` + `print-node-window` — the correct arm |
 
 ### 1.2 Bypasses inside the render family (drift)
 
@@ -281,7 +281,7 @@ The exact layering bug, in three sentences:
 3. **The one cap in the right unit is computed and thrown away.**
    `src/seon/cluster.clj:283-287` computes `projected-node` via
    `print-node-window` (bytes of projected EDN). `:290-293` then branches: if
-   `evaluation-print-node` is present — i.e. **every door evaluation** — the
+   `evaluation-print-node` is present — i.e. **every SCI evaluation** — the
    face is built from `evaluation-print-node`, not `projected-node`.
    `text-face` (`:200-210`) emits it with only `length`/`level`.
 
@@ -420,7 +420,7 @@ reaches the node.
 
 | # | Seam | file:line | Change | Blast radius |
 |---|---|---|---|---|
-| 1 | MCP door face | `src/seon/cluster.clj:283-293` | use `projected-node`; `text-face` takes a profile | every agent, every lane, every orchestrator probe |
+| 1 | MCP SCI evaluation output | `src/seon/cluster.clj:283-293` | use `projected-node`; `text-face` takes a profile | every agent, every lane, every orchestrator probe |
 | 2 | `project-node` reference rule | `src/seon/sci/admit.clj:218-338` | identity-only projection | every receipt, blob, error, and face in the system |
 | 3 | Test-runner `:fail` | `src/seon/test/runner.clj:151` | route to `report-error!`'s bounded path; add an aggregate bound at `:359` | every lane's gate output |
 | 4 | `seon.print/fit` + profiles | `src/seon/print.cljc`, new schema + config rows | the one fitting owner | all consumers |
@@ -459,7 +459,7 @@ path-limited commit.
 
 Stated explicitly, with the reason:
 
-1. **Boot-tower diagnostics before the printer exists.** ui.md already grants
+1. **Boot diagnostics before the printer exists.** ui.md already grants
    this: "a recursion-fence failure, overflow callback, development panic, or
    startup/export invariant may still write a brief direct stderr diagnostic
    because it reports the projection or durability machinery itself"

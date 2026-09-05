@@ -92,7 +92,7 @@ The [parallel isolation audit](../research/parallel-isolation-audit-2026-08-07.m
   through process-global facades. A raw or virtual-thread hop silently
   drops them all together — probed for the schema registry, `seon.db/*conn*`,
   and `seon.effect/*request-context*` in one shot. Every capability request
-  crossing the guarded door on `:io` runs with no cluster identity today; it
+  crossing the bounded evaluation on `:io` runs with no cluster identity today; it
   survives only because with one cluster the fallback happens to be right.
 - **Defect II — derived state parked in process-wide slots.** One compiled
   validator generation for the whole JVM with a check-then-re-deref race;
@@ -583,7 +583,7 @@ cluster, ~2/3 of the cluster's CPU; the generation atom compares AFTER
 paying — lane dispatched). Also: a THIRD identity-collision family that
 is DECLARED, not data (identity-attribute-of-an-identity-value —
 appended to the open issue; the run-scoped regression cannot see it);
-the effect door runs handlers UNARMED and background work wrongly
+the effect request handler runs handlers UNARMED and background work wrongly
 inherits the turn's deadline latch (lane dispatched: door adopts,
 background explicitly unarmed, bounds policy PARKED for owner); the
 three `bound-fn*` sites are now deletable (same lane, with the missing

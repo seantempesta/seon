@@ -18,7 +18,7 @@ failed.
 ## Evidence
 
 On 2026-08-04, isolated cluster `edgefaces0804` defined and called this through
-the real SCI door:
+the real SCI evaluator:
 
 ```clojure
 (defn render-own-result []

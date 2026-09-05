@@ -7,7 +7,7 @@ tags: [prd, agent, context, render]
 # The context pipeline, idealized — from zero, universal in every namespace
 
 *Owner + orchestrator, 2026-08-17 night. This supersedes the
-reader-inference ladder (the "producers-of-key" tier is DELETED — the
+reader-inference ladder (the "functions returning an attribute" tier is DELETED — the
 owner's objection was correct: nothing needs to produce data the pull
 already holds). Acquisition is mechanical; curation lives in
 rendering; verbs belong to agents.*
@@ -100,7 +100,7 @@ means NOW; time travel is always spelled in the form.
 
 ## What this dissolves and what remains
 
-DISSOLVED (from the mechanics register): producers-of-key inference,
+DISSOLVED (from the mechanics register): inference from function output attributes,
 the shape index (M6), the reader-faces predicate (M7), colocation
 weighting (M8), auto-run-vs-offered (M9) — acquisition has no readers
 to select. The register rows that REMAIN are acquisition- and

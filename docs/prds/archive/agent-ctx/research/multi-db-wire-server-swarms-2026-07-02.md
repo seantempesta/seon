@@ -266,7 +266,7 @@ sharing and CPU stalls remain. **N lightweight pods on one wire-server is the
 honest parallelism architecture; fiber-local conn is a correctness fix with a
 modest concurrency bonus.**
 
-Interaction with the `/solve` door: with a fiber-local conn, `solve-once!`
+Interaction with the `/solve` endpoint: with a fiber-local conn, `solve-once!`
 binds the scratch conn for the sample's dynamic extent instead of `set!`-ing
 the root; the wake trigger and turn loop for the scratch agent read the
 fiber value (ALS propagates through Node timers/awaits — same guarantee

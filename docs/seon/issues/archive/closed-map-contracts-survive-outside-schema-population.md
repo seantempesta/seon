@@ -178,7 +178,7 @@ No load-bearing exception or third-party boundary was escalated.
   `[:=> [:cat [:map [:my.agents.open-map-proof/value :int]]] :int]`; calling
   the installed function with `:my.agents.open-map-proof/extra` returned `43`.
 - The newly populated cluster evaluated packaged form 8 through the guarded
-  door and returned `:seon.schema/undefined-contract` with the readable
+  SCI evaluator and returned `:seon.schema/undefined-contract` with the readable
   `uses :any in an agent-authored contract` refusal.
 - The unrelated `seon.sci.eval-test` gate is red at the landed foreign
   boundary: 51 tests / 243 assertions, five failures in

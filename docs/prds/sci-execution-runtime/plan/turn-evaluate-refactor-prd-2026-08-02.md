@@ -38,7 +38,7 @@ files, and **five of them touched both in the same commit**:
 
 | Commit | Subject | `loop.cljc` | `eval.clj` |
 |---|---|---|---|
-| `c6db32f56` | Make the eval door REPL-native: arity errors and bare dir/doc | — | +74 −14 |
+| `c6db32f56` | Make the evaluation boundary REPL-native: arity errors and bare dir/doc | — | +74 −14 |
 | `5599d72b2` | Port seon.db q and pull into the fresh JVM | +3 −2 | — |
 | `be37aac87` | Store oversized eval results as reachable blobs | +46 −4 | — |
 | `88ebbde51` | Make SCI evaluation arms reload-safe | — | +18 −19 |

@@ -210,7 +210,7 @@ symbols, so re-evaluating a rule or a renderer changes the next render exactly a
 the default does.
 
 `data-panel` is N4's instance: `:seon.render/html`'s generic default, any value
-as a readable panel, bounded by the same `:seon.sci.admit/caps` the eval door
+as a readable panel, bounded by the same `:seon.sci.admit/caps` the evaluation boundary
 carries rather than a second set of size dials. It is the lowest-fidelity
 renderer on purpose — a clever floor would compete with the specialists instead
 of backstopping them.
@@ -416,7 +416,7 @@ follow" has seven concrete causes in the quarry, each an acceptance row:
 DEAD (zero callers) — quarry it, do not wire it.
 
 **Package 6 — canvas.** Unified: any agent function returning hiccup, evaluated
-through N3's guarded door, so the old infinite-loop special-casing comes free. A
+through N3's bounded evaluation, so the old infinite-loop special-casing comes free. A
 pinned canvas is a block whose html render is the pinned symbol; the quarry's
 separate structural checker (`src-old/seon/render/canvas.cljc:187-190,289`) is
 superseded by `hiccup?` plus admission — two validators is one too many.

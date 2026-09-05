@@ -12,15 +12,15 @@ tags: [research, agent]
 The mechanism is a custom inspect `@solver` that calls the Seon pod as an HTTP
 client (dataset + host-side scorer stay in inspect's process; the pod agent is
 the solver). Proven live end-to-end: a real inspect `eval()` drove real DeepSeek
-Seon agents through a thin `/solve` HTTP door; each agent ran its OWN multi-turn
+Seon agents through a thin `/solve` HTTP endpoint; each agent ran its OWN multi-turn
 FSM (store facts → recall → answer → `complete`), and inspect's host-side
 `includes()` scorer graded the replies — **inspect never managed a single turn.**
 
 - **Bridge works?** YES. Mechanism = **custom `@solver` → HTTP → pod**, NOT the
   model-proxy. Seon owns the loop; inspect is the outer shell only.
-- **Boundary add:** ONE thin request/response door (`POST /solve`) that reuses the
+- **Boundary add:** ONE thin request/response endpoint (`POST /solve`) that reuses the
   gym driver's start-and-await-read recipe. **ZERO changes to the agent loop,
-  context path, eval path, or FSM.** (For the smoke this door was stood up as a
+  context path, eval path, or FSM.** (For the smoke this endpoint was stood up as a
   throwaway in-pod HTTP shim on :7899 — same handler, no rebuild, no store wipe;
   productionizing = mounting the identical handler in `seon.web.serve`.)
 - **Smoke result:** 3/3 memory samples driven; agents took **2–5 real turns / 6–7
@@ -73,7 +73,7 @@ evaluate inspect-ai as the generalization-probe host once a win exists").
 
 **Confirmation for the owner: ZERO changes to the agent loop / context / eval /
 FSM.** The only new code is (a) inspect-side `@solver`/`@task` (`seon_solver.py`),
-and (b) the thin `POST /solve` boundary door — a start-and-await-read wrapper,
+and (b) the thin `POST /solve` HTTP endpoint — a start-and-await-read wrapper,
 the same shape as `test/seon/gym/driver.cljs` `drive-loop!`.
 
 ---
@@ -680,7 +680,7 @@ this is `/solve`-only. The benchmark harness (B1) can now re-run B2 for a real b
 
 ## 6. Blockers / caveats
 
-- **No blockers to case-1.** The one honest caveat: the smoke's `/solve` door was a
+- **No blockers to case-1.** The one honest caveat: the smoke's `/solve` endpoint was a
   throwaway in-pod shim (stood up via MCP eval — the fastest path to a live proof).
   Productionizing is mounting the identical handler in `seon.web.serve` with a Malli
   request/response schema + a seeded `:seon.route/*` row — a small, well-scoped

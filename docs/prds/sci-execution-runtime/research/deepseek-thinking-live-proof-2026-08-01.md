@@ -325,7 +325,7 @@ pin the documented required shape, not the current server's permissiveness.
   failure retaining finish and usage evidence.
 - A recorded assistant tool call is replayed byte-for-byte with
   `reasoning_content` before its tool result and in subsequent turns.
-- The real-door proof demonstrates one enabled turn with reasoning present,
+- The real SCI evaluation proof demonstrates one enabled turn with reasoning present,
   complete visible reply, and receipt usage, plus one disabled turn with no
   reasoning field or reasoning-token detail.
 
