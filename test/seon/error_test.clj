@@ -14,6 +14,7 @@
   is what proves the one codec ran — a raw `pr-str` of a flow report
   carrying `::flow/state` does not read back, and for a state holding a
   reference cycle it does not even return (`admit.clj:82-92`, probed).
+  The normalizer excludes that disposable proc state before admission.
   Fixed seed 20260727, per-trial isolation by construction: the
   normalizer is pure, opens nothing and writes nothing, so a trial's
   only state is the source it is handed.
@@ -343,24 +344,25 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest the-proc-state-never-escapes-raw
-  ;; asserted STRUCTURALLY over the read-back value rather than as a
-  ;; substring of the print: `*print-namespace-maps*` is true here, so
-  ;; the marker prints `#:seon.sci.admit{:reference …}` and a string
-  ;; match would be testing the printer's settings
-  (let [fact (error/normalize (request (transform-error (ex-info "boom" {}))))
+  ;; Asserted structurally over the read-back value rather than as a
+  ;; substring of the print.
+  (let [prepared (error/prepare
+                  (request (transform-error (ex-info "boom" {}))))
+        fact (:seon.error/fact prepared)
         read-back (#'admit/semantic-value
-                   (edn/read-string (:seon.error/data-edn fact)))]
+                   (edn/read-string (:seon.error/data-edn fact)))
+        full-read-back (#'admit/semantic-value
+                        (edn/read-string
+                         (:seon.error/data-content prepared)))]
     (testing "a value pr-str cannot survive reads back as EDN"
       (is (map? read-back)))
-    (testing "the live reference is OPAQUE, never entered — which is what
-    makes the cycle unrepresentable rather than detected"
-      (is (= {:seon.sci.admit/opaque "clojure.lang.Atom"}
-             (get-in read-back [::flow/state
-                                :seon.cluster.loop/cluster
-                                :seon.db/connection]))))
+    (testing "disposable proc state is omitted before admission"
+      (is (not (contains? read-back ::flow/state)))
+      (is (not (contains? full-read-back ::flow/state))))
     (testing "and the Throwable is the printer's bounded data projection,
-    never the live Throwable"
-      (let [projected (get read-back ::flow/ex)]
+    never the live Throwable; the complete meaningful projection remains
+    available for blob retrieval even when the inline preview elides it"
+      (let [projected (get full-read-back ::flow/ex)]
         (is (map? projected))
         (is (= "boom" (:cause projected)))
         (is (= {} (:data projected)))))))
@@ -380,6 +382,67 @@
         "a source that fits is not reported as capped")
     (is (true? (:seon.error/capped? wide))
         "a source wider than the caps says so")))
+
+(deftest fault-preparation-bounds-the-fact-and-omits-disposable-flow-state
+  (let [inline-limit 4096
+        large (apply str (repeat 100000 "e"))
+        disposable (str "DISPOSABLE-PROC-STATE-" large)
+        failure
+        (ex-info large
+                 {:seon.error/kind :seon.instrument/contract-violated
+                  :seon.error/data
+                  {:seon.instrument/fn "seon.render.data/at"
+                   :seon.instrument/arm :input
+                   :seon.instrument/schema large
+                   :seon.instrument/args large}})
+        prepared
+        (error/prepare
+         (assoc (request (assoc (transform-error failure)
+                                ::flow/state {:cached-render disposable}))
+                :seon.error/inline-limit inline-limit))
+        fact (:seon.error/fact prepared)
+        content (:seon.error/data-content prepared)
+        fact-bytes (alength (.getBytes (pr-str fact) "UTF-8"))]
+    (is (> (:seon.error/data-size fact) inline-limit))
+    (is (<= fact-bytes inline-limit)
+        (str "stored fault fact was " fact-bytes " UTF-8 bytes"))
+    (is (<= (alength (.getBytes (:seon.error/data-edn fact) "UTF-8"))
+            inline-limit))
+    (is (not (str/includes? content "DISPOSABLE-PROC-STATE-")))
+    (is (str/includes? content "seon.render.data/at"))
+    (is (str/includes? content large)
+        "the original diagnostic string remains available for blob retrieval")
+    (is (str/includes? (:seon.error/message fact) "more characters"))
+    (is (str/includes? (:seon.instrument/expected fact) "more characters"))
+    (is (str/includes? (:seon.instrument/args fact) "more characters"))
+    (is (every? #(some? (get fact %))
+                [:seon.error/id :seon.error/kind :seon.error/message
+                 :seon.error/signature :seon.error/data-edn
+                 :seon.error/data-size]))))
+
+(deftest fitting-can-require-a-blob-below-the-content-size-threshold
+  (let [inline-limit 4096
+        near-limit (apply str (repeat 2000 "q"))
+        prepared
+        (error/prepare
+         (assoc (request {:seon.error/kind :seon.error-test/near-limit
+                          :seon.error/message near-limit})
+                :seon.error/inline-limit inline-limit))
+        fact (:seon.error/fact prepared)
+        small
+        (error/prepare
+         (assoc (request {:seon.error/kind :seon.error-test/short
+                          :seon.error/message "short"})
+                :seon.error/inline-limit inline-limit))]
+    (is (<= (:seon.error/data-size fact) inline-limit))
+    (is (not= (:seon.error/data-edn fact)
+              (:seon.error/data-content prepared))
+        "whole-fact fitting can shorten evidence below the size threshold")
+    (is (true? (:seon.error/capped? fact)))
+    (is (= (get-in small [:seon.error/fact :seon.error/data-edn])
+           (:seon.error/data-content small))
+        "small evidence is not changed gratuitously")
+    (is (false? (get-in small [:seon.error/fact :seon.error/capped?])))))
 
 (deftest normalization-never-throws
   ;; the recursion fence, stated as a test: a source whose realization

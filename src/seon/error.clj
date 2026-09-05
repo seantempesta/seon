@@ -54,7 +54,7 @@
   CLASSIFICATION IS THE CHANNEL, NOT A PREDICATE, and that is why there
   is no `agent-vs-core` function here. `seon.sci.eval/evaluate` never
   throws, so an agent's mistake is by construction a VALUE and can only
-  become a receipt; anything arriving on `::flow/error` is a Throwable
+  become an evaluation result; anything arriving on `::flow/error` is a Throwable
   that escaped our own code, which is definitionally ours
   (`flow_test.clj:474-477` already asserts the negative half). Naming
   the family is therefore free, and no lookup, list or ambient scope
@@ -69,9 +69,11 @@
   `:seon.error/kind` in the corpus is a fact. A `[:enum]` would be a
   hand-maintained copy of everyone else's vocabulary.
 
-  ONE CODEC, AND IT IS `seon.sci.admit/admit`. The source is projected
-  through value admission before anything is printed — with the config
-  caps and `(constantly nil)` as the interrupt-fn, which is sound
+  ONE CODEC, AND IT IS `seon.sci.admit/admit`. The meaningful source is
+  projected through value admission before anything is printed. A flow
+  report's disposable `::flow/state` is excluded at this boundary. The caller's
+  declared admission caps remain authoritative. `(constantly nil)` is supplied
+  as the interrupt-fn, which is sound
   because admission is pure given the value and the caps
   (`admit.clj:128-129`). This is not a preference: two of flow's three
   shapes carry `::flow/state`, which for the run loop is the proc's
@@ -141,14 +143,17 @@
   (:require [clojure.core.async.flow :as-alias flow]
             [clojure.edn :as edn]
             [clojure.string :as str]
+            [seon.ai.tokens :as tokens]
             [seon.db :as db]
             [seon.error.refusal :as error.refusal]
+            [seon.print :as print]
             [seon.render.route :as render.route]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
-            [seon.sci.admit :as admit]))
+            [seon.sci.admit :as admit])
+  (:import [java.nio.charset StandardCharsets]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -330,6 +335,162 @@
 ;;; The normalizer
 ;;; ---------------------------------------------------------------------------
 
+(def ^:private default-inline-limit
+  ;; `seon.config` depends on this namespace, so bare `normalize` cannot read
+  ;; its shipped manifest without a cycle. This is the bootstrap value of the
+  ;; existing result blob threshold; running committers supply the live fact.
+  4096)
+
+(defn- meaningful-source
+  [source]
+  (if (and (map? source) (instance? Throwable (::flow/ex source)))
+    (dissoc source ::flow/state)
+    source))
+
+(defn- evidence-profile
+  [caps inline-limit token-budget]
+  {:seon.render.profile/id :seon.render.profile/error
+   :seon.render.profile/token-budget token-budget
+   :seon.render.profile/max-depth
+   (:seon.config.eval.result/max-depth caps)
+   :seon.render.profile/max-children
+   (:seon.config.eval.result/max-collection caps)
+   :seon.render.profile/composition :single-line
+   :seon.print/requery-refusal
+   (str "Full fault evidence is " inline-limit
+        " or more inline characters and requires its blob digest.")})
+
+(defn- utf8-size
+  [value]
+  (alength (.getBytes ^String value StandardCharsets/UTF_8)))
+
+(defn- fitted-node
+  [node caps inline-limit token-budget]
+  (let [profile (evidence-profile caps inline-limit token-budget)]
+    (-> node
+        (print/enrich-elisions profile)
+        (print/fit profile))))
+
+(defn- fitted-evidence-edn
+  [node caps inline-limit]
+  (loop [token-budget
+         (max 1 (tokens/estimate-of-characters inline-limit))]
+    (let [fitted (fitted-node node caps inline-limit token-budget)
+          serialized (admit/print-node-edn fitted)]
+      (cond
+        (<= (utf8-size serialized) inline-limit) serialized
+        (> token-budget 1) (recur (max 1 (quot token-budget 2)))
+        :else serialized))))
+
+(defn- bounded-text
+  [value caps inline-limit]
+  (let [admitted (admit/admit
+                  {:seon.sci.admit/value value
+                   :seon.sci.admit/interrupt-fn (constantly nil)
+                   :seon.sci.admit/caps caps
+                   :seon.config/on-core-error :record})]
+    (loop [token-budget
+           (max 1 (tokens/estimate-of-characters inline-limit))]
+      (let [fitted (fitted-node (:seon.sci.admit/print-node admitted)
+                                caps inline-limit token-budget)
+            projected (admit/semantic-value fitted)
+            text (if (string? projected)
+                   projected
+                   (print/emit-text fitted (print/default-options)))]
+        (if (or (<= (utf8-size text) inline-limit)
+                (= 1 token-budget))
+          text
+          (recur (max 1 (quot token-budget 2))))))))
+
+(defn- projected-instrument-data
+  [source]
+  (let [projected-error (if (map? (::flow/ex source))
+                          (:data (::flow/ex source))
+                          source)]
+    (when (= :seon.instrument/contract-violated
+             (:seon.error/kind projected-error))
+      (:seon.error/data projected-error))))
+
+(defn- fit-fact-payload
+  [base-fact node message-value instrument-data caps inline-limit]
+  (let [expected (or (:seon.instrument/schema instrument-data)
+                     (:seon.error/diagnostic-expected instrument-data))
+        arguments (or (:seon.instrument/args instrument-data)
+                      (:seon.error/diagnostic-offending instrument-data))
+        payload-count (+ 2 (if expected 1 0) (if arguments 1 0))
+        available (max 1 (- inline-limit (utf8-size (pr-str base-fact))))]
+    (loop [field-limit (max 1 (quot available payload-count))]
+      (let [fact
+            (cond-> (assoc base-fact
+                           :seon.error/message
+                           (bounded-text message-value caps field-limit)
+                           :seon.error/data-edn
+                           (fitted-evidence-edn node caps field-limit))
+              expected
+              (assoc :seon.instrument/expected
+                     (bounded-text expected caps field-limit))
+              arguments
+              (assoc :seon.instrument/args
+                     (bounded-text arguments caps field-limit)))]
+        (if (or (<= (utf8-size (pr-str fact)) inline-limit)
+                (= 1 field-limit))
+          fact
+          (recur (max 1 (quot field-limit 2))))))))
+
+(defn prepare
+  "Prepare one bounded fact and its full meaningful admitted evidence."
+  {:malli/schema [:=> [:cat :seon.error/prepare-request]
+                  :seon.error/prepared]}
+  [{:seon.error/keys [source id at process basis-t inline-limit]
+    :seon.sci.admit/keys [caps]
+    run-id :seon.cluster.run/id
+    agent-id :seon.cluster.agent/id}]
+  (let [failure (throwable source)
+        class-name (when failure (.getName (class failure)))
+        error-kind (kind source failure)
+        source (meaningful-source source)
+        admitted (admit/admit {:seon.sci.admit/value source
+                               :seon.sci.admit/interrupt-fn (constantly nil)
+                               :seon.sci.admit/caps caps
+                               :seon.config/on-core-error :record})
+        full-edn (:seon.cluster.eval/result-edn admitted)
+        inline-limit (or inline-limit default-inline-limit)
+        projected-source (:seon.sci.admit/value admitted)
+        instrument-data (projected-instrument-data projected-source)
+        flow? (map? source)
+        data-size (utf8-size full-edn)
+        base-fact
+        (cond-> {:seon.error/id id
+                 :seon.error/at at
+                 :seon.error/process process
+                 :seon.error/kind error-kind
+                 :seon.error/signature (signature process class-name error-kind
+                                                  (top-frame failure))
+                 :seon.error/data-size data-size
+                 :seon.error/capped? true}
+          class-name (assoc :seon.error/throwable-class class-name)
+          (and flow? (::flow/pid source))
+          (assoc :seon.error/proc (::flow/pid source))
+          (and flow? (::flow/op source)) (assoc :seon.error/op (::flow/op source))
+          (and flow? (::flow/cid source))
+          (assoc :seon.error/cid (::flow/cid source))
+          (:seon.instrument/fn instrument-data)
+          (assoc :seon.instrument/fn (:seon.instrument/fn instrument-data))
+          (:seon.instrument/arm instrument-data)
+          (assoc :seon.instrument/arm (:seon.instrument/arm instrument-data))
+          basis-t (assoc :seon.error/basis-t basis-t)
+          run-id (assoc :seon.error/run [:seon.cluster.run/id run-id])
+          agent-id (assoc :seon.error/agent
+                          [:seon.cluster.agent/id agent-id]))
+        fact (fit-fact-payload
+              base-fact (:seon.sci.admit/print-node admitted)
+              (message source failure) instrument-data caps inline-limit)
+        fact (assoc fact :seon.error/capped?
+                    (boolean (or (:seon.sci.admit/capped? admitted)
+                                 (not= full-edn (:seon.error/data-edn fact)))))]
+    {:seon.error/fact fact
+     :seon.error/data-content full-edn}))
+
 (defn normalize
   "Any error into the one durable fact. Total, pure, and never throws.
   Recognizes the source structurally — a map carrying `::flow/ex` is a
@@ -345,11 +506,13 @@
     absent and never empty — for a source nothing recognizes it names
     what arrived, because \"an error we cannot describe\" still has to
     say that much;
-  - projects the WHOLE source — including `::flow/state` and
-    `::flow/msg` — through `seon.sci.admit/admit` in `:record` mode with
-    the request's caps and `(constantly nil)` as the interrupt-fn, and
-    keeps the printed projection as `data-edn` with admission's own
-    `capped?` beside it;
+  - projects the meaningful source — retaining `::flow/msg` while excluding
+    disposable `::flow/state` — through `seon.sci.admit/admit` in `:record`
+    mode with the request's declared caps and `(constantly nil)` as the
+    interrupt-fn;
+  - stores a fitted projection in `data-edn`, records the full meaningful
+    projection's UTF-8 byte size in `data-size`, and marks `capped?` whenever
+    admission or inline fitting omitted evidence;
   - lifts `::flow/pid`, `::flow/op` and `::flow/cid` into `proc`, `op`
     and `cid`, each present exactly when the arriving shape carried it;
   - computes `signature` as `sha-256` over
@@ -362,52 +525,8 @@
   one. The result is transactable as-is — every key is a declared
   attribute of `:seon.error/fact` and nothing rides along."
   {:malli/schema [:=> [:cat :seon.error/normalize-request] :seon.error/fact]}
-  [{:seon.error/keys [source id at process basis-t]
-    :seon.sci.admit/keys [caps]
-    run-id :seon.cluster.run/id
-    agent-id :seon.cluster.agent/id}]
-  (let [failure (throwable source)
-        failure-data (when failure (refusal failure))
-        instrument-data (when (= :seon.instrument/contract-violated
-                                 (:seon.error/kind failure-data))
-                          (:seon.error/data failure-data))
-        class-name (when failure (.getName (class failure)))
-        error-kind (kind source failure)
-        ;; :record UNCONDITIONALLY. The dial governs the failing site;
-        ;; the recorder may not panic, because a panic here destroys the
-        ;; one record of the original failure.
-        admitted (admit/admit {:seon.sci.admit/value source
-                               :seon.sci.admit/interrupt-fn (constantly nil)
-                               :seon.sci.admit/caps caps
-                               :seon.config/on-core-error :record})
-        flow? (map? source)]
-    (cond-> {:seon.error/id id
-             :seon.error/at at
-             :seon.error/process process
-             :seon.error/kind error-kind
-             :seon.error/message (message source failure)
-             :seon.error/signature (signature process class-name error-kind
-                                              (top-frame failure))
-             :seon.error/data-edn (:seon.cluster.eval/result-edn admitted)
-             :seon.error/capped? (:seon.sci.admit/capped? admitted)}
-      class-name (assoc :seon.error/throwable-class class-name)
-      ;; each flow key rides exactly when the arriving shape carried it,
-      ;; because absence is the state — two of the three shapes have no
-      ;; op and one has no cid
-      (and flow? (::flow/pid source)) (assoc :seon.error/proc (::flow/pid source))
-      (and flow? (::flow/op source)) (assoc :seon.error/op (::flow/op source))
-      (and flow? (::flow/cid source)) (assoc :seon.error/cid (::flow/cid source))
-      (:seon.instrument/fn instrument-data)
-      (assoc :seon.instrument/fn (:seon.instrument/fn instrument-data))
-      (:seon.instrument/arm instrument-data)
-      (assoc :seon.instrument/arm (:seon.instrument/arm instrument-data))
-      (:seon.instrument/schema instrument-data)
-      (assoc :seon.instrument/expected (:seon.instrument/schema instrument-data))
-      (:seon.instrument/args instrument-data)
-      (assoc :seon.instrument/args (:seon.instrument/args instrument-data))
-      basis-t (assoc :seon.error/basis-t basis-t)
-      run-id (assoc :seon.error/run [:seon.cluster.run/id run-id])
-      agent-id (assoc :seon.error/agent [:seon.cluster.agent/id agent-id]))))
+  [request]
+  (:seon.error/fact (prepare request)))
 
 (defn value
   "The flat `:seon.error/value` a caller branches on, from a fact.
@@ -875,23 +994,41 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.error/commit-tx-request]
                   :seon.store/transaction-data]}
-  [db {:seon.error/keys [source id at process basis-t]
+  [db {:seon.error/keys [source id at process basis-t inline-limit]
+       supplied-fact :seon.error/fact
        :seon.sci.admit/keys [caps]
        run-id :seon.cluster.run/id
        agent-id :seon.cluster.agent/id
        escalate-to :seon.config.error/escalate-to
        limit :seon.config.error/recurrence-limit}]
-  (let [fact (normalize (cond-> {:seon.error/source source
-                                 :seon.error/id id
-                                 :seon.error/at at
-                                 :seon.error/process process
-                                 :seon.sci.admit/caps caps}
-                          basis-t (assoc :seon.error/basis-t basis-t)
-                          (and run-id (entity-exists? db :seon.cluster.run/id run-id))
-                          (assoc :seon.cluster.run/id run-id)
-                          (and agent-id
-                               (entity-exists? db :seon.cluster.agent/id agent-id))
-                          (assoc :seon.cluster.agent/id agent-id)))
+  (let [fact (or supplied-fact
+                 (normalize
+                  (cond-> {:seon.error/source source
+                           :seon.error/id id
+                           :seon.error/at at
+                           :seon.error/process process
+                           :seon.sci.admit/caps caps}
+                    inline-limit
+                    (assoc :seon.error/inline-limit inline-limit)
+                    basis-t (assoc :seon.error/basis-t basis-t)
+                    (and run-id
+                         (entity-exists? db :seon.cluster.run/id run-id))
+                    (assoc :seon.cluster.run/id run-id)
+                    (and agent-id
+                         (entity-exists? db :seon.cluster.agent/id agent-id))
+                    (assoc :seon.cluster.agent/id agent-id))))
+        fact (cond-> fact
+               (and (:seon.error/run fact)
+                    (not (entity-exists?
+                          db :seon.cluster.run/id
+                          (second (:seon.error/run fact)))))
+               (dissoc :seon.error/run)
+
+               (and (:seon.error/agent fact)
+                    (not (entity-exists?
+                          db :seon.cluster.agent/id
+                          (second (:seon.error/agent fact)))))
+               (dissoc :seon.error/agent))
         occurrence (inc (recurrence db (:seon.error/signature fact) process))
         ;; A MISASSEMBLED CALLER MUST NOT BREAK THE RECORDER. The limit
         ;; is a required request key, but requiredness is a contract and

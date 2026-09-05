@@ -24,9 +24,13 @@
                :seon.cluster.agent/id]
               [:seon.config.error/escalate-to
                {:optional true}
-               :seon.config.error/escalate-to]],
+               :seon.config.error/escalate-to]
+              [:seon.error/fact {:optional true} :seon.error/fact]],
              :data :map,
+             :data-blob :seon.blob/digest,
+             :data-content :string,
              :data-edn :string,
+             :data-size [:int {:min 0}],
              :dropped-fault-count [:int {:min 1}],
              :dropped-fault-digest [:string {:min 64, :max 64}],
              :evidence [:tuple [:enum :seon.error/id] :seon.error/id],
@@ -42,6 +46,12 @@
               [:seon.error/message :seon.error/message]
               [:seon.error/signature :seon.error/signature]
               [:seon.error/data-edn :seon.error/data-edn]
+              [:seon.error/data-size
+               {:optional true}
+               :seon.error/data-size]
+              [:seon.error/data-blob
+               {:optional true}
+               :seon.error/data-blob]
               [:seon.error/capped? :seon.error/capped?]
               [:seon.error/throwable-class
                {:optional true}
@@ -90,7 +100,16 @@
                :seon.cluster.run/id]
               [:seon.cluster.agent/id
                {:optional true}
-               :seon.cluster.agent/id]],
+               :seon.cluster.agent/id]
+              [:seon.error/inline-limit
+               {:optional true}
+               :seon.error/inline-limit]],
+             :inline-limit [:int {:min 256}],
+             :prepare-request :seon.error/normalize-request,
+             :prepared
+             [:map
+              [:seon.error/fact :seon.error/fact]
+              [:seon.error/data-content :seon.error/data-content]],
              :notice
              [:map
               [:seon.error/fact :seon.error/fact]
@@ -163,7 +182,13 @@
               [:seon.error/message :seon.error/message]],
              :signature [:re #:seon.db{:index true} "^[0-9a-f]{64}$"],
              :throwable-class [:string {:min 1}],
-             :source :any,
+             :source
+             [:any
+              {:seon.schema.admission/exemption
+               :seon.schema.admission/polymorphic-boundary
+               :seon.schema.admission/reason
+               "The error boundary must normalize any value or Throwable that escaped a failing subsystem."
+               :gen/elements [nil true 0 "failure" :failure [] {} #{}]}],
              :value
              [:map
               [:seon.error/kind :seon.error/kind]

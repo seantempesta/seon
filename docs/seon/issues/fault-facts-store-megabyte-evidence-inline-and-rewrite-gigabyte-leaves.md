@@ -57,8 +57,8 @@ commit.
   evidence at the seam — admit `data-edn` through the one `seon.print/fit`
   owner with the fault profile, and stage anything above the existing
   result blob threshold as a blob with a digest on the fact, exactly as
-  eval results do. A fault fact is a few hundred bytes plus a digest, never
-  megabytes.
+  evaluation results do. A fault fact remains within the configured inline
+  byte limit and carries a digest for larger meaningful evidence.
 - `seon.render.data/at` contract violation storm: a separate defect on the
   render side (what is passing a flow proc state where a value is
   expected); file/attach when the render owner reads this.
@@ -75,3 +75,33 @@ commit.
   record the footprint after reset in `bin/seon status`.
 - A fault storm of 500 identical violations grows the store by kilobytes,
   measured.
+
+## Implementation checkpoint
+
+On 2026-09-05, `seon.error/prepare` was added as the pure boundary that
+returns a fitted fact and the full meaningful admitted evidence. It excludes
+the flow proc's disposable `::flow/state`, bounds the complete serialized fact
+to the supplied UTF-8 inline limit, and retains the full meaningful projection
+for the existing blob publication mechanism. The focused regression
+`seon.error-test/fault-preparation-bounds-the-fact-and-omits-disposable-flow-state`
+passed with 9 assertions, including a 100,000-character Throwable message,
+contract schema, and offending arguments under a 4,096-byte fact bound.
+
+The issue remains open pending the file-backed 500-fault growth measurement
+and live reset-boundary verification required above.
+
+The first combined file-backed gate (`tmp/test-runs/run.7Lwok8`) ran 34 tests
+and 224 assertions with 6 failures and no errors. Its 500-fault measurement
+was 56,381,169 bytes before the first fault, 56,457,046 after one, and
+147,575,152 after 500: 91,193,983 bytes of growth. The largest inline fact was
+658 bytes, so inline bounding worked while the repeated full-evidence blob
+publication still failed the required storage-growth bound. This is measured
+red evidence, not acceptance.
+
+A second pure probe found a publication edge below the nominal threshold: a
+2,000-character flat error produced 2,289 bytes of admitted `data-content`, a
+520-byte fitted `data-edn`, and a 1,941-byte serialized fact. A publisher that
+stages only when `data-size` exceeds 4,096 would discard the omitted admitted
+evidence. Blob publication must therefore also occur whenever fitted
+`data-edn` differs from `data-content`; short unchanged evidence remains inline
+without a blob.
