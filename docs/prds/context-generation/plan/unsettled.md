@@ -479,6 +479,25 @@ Lab PRD's precondition (§6) is met; wave 1A waits only on the owner's go.
 Shared root reset to HEAD and `default` running at http://127.0.0.1:7994
 (this fix lands there on the next restart).
 
+## 2026-09-05 (day 2, late afternoon) — run-loop velocity and the print floor landed
+
+`run-loop-velocity-2`: gate `bin/test seon.cluster.loop-test
+seon.cluster.turn-test` 80 / 500 / 0; the redundant settlement projection
+build (360–550 ms per form) is gone (`4e68150f5`), fixtures repaired
+(`25adaeaf8`), the issue updated with the measured table (`c2cc606d0`).
+Remaining floor per form: `analyze-form` 228–311 ms — the cached prelude is
+reached but the form is REPARSED; next lane `analyze-form-speed` (fn.clj)
+once `datahike-bulk-commit` releases fn.clj. Also open from that drive: the
+scripted terminal `my.run/complete` form hits an admission refusal.
+`print-floor-strings-2`: `d5b212f88` (breadth → depth → strings, one-line
+floor; the MCP door fits every result under a `:seon.render.profile/mcp`)
+and `ba3518afb` (`get_value` pages strings by character offset; never an
+empty window) — issue archived. Owner asked for a clean tree: two lanes'
+in-flight work committed path-limited (`b3ba7d998`, `25adaeaf8`), tool
+caches ignored. Lanes reported the MCP tools "unavailable" during the
+window when the shared root was being reset (ctxprobe down, default
+starting) — not a config regression.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
