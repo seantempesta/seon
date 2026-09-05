@@ -542,6 +542,14 @@
                            "bin/test: persistent results NOT recorded:"))
           "the complete tally is visible before persistence is attempted"))))
 
+(deftest explicit-result-root-directs-bare-gate-evidence
+  (is (= "/tmp/isolated-operator-root"
+         (#'runner/configured-persistent-results-root
+          "/checkout-root" "/tmp/isolated-operator-root")))
+  (is (= "/checkout-root"
+         (#'runner/configured-persistent-results-root
+          "/checkout-root" nil))))
+
 (deftest result-recording-is-total-under-concurrent-test-retraction
   ;; The class this kills: the presence decision ran as a caller
   ;; pre-read, so a test row retracted between building the record

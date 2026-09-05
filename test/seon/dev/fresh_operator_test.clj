@@ -169,9 +169,39 @@
          (:seon.test.status/all-current-tests-last-known-green? status)))
     (is (= [absent-test] (:seon.test.status/absent status)))
     (is (= (str "namespace " namespace-name
+                ": UNKNOWN; 1 absent results")
+           (operator-private-value
+            'namespace-test-status-line (Date.) status false)))
+    (is (= (str "namespace " namespace-name
                 ": UNKNOWN; absent results: " absent-test)
            (operator-private-value
-            'namespace-test-status-line (Date.) status)))))
+            'namespace-test-status-line (Date.) status true)))))
+
+(deftest wholly-absent-test-evidence-is-one-bounded-loud-line
+  (let [statuses
+        [{:seon.test.status/namespace 'alpha-test
+          :seon.test.status/state :unknown
+          :seon.test.status/oldest-run-at nil
+          :seon.test.status/absent ['alpha-test/a 'alpha-test/b]
+          :seon.test.status/red []}
+         {:seon.test.status/namespace 'beta-test
+          :seon.test.status/state :unknown
+          :seon.test.status/oldest-run-at nil
+          :seon.test.status/absent ['beta-test/a]
+          :seon.test.status/red []}]]
+    (is (= (str "test evidence: UNKNOWN for 2 namespaces "
+                "(3 current tests have no recorded results); run bin/test; "
+                "details: bin/seon status --verbose")
+           (operator-private-value 'absent-test-evidence-line statuses)))))
+
+(deftest status-detail-is-an-explicit-flag
+  (is (false? (operator-private-value 'parse-status-arguments [])))
+  (is (true? (operator-private-value
+              'parse-status-arguments ["--verbose"])))
+  (is (= "Use `status [--verbose]`."
+         (:seon.dev.fresh-operator-test/message
+          (operator-private-outcome
+           'parse-status-arguments ["--details"])))))
 
 (deftest reachable-prepl-without-roster-evidence-is-not-called-unreachable
   (let [root (.getCanonicalPath (fresh-root))

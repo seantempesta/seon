@@ -1111,6 +1111,10 @@
           (finally
             (store/release-store! held-store)))))))
 
+(defn- configured-persistent-results-root
+  [launcher-root explicit-root]
+  (or (not-empty explicit-root) launcher-root))
+
 (defn- recording-failure
   [record-fn]
   (try
@@ -2050,7 +2054,9 @@
                (into [] (mapcat ::task-results) task-results)
                ::stopped-after (when platform-red? :platform)}
               persistent-root
-              (System/getProperty "seon.test.persistent-results-root")
+              (configured-persistent-results-root
+               (System/getProperty "seon.test.persistent-results-root")
+               (System/getenv "SEON_TEST_RESULT_ROOT"))
               record-results!
               (cond
                 (not= "-" cluster-name)

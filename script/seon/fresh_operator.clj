@@ -849,7 +849,7 @@
                86400000)))
 
 (defn- namespace-test-status-line
-  [now status]
+  [now status verbose?]
   (let [namespace-name (:seon.test.status/namespace status)
         basis (:seon.test.status/oldest-proof-basis-t status)
         run-at (:seon.test.status/oldest-run-at status)
@@ -862,16 +862,44 @@
            ": all current tests last known green; " floor)
 
       :red
-      (str "namespace " namespace-name ": last known RED; " floor
-           "; red tests: "
-           (str/join ", " (:seon.test.status/red status)))
+      (str "namespace " namespace-name ": last known RED; "
+           (if verbose?
+             (str "red tests: "
+                  (str/join ", " (:seon.test.status/red status)))
+             (str (count (:seon.test.status/red status)) " red tests"))
+           (when floor (str "; " floor)))
 
-      (str "namespace " namespace-name ": UNKNOWN; absent results: "
-           (str/join ", " (:seon.test.status/absent status))
+      (str "namespace " namespace-name ": UNKNOWN; "
+           (if verbose?
+             (str "absent results: "
+                  (str/join ", " (:seon.test.status/absent status)))
+             (str (count (:seon.test.status/absent status))
+                  " absent results"))
            (when (seq (:seon.test.status/red status))
-             (str "; red tests: "
-                  (str/join ", " (:seon.test.status/red status))))
+             (str "; "
+                  (if verbose?
+                    (str "red tests: "
+                         (str/join ", " (:seon.test.status/red status)))
+                    (str (count (:seon.test.status/red status))
+                         " red tests"))))
            (when floor (str "; " floor))))))
+
+(defn- absent-test-evidence-line
+  [statuses]
+  (let [namespace-count (count statuses)
+        absent-count
+        (reduce + (map (comp count :seon.test.status/absent) statuses))]
+    (str "test evidence: UNKNOWN for " namespace-count " namespaces ("
+         absent-count " current tests have no recorded results); run bin/test; "
+         "details: bin/seon status --verbose")))
+
+(defn- parse-status-arguments
+  [arguments]
+  (case arguments
+    [] false
+    ["--verbose"] true
+    (fail! "Use `status [--verbose]`."
+           {:seon.fresh-operator/arguments arguments})))
 
 (declare prepl-eval! terminal-value)
 
@@ -2532,10 +2560,8 @@
   {:seon.fn/external-sink :ai-visible-text
    :seon.fn/projection-boundary :none}
   [root arguments]
-  (when (seq arguments)
-    (fail! "`status` takes no arguments."
-           {:seon.fresh-operator/arguments arguments}))
-  (let [root (.getCanonicalPath (java.io.File. root))
+  (let [verbose? (parse-status-arguments arguments)
+        root (.getCanonicalPath (java.io.File. root))
         truth
         (reconciled-truth!
          root {:seon.fresh-operator/read-offline-roster? true
@@ -2636,8 +2662,13 @@
     (if (:seon.error/kind test-statuses)
       (println (str "test evidence: UNKNOWN; "
                     (:seon.error/message test-statuses)))
-      (doseq [test-status test-statuses]
-        (println (namespace-test-status-line status-now test-status))))
+      (if (and (not verbose?)
+               (every? (comp nil? :seon.test.status/oldest-run-at)
+                       test-statuses))
+        (println (absent-test-evidence-line test-statuses))
+        (doseq [test-status test-statuses]
+          (println
+           (namespace-test-status-line status-now test-status verbose?)))))
     (doseq [record process-records]
       (println
        (str "recorded JVM pid " (:seon.boot/pid record)
@@ -3066,7 +3097,8 @@
     "  init NAME [--force]\n"
     "                 fork a dormant named cluster from current-src;\n"
     "                 refuse an existing cluster unless --force destroys it\n"
-    "  status         reconcile and list every cluster in this operator root\n"
+    "  status [--verbose]\n"
+    "                 list clusters and bounded test evidence; --verbose lists tests\n"
     "  open [NAME]    open the advertised web URL\n"
     "  stop [--force] [NAME]\n"
     "                 omit NAME only when exactly one cluster exists;\n"
