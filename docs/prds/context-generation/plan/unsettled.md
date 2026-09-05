@@ -590,6 +590,17 @@ hook accumulator in the settlement tx. Owner: NO automatic wakes or
 agents reacting to these facts yet (§2.4c marked LATER) — capability only. bin/codex-agent resume now names
 the model (`4a683cd6b`).
 
+## 2026-09-05 (day 2, late night, 2) — ruling 68: the forgiving parser returns
+
+Owner: restore all the forgiving-parser behaviour; repair delimiters
+before reading and store the FIXED source (no repaired flag; the raw reply
+in the intent tx is the provenance); show an error only when repair
+cannot make the form read. Lane `turn-batch` redirected a third time
+(reader recovery invariants + old corpus, ruling 68 repair in the turn).
+clojure-mcp pulled to v0.4.0; its ideas summarised to the owner (repair
+before eval, Edamame structured delimiter errors, error-flag discipline,
+clojure-mcp-light hook-based repair for CLI assistants).
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**

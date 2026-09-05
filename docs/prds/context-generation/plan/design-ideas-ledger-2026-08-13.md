@@ -1019,6 +1019,25 @@ numerically and a bare cross-citation is a defect to fix on sight.
     once per turn. This is the moment ruling 64's one-eval-row-per-form
     falls out of the loop's own shape.
 
+68. **Restore the forgiving parser; repair silently, store the fixed
+    source** (owner, 2026-09-05 night). The first implementation's parser
+    recovered locally from malformed forms and repaired delimiters before
+    reading; the surviving `seon.sci.reader` never received either (the
+    2026-07-29 parser-merge audit said so; nobody merged). Ruling: (a) port
+    the recovery invariants into the ONE reader, in place, through
+    Edamame's structured error data — unclosed forms recover at the next
+    column-0 `(`, an inner form of an unclosed outer form never leaks as
+    executable, no anchoring on `[`/`{`, token-granular recovery for bad
+    tokens, strict advance, closer-only leftovers dropped; (b) delimiter
+    repair (Parinfer indent mode, accepted only when the output changed and
+    re-reads) runs on the reply BEFORE reading, and the eval row stores the
+    FIXED source as its source — no `repaired` flag: the agent only ever
+    sees good forms (the raw reply is already the intent transaction's
+    fact, so the original is derivable, never mirrored); (c) an error is
+    shown to the agent ONLY when repair cannot produce a form that reads.
+    Same design as the old `seon.repl.parse.repair` and as clojure-mcp's
+    `evaluate-with-repair`, minus the flag.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
