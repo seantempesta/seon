@@ -197,10 +197,8 @@
             (comp
              (filter #(= namespace-name (symbol (namespace %))))
              (distinct)
-             (filter #(schema/function-accepts-in?
-                       projection % [argument]))
-             (filter #(schema/function-returns-in?
-                       projection % output-schema))
+             (filter #(schema/function-accepts-and-returns-in?
+                       projection % [argument] output-schema))
              (map str))
             (sort-by str symbols)))))
 

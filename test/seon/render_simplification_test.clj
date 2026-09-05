@@ -10,6 +10,7 @@
             [seon.render.value :as value]
             [seon.render.walk :as walk]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
@@ -69,6 +70,35 @@
            (is (= (value/render-html floor-unit) (render-html request)))
            (is (not= :seon.render/missing-declaration
                      (:seon.error/kind (render-ai request))))))))))
+
+(deftest candidate-input-and-output-must-fit-the-same-arity
+  (let [cross-arity 'probe.render/cross-arity
+        matching 'probe.render/matching
+        argument-schema [:map [:seon.render/value :int]]
+        projection
+        (schema/build-projection
+         (schema.edn/packaged-forms)
+         {cross-arity
+          [:function
+           [:=> [:cat argument-schema] :int]
+           [:=> [:cat :string :string] :string]]
+          matching [:=> [:cat argument-schema] :string]})
+        request
+        {:seon.sci.eval/ctx {}
+         :seon.render/namespace 'probe.render
+         :seon.render/output-schema :string
+         :seon.render/value 7
+         :seon.render/profile
+         {:seon.render.profile/id :seon.render.profile/agent
+          :seon.render.profile/token-budget 100
+          :seon.render.profile/max-depth 4
+          :seon.render.profile/max-children 10
+          :seon.render.profile/composition :seon.render.profile.composition/context}}]
+    (with-redefs [kernel/context-projection (constantly projection)
+                  kernel/public-functions-in
+                  (fn [_ctx _namespace-name] [cross-arity matching])]
+      (is (= [(str matching)]
+             (target-call 'seon.render 'candidates request))))))
 
 (deftest missing-render-profile-remains-a-flat-error
   (support/with-database

@@ -76,6 +76,29 @@
     (is (false? (schema/function-accepts-in?
                  projection 'seon.schema-test/missing [{}])))))
 
+(deftest function-input-and-output-fit-belong-to-one-arity
+  (let [function-symbol 'seon.schema-test/cross-arity
+        projection
+        (schema/build-projection
+         (schema.edn/packaged-forms)
+         {function-symbol
+          [:function
+           [:=> [:cat :int] :int]
+           [:=> [:cat :string :string] :string]]})]
+    (is (schema/function-accepts-in? projection function-symbol [7]))
+    (is (schema/function-returns-in? projection function-symbol :string))
+    (is (false?
+         (schema/function-accepts-and-returns-in?
+          projection function-symbol [7] :string))
+        "different arities cannot satisfy the input and output halves")
+    (is (schema/function-accepts-and-returns-in?
+         projection function-symbol [7] :int))
+    (is (schema/function-accepts-and-returns-in?
+         projection function-symbol ["left" "right"] :string))
+    (is (false?
+         (schema/function-accepts-and-returns-in?
+          projection 'seon.schema-test/missing [7] :int)))))
+
 (deftest every-predicate-schema-declares-what-it-accepts
   (let [missing (volatile! [])]
     (walk/postwalk

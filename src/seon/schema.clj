@@ -3128,6 +3128,31 @@
                (m/-function-schema-arities compiled)))))
     (catch Throwable _ false)))
 
+(defn function-accepts-and-returns-in?
+  "True when one arity accepts `arguments` and declares `output-schema`."
+  {:malli/schema
+   [:=> [:catn [::projection ::projection]
+         [::function-symbol :qualified-symbol]
+         [::arguments :seon.schema/arguments]
+         [::output-schema ::registry-key]]
+    :boolean]}
+  [projection function-symbol arguments output-schema]
+  (try
+    (boolean
+     (when-let [contract
+                (get (:seon.schema.projection/function-contracts projection)
+                     function-symbol)]
+       (let [compiled
+             (m/function-schema
+              contract
+              {:registry (:seon.schema.projection/registry projection)})]
+         (some (fn [arity]
+                 (let [{:keys [input output]} (m/-function-info arity)]
+                   (and ((m/validator input) arguments)
+                        (= output-schema (m/form output)))))
+               (m/-function-schema-arities compiled)))))
+    (catch Throwable _ false)))
+
 (defn projection-explainer
   "Compile an explainer against exactly one immutable projection."
   {:malli/schema [:=> [:catn [::projection ::projection]
