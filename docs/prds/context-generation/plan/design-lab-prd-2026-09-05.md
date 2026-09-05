@@ -180,13 +180,13 @@ against real attributes.
 
 ## 8. Waves, lanes, and what is reused
 
-One dev namespace under `src/seon/dev/lab.clj` (dev-only route; excluded
-from agent contexts by not being required by any agent namespace), the
-LOAD DEFINITION namespace(s) under `src/seon/dev/lab/world/…` (the seed
-world's schemas, rows, and domain functions — real, indexed, hot-reloaded),
-the ORDERING function beside them, plus `resources/seon/lab/` for the
-page's inline script; the prompt scenario reuses `seon.render.web`'s debug
-machinery rather than duplicating it; no changes to
+The debug page's owner (`seon.render.web`, its debug section, and
+`seon.render.route`'s existing `/agent/{id}/debug`) grows the lab's views;
+the pure derivations (neighbourhood, candidates, scenario assembly) are
+ordinary functions in the render owners they belong to, tested against
+the canonical database fixture; the seed world is a config manifest under
+`config/` naming the steward agent and its namespace plus seed rows; the
+Cytoscape script is inlined in the page as the atlas does; no changes to
 production namespaces; tests under `test/seon/dev/lab_test.clj` for the
 pure derivations (neighbourhood, candidates, scenario assembly) against
 the canonical database fixture. Four lanes, one per wave, sequential (each
@@ -221,6 +221,29 @@ lands: the lab IS the visualization, over real data.
    designing agent edits; hot reload changes it and the dev page shows the
    new order on refresh. No manual drag, no saved manual orders.
 
-**Still open:** see the questions asked alongside this revision (load
-definition format; reset command; the seed world; the fate of
-`/agent/{id}/debug`).
+6. **No new infrastructure, no new names.** The lab is a CLUSTER —
+   started, reset, and described by the existing operator (`bin/seon
+   --root <root> reset --force`, `bin/seon --root <root> start <name>`;
+   cluster details live where they already live, `data/clusters/<name>/`).
+   No `bin/seon lab`, no `/lab` route, no `seon.dev.lab` namespace: **the
+   lab IS the debug page** — `/agent/{id}/debug` in `seon.render.web`
+   grows the graph, inspector, candidates, and scenarios, and its
+   "prospective prompt" becomes the prompt scenario.
+7. **The load definition is real code, and for the dogfood world it is
+   almost nothing new.** The seed world is THE STEWARD OF SEON'S OWN CODE:
+   an agent whose namespace is a real first-party namespace. Its data is
+   already there (that namespace's functions, tests, usages, errors), so
+   the load definition reduces to the config manifest that declares the
+   agent and its namespace plus a few seed messages and plan items —
+   applied with the existing `bin/seon config apply`. The agent's own
+   render, processing, and ORDERING functions live in ITS namespace, as
+   real files hot-reloaded on edit or as functions it defines in real
+   turns. No `src/seon/dev/lab/world/` directory.
+8. **Trying a new storage format is a code branch**, as the owner said:
+   add attributes (or retype existing ones — retype + reset is ruled),
+   change the code that writes and reads them, reset the lab cluster, look.
+   Nothing needs deleting first; the lab shows old and new attributes side
+   by side because it reads datoms.
+
+**Still open:** which first-party namespace the first steward works;
+where the default ordering function lives; the graph's default depth.
