@@ -138,7 +138,8 @@
   `:file` backend at the CANONICAL path of `store-dir` (the store id
   derives from the path, so every spelling of one physical directory
   must be the ONE store), fused persistent-set roots with a 256-entry
-  diff buffer, retained history by the settled default policy, and
+  diff buffer and a measured 4096-way branching factor, retained history by
+  the settled default policy, and
   write-time schema flexibility. Fusion and index settings are
   creation-only; reopen configurations omit them so Datahike adopts the
   stored values. `keep-history?` is also creation-fixed, but Datahike does
@@ -164,7 +165,13 @@
       :writer {:backend :self}
       :keep-history? keep-history?
       :fuse-index-roots? true
-      :index-config {:diff-buf-size 256}
+      :index-config {; The dependency's 512 default made the 208k-datom
+                     ; publication flush 3,029 values, each paying Konserve's
+                     ; file + directory force. 4,096 measured 357 without a
+                     ; read regression; keep the evidence beside the tuning:
+                     ; docs/seon/issues/complete-publication-takes-seventy-seconds.md
+                     :branching-factor 4096
+                     :diff-buf-size 256}
       :schema-flexibility :write})))
 
 (defn- open-configuration

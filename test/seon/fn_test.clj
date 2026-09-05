@@ -2,6 +2,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.cluster.run :as run]
             [seon.fn :as seon.fn]
@@ -70,6 +71,13 @@
         "a progress callback cannot split or otherwise change writer work")
     (is (= 1 (count observed)))
     (is (= ["declarations: 3/3"] @observed-lines))))
+
+(deftest program-population-store-uses-measured-index-fanout
+  (is (= {:branching-factor 4096
+          :diff-buf-size 256}
+         (:index-config
+          (store/datahike-configuration "tmp/fn-test/population-store")))
+      "4096-way persistent-set nodes bound one population's durable writes"))
 
 (defn- capability-fixture!
   [root capability-source]
