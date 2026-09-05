@@ -367,6 +367,31 @@ cluster; the decision procedure ("best", "done") written into §0.
 Precondition lane launched: fix the prospective prompt through the
 production request shape. Nothing else coded.
 
+## 2026-09-05 (night, platform round) — "get it running and fix what we know"
+
+Owner: fix the baseline and every known issue on code that stays; reset
+is too slow ("deleting info and reloading — make sure we aren't doing dumb
+shit"); `defn-` is a convention, not a restriction (the review's "private
+API" objection is void); no stewardship attribute now; the lab is not a
+separate system — the same machinery at the global (`/`), namespace
+(`/ns/{ns}/debug`), and agent (`/agent/{id}/debug`) levels; make
+iterating on the data and previewing its assembly easy. PRD simplified
+accordingly. Honest state: the platform TIER is green but the issue index
+carries ~50 open blockers, many in render/context code the redesign
+replaces (left alone); the ones that tax every loop are in flight. Lanes
+running: `prospective-prompt` (the fresh debug page's unavailable prompt;
+its test passes on a fixture that supplies what production omits),
+`init-speed` (publication 60.6 s measured — profile the phases, remove
+the dumb work), `print-floor-strings` (zero-character string windows +
+`get_value` paging + unconditional fit at the MCP door), `status-face`
+(bound the 100 KB UNKNOWN wall + PROVE stale-green live end to end),
+`run-loop-velocity` (2.4 s between every form). Queued behind
+loop.clj: reply durability (prose-only replies as facts; no-forms
+replies get a correction turn), message completion from the wrong agent.
+Also to fix: Codex lanes are not given the Seon MCP server (Claude
+launches `bin/mcp-server` via `.mcp.json`; `~/.codex/config.toml` has no
+`[mcp_servers.seon]`).
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
