@@ -465,6 +465,20 @@ rest. Lane `datahike-bulk-commit` decomposes that commit (index type,
 derivable attributes ruled dead by 50, chunking, konserve flush). The
 four parked lanes relaunched as `-2` on the whole tree.
 
+## 2026-09-05 (day 2, afternoon) — the lab's precondition is green
+
+`e28de63bc`/`524c4cd08` (lane `prospective-prompt-2`): the shared
+`walk-request` carries `:seon.cluster.agent/id`, so a fresh cluster's
+`/agent/{id}/debug` renders a real prospective prompt (cold isolated proof
+pasted in the summary); regressions go through the production request
+constructor, require a non-empty prompt, verify custody inputs, and prove
+no render-cost facts are written; an unavailable pane keeps HTTP 200 (the
+page is composite) but must show its diagnostic and no healthy `<pre>`.
+Issue archived. `bin/test seon.render.web-test`: 40 / 330 / 0. The Design
+Lab PRD's precondition (§6) is met; wave 1A waits only on the owner's go.
+Shared root reset to HEAD and `default` running at http://127.0.0.1:7994
+(this fix lands there on the next restart).
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
