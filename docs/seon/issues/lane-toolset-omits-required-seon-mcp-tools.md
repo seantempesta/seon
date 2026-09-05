@@ -31,3 +31,13 @@ server.
 
 A fresh implementation lane can call both required Seon MCP tools and receive
 a complete envelope before resorting to an isolated raw-JVM or operator probe.
+
+## Change — 2026-09-05
+
+`~/.codex/config.toml` now declares `[mcp_servers.seon]` launching the same
+`bin/mcp-server` (stdio, `bb -m seon.dev.mcp`) that `.mcp.json` gives
+Claude, with `cwd` at the repository root and a 120 s startup timeout for
+the Babashka boot. Lanes launched after this change should see
+`mcp__seon__runtime_status`, `eval_clj`, and `get_value`; the next lane
+summary that reports them available resolves this note, and one that still
+reports them missing reopens it with the Codex-side error.
