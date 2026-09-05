@@ -347,6 +347,26 @@ session context) critiques it into
 timing on its own root. The agent-centric design §2.1 now carries
 `:namespace` (home) + `:stewards`.
 
+## 2026-09-05 (night, later) — the PRD review landed; PRD revised
+
+[design-lab-prd-review-2026-09-05.md](../research/design-lab-prd-review-2026-09-05.md):
+"do not start wave 1 from this PRD yet" — the PRD specified a UI without
+first specifying the bounded observation VALUES it consumes, so empty
+graphs and unavailable prompts could pass acceptance. Measured: full
+publication 60.6 s + start 11.3 s (the 15 s reset was a target, not a
+fact); the fresh debug page returns HTTP 200 with an UNAVAILABLE
+prospective prompt while its test passes on a fixture that supplies what
+production omits; `producer`/`candidates` are private; no stewardship
+attribute; Cytoscape not vendored; the web service owns one connection.
+PRD revised: wave 1 split into 1A (pure `neighbourhood-page` contract) and
+1B (graph); public `candidate-explanation` + read-only diagnostic boundary
+named for wave 2; a shared entry value + an SCI-description owner for
+wave 3; connection owner + compatibility fence + same-origin POSTs for
+wave 4; decisions recorded in the design doc, never on the disposable
+cluster; the decision procedure ("best", "done") written into §0.
+Precondition lane launched: fix the prospective prompt through the
+production request shape. Nothing else coded.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
