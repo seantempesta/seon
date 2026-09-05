@@ -74,6 +74,12 @@
   .lens { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
   .lens b { color: var(--ink); font-weight: 500; }
   .teach { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+  .proj { display: grid; grid-template-columns: 1.1fr 1fr 1fr 1fr; gap: 12px; align-items: start; }
+  .lane h3 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 8px; font-weight: 500; }
+  .lane .step .fn { font-family: var(--mono); font-size: 11.5px; }
+  .lane .step .ord { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+  .lane .step .fmt { display: block; margin-top: 4px; font-size: 12px; color: var(--ink-2); }
+  @media (max-width: 1200px) { .proj { grid-template-columns: 1fr 1fr; } }
   .diagram { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px; overflow-x: auto; }
   pre.mermaid { margin: 0; font-family: var(--mono); }
   .notes { max-width: 72ch; color: var(--ink-2); }
@@ -110,6 +116,7 @@
     <p class="sub">one model, five views · edit the data, not the drawing</p>
     <button data-view="model" aria-current="page">Data model</button>
     <button data-view="walk">The walk → forms → transcript</button>
+    <button data-view="projections">Three projections: SCI · prompt · page</button>
     <button data-view="query">Query language: q, pull, diff</button>
     <button data-view="watch">The watch</button>
     <button data-view="index">Where code is indexed</button>
@@ -159,6 +166,23 @@
         <div class="col" id="colWalk"><h3>Walk — the generated form</h3></div>
         <div class="col" id="colTranscript"><h3>Transcript — as the agent reads it</h3></div>
       </div>
+    </section>
+
+    <section id="projections">
+      <p class="eyebrow">One graph · three consumers · design §3.3</p>
+      <h2>The same datum, three optimal formats: a binding, a line of text, a block</h2>
+      <p class="lede">Left: the raw data and the entity it sits on, with its links. Hover a row: the three lanes light up with the function each projection applies to it and where it lands in that projection's order. Nothing is stored in any of the three formats; each is a function of the facts, and each function is a program row found by contract.</p>
+      <div class="proj">
+        <div class="lane" id="laneData"><h3>Raw data · entity · links</h3></div>
+        <div class="lane" id="laneSci"><h3>SCI environment · installers · dependency order</h3></div>
+        <div class="lane" id="laneAi"><h3>Completion prompt · /ai functions · layout order</h3></div>
+        <div class="lane" id="laneHtml"><h3>Page · /html functions · regions</h3></div>
+      </div>
+      <ul class="notes" style="margin-top:14px">
+        <li><b>Pre-requisites differ per consumer.</b> SCI needs a namespace required before a def is interned and a readable value before a handle is bound. The prompt needs <code>(doc sym)</code>/<code>(dir ns)</code> before first use (the demand DAG the layout sorts). The page turns the same demand edges into links and hover cards.</li>
+        <li><b>The page's regions are functions</b>: <code>header-html</code> over the agent's plumbing attributes; <code>transcript-html</code> over the ordered evals (each a block: caption, highlighted source, the value's /html face, the handle chip; the agent's prose comments rendered as markdown inline); panels = any function that takes the agent's data and returns hiccup, requested by evaluating it.</li>
+        <li><b>Compaction touches no fact</b>: SCI keeps the newest def and every binding; the prompt shows old evals as handle + one line; the page pages the transcript by time.</li>
+      </ul>
     </section>
 
     <section id="query">
@@ -434,6 +458,30 @@ const MODEL = {
       out: "+ 2026-09-08 11:00 dentist (family, 1 h)\n+ 2026-09-09 16:00 flight SFO→BOS (travel)\n+ 2026-09-12 09:00 offsite (work, all day) ⚠ overlaps standup\n;; result/c1  rendered-by acme.calendar/events-summary (its diff arm: + − ~)",
       refs: [ { id: "val:diff", kind: "value", label: "+3 events, 1 new conflict", because: ["fact:evidence-a2", "val:new-events", "fn:events-summary"], why: "the same read at the recorded basis and now; the family's render function renders the diff value" } ] }
   ],
+  // THREE PROJECTIONS of one record (design §3.3). Each datum names the entity it sits on and its links;
+  // each lane names the function applied and the position in that projection's order.
+  projections: [
+    { id: "plumbing", data: "turn 3 · process alive · trigger msg-1740 · basis 536871200", entity: "the AGENT entity", attrs: ":seon.agent/turn :process :trigger :context-basis", links: "→ :namespace acme.calendar · → :cluster",
+      sci: { fn: "(no binding — plumbing is not code)", ord: "—", fmt: "" }, ai: { fn: "seon.agent/header-ai", ord: "1 · first line of (help)", fmt: ";; cal-steward · turn 3 · answering msg-1740" }, html: { fn: "seon.agent/header-html", ord: "region: header", fmt: "<header> id · turn · alive · basis · unhandled 1" } },
+    { id: "ns", data: "namespace acme.calendar · requires [seon.db my.run]", entity: "the :seon.ns row (referenced, not owned)", attrs: ":seon.ns/name :requires", links: "← :seon.agent/namespace · ← :seon.fn/ns ×9",
+      sci: { fn: "require-namespace", ord: "1 · before any def", fmt: "(require 'seon.db 'my.run) in the fork" }, ai: { fn: "(dir acme.calendar) — data face", ord: "2 · teaching, before first use", fmt: "week free-slots conflicts events-summary event-ai …" }, html: { fn: "(doc ns) → ns-html", ord: "header link · hover card", fmt: "<a href=/namespace/acme.calendar>" } },
+    { id: "defs", data: "def largest (turn 1, ordinal 4) · def inbox-view (turn 2, ordinal 9)", entity: ":seon.agent.def rows (component of their eval)", attrs: ":name :value|:blob", links: "← :seon.agent.eval/defines",
+      sci: { fn: "install-def (newest defining eval wins)", ord: "2 · [turn ordinal] order", fmt: "#'acme.calendar/largest · #'acme.calendar/inbox-view interned" }, ai: { fn: "(dir *ns*) shows them; their evals render as history", ord: "history by time", fmt: "acme.calendar=> (defn inbox-view …) #'…" }, html: { fn: "eval-html (the defining eval's block)", ord: "transcript by time", fmt: "<block> highlighted defn · handle chip" } },
+    { id: "results", data: "eval a2 result: 128 events (value EDN, blob) · eval b1: the week's rows", entity: ":seon.agent.eval rows (→ :agent)", attrs: ":result :result-blob :result-family", links: "→ :agent · :defines · :reads",
+      sci: { fn: "bind-result (lazy: reads EDN or blob)", ord: "3 · after defs", fmt: "result/t2-a2 · result/t3-b1 bound" }, ai: { fn: "the wrapped render fn named in the form, else the floor", ord: "history by time", fmt: "3 calendars: work 71 · family 39 … ;; result/t2-a2" }, html: { fn: "the value's /html face (events-html)", ord: "transcript block · panel if requested", fmt: "<block> summary table · handle chip" } },
+    { id: "inbox", data: "messages to me: 1 unhandled (msg-1740 'what does my week look like?')", entity: ":seon.message rows (→ :to me, → :from)", attrs: ":content :at :handled-by", links: "→ :to agent · → :from · → :about",
+      sci: { fn: "(no binding)", ord: "—", fmt: "" }, ai: { fn: "seon.message/inbox-view (or my own)", ord: "kind: messages · newest first · the TRIGGER last", fmt: ";; messages to me, unhandled\\n(seon.message/inbox-view (seon.db/q …))" }, html: { fn: "inbox-html", ord: "header count · main block", fmt: "<block> one row per message · reply form" } },
+    { id: "events", data: "128 :acme.calendar/event rows via calendar → steward", entity: "domain rows (their own refs)", attrs: ":title :start :end :calendar", links: "→ :calendar → :steward (me)",
+      sci: { fn: "(no binding; queryable by the agent)", ord: "—", fmt: "" }, ai: { fn: "acme.calendar/events-summary (collection face)", ord: "kind: my data · newest first", fmt: ";; my calendar, as a whole\\n(acme.calendar/events-summary (seon.db/q …))" }, html: { fn: "events-html · week-html (a PANEL the user asked for)", ord: "panel · newest basis first", fmt: "<panel> week grid ⚠ overlaps" } },
+    { id: "code", data: "9 public fns in acme.calendar · contracts · 4 tests reaching week", entity: ":seon.fn / :seon.fn.arity / :seon.test rows", attrs: ":sym :doc :arities :spec", links: "→ :ns · arity → schema refs",
+      sci: { fn: "wrap-contract (instrument from :seon.fn/spec)", ord: "4 · after bindings", fmt: "each public var wrapped" }, ai: { fn: "(doc acme.calendar/week) — data face", ord: "teaching, before first use", fmt: "acme.calendar/week ([calendar start]) → events rendered" }, html: { fn: "doc-html", ord: "hover card on the form's symbols", fmt: "<card> arglists · in/out · tests" } },
+    { id: "prose", data: "the agent's ;; comment lines (its own prose)", entity: ":seon.agent.eval/source (comment-only rows)", attrs: ":source", links: "→ :agent",
+      sci: { fn: "(no binding — comments do not evaluate)", ord: "—", fmt: "" }, ai: { fn: "verbatim (a comment is data)", ord: "history by time", fmt: ";; the plan: check conflicts first" }, html: { fn: "markdown-html (emphasis, code spans, lists)", ord: "transcript block", fmt: "<block class=prose> rendered markdown" } },
+    { id: "faults", data: "0 faults about me · 1 eval error (turn 1, ordinal 5)", entity: ":seon.fault rows (→ :agent) · :seon.agent.eval/error-kind", attrs: ":kind :message :at", links: "→ :agent · → :eval",
+      sci: { fn: "(no binding)", ord: "—", fmt: "" }, ai: { fn: "error face, where it happened", ord: "history by time (in place)", fmt: "{:seon.error/kind … :message …}" }, html: { fn: "error-html", ord: "transcript block · header badge", fmt: "<block class=error>" } },
+    { id: "agents", data: "ROOT only: 4 agents · 1 dead process · 3 unhandled messages total", entity: "other AGENT entities (via cluster → agents)", attrs: "each agent's plumbing attributes", links: "→ :cluster ← :agents",
+      sci: { fn: "(no binding)", ord: "—", fmt: "" }, ai: { fn: "seon.agent/agents-summary (one line per agent)", ord: "kind: the world · after my own data", fmt: "planner  turn 7  alive   unhandled 2  last eval 17:44\\nreviewer turn 2  DEAD    unhandled 1  last eval 09:10" }, html: { fn: "agents-html", ord: "root's main block", fmt: "<table> one row per agent · drill-in" } }
+  ],
   idioms: [
     { when: "I hold an entity (a lookup ref) and want its attributes and what it points at", idiom: "pull, nested selector", form: "(seon.db/pull '[:seon.ns/name {:seon.ns/requires [:seon.ns/name]} {:seon.ns/refers [:seon.ns.refer/local]}] [:seon.ns/name 'my.agents.root])", grammar: "map-spec entry {:attr [subselector]}; the identity attribute on every ref leaf" },
     { when: "I want what points AT me (a reverse edge), all of it", idiom: "q with pull in :find (collection)", form: "(seon.db/q '[:find [(pull ?m [:seon.cluster.message/id :seon.cluster.message/at :seon.cluster.message/content]) ...] :where [?m :seon.cluster.message/to [:seon.cluster.agent/id \"root\"]]])", grammar: ":find [x ...] returns a collection; lookup refs in :where; pull as a find function" },
@@ -558,6 +606,21 @@ function drawWalk() {
     el.addEventListener("mouseleave", () => document.querySelectorAll(`.step[data-i="${el.dataset.i}"]`).forEach(x => x.removeAttribute("data-hot")));
   });
 }
+function drawProjections() {
+  const lanes = { data: document.getElementById("laneData"), sci: document.getElementById("laneSci"), ai: document.getElementById("laneAi"), html: document.getElementById("laneHtml") };
+  MODEL.projections.forEach((d, i) => {
+    const mk = (html) => { const el = document.createElement("div"); el.className = "step"; el.dataset.p = d.id; el.innerHTML = html; return el; };
+    lanes.data.appendChild(mk(`<span class="n">${i + 1}</span>${escapeHtml(d.data)}<div class="teach">on: ${escapeHtml(d.entity)} · <span class="mono">${escapeHtml(d.attrs)}</span><br>links: <span class="mono">${escapeHtml(d.links)}</span></div>`));
+    for (const k of ["sci", "ai", "html"]) {
+      const x = d[k];
+      lanes[k].appendChild(mk(`<span class="n">${i + 1}</span><span class="fn">${escapeHtml(x.fn)}</span><div class="ord">order: ${escapeHtml(x.ord)}</div>${x.fmt ? `<pre class="form" style="margin-top:6px">${escapeHtml(x.fmt)}</pre>` : ""}`));
+    }
+  });
+  document.querySelectorAll(".lane .step").forEach(el => {
+    el.addEventListener("mouseenter", () => document.querySelectorAll(`.lane .step[data-p="${el.dataset.p}"]`).forEach(x => x.setAttribute("data-hot", "")));
+    el.addEventListener("mouseleave", () => document.querySelectorAll(`.lane .step[data-p="${el.dataset.p}"]`).forEach(x => x.removeAttribute("data-hot")));
+  });
+}
 function drawIdioms() {
   document.querySelector("#idiomsTable tbody").innerHTML = MODEL.idioms.map(d => `<tr><td style="font-family:var(--sans);white-space:normal;color:var(--ink)">${d.when}</td><td class="mono">${d.idiom}</td><td><pre class="form" style="margin:0">${escapeHtml(d.form)}</pre></td><td style="color:var(--ink-2)">${d.grammar}</td></tr>`).join("");
 }
@@ -649,7 +712,7 @@ document.getElementById("stepPlay").addEventListener("click", () => {
   next(); playing = setInterval(next, 3000);
 });
 
-legend(); drawGraph(); styleSteps(); resetSteps(); drawWalk(); drawIdioms(); drawDecisions();
+legend(); drawGraph(); styleSteps(); resetSteps(); drawWalk(); drawProjections(); drawIdioms(); drawDecisions();
 let initial = "model"; try { initial = localStorage.getItem("atlas-view") || "model"; } catch (e) {}
 show(initial);
 </script>
