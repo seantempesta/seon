@@ -13,7 +13,8 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
             [seon.test.accretion :as accretion])
-  (:import [java.nio.file Files]
+  (:import [java.nio.charset StandardCharsets]
+           [java.nio.file Files]
            [java.security MessageDigest]))
 
 (schema.edn/load! {})
@@ -101,21 +102,37 @@
   (let [digest (.digest (MessageDigest/getInstance "SHA-256") source-bytes)]
     (apply str (map #(format "%02x" (bit-and 0xff %)) digest))))
 
-(defn- file-digest
+(defn- source-context
   [file]
-  (sha-256 (Files/readAllBytes (.toPath ^java.io.File file))))
+  (let [source-bytes (Files/readAllBytes (.toPath ^java.io.File file))
+        text (String. source-bytes StandardCharsets/UTF_8)]
+    {:bytes source-bytes
+     :text text
+     :line-starts
+     (loop [matcher (re-matcher #"\n" text) starts [0]]
+       (if (.find matcher)
+         (recur matcher (conj starts (inc (.start matcher))))
+         starts))}))
 
-(defn- exact-source [entry]
-  (let [text (slurp (::analyzer/filename entry))
-        line-starts
-        (loop [matcher (re-matcher #"\n" text) starts [0]]
-          (if (.find matcher)
-            (recur matcher (conj starts (inc (.start matcher))))
-            starts))
+(defn- source-contexts
+  [files]
+  (into {}
+        (map (fn [file]
+               [(.getCanonicalPath ^java.io.File file)
+                (source-context file)]))
+        files))
+
+(defn- exact-source [contexts entry]
+  (let [{:keys [text line-starts]}
+        (get contexts (::analyzer/filename entry))
         row (::analyzer/row entry)
         col (::analyzer/col entry)
         end-row (::analyzer/end-row entry)
         end-col (::analyzer/end-col entry)]
+    (when-not text
+      (throw (ex-info "Static declaration has no source file content."
+                      {:seon.error/kind ::index-refused
+                       ::analysis-entry entry :seon.fn/index-refused true})))
     (when-not (every? some? [row col end-row end-col])
       (throw (ex-info "Static declaration has no exact source span."
                       {:seon.error/kind ::index-refused
@@ -145,8 +162,8 @@
   [namespace-name]
   [:seon.ns/name namespace-name])
 
-(defn- namespace-context [entry]
-  (let [form (read-jvm-form (exact-source entry))]
+(defn- namespace-context [contexts entry]
+  (let [form (read-jvm-form (exact-source contexts entry))]
     (reduce
      (fn [context clause]
        (case (first clause)
@@ -194,11 +211,11 @@
              value))))
    form))
 
-(defn- namespace-row [entry]
+(defn- namespace-row [contexts context entry]
   (let [namespace-name (::analyzer/name entry)
-        {:keys [aliases refers imports requires]} (namespace-context entry)]
+        {:keys [aliases refers imports requires]} context]
     (cond-> {:seon.ns/name namespace-name
-             :seon.ns/source (exact-source entry)}
+             :seon.ns/source (exact-source contexts entry)}
       (::analyzer/doc entry) (assoc :seon.ns/doc (::analyzer/doc entry))
       (seq requires)
       (assoc :seon.ns/requires (into #{} (map namespace-ref) requires))
@@ -325,14 +342,12 @@
     (second value)
     value))
 
-(defn- var-row [analysis calls-by-caller used-keywords entry]
+(defn- var-row
+  [contexts namespace-contexts calls-by-caller used-keywords entry]
   (let [namespace-name (::analyzer/ns entry)
         qualified (symbol (str namespace-name) (str (::analyzer/name entry)))
         metadata (::analyzer/meta entry)
-        namespace-entry
-        (first (filter #(= namespace-name (::analyzer/name %))
-                       (::analyzer/namespace-definitions analysis)))
-        source (exact-source entry)
+        source (exact-source contexts entry)
         external-sink (:seon.fn/external-sink metadata)
         projection-boundary (:seon.fn/projection-boundary metadata)
         capability-declared? (contains? metadata :seon.effect/capability)
@@ -375,7 +390,7 @@
                (pr-str (schema/canonical-definition
                         (qualify-schema-symbols
                          (:malli/schema metadata)
-                        (namespace-context namespace-entry))
+                        (get namespace-contexts namespace-name))
                         {})))
         (seq (get calls-by-caller (str qualified)))
         (assoc :seon.fn/calls
@@ -743,15 +758,25 @@
                      :seon.fn/index-refused true}))))
 
 (defn- analysis-rows-by-file
-  [analysis first-party-functions]
+  [analysis first-party-functions contexts]
   (let [calls-by-caller
         (call-targets-by-caller analysis first-party-functions)
-        used-keywords (keywords-by-holder analysis)]
+        used-keywords (keywords-by-holder analysis)
+        namespace-contexts
+        (into {}
+              (map (fn [entry]
+                     [(::analyzer/name entry)
+                      (namespace-context contexts entry)]))
+              (::analyzer/namespace-definitions analysis))]
     (reduce
      (fn [rows entry]
        (if-let [row (if (::analyzer/ns entry)
-                      (var-row analysis calls-by-caller used-keywords entry)
-                      (namespace-row entry))]
+                      (var-row contexts namespace-contexts calls-by-caller
+                               used-keywords entry)
+                      (namespace-row contexts
+                                     (get namespace-contexts
+                                          (::analyzer/name entry))
+                                     entry))]
          (update rows (::analyzer/filename entry) (fnil conj []) row)
          rows))
      {}
@@ -759,12 +784,12 @@
              (::analyzer/var-definitions analysis)))))
 
 (defn- artifact
-  [file rows findings]
+  [file context rows findings]
   (let [canonical-path (.getCanonicalPath ^java.io.File file)
         canonical-rows (mapv program/canonical-row rows)]
     (cond->
      {:seon.fn.file/path canonical-path
-      :seon.fn.file/digest (file-digest file)
+      :seon.fn.file/digest (sha-256 (:bytes context))
       :seon.fn.file/rows canonical-rows
       :seon.fn.file/identities
       (->> canonical-rows
@@ -1240,6 +1265,7 @@
                       {:seon.error/kind ::index-refused
                        :seon.fn.file/path (.getCanonicalPath file) :seon.fn/index-refused true})))
     (let [canonical-path (.getCanonicalPath file)
+          contexts (source-contexts [file])
           analysis (analyzer/analyze {::analyzer/paths [canonical-path]})
           first-party-functions
           (into (set known-functions)
@@ -1247,7 +1273,9 @@
           findings (publication-findings analysis first-party-functions)]
       (assert-clean-analysis! analysis first-party-functions)
       (artifact file
-                (get (analysis-rows-by-file analysis first-party-functions)
+                (get contexts canonical-path)
+                (get (analysis-rows-by-file analysis first-party-functions
+                                            contexts)
                      canonical-path
                      [])
                 findings))))
@@ -1332,15 +1360,18 @@
   (let [roots (:seon.fn/roots request)
         files (source-files roots)
         paths (mapv #(.getCanonicalPath ^java.io.File %) files)
+        contexts (source-contexts files)
         analysis (analyzer/analyze {::analyzer/paths paths})
         first-party-functions (first-party-function-symbols analysis)
         findings-by-file
         (group-by ::analyzer/filename
                   (publication-findings analysis first-party-functions))
-        rows-by-file (analysis-rows-by-file analysis first-party-functions)
+        rows-by-file
+        (analysis-rows-by-file analysis first-party-functions contexts)
         artifacts
         (mapv (fn [file]
                 (artifact file
+                          (get contexts (.getCanonicalPath ^java.io.File file))
                           (get rows-by-file
                                (.getCanonicalPath ^java.io.File file)
                                [])
@@ -1782,6 +1813,116 @@
        (str (name phase) ": " total "/" total))))
   nil)
 
+(defn- index-tempids
+  [rows identity-attributes]
+  (let [identities
+        (into (sorted-set-by #(compare (pr-str %1) (pr-str %2)))
+              (comp
+               (filter map?)
+               (mapcat (fn [entity]
+                         (let [identities
+                               (keep (fn [attribute]
+                                       (when-let [entry (find entity attribute)]
+                                         [attribute (val entry)]))
+                                     identity-attributes)]
+                           (when (< 1 (count identities))
+                             (throw
+                              (ex-info
+                               "Program indexing found multiple entity identities."
+                               {:seon.error/kind ::index-refused
+                                ::identity (vec identities)
+                                :seon.fn/index-refused true})))
+                           identities))))
+              (mapcat #(filter map? (tree-seq coll? seq %)) rows))]
+    (into {}
+          (map-indexed (fn [index program-identity]
+                         [program-identity (str "seon.fn.index/" index)]))
+          identities)))
+
+(defn- compile-index-transaction
+  "Flatten one program population through transaction-local identities.
+
+  Datahike lookup refs resolve against the database before the transaction;
+  string tempids instead let namespace, declaration, shape, and call refs all
+  resolve inside one transaction. Identified nested maps are emitted once per
+  population, rather than normalized again at every owning declaration."
+  [rows identity-attributes]
+  (let [identity-attribute-set (set identity-attributes)
+        tempids (index-tempids rows identity-attributes)
+        entity-id
+        (fn [entity]
+          (or (some (fn [attribute]
+                      (when-let [entry (find entity attribute)]
+                        (get tempids [attribute (val entry)])))
+                    identity-attributes)
+              (let [db-id (:db/id entity)]
+                (when (or (string? db-id)
+                          (number? db-id)
+                          (keyword? db-id)
+                          (and (vector? db-id) (= 2 (count db-id))))
+                  db-id))))
+        lookup-tempid
+        (fn [value]
+          (when (and (vector? value) (= 2 (count value)))
+            (get tempids value)))
+        entities (volatile! {})
+        rewrite
+        (fn rewrite [value]
+          (cond
+            (lookup-tempid value)
+            (lookup-tempid value)
+
+            (map? value)
+            (let [eid (entity-id value)
+                  entity
+                  (reduce-kv (fn [result attribute child]
+                               (cond
+                                 (= :db/id attribute) result
+                                 (contains? identity-attribute-set attribute)
+                                 result
+                                 :else
+                                 (assoc result attribute (rewrite child))))
+                             (cond-> (empty value)
+                               eid (assoc :db/id eid))
+                             value)]
+              (if eid
+                (do
+                  (when-let [prior (get @entities eid)]
+                    (when-not (= prior entity)
+                      (throw
+                       (ex-info
+                        "Program indexing found conflicting entity maps."
+                        {:seon.error/kind ::index-refused
+                         ::identity eid
+                         :seon.fn/index-refused true}))))
+                  (vswap! entities assoc eid entity)
+                  eid)
+                entity))
+
+            (vector? value) (mapv rewrite value)
+            (set? value) (into #{} (map rewrite) value)
+            (seq? value) (map rewrite value)
+            :else value))
+        keyword-operations
+        (into []
+              (comp
+               (mapcat keyword-facts)
+               (map (fn [[operation program-identity attribute value]]
+                      [operation (or (get tempids program-identity)
+                                     program-identity)
+                       attribute value])))
+              rows)]
+    (doseq [row rows]
+      (rewrite (dissoc row :seon.fn/keywords)))
+    {:seon.fn/index-entities
+     (->> @entities (sort-by key) (mapv val))
+     :seon.fn/index-identity-operations
+     (into []
+           (map (fn [[[attribute value] tempid]]
+                  [:db/add tempid attribute value]))
+           (sort-by (comp pr-str key) tempids))
+     :seon.fn/index-keyword-operations keyword-operations}))
+
 (defn index!
   "Populate one fresh source scratch branch from static analysis.
 
@@ -1811,50 +1952,18 @@
        (throw (ex-info "Program indexing requires a fresh source scratch branch."
                        {:seon.error/kind ::index-refused
                         ::existing-program-entity existing :seon.fn/index-refused true})))
-     (let [namespaces (filterv :seon.ns/name rows)
-          namespace-bases
-          (mapv #(dissoc % :seon.ns/requires) namespaces)
-          namespace-relations
-          (into []
-                (keep (fn [row]
-                        (when (seq (:seon.ns/requires row))
-                          (select-keys row
-                                       [:seon.ns/name :seon.ns/requires]))))
-                namespaces)
-          declarations (filterv #(not (:seon.ns/name %)) rows)
-          declaration-bases
-          (mapv #(dissoc % :seon.fn/calls :seon.test/subject :seon.fn/keywords)
-                declarations)
-          keyword-rows
-          (into [] (mapcat keyword-facts) declarations)
-          subject-rows
-          (into []
-                (keep (fn [row]
-                        (when-some [subject (:seon.test/subject row)]
-                          (let [[identity-attribute identity-value]
-                                (program/row-identity row)]
-                            {identity-attribute identity-value
-                             :seon.test/subject subject}))))
-                declarations)
-          call-rows
-          (into []
-                (keep (fn [row]
-                        (when (seq (:seon.fn/calls row))
-                          (let [[identity-attribute identity-value]
-                                (program/row-identity row)]
-                            {identity-attribute identity-value
-                             :seon.fn/calls (:seon.fn/calls row)}))))
-                declarations)
-          commit-phase! (partial commit-index-phase!
-                                 connection process progress!)]
-       ;; Datahike processes tx-data in order. Every identity therefore exists
-       ;; before a requires lookup ref resolves it, including the shared
-       ;; name-only rows for external namespaces.
-       (commit-phase! :seon.fn/namespaces
-                      (into namespace-bases namespace-relations))
-       (commit-phase! :seon.fn/declarations declaration-bases)
-       (commit-phase! :seon.test/subject subject-rows)
-       (commit-phase! :seon.fn/keywords keyword-rows)
-       (commit-phase! :seon.fn/calls call-rows)
+     (let [identity-attributes (db/identity-attributes @connection)
+           {entities :seon.fn/index-entities
+            identity-operations :seon.fn/index-identity-operations
+            keyword-operations :seon.fn/index-keyword-operations}
+           (compile-index-transaction rows identity-attributes)]
+       (report-index-progress!
+        progress!
+        (str "program population compiled: " (count entities)
+             " entities, " (count identity-operations) " identities, "
+             (count keyword-operations) " keyword facts"))
+       (commit-index-phase! connection process progress! :seon.fn/population
+                            (into (into identity-operations entities)
+                                  keyword-operations))
        {:seon.reconcile/converged? false
         :seon.reconcile/operations (count rows)}))))

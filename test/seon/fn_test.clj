@@ -750,6 +750,26 @@
       (is (some #(= :unresolved-symbol (::analyzer/type %))
                 (::seon.fn/findings (ex-data failure)))))))
 
+(deftest source-context-is-derived-once-per-file-population
+  (let [root (fixture-root)
+        _ (write-source!
+           root "sample/once.clj"
+           (str "(ns sample.once)\n"
+                "(defn one [] 1)\n"
+                "(defn two [] 2)\n"
+                "(defn three [] 3)\n"))
+        read-form-var (ns-resolve 'seon.fn 'read-jvm-form)
+        read-form (var-get read-form-var)
+        reads (atom 0)]
+    (with-redefs-fn
+      {read-form-var
+       (fn [source]
+         (swap! reads inc)
+         (read-form source))}
+      #(seon.fn/build-manifest {:seon.fn/roots [(.getPath root)]}))
+    (is (= 1 @reads)
+        "the namespace form is parsed once, not once per declaration")))
+
 (deftest publication-veto-is-exactly-the-cant-load-finding-classes
   (let [root (fixture-root)
         source-file
@@ -1009,6 +1029,8 @@
                   (fn [_]
                     (throw (ex-info "analysis must not run" {})))
                   schema.edn/packaged-forms (constantly {})
+                  db/identity-attributes
+                  (constantly [:seon.ns/name :seon.fn/sym :seon.test/sym])
                   db/q (fn [& _] nil)
                   db/transact!
                   (fn [_ request]
@@ -1018,29 +1040,41 @@
                     {:seon.db/connection (atom :database)
                      :seon.fn/manifest manifest})]
         (is (pos? (:seon.reconcile/operations result)))
-        (is (= 5 (count @transactions)))
-        (is (= 'prebuilt
-               (-> @transactions first :tx-data first :seon.ns/name)))
-        (is (some #(= "prebuilt/value" (:seon.fn/sym %))
-                  (-> @transactions second :tx-data)))
-        (is (nil? (-> @transactions second :tx-data second
-                      :seon.fn/keywords))
-            "a keyword collection never enters an entity-map transaction")
-        (is (= [{:seon.test/sym "prebuilt/value-test"
-                 :seon.test/subject [:seon.fn/sym "prebuilt/value"]}]
-               (-> @transactions (nth 2) :tx-data)))
-        (is (= [[:db/add [:seon.fn/sym "prebuilt/value"]
-                  :seon.fn/keywords :seon.cluster.agent/id]
-                [:db/add [:seon.fn/sym "prebuilt/value"]
-                 :seon.fn/keywords :seon.config/agent-overlay]]
-               (-> @transactions (nth 3) :tx-data))
-            "the lookup-ref-shaped pair is emitted as two keyword facts")
-        (is (= [{:seon.test/sym "prebuilt/value-test"
-                 :seon.fn/calls [[:seon.fn/sym "prebuilt/value"]]}]
-               (-> @transactions (nth 4) :tx-data)))))
+        (is (= 1 (count @transactions))
+            "one population pays one Datahike commit")
+        (let [tx-data (:tx-data (first @transactions))
+              identity-op
+              (fn [attribute value]
+                (some #(when (and (vector? %)
+                                  (= [:db/add attribute value]
+                                     [(first %) (nth % 2) (nth % 3)]))
+                         %)
+                      tx-data))
+              function-id (second (identity-op :seon.fn/sym
+                                               "prebuilt/value"))
+              test-id (second (identity-op :seon.test/sym
+                                           "prebuilt/value-test"))
+              entity-by-id (into {} (keep #(when (map? %) [(:db/id %) %]))
+                                 tx-data)]
+          (is (string? function-id))
+          (is (= function-id
+                 (:seon.test/subject (get entity-by-id test-id))))
+          (is (= [function-id]
+                 (:seon.fn/calls (get entity-by-id test-id))))
+          (is (= #{[:db/add function-id :seon.fn/keywords
+                    :seon.cluster.agent/id]
+                   [:db/add function-id :seon.fn/keywords
+                    :seon.config/agent-overlay]}
+                 (set (filter #(and (vector? %)
+                                    (= :seon.fn/keywords (nth % 2 nil)))
+                              tx-data)))
+              "keyword pairs remain independent cardinality-many facts"))))
     (let [attempts (atom 0)
           result
           (with-redefs [schema.edn/packaged-forms (constantly {})
+                        db/identity-attributes
+                        (constantly [:seon.ns/name :seon.fn/sym
+                                     :seon.test/sym])
                         db/q (fn [& _] nil)
                         db/transact!
                         (fn [& _]
@@ -1054,9 +1088,9 @@
               (catch clojure.lang.ExceptionInfo failure
                 (ex-data failure))))]
       (is (= :seon.fn/index-refused (:seon.error/kind result)))
-      (is (= :seon.fn/namespaces (:seon.fn/index-phase result)))
+      (is (= :seon.fn/population (:seon.fn/index-phase result)))
       (is (= 1 @attempts)
-          "a refused identity phase prevents dependent transactions"))))
+          "the population is one writer admission"))))
 
 (deftest keyword-usage-is-indexed-per-declaration
   (let [root (fixture-root)

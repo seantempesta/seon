@@ -65,3 +65,28 @@ sample is faster but still violates the fast-by-default law by more than an
 order of magnitude.
 - A named cause with numbers; complete publication is back near its historical
   cost or an owner-ruled accepted budget has the fix-loop default adjusted.
+
+## Re-profiled 2026-09-05
+
+A fresh private operator root took 68.36 s real before the indexing repair.
+Phase instrumentation found 56.323 s inside publication: clj-kondo plus source
+row construction took 7.103 s, schema population took 6.023 s, and the five
+program-graph writer phases took 39.096 s (namespaces 3.157 s, declarations
+23.237 s, keywords 4.323 s, calls 8.379 s). Contract projection and per-row
+contract derivation together took 1.235 s. The analyzed input is exactly the
+236 `.clj`/`.cljc` files under `src/` and `test/` (5,077,708 bytes on this
+checkout); `reference-code/` is not analyzed, and clj-kondo used the existing
+19 MiB `.clj-kondo/.cache`.
+
+The 2026-09-05 indexing repair reads and line-indexes each source file once,
+parses each namespace form once per population, and compiles all program refs
+to transaction-local tempids. That replaced five dependent program commits
+with one. The matched instrumented publication fell from 56.323 s to 38.415 s;
+the program boundary became 4.030 s of transaction compilation plus one
+26.025 s Datahike commit for 207,915 datoms. The full cold command improved
+only from 68.36 s to 63.29 s real, so this issue remains open: the irreducible
+observed floor is now the real 208k-datom database population plus roughly
+25 s of cold operator/source-JVM loading, not repeated per-row source reads or
+per-phase commits. Reaching the target requires reducing the admitted fact
+population or accelerating the Datahike bulk-load/store boundary without
+weakening durability or program-graph queryability.
