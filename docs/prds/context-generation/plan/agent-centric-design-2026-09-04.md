@@ -178,9 +178,15 @@ What it answers, one hop each (all reverse-ref lookups on indexed refs):
 ;; dead weight: functions no eval ever called and no test reaches
 ```
 
-### 2.4c The steward's wake — root and namespace stewards learn about problems without a notifier
+### 2.4c The steward's wake — LATER, not now (owner, 2026-09-05: "don't set up automatic agents to run queries; we aren't there yet — we are building in the capability to do so later")
 
-No new mechanism. Three things that already exist compose:
+What we build NOW is only the capability: the facts of §2.4b, so that
+"who is failing calling my function" and "what did they run before it" are
+answerable queries any agent or human can run by hand. NO automatic wake,
+NO agent scheduled to poll or react. The composition below is the design
+for when the owner says go; it stays here so the facts are shaped for it.
+
+No new mechanism will be needed then. Three things that already exist compose:
 
 1. **The fact.** The failing eval settles with `:failed-call` → the
    function → its namespace → (reverse) the agents whose `:namespace` or

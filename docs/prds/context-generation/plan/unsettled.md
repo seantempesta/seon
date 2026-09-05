@@ -586,7 +586,8 @@ resumed twice: once for the indexing correction, once refuting its
 "another lane's change" attribution (runner.clj:1057 auto-gensym is HEAD
 code; the reader test asserted form-equality Clojure never promised).
 Follow-up for the lane once its gate is green: §2.4b's two attributes +
-hook accumulator in the settlement tx. bin/codex-agent resume now names
+hook accumulator in the settlement tx. Owner: NO automatic wakes or
+agents reacting to these facts yet (§2.4c marked LATER) — capability only. bin/codex-agent resume now names
 the model (`4a683cd6b`).
 
 ## Previous state (2026-08-29, evening)
