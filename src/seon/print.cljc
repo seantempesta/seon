@@ -853,14 +853,25 @@
 
 (defn- fit-text
   [node profile path string-limit]
-  (let [value (if (= ::projected (::face node))
-                (projected-text node)
-                (::value node))
+  (let [html-projection? (and (= ::projected (::face node))
+                              (= :seon.render/html
+                                 (:seon.render/output node)))
+        value (if html-projection?
+                ;; Measure the source representation to retain the existing
+                ;; bound, but never expose that representation as HTML text.
+                (pr-str (::value node))
+                (if (= ::projected (::face node))
+                  (projected-text node)
+                  (::value node)))
         original (long (or (::length node) (count value)))]
     (if-let [bounded (bounded-text value original string-limit)]
-      (elision-node profile path (count (::value bounded))
-                    (- original (count (::value bounded))) original
-                    :characters (pr-str (::value bounded)))
+      (if html-projection?
+        (elision-node profile path (count (::value bounded))
+                      (- original (count (::value bounded))) original
+                      :characters "rendered HTML")
+        (elision-node profile path (count (::value bounded))
+                      (- original (count (::value bounded))) original
+                      :characters (pr-str (::value bounded))))
       node)))
 
 (defn- structural-elision

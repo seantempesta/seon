@@ -281,6 +281,22 @@
                (+ (:seon.render.data/next-offset fitted)
                   (:seon.print/omitted fitted))))))))
 
+(deftest oversized-html-projection-elides-without-printing-hiccup-source
+  (let [profile (assoc (render/agent-render-profile
+                        (test-support/effective-config))
+                       :seon.render.profile/token-budget 1
+                       :seon.render.profile/max-depth 8
+                       :seon.render.profile/max-children 32)
+        node {:seon.print/face :seon.print/projected
+              :seon.render/output :seon.render/html
+              :seon.print/value [:section {:class "oversized"}
+                                 (apply str (repeat 200 "x"))]}
+        fitted (print/fit node profile)
+        html (hiccup/->string (print/emit-hiccup fitted (print/default-options)))]
+    (is (= :seon.print/elided (:seon.print/face fitted)))
+    (is (not (str/includes? html "[:section")))
+    (is (str/includes? html "rendered HTML"))))
+
 (deftest fit-cuts-breadth-before-windowing-one-line-strings
   (let [text (apply str (repeat 36 \x))
         line-width (:seon.print/width (print/default-options))
