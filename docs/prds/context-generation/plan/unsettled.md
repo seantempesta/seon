@@ -332,6 +332,21 @@ page = layout); the first steward works `my.note`; depth one hop, expand
 on click; trying a storage format = a code branch + reset. Agent creation
 is the existing route (the manifest declares no agents — corrected).
 
+## 2026-09-05 (late) — the Lab PRD rewritten whole; review running
+
+The PRD accreted rulings into contradictions; rewritten as one document
+([design-lab-prd-2026-09-05.md](design-lab-prd-2026-09-05.md)): why, one
+sentence, the rulings as constraints (no new infra/names — the lab IS
+`/agent/{id}/debug`; everything real; fresh envs from real Clojure;
+visualize the context to be sent; ordering algorithmic and local; agents
+have a home namespace and may steward others; first world = a steward of
+`my.note`), the page, what it computes, waves with acceptance, the
+questions it answers, risks. Owner is reading; lane `prd-review` (no
+session context) critiques it into
+`research/design-lab-prd-review-2026-09-05.md` and measures init/start
+timing on its own root. The agent-centric design §2.1 now carries
+`:namespace` (home) + `:stewards`.
+
 ## Previous state (2026-08-29, evening)
 
 **Design track (owner still forming — NO implementation until he says):**
