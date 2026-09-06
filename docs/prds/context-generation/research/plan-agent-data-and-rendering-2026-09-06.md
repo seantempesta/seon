@@ -76,6 +76,25 @@ crosses the render owner and remains unimplemented. This slice only makes the
 existing plan projections truthful about the underlying data and the direct
 database surface.
 
+The executable primer experiment at
+`thinking_primer_probe_2026_09_06.clj` uses that surface as an ordinary agent
+reply: source comments explain the next step, and `seon.cluster.reply/sources`
+retains those comments beside three ordered forms for namespace discovery,
+batched function documentation, and current-plan rendering. The forms run in
+one disposable turn fork. The experiment records each exact source and its
+admitted result separately and never evaluates displayed or serialized result
+text. It proves the current reader and evaluator path; it does not implement
+production context composition or a separate thinking field.
+
+One bounded live execution against the sovereign default cluster parsed
+exactly three sources, all attributed to `my.agents.root`. In order, their
+admitted results were the 12 public `my.plan` names, the two requested function
+documentation rows, and the rendered empty current plan. The evaluations took
+104.35 ms, 9.57 ms, and 101.28 ms; all three reported `capped? false` and no
+error. The cluster still held its older published plan docstrings and heading,
+which is expected: this probe exercises the live reply-reader and turn-fork
+path and does not refork a sovereign cluster onto edited source.
+
 The complete `plan-context-prd-2026-08-13.md` and the data-oriented Clojure,
 data-modeling, Datahike, and REPL skills were read end to end before this
 change. The implementation was checked against the pinned Datahike source
