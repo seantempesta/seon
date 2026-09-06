@@ -122,6 +122,11 @@
                (:seon.sci.admit/value evaluated)))
         (is (nil? (:seon.cluster.eval/error evaluated)))))))
 
+(deftest message-terminal-formatter-preserves-database-errors
+  (let [failure {:seon.error/kind ::read-failed
+                 :seon.error/message "message read failed"}]
+    (is (= failure (message/format-ai failure)))))
+
 (deftest message-html-separates-attribution-time-and-authored-content
   (with-database
     (fn [connection]

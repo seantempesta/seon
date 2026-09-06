@@ -18,6 +18,13 @@
   [offset]
   (java.util.Date. (long (+ t0-ms offset))))
 
+(deftest plan-terminal-formatters-preserve-database-errors
+  (let [failure {:seon.error/kind ::read-failed
+                 :seon.error/message "plan read failed"}]
+    (is (= failure (plan/format-item-ai failure)))
+    (is (= failure (plan/format-ready-items-ai failure)))
+    (is (= failure (plan/format-plan-ai failure)))))
+
 (defn- with-plan
   [f]
   (support/with-database

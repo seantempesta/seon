@@ -471,9 +471,12 @@
   lookup ref. Naming an agent resolves each shape against the database value
   riding on the unit. A present ref that does not resolve stays visibly
   unresolved; only an absent `from` means outside the cluster."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat [:or :seon.render/unit :seon.error/value]]
+                  [:or :nil :string :seon.error/value]]}
   [unit]
-  (let [database (get unit :seon.db/db)
+  (if (:seon.error/kind unit)
+    unit
+    (let [database (get unit :seon.db/db)
         content (get unit ::content)
         from-ref (get unit ::from)
         to-ref (get unit ::to)]
@@ -487,7 +490,7 @@
              (cond
                to (str " to " to)
                to-ref (str " to unresolved recipient " (pr-str to-ref)))
-             ": " content)))))
+             ": " content))))))
 
 (defn render-ai
   "`:seon.render/ai` — source which reads and formats this message."

@@ -897,9 +897,12 @@
 
 (defn format-item-ai
   "Format one authored plan item as terminal text."
-  {:malli/schema [:=> [:cat :my.plan.item/item] :string]}
+  {:malli/schema [:=> [:cat [:or :my.plan.item/item :seon.error/value]]
+                  [:or :string :seon.error/value]]}
   [item]
-  (str "Plan item " (item-line (item-value item))))
+  (if (error-value? item)
+    item
+    (str "Plan item " (item-line (item-value item)))))
 
 (defn render-item-ai
   "Render source which reads and formats one authored plan item."
@@ -928,12 +931,15 @@
 
 (defn format-ready-items-ai
   "Format a supplied ready authored plan frontier as terminal text."
-  {:malli/schema [:=> [:cat :my.plan/ready-items] :string]}
+  {:malli/schema [:=> [:cat [:or :my.plan/ready-items :seon.error/value]]
+                  [:or :string :seon.error/value]]}
   [items]
-  (if (seq items)
-    (str "Ready authored work (" (count items) "):\n"
-         (str/join "\n" (map #(str "- " (item-line %)) items)))
-    "No authored work is ready."))
+  (if (error-value? items)
+    items
+    (if (seq items)
+      (str "Ready authored work (" (count items) "):\n"
+           (str/join "\n" (map #(str "- " (item-line %)) items)))
+      "No authored work is ready.")))
 
 (defn render-ready-items-ai
   "Render source which reads and formats the supplied ready item selection."
@@ -962,28 +968,39 @@
          (str ":\n" (str/join "\n" (map #(str "- " (line %)) values))))))
 
 (defn- plan-introduction
-  []
-  (str "Items connect to this agent through :my.plan.item/agent; "
+  ([] (plan-introduction nil))
+  ([view]
+   (let [item-id (some :my.plan.item/id
+                       (concat (:my.plan/ready view)
+                               (:my.plan/blocked view)
+                               (:my.plan/recent-completions view)))
+         shown-id (or item-id "<item-id>")]
+    (str "Items connect to this agent through :my.plan.item/agent; "
        ":my.plan.item/parent decomposes work, open :my.plan.item/needs refs "
        "block work, and :my.plan.item/completed-at presence completes it. "
        "For example: (seon.db/transact! [{:db/id "
-       "[:my.plan.item/id \"item-id\"] :my.plan.item/title \"Updated title\"}]). "
+       (pr-str [:my.plan.item/id shown-id])
+       " :my.plan.item/title \"Updated title\"}]). "
+       (when-not item-id "Replace <item-id> with an existing item id. ")
        "These are ordinary facts that "
        "seon.db/q and seon.db/pull read and seon.db/transact! can create or "
-       "update; the sections below are derived current state."))
+        "update; the sections below are derived current state."))))
 
 (defn format-plan-ai
   "Format the current plan union as terminal text."
-  {:malli/schema [:=> [:cat :my.plan/view] :string]}
+  {:malli/schema [:=> [:cat [:or :my.plan/view :seon.error/value]]
+                  [:or :string :seon.error/value]]}
   [view]
-  (let [older (:my.plan/older-completions view)]
+  (if (error-value? view)
+    view
+    (let [older (:my.plan/older-completions view)]
     (str/join
      "\n\n"
      (cond->
       [(str "Current plan for " (pr-str (:seon.cluster.agent/id view))
             (when-let [anchor (:my.plan/anchor view)]
               (str " — anchor " (pr-str anchor))))
-       (plan-introduction)
+       (plan-introduction view)
        (section-ai
         "Derived obligations"
         (:my.plan/obligations view)
@@ -995,7 +1012,7 @@
        (section-ai "Blocked authored work" (:my.plan/blocked view) item-line)
        (section-ai "Recent completions"
                    (:my.plan/recent-completions view) item-line)]
-       older (conj (print/render-elision-ai older))))))
+       older (conj (print/render-elision-ai older)))))))
 
 (defn render-plan-ai
   "Render source which derives and formats the current plan union."
