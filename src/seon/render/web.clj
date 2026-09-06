@@ -1128,6 +1128,36 @@
      (= output :seon.render/html) rendered
      :else [:pre (str rendered)])])
 
+(defn- debug-read-dependencies-html
+  [entry]
+  (if (contains? entry :seon.render.call/read-evidence)
+    (let [evidence (:seon.render.call/read-evidence entry)]
+      [:details {:class "seon-debug-read-dependencies"}
+       [:summary (str "database read dependencies · " (count evidence)
+                      " evidence entries")]
+       [:p {:class "seon-debug-read-basis"}
+        "render basis transaction "
+        (pr-str (:seon.render.call/basis-transaction entry))]
+       (if (seq evidence)
+         (into [:ol]
+               (map-indexed
+                (fn [index read]
+                  [:li
+                   [:details
+                    [:summary (str "evidence entry " (inc index))]
+                    (debug-value-html
+                     (select-keys
+                      read
+                      [:seon.db/source-argument-position
+                       :seon.db/read-request
+                       :datahike.read/dependency-plan
+                       :datahike.read/revision]))]]))
+               evidence)
+         [:p "No database read evidence was retained."])])
+    [:details {:class "seon-debug-read-dependencies"}
+     [:summary "database read dependencies unavailable"]
+     [:p "Read evidence is absent from this retained render entry."]]))
+
 (defn- debug-experiment-candidate-html
   [debug-request output selected stage-status previews entries candidate]
   (let [producer (:seon.render.selection.candidate/producer candidate)
@@ -1152,6 +1182,8 @@
         (debug-value-html
          (get-in entry [:seon.render.call/static-evidence
                         :seon.render.call/argument]))])
+     (when-let [entry (get entries producer)]
+       (debug-read-dependencies-html entry))
      (when-let [entry (get entries producer)]
        (debug-renderer-contract entry producer))
      (when-let [entry (get entries producer)]

@@ -1115,6 +1115,38 @@
             (is (= 1 @calls)
                 "unchanged debug reads reuse the retained observation")))))))
 
+(deftest debug-compatible-candidate-discloses-retained-read-dependencies
+  (let [rendered
+        ((web-private 'debug-read-dependencies-html)
+         {:seon.render.call/basis-transaction 42
+          :seon.render.call/read-evidence
+          [{:seon.db/source-argument-position 0
+            :seon.db/read-request
+            {:seon.db/read-operation :q
+             :seon.db/query-request {:query '[:find ?e]
+                                     :args ['?db]}}
+            :datahike.read/dependency-plan {:datahike.read/attributes #{:seon.ns/name}}
+            :datahike.read/revision
+            {:datahike.cache/connection-id [:connection :one]
+             :datahike.cache/generation #uuid "00000000-0000-0000-0000-000000000001"
+             :datahike.read/attributes #{:seon.ns/name}}}]})
+        html (hiccup/->string rendered)]
+    (is (str/includes? html "database read dependencies · 1 evidence entries"))
+    (is (str/includes? html "render basis transaction 42"))
+    (is (str/includes? html ":seon.db/read-operation :q"))
+    (is (str/includes? html ":datahike.read/dependency-plan"))
+    (is (str/includes? html ":datahike.read/revision"))))
+
+(deftest debug-read-dependencies-distinguishes-empty-from-absent
+  (let [render ((web-private 'debug-read-dependencies-html)
+                {:seon.render.call/basis-transaction 7
+                 :seon.render.call/read-evidence []})
+        absent ((web-private 'debug-read-dependencies-html) {})]
+    (is (str/includes? (hiccup/->string render)
+                       "No database read evidence was retained."))
+    (is (str/includes? (hiccup/->string absent)
+                       "database read dependencies unavailable"))))
+
 (deftest unrelated-transaction-reuses-debug-observation-and-render-call
   (with-server
     (fn [connection server context]
