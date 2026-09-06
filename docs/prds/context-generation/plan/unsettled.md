@@ -8,6 +8,23 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Owner steering — visualization and design iteration, 2026-09-06: stop trying
+to solve namespace rendering or the entire platform before experimentation.
+Implementation agents are paused and their unfinished shared-tree edits are
+preserved. The next work is feedback-driven iteration on the visualization,
+using the default renderer and inspectable candidates; specialized-renderer
+perfection is not a prerequisite. Automatic goal continuations do not override
+this direction or authorize restarting paused implementation lanes.
+
+An interactive design example was shown in the conversation at
+`/Users/sean/.codex/visualizations/2026/09/05/01a072a8-9fd1-7863-b8c1-34b2c3d9e577/seon-inspection-layout.html`.
+It compares sidebar versus inline inspection and simulates attribute selection
+and renderer previews. Browser checks verified these local interactions and
+360-pixel containment. Its data, ranking, and producing forms are illustrative,
+not evidence of executed forms or adopted renderer precedence. It is not the
+completed production lab. Await owner feedback before choosing its layout or
+resuming the platform changes.
+
 Candidate and prompt UI integration checkpoint, 2026-09-06: retained arguments
 and Malli contracts now have disclosures; candidate/selected function links
 navigate to their actual database entities, and AI/HTML links preserve viewer
