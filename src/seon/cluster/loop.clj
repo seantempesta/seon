@@ -142,6 +142,26 @@
              max-source))
    sources))
 
+(defn planned-sources
+  "Parse and repair the ordered forms that one ordinary source run executes.
+
+  This is the same source preparation used for a provider reply. Reader
+  failures remain executable source so the ordinary evaluator records their
+  terminal diagnostic; a reply containing no forms remains a flat refusal."
+  {:malli/schema
+   [:=> [:catn
+         [:text :seon.cluster.reply/text]
+         [:namespace-name :seon.ns/name]
+         [:max-source :seon.config.eval.result/max-source]]
+    [:or :seon.cluster.reply/sources :seon.error/value]]}
+  [text namespace-name max-source]
+  (let [parsed (reply/sources text namespace-name max-source)]
+    (cond
+      (vector? parsed) (repair-sources parsed namespace-name max-source)
+      (= ::reply/no-forms (:seon.error/kind parsed)) parsed
+      :else [{:seon.cluster.run.form/source text
+              :seon.ns/name namespace-name}])))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The pure turn
 ;;; ---------------------------------------------------------------------------
@@ -485,12 +505,6 @@
       (submission-time-limit-evaluation
        request
        (::seon.flow/submission-wait-ms submission)))))
-
-(defn- digest
-  "The plan digest: SHA-256 over the ordered sources, so the same reply
-  freezes to the same plan and N2's absent-to-digest fence is exact."
-  [sources]
-  (schema/sha-256 [(.getBytes (pr-str sources) "UTF-8")]))
 
 (defn- error-tx
   "Transaction data recording one failure VALUE as a durable error fact.
@@ -1411,22 +1425,13 @@
             (let [reply-text (:seon.ai/text completion)
                   database @connection
                   namespace-name (sci.eval/agent-namespace database agent-id)
-                  parsed (reply/sources
-                          reply-text namespace-name
-                          (get-in cluster
-                                  [:seon.sci.admit/caps
-                                   :seon.config.eval.result/max-source]))
                   max-source
                   (get-in cluster
                           [:seon.sci.admit/caps
                            :seon.config.eval.result/max-source])
-                  sources
-                  (cond
-                    (vector? parsed)
-                    (repair-sources parsed namespace-name max-source)
-                    (= ::reply/no-forms (:seon.error/kind parsed)) []
-                    :else [{:seon.cluster.run.form/source reply-text
-                            :seon.ns/name namespace-name}])
+                  prepared
+                  (planned-sources reply-text namespace-name max-source)
+                  sources (if (vector? prepared) prepared [])
                   threshold
                   (db/q '[:find ?threshold .
                           :where
@@ -1438,7 +1443,8 @@
                   plan-request
                   (cond-> {:seon.cluster.run/id run-id
                            :seon.cluster.run/process process
-                           :seon.cluster.run/plan-digest (digest sources)
+                           :seon.cluster.run/plan-digest
+                           (run/plan-digest sources)
                            :seon.cluster.run/reply-size reply-size
                            :seon.cluster.run/sources sources}
                     reply-stage
@@ -1466,14 +1472,7 @@
                    #(db/transact! connection {:tx-data intent-tx}))]
               (cond
                 (:seon.error/kind outcome) (fail! outcome)
-                (empty? sources)
-                (fail! (if (:seon.error/kind parsed)
-                         parsed
-                         {:seon.error/kind ::reply/no-forms
-                          :seon.error/message
-                          "The model reply contained no forms."
-                          :seon.error/data
-                          {:seon.cluster.run/reply reply-text}}))
+                (empty? sources) (fail! prepared)
                 :else
                 (resume-turn
                  {::cluster cluster
