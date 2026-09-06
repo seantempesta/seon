@@ -3,6 +3,7 @@
   from program facts, and the cluster-local cache's basis boundary."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [my.plan :as plan]
             [sci.core :as sci]
             [seon.call-preparation :as cp]
             [seon.db :as db]
@@ -605,3 +606,39 @@
                  live
                  (str "(seon.call-preparation-test/probe-received-database?"
                       " \"a\")"))))))))))
+
+(deftest an-acquired-context-supplies-a-leading-database-to-plan
+  (testing "a real first-party call uses its contracted shorter shape"
+    (test-support/with-database
+     (fn [connection]
+       ;; This ordinary call is also the program-graph edge that makes the
+       ;; source-string callee part of a reduced focused-test projection.
+       (is (= :my.plan/agent-not-found
+              (:seon.error/kind (plan/plan @connection "missing"))))
+       (let [ctx (sci.eval/cluster-ctx @connection connection)
+             acquired-projection (:seon.schema/projection ctx)
+             environment
+             (env/refuse-incomplete-environment!
+              (env/environment {:seon.boot/cluster-name "plan-call"
+                                :seon.db/connection connection
+                                :seon.schema/projection acquired-projection}))
+             live (env/carry-state ctx (env/environment-state environment))
+             current (cp/snapshot @connection acquired-projection)
+             invocation-plan
+             (cp/plan (get ctx cp/carrier) @connection current "my.plan/plan")
+             omitted (sci/eval-string* live "(my.plan/plan \"missing\")")
+             explicit
+             (sci/eval-string*
+              live
+              (str "(my.plan/plan "
+                   "(seon.call-preparation-test/probe-current-database) "
+                   "\"missing\")"))]
+         (is (= [0]
+                (mapv :seon.fn.argument/index
+                      (get-in invocation-plan
+                              [:seon.call-preparation/by-supplied-count 1
+                               :seon.call-preparation/inserts])))
+             "the complete indexed contract derives the leading database slot")
+         (is (= :my.plan/agent-not-found (:seon.error/kind omitted)))
+         (is (= omitted explicit)
+             "an explicit database wins and reaches the same function body"))))))
