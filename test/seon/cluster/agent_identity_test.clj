@@ -4,7 +4,6 @@
             [seon.cluster.agent :as agent]
             [seon.db :as db]
             [seon.config :as config]
-            [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
@@ -78,12 +77,23 @@
                      :seon.db/db database
                      :seon.db/connection connection
                      :seon.cluster.agent/id agent-id})
-            live (:seon.sci.eval/ctx forked)]
+            live (:seon.sci.eval/ctx forked)
+            evaluate
+            (fn [source]
+              (sci.eval/evaluate
+               {:seon.sci.eval/ctx live
+                :seon.cluster.agent/id agent-id
+                :seon.sci.admit/caps
+                (config/result-caps (test-support/effective-config))
+                :seon.sci.eval/time-limit-ms 5000
+                :seon.config/on-core-error :panic
+                :seon.cluster.run.form/source source
+                :seon.cluster.run.form/ns [:seon.ns/name namespace-name]}))]
         (is (some? live))
-        (is (= expected (sci/eval-string* live "(seon.cluster.agent/whoami)")))
+        (is (= expected (:seon.sci.admit/value (evaluate "(seon.cluster.agent/whoami)"))))
         (is (= "Agent     supplied"
-               (sci/eval-string* live
-                 "(seon.cluster.agent/whoami {:seon.cluster.agent/id \"supplied\"})"))
+               (:seon.sci.admit/value
+                (evaluate "(seon.cluster.agent/whoami {:seon.cluster.agent/id \"supplied\"})")))
             "the supplied map wins over current-agent defaults")
         (is (= "Agent     supplied"
                (agent/whoami {:seon.cluster.agent/id "supplied"})))))))

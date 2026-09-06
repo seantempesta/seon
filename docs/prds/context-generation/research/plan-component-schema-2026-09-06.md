@@ -205,3 +205,30 @@ These checks belong in the existing `plan!` transaction compiler and direct
 writer function. Datahike owns component lifecycle and referential retractions;
 the plan owner decides semantic reachability, cycles, and current-step validity
 against the mid-transaction database.
+
+## Root review and live experiment, 2026-09-06
+
+The ownership/position proposal is retained. The separate label/after/children
+input example above is not the recommended new default: use the actual stored
+steps keys, native transaction tempids, and ordinary needs refs. Do not add a
+second authored grammar when direct nested transaction data already expresses
+it. The refusal list is a research proposal, not an approved policy: cross-agent
+prerequisites can be meaningful; no new blanket same-agent restriction should
+be introduced as part of this rendering refactor.
+
+A live pull rooted at Juniper's agent identity returned its current item and
+both authored items. A pure 4 ms formatting probe produced:
+
+```text
+1. Make my plan and messages useful context — current
+Inspect the facts connected to my agent entity. Compare the AI and HTML renderings, then improve the functions with Sean.
+Done when: Two clear blocks: the work I am doing and the new messages I should respond to.
+
+2. Try the assembled context in a live agent turn
+After reviewing the blocks, test whether the agent can find its data and update its plan.
+```
+
+This uses actual stored content, not invented fixture prose. The probe ordered
+by entity id solely because the current model lacks authored sibling position;
+that is not the intended order authority. The proposed position attribute fixes
+that missing fact. Nested component ownership is not installed yet.
