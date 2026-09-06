@@ -1305,3 +1305,12 @@ the existing namespace/program mechanisms rather than another injection list.
 The live host-JVM probe returned the new three-line identity; this is not yet
 proof of indexed SCI or browser convergence. The earlier page proof above
 still included the now-retired formatting wrapper around `whoami`.
+
+The owner refined `whoami` to accept either supplied agent data (one map) or
+no visible arguments in SCI. It now has a map arity and the database/agent-id
+arity used by supplied defaults; both use the same formatting implementation.
+A regression now exercises both calls in the real acquired SCI turn fork.
+The previous single-arity identity gate passed 2 tests / 83 assertions; that
+result does not cover the new arity. Context selection transcript projection
+and lock route remain unverified in the browser. Review caught and corrected
+the lock handler's incorrect service connection key before deployment.

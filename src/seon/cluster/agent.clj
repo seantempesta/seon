@@ -142,22 +142,26 @@
   to inspect another agent, or a database value to query an explicit snapshot.
   Use seon.db/pull when the identity attributes themselves are needed as data."
   {:malli/schema
-   [:=> [:catn [:database :seon.db/database-value]
-                [:agent-id :seon.cluster.agent/id]]
-    [:or [:maybe :string] :seon.error/value]]}
-  [database agent-id]
-  (let [agent-data (db/pull database identity-selector
-                            [:seon.cluster.agent/id agent-id])]
-    (if (:seon.error/kind agent-data)
-      agent-data
-      (when-let [identity (:seon.cluster.agent/id agent-data)]
-        (let [namespace-name
-              (get-in agent-data [:seon.cluster.agent/namespace :seon.ns/name])
-              cluster-name
-              (get-in agent-data [:seon.cluster.agent/cluster :seon.cluster/name])]
-          (str "Agent     " identity
-               (when namespace-name (str "\nNamespace " namespace-name))
-               (when cluster-name (str "\nCluster   " cluster-name))))))))
+   [:function
+    [:=> [:catn [:agent-data :seon.render/unit]]
+     [:or [:maybe :string] :seon.error/value]]
+    [:=> [:catn [:database :seon.db/database-value]
+                 [:agent-id :seon.cluster.agent/id]]
+     [:or [:maybe :string] :seon.error/value]]]}
+  ([agent-data]
+   (if (:seon.error/kind agent-data)
+     agent-data
+     (when-let [identity (:seon.cluster.agent/id agent-data)]
+       (let [namespace-name
+             (get-in agent-data [:seon.cluster.agent/namespace :seon.ns/name])
+             cluster-name
+             (get-in agent-data [:seon.cluster.agent/cluster :seon.cluster/name])]
+         (str "Agent     " identity
+              (when namespace-name (str "\nNamespace " namespace-name))
+              (when cluster-name (str "\nCluster   " cluster-name)))))))
+  ([database agent-id]
+   (whoami (db/pull database identity-selector
+                    [:seon.cluster.agent/id agent-id]))))
 
 (defn render-identity-ai
   "Render the ordinary query that returns an agent's identity text."

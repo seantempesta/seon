@@ -3,6 +3,8 @@
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.agent :as agent]
             [seon.db :as db]
+            [sci.core :as sci]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
 (def ^:private agent-id "identity-root")
@@ -59,3 +61,24 @@
                 :seon.cluster.agent/id agent-id}]
       (is (:seon.error/kind database-error))
       (is (= database-error (agent/render-identity-html unit))))))
+
+(deftest identity-map-and-omitted-arguments-use-the-same-function
+  (with-agent
+    (fn [connection]
+      (let [database @connection
+            expected (agent/whoami database agent-id)
+            context (sci.eval/cluster-ctx database connection)
+            forked (sci.eval/fork-for-turn
+                    {:seon.sci.eval/ctx context
+                     :seon.db/db database
+                     :seon.db/connection connection
+                     :seon.cluster.agent/id agent-id})
+            live (:seon.sci.eval/ctx forked)]
+        (is (some? live))
+        (is (= expected (sci/eval-string* live "(seon.cluster.agent/whoami)")))
+        (is (= "Agent     supplied"
+               (sci/eval-string* live
+                 "(seon.cluster.agent/whoami {:seon.cluster.agent/id \"supplied\"})"))
+            "the supplied map wins over current-agent defaults")
+        (is (= "Agent     supplied"
+               (agent/whoami {:seon.cluster.agent/id "supplied"})))))))
