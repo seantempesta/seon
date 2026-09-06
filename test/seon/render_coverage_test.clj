@@ -11,7 +11,6 @@
             [seon.effect :as effect]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
-            [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -192,8 +191,8 @@
    (some #(when (= attribute (:seon.render.walk/attribute %)) %) units)))
 
 (deftest important-runtime-entities-declare-and-use-readable-faces
-  (is (= {:seon.render/ai `agent/render-situation-ai
-          :seon.render/html `transcript/render-session-html}
+  (is (= {:seon.render/ai `agent/render-identity-ai
+          :seon.render/html `agent/render-identity-html}
          (select-keys (family-properties :seon.cluster.agent/agent)
                       [:seon.render/ai :seon.render/html])))
   (is (= {:seon.render/ai `agent/render-creation-ai

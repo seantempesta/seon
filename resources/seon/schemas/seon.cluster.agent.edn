@@ -2,11 +2,11 @@
                      [:map
                       {:seon.db/attributes true,
                        :seon.render/ai
-                       seon.cluster.agent/render-situation-ai,
+                       seon.cluster.agent/render-identity-ai,
                        :seon.render/html
-                       seon.render.transcript/render-session-html,
+                       seon.cluster.agent/render-identity-html,
                        :seon.render/form
-                       seon.cluster.agent/situation-form}
+                       seon.cluster.agent/identity-form}
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
                       [:seon.cluster.agent/namespace
                        {:optional true}

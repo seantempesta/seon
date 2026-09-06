@@ -119,6 +119,85 @@
    "; A new run just opened. Why am I awake — do I have messages?"
    :seon.repl/form '(help)})
 
+(def ^:private identity-selector
+  '[:seon.cluster.agent/id
+    {:seon.cluster.agent/namespace [:seon.ns/name]}
+    {:seon.cluster.agent/cluster [:seon.cluster/name]}])
+
+(defn identity-form
+  "Return the database read that reproduces an agent's identity."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [unit]
+  {:seon.repl/comment "; Who am I?"
+   :seon.repl/form
+   (list 'seon.db/pull
+         (list 'quote identity-selector)
+         [:seon.cluster.agent/id (:seon.cluster.agent/id unit)])})
+
+(defn- identity-data
+  [unit]
+  (let [agent-id (:seon.cluster.agent/id unit)]
+    (when agent-id
+      (if-let [database (:seon.db/db unit)]
+        (db/pull database identity-selector
+                 [:seon.cluster.agent/id agent-id])
+        (if (map? (:seon.render/value unit))
+          (:seon.render/value unit)
+          unit)))))
+
+(defn render-identity-ai
+  "Render an agent's id, namespace, and cluster as concise identity."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or [:maybe :string] :seon.error/value]]}
+  [unit]
+  (let [agent-data (identity-data unit)]
+    (if (:seon.error/kind agent-data)
+      agent-data
+      (let [agent-id (:seon.cluster.agent/id agent-data)
+            namespace-name
+            (get-in agent-data
+                    [:seon.cluster.agent/namespace :seon.ns/name])
+            cluster-name
+            (get-in agent-data
+                    [:seon.cluster.agent/cluster :seon.cluster/name])]
+        (when agent-id
+          (str "; Identity derived from current database facts:\n"
+               "; You are agent " (pr-str agent-id) ".\n"
+               (when namespace-name (str "; Namespace: " namespace-name "\n"))
+               (when cluster-name
+                 (str "; Cluster: " (pr-str cluster-name) "\n"))
+               "; Query this identity again:\n"
+               (pr-str (:seon.repl/form (identity-form unit)))))))))
+
+(defn render-identity-html
+  "Render an agent's id, namespace, and cluster as an identity card."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or [:maybe :seon.render/hiccup] :seon.error/value]]}
+  [unit]
+  (let [agent-data (identity-data unit)]
+    (if (:seon.error/kind agent-data)
+      agent-data
+      (let [agent-id (:seon.cluster.agent/id agent-data)
+            namespace-name
+            (get-in agent-data
+                    [:seon.cluster.agent/namespace :seon.ns/name])
+            cluster-name
+            (get-in agent-data
+                    [:seon.cluster.agent/cluster :seon.cluster/name])]
+        (when agent-id
+          [:article {:class "seon-family-entry seon-agent-identity-entry"}
+           [:header
+            [:p {:class "seon-kicker"} "Agent"]
+            [:h3 [:code agent-id]]]
+           (into [:dl]
+                 (cond-> []
+                   namespace-name
+                   (conj [:div [:dt "Namespace"]
+                          [:dd [:code (str namespace-name)]]])
+                   cluster-name
+                   (conj [:div [:dt "Cluster"]
+                          [:dd [:code cluster-name]]])))])))))
+
 (defn render-situation-ai
   "Render the live situation as concise orientation for the agent.
 
