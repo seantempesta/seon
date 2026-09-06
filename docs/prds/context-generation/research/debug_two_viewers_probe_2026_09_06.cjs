@@ -30,6 +30,14 @@ const assert = require('node:assert/strict');
     assert.equal(observations[0].model['seon.graph/selected'], observations[1].model['seon.graph/selected']);
     assert.deepEqual(observations[0].model['seon.graph/snapshot'], observations[1].model['seon.graph/snapshot']);
     assert.notEqual(observations[0].selection, observations[1].selection);
+    for (const observation of observations) {
+      assert(observation.header.includes('indexed source digest'));
+      assert(observation.header.includes('schema projection fingerprint'));
+      assert(!observation.header.includes('\nnil\n'));
+    }
+    assert(observations[0].selection.includes(':schema\nselected'));
+    assert(observations[1].selection.includes(':namespace\nselected'));
+    assert(observations[1].selection.includes('my.plan/render-item-html compatible'));
     console.log(JSON.stringify(observations.map(({model, selection, ...rest}) => ({
       ...rest, selected: model['seon.graph/selected'],
       selection: selection.slice(0, 1600),

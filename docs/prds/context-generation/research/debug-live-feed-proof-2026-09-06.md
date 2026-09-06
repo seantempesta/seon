@@ -119,3 +119,16 @@ selected at the schema stage; investigation identified a return-contract name
 mismatch. After hot-reloading the new header, the reopened `my.plan` viewer
 could still serve an older cached header without source/projection identity,
 even after a runtime wake. Both findings are assigned to the existing owners.
+
+Resolved and verified: `f4b08e7c5` matches namespace HTML candidates against
+the actual `:seon.render/hiccup` return contract (79 focused assertions).
+`289c9913f` drops unwatched code-derived packages on the existing runtime-eval
+event and refreshes the shared latest-package map (77 focused assertions).
+After hot reload and one ordinary SCI evaluation, the same two-viewer browser
+probe passes stronger assertions: both headers carry the indexed source digest
+and schema projection fingerprint, `my.plan` selects at the namespace stage,
+and `seon.flow` selects through schema metadata. Both still show the same
+subject, snapshot, references, and output. The closed viewer no longer serves
+the old header. Source digest was
+`23e6dab924ab00226006c0500ba825b2c05991a879e42dc999007a15b43f3c07`,
+and projection fingerprint was 264262463.

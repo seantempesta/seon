@@ -8,6 +8,16 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Two-viewer and reopen checkpoint, 2026-09-06: actual browser inspection of
+the same plan entity now selects at namespace stage for `my.plan` and schema
+stage for `seon.flow`, with the same database snapshot, graph, and actual output.
+No agents or transactions were created by opening those agentless debug routes.
+Both headers show the sovereign indexed-source digest and handed projection
+fingerprint. Browser-discovered namespace return-contract mismatch and stale
+closed-viewer runtime caches were fixed in `f4b08e7c5` and `289c9913f`
+(79 and 77 focused assertions). Stronger browser assertions pass after the
+existing runtime-eval event; no cache-busting URL or reset is used.
+
 Live delivery checkpoint, 2026-09-06: the isolated `lab-browser-0906` probe
 now passes a real database transaction through SSE into the same open browser.
 A plan title changed and a new dependency ref appeared; basis advanced
