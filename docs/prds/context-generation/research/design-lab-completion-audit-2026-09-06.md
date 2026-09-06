@@ -6,6 +6,42 @@ tags: [research, context, render]
 
 # Design Lab first inspection slice completion audit — 2026-09-06
 
+## Updated checkpoint at `b979cbac1`
+
+The earlier table below is retained as a dated audit of `c94e68e11`, not the
+current implementation status. The following evidence supersedes its affected
+rows:
+
+- **Alternate execution is implemented.** The ordered comparison invokes every
+  distinct compatible candidate for AI and HTML through `render-call`, retaining
+  the actual result. Both projections show selected, shadowed, rejected and
+  missing choices. The selection owner supplies the stages; the UI does not
+  implement a second preference algorithm (`e8b2038d4`, `f8f0d4ca9`).
+- **Shared caching is proven by invocation counts.** Eight focused checks passed
+  131 assertions. Distinct display IDs reuse one SCI invocation; unrelated
+  transactions preserve it; changed queried facts invoke again. Observation and
+  selection reuse are covered separately. This is not a full-suite verdict.
+- **Live invalidation is reverified with that cache installed.** The title update
+  at basis 536871429 reached both paired projections. A selected renderer SCI
+  restoration reached HTML at unchanged basis 536871430. The same graph instance,
+  container, zoom and pan survived without navigation or JavaScript errors. See
+  `debug-live-feed-proof-2026-09-06.md` for exact evidence and reproducible probe.
+- **Complete acquired output and responsive containment are verified.** The
+  namespace browser checks actual function definitions in AI and summaries in
+  HTML; 1440- and 390-pixel document widths stayed contained. Rendering caps are
+  disabled by owner direction; query-work bounds remain separate. The root
+  entity-id regression was fixed and covered through generic invocation.
+
+**Still incomplete:** the requested actual producing source and ordinary stored
+form/result integration. Renderer invocation evidence must not be relabelled as
+an executed source string. The existing source-run implementation work remains
+paused under the owner's visualization-first steering. No parser, interpreter,
+or run-storage redesign was added in this checkpoint. Full context generation,
+settled agent-authored customization, and broader graph scale trials remain
+unproven. The active goal is therefore not marked complete.
+
+## Earlier audit
+
 This is a point-in-time audit of repository HEAD `c94e68e11` and the live
 evidence recorded on 2026-09-06. It is not a second roadmap. I read
 `../plan/design-lab-prd-2026-09-05.md` and the current

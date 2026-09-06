@@ -8,13 +8,23 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Live cache integration verification, 2026-09-06: with the shared cache active,
+a title transaction at basis 536871429 changed both candidate projections and
+the selected output in the already-open page. Restoring the original renderer
+through SCI changed HTML at unchanged basis 536871430. Both checks retained the
+same Cytoscape instance, container, zoom and pan with one initial navigation
+and no JavaScript errors. The title and renderer were restored. The browser
+probe compares graph snapshot identity rather than the entire header, whose
+measured acquisition duration can legitimately change.
+
 Owner cache direction, 2026-09-06: evaluating a renderer for visualization
 must populate the same invocation cache later consumers use. Presentation
 call IDs are not invocation identity. Reuse requires the same actual function,
 output, prepared inputs and program world, with current database read evidence;
 do not scan every retained call to discover a hit. The existing render proc
 owns this cache. Executed source forms use their ordinary stored results;
-opening an inspection must not rerun them. Cross-surface reuse is implemented in the existing render proc. The focused
+opening an inspection must not rerun them. Cross-surface reuse is implemented
+in the existing render proc. The focused
 regression counts actual SCI invocations: two presentation IDs reuse one
 invocation, an unrelated transaction reuses it, and a changed queried fact
 invokes again. Eight focused checks passed with 131 assertions and no failures
@@ -31,14 +41,16 @@ errors); `debug_complete_render_probe_2026_09_06.cjs` preserves the check.
 A later browser pass exposed missing function summaries: generic producer
 preparation dropped the entity `:db/id` before the namespace renderer queried
 its functions. The live database has 50 matching functions; the prepared
-argument lacks the id. Restoring the acquired root id at generic producer preparation restores the
+argument lacked the id. Restoring the acquired root id at generic producer
+preparation restores the
 actual namespace outputs in both projections. The browser probe checks the
 qualified HTML summary and the actual AI namespace plus unqualified `defn`;
-these are intentionally different outputs. The final browser pass passed at 1440 and 390 pixels with no JavaScript errors
+these are intentionally different outputs. The final browser pass passed at
+1440 and 390 pixels with no JavaScript errors
 and 161 ms observed completion. The graph library already resizes its canvas;
 the probe now waits for that observable result instead of assuming two animation
 frames suffice. The actual plan entity 32011 also appears in both projections.
-These are hot-loaded Var proofs on the same branch. These observations exercise hot-loaded JVM Vars
+These observations exercise hot-loaded JVM Vars
 on `lab-browser-0906`, not a fresh fork's indexed source. Initial source hook
 publication encountered concurrent initialization lock contention; subsequent
 publication succeeded.

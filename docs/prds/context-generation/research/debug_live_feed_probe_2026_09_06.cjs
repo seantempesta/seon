@@ -4,6 +4,7 @@ const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const beforeText = process.argv[4] || 'Before live update';
 const afterText = process.argv[5] || 'After live update';
+const changeKind = process.argv[6] || 'data';
 (async () => {
   const browser = await chromium.launch({
     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -29,7 +30,8 @@ const afterText = process.argv[5] || 'After live update';
       const cy = container._cyreg.cy;
       cy.viewport({ zoom: 0.8, pan: { x: 75, y: 85 } });
       window.seonBrowserProof = { container, cy };
-      return { header: document.querySelector('#debug-inspection-header').innerText,
+      return { snapshot: JSON.parse(document.querySelector('[data-graph-model]').textContent)['seon.graph/snapshot'],
+        header: document.querySelector('#debug-inspection-header').innerText,
         edges: cy.edges().length, nodes: cy.nodes().length };
     });
     console.log(JSON.stringify({ readyForTransaction: true, before }));
@@ -40,7 +42,8 @@ const afterText = process.argv[5] || 'After live update';
     const after = await page.evaluate(() => {
       const container = document.querySelector('[data-graph-canvas]');
       const cy = container._cyreg.cy;
-      return { header: document.querySelector('#debug-inspection-header').innerText,
+      return { snapshot: JSON.parse(document.querySelector('[data-graph-model]').textContent)['seon.graph/snapshot'],
+        header: document.querySelector('#debug-inspection-header').innerText,
         output: document.querySelector('#debug-html-inspection').innerText,
         graphStatus: document.querySelector('[data-graph-status]').textContent,
         edges: cy.edges().length, nodes: cy.nodes().length,
@@ -49,7 +52,14 @@ const afterText = process.argv[5] || 'After live update';
         zoom: cy.zoom(), pan: cy.pan() };
     });
     console.log(JSON.stringify({ before, after, navigations, errors }, null, 2));
-    assert.notEqual(after.header, before.header);
+    if (changeKind === 'code') assert.deepEqual(after.snapshot, before.snapshot, 'SCI redefinition alone does not transact');
+    else assert.notDeepEqual(after.snapshot, before.snapshot);
+    const previews = await page.locator('.seon-debug-projection-column').evaluateAll(columns =>
+      columns.map(column => ({output: column.querySelector('h4')?.textContent, text: column.innerText})));
+    assert(previews.some(column => column.output === 'HTML' && column.text.includes(afterText)),
+      'paired HTML preview receives the same live update');
+    if (changeKind === 'data') assert(previews.some(column => column.output === 'AI' && column.text.includes(afterText)),
+      'paired AI preview receives the data update');
     assert(after.sameContainer && after.sameInstance);
     assert.equal(after.zoom, 0.8);
     assert.deepEqual(after.pan, { x: 75, y: 85 });

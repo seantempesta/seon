@@ -132,3 +132,25 @@ subject, snapshot, references, and output. The closed viewer no longer serves
 the old header. Source digest was
 `23e6dab924ab00226006c0500ba825b2c05991a879e42dc999007a15b43f3c07`,
 and projection fingerprint was 264262463.
+
+## Shared-cache integration recheck — 2026-09-06
+
+At source checkpoint `b979cbac1`, the updated live-feed probe also asserts the
+paired candidate previews. Subject 32011 in viewer `my.plan` changed from
+`After live update` to `Cache verification update` at basis 536871429. The
+selected HTML and both paired projections updated without navigation. Restoring
+the title committed basis 536871430.
+
+A temporary SCI definition emitted `Shared cache code update`; restoring the
+exact original source read from the scratch database changed the already-open
+HTML preview back to the original item-id output at unchanged basis 536871430
+and commit `6a9db268-0f29-5e1d-a3e6-9fcfac8f5355`. Both proofs retained the
+Cytoscape container/instance, zoom 0.8, pan `{x:75,y:85}`, three nodes and two
+edges. Each had exactly one initial navigation and no JavaScript errors.
+
+The code-change mode compares the actual graph snapshot, not header bytes:
+acquisition timing legitimately changes on re-evaluation. The first attempted
+assertion over the whole header failed only on that timing field; the corrected
+observable-state assertion passed. Run with final argument `code` for a SCI
+change or `data` for a transaction. This remains a hot-loaded SCI/JVM proof, not
+a settled agent-definition or newly forked program proof.
