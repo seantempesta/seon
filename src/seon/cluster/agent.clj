@@ -136,42 +136,35 @@
          [:seon.cluster.agent/id (:seon.cluster.agent/id unit)])})
 
 (defn whoami
-  "Query an agent's identity, namespace, and cluster.
+  "Describe the current agent's identity, namespace, and cluster.
 
   SCI supplies the current database and agent when omitted. Pass an agent id
-  to inspect another agent, or a database value to query an explicit snapshot."
+  to inspect another agent, or a database value to query an explicit snapshot.
+  Use seon.db/pull when the identity attributes themselves are needed as data."
   {:malli/schema
    [:=> [:catn [:database :seon.db/database-value]
                 [:agent-id :seon.cluster.agent/id]]
-    [:or [:maybe :seon.render/unit] :seon.error/value]]}
+    [:or [:maybe :string] :seon.error/value]]}
   [database agent-id]
-  (db/pull database identity-selector
-           [:seon.cluster.agent/id agent-id]))
-
-(defn render-identity-text
-  "Format queried agent identity facts as concise plain text."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or [:maybe :string] :seon.error/value]]}
-  [agent-data]
-  (if (:seon.error/kind agent-data)
-    agent-data
-    (let [agent-id (:seon.cluster.agent/id agent-data)
-          namespace-name
-          (get-in agent-data [:seon.cluster.agent/namespace :seon.ns/name])
-          cluster-name
-          (get-in agent-data [:seon.cluster.agent/cluster :seon.cluster/name])]
-      (when agent-id
-        (str "Agent " (pr-str agent-id)
-             (when namespace-name (str "\nNamespace " namespace-name))
-             (when cluster-name (str "\nCluster " (pr-str cluster-name))))))))
+  (let [agent-data (db/pull database identity-selector
+                            [:seon.cluster.agent/id agent-id])]
+    (if (:seon.error/kind agent-data)
+      agent-data
+      (when-let [identity (:seon.cluster.agent/id agent-data)]
+        (let [namespace-name
+              (get-in agent-data [:seon.cluster.agent/namespace :seon.ns/name])
+              cluster-name
+              (get-in agent-data [:seon.cluster.agent/cluster :seon.cluster/name])]
+          (str "Agent     " identity
+               (when namespace-name (str "\nNamespace " namespace-name))
+               (when cluster-name (str "\nCluster   " cluster-name))))))))
 
 (defn render-identity-ai
   "Render the ordinary query that returns an agent's identity text."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
   (when (:seon.cluster.agent/id unit)
-    (str "(seon.cluster.agent/render-identity-text\n  "
-         (pr-str (list `whoami)) ")")))
+    (pr-str (list `whoami))))
 
 (defn render-identity-html
   "Render an agent's id, namespace, and cluster as an identity card."
@@ -182,7 +175,8 @@
                      (if (:seon.error/kind database)
                        database
                        (when-let [agent-id (:seon.cluster.agent/id unit)]
-                         (whoami database agent-id)))
+                         (db/pull database identity-selector
+                                  [:seon.cluster.agent/id agent-id])))
                      (or (:seon.render/value unit) unit))]
     (if (:seon.error/kind agent-data)
       agent-data

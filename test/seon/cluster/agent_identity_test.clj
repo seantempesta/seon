@@ -22,78 +22,34 @@
                :seon.cluster/name cluster-name})))
       (body connection))))
 
-(deftest identity-form-reproduces-the-rendered-agent
+(deftest identity-renders-from-current-database-facts
   (with-agent
     (fn [connection]
       (let [unit {:seon.db/db @connection
                   :seon.cluster.agent/id agent-id}
-            entry (agent/identity-form unit)
-            result (binding [db/*conn* connection]
-                     (eval (:seon.repl/form entry)))]
-        (is (= ";; Who am I?" (:seon.repl/comment entry)))
-        (is (= {:seon.cluster.agent/id agent-id
-                :seon.cluster.agent/namespace
-                {:seon.ns/name namespace-name}
-                :seon.cluster.agent/cluster
-                {:seon.cluster/name cluster-name}}
-               result))
-        (is (= (agent/render-identity-text result)
-               (str "Agent \"identity-root\"\n"
-                    "Namespace my.agents.identity-root\n"
-                    "Cluster \"identity-cluster\"")))))))
-
-(deftest identity-ai-source-and-terminal-value-are-separated
-  (let [unit {:seon.cluster.agent/id agent-id}
-        queried {:seon.cluster.agent/id agent-id
-                 :seon.cluster.agent/namespace
-                 {:seon.ns/name namespace-name}
-                 :seon.cluster.agent/cluster
-                 {:seon.cluster/name cluster-name}}
-        source (agent/render-identity-ai unit)]
-    (is (= (list 'seon.cluster.agent/render-identity-text
-                 (list 'seon.cluster.agent/whoami))
-           (read-string source))
-        "the source uses the public identity query rather than exposing its pull selector")
-    (is (= (str "Agent \"identity-root\"\n"
-                "Namespace my.agents.identity-root\n"
-                "Cluster \"identity-cluster\"")
-           (agent/render-identity-text queried))
-        "the terminal formatter returns only the queried identity value")
-    (let [database-error
-          {:seon.error/kind :seon.db/pull-failed
-           :seon.error/message "identity query failed"}]
-      (is (= database-error (agent/render-identity-text database-error))
-          "the terminal formatter preserves a flat query error"))
-    (is (not (str/includes? source "Namespace my.agents.identity-root"))
-        "the source does not fabricate its eventual query result")))
-
-(deftest identity-renders-for-agents-and-humans
-  (with-agent
-    (fn [connection]
-      (let [unit {:seon.db/db @connection
-                  :seon.cluster.agent/id agent-id}
-            ai (agent/render-identity-ai unit)
+            source (agent/render-identity-ai unit)
             html (agent/render-identity-html unit)]
-        (testing "AI identity is concise and explicit"
-          (is (not (str/includes? ai (pr-str agent-id)))
-              "identity discovery must not require the agent to know its id")
-          (is (str/includes? ai
-                             "seon.cluster.agent/render-identity-text"))
-          (is (str/includes? ai "seon.cluster.agent/whoami"))
-          (is (= (agent/whoami @connection agent-id)
-                 (binding [db/*conn* connection]
-                   (eval (:seon.repl/form (agent/identity-form unit)))))
-              "the concise query returns the same stored identity facts"))
-        (testing "HTML identity is a labelled card"
-          (is (str/includes? (pr-str html) agent-id))
-          (is (str/includes? (pr-str html) (str namespace-name)))
-          (is (str/includes? (pr-str html) cluster-name)))))))
+        (is (= '(seon.cluster.agent/whoami) (read-string source)))
+        (is (not (str/includes? source agent-id))
+            "discovering identity cannot require already knowing it")
+        (is (= "Agent     identity-root\nNamespace my.agents.identity-root\nCluster   identity-cluster"
+               (agent/whoami @connection agent-id)))
+        (is (str/includes? (pr-str html) agent-id))
+        (is (str/includes? (pr-str html) (str namespace-name)))
+        (is (str/includes? (pr-str html) cluster-name))
+        (db/transact! connection
+                      [[:db/add [:seon.cluster/name cluster-name]
+                        :seon.cluster/name "renamed-cluster"]])
+        (is (str/includes? (agent/whoami @connection agent-id)
+                           "Cluster   renamed-cluster")
+            "the result follows the supplied database, not a captured identity")))))
 
 (deftest identity-rendering-keeps-partial-data-and-read-errors-visible
   (testing "an id remains visible while optional connections are absent"
     (let [unit {:seon.cluster.agent/id agent-id
                 :seon.render/value {:seon.cluster.agent/id agent-id}}]
-      (is (str/includes? (agent/render-identity-ai unit) agent-id))
+      (is (= '(seon.cluster.agent/whoami)
+             (read-string (agent/render-identity-ai unit))))
       (is (str/includes? (pr-str (agent/render-identity-html unit)) agent-id))))
   (testing "a database refusal remains a typed rendered refusal"
     (let [database-error
@@ -102,6 +58,4 @@
           unit {:seon.db/db database-error
                 :seon.cluster.agent/id agent-id}]
       (is (:seon.error/kind database-error))
-      (is (str/includes? (agent/render-identity-ai unit)
-                         (pr-str agent-id)))
       (is (= database-error (agent/render-identity-html unit))))))

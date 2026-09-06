@@ -1295,3 +1295,13 @@ selected identity transcript evaluates `(seon.cluster.agent/whoami)` without
 embedding the agent id. A separate fresh Juniper SCI fork returned the correct
 identity in 73 ms. Found-value AI cards still display source without evaluated
 results; these are not complete context blocks yet.
+
+Identity refinement, 2026-09-06: the owner rejected the extra public
+`render-identity-text` wrapper. `whoami` now queries the supplied database and
+returns the concise identity display itself; raw attributes remain queryable
+with `seon.db/pull`. Generated source is one qualified `whoami` call with no
+agent-id argument. Bare-symbol resolution is not yet installed, and must use
+the existing namespace/program mechanisms rather than another injection list.
+The live host-JVM probe returned the new three-line identity; this is not yet
+proof of indexed SCI or browser convergence. The earlier page proof above
+still included the now-retired formatting wrapper around `whoami`.
