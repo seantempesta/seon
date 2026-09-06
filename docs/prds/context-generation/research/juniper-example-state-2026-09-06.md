@@ -1,5 +1,6 @@
 ---
 title: Juniper agent context example
+type: research
 date: 2026-09-06
 status: in-progress
 ---
