@@ -113,7 +113,7 @@
                   [:span {:class "seon-message-to"} "Agent bob"]]
                  [:time {:class "seon-message-at"
                          :datetime "2023-11-14T22:13:20Z"}
-                  "#inst \"2023-11-14T22:13:20.000-00:00\""]]
+                  "2023-11-14T22:13:20Z"]]
                 [:p {:class "seon-message-content"}
                  "first line\nsecond line"]]
                rendered)

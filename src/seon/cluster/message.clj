@@ -518,7 +518,7 @@
               to-ref (str "Unresolved recipient " (pr-str to-ref))
               :else "No recipient")]]
           (when at
-            [:time {:class "seon-message-at"
-                    :datetime (.toString (.toInstant ^java.util.Date at))}
-             (pr-str at)])]
+            (let [instant (.toString (.toInstant ^java.util.Date at))]
+              [:time {:class "seon-message-at" :datetime instant}
+               instant]))]
          [:p {:class "seon-message-content"} content]]))))

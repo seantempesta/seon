@@ -971,8 +971,8 @@ details.tool-call-details[open] .tool-preview {
 }
 .seon-message-direction {
   display: flex;
-  flex-wrap: wrap;
   gap: 0.3rem;
+  white-space: nowrap;
 }
 .seon-message-from,
 .seon-message-to {
@@ -1037,7 +1037,10 @@ details.tool-call-details[open] .tool-preview {
   font-weight: 500;
 }
 @media (max-width: 40rem) {
-  .seon-message-meta { align-items: flex-start; flex-direction: column; }
+  .seon-message-meta {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
 }
 .seon-error-entry {
   padding-left: 0.5rem;
