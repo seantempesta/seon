@@ -193,7 +193,7 @@
            [:header
             [:p {:class "seon-kicker"} "Agent"]
             [:h3 [:code agent-id]]]
-           [:p "This agent maintains its own plan and responds to messages. Its connected facts supply the context it sees when it works."]
+           [:p "This is the agent’s identity. Its namespace holds its functions; its cluster holds the shared database. The connected plan and messages describe its work."]
            (into [:dl]
                  (cond-> []
                    namespace-name
