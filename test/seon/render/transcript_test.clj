@@ -32,6 +32,25 @@
 
 (declare unit)
 
+(deftest admitted-top-level-string-is-terminal-text
+  (let [bounded-result (ns-resolve 'seon.render.transcript 'bounded-result)
+        render-unit {:seon.print/options {}}
+        string-node {:seon.print/face :seon.print/string
+                     :seon.print/value "Agent: juniper\nNamespace: my.agents.juniper"}
+        nested-node {:seon.print/face :seon.print/map
+                     :seon.print/entries
+                     [[{:seon.print/face :seon.print/keyword
+                        :seon.print/value :text}
+                       string-node]]}
+        truncated-node {:seon.print/face :seon.print/truncated-string
+                        :seon.print/value "Agent: juni"}]
+    (is (= "Agent: juniper\nNamespace: my.agents.juniper"
+           (bounded-result render-unit (pr-str string-node))))
+    (is (= "{:text \"Agent: juniper\\nNamespace: my.agents.juniper\"}"
+           (bounded-result render-unit (pr-str nested-node))))
+    (is (= "\"Agent: juni…\""
+           (bounded-result render-unit (pr-str truncated-node))))))
+
 (deftest stored-evaluations-are-terminal-transcript-values
   (support/with-database
     (fn [connection]
@@ -69,7 +88,9 @@
          :seon.cluster.eval/run [:seon.cluster.run/id "terminal-values"]
          :seon.cluster.eval/ordinal 2
          :seon.cluster.eval/at (java.util.Date. 3)
-         :seon.cluster.eval/result-edn (pr-str "alpha\nbeta")}
+         :seon.cluster.eval/result-edn
+         (pr-str {:seon.print/face :seon.print/string
+                  :seon.print/value "alpha\nbeta"})}
         {:seon.cluster.run.form/id "terminal-nested-string-form"
          :seon.cluster.run.form/run [:seon.cluster.run/id "terminal-values"]
          :seon.cluster.run.form/ordinal 3
@@ -78,7 +99,14 @@
          :seon.cluster.eval/run [:seon.cluster.run/id "terminal-values"]
          :seon.cluster.eval/ordinal 3
          :seon.cluster.eval/at (java.util.Date. 4)
-         :seon.cluster.eval/result-edn (pr-str {:text "alpha\nbeta"})}])
+         :seon.cluster.eval/result-edn
+         (pr-str
+          {:seon.print/face :seon.print/map
+           :seon.print/entries
+           [[{:seon.print/face :seon.print/keyword
+              :seon.print/value :text}
+             {:seon.print/face :seon.print/string
+              :seon.print/value "alpha\nbeta"}]]})}])
       (let [receipt-render run/render-receipt-ai
             receipt-calls (atom 0)
             rendered

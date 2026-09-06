@@ -655,6 +655,10 @@
         (floor-text unit {:seon.cluster.eval/result-edn serialized
                           :seon.render.transcript/unreadable? true})
 
+        (and (map? read-value)
+             (= ::print/string (:seon.print/face read-value)))
+        (:seon.print/value read-value)
+
         (and (map? read-value) (:seon.print/face read-value))
         (print/emit-text read-value
                          (merge (print/default-options)
