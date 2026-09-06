@@ -217,3 +217,34 @@ One mechanism requires removing the current mirrors in the same refactor:
   independently split, normalize, or digest source leaves.
 - **Display derives from stored facts.** Re-rendering original inputs can see a
   later database basis and is not evidence of what executed.
+
+## Bounded debug-cache integration — 2026-09-06
+
+The debug surface now marks only its selected AI call as an authored-source
+composition boundary. `render-call` retains the returned source in the existing
+shared invocation entry. `render-source-call` submits that source through
+`seon.cluster.agent/submit-source!`, retains the returned run id in the same
+entry, and returns immediately. A later database render wake derives pending or
+terminal state from the retained run facts; no separate status is retained, and terminal output comes from
+`seon.render.transcript/render-run-ai`. Evaluation read-evidence rows join the
+invocation's existing read evidence, so the normal cache-current check governs
+both source production and the reads performed by the evaluated form.
+
+The render proc receives the already existing cluster handle and routing atom
+as explicit arguments from `cluster-graph-definition`. It performs no global
+lookup, wait, polling, inline SCI evaluation, or new caching. When that agent
+already holds a run, the invocation retains the queried run identity and read
+evidence as a pending prerequisite; its settlement invalidates that evidence
+and permits one later submission. A transaction-race refusal is returned but
+is not retained as a candidate result. Alternative-candidate inspection remains
+read-only; this bounded slice submits the one selected debug candidate rather
+than opening one run per alternative.
+
+The remaining context/bootstrap integration is explicit. Before a model call,
+the agent already owns a held generated run, so source candidates must be
+collected in dependency-ready order, parsed once per ready group, and appended
+through the existing generated-form owner. Context composition must then reuse
+the stored run/evaluation identities retained by this invocation cache. It must
+not call the idle-agent submission seam, open nested runs, or execute one run
+per renderer leaf. That batching and held-run wiring is outside this debug-cache
+slice.

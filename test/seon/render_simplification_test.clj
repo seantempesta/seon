@@ -706,6 +706,92 @@
                  (is (= 2 @invocations)
                      "a changed read dependency invokes again"))))))))))
 
+(deftest authored-source-invocation-reuses-one-stored-run-across-presentations
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "source-cache")
+     (db/transact!
+      connection
+      (concat
+       (agent/creation-tx
+        {:seon.cluster.agent/id "source-cache-agent"
+         :seon.ns/name fixture-a
+         :seon.cluster/name "source-cache"})
+       [{:seon.cluster.run/id "source-cache-run"
+         :seon.cluster.run/agent
+         [:seon.cluster.agent/id "source-cache-agent"]
+         :seon.cluster.run/opened-at #inst "2026-09-06T20:00:00Z"
+         :seon.cluster.run/closed-at #inst "2026-09-06T20:00:01Z"}
+        {:seon.cluster.eval/id "source-cache-eval"
+         :seon.cluster.eval/run
+         [:seon.cluster.run/id "source-cache-run"]
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/at #inst "2026-09-06T20:00:00Z"
+         :seon.cluster.eval/source "(+ 1 1)"
+         :seon.cluster.eval/ns [:seon.ns/name fixture-a]
+         :seon.cluster.eval/result-edn
+         "#:seon.print{:face :seon.print/number, :value 2}"}]))
+     (let [ctx (support/fork-cluster-ctx connection)
+           invoke kernel/invoke
+           source-invocations (atom 0)
+           submissions (atom 0)
+           source-call (ns-resolve 'seon.render.web 'render-source-call)
+           submit-var (ns-resolve 'seon.cluster.agent 'submit-source!)
+           request
+           (fn [call-id retained captured calls]
+             (assoc (render-request @connection ctx fixture-a
+                                    {:seon.ns/name fixture-a})
+                    :seon.render/output :seon.render/ai
+                    :seon.render/profile
+                    {:seon.render.profile/id :test/source-cache
+                     :seon.render.profile/token-budget 1000
+                     :seon.render.profile/max-depth 8
+                     :seon.render.profile/max-children 100
+                     :seon.render.profile/composition
+                     :seon.render.profile.composition/context}
+                    :seon.render.call/id call-id
+                    :seon.render/retained-calls {}
+                    :seon.render/captured-calls calls
+                    :seon.render/invocations retained
+                    :seon.render/captured-invocations captured
+                    :seon.cluster.agent/id "source-cache-agent"
+                    :seon.cluster.loop/cluster {}
+                    :seon.cluster.agent/routing (atom {})))]
+       (sci/binding [sci/ns (sci/create-ns fixture-a)]
+         (sci/eval-form ctx '(defn namespace-ai [_] "(+ 1 1)")))
+       (with-redefs-fn
+         {#'kernel/invoke
+          (fn [invocation]
+            (swap! source-invocations inc)
+            (invoke invocation))
+          submit-var
+          (fn [_]
+            (swap! submissions inc)
+            {:seon.cluster.run/id "source-cache-run"})}
+         (fn []
+           (let [first-invocations (atom {})
+                 first-calls (atom {})
+                 first-output
+                 (source-call (request [:debug] {} first-invocations
+                                       first-calls))
+                 second-invocations (atom {})
+                 second-calls (atom {})
+                 second-output
+                 (source-call (request [:context] @first-invocations
+                                       second-invocations second-calls))
+                 retained (some-> @second-invocations vals first peek)]
+             (is (= first-output second-output))
+             (is (str/includes? second-output "2"))
+             (is (= 1 @source-invocations)
+                 "two presentations reuse the selected source invocation")
+             (is (= 1 @submissions)
+                 "the retained run identity prevents a second execution")
+             (is (= "(+ 1 1)" (:seon.render.call/source retained)))
+             (is (= "source-cache-run"
+                    (:seon.render.call/source-run-id retained)))
+             (is (= second-output
+                    (:seon.render.call/output retained))))))))))
+
 (deftest generic-renderer-receives-the-acquired-entity-id
   (support/with-database
    (fn [connection]

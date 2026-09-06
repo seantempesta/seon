@@ -2269,8 +2269,8 @@
              {:proc (flow/var-process
                      #'web/render-step :io
                      (env/carry (assoc view
-                                       :seon.cluster.loop/cluster
-                                       handle)
+                                       :seon.cluster.loop/cluster handle
+                                       :seon.cluster.agent/routing routing)
                                 environment))}
              :seon.search/index
              {:proc (flow/var-process

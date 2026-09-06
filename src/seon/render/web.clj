@@ -1391,6 +1391,143 @@
 
 (declare refresh-retained-read-evidence)
 
+(defn- replace-current-invocation!
+  [captured invocation-key evidence f]
+  (swap! captured update invocation-key
+         (fn [bucket]
+           (mapv (fn [entry]
+                   (if (render/same-invocation-evidence? entry evidence)
+                     (f entry)
+                     entry))
+                 bucket))))
+
+(defn- held-agent-run
+  [database agent-id]
+  (let [captured (atom [])
+        agent (binding [db/*read-evidence-sink* captured]
+                (db/pull database
+                         [{:seon.cluster.agent/run
+                           [:seon.cluster.run/id]}]
+                         [:seon.cluster.agent/id agent-id]))]
+    {:seon.cluster.run/id
+     (get-in agent [:seon.cluster.agent/run :seon.cluster.run/id])
+     :seon.render.call/read-evidence
+     (db/read-evidence @captured {:seon.db/retain-read-results? true})}))
+
+(defn- evaluation-read-evidence
+  [database run-id]
+  (into []
+        (mapcat :seon.cluster.eval/read-evidence)
+        (db/q '[:find [(pull ?evaluation
+                             [{:seon.cluster.eval/read-evidence [*]}]) ...]
+                :in $ ?run-id
+                :where
+                [?run :seon.cluster.run/id ?run-id]
+                [?evaluation :seon.cluster.eval/run ?run]]
+              database run-id)))
+
+(defn- source-run
+  [database run-id]
+  (db/pull database
+           [:seon.cluster.run/id
+            :seon.cluster.run/closed-at
+            :seon.cluster.run/error
+            {:seon.cluster.run/agent [:db/id :seon.cluster.agent/id]}]
+           [:seon.cluster.run/id run-id]))
+
+(defn- render-source-call
+  "Submit one explicitly authored AI candidate, then derive its stored result.
+
+  The invocation atom is the existing cache. A database wake re-enters this
+  function with the retained run identity; this function never waits for the
+  run and never evaluates source itself."
+  [request]
+  (let [captured-invocations (:seon.render/captured-invocations request)
+        request (cond-> request
+                  (= :seon.render/ai (:seon.render/output request))
+                  (assoc :seon.render.call/source-output? true)
+
+                  captured-invocations
+                  (update :seon.render/invocations merge
+                          @captured-invocations))
+        rendered (render/render-call request)
+        call-id (:seon.render.call/id request)
+        call-entry (get @(:seon.render/captured-calls request) call-id)
+        invocation-key (:seon.render.call/invocation-key call-entry)
+        invocation (some #(when (render/same-invocation-evidence?
+                                 % call-entry)
+                            %)
+                         (get @captured-invocations invocation-key))
+        source (:seon.render.call/source invocation)]
+    (if (or (not source) (:seon.render.call/output invocation))
+      rendered
+      (let [held (when-not (:seon.render.call/source-run-id invocation)
+                   (held-agent-run (:seon.db/db request)
+                                   (:seon.cluster.agent/id request)))
+            held-run-id (:seon.cluster.run/id held)
+            run-id (or (:seon.render.call/source-run-id invocation)
+                       (:seon.render.call/source-run-id request))
+            submission
+            (when (and (not run-id) (not held-run-id))
+              (cluster.agent/submit-source!
+               {:seon.cluster.loop/cluster
+                (:seon.cluster.loop/cluster request)
+                :seon.cluster.agent/routing
+                (:seon.cluster.agent/routing request)
+                :seon.cluster.agent/id
+                (:seon.cluster.agent/id request)
+                :seon.cluster.reply/text source}))
+            submission-error (when (:seon.error/kind submission) submission)
+            transient-submission-error?
+            (contains? #{::run/agent-already-running
+                         ::run/starting-namespace-changed}
+                       (::run/rule submission-error))
+            run-id (or run-id (:seon.cluster.run/id submission))
+            run (when run-id (source-run (:seon.db/db request) run-id))
+            terminal? (and run
+                           (or (contains? run :seon.cluster.run/closed-at)
+                               (contains? run :seon.cluster.run/error)))
+            output
+            (cond
+              submission-error submission-error
+              terminal?
+              (transcript/render-run-ai
+               (-> request
+                   (dissoc :seon.render.call/source-output?)
+                   (assoc :seon.cluster.run/id run-id
+                          :seon.cluster.run/agent
+                          (:seon.cluster.run/agent run))))
+              :else nil)
+            read-evidence (when terminal?
+                            (evaluation-read-evidence
+                             (:seon.db/db request) run-id))
+            enrich
+            (fn [entry]
+              (cond-> entry
+                run-id (assoc :seon.render.call/source-run-id run-id)
+                (and submission-error (not transient-submission-error?))
+                (assoc :seon.render.call/output submission-error)
+                terminal? (assoc :seon.render.call/output output)
+                held-run-id
+                (assoc :seon.render.call/source-blocked-run-id held-run-id)
+                (seq (:seon.render.call/read-evidence held))
+                (update :seon.render.call/read-evidence into
+                        (:seon.render.call/read-evidence held))
+                (seq read-evidence)
+                (update :seon.render.call/read-evidence into read-evidence)))]
+        (if transient-submission-error?
+          (swap! captured-invocations update invocation-key
+                 (fn [bucket]
+                   (into []
+                         (remove #(render/same-invocation-evidence?
+                                   % call-entry))
+                         bucket)))
+          (do
+            (replace-current-invocation! captured-invocations invocation-key
+                                         call-entry enrich)
+            (swap! (:seon.render/captured-calls request) update call-id enrich)))
+        output))))
+
 (defn- debug-render-experiment
   [render-request output subject]
   (let [request (assoc render-request :seon.render/output output)
@@ -1460,7 +1597,7 @@
      :seon.render/entries entries}))
 
 (defn- debug-output-html
-  [debug-request acquisition rendered]
+  [debug-request acquisition rendered call-entry]
   (hiccup/->string
    [:section {:id (debug-html-id
                    (or (:seon.cluster.agent/id debug-request) "inspection"))
@@ -1475,6 +1612,10 @@
 
       (:seon.error/kind rendered)
       (debug-value-html rendered)
+
+      (and (:seon.render.call/source call-entry) (nil? rendered))
+      [:p {:class "seon-render-pending"}
+       "The selected source is running through the agent's ordinary episode."]
 
       (= :seon.render/html (:seon.render/output debug-request))
       [:div {:class "seon-debug-output-preview"} rendered]
@@ -1676,11 +1817,16 @@
           :seon.render/namespace
           (:seon.render.debug/viewer-namespace debug-request)
           :seon.render/profile profile
+          :seon.render.value/root (:seon.render.debug/subject debug-request)
+          :seon.render.data/cursor cursor
           :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
           :seon.sci.admit/caps caps
           :seon.sci.eval/time-limit-ms
           (:seon.config.eval/time-limit-ms handle)
-          :seon.config/on-core-error (:seon.config/on-core-error handle)}
+          :seon.config/on-core-error (:seon.config/on-core-error handle)
+          :seon.cluster.loop/cluster handle
+          :seon.cluster.agent/routing
+          (:seon.cluster.agent/routing handle)}
           render-agent-id
           (assoc :seon.cluster.agent/id render-agent-id))
         entity-html
@@ -1716,7 +1862,7 @@
                  :seon.render/captured-calls captured-calls
                  :seon.render/invocations retained-invocations
                  :seon.render/captured-invocations captured-invocations))
-        rendered (when render-request (render/render-call render-request))
+        rendered (when render-request (render-source-call render-request))
         experiments
         (when render-request
           {:seon.render/ai
@@ -1758,7 +1904,8 @@
                                                     render-call-entry))
           (debug-html-id
            (or (:seon.cluster.agent/id debug-request) "inspection"))
-          (debug-output-html debug-request selected-result rendered)}
+          (debug-output-html debug-request selected-result rendered
+                             render-call-entry)}
           prompt-result
           (assoc prompt-id
                  (debug-ai-html (:seon.cluster.agent/id debug-request)
@@ -2048,7 +2195,9 @@
         ;; only advances its observed database basis below.
         (if (or invalidate-calls? (nil? package) (seq candidates))
           (debug-page-result database connection debug-request caps profile
-                             handle retained retained-invocations
+                             (assoc handle :seon.cluster.agent/routing
+                                    (:seon.cluster.agent/routing state))
+                             retained retained-invocations
                              captured-invocations)
           {::retained-only? true
            ::advance-basis? (not= (db/basis-t database)

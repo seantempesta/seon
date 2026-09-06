@@ -574,7 +574,8 @@
       (invocation-argument-evidence projection request selected)
       (select-keys request [:seon.sci.admit/caps
                             :seon.sci.eval/time-limit-ms
-                            :seon.config/on-core-error])]}))
+                            :seon.config/on-core-error
+                            :seon.render.call/source-output?])]}))
 
 (declare same-call-cache-evidence?)
 
@@ -604,7 +605,9 @@
                        retained-bucket)
                  entry))))
 
-(defn- same-call-cache-evidence?
+(defn same-invocation-evidence?
+  "True when two invocation entries describe the same code and input."
+  {:malli/schema [:=> [:cat :map :map] :boolean]}
   [previous current]
   (and (some? (::program-snapshot current))
        (some? (::projection current))
@@ -612,6 +615,8 @@
                    (::program-snapshot current))
        (identical? (::projection previous) (::projection current))
        (= (::selection-input previous) (::selection-input current))))
+
+(def ^:private same-call-cache-evidence? same-invocation-evidence?)
 
 (defn- refresh-read-evidence
   [database previous]
@@ -1065,31 +1070,47 @@
                                          previous))))
                     captured (atom [])
                     invocation-reusable? (some? retained-invocation)
+                    source-output?
+                    (and (= output :seon.render/ai)
+                         (:seon.render.call/source-output? request)
+                         (not (floor-producer? selected)))
                     raw (if invocation-reusable?
-                          (:seon.render.call/output retained-invocation)
+                          (or (:seon.render.call/source retained-invocation)
+                              (:seon.render.call/output retained-invocation))
                           (raw-output
                            (assoc request
                                   :seon.render.call/selected-producer selected
                                   :seon.render.call/captured-reads captured)
                            output selected))
+                    authored-source? (and source-output? (string? raw))
                     invocation-entry
                     (merge
                      (if invocation-reusable?
                        (refresh-read-evidence database retained-invocation)
-                       {:seon.render.call/read-evidence
+                       (cond->
+                        {:seon.render.call/read-evidence
                         (db/read-evidence
                          @captured {:seon.db/retain-read-results? true})
                         :seon.render.call/basis-transaction
                         (db/basis-t database)
-                        :seon.render.call/output raw})
+                         :seon.render.call/output
+                         (when-not source-output? raw)}
+                         authored-source?
+                         (assoc :seon.render.call/source raw)
+
+                         (:seon.render.call/source-run-id request)
+                         (assoc :seon.render.call/source-run-id
+                                (:seon.render.call/source-run-id request))))
                      cache-evidence)
                     _ (retain-invocation!
                        captured-invocations invocation-key
                        (get retained-invocations invocation-key)
                        invocation-entry)
-                    rendered (if reusable?
+                    rendered (if authored-source?
+                               (:seon.render.call/output invocation-entry)
+                               (if reusable?
                                (:seon.render.call/output previous)
-                               (present-output request output raw))
+                               (present-output request output raw)))
                     entry (merge
                            (if reusable?
                              (if check-read-evidence?

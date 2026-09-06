@@ -45,7 +45,15 @@
                 [:vector :seon.schema/value]]
                [:seon.render.call/selected-producer
                 {:optional true}
-                :qualified-symbol]],
+                :qualified-symbol]
+               [:seon.render.call/source-output?
+                {:optional true}
+                :boolean]
+               [:seon.render.call/source-run-id
+                {:optional true}
+                :seon.cluster.run/id]],
+              :source [:string {:min 1}],
+              :source-blocked-run-id :seon.cluster.run/id,
               :candidate-request
               [:map
                [:seon.db/db :seon.db/database-value]
