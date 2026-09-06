@@ -851,9 +851,8 @@
   [unit]
   (let [db (:seon.db/db unit)
         agent-id (:seon.cluster.agent/id unit)
-        requested (max 0 (long (get unit ::token-budget 0)))
-        candidate-limit (int (min Integer/MAX_VALUE
-                                  (max recent-entry-count requested)))
+        candidate-limit (long (get-in unit [:seon.sci.admit/caps
+                                            :seon.config.eval.result/max-nodes]))
         selected-run-id (::selected-run-id unit)
         total (if selected-run-id
                 (selected-run-count db selected-run-id candidate-limit)
@@ -867,45 +866,17 @@
                            (map #(projected-entry unit % :full)))
                      entries)
         candidates (into [] (remove ::pinned?) entries)
-        pinned-count (count pinned)
-        acquired (count candidates)
-        unacquired (- total pinned-count acquired)
-        ;; The floor is the exact smallest honest twin: the full pinned
-        ;; bootstrap prefix plus the loud marker for everything after it.
-        minimum (output-tokens pinned [] (- total pinned-count))
-        budget (max requested minimum)
-        recent-start (max 0 (- acquired recent-entry-count))]
-    (loop [index (dec acquired)
-           newer []]
-      (if (neg? index)
-        {::pinned pinned
-         ::entries newer
-         ::elided unacquired
-         ::minimum-token-budget minimum
-         ::token-budget budget}
-        (let [entry (nth candidates index)
-              recent? (<= recent-start index)
-              full (when recent?
-                     (projected-entry unit entry :full))
-              with-full (when full (into [full] newer))
-              older-count (+ unacquired index)]
-          (cond
-            (and with-full (fits? budget pinned with-full older-count))
-            (recur (dec index) with-full)
-
-            :else
-            (if-let [summary
-                     (best-summary
-                      unit pinned entry newer older-count budget)]
-              (recur (dec index) (into [summary] newer))
-              {::pinned pinned
-               ::entries newer
-               ::elided (+ unacquired (inc index))
-               ::minimum-token-budget minimum
-               ::token-budget budget})))))))
+        projected (mapv #(projected-entry unit % :full) candidates)
+        elided (max 0 (- total (count pinned) (count candidates)))
+        measured (output-tokens pinned projected elided)]
+    {::pinned pinned
+     ::entries projected
+     ::elided elided
+     ::minimum-token-budget measured
+     ::token-budget measured}))
 
 (defn minimum-token-budget
-  "Minimum budget preserving the bootstrap and a loud elision marker."
+  "Measured size of the complete query-bounded transcript."
   {:malli/schema [:=> [:cat :seon.render/unit] [:int {:min 0}]]}
   [unit]
   (::minimum-token-budget (projection (assoc unit ::token-budget 0))))
@@ -974,14 +945,11 @@
                 [?agent :seon.cluster.agent/namespace ?namespace]
                 [?namespace :seon.ns/name ?name]]
               db agent-id)
-        budget (long (or (get-in unit [:seon.render/profile
-                                       :seon.render.profile/token-budget])
-                         (get-in unit [:seon.sci.admit/caps
-                                       :seon.config.eval.result/max-string])
-                         0))
+        candidate-count (long (get-in unit [:seon.sci.admit/caps
+                                             :seon.config.eval.result/max-nodes]))
         candidates
         (history db (:seon.cluster.run/id unit) agent-id
-                 (int (min Integer/MAX_VALUE (max recent-entry-count budget))))
+                 candidate-count)
         entries
         (mapv
          (fn [entry]
@@ -1007,17 +975,7 @@
               (entry-bytes (or (::namespace entry) namespace-name)
                            form printed-value)}))
          candidates)]
-    (loop [remaining entries
-           spent 0
-           fitted []]
-      (if-let [entry (first remaining)]
-        (let [cost (long (or (tokens/estimate
-                              (:seon.render.history/bytes entry))
-                             0))]
-          (if (<= (+ spent cost) budget)
-            (recur (next remaining) (+ spent cost) (conj fitted entry))
-            fitted))
-        fitted))))
+    entries))
 
 (defn render-html
   "Render the same bounded transcript with stable block and entry ids."

@@ -746,7 +746,7 @@
   (let [data (render-data unit)]
     (if (error-value? data)
       data
-      (budgeted-ai data (token-budget unit)))))
+      (ai-text data))))
 
 (defn render-html
   "Render the namespace's same definitions as stable HTML entries."
@@ -756,4 +756,4 @@
   (let [data (render-data unit)]
     (if (error-value? data)
       data
-      (budgeted-html data (token-budget unit)))))
+      (html-view data (count (::functions data))))))
