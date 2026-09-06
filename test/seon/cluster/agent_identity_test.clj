@@ -51,7 +51,7 @@
                  {:seon.cluster/name cluster-name}}
         source (agent/render-identity-ai unit)]
     (is (= (list 'seon.cluster.agent/render-identity-text
-                 (list 'seon.cluster.agent/whoami agent-id))
+                 (list 'seon.cluster.agent/whoami))
            (read-string source))
         "the source uses the public identity query rather than exposing its pull selector")
     (is (= (str "Agent \"identity-root\"\n"
@@ -75,7 +75,8 @@
             ai (agent/render-identity-ai unit)
             html (agent/render-identity-html unit)]
         (testing "AI identity is concise and explicit"
-          (is (str/includes? ai (pr-str agent-id)))
+          (is (not (str/includes? ai (pr-str agent-id)))
+              "identity discovery must not require the agent to know its id")
           (is (str/includes? ai
                              "seon.cluster.agent/render-identity-text"))
           (is (str/includes? ai "seon.cluster.agent/whoami"))

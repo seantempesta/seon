@@ -169,9 +169,9 @@
   "Render the ordinary query that returns an agent's identity text."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
-  (when-let [agent-id (:seon.cluster.agent/id unit)]
+  (when (:seon.cluster.agent/id unit)
     (str "(seon.cluster.agent/render-identity-text\n  "
-         (pr-str (list `whoami agent-id)) ")")))
+         (pr-str (list `whoami)) ")")))
 
 (defn render-identity-html
   "Render an agent's id, namespace, and cluster as an identity card."

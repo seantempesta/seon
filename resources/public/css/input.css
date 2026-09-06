@@ -1544,13 +1544,47 @@ details.tool-call-details[open] .tool-preview {
 }
 .seon-debug-found-value {
   min-width: 0;
-  margin-top: 0.65rem;
+  margin-top: 1rem;
+  border: 1px solid var(--color-base-700);
+  border-radius: 0.4rem;
+  background: var(--color-base-900);
+  overflow: hidden;
 }
-.seon-debug-found-value > h3 {
-  margin: 0 0 0.35rem;
+.seon-debug-value-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.2rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--color-base-700);
+  background: var(--color-base-850);
+}
+.seon-debug-value-header h3 {
+  margin: 0;
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: 0.8rem;
   font-weight: 500;
+  color: var(--color-text-100);
+}
+.seon-debug-value-label,
+.seon-debug-stored-value {
+  margin: 0 0 0.3rem;
+  color: var(--color-text-400);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+.seon-debug-stored-value code {
+  color: var(--color-text-200);
+}
+.seon-debug-found-value > .seon-debug-projection-grid {
+  padding: 1rem;
+  gap: 1rem;
+}
+.seon-debug-found-value .seon-debug-projection-column {
+  padding: 0.75rem;
+  background: var(--color-base-950);
+  border: 1px solid var(--color-base-800);
 }
 .seon-agent-identity-entry .seon-kicker {
   margin: 0 0 0.2rem;

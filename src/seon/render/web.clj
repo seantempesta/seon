@@ -1318,10 +1318,8 @@
   (let [{:keys [e a v]} datom
         path (if (= :outgoing direction) [a] [])
         destination (if (= :outgoing direction) v e)
-        label (str (name direction) " " (pr-str a)
-                   (when (and (= :outgoing direction)
-                              (not (ref-attributes a)))
-                     " · inspect full attribute"))
+        reference? (or (= :incoming direction) (ref-attributes a))
+        label (if reference? destination a)
         selected-link
         (cond
           (and (= :outgoing direction) (identity-attributes a))
@@ -1340,7 +1338,14 @@
                   :seon.render.call/id
                   [::found-value direction e a v path output])))]
     [:article {:class "seon-debug-found-value"}
-     [:h3 selected-link]
+     [:header {:class "seon-debug-value-header"}
+      [:div
+       [:p {:class "seon-debug-value-label"}
+        (if (= :outgoing direction) "Attribute on this entity" "Reference from another entity")]
+       [:h3 [:code (str a)]]]
+      [:div {:class "seon-debug-stored-value"}
+       [:span (if reference? "Referenced entity " "Stored value ")]
+       (if reference? selected-link [:code (pr-str v)])]]
      [:div {:class "seon-debug-projection-grid"}
       [:section {:class "seon-debug-projection-column"}
        [:h4 "AI"]
@@ -1373,12 +1378,14 @@
     (cond
       (:seon.error/kind related-entities)
       [:section {:class "seon-debug-found-values"}
-       [:h2 {:class "seon-debug-caption"} "found values"]
+       [:h2 {:class "seon-debug-caption"} "Attributes and values"]
        (debug-value-html related-entities)]
 
       (seq rows)
       (into [:section {:class "seon-debug-found-values"}
-             [:h2 {:class "seon-debug-caption"} "found values"]]
+             [:h2 {:class "seon-debug-caption"} "Attributes and values"]
+             [:p {:class "seon-debug-description"}
+              "Each card shows one stored attribute and value, with its AI and HTML renderings. Reference values preview the connected entity."]]
             (map (fn [[direction datom value]]
                    (debug-found-value render-request debug-request
                                       ref-attributes identity-attributes
