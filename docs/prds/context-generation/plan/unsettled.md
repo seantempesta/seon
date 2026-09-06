@@ -8,6 +8,18 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Execution prerequisite now verified (`f93dae52f`): the final focused source
+submission checks pass 2 tests / 83 assertions. An isolated ordinary boot
+submitted two commented forms, closed their run, stored both numeric results,
+and consumed `result/e0` with zero provider attempts. Shared source preparation
+is committed in `423d46b1c`. Terminal transcript formatting is direct and
+metadata-free in `570a18f48` (1 focused test / 77 assertions). Identity source
+generation is separated from its ordinary result formatter in `e8d73e9d5`;
+this new source path is not yet exposed as an evaluated browser preview.
+The active integration adds stored evaluation identities to the existing
+invocation cache and uses ordinary transaction wakes for pending/completed
+candidate display. No second evaluator, cache, or inclusion registry is planned.
+
 Live checkpoint: `75d6c3787` and `12aeef5de` improve the existing message
 HTML and plan CSS. Root personally inspected both crops after host Var reload:
 message attribution and compact UTC timestamp sit above the authored content;
