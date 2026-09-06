@@ -51,6 +51,35 @@
     (is (= "\"Agent: juni…\""
            (bounded-result render-unit (pr-str truncated-node))))))
 
+(deftest selected-run-keeps-status-outside-agent-visible-text
+  (let [selected-identities
+        (ns-resolve 'seon.render.transcript 'selected-run-identities)
+        unit {:seon.db/db ::database
+              :seon.cluster.run/id "selected-run"
+              :seon.cluster.run/agent
+              {:seon.cluster.agent/id "selected-agent"}
+              :seon.sci.admit/caps caps}]
+    (with-redefs-fn
+      {selected-identities
+       (constantly
+        {:seon.render.transcript/selected-run-id "selected-run"
+         :seon.render.transcript/selected-agent-id "selected-agent"
+         :seon.render.transcript/selected-run-error nil})
+       #'run/render-ai (constantly "Run selected-run · opened at epoch")
+       #'transcript/render-ai
+       (constantly "my.agents.selected=> (+ 1 2)\n3")
+       #'run/render-html
+       (constantly [:article {:class "seon-run-status"} "Run selected-run"])
+       #'transcript/render-html
+       (constantly [:section {:class "seon-transcript"} "(+ 1 2)\n3"])}
+      (fn []
+        (is (= "my.agents.selected=> (+ 1 2)\n3"
+               (transcript/render-run-ai unit)))
+        (is (= [:section {:class "seon-run-transcript"}
+                [:article {:class "seon-run-status"} "Run selected-run"]
+                [:section {:class "seon-transcript"} "(+ 1 2)\n3"]]
+               (transcript/render-run-html unit)))))))
+
 (deftest stored-evaluations-are-terminal-transcript-values
   (support/with-database
     (fn [connection]

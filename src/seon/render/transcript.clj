@@ -951,10 +951,8 @@
       (and (:seon.db/db unit) run-id agent-id)
       (let [unit (assoc (transcript-unit
                          (assoc unit :seon.cluster.agent/id agent-id))
-                        ::selected-run-id run-id)
-            status (run/render-ai unit)
-            transcript (render-ai unit)]
-        (str status (when (seq transcript) (str "\n" transcript))))
+                        ::selected-run-id run-id)]
+        (render-ai unit))
       :else (missing-selected-run unit identities))))
 
 (defn message-form
