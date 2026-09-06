@@ -833,6 +833,13 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   `src/seon/call_preparation.clj`,
   `test/seon/call_preparation_test.clj`; causal evidence in
   [the call-preparation issue](../../../seon/issues/archive/focused-test-projection-omits-sci-source-callees.md).
+  **Map amendment, 2026-09-06:** a top-level map argument may itself be
+  omitted when every required entry has an admitted supplied default. The
+  existing planner constructs that map and fills its required entries;
+  optional entries remain absent and explicit caller entries win. A required
+  caller-authored entry prevents map omission. This supersedes the earlier
+  present-map-only restriction without adding function-specific zero-arity
+  wrappers, whose host calls cannot re-enter SCI's preparation hook.
 - **THE EXCLUSIVE-SWEEP DESIGN IS SEALED (owner, same day):**
   [exclusive-sweep-design-2026-08-05.md](exclusive-sweep-design-2026-08-05.md)
   is ruled with its three core recommendations accepted — Datahike's

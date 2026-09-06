@@ -607,6 +607,22 @@
     [?entry :seon.schema.shape.entry/schema ?value-shape]
     [?value-shape :seon.schema.shape/fingerprint ?fingerprint]])
 
+(def ^:private required-map-entry-query
+  '[:find ?order ?index ?entry-key
+    :in $ ?sym
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order ?order]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?argument :seon.fn.argument/index ?index]
+    [?argument :seon.fn.argument/rest? false]
+    [?argument :seon.fn.argument/schema ?shape]
+    [?shape :seon.schema.shape/type :map]
+    [?shape :seon.schema.shape/entries ?entry]
+    [?entry :seon.schema.shape.entry/optional? false]
+    [?entry :seon.schema.map-entry/key-keyword ?entry-key]])
+
 (defn- candidate-indexes
   [candidates]
   (mapv (fn [candidate]
@@ -632,7 +648,8 @@
   arity, which always wins."
   [exact derived]
   (let [leading (first (:seon.call-preparation/inserts derived))]
-    (when (and leading (zero? (long (:seon.fn.argument/index leading))))
+    (when (and (:seon.call-preparation/key leading)
+               (zero? (long (:seon.fn.argument/index leading))))
       {:seon.call-preparation/key (:seon.call-preparation/key leading)
        :seon.call-preparation/supplied exact
        :seon.call-preparation/omitted derived})))
@@ -716,7 +733,7 @@
                          (db/q database positional-query sym fingerprints))
             entries (when (seq fingerprints)
                       (db/q database map-entry-query sym fingerprints))
-            slots-by-arity
+            positional-slots-by-arity
             (reduce (fn [acc [order position rest? fingerprint]]
                       (let [candidate (get index fingerprint)]
                         (cond-> acc
@@ -743,6 +760,20 @@
                           acc)))
                     {}
                     entries)
+            slots-by-arity
+            (reduce-kv
+             (fn [acc [order position] required]
+               (let [entries (filterv #(= position (:seon.fn.argument/index %))
+                                      (get entries-by-arity order))]
+                 (if (= (set (map #(nth % 2) required))
+                        (set (map :seon.call-preparation/entry-key entries)))
+                   (update-in acc [order :slots] (fnil conj [])
+                              {:seon.fn.argument/index position
+                               :seon.call-preparation/entries entries})
+                   acc)))
+             positional-slots-by-arity
+             (group-by (fn [[order position _]] [order position])
+                       (db/q database required-map-entry-query sym)))
             validators (when (some #(> (count (:slots %)) 1)
                                    (vals slots-by-arity))
                          (argument-validators database current sym))
@@ -1080,7 +1111,9 @@
               with-inserts
               (reduce (fn [args slot]
                         (let [position (:seon.fn.argument/index slot)
-                              produced (value-for slot)]
+                              produced (if (:seon.call-preparation/entries slot)
+                                         {}
+                                         (value-for slot))]
                           (if @refusal
                             args
                             (into (conj (subvec args 0 position) produced)

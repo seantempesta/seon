@@ -96,4 +96,6 @@ two failures and zero errors. Both failures belong to the existing
 case: `seon.schema.datahike/resolve-malli-form-in` rejected its regex Malli
 fixture during runtime instrumentation. The source reconciliation regression
 passed. The newer historical-deletion assertion still requires its final
-focused gate; this combined run preceded that assertion.
+focused gate; this combined run preceded that assertion. That final
+source-only gate subsequently passed: `run.f5oKiZ`, one test and 86 assertions,
+zero failures or errors.

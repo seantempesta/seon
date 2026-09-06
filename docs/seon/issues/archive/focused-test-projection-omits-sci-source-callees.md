@@ -82,3 +82,34 @@ Existing full arities and leading-database dispatch retain precedence.
 - Both defaults may still be omitted together in a scoped agent environment.
 - A fresh published cluster demonstrates the ordinary call through SCI.
 - No renderer database workaround, source rewrite, or host-metadata fallback.
+
+## Required request maps
+
+The owner subsequently changed plan and identity lookup to one declared
+request-map arity. A literal host `([] (whoami {}))` delegation bypassed SCI's
+call-preparation hook on its inner call, so required database and agent keys
+were absent. The hook contract explicitly excludes host-internal calls
+(`reference-code/sci/src/sci/core.cljc:310-324`). This was a distinct limit of
+the old present-map-only rule, not missing supplier rows.
+
+The existing planner now derives an omitted map slot when its indexed
+required-entry set exactly equals its admitted supplied-entry set. It inserts
+an empty map and uses the existing required-entry fill step. An unsuppliable
+required entry prevents construction; optional entries stay absent; explicit
+caller values and declared arities keep precedence. The literal identity
+zero-arity wrapper was removed.
+
+A fresh turn fork on `juniper-context`, evaluated through
+`seon.sci.eval/evaluate` with database-derived admission caps and a five-second
+limit, returned Juniper's identity for `(seon.cluster.agent/whoami)` and
+root's identity for the explicit `{:seon.cluster.agent/id "root"}` request.
+At that observation published and adopted source commit IDs agreed on
+`6a9dfcfc-bfc7-575d-a39c-749f724a6658`, and the sealed publication digest
+equaled the current file snapshot:
+`88b680861c7f65531c64752794783f18f190da3baf6d7dc2381b497409197955`.
+
+The combined final gate `bin/test seon.call-preparation-test
+seon.cluster.agent-identity-test my.plan-test`, `run.PY7RYq`, passed all 32
+tests and 237 assertions with zero failures or errors. It includes absent-map
+construction, refusal to invent a required caller field, explicit caller
+precedence, and the acquired-context argumentless plan and identity calls.

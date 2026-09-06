@@ -104,6 +104,15 @@
 
  :slots [:vector :seon.call-preparation/slot],
 
+ ;; An omitted map is constructible only when every required entry has an
+ ;; admitted supplier. Its entries are filled by the same caller-wins step.
+ :insertion
+ [:or :seon.call-preparation/slot
+  [:map
+   [:seon.fn.argument/index :seon.fn.argument/index]
+   [:seon.call-preparation/entries :seon.call-preparation/slots]]],
+ :insertions [:vector :seon.call-preparation/insertion],
+
  :variadic? :boolean,
  :rest-slot? :boolean,
  :ambiguous? :boolean,
@@ -119,7 +128,7 @@
   [:seon.fn.arity/argument-count :seon.fn.arity/argument-count]
   [:seon.call-preparation/variadic? :seon.call-preparation/variadic?]
   [:seon.call-preparation/rest-slot? :seon.call-preparation/rest-slot?]
-  [:seon.call-preparation/slots :seon.call-preparation/slots]
+  [:seon.call-preparation/slots :seon.call-preparation/insertions]
   [:seon.call-preparation/argument-validators
    {:optional true} :seon.call-preparation/argument-validators]
   [:seon.call-preparation/entries :seon.call-preparation/slots]],
@@ -131,7 +140,7 @@
  :call-shape
  [:map
   [:seon.fn.arity/order :seon.fn.arity/order]
-  [:seon.call-preparation/inserts :seon.call-preparation/slots]
+  [:seon.call-preparation/inserts :seon.call-preparation/insertions]
   [:seon.call-preparation/entries :seon.call-preparation/slots]],
 
  ;; A declared arity and a derived shorter shape landing on ONE supplied
@@ -159,7 +168,7 @@
   [:seon.fn.arity/order {:optional true} :seon.fn.arity/order]
   [:seon.call-preparation/inserts
    {:optional true}
-   :seon.call-preparation/slots]
+   :seon.call-preparation/insertions]
   [:seon.call-preparation/entries
    {:optional true}
    :seon.call-preparation/slots]

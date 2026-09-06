@@ -45,6 +45,14 @@
   (swap! entered inc)
   (db/connection? (:seon.db/connection request)))
 
+(defn probe-map-needs-label
+  "A required caller-authored field prevents omission of the request map."
+  {:malli/schema
+   [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
+               [:sample/label :string]]] :string]}
+  [request]
+  (:sample/label request))
+
 (defn probe-received-both
   "Both database values of a two-slot arity, for the all-or-nothing proof."
   {:malli/schema
@@ -455,6 +463,18 @@
            (is (true? (probe ctx "probe-received-database? \"a\""))))
          (testing "map key: an absent REQUIRED key is filled"
            (is (true? (probe ctx "probe-received-connection? {}"))))
+         (testing "an omitted map is constructed from its required suppliers"
+           (is (true? (probe ctx "probe-received-connection?"))))
+         (testing "a required caller-authored field prevents map construction"
+           (is (= "required"
+                  (probe-map-needs-label {:seon.db/connection connection
+                                          :sample/label "required"})))
+           (let [current (cp/snapshot @connection (projection))
+                 invocation (cp/plan-for @connection current
+                                         "seon.call-preparation-test/probe-map-needs-label")]
+             (is (some? invocation))
+             (is (= [] (cp/prepare current (environment-for connection)
+                                   invocation [])))))
          (testing "explicit caller wins, at a map key"
            (is (false? (probe ctx
                               "probe-received-connection? {:seon.db/connection 1}"))
@@ -661,7 +681,7 @@
              invocation-plan
              (cp/plan (get ctx cp/carrier) @connection current "my.plan/plan")
              omitted (try
-                       (sci/eval-string* live "(my.plan/plan {})")
+                       (sci/eval-string* live "(my.plan/plan)")
                        (catch Throwable cause cause))
              explicit
              (sci/eval-string*
@@ -672,7 +692,7 @@
          (is (contains? (:seon.call-preparation/supplied-defaults current)
                         :seon.db/db)
              (pr-str (:seon.call-preparation/refusals current)))
-         (let [prepared (cp/prepare current environment invocation-plan [{}])]
+         (let [prepared (cp/prepare current environment invocation-plan [])]
            (is (= 1 (count prepared)))
            (is (db/database-value? (:seon.db/db (first prepared))))
            (is (= "missing"
