@@ -28,7 +28,7 @@ fact is not represented by the current implementation.
 | Prompt comparison is secondary and labels historical versus computed values | **Incomplete** | Prompt acquisition is opt-in, so it does not block initial inspection paint (`src/seon/render/web.clj:616-723,2453-2470`). | Current `debug-prompt` chooses a captured prompt *or* a prospective prompt. It does not show the requested historical capture and newly computed preview as two separately labelled values when both exist. |
 | Relevant database changes repaint the same open page | **Incomplete** | A prior same-tab proof saw a namespace doc appear and disappear at new bases without reload (`design-lab-inspection-slice-2026-09-05.md:339-344`), and `test/seon/render/web_test.clj:913-933` positively exercises a real socket feed after a transaction. | Repeat the database-change proof on the current integrated data/graph/selection/output surface. The latest browser graph probe explicitly did not perform it (`../plan/unsettled.md:20-22`). |
 | Rendering-code evaluation repaints without browser refresh | **Incomplete** | The running topology gives evaluation its own input and invalidates retained calls in `src/seon/cluster.clj:430-443,2330-2343` and `src/seon/render/web.clj:1777-1925`. `test/seon/render/web_test.clj:1015-1058` positively covers two evaluation signals interleaved with database wakes. | Re-evaluate an actual selected helper while the same browser page remains open and assert its displayed output changes and restores. The focused test substitutes the page function and offers channel values directly; it does not prove MCP evaluation through browser delivery. |
-| Unchanged or unrelated facts reuse acquisition, discovery and invocation | **Incomplete — current falsifier red** | `src/seon/render/web.clj:1060-1137` retains the bounded observation through the existing read-evidence mechanism, and the unchanged-database case is covered at `test/seon/render/web_test.clj:935-956`. | The latest focused unrelated-transaction test reports 2 passes, 2 failures: observation stays at one call, but discovery and invocation rise from 1 to 2 (`../plan/unsettled.md:133-154`). The first slice cannot claim relevant-input caching until that exact regression reaches 1/1/1 for the unrelated transaction and 2/2/2 only for selected-data change. |
+| Unchanged or unrelated facts reuse acquisition, discovery and invocation | **Proved by the focused counter regression** | `src/seon/render/web.clj:1060-1137` retains the bounded observation through the existing read-evidence mechanism. After `b080f42d1` bounded the selected namespace renderer's reads, `unrelated-transaction-reuses-debug-observation-and-render-call` passed with observation/discovery/invocation counts 1/1/1 initially, 1/1/1 after an unrelated transaction and 2/2/2 after the selected namespace changed (76 pass, 0 fail, 0 error, reported 2026-09-06). | Browser timing and useful output remain separate acceptance facts; this focused result proves the cache decision and call counts. |
 | Current browser interaction and responsive layout | **Proved for the bounded one-hop graph, not for the milestone as a whole** | The committed browser probe positively checked one Cytoscape instance, retained viewport/selection, edge detail, physical navigation, 390-pixel containment and no JavaScript errors on the actual 34-node/33-reference model (`../plan/unsettled.md:11-22`). | The same run did not prove live database update, code update, two viewers, producing form or successful plan-item output. Its clean JavaScript console cannot certify those unexercised paths. |
 
 ## Smallest coherent remaining integration action
@@ -43,10 +43,10 @@ graph owner.
 
 Then run one bounded browser sequence over the existing debug route: inspect the
 same subject through two viewers and the agentless route; change and restore one
-selected datom; re-evaluate and restore the selected helper; make one unrelated
-transaction. Assert the header including program identity, producing form,
-ordered selection, prepared argument, actual output, linked data and graph after
-each relevant change, and assert no discovery/invocation increase for the
-unrelated change. That single sequence closes the connected first-slice claim;
+selected datom; re-evaluate and restore the selected helper. Assert the header
+including program identity, producing form, ordered selection, prepared
+argument, actual output, linked data and graph after each relevant change. The
+focused 1/1/1 → unrelated 1/1/1 → relevant 2/2/2 regression already proves the
+cache decision and need not be repeated in the browser. That sequence closes the connected first-slice claim;
 it does not claim the later N-hop, generated-context, temporal-teaching or
 displayed-fact-coverage experiments are implemented.
