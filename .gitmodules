@@ -373,3 +373,6 @@
 [submodule "reference-code/editscript"]
 	path = reference-code/editscript
 	url = https://github.com/juji-io/editscript
+[submodule "reference-code/cytoscape"]
+	path = reference-code/cytoscape
+	url = https://github.com/cytoscape/cytoscape.js.git
