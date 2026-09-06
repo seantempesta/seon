@@ -500,7 +500,7 @@
              (eval/evaluate
               {:seon.cluster.run.form/source
                (str "(defn live-html "
-                    "{:malli/schema [:=> [:cat :map] :seon.render/html]} "
+                    "{:malli/schema [:=> [:cat :map] :seon.render/hiccup]} "
                     "[_value] [:article {:class \"live-html\"} \"live\"])")
                :seon.cluster.run.form/ns [:seon.ns/name fixture-a]
                :seon.sci.eval/ctx ctx
@@ -607,6 +607,72 @@
                       (target-call 'seon.render.web 'join-package package)))
       (is (identical? package
                       (target-call 'seon.render.web 'join-package package))))))
+
+(deftest shared-invocation-cache-reuses-identical-entity-inputs-across-call-ids
+  (support/with-database
+   (fn [connection]
+     (db/transact! connection
+                   [{:seon.ns/name fixture-a
+                     :seon.ns/doc "one"}])
+     (let [ctx (support/fork-cluster-ctx connection)
+           invoke kernel/invoke
+           invocations (atom 0)
+           request (fn [call-id retained captured]
+                     (assoc (render-request @connection ctx fixture-a
+                                            {:seon.ns/name fixture-a})
+                            :seon.render/output :seon.render/ai
+                            :seon.render.call/id call-id
+                            :seon.render/invocations retained
+                            :seon.render/captured-invocations captured))]
+       (sci/binding [sci/ns (sci/create-ns fixture-a)]
+         (sci/eval-form
+          ctx
+          '(defn namespace-ai [value]
+             (str "A:" (:seon.ns/name value) ":"
+                  (seon.db/q
+                   '[:find ?doc .
+                     :in $ ?name
+                     :where
+                     [?namespace :seon.ns/name ?name]
+                     [?namespace :seon.ns/doc ?doc]]
+                   (:seon.db/db value) (:seon.ns/name value))))))
+       (with-redefs [kernel/invoke (fn [invocation]
+                                    (swap! invocations inc)
+                                    (invoke invocation))]
+         (let [first-captured (atom {})
+               first-output (target-call 'seon.render 'render-call
+                                         (request [:debug] {} first-captured))]
+           (let [second-captured (atom {})
+                 second-output (target-call 'seon.render 'render-call
+                                            (request [:context] @first-captured
+                                                     second-captured))]
+             (is (= (str "A:" fixture-a ":one") first-output second-output))
+             (is (= 1 @invocations)
+                 "the second presentation reuses the raw invocation")
+             (is (some (comp seq :seon.render.call/read-evidence)
+                       (mapcat identity (vals @second-captured)))
+                 "a cache hit retains read evidence from the invocation")
+             (db/transact! connection
+                           [{:seon.cluster/name "cache-unrelated"}])
+             (let [unrelated-captured (atom {})
+                   unrelated-output
+                   (target-call 'seon.render 'render-call
+                                (request [:unrelated] @second-captured
+                                         unrelated-captured))]
+               (is (= second-output unrelated-output))
+               (is (= 1 @invocations)
+                   "an unrelated transaction does not invoke again")
+               (db/transact! connection
+                             [{:seon.ns/name fixture-a
+                               :seon.ns/doc "two"}])
+               (let [relevant-captured (atom {})
+                     relevant-output
+                     (target-call 'seon.render 'render-call
+                                  (request [:changed] @unrelated-captured
+                                           relevant-captured))]
+                 (is (= (str "A:" fixture-a ":two") relevant-output))
+                 (is (= 2 @invocations)
+                     "a changed read dependency invokes again"))))))))))
 
 (deftest broken-renderer-is-private-to-browser-and-loud-to-owner
   (support/with-database
