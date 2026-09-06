@@ -1339,3 +1339,18 @@ Both model replies and renderer submissions now share `run/stage-reply!` and
 reply/reply-blob/reply-size facts, forwarded into the existing plan transaction.
 No new source or result family was introduced. The existing agent submission
 regression now checks exact stored reply. Its gate is pending.
+
+Component modeling review (owner request, 2026-09-06): run/forms already owns
+form entities as components. Research found duplicate forward/back relationships
+and repeated form source/ns/run/ordinal on evaluations; the exact inventory and
+candidate consolidation are in context-selection-diff-integration-2026-09-06.md.
+Do not add a parallel agent form store or persist result/eN as another identity:
+that name is derived from ordinal within its run. A coherent writer/reader
+refactor is still required before changing these ownership relationships.
+
+Live selection proof: contribution `juniper-source-fidelity-lock` references
+original evaluations 53600 and 53601. `context/comparison` against the same
+source run returned :ready with identical baseline/refreshed refs. The browser
+remains stopped because source runs were being regenerated every 1–2 seconds;
+run count reached 1610 before the stopped web settled. Do not restart the UI
+until that invalidation defect and incomplete dev-source adoption are resolved.

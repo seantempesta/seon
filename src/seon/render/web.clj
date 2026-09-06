@@ -1313,6 +1313,22 @@
                alternatives)]))
     found-values])))
 
+(defn- context-action-form
+  [agent-id run-id contribution label]
+  [:form {(keyword "data-on:submit")
+          (str "@post('" (route/path ::route/agent-context {:id agent-id})
+               "', {contentType:'form'})")}
+   [:input {:type "hidden" :name "run" :value run-id}]
+   [:input {:type "hidden" :name "action"
+            :value (if contribution "compact" "append")}]
+   (when contribution
+     [:input {:type "hidden" :name "contribution"
+              :value (:seon.context.contribution/id contribution)}])
+   (when contribution
+     [:input {:type "hidden" :name "evaluations"
+              :value (pr-str (:seon.context.contribution/evaluations contribution))}])
+   [:button {:type "submit" :class "seon-bar-send"} label]])
+
 (defn- debug-context-html
   [render-request selection source-call]
   (let [agent-id (:seon.cluster.agent/id render-request)
@@ -1320,13 +1336,9 @@
     [:section {:class "seon-debug-found-values"}
      [:h2 {:class "seon-debug-caption"} "Context selection"]
      [:p {:class "seon-debug-description"}
-      "Lock an evaluated preview to keep its forms and results in this agent’s context. Stored evaluations are shared by reference; locking does not execute them again."]
+      "Lock evaluated forms and results into this agent’s context. Changes appear beside the locked results; appending adds a block, while compacting replaces its selected evaluations. Earlier evaluations remain stored."]
      (when (and agent-id run-id (:seon.render.call/output source-call))
-       [:form {(keyword "data-on:submit")
-               (str "@post('" (route/path ::route/agent-context {:id agent-id})
-                    "', {contentType:'form'})")}
-        [:input {:type "hidden" :name "run" :value run-id}]
-        [:button {:type "submit" :class "seon-bar-send"} "Lock preview into context"]])
+       (context-action-form agent-id run-id nil "Lock preview into context"))
      (cond
        (:seon.error/kind selection) (debug-value-html selection)
        (empty? selection) [:p "No previews locked yet."]
@@ -1334,12 +1346,46 @@
        (into [:div]
              (map
               (fn [contribution]
-                (let [unit (merge render-request contribution)]
+                (let [unit (merge render-request contribution)
+                      baseline (transcript/render-ai unit)
+                      comparison
+                      (when run-id
+                        (context/comparison
+                         (:seon.db/db render-request)
+                         {:seon.cluster.agent/id agent-id
+                          :seon.cluster.run/id run-id
+                          :seon.context.contribution/id
+                          (:seon.context.contribution/id contribution)}))
+                      status (:seon.context.comparison/status comparison)
+                      current
+                      (when (= :ready status)
+                        (transcript/render-ai
+                         (assoc unit :seon.context.contribution/evaluations
+                                (set (:seon.context.comparison/refreshed-evaluations
+                                      comparison)))))
+                      changed? (and (= :ready status) (not= baseline current))]
                   [:article {:class "seon-debug-found-value"}
                    [:header {:class "seon-debug-value-header"}
                     [:h3 (str "Block " (inc (:seon.context.contribution/position contribution)))]]
-                   [:pre {:class "seon-debug-candidate-preview"}
-                    (transcript/render-ai unit)]])))
+                   [:div {:class "seon-debug-projection-grid"}
+                    [:section {:class "seon-debug-projection-column"}
+                     [:h4 "Locked context"]
+                     [:pre {:class "seon-debug-candidate-preview"} baseline]]
+                    [:section {:class "seon-debug-projection-column"}
+                     [:h4 "Current preview"]
+                     (cond
+                       (:seon.error/kind comparison) (debug-value-html comparison)
+                       (= :pending status) [:p "Evaluation in progress…"]
+                       (= :different-source status) [:p "Select the same forms to compare their current results."]
+                       (= :ready status)
+                       [:div
+                        [:p (if changed? "Changed since locking" "Unchanged")]
+                        [:pre {:class "seon-debug-candidate-preview"} current]
+                        (when changed?
+                          [:div
+                           (context-action-form agent-id run-id nil "Append updated context")
+                           (context-action-form agent-id run-id contribution "Compact to current results")])]
+                       :else [:p "Select a renderer preview to compare."])]]])))
              selection))]))
 
 (defn- debug-found-value
@@ -3418,10 +3464,18 @@
         result (db/transact!
                 connection
                 {:tx-data
-                 [[:db.fn/call #'context/append-tx
-                   {:seon.cluster.agent/id (get-in request [:path-params :id])
-                    :seon.cluster.run/id (get params "run")
-                    :seon.context.contribution/id (str (random-uuid))}]]
+                 [[:db.fn/call
+                   (if (= "compact" (get params "action"))
+                     #'context/compact-tx #'context/append-tx)
+                   (cond->
+                    {:seon.cluster.agent/id (get-in request [:path-params :id])
+                     :seon.cluster.run/id (get params "run")
+                     :seon.context.contribution/id
+                     (if (= "compact" (get params "action"))
+                       (get params "contribution") (str (random-uuid)))}
+                     (= "compact" (get params "action"))
+                     (assoc :seon.context.contribution/evaluations
+                            (edn/read-string (get params "evaluations"))))]]
                  :tx-meta
                  (inbound-tx-meta @connection
                                   (:seon.cluster.run/process service)
