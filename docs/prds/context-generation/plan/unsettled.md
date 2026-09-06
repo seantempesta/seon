@@ -8,6 +8,17 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Owner clarification, 2026-09-06: reuse the normal source execution and
+settlement mechanism for lab comments/forms/results. The parser does not own
+SCI context creation: `reply/sources` parses source, while the existing run
+loop freezes intent, `resume-turn` obtains `sci.eval/fork-for-turn`, evaluates
+ordered forms and binds their results, then settles the batch. The lab should
+use that complete path and its ordinary stored results. Do not replace each
+renderer invocation with a separately invented parser/fork mechanism. The
+previous fork-per-render design question is superseded by this clarification;
+trace the smallest existing entry seam for system-authored source without a
+paid model call. Read-only inspection itself must remain read-only.
+
 Two-viewer and reopen checkpoint, 2026-09-06: actual browser inspection of
 the same plan entity now selects at namespace stage for `my.plan` and schema
 stage for `seon.flow`, with the same database snapshot, graph, and actual output.
