@@ -495,6 +495,30 @@
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:maybe :seon.render/hiccup]]}
   [unit]
-  (when-let [text (render-ai unit)]
-    [:article {:class "seon-family-entry seon-message-entry"}
-     [:p text]]))
+  (let [database (get unit :seon.db/db)
+        content (get unit ::content)
+        from-ref (get unit ::from)
+        to-ref (get unit ::to)
+        at (get unit ::at)]
+    (when content
+      (let [from (agent-reference-id database from-ref)
+            to (agent-reference-id database to-ref)]
+        [:article {:class "seon-family-entry seon-message-entry"}
+         [:header {:class "seon-message-meta"}
+          [:span {:class "seon-message-direction"}
+           [:span {:class "seon-message-from"}
+            (cond
+              from (str "Agent " from)
+              from-ref (str "Unresolved sender " (pr-str from-ref))
+              :else "Outside this cluster")]
+           [:span {:class "seon-message-arrow" :aria-hidden "true"} "→"]
+           [:span {:class "seon-message-to"}
+            (cond
+              to (str "Agent " to)
+              to-ref (str "Unresolved recipient " (pr-str to-ref))
+              :else "No recipient")]]
+          (when at
+            [:time {:class "seon-message-at"
+                    :datetime (.toString (.toInstant ^java.util.Date at))}
+             (pr-str at)])]
+         [:p {:class "seon-message-content"} content]]))))

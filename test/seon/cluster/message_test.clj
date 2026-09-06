@@ -93,6 +93,49 @@
                  :seon.cluster.message/to
                  [:seon.cluster.agent/id "bob"]})))))))
 
+(deftest message-html-separates-attribution-time-and-authored-content
+  (with-database
+    (fn [connection]
+      (let [database @connection
+            rendered
+            (message/render-html
+             {:seon.db/db database
+              :seon.cluster.message/content "first line\nsecond line"
+              :seon.cluster.message/from [:seon.cluster.agent/id "alice"]
+              :seon.cluster.message/to [:seon.cluster.agent/id "bob"]
+              :seon.cluster.message/at now})]
+        (is (= [:article {:class "seon-family-entry seon-message-entry"}
+                [:header {:class "seon-message-meta"}
+                 [:span {:class "seon-message-direction"}
+                  [:span {:class "seon-message-from"} "Agent alice"]
+                  [:span {:class "seon-message-arrow" :aria-hidden "true"}
+                   "→"]
+                  [:span {:class "seon-message-to"} "Agent bob"]]
+                 [:time {:class "seon-message-at"
+                         :datetime "2023-11-14T22:13:20Z"}
+                  "#inst \"2023-11-14T22:13:20.000-00:00\""]]
+                [:p {:class "seon-message-content"}
+                 "first line\nsecond line"]]
+               rendered)
+            "metadata and the authored content occupy distinct elements")
+        (is (= "From outside this cluster to bob: first line\nsecond line"
+               (message/render-ai
+                {:seon.db/db database
+                 :seon.cluster.message/content "first line\nsecond line"
+                 :seon.cluster.message/to [:seon.cluster.agent/id "bob"]}))
+            "the AI projection remains the existing exact sentence")
+        (is (str/includes?
+             (pr-str
+              (message/render-html
+               {:seon.db/db database
+                :seon.cluster.message/content "hello"
+                :seon.cluster.message/from
+                [:seon.cluster.agent/id "nobody"]
+                :seon.cluster.message/to [:seon.cluster.agent/id "bob"]
+                :seon.cluster.message/at now}))
+             "Unresolved sender [:seon.cluster.agent/id \\\"nobody\\\"]")
+            "the HTML metadata preserves unresolved-sender evidence")))))
+
 (defn- ask!
   "Commit one message from OUTSIDE the agent population — a human's.
   No `from`, and no triggering transaction: the head of a chain."

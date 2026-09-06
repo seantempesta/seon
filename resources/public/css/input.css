@@ -959,6 +959,86 @@ details.tool-call-details[open] .tool-preview {
   padding-left: 0.5rem;
   border-left: 2px solid var(--color-signal);
 }
+.seon-message-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem 0.8rem;
+  margin-bottom: 0.28rem;
+  color: var(--color-text-500);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+}
+.seon-message-direction {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.seon-message-from,
+.seon-message-to {
+  color: var(--color-text-400);
+}
+.seon-message-arrow { color: var(--color-signal); }
+.seon-message-at {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.seon-message-content {
+  color: var(--color-text-100);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.my-plan-item {
+  display: grid;
+  gap: 0.28rem;
+  padding: 0.4rem 0.5rem;
+  border-left: 2px solid var(--color-info);
+}
+.my-plan-item h3 {
+  margin: 0;
+  color: var(--color-text-100);
+  font-size: 0.76rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+.my-plan-id {
+  color: var(--color-text-500);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+}
+.my-plan-item > p:not(.my-plan-id):not(.my-plan-expected) {
+  color: var(--color-text-200);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+.my-plan-expected {
+  margin-top: 0.12rem !important;
+  padding-top: 0.28rem;
+  border-top: 1px solid var(--color-base-800);
+  color: var(--color-info);
+  font-size: 0.66rem;
+}
+.my-plan-ready,
+.my-plan-blocked,
+.my-plan-completed,
+.my-plan-obligations {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+}
+.my-plan-ready > h3,
+.my-plan-blocked > h3,
+.my-plan-completed > h3,
+.my-plan-obligations > h3 {
+  margin: 0;
+  color: var(--color-text-400);
+  font-size: 0.66rem;
+  font-weight: 500;
+}
+@media (max-width: 40rem) {
+  .seon-message-meta { align-items: flex-start; flex-direction: column; }
+}
 .seon-error-entry {
   padding-left: 0.5rem;
   border-left: 2px solid var(--color-error);
