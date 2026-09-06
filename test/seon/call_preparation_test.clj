@@ -654,3 +654,44 @@
          (is (= :my.plan/agent-not-found (:seon.error/kind omitted)))
          (is (= omitted explicit)
              "an explicit database wins and reaches the same function body"))))))
+
+(deftest snapshot-cache-coherence-does-not-widen-evaluation-evidence
+  (test-support/with-database
+   (fn [connection]
+     (db/transact! connection database-rows)
+     (let [captured (atom [])
+           _snapshot (binding [db/*read-evidence-sink* captured]
+                       (cp/snapshot @connection (projection)))
+           evidence (db/read-evidence
+                     @captured {:seon.db/retain-read-results? true})
+           attributes
+           (into #{}
+                 (mapcat (fn [entry]
+                           (let [plan (:datahike.read/dependency-plan entry)]
+                             (when (map? plan)
+                               (mapcat :datahike.query.source/attributes
+                                       (:datahike.query.dependency/sources
+                                        plan))))))
+                 evidence)
+           row (db/q '[:find (pull ?row
+                                   [:db/id
+                                    {:seon.call-preparation/schema [:db/id]}
+                                    {:seon.call-preparation/supplier [:db/id]}]) .
+                       :where
+                       [?row :seon.call-preparation/key :seon.db/db]]
+                     @connection)]
+       (is (seq evidence))
+       (is (not-any? #(= :all (:datahike.read/dependency-plan %)) evidence)
+           "the snapshot's internal max-tx basis is not a semantic read")
+       (is (every? attributes (cp/row-attributes))
+           "precise supplied-default declaration dependencies remain")
+       (is (db/read-evidence-current? @connection evidence))
+       (db/transact!
+        connection
+        [{:seon.call-preparation/key :test/alternate-database
+          :seon.call-preparation/schema
+          (get-in row [:seon.call-preparation/schema :db/id])
+          :seon.call-preparation/supplier
+          (get-in row [:seon.call-preparation/supplier :db/id])}])
+       (is (false? (db/read-evidence-current? @connection evidence))
+           "a real supplied-default declaration change still invalidates")))))

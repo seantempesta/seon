@@ -282,14 +282,22 @@
   RETRACTION move this basis; a store kept without history answers from
   its current value, which still moves on every assertion."
   [database attributes]
-  (let [history (db/history database)
-        historical (when-not (error-value? history)
-                     (db/q history historical-row-transaction-query
-                           attributes))
-        current (db/q database current-row-transaction-query attributes)]
-    (long (or (when (number? historical) historical)
-              (when (number? current) current)
-              0))))
+  ;; This basis keeps the process-local snapshot cache coherent. It is not a
+  ;; semantic read performed by the prepared call: the surrounding snapshot
+  ;; queries already retain the precise row, schema, and supplier attributes
+  ;; whose change can affect preparation. A temporal view plus a variable
+  ;; attribute max-tx query necessarily reports `:all`; retaining that internal
+  ;; observation made every unrelated result-settlement transaction invalidate
+  ;; the evaluated form that preparation had merely admitted.
+  (binding [db/*read-evidence-sink* nil]
+    (let [history (db/history database)
+          historical (when-not (error-value? history)
+                       (db/q history historical-row-transaction-query
+                             attributes))
+          current (db/q database current-row-transaction-query attributes)]
+      (long (or (when (number? historical) historical)
+                (when (number? current) current)
+                0)))))
 
 (defn- by-fingerprint
   [supplied-defaults]
