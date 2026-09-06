@@ -1222,13 +1222,22 @@ details.tool-call-details[open] .tool-preview {
 .seon-debug-grid:has(> .seon-debug-prompt-detail) {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
-.seon-debug-grid:has(> .seon-debug-graph) {
-  grid-template-columns: minmax(20rem, 0.9fr) minmax(0, 1.1fr);
-  height: auto;
-  overflow: auto;
+.seon-debug-experiment:has(> .seon-debug-graph) {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(20rem, 0.9fr);
+  grid-auto-rows: max-content;
+  align-content: start;
+  align-items: start;
 }
-.seon-debug-grid:has(> .seon-debug-graph) > .seon-debug-prompt-detail {
-  grid-column: 1 / -1;
+.seon-debug-experiment > .seon-debug-body {
+  grid-column: 1;
+  min-width: 0;
+}
+.seon-debug-experiment > .seon-debug-graph {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  position: sticky;
+  top: 0;
 }
 .seon-debug-graph {
   min-width: 0;
@@ -1429,6 +1438,15 @@ details.tool-call-details[open] .tool-preview {
   .seon-debug-experiment {
     overflow: visible;
     border-right: 0;
+  }
+  .seon-debug-experiment:has(> .seon-debug-graph) {
+    display: flex;
+    flex-direction: column;
+  }
+  .seon-debug-experiment > .seon-debug-body,
+  .seon-debug-experiment > .seon-debug-graph {
+    width: 100%;
+    position: static;
   }
   .seon-debug-graph {
     border-right: 0;
