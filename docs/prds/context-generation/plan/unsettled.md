@@ -8,6 +8,14 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Stored-run visualization now uses the existing transcript renderers by default
+(`a34f91ae5`). The focused test passed 89 assertions; a fresh branch's browser
+shows stored forms and results in both AI and HTML without changing its basis
+transaction or evaluation count. Generic function invocation evidence is still
+not an executed source string. Source submission work remains separate.
+The edit-hook publication and exact fresh-fork checks are recorded in
+`../research/edit-hook-publication-proof-2026-09-06.md`.
+
 Live cache integration verification, 2026-09-06: with the shared cache active,
 a title transaction at basis 536871429 changed both candidate projections and
 the selected output in the already-open page. Restoring the original renderer

@@ -39,8 +39,14 @@ function/ref navigation. MCP before and after those read-only probes returned
 basis 536871430 and the same sole agent entity 31810: inspecting agentless
 namespaces created neither agent nor transaction.
 
-**Still incomplete:** the requested actual producing source and ordinary stored
-form/result integration. Renderer invocation evidence must not be relabelled as
+**Updated at `a34f91ae5`:** ordinary stored form/result display now selects the
+existing transcript functions from the run schema. The focused test passed 89
+assertions. The fresh-branch browser probe positively observes stored sources
+and results in both projections, with an unchanged database basis and 11
+evaluations. See the resolved run-schema issue and the stored-run browser probe.
+
+**Still incomplete:** source submission integrated into the debug UI and actual
+producing source for generic invocation. Renderer invocation evidence must not be relabelled as
 an executed source string. The existing source-run implementation work remains
 paused under the owner's visualization-first steering. No parser, interpreter,
 or run-storage redesign was added in this checkpoint. Full context generation,

@@ -607,7 +607,10 @@ code changes, verify the running system, not only the tests, and report
 what is still broken honestly.
 
 The edit hook runs clj-kondo over prospective Clojure edits and publishes
-admitted changes to `current-src`; it never runs tests. Syntax,
+admitted changes to `current-src`; it never runs tests. The configured hooks
+cover `apply_patch`, `Edit`, and `Write`, including default config and schema
+publication. Shell file writes do not trigger them: use `bin/seon init --changed
+PATH` after such edits and verify publication. Syntax,
 unresolved-name, privacy, and arity errors block; read hook feedback and
 report smells.
 
