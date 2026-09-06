@@ -109,3 +109,54 @@ snapshot and refresh proof. This is an execution-reuse proof for that indexed
 program; later UI cap edits require their own final published fork. The
 broader web gate failures above remain an integration limitation, not a green
 claim. The separate freshness-query dissolution remains a follow-up design.
+
+## Unresolved follow-up: wildcard pull freshness
+
+The resolution above remains valid for the stale call-preparation dependency it
+measured. A later Juniper fallback source exposed a different conservative
+dependency: `(seon.db/pull (quote [*]) 32367)` retained twelve dependencies,
+and the only stale one was the pull's `:datahike.read/attributes :all` revision.
+An unrelated transaction advances the database commit id, so that wildcard
+read currently forces the otherwise unchanged source to execute again.
+
+A wildcard makes `pull-spec-attribute-dependencies` return `:all`, and
+`pull-dependency-plan` then cannot add a narrower entity-ref attribute set
+(`reference-code/datahike/src/datahike/pull_api.cljc:107-180`). Seon's
+`dependency-revision` represents `:all` with the whole committed database
+commit id (`src/seon/db.clj:391-422`). Datahike's cache context maintains
+attribute revisions and one conservative revision; it has no entity revision
+index. Transaction reports contain changed datoms, but that history is not
+retained in the read revision, so an entity-scoped freshness decision cannot
+be derived from the current and retained cache contexts
+(`reference-code/datahike/src/datahike/writing.cljc:576-605`).
+
+The smallest shared exact fix is result-digest replay at the existing read
+evidence owner. `append-pull-evidence!` already captures the exact replay
+request and logical pull result (`src/seon/db.clj:332-350`), and
+`read-evidence-current?` already replays a request when its revision differs
+(`src/seon/db.clj:510-538`). Retain a SHA-256 digest of the canonical EDN result
+beside durable read evidence, then compare it with the digest of the replayed
+result when the `:all` revision changes. `seon.schema/canonical-data-string`
+already gives maps and sets order-independent canonical bytes
+(`src/seon/schema.clj:489-536`). This stores a fixed-size digest rather than a
+possibly large wildcard result. An unchanged entity stays current across an
+unrelated transaction; any changed value, added or retracted attribute, or
+changed component expansion changes the replay result and invalidates it.
+Values that cannot be represented as canonical EDN retain the current
+conservative behavior.
+
+The existing process-local retained-result path is deliberately limited to
+bounded reads (`src/seon/db.clj:242-288,437-458`) and cannot solve durable
+evaluation reuse: durable evidence intentionally omits the result, while a
+wildcard pull is unbounded by that contract. Widening it would retain the giant
+result the constraint excludes. Adding entity revision state to Datahike would
+also solve this, but it adds a new maintained index and transaction-history
+contract for a case the existing replay seam can decide exactly.
+
+A focused regression should capture a wildcard pull of one entity, retain only
+its request and digest, transact an unrelated entity, and assert current;
+changing, adding, and retracting an attribute on the pulled entity must each
+assert stale. A component child change should be included because wildcard
+pull automatically expands component refs. The source-execution regression
+then proves this freshness result prevents a second evaluation rather than
+only proving the lower-level digest comparison.
