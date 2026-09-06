@@ -1416,15 +1416,19 @@
 
 (defn- evaluation-read-evidence
   [database run-id]
-  (into []
-        (mapcat :seon.cluster.eval/read-evidence)
+  (let [evaluations
         (db/q '[:find [(pull ?evaluation
                              [{:seon.cluster.eval/read-evidence [*]}]) ...]
                 :in $ ?run-id
                 :where
                 [?run :seon.cluster.run/id ?run-id]
                 [?evaluation :seon.cluster.eval/run ?run]]
-              database run-id)))
+              database run-id)]
+    (if (:seon.error/kind evaluations)
+      evaluations
+      (into []
+            (mapcat :seon.cluster.eval/read-evidence)
+            evaluations))))
 
 (defn- source-run
   [database run-id]
@@ -1454,7 +1458,9 @@
         current-namespace
         (assigned-agent-namespace database (:seon.cluster.agent/id request))
         starting-namespace
-        (get-in run [:seon.cluster.run/starting-ns :seon.ns/name])]
+        (get-in run [:seon.cluster.run/starting-ns :seon.ns/name])
+        read-evidence (when run-id
+                        (evaluation-read-evidence database run-id))]
     (when (and (= source (:seon.render.call/source previous))
                (= (get-in current [:seon.render.call/static-evidence
                                    :seon.render.call/producer])
@@ -1471,8 +1477,8 @@
                                :seon.cluster.agent/id]))
                (some? current-namespace)
                (= current-namespace starting-namespace)
-               (db/read-evidence-current?
-                database (evaluation-read-evidence database run-id)))
+               (vector? read-evidence)
+               (db/read-evidence-current? database read-evidence))
       run-id)))
 
 (defn- render-source-call
@@ -2321,7 +2327,23 @@
     (assoc state
            ::packages (select-keys (::packages state) watched)
            ::fragments {}
-           ::calls {}
+           ::calls
+           (reduce-kv
+            (fn [registrations registration-key calls]
+              (let [source-calls
+                    (into {}
+                          (comp
+                           (filter (comp :seon.render.call/source-run-id val))
+                           (map (fn [[call-id entry]]
+                                  [call-id
+                                   (dissoc entry
+                                           :seon.render/selection-input
+                                           :seon.render.call/output
+                                           :seon.render.call/read-evidence)])))
+                          calls)]
+                (cond-> registrations
+                  (seq source-calls) (assoc registration-key source-calls))))
+            {} (::calls state))
            ::ai-calls {}
            ::invocations {}
            ::ai-entries {})))

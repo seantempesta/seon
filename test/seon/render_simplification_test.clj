@@ -773,6 +773,20 @@
                  (source-call (request [:debug] {} first-invocations
                                        first-calls {}
                                        {:seon.ns/name fixture-a}))
+                 registration-key [:source-cache-tab]
+                 invalidated
+                 (target-call
+                  'seon.render.web 'invalidate-runtime-derived-state
+                  {:seon.render.web/registration (atom {registration-key 1})
+                   :seon.render.web/packages {}
+                   :seon.render.web/fragments {}
+                   :seon.render.web/calls {registration-key @first-calls}
+                   :seon.render.web/ai-calls {}
+                   :seon.render.web/invocations {}
+                   :seon.render.web/ai-entries {}})
+                 retained-after-runtime-eval
+                 (get-in invalidated
+                         [:seon.render.web/calls registration-key])
                  _ (db/transact!
                     connection
                     [{:seon.cluster.eval/id "source-cache-eval"
@@ -786,7 +800,7 @@
                  second-output
                  (source-call
                   (request [:debug] @first-invocations second-invocations
-                           second-calls @first-calls
+                           second-calls retained-after-runtime-eval
                            {:seon.ns/name fixture-a
                             :seon.cluster.run/_agent [{:db/id 9001}]}))
                  third-invocations (atom {})
@@ -800,6 +814,12 @@
                  retained (some-> @third-invocations vals first peek)]
              (is (nil? first-output)
                  "the pending run has no invented synchronous output")
+             (is (nil? (get-in retained-after-runtime-eval
+                               [[:debug] :seon.render.call/output]))
+                 "runtime evaluation invalidates the old presentation output")
+             (is (= "source-cache-run"
+                    (get-in retained-after-runtime-eval
+                            [[:debug] :seon.render.call/source-run-id])))
              (is (= second-output third-output))
              (is (str/includes? second-output "2"))
              (is (= 2 @source-invocations)
