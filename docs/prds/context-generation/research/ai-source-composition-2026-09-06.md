@@ -378,6 +378,74 @@ dependency unavailable; never rebind it or re-execute the block silently.
 - `src/seon/render/walk.clj` and transcript tests: query stored forms and
   evaluations, terminally format their admitted results, delete
   `generic-history-entries`.
+
+## Self-observing source feedback audit — 2026-09-06
+
+The feedback is real for a source such as `(my.plan/plan db agent-id)`.
+`submit-source!` commits `system-run-tx` before waking the agent
+(`src/seon/cluster/agent.clj:681-704`), and `system-run-tx` opens the run and
+its agent pointer in that same transaction (`src/seon/cluster/run.clj:761-808`,
+with the pointer established by `open-call` at lines 430-443). Evaluation then
+uses a fresh `@connection` snapshot and records the reads performed by the
+source (`src/seon/cluster/loop.clj:1685-1707`). Therefore the open source run
+already exists when its first form reads the database.
+
+`my.plan/run-obligations` selects every run for the agent that lacks
+`:seon.cluster.run/closed-at`; it does not distinguish how the run began
+(`src/my/plan.clj:727-746`). The source run consequently appears in its own
+`my.plan/plan` result. Settlement later adds terminal run/evaluation facts.
+The retained evidence is replayed or compared against dependency revisions by
+`db/read-evidence-current?` (`src/seon/db.clj:510-534`), so closing the run can
+make the result that depended on the open-run query stale. The current web
+reuse check requires that evidence to remain current before reusing the stored
+source run (`src/seon/render/web.clj:1450-1482`). If a redraw responds to that
+staleness by submitting again, each replacement run repeats the same cycle.
+Precise invalidation does not solve this semantic feedback.
+
+The durable run facts do not currently identify a preview. `system-run-tx`
+records the same run, form, evaluation, process, agent, namespace, digest, and
+optional trigger facts for any system-authored source. `:system` on a form says
+who authored it, not whether it is a debug preview, and absence of a trigger is
+not a unique cause. The existing non-name-based distinction is process-local:
+the retained render invocation carries `:seon.render.call/source-run-id`, and
+that id resolves the exact stored block (`src/seon/render/web.clj:1500-1557`).
+It is sufficient while the retained invocation exists; the database alone
+cannot reconstruct “preview” after that association is lost.
+
+The smallest safe rule is that execution follows explicit intent. A terminal
+invocation with `source-run-id` is immutable stored evaluation history for that
+invocation and redraw reuses it even when its recorded reads are no longer
+current. A fresh agent generation or an explicit lab rerun is a new execution
+intent and may open a new run against the then-current database. This preserves
+ordinary REPL semantics, including a write followed by a read seeing the new
+database, and prevents a database transaction caused by an evaluation from
+implicitly requesting another evaluation. Read evidence remains useful to
+explain the historical result and to invalidate unevaluated selection/source
+derivation; it must not itself manufacture execution intent.
+
+An authored source may instead request a database snapshot grounded by the
+run's existing `:seon.cluster.run/opening-commit-id` when stable pre-run
+semantics are part of that source's contract. That must be explicit in the
+source/API: silently supplying an as-of database to every renderer would change
+ordinary evaluation semantics. If preview identity must survive loss of the
+retained invocation, a durable relation from the render invocation/candidate to
+the run would be required; no existing run attribute supplies that provenance,
+so this audit does not recommend inferring it from ids, triggers, or authorship.
+
+Replacing `render.walk/history` with `transcript/history-entries` alone would
+also be unsafe. `history-entries` asks the transcript history query for an agent
+and optional run id, then retains every actual `:input` and `:eval` row
+(`src/seon/render/transcript.clj:990-1031`). Without an explicit selected run it
+cannot tell which system-authored runs were preview evaluations, because that
+distinction is absent from the run facts described above. Feeding that global
+result into agent context would turn every debug preview into actual agent
+history. Inclusion requires the existing selection provenance: the candidate's
+retained invocation key plus `source-run-id`, or, for a candidate appended to
+the held generated run, its exact `{run-id, start-ordinal, form-count}` span.
+The context owner must request those selected run/span entries explicitly and
+concatenate them with independently queried ordinary history; it must not infer
+inclusion from system authorship or enumerate all runs for the agent.
+
 - `src/seon/render/web.clj` and focused web tests: retain/concatenate those
   stored observations and preserve the debug invocation-to-run identity. No
   new cache or registry belongs here.
