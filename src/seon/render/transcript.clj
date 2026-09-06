@@ -276,6 +276,43 @@
                          (concat (pinned-receipt-ids db agent-id)
                                  receipt-ids))))))))
 
+(defn- selected-run-entity-ids
+  "Select a bounded prefix of forms and evaluations for one run.
+
+   The extra row is an omission sentinel; it avoids materializing an
+   unbounded run merely to calculate an elision count."
+  [db run-id limit]
+  (let [bounded-limit (inc (max 0 (int limit)))]
+    {:input
+     (mapv first
+           (db/q {:query
+                  '[:find ?form ?ordinal
+                    :in $ ?run-id
+                    :where
+                    [?run :seon.cluster.run/id ?run-id]
+                    [?form :seon.cluster.run.form/run ?run]
+                    [?form :seon.cluster.run.form/ordinal ?ordinal]]
+                  :args [db run-id]
+                  :order-by '[?ordinal :asc]
+                  :limit bounded-limit}))
+     :eval
+     (mapv first
+           (db/q {:query
+                  '[:find ?receipt ?ordinal
+                    :in $ ?run-id
+                    :where
+                    [?run :seon.cluster.run/id ?run-id]
+                    [?receipt :seon.cluster.eval/run ?run]
+                    [?receipt :seon.cluster.eval/ordinal ?ordinal]]
+                  :args [db run-id]
+                  :order-by '[?ordinal :asc]
+                  :limit bounded-limit}))}))
+
+(defn- selected-run-count
+  [db run-id limit]
+  (let [{:keys [input eval]} (selected-run-entity-ids db run-id limit)]
+    (+ (count input) (count eval))))
+
 (defn- form-sources
   [db receipt-ids]
   (if (seq receipt-ids)
@@ -506,8 +543,12 @@
         [:db/id (:db/id entity)])))
 
 (defn- history
-  [db run-id agent-id limit]
-  (let [ids (candidate-entity-ids db agent-id limit)
+  ([db run-id agent-id limit]
+   (history db run-id agent-id limit nil))
+  ([db run-id agent-id limit selected-run-id]
+   (let [ids (if selected-run-id
+               (selected-run-entity-ids db selected-run-id limit)
+               (candidate-entity-ids db agent-id limit))
         messages (pulled-many db message-selector (:message ids))
         receipts (pulled-many db receipt-selector (:eval ids))
         inputs (pulled-many db form-selector (:input ids))
@@ -532,7 +573,7 @@
                                 (= (bootstrap/run-id agent-id)
                                    (::run-id entry)))))))
          (sort-by entry-order)
-         vec)))
+         vec))))
 
 (defn- read-result
   [serialized]
@@ -810,13 +851,16 @@
   [unit]
   (let [db (:seon.db/db unit)
         agent-id (:seon.cluster.agent/id unit)
-        total (history-count db agent-id)
         requested (max 0 (long (get unit ::token-budget 0)))
         candidate-limit (int (min Integer/MAX_VALUE
                                   (max recent-entry-count requested)))
+        selected-run-id (::selected-run-id unit)
+        total (if selected-run-id
+                (selected-run-count db selected-run-id candidate-limit)
+                (history-count db agent-id))
         entries (if (and db agent-id)
                   (history db (:seon.cluster.run/id unit)
-                           agent-id candidate-limit)
+                           agent-id candidate-limit selected-run-id)
                   [])
         pinned (into []
                      (comp (filter ::pinned?)
@@ -872,6 +916,13 @@
   [unit]
   (let [{::keys [pinned entries elided]} (projection unit)]
     (ai-output pinned entries elided)))
+
+(defn render-run-ai
+  "Render a bounded run's stored forms and evaluation results."
+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  [unit]
+  (render-ai (assoc unit ::selected-run-id
+                    (:seon.cluster.run/id unit))))
 
 (defn message-form
   "Return the ordinary message read form for one message entity."
@@ -980,6 +1031,13 @@
                  (sort-by entry-order
                           (into entries (reasoning-attempts unit)))
                  elided)))
+
+(defn render-run-html
+  "Render a bounded run's stored forms and evaluation results as Hiccup."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (render-html (assoc unit ::selected-run-id
+                      (:seon.cluster.run/id unit))))
 
 (defn- transcript-unit
   [unit]
