@@ -8,6 +8,18 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Candidate and prompt UI integration checkpoint, 2026-09-06: retained arguments
+and Malli contracts now have disclosures; candidate/selected function links
+navigate to their actual database entities, and AI/HTML links preserve viewer
+and subject. Browser clicks proved the round trip and definition navigation
+with no JavaScript errors. Candidate focused checks: 84 assertions passed.
+Prompt comparison separately displays historical capture and current preview;
+83 focused assertions and actual browser comparison passed. Browser scripts
+`debug_candidate_controls_probe_2026_09_06.cjs` and
+`debug_prompt_browser_probe_2026_09_06.cjs` preserve those checks. The goal remains
+open: normal durable source submission and namespace-output readability are
+being improved at their existing owners, with no per-render interpreter.
+
 Owner clarification, 2026-09-06: reuse the normal source execution and
 settlement mechanism for lab comments/forms/results. The parser does not own
 SCI context creation: `reply/sources` parses source, while the existing run

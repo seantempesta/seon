@@ -751,6 +751,8 @@
                     {:seon.render.debug/viewer-namespace 'my.viewer
                      :seon.render.debug/subject [:my/id "subject"]
                      :seon.render/output :seon.render/html
+                     :seon.render.data/limit 40
+                     :seon.render.data/max-ref-attributes 40
                      :seon.render.web/pull-max-work 40
                      :seon.render.web/pull-max-results 40
                      :seon.render.data/max-result-weight 4000}
@@ -773,7 +775,12 @@
              header
              (str "schema projection fingerprint</span><code>"
                   (:seon.schema.projection/fingerprint program-identity)))
-            "the exact context projection fingerprint is visible")))))
+            "the exact context projection fingerprint is visible")
+        (is (and (str/includes? header "aria-label=\"Rendered output\"")
+                 (str/includes? header "aria-current=\"page\"")
+                 (str/includes? header "output=%3Aseon.render%2Fhtml")
+                 (str/includes? header "output=%3Aseon.render%2Fai"))
+            "HTML and AI remain ordinary links with the selected output exposed")))))
 
 (deftest debug-datom-links-follow-reference-direction-and-preserve-the-view
   (let [request {:seon.render.debug/viewer-namespace 'my.viewer
@@ -850,12 +857,41 @@
            :seon.render.selection.stage/candidates
            [{:seon.render.selection.candidate/producer 'my.render/card
              :seon.render.selection.candidate/status :compatible}]}]}
+        debug-request
+        {:seon.render.debug/viewer-namespace 'my.viewer
+         :seon.render.debug/subject [:my/id "subject"]
+         :seon.render/output :seon.render/html
+         :seon.render.data/limit 17
+         :seon.render.data/max-ref-attributes 19
+         :seon.render.data/max-result-weight 23
+         :seon.render.web/pull-max-work 29
+         :seon.render.web/pull-max-results 31}
+        call-entry
+        {:seon.render.call/static-evidence
+         {:seon.render/selection selection
+          :seon.render.call/argument
+          {:seon.render/value {:my/card "actual supplied value"}}
+          :seon.render.call/declaration-row
+          {:seon.fn/doc "Render the actual <card>."}}
+         :seon.render/projection
+         {:seon.schema.projection/function-contracts
+          {'my.render/card
+           [:=> [:cat [:map [:seon.render/value :my/card]]]
+            :seon.render/hiccup]}}}
         selected-html
         ((web-private 'debug-selection-html)
-         selection
-         {:seon.fn/doc "Render the actual <card>."})
+         debug-request call-entry)
         undocumented-html
-        ((web-private 'debug-selection-html) selection {})
+        ((web-private 'debug-selection-html)
+         debug-request
+         (assoc-in call-entry
+                   [:seon.render.call/static-evidence
+                    :seon.render.call/declaration-row]
+                   (dissoc
+                    (get-in call-entry
+                            [:seon.render.call/static-evidence
+                             :seon.render.call/declaration-row])
+                    :seon.fn/doc)))
         observation-html
         ((web-private 'debug-observation-html)
          #{}
@@ -882,6 +918,19 @@
              (str/includes? selected-html "my.render/card")
              (str/includes? selected-html "compatible"))
         "ranked candidate evidence remains available in its disclosure")
+    (is (and (str/includes? selected-html "supplied argument")
+             (str/includes? selected-html "actual supplied value")
+             (str/includes? selected-html "declared contract and arities")
+             (str/includes? selected-html ":my/card")
+             (str/includes? selected-html "definition"))
+        "the actual retained argument and contract remain inspectable beside the definition link")
+    (is (and (str/includes? selected-html "/ns/my.viewer/debug?")
+             (str/includes?
+              selected-html
+              "subject=%5B%3Aseon.fn%2Fsym+%22my.render%2Fcard%22%5D")
+             (str/includes? selected-html "output=%3Aseon.render%2Fhtml")
+             (str/includes? selected-html "limit=17"))
+        "renderer navigation preserves the viewer, output, and bounds")
     (is (not (str/includes? undocumented-html "seon-debug-description"))
         "an absent declaration doc does not invent a description")
     (is (and (str/includes?

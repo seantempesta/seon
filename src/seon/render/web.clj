@@ -615,20 +615,26 @@
 
 (defn- latest-captured-prompt
   [db agent-id]
-  (ffirst
-   (db/q {:query
-          '[:find ?prompt ?basis-t ?capture-id
-            :in $ ?agent-id
-            :where
-            [?agent :seon.cluster.agent/id ?agent-id]
-            [?run :seon.cluster.run/agent ?agent]
-            [?capture :seon.context.capture/run ?run]
-            [?capture :seon.context.capture/prompt ?prompt]
-            [?capture :seon.context.capture/basis-t ?basis-t]
-            [?capture :seon.context.capture/id ?capture-id]]
-          :args [db agent-id]
-          :order-by '[?basis-t :desc ?capture-id :desc]
-          :limit 1})))
+  (let [rows (db/q {:query
+                     '[:find ?prompt ?basis-t ?capture-id
+                       :in $ ?agent-id
+                       :where
+                       [?agent :seon.cluster.agent/id ?agent-id]
+                       [?run :seon.cluster.run/agent ?agent]
+                       [?capture :seon.context.capture/run ?run]
+                       [?capture :seon.context.capture/prompt ?prompt]
+                       [?capture :seon.context.capture/basis-t ?basis-t]
+                       [?capture :seon.context.capture/id ?capture-id]]
+                     :args [db agent-id]
+                     :order-by '[?basis-t :desc ?capture-id :desc]
+                     :limit 1})]
+    (if (:seon.error/kind rows)
+      rows
+      (when-let [[prompt basis-t capture-id] (first rows)]
+        {:seon.render.debug/prompt prompt
+         :seon.render.debug/prompt-kind :captured
+         :seon.render.debug/prompt-basis-t basis-t
+         :seon.render.debug/prompt-id capture-id}))))
 
 (defn- debug-diagnostic
   [kind message operation member expected offending cause evidence]
@@ -674,9 +680,11 @@
         {:seon.render.debug/prompt
          (str/join "\n\n" (map :seon.render.history/bytes entries))
          :seon.render.debug/prompt-kind :prospective
+         :seon.render.debug/prompt-basis-t (db/basis-t db)
          :seon.render.debug/evidence entries})
       (catch Throwable cause
         {:seon.render.debug/prompt-kind :unavailable
+         :seon.render.debug/prompt-basis-t (db/basis-t db)
          :seon.error/value
          (debug-diagnostic
           ::prospective-context-unavailable
@@ -690,37 +698,57 @@
 
 (defn- debug-prompt
   [db connection agent-id caps render-context]
-  (if-let [captured (latest-captured-prompt db agent-id)]
-    {:seon.render.debug/prompt captured
-     :seon.render.debug/prompt-kind :captured
-     :seon.render.debug/evidence captured}
-    (prospective-prompt db connection agent-id caps render-context)))
+  (let [captured (latest-captured-prompt db agent-id)
+        captured (if (:seon.error/kind captured)
+                   {:seon.render.debug/prompt-kind :unavailable
+                    :seon.error/value captured}
+                   captured)
+        captured? (= :captured (:seon.render.debug/prompt-kind captured))
+        prospective (prospective-prompt db connection agent-id caps render-context)]
+    {:seon.render.debug/prompt-kind
+     (if captured? :captured (:seon.render.debug/prompt-kind prospective))
+     :seon.render.debug/captured captured
+     :seon.render.debug/prospective prospective}))
 
 (defn- debug-ai-html
   [agent-id prompt-result]
   (let [element-id (str "debug-ai-" agent-id)
-        failure (:seon.error/value prompt-result)
-        diagnostic (:seon.error/data failure)]
+        captured (:seon.render.debug/captured prompt-result)
+        prospective (:seon.render.debug/prospective prompt-result)
+        pane (fn [label result]
+               (let [failure (:seon.error/value result)
+                     diagnostic (:seon.error/data failure)]
+                 [:section {:class "seon-debug-prompt-pane"}
+                  [:h3 {:class "seon-debug-caption"} label]
+                  [:p {:class "seon-debug-prompt-basis"}
+                   (str "database basis "
+                        (or (:seon.render.debug/prompt-basis-t result)
+                            "unknown")
+                        (when-let [id (:seon.render.debug/prompt-id result)]
+                          (str " · " (pr-str id))))]
+                  (if-some [prompt (:seon.render.debug/prompt result)]
+                    [:pre prompt]
+                    (if (= :unavailable
+                           (:seon.render.debug/prompt-kind result))
+                      (into [:dl {:class "seon-debug-diagnostic"}]
+                            (map (fn [[attribute value]]
+                                   [:div [:dt [:code (pr-str attribute)]]
+                                    [:dd [:code (pr-str value)]]]))
+                            [[:seon.error/kind (:seon.error/kind failure)]
+                             [:seon.error/diagnostic-member
+                              (:seon.error/diagnostic-member diagnostic)]
+                             [:seon.error/diagnostic-cause
+                              (:seon.error/diagnostic-cause diagnostic)]
+                             [:seon.error/diagnostic-expected
+                              (:seon.error/diagnostic-expected diagnostic)]])
+                      [:p {:class "seon-debug-prompt-unavailable"}
+                       label " unavailable"]))]))]
     (hiccup/->string
      [:section {:id element-id
                 :class "seon-debug-body seon-debug-body-ai"}
-      [:span {:class "seon-debug-context-status"}
-       (name (:seon.render.debug/prompt-kind prompt-result))]
-      (if-some [prompt (:seon.render.debug/prompt prompt-result)]
-        [:pre prompt]
-        (into
-         [:dl {:class "seon-debug-diagnostic"}]
-         (map (fn [[attribute value]]
-                [:div
-                 [:dt [:code (pr-str attribute)]]
-                 [:dd [:code (pr-str value)]]]))
-         [[:seon.error/kind (:seon.error/kind failure)]
-          [:seon.error/diagnostic-member
-           (:seon.error/diagnostic-member diagnostic)]
-          [:seon.error/diagnostic-cause
-           (:seon.error/diagnostic-cause diagnostic)]
-          [:seon.error/diagnostic-expected
-           (:seon.error/diagnostic-expected diagnostic)]]))])))
+      [:span {:class "seon-debug-context-status"} "prompt comparison"]
+      (pane "historical captured prompt" captured)
+      (pane "newly computed prospective prompt" prospective)])))
 
 (defn- debug-html-id
   [agent-id]
@@ -807,7 +835,15 @@
 
 (defn- debug-header-html
   [debug-request observation acquisition-ms program-identity]
-  (hiccup/->string
+  (let [output-link
+        (fn [output label]
+          [:a (cond-> {:href (debug-page-url
+                              debug-request
+                              {:seon.render/output output})}
+                (= output (:seon.render/output debug-request))
+                (assoc :aria-current "page"))
+           label])]
+    (hiccup/->string
    [:header {:id "debug-inspection-header" :class "seon-debug-header"}
     [:div
      [:span "viewer"]
@@ -827,13 +863,15 @@
              (:seon.schema.projection/fingerprint program-identity))]]
     [:div
      [:span "output"]
-     [:code (pr-str (:seon.render/output debug-request))]]
+     [:nav {:aria-label "Rendered output"}
+      (output-link :seon.render/html "HTML")
+      (output-link :seon.render/ai "AI")]]
     [:div
      [:span "render value acquisition"]
      [:code (str acquisition-ms " ms · work " (::pull-max-work debug-request)
                 " · results " (::pull-max-results debug-request)
                 " · weight "
-                (:seon.render.data/max-result-weight debug-request))]]]))
+                (:seon.render.data/max-result-weight debug-request))]]])))
 
 (defn- debug-observation-html
   [ref-attributes debug-request observation entity-html restarted?]
@@ -956,52 +994,86 @@
       [:p {:class "seon-debug-graph-status" :data-graph-status ""}
        "Graph unavailable because the bounded observation is unavailable."]])))
 
+(defn- debug-renderer-link
+  [debug-request producer]
+  (debug-subject-link debug-request [:seon.fn/sym (str producer)] producer))
+
+(defn- debug-renderer-contract
+  [call-entry producer]
+  (let [contract
+        (get-in call-entry
+                [:seon.render/projection
+                 :seon.schema.projection/function-contracts producer])]
+    (when contract
+      [:details {:class "seon-debug-renderer-evidence"}
+       [:summary "declared contract and arities"]
+       (debug-value-html contract)])))
+
 (defn- debug-candidate-html
-  [candidate]
-  [:li
-   [:code
-    (pr-str (:seon.render.selection.candidate/producer candidate))]
-   [:span
-    (str " "
-         (name (:seon.render.selection.candidate/status candidate))
-         (when-let [reason
-                    (:seon.render.selection.candidate/reason candidate)]
-           (str " · " (name reason))))]])
+  [debug-request call-entry candidate]
+  (let [producer (:seon.render.selection.candidate/producer candidate)]
+    [:li
+     (debug-renderer-link debug-request producer)
+     [:span
+      (str " "
+           (name (:seon.render.selection.candidate/status candidate))
+           (when-let [reason
+                      (:seon.render.selection.candidate/reason candidate)]
+             (str " · " (name reason))))]
+     (debug-renderer-contract call-entry producer)]))
 
 (defn- debug-stage-html
-  [stage]
+  [debug-request call-entry stage]
   [:li
    [:div {:class "seon-debug-section-line"}
     [:code (pr-str (:seon.render.selection.stage/name stage))]
     [:span (name (:seon.render.selection.stage/status stage))]]
    (when-let [candidates (:seon.render.selection.stage/candidates stage)]
-     (into [:ul] (map debug-candidate-html) candidates))
+     (into [:ul]
+           (map (partial debug-candidate-html debug-request call-entry))
+           candidates))
    (when-let [error (:seon.render.selection.stage/error stage)]
      (debug-value-html error))])
 
 (defn- debug-selection-html
-  [selection declaration-row]
-  (hiccup/->string
-   [:section {:id "debug-selection"
-              :class "seon-debug-body seon-debug-selection"}
-    [:h2 {:class "seon-debug-caption"} "selected renderer"]
-    (if-not selection
-      [:p {:class "seon-render-pending"}
-       "Selection is unavailable because no complete render value was acquired."]
-      [:div
-       [:p {:class "seon-debug-selected"}
-        [:code (pr-str (:seon.render.selection/selected selection))]]
-       (when-let [description (:seon.fn/doc declaration-row)]
-         [:p {:class "seon-debug-description"}
-          [:span "description"]
-          " "
-          description])
-       [:details {:class "seon-debug-selection-detail"}
-        [:summary "selection evidence"]
-        [:p "Ordered precedence and compatible candidates"]
-        (into [:ol {:class "seon-debug-stages"}]
-              (map debug-stage-html)
-              (:seon.render.selection/stages selection))]])]))
+  [debug-request call-entry]
+  (let [static-evidence (:seon.render.call/static-evidence call-entry)
+        selection (:seon.render/selection static-evidence)
+        declaration-row (:seon.render.call/declaration-row static-evidence)
+        selected (:seon.render.selection/selected selection)]
+    (hiccup/->string
+     [:section {:id "debug-selection"
+                :class "seon-debug-body seon-debug-selection"}
+      [:h2 {:class "seon-debug-caption"} "selected renderer"]
+      (if-not selection
+        [:p {:class "seon-render-pending"}
+         "Selection is unavailable because no complete render value was acquired."]
+        [:div
+         [:p {:class "seon-debug-selected"}
+          (if (qualified-symbol? selected)
+            (debug-renderer-link debug-request selected)
+            [:code (pr-str selected)])]
+         (when-let [description (:seon.fn/doc declaration-row)]
+           [:p {:class "seon-debug-description"}
+            [:span "description"]
+            " "
+            description])
+         (when (qualified-symbol? selected)
+           [:p {:class "seon-debug-definition-link"}
+            [:span "definition"]
+            " "
+            (debug-renderer-link debug-request selected)])
+         [:details {:class "seon-debug-call-evidence"}
+          [:summary "supplied argument"]
+          (debug-value-html (:seon.render.call/argument static-evidence))]
+         (when (qualified-symbol? selected)
+           (debug-renderer-contract call-entry selected))
+         [:details {:class "seon-debug-selection-detail"}
+          [:summary "selection evidence"]
+          [:p "Ordered precedence and compatible candidates"]
+          (into [:ol {:class "seon-debug-stages"}]
+                (map (partial debug-stage-html debug-request call-entry))
+                (:seon.render.selection/stages selection))]])])))
 
 (defn- debug-output-html
   [debug-request acquisition rendered]
@@ -1221,12 +1293,7 @@
                  :seon.render/retained-calls retained-calls
                  :seon.render/captured-calls captured-calls))
         rendered (when render-request (render/render-call render-request))
-        render-static-evidence
-        (get-in @captured-calls
-                [call-id :seon.render.call/static-evidence])
-        selection (:seon.render/selection render-static-evidence)
-        declaration-row
-        (:seon.render.call/declaration-row render-static-evidence)
+        render-call-entry (get @captured-calls call-id)
         prompt-id (str "debug-ai-"
                        (or (:seon.cluster.agent/id debug-request) "inspection"))
         prompt-result
@@ -1246,7 +1313,8 @@
                                   restarted?)
           "debug-graph"
           (debug-graph-html debug-request ref-attributes observation)
-          "debug-selection" (debug-selection-html selection declaration-row)
+          "debug-selection" (debug-selection-html debug-request
+                                                   render-call-entry)
           (debug-html-id
            (or (:seon.cluster.agent/id debug-request) "inspection"))
           (debug-output-html debug-request acquisition rendered)}
