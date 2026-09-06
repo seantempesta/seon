@@ -139,30 +139,30 @@
 (defn whoami
   "Describe the current agent's identity, namespace, and cluster.
 
-  SCI supplies the current database and agent when omitted. Pass an agent id
-  to inspect another agent, or a database value to query an explicit snapshot.
+  SCI supplies missing database and agent entries in the request map.
+  Pass :seon.cluster.agent/id to inspect another agent, or :seon.db/db
+  to query an explicit snapshot.
   Use seon.db/pull when the identity attributes themselves are needed as data."
   {:malli/schema
    [:function
-    [:=> [:catn [:agent-data :seon.render/unit]]
+    [:=> [:cat]
      [:or [:maybe :string] :seon.error/value]]
-    [:=> [:catn [:database :seon.db/database-value]
-                 [:agent-id :seon.cluster.agent/id]]
+    [:=> [:cat :seon.cluster.agent/identity-request]
      [:or [:maybe :string] :seon.error/value]]]}
-  ([agent-data]
-   (if (:seon.error/kind agent-data)
-     agent-data
-     (when-let [identity (:seon.cluster.agent/id agent-data)]
-       (let [namespace-name
-             (get-in agent-data [:seon.cluster.agent/namespace :seon.ns/name])
-             cluster-name
-             (get-in agent-data [:seon.cluster.agent/cluster :seon.cluster/name])]
-         (str "Agent     " identity
-              (when namespace-name (str "\nNamespace " namespace-name))
-              (when cluster-name (str "\nCluster   " cluster-name)))))))
-  ([database agent-id]
-   (whoami (db/pull database identity-selector
-                    [:seon.cluster.agent/id agent-id]))))
+  ([] (whoami {}))
+  ([request]
+   (let [agent-data (db/pull (:seon.db/db request) identity-selector
+                           [:seon.cluster.agent/id (:seon.cluster.agent/id request)])]
+     (if (:seon.error/kind agent-data)
+       agent-data
+       (when-let [agent-id (:seon.cluster.agent/id agent-data)]
+         (let [namespace-name
+               (get-in agent-data [:seon.cluster.agent/namespace :seon.ns/name])
+               cluster-name
+               (get-in agent-data [:seon.cluster.agent/cluster :seon.cluster/name])]
+           (str "Agent     " agent-id
+                (when namespace-name (str "\nNamespace " namespace-name))
+                (when cluster-name (str "\nCluster   " cluster-name)))))))))
 
 (defn render-identity-ai
   "Render the ordinary query that returns an agent's identity text."

@@ -70,6 +70,10 @@
                        :seon.cluster.agent/routing]],
                      :eid :int,
                      :id [:string {:min 1, :seon.db/identity true}],
+                     :identity-request
+                     [:map
+                      [:seon.db/db :seon.db/database-value]
+                      [:seon.cluster.agent/id :seon.cluster.agent/id]],
                      :instructions [:set :seon.db/ref],
                      :namespace
                      [:and #:seon.db{:unique true} :seon.db/ref],

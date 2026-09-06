@@ -4,6 +4,7 @@
             [seon.cluster.agent :as agent]
             [seon.db :as db]
             [seon.config :as config]
+            [seon.env :as env]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
@@ -35,14 +36,14 @@
         (is (not (str/includes? source agent-id))
             "discovering identity cannot require already knowing it")
         (is (= "Agent     identity-root\nNamespace my.agents.identity-root\nCluster   identity-cluster"
-               (agent/whoami @connection agent-id)))
+               (agent/whoami {:seon.db/db @connection :seon.cluster.agent/id agent-id})))
         (is (str/includes? (pr-str html) agent-id))
         (is (str/includes? (pr-str html) (str namespace-name)))
         (is (str/includes? (pr-str html) cluster-name))
         (db/transact! connection
                       [[:db/add [:seon.cluster/name cluster-name]
                         :seon.cluster/name "renamed-cluster"]])
-        (is (str/includes? (agent/whoami @connection agent-id)
+        (is (str/includes? (agent/whoami {:seon.db/db @connection :seon.cluster.agent/id agent-id})
                            "Cluster   renamed-cluster")
             "the result follows the supplied database, not a captured identity")))))
 
@@ -69,9 +70,25 @@
                     (filterv :seon.call-preparation/key
                              (:seon.config/initialization
                               (config/compile-manifest {}))))
+      (db/transact! connection [{:seon.cluster.agent/id "supplied"}])
       (let [database @connection
-            expected (agent/whoami database agent-id)
-            context (sci.eval/cluster-ctx database connection)
+            indexed (db/pull database
+                             '[:seon.fn/sym
+                               {:seon.fn/arities
+                                [:seon.fn.arity/order
+                                 :seon.fn.arity/argument-count
+                                 :seon.fn.arity/input
+                                 :seon.fn.arity/output]}]
+                             [:seon.fn/sym "seon.cluster.agent/whoami"])
+            arities (sort-by :seon.fn.arity/order (:seon.fn/arities indexed))
+            expected (agent/whoami {:seon.db/db database :seon.cluster.agent/id agent-id})
+            acquired (sci.eval/cluster-ctx database connection)
+            environment (env/refuse-incomplete-environment!
+                         (env/environment
+                          {:seon.boot/cluster-name cluster-name
+                           :seon.db/connection connection
+                           :seon.schema/projection (:seon.schema/projection acquired)}))
+            context (env/carry-state acquired (env/environment-state environment))
             forked (sci.eval/fork-for-turn
                     {:seon.sci.eval/ctx context
                      :seon.db/db database
@@ -89,6 +106,11 @@
                 :seon.config/on-core-error :panic
                 :seon.cluster.run.form/source source
                 :seon.cluster.run.form/ns [:seon.ns/name namespace-name]}))]
+        (is (= [0 1] (mapv :seon.fn.arity/argument-count arities))
+            "indexing retains both declared arities instead of flattening them")
+        (is (= 2 (count (set (map :seon.fn.arity/input arities))))
+            "each arity has its own input contract")
+        (is (every? :seon.fn.arity/output arities))
         (is (some? live))
         (is (= expected (:seon.sci.admit/value (evaluate "(seon.cluster.agent/whoami)"))))
         (is (= "Agent     supplied"
@@ -96,4 +118,4 @@
                 (evaluate "(seon.cluster.agent/whoami {:seon.cluster.agent/id \"supplied\"})")))
             "the supplied map wins over current-agent defaults")
         (is (= "Agent     supplied"
-               (agent/whoami {:seon.cluster.agent/id "supplied"})))))))
+               (agent/whoami {:seon.db/db database :seon.cluster.agent/id "supplied"})))))))
