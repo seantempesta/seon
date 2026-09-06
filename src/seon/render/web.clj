@@ -1044,9 +1044,9 @@
 (defn- debug-renderer-definition
   [call-entry]
   (let [source (get-in call-entry
-                       [:seon.render.call/static-evidence
-                        :seon.render.call/declaration-row
-                        :seon.fn/source])]
+                        [:seon.render.call/static-evidence
+                         :seon.render.call/declaration-row
+                        :seon.sci.eval/function-source])]
     (if (string? source)
       [:details {:class "seon-debug-function-definition"}
        [:summary "function definition"]

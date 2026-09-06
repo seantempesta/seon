@@ -987,7 +987,8 @@
   (let [render-definition (web-private 'debug-renderer-definition)
         entry {:seon.render.call/static-evidence
                {:seon.render.call/declaration-row
-                {:seon.fn/source "(defn render-card [x] (<unsafe> x))"}}}
+                {:seon.sci.eval/function-source
+                 "(defn render-card [x] (<unsafe> x))"}}}
         present (hiccup/->string (render-definition entry))
         missing (hiccup/->string
                  (render-definition
@@ -1001,6 +1002,20 @@
         "stored source cannot become markup")
     (is (str/includes? missing "No source is stored for this function.")
         "an absent stored definition is explicit rather than blank or fabricated")))
+
+(deftest debug-renderer-definition-accepts-the-acquired-program-row
+  (support/with-database
+    (fn [connection]
+      (let [ctx (support/fork-cluster-ctx connection)
+            row (sci.kernel/program-function ctx 'my.plan/render-item-html)
+            html (hiccup/->string
+                  ((web-private 'debug-renderer-definition)
+                   {:seon.render.call/static-evidence
+                    {:seon.render.call/declaration-row row}}))]
+        (is (string? (:seon.sci.eval/function-source row))
+            "the acquired kernel row carries the normalized source key")
+        (is (str/includes? html "(defn render-item-html")
+            "the disclosure consumes the actual acquired program row")))))
 
 (deftest debug-graph-model-preserves-datom-identity-and-direction
   (let [request {:seon.render.debug/viewer-namespace 'my.viewer
