@@ -8,6 +8,17 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Owner's current visual iteration: show found values as paired AI/HTML previews
+first. Clicking a value exposes other applicable renderers in priority order;
+absent renderers and empty stages do not appear. Actual rendering errors remain
+visible. Establish one default agent identity block with a database "who am I"
+query, agent id, assigned namespace, and cluster before proceeding to distance
+rendering. Data attributes, values, refs, and renderer functions are all open to
+revision during these experiments. The live Juniper fixture and reproducible
+seed are recorded in [the example state](../research/juniper-example-state-2026-09-06.md).
+Implementation and live verification of these preview changes are in progress;
+the existence of seeded facts does not complete their rendering.
+
 Inline definition inspection is verified (`809e726d9`, corrected `93cc6bab0`):
 candidate cards expose the retained SCI function source without leaving the
 input. A live mismatch exposed a fixture using the raw DB key instead of
