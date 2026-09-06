@@ -1028,6 +1028,51 @@
     (is (not (str/includes? rendered ":floor"))
         "an empty stage is absent")))
 
+(deftest debug-selected-renderer-metadata-is-outside-preview
+  (let [selected 'my.render/ai
+        experiment
+        {:seon.render/selection
+         {:seon.render.selection/selected selected
+          :seon.render.selection/stages
+          [{:seon.render.selection.stage/name :namespace
+            :seon.render.selection.stage/status :selected
+            :seon.render.selection.stage/candidates
+            [{:seon.render.selection.candidate/producer selected
+              :seon.render.selection.candidate/status :compatible}]}]}
+         :seon.render/previews {selected "exact agent-visible text"}
+         :seon.render/entries
+         {selected
+          {:seon.render.call/basis-transaction 42
+           :seon.render.call/read-evidence []
+           :seon.render.call/static-evidence
+           {:seon.render.call/declaration-row
+            {:seon.sci.eval/function-source "(defn ai [x] x)"}}}}}
+        request {:seon.render.debug/viewer-namespace 'my.viewer}
+        preview (hiccup/->string
+                 ((web-private 'debug-selected-projection-html)
+                  request :seon.render/ai experiment))
+        details (hiccup/->string
+                 ((web-private 'debug-selected-renderer-details)
+                  request :seon.render/ai experiment))
+        page ((web-private 'debug-experiments-html)
+              request {:seon.render/ai experiment
+                       :seon.render/html
+                       {:seon.render/selection
+                        {:seon.render.selection/stages []}}})]
+    (is (= 1 (count (re-seq #"exact agent-visible text" preview)))
+        "the AI preview contains the renderer output exactly once")
+    (is (not-any? #(str/includes? preview %)
+                  ["renderer details" "my.render/ai" "function definition"
+                   "database read dependencies" "declared contract"])
+        "renderer metadata is not a child of the AI preview")
+    (is (every? #(str/includes? details %)
+                ["my.render/ai" "function definition"
+                 "database read dependencies"])
+        "the separate renderer disclosure retains its evidence")
+    (is (< (.indexOf page "exact agent-visible text")
+           (.indexOf page "renderer details"))
+        "renderer details are a sibling below the paired previews")))
+
 (deftest debug-found-values-render-scalars-and-connected-entities-in-pairs
   (let [values (atom [])
         observation

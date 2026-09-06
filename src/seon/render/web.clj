@@ -1217,11 +1217,10 @@
                    :seon.render.selection/stages]))))
 
 (defn- debug-selected-projection-html
-  [debug-request output experiment]
+  [_debug-request output experiment]
   (let [selection (:seon.render/selection experiment)
         selected (:seon.render.selection/selected selection)
         previews (:seon.render/previews experiment)
-        entries (:seon.render/entries experiment)
         selected-stage
         (some #(when (= :selected
                         (:seon.render.selection.stage/status %))
@@ -1242,19 +1241,24 @@
       :else
       [:section {:class "seon-debug-projection-column"}
        [:h4 (if (= output :seon.render/ai) "AI" "HTML")]
-       (debug-preview-html output rendered)
-       (when (qualified-symbol? selected)
-         [:details {:class "seon-debug-selected-renderer"}
-          [:summary
-           "renderer "
-           (debug-renderer-link
-            (assoc debug-request :seon.render/output output) selected)]
-          (when-let [entry (get entries selected)]
-            (debug-read-dependencies-html entry))
-          (when-let [entry (get entries selected)]
-            (debug-renderer-contract entry selected))
-          (when-let [entry (get entries selected)]
-            (debug-renderer-definition entry))])])))
+       (debug-preview-html output rendered)])))
+
+(defn- debug-selected-renderer-details
+  [debug-request output experiment]
+  (let [selection (:seon.render/selection experiment)
+        selected (:seon.render.selection/selected selection)
+        entry (get (:seon.render/entries experiment) selected)]
+    (when (and (not (:seon.error/kind selection))
+               (qualified-symbol? selected))
+      [:section {:class "seon-debug-selected-renderer"}
+       [:h4 (if (= output :seon.render/ai) "AI" "HTML")]
+       [:p
+        "renderer "
+        (debug-renderer-link
+         (assoc debug-request :seon.render/output output) selected)]
+       (when entry (debug-read-dependencies-html entry))
+       (when entry (debug-renderer-contract entry selected))
+       (when entry (debug-renderer-definition entry))])))
 
 (defn- debug-alternative-html
   [debug-request output experiment candidate]
@@ -1286,6 +1290,15 @@
       debug-request :seon.render/ai (:seon.render/ai experiments))
      (debug-selected-projection-html
       debug-request :seon.render/html (:seon.render/html experiments))]
+    (let [details
+          (keep (fn [output]
+                  (debug-selected-renderer-details
+                   debug-request output (get experiments output)))
+                [:seon.render/ai :seon.render/html])]
+      (when (seq details)
+        [:details {:class "seon-debug-selected-renderer-details"}
+         [:summary "renderer details"]
+         (into [:div {:class "seon-debug-projection-grid"}] details)]))
     (let [alternatives
           (->> [:seon.render/ai :seon.render/html]
                (mapcat

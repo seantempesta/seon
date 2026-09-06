@@ -1405,7 +1405,9 @@ details.tool-call-details[open] .tool-preview {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.65rem;
 }
-.seon-debug-projection-column,
+.seon-debug-projection-column {
+  min-width: 0;
+}
 .seon-debug-candidate {
   min-width: 0;
   padding: 0.6rem;
@@ -1417,6 +1419,34 @@ details.tool-call-details[open] .tool-preview {
 }
 .seon-debug-selected-previews {
   margin-top: 0.75rem;
+}
+.seon-debug-selected-previews .seon-debug-candidate-preview {
+  margin-top: 0;
+  padding: 0.6rem;
+  border: 1px solid var(--color-base-800);
+  background: var(--color-base-950);
+}
+.seon-debug-selected-renderer-details {
+  margin-top: 0.75rem;
+  color: var(--color-text-400);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.seon-debug-selected-renderer-details > summary {
+  color: var(--color-text-200);
+  cursor: pointer;
+}
+.seon-debug-selected-renderer-details .seon-debug-projection-grid {
+  margin-top: 0.65rem;
+}
+.seon-debug-selected-renderer {
+  min-width: 0;
+  padding: 0.6rem;
+  border: 1px solid var(--color-base-800);
+  background: var(--color-base-950);
+}
+.seon-debug-selected-renderer > p {
+  margin: 0;
 }
 .seon-debug-alternative-renderers {
   margin-top: 0.75rem;
