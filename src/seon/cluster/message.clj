@@ -453,13 +453,11 @@
         (when-not (:seon.error/kind result)
           result)))))
 
-(defn render-ai
-  "`:seon.render/ai` — one message, as the sentence it was.
+(defn format-ai
+  "Format one message as the terminal sentence it was.
 
-  Declared on `:seon.cluster.message/message` in
-  `resources/seon/schema.edn`, so every reader of a message — a
-  prompt, a page, an agent's neighbourhood — is handed the same
-  sentence by the same function.
+  The authored source projection calls this function after reading the
+  durable message, so the stored evaluation value is the exact sentence.
 
   ABSENCE OF `from` IS THE OTHER HALF OF THE CONTRACT and it is read
   here exactly as the schema states it: a message with no sender came
@@ -489,6 +487,24 @@
                to (str " to " to)
                to-ref (str " to unresolved recipient " (pr-str to-ref)))
              ": " content)))))
+
+(defn render-ai
+  "`:seon.render/ai` — source which reads and formats this message."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (when-let [id (get unit ::id)]
+    (pr-str
+     (list `format-ai
+           (list 'assoc
+                 (list 'seon.db/pull 'db
+                       '[:seon.cluster.message/id
+                         :seon.cluster.message/content
+                         {:seon.cluster.message/from
+                          [:db/id :seon.cluster.agent/id]}
+                         {:seon.cluster.message/to
+                          [:db/id :seon.cluster.agent/id]}]
+                       [::id id])
+                 :seon.db/db 'db)))))
 
 (defn render-html
   "`:seon.render/html` — one message, with the same facts as its AI twin."

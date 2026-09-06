@@ -64,7 +64,7 @@
             alice-eid (:db/id (db/pull database '[:db/id]
                                        [:seon.cluster.agent/id "alice"]))]
         (is (= "Agent alice said to bob: hello"
-               (message/render-ai
+               (message/format-ai
                 {:seon.db/db database
                  :seon.cluster.message/content "hello"
                  :seon.cluster.message/from
@@ -72,14 +72,14 @@
                  :seon.cluster.message/to
                  {:seon.cluster.agent/id "bob"}})))
         (is (= "Agent alice said to bob: hello"
-               (message/render-ai
+               (message/format-ai
                 {:seon.db/db database
                  :seon.cluster.message/content "hello"
                  :seon.cluster.message/from {:db/id alice-eid}
                  :seon.cluster.message/to
                  [:seon.cluster.agent/id "bob"]})))
         (is (= "An unresolved sender [:seon.cluster.agent/id \"nobody\"] said to bob: hello"
-               (message/render-ai
+               (message/format-ai
                 {:seon.db/db database
                  :seon.cluster.message/content "hello"
                  :seon.cluster.message/from
@@ -87,11 +87,19 @@
                  :seon.cluster.message/to
                  [:seon.cluster.agent/id "bob"]})))
         (is (= "From outside this cluster to bob: hello"
-               (message/render-ai
+               (message/format-ai
                 {:seon.db/db database
                  :seon.cluster.message/content "hello"
                  :seon.cluster.message/to
                  [:seon.cluster.agent/id "bob"]})))))))
+
+(deftest message-ai-is-parseable-source-over-the-durable-message
+  (let [source (message/render-ai {:seon.cluster.message/id "message-1"})
+        planned (cluster.loop/planned-sources source 'my.agents.alice 4096)]
+    (is (= 1 (count planned)))
+    (is (= source (:seon.cluster.run.form/source (first planned))))
+    (is (str/includes? source "seon.db/pull"))
+    (is (str/includes? source "seon.cluster.message/format-ai"))))
 
 (deftest message-html-separates-attribution-time-and-authored-content
   (with-database
@@ -119,7 +127,7 @@
                rendered)
             "metadata and the authored content occupy distinct elements")
         (is (= "From outside this cluster to bob: first line\nsecond line"
-               (message/render-ai
+               (message/format-ai
                 {:seon.db/db database
                  :seon.cluster.message/content "first line\nsecond line"
                  :seon.cluster.message/to [:seon.cluster.agent/id "bob"]}))

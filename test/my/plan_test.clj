@@ -182,7 +182,8 @@
         (let [current (plan/plan @connection "alice")
               recent (:my.plan/recent-completions current)
               older (:my.plan/older-completions current)
-              ai (plan/render-plan-ai current)
+              source (plan/render-plan-ai current)
+              ai (plan/format-plan-ai current)
               html (plan/render-plan-html current)]
           (testing "the view reconstructs from the current database value"
             (is (= ["open"] (mapv :my.plan.item/id (:my.plan/ready current))))
@@ -193,7 +194,9 @@
             (is (= :children (:seon.print/elision-unit older))))
           (testing "declared shapes accept the rebuilt values and renders"
             (is (seon.schema/valid-candidate-value? :my.plan/view current))
-            (is (seon.schema/valid-candidate-value? :seon.render/ai ai))
+            (is (str/includes? source "my.plan/format-plan-ai"))
+            (is (str/includes? source "my.plan/plan"))
+            (is (seon.schema/valid-candidate-value? :seon.render/ai source))
             (is (seon.schema/valid-candidate-value? :seon.render/hiccup html))
             (is (str/includes? ai "Current work"))
             (is (= :section (first html)))))))))

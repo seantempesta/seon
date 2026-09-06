@@ -892,11 +892,19 @@
        (when-let [expected (:my.plan.item/expected-result item)]
          (str " — expect " expected))))
 
-(defn render-item-ai
-  "Render one authored plan item as text."
-  {:malli/schema [:=> [:cat :my.plan.item/item] :seon.render/ai]}
+(defn format-item-ai
+  "Format one authored plan item as terminal text."
+  {:malli/schema [:=> [:cat :my.plan.item/item] :string]}
   [item]
   (str "Plan item " (item-line (item-value item))))
+
+(defn render-item-ai
+  "Render source which reads and formats one authored plan item."
+  {:malli/schema [:=> [:cat :my.plan.item/item] :seon.render/ai]}
+  [item]
+  (pr-str (list `format-item-ai
+                (list 'seon.db/pull 'db item-selector
+                      [:my.plan.item/id (:my.plan.item/id (item-value item))]))))
 
 (defn render-item-html
   "Render one authored plan item as Hiccup."
@@ -913,14 +921,25 @@
       (conj [:p {:class "my-plan-expected"}
              (str "Expected: " (:my.plan.item/expected-result item))]))))
 
-(defn render-ready-items-ai
-  "Render the ready authored plan frontier as text."
-  {:malli/schema [:=> [:cat :my.plan/ready-items] :seon.render/ai]}
+(defn format-ready-items-ai
+  "Format a supplied ready authored plan frontier as terminal text."
+  {:malli/schema [:=> [:cat :my.plan/ready-items] :string]}
   [items]
   (if (seq items)
     (str "Ready authored work (" (count items) "):\n"
          (str/join "\n" (map #(str "- " (item-line %)) items)))
     "No authored work is ready."))
+
+(defn render-ready-items-ai
+  "Render source which reads and formats the supplied ready item selection."
+  {:malli/schema [:=> [:cat :my.plan/ready-items] :seon.render/ai]}
+  [items]
+  (pr-str
+   (list `format-ready-items-ai
+         (list 'seon.db/pull-many 'db item-selector
+               (mapv (fn [item]
+                       [:my.plan.item/id (:my.plan.item/id item)])
+                     items)))))
 
 (defn render-ready-items-html
   "Render the ready authored plan frontier as Hiccup."
@@ -945,9 +964,9 @@
        "seon.db/q and seon.db/pull read and seon.db/transact! can create or "
        "update; the sections below are derived current state."))
 
-(defn render-plan-ai
-  "Render the current plan union as bounded text."
-  {:malli/schema [:=> [:cat :my.plan/view] :seon.render/ai]}
+(defn format-plan-ai
+  "Format the current plan union as terminal text."
+  {:malli/schema [:=> [:cat :my.plan/view] :string]}
   [view]
   (let [older (:my.plan/older-completions view)]
     (str/join
@@ -969,6 +988,14 @@
        (section-ai "Recent completions"
                    (:my.plan/recent-completions view) item-line)]
        older (conj (print/render-elision-ai older))))))
+
+(defn render-plan-ai
+  "Render source which derives and formats the current plan union."
+  {:malli/schema [:=> [:cat :my.plan/view] :seon.render/ai]}
+  [view]
+  (pr-str
+   (list `format-plan-ai
+         (list `plan 'db (:seon.cluster.agent/id view)))))
 
 (defn- item-list-html
   [title items css-class]
