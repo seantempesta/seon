@@ -162,3 +162,80 @@ comparison reader should use the existing inline-or-blob retrieval idiom and
 return a flat unavailable-source error if the blob cannot be read. There is no
 reason to retain superseded cache entries for restart safety once the run owns
 its raw reply.
+
+## Form, evaluation, and selection ownership
+
+The current database stores more than one representation of a form/evaluation
+relationship:
+
+- A run owns `:seon.cluster.run/forms`, a cardinality-many component ref
+  (`resources/seon/schemas/seon.cluster.run.edn:5-7`). Each form also stores the
+  reverse `:seon.cluster.run.form/run`, plus ordinal, author, source, and parse
+  namespace (`resources/seon/schemas/seon.cluster.run.form.edn:1-29`).
+- An evaluation stores its run and ordinal, and also repeats the form's source
+  and namespace (`resources/seon/schemas/seon.cluster.eval.edn:1-16,21-82`).
+  `receipt-start-call` writes those copies even though `settlement-form` later
+  finds the form by the same run and ordinal and reads source/namespace from the
+  form (`src/seon/cluster/run.clj:1074-1137,1139-1165`).
+- The run planner writes both the run's component edge and the form's run edge
+  (`src/seon/cluster/run.clj:710-740`). Thus `run/forms` versus `form/run`, and
+  `form/{source,ns,ordinal}` versus `eval/{source,ns,ordinal,run}`, are stored
+  mirrors rather than distinct facts.
+
+Datahike component semantics make the forward owner meaningful. Retracting an
+entity discovers component-valued outgoing datoms and recursively emits
+`retractEntity` for their values
+(`reference-code/datahike/src/datahike/db/transaction.cljc:830-839,997-1014`).
+Consequently the durable shape should follow ownership from run to form to its
+evaluation; a backlink collection is unnecessary for traversal because
+Datalog can query the reverse of either ref.
+
+The smallest coherent target is:
+
+1. Keep `run/forms` as the one run-to-form relationship and its component
+   ownership. Keep source, parse namespace, ordinal, author, and refresh
+   provenance on the form.
+2. Add one cardinality-one component ref on the form to its evaluation. Move
+   the existing evaluation result, error, output, timing, read evidence, and
+   diagnostic metadata under that ref unchanged. These are evaluation facts,
+   not form copies.
+3. In the same migration wave, stop writing and stop reading
+   `eval/run`, `eval/ordinal`, `eval/source`, and `eval/ns`, and stop writing
+   `form/run`. Derive the run through the reverse `run/forms` edge and the
+   evaluation through the form's component ref. This is consolidation, not an
+   additional mirror. A temporary dual-write would create the duplicate model
+   the change is meant to remove, so writers, queries, schemas, and fixtures
+   should change together.
+4. Preserve evaluation identity stability. The writer already derives the
+   evaluation identity from `(run-id, ordinal)` before transaction entity ids
+   exist (`src/seon/cluster/run.clj:607-623,1074-1081`). That identity may remain
+   unchanged even when its stored navigation becomes form-owned.
+
+No stored `result/eN` symbol is needed. `seon.sci.eval/bind-result!` derives the
+symbol from the form ordinal inside the turn fork; its docstring explicitly
+states that the fork supplies agent/run scope and ordinal is the remaining
+distinguishing projection (`src/seon/sci/eval.clj:533-547`). Persisting the
+symbol would mirror a deterministic presentation name and would be ambiguous
+without its run/turn scope. UI and transcript code can derive `result/eN` from
+the owning form's ordinal whenever it presents that evaluation.
+
+Authorship and context selection remain separate facts. A form's
+`:seon.cluster.run.form/author` says `:agent` or `:system`; it records who
+authored executable source. A locked preview remains a system-authored run form
+whose evaluation is referenced by
+`:seon.context.contribution/evaluations`. The contribution means the agent
+selected that already stored result into context; it must not rewrite the form
+as agent-authored or copy the form/result under the agent. Agent-authored forms
+continue to enter ordinary run history, while locked previews enter selected
+context through contribution refs. Both render through the same form and
+evaluation entities.
+
+This consolidation has a deliberately larger reader-update radius than adding
+one direct `eval/form` backlink: transcript, work selection, settlement,
+curation, problem routing, and context comparison currently join evaluations
+by run plus ordinal. The implementation should inventory those joins from the
+program graph, update them in one bounded migration, and retain one regression
+that retracting a run retracts its forms and their evaluations while a context
+contribution cannot silently retain a dangling evaluation ref. Adding
+`eval/form` while retaining all existing run/ordinal/source/ns fields would be
+smaller code churn but would preserve every duplicate and add another one.
