@@ -897,6 +897,11 @@
            (into #{} (map #(get-in % [:data :id])) edges)))
     (is (every? #(= ":fixture/ref" (get-in % [:data :attribute])) edges))
     (is (str/includes? html "outgoing partial, incoming complete"))
+    (is (and (str/includes? html "data-graph-status")
+             (str/includes? html "data-graph-detail")
+             (str/includes? html
+                            "Select a reference assertion for details."))
+        "bounded acquisition status remains separate from interaction detail")
     (is (str/includes? html "\\u003c\\/script>\\u003cselected>"))
     (is (not (str/includes? html "</script><selected>")))))
 

@@ -919,8 +919,7 @@
                 :data-graph-canvas "" :data-ignore-morph ""}]
       [:script {:type "application/json" :data-graph-model ""}
        (hiccup/raw (json-script-text model))]
-      [:p {:class "seon-debug-graph-status" :data-graph-detail ""
-           :aria-live "polite"}
+      [:p {:class "seon-debug-graph-status" :data-graph-status ""}
        (str "Loaded " (count (get-in model [:elements :edges]))
             " reference assertions; outgoing "
             (if (get-in observation [:seon.render.data/outgoing
@@ -929,11 +928,13 @@
             ", incoming "
             (if (get-in observation [:seon.render.data/incoming
                                      :seon.render.data/complete?])
-              "complete" "partial") ".")]]
-     [:section {:id "debug-graph" :class "seon-debug-graph"}
-      [:h2 {:class "seon-debug-graph-heading"} "reference graph"]
+              "complete" "partial") ".")]
       [:p {:class "seon-debug-graph-status" :data-graph-detail ""
            :aria-live "polite"}
+       "Select a reference assertion for details."]]
+     [:section {:id "debug-graph" :class "seon-debug-graph"}
+      [:h2 {:class "seon-debug-graph-heading"} "reference graph"]
+      [:p {:class "seon-debug-graph-status" :data-graph-status ""}
        "Graph unavailable because the bounded observation is unavailable."]])))
 
 (defn- debug-candidate-html
@@ -1023,8 +1024,7 @@
      "Loading bounded structural observation…"]]
    [:section {:id "debug-graph" :class "seon-debug-graph"}
     [:h2 {:class "seon-debug-graph-heading"} "reference graph"]
-    [:p {:class "seon-debug-graph-status" :data-graph-detail ""
-         :aria-live "polite"}
+    [:p {:class "seon-debug-graph-status" :data-graph-status ""}
      "Loading bounded reference graph…"]]])
 
 (defn- debug-data-call-id

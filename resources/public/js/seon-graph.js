@@ -267,7 +267,7 @@ attribute({
         const selectedEdge = cy.edges().filter((edge) => edge.selected()).first()
         show(selectedEdge.nonempty()
           ? edgeDescription(selectedEdge)
-          : 'Reference graph ready.')
+          : 'Select a reference assertion for details.')
       } catch (error) {
         show(`Graph unavailable: ${error.message}`, true)
       }
