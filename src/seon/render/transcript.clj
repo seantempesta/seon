@@ -990,9 +990,9 @@
 (defn history-entries
   "Return one agent's durable transcript as immutable REPL entries.
 
-   Stored form source remains byte-faithful. Synthesized forms are honest
-   reads of durable message and undisposed-run facts; values come from settled
-   facts and declared renderers, never from executing the displayed form."
+   Stored form source remains byte-faithful and values come only from stored
+   evaluation facts. Messages and run status have their own renderers; neither
+   is presented here as if it had executed."
   {:malli/schema [:=> [:cat :seon.render/unit] [:vector :map]]}
   [unit]
   (let [db (:seon.db/db unit)
@@ -1013,18 +1013,11 @@
         entries
         (mapv
          (fn [entry]
-           (let [form (case (::kind entry)
-                        :message (message-form (::entity entry))
-                        :run (list 'db/pull 'db
-                                   [:seon.cluster.run/undisposed-at]
-                                   [:seon.cluster.run/id (::id entry)])
-                        (::source entry))
+           (let [form (::source entry)
                  printed-value
                  (case (::kind entry)
-                   :message (rendered-family unit (::entity entry) 1)
                    :input nil
-                   :eval (receipt-printed-value unit entry)
-                   :run (run/render-ai (::entity entry)))]
+                   :eval (receipt-printed-value unit entry))]
              {:seon.render.history/call-id
               [:seon.render.transcript/entry (::kind entry) (::id entry)]
               :seon.render.history/basis-transaction
@@ -1034,7 +1027,7 @@
               :seon.render.history/bytes
               (entry-bytes (or (::namespace entry) namespace-name)
                            form printed-value)}))
-         candidates)]
+         (filterv #(contains? #{:input :eval} (::kind %)) candidates))]
     entries))
 
 (defn render-html

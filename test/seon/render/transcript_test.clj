@@ -80,6 +80,57 @@
                 [:section {:class "seon-transcript"} "(+ 1 2)\n3"]]
                (transcript/render-run-html unit)))))))
 
+(deftest durable-history-entries-never-invent-executions
+  (let [history (ns-resolve 'seon.render.transcript 'history)
+        opened-at (java.util.Date. 0)
+        base {:seon.render.transcript/at opened-at
+              :seon.render.transcript/run-opened-at opened-at
+              :seon.render.transcript/read-basis 17}
+        candidates
+        [(merge base
+                {:seon.render.transcript/kind :message
+                 :seon.render.transcript/id "message"
+                 :seon.render.transcript/entity
+                 {:db/id 1 :seon.cluster.message/content "hello"}})
+         (merge base
+                {:seon.render.transcript/kind :input
+                 :seon.render.transcript/id "submitted-form"
+                 :seon.render.transcript/source "(future-work)"
+                 :seon.render.transcript/namespace 'my.agents.test
+                 :seon.render.transcript/entity {:db/id 2}})
+         (merge base
+                {:seon.render.transcript/kind :eval
+                 :seon.render.transcript/id "stored-evaluation"
+                 :seon.render.transcript/source "(+ 1 2)"
+                 :seon.render.transcript/namespace 'my.agents.test
+                 :seon.render.transcript/result "3"
+                 :seon.render.transcript/entity {:db/id 3}})
+         (merge base
+                {:seon.render.transcript/kind :run
+                 :seon.render.transcript/id "undisposed-run"
+                 :seon.render.transcript/entity {:db/id 4}})]
+        unit {:seon.db/db ::database
+              :seon.cluster.agent/id "test"
+              :seon.sci.admit/caps caps}]
+    (with-redefs-fn
+      {history (constantly candidates)
+       #'db/q (constantly 'my.agents.test)
+       #'render/render-call
+       (fn [_] (throw (ex-info "current values are not executions" {})))}
+      (fn []
+        (let [entries (transcript/history-entries unit)
+              bytes (mapv :seon.render.history/bytes entries)]
+          (is (= [[:seon.render.transcript/entry :input "submitted-form"]
+                  [:seon.render.transcript/entry :eval "stored-evaluation"]]
+                 (mapv :seon.render.history/call-id entries)))
+          (is (= ["my.agents.test=> (future-work)"
+                  "my.agents.test=> (+ 1 2)\n3"]
+                 bytes))
+          (is (not-any? #(or (str/includes? % "hello")
+                             (str/includes? % "db/pull")
+                             (str/includes? % "undisposed-run"))
+                        bytes)))))))
+
 (deftest stored-evaluations-are-terminal-transcript-values
   (support/with-database
     (fn [connection]

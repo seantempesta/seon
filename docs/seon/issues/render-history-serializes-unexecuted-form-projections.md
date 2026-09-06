@@ -56,3 +56,17 @@ retained history only after those facts exist.
 - One recurring proof shows that a generated form whose execution returns a
   value different from its pre-execution render displays only the actual
   receipt value.
+
+## Partial correction — 2026-09-06
+
+`seon.render.transcript/history-entries` now emits only durable submitted form
+sources and stored evaluation results. It no longer converts message facts or
+undisposed-run facts into synthetic forms paired with current rendered values.
+Those facts remain independently visible through their existing family and
+HTML renderers.
+
+This issue remains open because `seon.render.walk/generic-history-entries`
+still performs the separate neighborhood `:seon.render/form` plus
+`:seon.render/ai` pairing described above. Removing that provider-context path
+requires the stored generated-run integration; the transcript boundary fix
+does not claim that work complete.
