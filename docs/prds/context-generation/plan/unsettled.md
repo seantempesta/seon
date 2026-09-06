@@ -17,6 +17,12 @@ agent's historical exchanges. Reuse one execution and rendering mechanism;
 candidate inspection and actual history are different data, not parallel
 implementations. Inspect existing refs before relocating facts.
 
+Candidate reuse is required: once the debug view evaluates a candidate,
+assembling that same candidate into context and preparing the provider request
+reuse its exact stored source and results without another execution. Presentation
+identity is not execution identity. Verify with an execution count across all
+three consumers; equal displayed strings alone do not prove reuse.
+
 Active goal renewed 2026-09-06: finish the common source → existing reader →
 ordinary SCI execution → stored result → transcript path for AI rendering,
 then compose those blocks into agent context. Completion requires personally
