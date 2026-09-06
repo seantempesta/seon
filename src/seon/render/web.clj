@@ -162,8 +162,7 @@
   {:seon.render.data/limit 40
    :seon.render.data/max-ref-attributes 40
    :seon.render.data/max-result-weight 4000
-   ::pull-max-work 4000
-   ::pull-max-results 4000})
+   ::pull-max-work 4000})
 
 (defn- debug-query
   [query default-subject viewer-namespace agent-id]
@@ -191,9 +190,6 @@
       ::pull-max-work
       (positive-query-long (get query "maxWork")
                            (::pull-max-work debug-defaults) 1000000)
-      ::pull-max-results
-      (positive-query-long (get query "maxResults")
-                           (::pull-max-results debug-defaults) 1000000)
       :seon.render.data/cursor
       (data/parse-cursor (get query "path") (get query "offset"))}
       agent-id
@@ -221,7 +217,6 @@
     :maxResultWeight
     (str (:seon.render.data/max-result-weight debug-request))
     :maxWork (str (::pull-max-work debug-request))
-    :maxResults (str (::pull-max-results debug-request))
     :path (pr-str (get-in debug-request
                           [:seon.render.data/cursor :seon.render.data/path] []))
     :offset (str (get-in debug-request
@@ -896,10 +891,9 @@
              (:seon.schema.projection/fingerprint program-identity))]]
     [:div
      [:span "render value acquisition"]
-     [:code (str acquisition-ms " ms · query bounds: work ≤ "
+     [:code (str acquisition-ms " ms · pull work ≤ "
                 (::pull-max-work debug-request)
-                " · results ≤ " (::pull-max-results debug-request)
-                " · weight ≤ "
+                " · index page weight ≤ "
                 (:seon.render.data/max-result-weight debug-request))]]]
     [:div
      [:span "output"]
@@ -1717,8 +1711,7 @@
                  :seon.render.data/max-result-weight
                  :seon.render.data/outgoing-cursor
                  :seon.render.data/incoming-cursor
-                 ::pull-max-work
-                 ::pull-max-results])])
+                 ::pull-max-work])])
 
 (defn- refresh-retained-read-evidence
   [database retained]
@@ -1790,11 +1783,7 @@
                   (db/pull database
                            {:selector '[*]
                             :eid (:seon.render.debug/subject effective-request)
-                            :max-work (::pull-max-work effective-request)
-                            :max-results (::pull-max-results effective-request)
-                            :max-result-weight
-                            (:seon.render.data/max-result-weight
-                             effective-request)})
+                            :max-work (::pull-max-work effective-request)})
                   ref-attributes (installed-ref-attributes database)
                   outgoing (get-in observation
                                    [:seon.render.data/outgoing
@@ -1817,11 +1806,7 @@
                      database
                      {:selector '[*]
                       :eids related-eids
-                      :max-work (::pull-max-work effective-request)
-                      :max-results (::pull-max-results effective-request)
-                      :max-result-weight
-                      (:seon.render.data/max-result-weight
-                       effective-request)}))]
+                      :max-work (::pull-max-work effective-request)}))]
               {::debug-request effective-request
                ::observation observation
                ::related-entities

@@ -24,6 +24,9 @@
                  :seon.context.contribution/hash]
                 [:seon.context.contribution/tokens
                  :seon.context.contribution/tokens]
+                [:seon.context.contribution/evaluations
+                 {:optional true}
+                 :seon.context.contribution/evaluations]
                 [:seon.error/value
                  {:optional true}
                  :seon.error/value]],

@@ -11,12 +11,16 @@
                               :seon.context.contribution/hash]
                              [:seon.context.contribution/tokens
                               :seon.context.contribution/tokens]
+                             [:seon.context.contribution/evaluations
+                              {:optional true}
+                              :seon.context.contribution/evaluations]
                              [:seon.error/kind
                               {:optional true}
                               :seon.error/kind]
                              [:seon.context.contribution/error
                               {:optional true}
                               :seon.context.contribution/error]],
+                            :evaluations [:set :seon.db/ref],
                             :error [:string {:min 1}],
                             :hash [:string {:min 1}],
                             :id

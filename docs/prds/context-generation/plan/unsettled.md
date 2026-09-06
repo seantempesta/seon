@@ -1263,3 +1263,18 @@ remain the baseline for derived diffs; appending changes or compacting changes
 the agent's ordered context selection. Earlier explicit-rerun-only research is
 superseded by this instruction. Context authority must be structured references
 to existing forms/evaluations, with text and HTML projected at the boundary.
+
+Context contribution records now admit `:seon.context.contribution/evaluations`
+as ordinary refs. The existing capture writer retains these refs without
+copying source or result values. Contribution position orders blocks;
+evaluation ordinals order the forms within each execution. This is the data
+foundation only: agent selection, lock controls, diff projection, and prompt
+assembly from selected executions remain unfinished. The owner explicitly
+requires accumulating facts and sharing them by reference, including when
+context is appended or compacted.
+
+The debug related-entity batch exceeded a hardcoded result-weight limit and
+hid all found-value previews. Pull and pull-many acquisition now omit result
+count/weight limits; their work bound and the separate graph index pagination
+remain. This does not establish that discovery is fast: live measurement and
+the end-to-end refresh proof are still required.

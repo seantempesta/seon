@@ -147,6 +147,9 @@
              (:seon.context.contribution/hash record)
              :seon.context.contribution/tokens
              (:seon.context.contribution/tokens record)}
+      (seq (:seon.context.contribution/evaluations record))
+      (assoc :seon.context.contribution/evaluations
+             (:seon.context.contribution/evaluations record))
       failure
       (assoc :seon.error/kind (:seon.error/kind failure)
              :seon.context.contribution/error (:seon.error/message failure)))))
