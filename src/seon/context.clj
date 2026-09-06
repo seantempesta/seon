@@ -1,5 +1,5 @@
 (ns seon.context
-  "The compiled core AI projections, and the pre-provider capture.
+  "Agent-owned context selection, compiled AI projections, and prompt capture.
 
   THE PROMPT'S PROSE LIVES HERE NOW, one named block projection per
   piece (context-blocks contract §3.5, sealed 2026-07-28) — and it is
@@ -42,7 +42,9 @@
   — capture with no attempt row, evidence the call may never have
   fired; kill after — today's attempt-row story. Nothing re-executes."
   (:require [seon.ai.tokens :as tokens]
+            [seon.cluster.run :as run]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -51,6 +53,139 @@
 ;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
+
+;;; ---------------------------------------------------------------------------
+;;; Agent-owned selection of existing evaluations
+;;; ---------------------------------------------------------------------------
+
+(defn- selection-refusal
+  [rule request evidence]
+  (assoc
+   (error/diagnostic
+    {:seon.error/kind ::selection-refused
+     :seon.error/message (str "Context selection refused: " (name rule) ".")
+     :seon.error/diagnostic-layer ::selection
+     :seon.error/diagnostic-operation ::selection
+     :seon.error/diagnostic-member rule
+     :seon.error/diagnostic-expected
+     "An existing agent's closed run with terminal evaluations and an available contribution identity."
+     :seon.error/diagnostic-offending request
+     :seon.error/diagnostic-cause rule
+     :seon.error/diagnostic-evidence evidence})
+   ::selection-refused rule))
+
+(defn selection
+  "Return an agent's selected contributions in position order.
+
+  Evaluation refs point at the original stored evaluations; their existing
+  run ordinals determine form order. No source or result is copied."
+  {:malli/schema
+   [:=> [:catn [:database :seon.db/database-value]
+                [:agent-id :seon.cluster.agent/id]]
+    [:or :seon.context/selection :seon.error/value]]}
+  [database agent-id]
+  (let [agent-data
+        (db/pull database
+                 [:db/id
+                  {:seon.context.contribution/_agent
+                   [:seon.context.contribution/id
+                    :seon.context.contribution/position
+                    {:seon.context.contribution/evaluations [:db/id]}]}]
+                 [:seon.cluster.agent/id agent-id])]
+    (cond
+      (:seon.error/kind agent-data) agent-data
+      (nil? agent-data)
+      (selection-refusal ::no-such-agent
+                         {:seon.cluster.agent/id agent-id} {})
+      :else
+      (->> (:seon.context.contribution/_agent agent-data)
+           (map (fn [contribution]
+                  (-> contribution
+                      (assoc :seon.context.contribution/agent (:db/id agent-data))
+                      (update :seon.context.contribution/evaluations
+                              #(set (map :db/id %))))))
+           (sort-by (juxt :seon.context.contribution/position
+                          :seon.context.contribution/id))
+           vec))))
+
+(defn- transaction-read
+  [value]
+  (if (:seon.error/kind value)
+    (throw (ex-info (:seon.error/message value) value))
+    value))
+
+(defn append-tx
+  "Append a closed run's terminal evaluations to its agent's context selection.
+
+  Invoke as `[:db.fn/call seon.context/append-tx request]`: Datahike supplies
+  the mid-transaction database, so ownership, eligibility, and the next
+  position are decided atomically. Repeating an identical contribution id
+  preserves its position; using it for different evaluations refuses."
+  {:malli/schema
+   [:=> [:catn [:database :seon.db/database-value]
+                [:request :seon.context/append-request]]
+    :seon.store/transaction-data]}
+  [database request]
+  (let [agent-id (:seon.cluster.agent/id request)
+        run-id (:seon.cluster.run/id request)
+        contribution-id (:seon.context.contribution/id request)
+        agent-data (transaction-read
+                    (db/pull database [:db/id]
+                             [:seon.cluster.agent/id agent-id]))
+        run-data (transaction-read
+                  (db/pull database
+                           [:db/id :seon.cluster.run/closed-at
+                            {:seon.cluster.run/agent [:db/id]}
+                            {:seon.cluster.eval/_run
+                             [:db/id :seon.cluster.eval/result-edn
+                              :seon.cluster.eval/error
+                              :seon.cluster.eval/interrupted-at]}]
+                           [:seon.cluster.run/id run-id]))
+        evaluations (:seon.cluster.eval/_run run-data)
+        evaluation-refs (set (map :db/id evaluations))
+        existing (transaction-read
+                  (db/pull database
+                           [{:seon.context.contribution/agent [:db/id]}
+                            {:seon.context.contribution/evaluations [:db/id]}]
+                           [:seon.context.contribution/id contribution-id]))
+        rule (cond
+               (nil? agent-data) ::no-such-agent
+               (nil? run-data) ::no-such-run
+               (not= (:db/id agent-data)
+                     (get-in run-data [:seon.cluster.run/agent :db/id]))
+               ::foreign-run
+               (not (:seon.cluster.run/closed-at run-data)) ::run-open
+               (empty? evaluations) ::no-evaluations
+               (not-every? run/terminal? evaluations) ::unfinished-evaluation
+               (and existing
+                    (or (not= (:db/id agent-data)
+                              (get-in existing
+                                      [:seon.context.contribution/agent :db/id]))
+                        (not= evaluation-refs
+                              (set (map :db/id
+                                        (:seon.context.contribution/evaluations
+                                         existing))))))
+               ::contribution-conflict)]
+    (cond
+      rule
+      (let [refusal (selection-refusal rule request
+                                      {:seon.cluster.agent/id agent-id
+                                       :seon.cluster.run/id run-id})]
+        (throw (ex-info (:seon.error/message refusal) refusal)))
+      existing []
+      :else
+      (let [position
+            (transaction-read
+             (db/q '[:find (max ?position) .
+                     :in $ ?agent
+                     :where
+                     [?contribution :seon.context.contribution/agent ?agent]
+                     [?contribution :seon.context.contribution/position ?position]]
+                   database (:db/id agent-data)))]
+        [{:seon.context.contribution/id contribution-id
+          :seon.context.contribution/agent (:db/id agent-data)
+          :seon.context.contribution/position (inc (or position -1))
+          :seon.context.contribution/evaluations evaluation-refs}]))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Message custody in one run's rendered context

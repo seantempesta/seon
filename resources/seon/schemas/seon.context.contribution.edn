@@ -6,11 +6,17 @@
                              [:seon.context.contribution/position
                               :seon.context.contribution/position]
                              [:seon.render.block/name
+                              {:optional true}
                               :seon.render.block/name]
                              [:seon.context.contribution/hash
+                              {:optional true}
                               :seon.context.contribution/hash]
                              [:seon.context.contribution/tokens
+                              {:optional true}
                               :seon.context.contribution/tokens]
+                             [:seon.context.contribution/agent
+                              {:optional true}
+                              :seon.context.contribution/agent]
                              [:seon.context.contribution/evaluations
                               {:optional true}
                               :seon.context.contribution/evaluations]
@@ -20,6 +26,7 @@
                              [:seon.context.contribution/error
                               {:optional true}
                               :seon.context.contribution/error]],
+                            :agent :seon.db/ref,
                             :evaluations [:set :seon.db/ref],
                             :error [:string {:min 1}],
                             :hash [:string {:min 1}],
