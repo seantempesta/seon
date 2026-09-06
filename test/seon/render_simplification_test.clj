@@ -95,17 +95,31 @@
            pulled (db/pull database '[*]
                            [:my.plan.item/id "pulled-render-item"])
            prepared (value/transacted pulled database)
-           rendered (render-html
-                     (render-request database
-                                     (support/fork-cluster-ctx connection)
-                                     'my.plan
-                                     pulled))]
+           request (assoc (render-request
+                           database (support/fork-cluster-ctx connection)
+                           'my.plan pulled)
+                          :seon.render/output :seon.render/html)
+           decision (selection request)
+           namespace-stage
+           (nth (:seon.render.selection/stages decision) 2)
+           candidate
+           (some #(when (= 'my.plan/render-item-html
+                           (:seon.render.selection.candidate/producer %))
+                    %)
+                 (:seon.render.selection.stage/candidates namespace-stage))
+           rendered (render-html request)]
        (is (integer? (:my.plan.item/agent prepared)))
        (is (= ['my.plan/render-item-html]
               (:my.plan.item/about prepared))
            "a scalar EDN vector is not mistaken for cardinality-many")
        (is (= prepared (value/transacted (dissoc pulled :db/id) database))
            "normalization does not depend on a root :db/id projection")
+       (is (= 'my.plan/render-item-html
+              (:seon.render.selection/selected decision)))
+       (is (= :selected
+              (:seon.render.selection.stage/status namespace-stage)))
+       (is (= :compatible
+              (:seon.render.selection.candidate/status candidate)))
        (is (str/includes? (hiccup/->string rendered)
                           "Render the pulled item"))))))
 

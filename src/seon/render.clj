@@ -447,7 +447,7 @@
             projection (sci.kernel/context-projection ctx)
             output-schema (case output
                             :seon.render/ai :seon.render/ai
-                            :seon.render/html :seon.render/html
+                            :seon.render/html :seon.render/hiccup
                             :seon.render/form :seon.render/form)]
         (loop [stage-names selection-stage-order
                stages []]
