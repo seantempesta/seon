@@ -48,6 +48,23 @@ complete reusable output entry here would instead mask live code changes.
 This correction still needs a successful fresh live proof; its focused test
 is not closure of this issue.
 
+The third fresh proof still produced seven runs/evaluations and was stopped.
+Its stored evaluation has 15 read-evidence entries. Three have dependency plan
+`:all`: the history-view construction and the current/historical maximum
+transaction queries in `seon.call-preparation/newest-row-transaction`. Their
+attribute input is exactly `:seon.call-preparation/key`, `/schema`, and
+`/supplier`; they maintain call-preparation cache coherence. The evaluated
+identity pull itself has precise attribute dependencies. A result-settlement
+transaction therefore invalidates the broad machinery observations even when
+the identity data is unchanged.
+
+The next correction belongs at that existing metadata observation boundary.
+It must preserve real supplier/declaration dependencies while preventing
+internal cache-coherence reads from claiming that an identity result depends
+on every database fact. Ignoring false read validity or returning a permanent
+stale-result refusal would not fix the requested behavior. Do not classify this
+as another presentation-key mismatch.
+
 ## Owner and acceptance
 
 Correct the existing retained call/invocation cache in `seon.render.web` and
