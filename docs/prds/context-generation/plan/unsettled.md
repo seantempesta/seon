@@ -8,6 +8,18 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Live delivery checkpoint, 2026-09-06: the isolated `lab-browser-0906` probe
+now passes a real database transaction through SSE into the same open browser.
+A plan title changed and a new dependency ref appeared; basis advanced
+536870953→536870954, nodes/edges changed 2/1→3/2, and container, Cytoscape
+instance, zoom, and pan survived without navigation or JavaScript errors.
+The initial attempt exposed selection/invocation using different pulled-ref
+shapes; `f609acb71` fixes the shared argument preparation (76 focused assertions
+passed). Reproducible fixture, exact transaction, and proof limits are in
+[live feed proof](../research/debug-live-feed-proof-2026-09-06.md).
+Renderer-evaluation-only live update and actual producing-form display remain
+open; the complete inspection goal is not yet achieved.
+
 Browser checkpoint, 2026-09-06: the live debug page now draws the actual
 34-node/33-reference graph alongside selected output. Browser-discovered
 container, event namespace, status replacement, and parent-selector defects
@@ -133,7 +145,7 @@ mockup's local preview must not become an implicit production invocation.
 | Work / uncertainty | Smallest decisive verification | Stop / reuse rule |
 |---|---|---|
 | Reference navigation | One focused case covering outgoing ref, incoming source, attribute identity, scalar non-ref, and retained viewer | No namespace-wide suite; reuse this proof until navigation inputs change. |
-| Unrelated transactions rerender | Diagnose retained evidence; rerun only `unrelated-transaction-reuses-debug-observation-and-render-call` after the owner fix | Current red: observation stays 1, discovery/invocation rise to 2. Do not rerun already-green DB safety tests for an unchanged DB owner. |
+| Unrelated transactions rerender | `unrelated-transaction-reuses-debug-observation-and-render-call` is the retained proof | Resolved after `b080f42d1`: observation/discovery/invocation remained 1/1/1 after an unrelated transaction and became 2/2/2 only after selected data changed. Focused result: 76/0/0. |
 | Useful bounded HTML | Finish the existing preview-focused cases and inspect actual HTML once | Do not rerun the long grammar property while iterating on preview presentation. |
 | Graph identity and lifecycle | One directed multiedge/self-loop specimen; ten model patches, then remove the graph element | One instance, preserved positions, exact qualified attributes, destruction on removal. No new backend or layout benchmark until this passes. |
 | Accumulated exploration | Expand two subjects and transact a connecting ref; assert every returned page has one database identity | Client-only unions fail this requirement. Compose bounded existing observations server-side before claiming live accumulated exploration. |
@@ -148,10 +160,12 @@ maintenance settlement refusal, and one failed root run. These are tracked
 in the existing fault-storage issue pending cause inspection; do not start
 another broad repair campaign unless one blocks the decisive UI proof.
 
-Root's last focused verification: DB semantic replay 78/0/0, bounded/opaque
+Historical pre-fix verification: DB semantic replay 78/0/0, bounded/opaque
 request refusal 1/0/0, lazy/opaque safety 4/0/0, runtime-evaluation wake 8/0/0;
 web unrelated-transaction reuse 2/2/0. Counts are pass/fail/error, from
-`tmp/design-lab-cache-final.log`; the web cache is explicitly still red.
+`tmp/design-lab-cache-final.log`. The later `b080f42d1` focused proof resolved
+that web failure: 76/0/0, with 1/1/1 initial calls, unchanged 1/1/1 after an
+unrelated transaction, and 2/2/2 after selected data changed.
 
 ## Active execution goals — dinner continuation, 2026-09-05
 

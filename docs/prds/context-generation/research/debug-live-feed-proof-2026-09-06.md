@@ -1,6 +1,12 @@
+---
+type: research
+status: active
+tags: [render, web, testing]
+---
+
 # Database-to-browser delivery proof — 2026-09-06
 
-Status: in progress. This is evidence for the first inspection slice, not a
+Status: passed after the render argument fix. This is evidence for the first inspection slice, not a
 second roadmap. Root owns scratch cluster `lab-browser-0906`, started with
 `bin/seon start lab-browser-0906`; its advertised URL is
 `http://127.0.0.1:7833`. The shared `default` database is not modified.
@@ -44,12 +50,30 @@ path. Wait for its explicit `readyForTransaction` output before this mutation:
 The browser must receive the new title and two reference edges without
 navigation, preserve its existing Cytoscape instance, container, zoom and pan,
 and show the updated database identity. Its deadline is 60 seconds and failure
-is loud. No mutation has been performed yet: the initial render exposed a
-prerequisite defect.
+is loud.
 
 Initial result: selection chose `my.plan/render-item-html`, but invocation
 refused `:my.plan.item/agent {:db/id 31810}` under the declared reference
-contract. Source investigation confirmed selection checks a normalized value
-while invocation supplies the original pull. The prerequisite is being fixed
-at the existing render argument preparation, with schema-based preservation
-of refs, cardinality-many values, and scalar vector values.
+contract. Source investigation confirmed selection checked a normalized value
+while invocation supplied the original pull. Commit `f609acb71` fixes the
+existing argument preparation using the installed database schema. Its focused
+regression passed 76 assertions, including scalar vector preservation.
+
+## Integrated result
+
+After hot-reloading `seon.render.value` and `seon.render`, and reapplying
+instrumentation with the scratch cluster's projection, the browser reached its
+explicit ready state. The mutation above then committed at basis 536870954.
+The open browser changed from basis 536870953 to 536870954, displayed
+`After live update`, and changed its graph from two nodes/one edge to three
+nodes/two edges. The same DOM container and Cytoscape instance survived, zoom
+remained 0.8 and pan remained `{x:75,y:85}`. Exactly one main-frame navigation
+occurred (initial load), and there were no JavaScript errors. The process
+exited successfully. The local screenshot is
+`tmp/debug-live-feed-2026-09-06.png`.
+
+This proves an actual transaction through the existing live feed into a browser
+on an isolated cluster. It does not yet prove a renderer-definition-only
+evaluation triggers the correct output change, nor the producing-form display.
+The web/render JVM Vars were hot-reloaded; this is not a claim that an existing
+cluster automatically adopted a new indexed program publication.
