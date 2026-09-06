@@ -279,16 +279,16 @@ attribute({
       show(edgeDescription(event.target))
     }
 
-    cy.on('tap.seonGraph', 'node', onNodeTap)
-    cy.on('tap.seonGraph', 'edge', onEdgeTap)
+    cy.on('tap', 'node', onNodeTap)
+    cy.on('tap', 'edge', onEdgeTap)
     const observer = new MutationObserver(update)
     observer.observe(script, { childList: true, characterData: true, subtree: true })
     update()
 
     return () => {
       observer.disconnect()
-      cy.off('tap.seonGraph', 'node', onNodeTap)
-      cy.off('tap.seonGraph', 'edge', onEdgeTap)
+      cy.off('tap', 'node', onNodeTap)
+      cy.off('tap', 'edge', onEdgeTap)
       cy.destroy()
     }
   },
