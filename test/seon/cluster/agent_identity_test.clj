@@ -50,12 +50,10 @@
                  :seon.cluster.agent/cluster
                  {:seon.cluster/name cluster-name}}
         source (agent/render-identity-ai unit)]
-    (is (= (str ";; Who am I?\n"
-                (pr-str
-                 (list 'seon.cluster.agent/render-identity-text
-                       (:seon.repl/form (agent/identity-form unit)))))
-           source)
-        "the preview is an authored comment plus one executable query form")
+    (is (= (list 'seon.cluster.agent/render-identity-text
+                 (list 'seon.cluster.agent/whoami agent-id))
+           (read-string source))
+        "the source uses the public identity query rather than exposing its pull selector")
     (is (= (str "Agent \"identity-root\"\n"
                 "Namespace my.agents.identity-root\n"
                 "Cluster \"identity-cluster\"")
@@ -80,7 +78,11 @@
           (is (str/includes? ai (pr-str agent-id)))
           (is (str/includes? ai
                              "seon.cluster.agent/render-identity-text"))
-          (is (str/includes? ai "seon.db/pull")))
+          (is (str/includes? ai "seon.cluster.agent/whoami"))
+          (is (= (agent/whoami @connection agent-id)
+                 (binding [db/*conn* connection]
+                   (eval (:seon.repl/form (agent/identity-form unit)))))
+              "the concise query returns the same stored identity facts"))
         (testing "HTML identity is a labelled card"
           (is (str/includes? (pr-str html) agent-id))
           (is (str/includes? (pr-str html) (str namespace-name)))

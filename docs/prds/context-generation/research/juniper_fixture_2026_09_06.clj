@@ -5,10 +5,11 @@
             [seon.schema]))
 
 ; Load this file through MCP JVM evaluation on the selected scratch cluster.
-; Change the cluster name below when reproducing on a fresh source fork.
 ; These are sample messages requested by Sean, not model-generated replies.
-(let [cluster-name "lab-run-inspection"
-      instance (get @seon.operator.runtime/running-instances cluster-name)
+(defn install!
+  "Install the Juniper example in the explicitly selected running cluster."
+  [cluster-name]
+ (let [instance (get @seon.operator.runtime/running-instances cluster-name)
       cluster (:seon.cluster.loop/cluster instance)
       connection (:seon.db/connection cluster)
       process (:seon.cluster.run/process cluster)]
@@ -66,4 +67,4 @@
                 {:my.plan/anchor [:my.plan.item/id]}
                 {:my.plan.item/_agent [:my.plan.item/id]}
                 {:seon.cluster.message/_to [:seon.cluster.message/id]}]
-              [:seon.cluster.agent/id "juniper"]))))))))
+              [:seon.cluster.agent/id "juniper"])))))))))

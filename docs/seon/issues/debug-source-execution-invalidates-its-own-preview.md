@@ -91,6 +91,20 @@ boundaries must consume the existing terminal text directly.
 
 ## Owner and acceptance
 
+Root's next personal browser review on 2026-09-06 used the stable namespace
+URL on port 7766 (`tmp/juniper-context-live`, Juniper entity 32367). The AI
+preview remained pending and the complete found-values section became an
+`:seon.db/invalid-read` from `pull-many`: result weight 4056 exceeded 4000.
+`acquire-debug-data` applies this single bound to the entire related-entity
+batch. This is a failed user-facing result, not acceptable partial success
+because the identity HTML still renders. Removing duplicate source execution
+must be verified on this actual page; the remaining acquisition limits also
+need reconciliation with the owner's unrestricted rendering experiment.
+
+The more specific page-refresh cache deletion is tracked in
+`runtime-evaluation-reexecutes-retained-render-source.md`. Its regression
+reproduces the duplicate clearing after the earlier invalidation correction.
+
 Correct the existing retained call/invocation cache in `seon.render.web` and
 `seon.render`. Preserve pending and terminal execution identity across producer
 refreshes when source, program, agent namespace, and execution read evidence

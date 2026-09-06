@@ -135,16 +135,18 @@
          (list 'quote identity-selector)
          [:seon.cluster.agent/id (:seon.cluster.agent/id unit)])})
 
-(defn- identity-data
-  [unit]
-  (let [agent-id (:seon.cluster.agent/id unit)]
-    (when agent-id
-      (if-let [database (:seon.db/db unit)]
-        (db/pull database identity-selector
-                 [:seon.cluster.agent/id agent-id])
-        (if (map? (:seon.render/value unit))
-          (:seon.render/value unit)
-          unit)))))
+(defn whoami
+  "Query an agent's identity, namespace, and cluster.
+
+  SCI supplies the current database and agent when omitted. Pass an agent id
+  to inspect another agent, or a database value to query an explicit snapshot."
+  {:malli/schema
+   [:=> [:catn [:database :seon.db/database-value]
+                [:agent-id :seon.cluster.agent/id]]
+    [:or [:maybe :seon.render/unit] :seon.error/value]]}
+  [database agent-id]
+  (db/pull database identity-selector
+           [:seon.cluster.agent/id agent-id]))
 
 (defn render-identity-text
   "Format queried agent identity facts as concise plain text."
@@ -167,20 +169,21 @@
   "Render the ordinary query that returns an agent's identity text."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
-  (when (:seon.cluster.agent/id unit)
-    (let [entry (identity-form unit)]
-      (str (:seon.repl/comment entry)
-           "\n"
-           (pr-str
-            (list 'seon.cluster.agent/render-identity-text
-                  (:seon.repl/form entry)))))))
+  (when-let [agent-id (:seon.cluster.agent/id unit)]
+    (str "(seon.cluster.agent/render-identity-text\n  "
+         (pr-str (list `whoami agent-id)) ")")))
 
 (defn render-identity-html
   "Render an agent's id, namespace, and cluster as an identity card."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or [:maybe :seon.render/hiccup] :seon.error/value]]}
   [unit]
-  (let [agent-data (identity-data unit)]
+  (let [agent-data (if-let [database (:seon.db/db unit)]
+                     (if (:seon.error/kind database)
+                       database
+                       (when-let [agent-id (:seon.cluster.agent/id unit)]
+                         (whoami database agent-id)))
+                     (or (:seon.render/value unit) unit))]
     (if (:seon.error/kind agent-data)
       agent-data
       (let [agent-id (:seon.cluster.agent/id agent-data)
