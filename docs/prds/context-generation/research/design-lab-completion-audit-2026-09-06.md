@@ -32,6 +32,13 @@ rows:
   disabled by owner direction; query-work bounds remain separate. The root
   entity-id regression was fixed and covered through generic invocation.
 
+The refreshed two-viewer and controls probes at `44eed6021` also pass on the
+ranked layout: same subject and snapshot, namespace selection for `my.plan`,
+schema selection for `seon.flow`, actual argument/contract disclosures and
+function/ref navigation. MCP before and after those read-only probes returned
+basis 536871430 and the same sole agent entity 31810: inspecting agentless
+namespaces created neither agent nor transaction.
+
 **Still incomplete:** the requested actual producing source and ordinary stored
 form/result integration. Renderer invocation evidence must not be relabelled as
 an executed source string. The existing source-run implementation work remains
