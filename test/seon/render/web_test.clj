@@ -819,7 +819,8 @@
                     (concat (anchors outgoing) (anchors incoming)))
         target-href (get hrefs "20")
         source-href (get hrefs "90")
-        attribute-href (get hrefs ":my/ref")]
+        attribute-href (get hrefs ":my/ref")
+        scalar-href (get hrefs "\"plain\"")]
     (is (str/includes? target-href "subject=20")
         "an outgoing ref value follows its target")
     (is (str/includes? source-href "subject=90")
@@ -827,8 +828,9 @@
     (is (str/includes? attribute-href
                        "subject=[:db/ident :my/ref]")
         "an attribute follows its installed :db/ident entity")
-    (is (not (find hrefs "\"plain\""))
-        "an ordinary scalar value remains text")
+    (is (and (str/includes? scalar-href "subject=[:my/id \"before\"]")
+             (str/includes? scalar-href "path=[:my/name]"))
+        "an ordinary outgoing value selects its attribute without changing the entity")
     (doseq [href [target-href source-href attribute-href]]
       (is (str/starts-with? href "/ns/my.viewer/debug?")
           "navigation keeps the viewing namespace")
@@ -840,6 +842,46 @@
       (is (not (or (str/includes? href "outgoingCursor=")
                    (str/includes? href "incomingCursor=")))
           "a new subject never carries snapshot-bound page cursors"))))
+
+(deftest debug-selected-path-is-the-renderer-input
+  (with-server
+    (fn [_connection server _context]
+      (let [values (atom [])
+            call-ids (atom [])
+            invoke render/render-call
+            subject (URLEncoder/encode
+                     (pr-str [:seon.ns/name 'seon.flow]) "UTF-8")
+            feed-url (fn [path]
+                       (str "/feed/seon.flow?debug=true&viewer=seon.flow"
+                            "&subject=" subject
+                            "&output=%3Aseon.render%2Fhtml"
+                            "&path=" (URLEncoder/encode (pr-str path) "UTF-8")
+                            "&offset=0"))]
+        (with-redefs [render/render-call
+                      (fn [request]
+                        (swap! values conj (:seon.render/value request))
+                        (swap! call-ids conj (:seon.render.call/id request))
+                        (invoke request))]
+          (let [stream (open-feed server (feed-url [:seon.ns/name]))]
+            (try
+              (let [patch (read-until! stream "selected path")]
+                (is (seq @values)
+                    "the selected value reaches the generic render boundary")
+                (is (every? #(= 'seon.flow %) @values)
+                    "the renderer comparison receives the scalar at the path")
+                (is (every? #(str/includes? (pr-str %) "[:seon.ns/name]") @call-ids)
+                    "retained render identities distinguish the selected path")
+                (is (str/includes? patch "return to entity")))
+              (finally (.close stream))))
+          (reset! values [])
+          (let [stream (open-feed server (feed-url [:seon.ns/missing]))]
+            (try
+              (let [patch (read-until! stream "no-such-path")]
+                (is (empty? @values)
+                    "a missing path never falls back to rendering the entity")
+                (is (str/includes? patch "debug-html-inspection")
+                    "the rendered-result panel exposes the path diagnostic"))
+              (finally (.close stream)))))))))
 
 (deftest debug-layout-leads-with-renderer-comparison-and-real-description
   (let [placeholder

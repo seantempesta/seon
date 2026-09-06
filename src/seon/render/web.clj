@@ -796,6 +796,15 @@
                :seon.render.data/incoming-cursor nil})}
    [:code (pr-str label)]])
 
+(defn- debug-path-link
+  [debug-request path label]
+  [:a {:href (debug-page-url
+              debug-request
+              {:seon.render.data/cursor
+               {:seon.render.data/path path
+                :seon.render.data/offset 0}})}
+   [:code (pr-str label)]])
+
 (defn- datom-page-html
   [debug-request ref-attributes direction page]
   [:section {:class "seon-debug-datom-page"}
@@ -820,10 +829,14 @@
                        (debug-subject-link debug-request e e)
                        [:code (pr-str e)])]
                 [:td (debug-subject-link debug-request [:db/ident a] a)]
-                [:td (if (and (= :outgoing direction)
-                              (ref-attributes a))
+                [:td (cond
+                       (and (= :outgoing direction) (ref-attributes a))
                        (debug-subject-link debug-request v v)
-                       [:code (pr-str v)])]
+
+                       (= :outgoing direction)
+                       (debug-path-link debug-request [a] v)
+
+                       :else [:code (pr-str v)])]
                 [:td [:code (if (some? stored) (pr-str stored) "—")]]
                 [:td [:code (pr-str tx)]]
                 [:td (if added "+" "−")]]))
@@ -842,7 +855,10 @@
 
 (defn- debug-header-html
   [debug-request observation acquisition-ms program-identity]
-  (let [output-link
+  (let [cursor (or (:seon.render.data/cursor debug-request)
+                   (data/parse-cursor nil nil))
+        path (:seon.render.data/path cursor)
+        output-link
         (fn [output label]
           [:a (cond-> {:href (debug-page-url
                               debug-request
@@ -858,6 +874,14 @@
     [:div
      [:span "subject"]
      [:code (pr-str (:seon.render.debug/subject debug-request))]]
+    (when (seq path)
+      [:div
+       [:span "selected path"]
+       [:code (pr-str path)]
+       [:a {:href (debug-page-url
+                   debug-request
+                   {:seon.render.data/cursor (data/parse-cursor nil nil)})}
+        "return to entity"]])
     [:div
      [:span "snapshot"]
      [:code (pr-str (:seon.render.data/snapshot observation))]]
@@ -875,9 +899,10 @@
       (output-link :seon.render/ai "AI")]]
     [:div
      [:span "render value acquisition"]
-     [:code (str acquisition-ms " ms · work " (::pull-max-work debug-request)
-                " · results " (::pull-max-results debug-request)
-                " · weight "
+     [:code (str acquisition-ms " ms · query bounds: work ≤ "
+                (::pull-max-work debug-request)
+                " · results ≤ " (::pull-max-results debug-request)
+                " · weight ≤ "
                 (:seon.render.data/max-result-weight debug-request))]]])))
 
 (defn- debug-observation-html
@@ -1419,6 +1444,19 @@
         restarted? (::restarted? debug-data-output)
         acquisition (::acquisition debug-data-output)
         acquisition-ms (::acquisition-ms debug-data-output)
+        cursor (or (:seon.render.data/cursor debug-request)
+                   (data/parse-cursor nil nil))
+        selected-result
+        (cond
+          (nil? acquisition)
+          {:seon.error/kind ::render-value-missing
+           :seon.error/message "The selected entity does not exist."}
+
+          (:seon.error/kind acquisition) acquisition
+
+          :else (data/at acquisition cursor))
+        selected? (contains? selected-result :seon.render.data/value)
+        selected-value (:seon.render.data/value selected-result)
         render-agent-id
         (or (:seon.cluster.agent/id debug-request)
             (:seon.cluster.agent/id handle))
@@ -1436,18 +1474,9 @@
           render-agent-id
           (assoc :seon.cluster.agent/id render-agent-id))
         entity-html
-        (if (or (nil? acquisition) (:seon.error/kind acquisition))
-          (debug-value-html
-           (or acquisition
-               {:seon.error/kind ::render-value-missing
-                :seon.error/message "The selected entity does not exist."}))
-          (let [cursor (or (:seon.render.data/cursor debug-request)
-                           (data/parse-cursor nil nil))
-                found (data/at acquisition cursor)
-                opened-value (if (contains? found :seon.render.data/value)
-                               (:seon.render.data/value found)
-                               found)
-                rendered-value
+        (if-not selected?
+          (debug-value-html selected-result)
+          (let [rendered-value
                 (value/render-html
                  (assoc render-custody
                         :seon.render.value/root
@@ -1457,7 +1486,7 @@
                         :seon.render.data/cursor cursor
                         :seon.render.value/options
                         {:seon.render.value/structural? true}
-                        :seon.render/value opened-value))]
+                        :seon.render/value selected-value))]
             (if (:seon.error/kind rendered-value)
               (debug-value-html rendered-value)
               rendered-value)))
@@ -1465,11 +1494,12 @@
         call-id [::inspection-render
                  (:seon.render.debug/viewer-namespace debug-request)
                  (:seon.render.debug/subject debug-request)
+                 (:seon.render.data/path cursor)
                  (:seon.render/output debug-request)]
         render-request
-        (when-not (or (nil? acquisition) (:seon.error/kind acquisition))
+        (when selected?
           (assoc render-custody
-                 :seon.render/value acquisition
+                 :seon.render/value selected-value
                  :seon.render/output (:seon.render/output debug-request)
                  :seon.render.call/id call-id
                  :seon.render/retained-calls retained-calls
@@ -1481,10 +1511,12 @@
         (when render-request
           {:seon.render/ai
            (debug-render-experiment render-request :seon.render/ai
-                                    (:seon.render.debug/subject debug-request))
+                                    [(:seon.render.debug/subject debug-request)
+                                     (:seon.render.data/path cursor)])
            :seon.render/html
            (debug-render-experiment render-request :seon.render/html
-                                    (:seon.render.debug/subject debug-request))})
+                                    [(:seon.render.debug/subject debug-request)
+                                     (:seon.render.data/path cursor)])})
         render-call-entry (get @captured-calls call-id)
         prompt-id (str "debug-ai-"
                        (or (:seon.cluster.agent/id debug-request) "inspection"))
@@ -1511,7 +1543,7 @@
                                                     render-call-entry))
           (debug-html-id
            (or (:seon.cluster.agent/id debug-request) "inspection"))
-          (debug-output-html debug-request acquisition rendered)}
+          (debug-output-html debug-request selected-result rendered)}
           prompt-result
           (assoc prompt-id
                  (debug-ai-html (:seon.cluster.agent/id debug-request)
