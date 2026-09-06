@@ -8,6 +8,15 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Owner clarification, 2026-09-06: debug outputs are possible transcript values,
+not automatically the agent's actual history. Connect the agent's run-loop
+data, submitted forms, and evaluated results to its entity and render them
+alongside generated context forms. Preserve source provenance: evaluating a
+candidate does not mean the agent submitted it or that it belongs in the
+agent's historical exchanges. Reuse one execution and rendering mechanism;
+candidate inspection and actual history are different data, not parallel
+implementations. Inspect existing refs before relocating facts.
+
 Active goal renewed 2026-09-06: finish the common source → existing reader →
 ordinary SCI execution → stored result → transcript path for AI rendering,
 then compose those blocks into agent context. Completion requires personally
