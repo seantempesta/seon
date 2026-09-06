@@ -252,17 +252,17 @@ slice.
 ## Stored-history integration audit — 2026-09-06
 
 The current source confirms that the replacement can stay inside the existing
-owners, but it also narrows the earlier batching proposal. `generate-turn`
-currently asks `bootstrap/next-entry` for exactly one dependency-ready entry,
-appends exactly one form, and immediately resumes that ordinal
+owners. `generate-turn` currently asks `bootstrap/next-entry` for one
+dependency-ready candidate, appends one parsed form, and immediately resumes
+that ordinal
 (`src/seon/cluster/loop.clj:1909-2002`). `append-generated-call` deliberately
 requires the preceding ordinal to be terminal before accepting its successor
 (`src/seon/cluster/run.clj:810-879`). That serial frontier is the authority.
-Joining multiple apparently independent sources into one append transaction
-would require widening the transaction contract and supplies no necessary
-guarantee. The minimum change preserves one append and one evaluation per
-frontier step; it does **not** mean one run per leaf. Every generated source is
-an ordinal in the already-held run.
+A candidate source, however, may contain arbitrary comments and several forms:
+`planned-sources` already parses and repairs it once into an ordered vector
+(`src/seon/cluster/loop.clj:145-163`). The minimum change preserves one append
+and evaluation per ordinal while advancing through that vector serially. It
+does **not** impose one form per candidate or create one run per leaf.
 
 ### Exact replacement flow
 
@@ -273,18 +273,17 @@ an ordinal in the already-held run.
    and the `:seon.repl/entry` conversion. The current unconditional conversion
    is visible at `src/seon/bootstrap.clj:119-132,521-606`.
 2. `next-entry-in` continues to query the held run's stored form/evaluation
-   pairs in ordinal order. Match each settled ordinal to its candidate by the
-   retained invocation identity recorded with the generated form, rather than
-   by source-string equality. Source text is payload, not identity. The next
-   candidate is the first candidate whose declared dependencies are satisfied
-   by those stored admitted result nodes.
+   pairs in ordinal order. A selected candidate is one block: its source-run id
+   identifies the whole already-executed debug block, while a candidate parsed
+   for the held run owns one contiguous ordinal span. Source text remains
+   payload and drift evidence, never candidate identity.
 3. `generate-turn` passes that source directly through the existing
-   `planned-sources` reader seam, requires the one-candidate result to contain
-   exactly one parsed form, and hands that exact source/namespace to
-   `append-generated-tx`. The transaction owner and `resume-turn` remain
-   unchanged. A multi-form renderer source is a typed candidate error at this
-   boundary unless the owner separately widens “one candidate = one ordinal”;
-   silently splitting it would destroy the candidate-to-evaluation identity.
+   `planned-sources` reader seam once. Retain the returned ordered vector as
+   pending generated-prefix state and hand its next exact source/namespace to
+   `append-generated-tx`; after that ordinal settles, advance to the next form
+   in the same vector. The transaction owner and `resume-turn` remain
+   unchanged. Comments stay attached to the exact source slices returned by
+   the reader.
 4. Once the generated prefix is terminal, `render.walk/history` queries its
    stored form/evaluation rows and builds transcript entries with the existing
    terminal result formatter. Delete `generic-history-entries` and both
@@ -301,14 +300,17 @@ an ordinal in the already-held run.
 An invocation with `:seon.render.call/source-run-id` and a terminal stored run
 is already evaluated. Resolve that run's exact form/evaluation rows and reuse
 their bytes and read evidence. Context inclusion performs zero submission and
-zero evaluation. `render-source-call` already derives terminal output from the
-retained run and enriches the same invocation entry with evaluation read
-evidence (`src/seon/render/web.clj:1438-1515`).
+zero evaluation. That run id identifies the candidate's complete ordered block,
+including every form the reader produced. `render-source-call` already derives
+terminal output from the retained run and enriches the same invocation entry
+with evaluation read evidence (`src/seon/render/web.clj:1438-1515`).
 
 An invocation carrying authored source but no run identity has two distinct
 custody cases. While the agent has a held generated run, it becomes the next
-eligible ordinal in that run through `append-generated-tx`; it must not enter
-`submit-source!`. When no run is held, the explicit debug action may use
+eligible contiguous ordinal span in that run through repeated
+`append-generated-tx` transitions; it must not enter `submit-source!`. The
+span starts at the run's current form count and ends after the parsed vector's
+last form. When no run is held, the explicit debug action may use
 `submit-source!` and retain its returned run identity as it does now. The
 current debug owner already records a held run as
 `:seon.render.call/source-blocked-run-id`; that is an observation, not a queued
@@ -338,6 +340,34 @@ that moves `current-task?` last is deleted with the simulated entries; the
 stored-history query must express the desired actual-history/current-trigger/
 generated-prefix segment order explicitly.
 
+### Minimal block identity
+
+No new invocation entity is required. A cached block already has the existing
+`:seon.render.call/source-run-id`; the ordered forms and receipts derive by
+joining that run and sorting ordinal. For a candidate executing inside the
+held run, retain its existing invocation key with `{run-id, start-ordinal,
+form-count}` in the current invocation cache. Those three values select its
+contiguous form/receipt span without comparing source strings. During recovery,
+the run's form and receipt identities are already deterministic from
+`(run-id, ordinal)` (`src/seon/cluster/run.clj:591-625`). If recovery must also
+restore which candidate owned a span after the invocation cache is lost, then
+a scalar block id on each run-form is the smallest durable fact; this need is
+not yet established and does not justify an invocation entity.
+
+### Durable prior results
+
+Cross-run `result/eN` rebinding is forbidden: `bind-result!` defines that name
+inside one turn fork. Existing durable identities do permit an explicit origin
+to be named: `:seon.cluster.eval/id` derives from run id and ordinal, and the
+receipt stores `result-edn`/result-blob. The current public owners do not yet
+provide an error-preserving agent call that resolves that receipt to its
+semantic value. `seon.eval.drive/read-result` is a grading helper over supplied
+serialized text, and `seon.blob/get` requires an explicit connection; neither
+is the missing agent source boundary. A later generated source may depend on a
+prior external result only after the existing result owner exposes a qualified,
+error-preserving read by evaluation id. Until then, mark that candidate
+dependency unavailable; never rebind it or re-execute the block silently.
+
 ### Implementation ownership
 
 - `src/seon/bootstrap.clj` and its focused tests: candidate ordering,
@@ -351,21 +381,19 @@ generated-prefix segment order explicitly.
 - `src/seon/render/web.clj` and focused web tests: retain/concatenate those
   stored observations and preserve the debug invocation-to-run identity. No
   new cache or registry belongs here.
-- The schema owner must declare one explicit invocation reference on a
-  generated form if invocation identity cannot be reconstructed from existing
-  facts. It must not use source hash/equality as a substitute.
+- Schema needs no new invocation entity for the initial slice. Add a scalar
+  source-block fact to run forms only if a recovery test proves the in-memory
+  `{run-id, start-ordinal, form-count}` span cannot be re-derived.
 
 ### Remaining decisions
 
-1. **Invocation provenance fact.** Current run-form facts carry run, ordinal,
-   author, source, and namespace, but no render invocation reference. Choose a
-   real ref/identity attribute before implementation; source equality is
-   demonstrably ambiguous.
-2. **Historical debug-result dependencies.** Direct context inclusion reuses a
-   terminal debug run without execution. There is no relation or SCI binding
-   allowing a later held-run source to depend on that external evaluation.
-   Cross-run dependency reuse requires an explicit provenance/binding decision
-   and is not part of deleting simulated history.
+1. **Span recovery.** Prove whether candidate ownership must survive loss of
+   the invocation cache. If yes, add one scalar block id to each form in the
+   span; do not create an invocation entity.
+2. **Historical result read.** Direct context inclusion reuses a terminal debug
+   run without execution. A later source needs a qualified evaluation-id read
+   owner before it can depend on that value; cross-run `result/eN` binding is
+   not allowed.
 3. **Segment ordering.** Durable facts determine order within runs, but the
    product order between prior agent history, current trigger, and the newly
    generated prefix must be stated once in the context PRD before replacing
