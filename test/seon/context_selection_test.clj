@@ -14,6 +14,12 @@
   [agent-id run-id contribution-id]
   [:db.fn/call context/append-tx (request agent-id run-id contribution-id)])
 
+(defn- compact-call
+  [agent-id run-id contribution-id expected-evaluations]
+  [:db.fn/call context/compact-tx
+   (assoc (request agent-id run-id contribution-id)
+          :seon.context.contribution/evaluations expected-evaluations)])
+
 (deftest selection-references-terminal-evaluations-in-writer-decided-order
   (test-support/with-database
    (fn [connection]
@@ -102,3 +108,77 @@
        (is (= :seon.context/no-such-agent
               (:seon.context/selection-refused
                (context/selection @connection "missing"))))))))
+
+(deftest compact-replaces-only-observed-evaluation-refs
+  (test-support/with-database
+   (fn [connection]
+     (let [closed-at #inst "2026-09-06T00:00:00Z"
+           _ (db/transact!
+              connection
+              [{:seon.cluster.agent/id "compact-agent"}
+               {:seon.cluster.run/id "compact-before"
+                :seon.cluster.run/agent
+                [:seon.cluster.agent/id "compact-agent"]
+                :seon.cluster.run/closed-at closed-at}
+               {:seon.cluster.run/id "compact-after"
+                :seon.cluster.run/agent
+                [:seon.cluster.agent/id "compact-agent"]
+                :seon.cluster.run/closed-at closed-at}
+               {:seon.ns/name 'compact.context}
+               {:seon.cluster.run.form/id "compact-before-form"
+                :seon.cluster.run.form/run
+                [:seon.cluster.run/id "compact-before"]
+                :seon.cluster.run.form/ordinal 0
+                :seon.cluster.run.form/author :system
+                :seon.cluster.run.form/source "(identity 1)"
+                :seon.cluster.run.form/ns [:seon.ns/name 'compact.context]}
+               {:seon.cluster.run.form/id "compact-after-form"
+                :seon.cluster.run.form/run
+                [:seon.cluster.run/id "compact-after"]
+                :seon.cluster.run.form/ordinal 0
+                :seon.cluster.run.form/author :system
+                :seon.cluster.run.form/source "(identity 1)"
+                :seon.cluster.run.form/ns [:seon.ns/name 'compact.context]}
+               {:seon.cluster.eval/id "compact-before-0"
+                :seon.cluster.eval/run [:seon.cluster.run/id "compact-before"]
+                :seon.cluster.eval/ordinal 0
+                :seon.cluster.eval/result-edn "1"}
+               {:seon.cluster.eval/id "compact-after-0"
+                :seon.cluster.eval/run [:seon.cluster.run/id "compact-after"]
+                :seon.cluster.eval/ordinal 0
+                :seon.cluster.eval/result-edn "2"}])
+           _ (db/transact!
+              connection
+              [(append-call "compact-agent" "compact-before" "compact-choice")])
+           before (first (context/selection @connection "compact-agent"))
+           expected (:seon.context.contribution/evaluations before)
+           comparison
+           (context/comparison
+            @connection
+            (request "compact-agent" "compact-after" "compact-choice"))
+           committed
+           (db/transact!
+            connection
+            [(compact-call "compact-agent" "compact-after" "compact-choice"
+                           expected)])
+           after (first (context/selection @connection "compact-agent"))]
+       (is (nil? (:seon.error/kind committed)))
+       (is (= :ready (:seon.context.comparison/status comparison)))
+       (is (= expected
+              (set (:seon.context.comparison/baseline-evaluations comparison))))
+       (is (= (:seon.context.contribution/position before)
+              (:seon.context.contribution/position after)))
+       (is (= "compact-after-0"
+              (:seon.cluster.eval/id
+               (db/pull @connection [:seon.cluster.eval/id]
+                        (first (:seon.context.contribution/evaluations after))))))
+       (let [basis (db/basis-t @connection)
+             stale (db/transact!
+                    connection
+                    [(compact-call "compact-agent" "compact-before"
+                                   "compact-choice" expected)])]
+         (is (= :seon.context/stale-contribution
+                (:seon.context/selection-refused stale)))
+         (is (= basis (db/basis-t @connection)))
+         (is (= after (first (context/selection @connection
+                                                "compact-agent")))))))))

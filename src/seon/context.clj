@@ -114,21 +114,10 @@
     (throw (ex-info (:seon.error/message value) value))
     value))
 
-(defn append-tx
-  "Append a closed run's terminal evaluations to its agent's context selection.
-
-  Invoke as `[:db.fn/call seon.context/append-tx request]`: Datahike supplies
-  the mid-transaction database, so ownership, eligibility, and the next
-  position are decided atomically. Repeating an identical contribution id
-  preserves its position; using it for different evaluations refuses."
-  {:malli/schema
-   [:=> [:catn [:database :seon.db/database-value]
-                [:request :seon.context/append-request]]
-    :seon.store/transaction-data]}
+(defn- eligible-run
   [database request]
   (let [agent-id (:seon.cluster.agent/id request)
         run-id (:seon.cluster.run/id request)
-        contribution-id (:seon.context.contribution/id request)
         agent-data (transaction-read
                     (db/pull database [:db/id]
                              [:seon.cluster.agent/id agent-id]))
@@ -143,11 +132,6 @@
                            [:seon.cluster.run/id run-id]))
         evaluations (:seon.cluster.eval/_run run-data)
         evaluation-refs (set (map :db/id evaluations))
-        existing (transaction-read
-                  (db/pull database
-                           [{:seon.context.contribution/agent [:db/id]}
-                            {:seon.context.contribution/evaluations [:db/id]}]
-                           [:seon.context.contribution/id contribution-id]))
         rule (cond
                (nil? agent-data) ::no-such-agent
                (nil? run-data) ::no-such-run
@@ -156,8 +140,43 @@
                ::foreign-run
                (not (:seon.cluster.run/closed-at run-data)) ::run-open
                (empty? evaluations) ::no-evaluations
-               (not-every? run/terminal? evaluations) ::unfinished-evaluation
-               (and existing
+               (not-every? run/terminal? evaluations) ::unfinished-evaluation)]
+    {:agent-data agent-data
+     :run-data run-data
+     :evaluation-refs evaluation-refs
+     :rule rule}))
+
+(defn- refuse-selection!
+  [rule request]
+  (let [refusal (selection-refusal
+                 rule request
+                 {:seon.cluster.agent/id (:seon.cluster.agent/id request)
+                  :seon.cluster.run/id (:seon.cluster.run/id request)
+                  :seon.context.contribution/id
+                  (:seon.context.contribution/id request)})]
+    (throw (ex-info (:seon.error/message refusal) refusal))))
+
+(defn append-tx
+  "Append a closed run's terminal evaluations to its agent's context selection.
+
+  Invoke as `[:db.fn/call seon.context/append-tx request]`: Datahike supplies
+  the mid-transaction database, so ownership, eligibility, and the next
+  position are decided atomically. Repeating an identical contribution id
+  preserves its position; using it for different evaluations refuses."
+  {:malli/schema
+   [:=> [:catn [:database :seon.db/database-value]
+                [:request :seon.context/append-request]]
+    :seon.store/transaction-data]}
+  [database request]
+  (let [contribution-id (:seon.context.contribution/id request)
+        {:keys [agent-data evaluation-refs rule]} (eligible-run database request)
+        existing (transaction-read
+                  (db/pull database
+                           [{:seon.context.contribution/agent [:db/id]}
+                            {:seon.context.contribution/evaluations [:db/id]}]
+                           [:seon.context.contribution/id contribution-id]))
+        rule (or rule
+                 (when (and existing
                     (or (not= (:db/id agent-data)
                               (get-in existing
                                       [:seon.context.contribution/agent :db/id]))
@@ -165,13 +184,9 @@
                               (set (map :db/id
                                         (:seon.context.contribution/evaluations
                                          existing))))))
-               ::contribution-conflict)]
+                   ::contribution-conflict))]
     (cond
-      rule
-      (let [refusal (selection-refusal rule request
-                                      {:seon.cluster.agent/id agent-id
-                                       :seon.cluster.run/id run-id})]
-        (throw (ex-info (:seon.error/message refusal) refusal)))
+      rule (refuse-selection! rule request)
       existing []
       :else
       (let [position
@@ -186,6 +201,147 @@
           :seon.context.contribution/agent (:db/id agent-data)
           :seon.context.contribution/position (inc (or position -1))
           :seon.context.contribution/evaluations evaluation-refs}]))))
+
+(defn compact-tx
+  "Replace one contribution's evaluation refs with a refreshed closed run.
+
+  The caller supplies the refs it observed. Datahike invokes this function
+  against the mid-transaction database, so a concurrent selection change
+  refuses instead of being overwritten. Identity and position are untouched."
+  {:malli/schema
+   [:=> [:catn [:database :seon.db/database-value]
+                [:request :seon.context/compact-request]]
+    :seon.store/transaction-data]}
+  [database request]
+  (let [contribution-id (:seon.context.contribution/id request)
+        expected-refs (:seon.context.contribution/evaluations request)
+        {:keys [agent-data evaluation-refs rule]} (eligible-run database request)
+        existing (transaction-read
+                  (db/pull database
+                           [:db/id
+                            {:seon.context.contribution/agent [:db/id]}
+                            {:seon.context.contribution/evaluations [:db/id]}]
+                           [:seon.context.contribution/id contribution-id]))
+        current-refs
+        (set (map :db/id (:seon.context.contribution/evaluations existing)))
+        rule (or rule
+                 (when-not existing ::no-such-contribution)
+                 (when (and existing
+                            (not= (:db/id agent-data)
+                                  (get-in existing
+                                          [:seon.context.contribution/agent
+                                           :db/id])))
+                   ::foreign-contribution)
+                 (when (and existing (not= expected-refs current-refs))
+                   ::stale-contribution))]
+    (cond
+      rule (refuse-selection! rule request)
+      (= current-refs evaluation-refs) []
+      :else
+      (into []
+            (concat
+             (map (fn [evaluation]
+                    [:db/retract (:db/id existing)
+                     :seon.context.contribution/evaluations evaluation])
+                  current-refs)
+             (map (fn [evaluation]
+                    [:db/add (:db/id existing)
+                     :seon.context.contribution/evaluations evaluation])
+                  evaluation-refs))))))
+
+(defn- ordered-run-evaluations
+  [database run-eid]
+  (mapv second
+        (sort-by first
+                 (db/q '[:find ?ordinal ?evaluation
+                         :in $ ?run
+                         :where
+                         [?evaluation :seon.cluster.eval/run ?run]
+                         [?evaluation :seon.cluster.eval/ordinal ?ordinal]]
+                       database run-eid))))
+
+(defn- ordered-run-source
+  [database run-eid]
+  (mapv (fn [[ordinal source namespace-name]]
+          {:seon.cluster.run.form/ordinal ordinal
+           :seon.cluster.run.form/source source
+           :seon.ns/name namespace-name})
+        (sort-by first
+                 (db/q '[:find ?ordinal ?source ?namespace-name
+                         :in $ ?run
+                         :where
+                         [?form :seon.cluster.run.form/run ?run]
+                         [?form :seon.cluster.run.form/ordinal ?ordinal]
+                         [?form :seon.cluster.run.form/source ?source]
+                         [?form :seon.cluster.run.form/ns ?namespace]
+                         [?namespace :seon.ns/name ?namespace-name]]
+                       database run-eid))))
+
+(defn comparison
+  "Compare a locked contribution with a refreshed run of the same form source.
+
+  Returns evaluation refs only. An open refreshed run is explicitly pending;
+  different ordered source or namespace facts are explicitly distinguished."
+  {:malli/schema
+   [:=> [:catn [:database :seon.db/database-value]
+                [:request :seon.context/comparison-request]]
+    [:or :seon.context/comparison :seon.error/value]]}
+  [database request]
+  (let [agent-id (:seon.cluster.agent/id request)
+        run-id (:seon.cluster.run/id request)
+        contribution-id (:seon.context.contribution/id request)
+        contribution
+        (db/pull database
+                 [{:seon.context.contribution/agent [:db/id]}
+                  {:seon.context.contribution/evaluations
+                   [:db/id {:seon.cluster.eval/run [:db/id]}]}]
+                 [:seon.context.contribution/id contribution-id])
+        agent-data (db/pull database [:db/id]
+                       [:seon.cluster.agent/id agent-id])
+        refreshed
+        (db/pull database
+                 [:db/id :seon.cluster.run/closed-at
+                 {:seon.cluster.run/agent [:db/id]}]
+                 [:seon.cluster.run/id run-id])
+        eligibility (when (:seon.cluster.run/closed-at refreshed)
+                      (eligible-run database request))
+        baseline-runs
+        (set (keep #(get-in % [:seon.cluster.eval/run :db/id])
+                   (:seon.context.contribution/evaluations contribution)))
+        rule (cond
+               (:seon.error/kind contribution) contribution
+               (:seon.error/kind agent-data) agent-data
+               (:seon.error/kind refreshed) refreshed
+               (nil? contribution) ::no-such-contribution
+               (nil? agent-data) ::no-such-agent
+               (not= (:db/id agent-data)
+                     (get-in contribution
+                             [:seon.context.contribution/agent :db/id]))
+               ::foreign-contribution
+               (nil? refreshed) ::no-such-run
+               (not= (:db/id agent-data)
+                     (get-in refreshed [:seon.cluster.run/agent :db/id]))
+               ::foreign-run
+               (not= 1 (count baseline-runs)) ::contribution-run-ambiguous
+               (:rule eligibility) (:rule eligibility))]
+    (cond
+      (map? rule) rule
+      rule (selection-refusal rule request
+                              {:seon.context.contribution/id contribution-id
+                               :seon.cluster.run/id run-id})
+      (not (:seon.cluster.run/closed-at refreshed))
+      {:seon.context.comparison/status :pending}
+      :else
+      (let [baseline-run (first baseline-runs)
+            same-source? (= (ordered-run-source database baseline-run)
+                            (ordered-run-source database (:db/id refreshed)))]
+        (if-not same-source?
+          {:seon.context.comparison/status :different-source}
+          {:seon.context.comparison/status :ready
+           :seon.context.comparison/baseline-evaluations
+           (ordered-run-evaluations database baseline-run)
+           :seon.context.comparison/refreshed-evaluations
+           (ordered-run-evaluations database (:db/id refreshed))})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Message custody in one run's rendered context
