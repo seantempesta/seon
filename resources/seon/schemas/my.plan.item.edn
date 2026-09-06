@@ -1,18 +1,52 @@
-#:my.plan.item{:id [:string {:min 1, :seon.db/identity true}],
-               :title [:string {:min 1}],
-               :description [:string {:min 1}],
-               :agent :seon.db/ref,
-               :parent :seon.db/ref,
-               :needs [:set :seon.db/ref],
+#:my.plan.item{:id
+               [:string
+                {:min 1,
+                 :seon.db/identity true,
+                 :description
+                 "The stable lookup identity of one authored plan item."}],
+               :title
+               [:string
+                {:min 1,
+                 :description "The current human-readable work title."}],
+               :description
+               [:string
+                {:min 1,
+                 :description "Optional detail about the work to perform."}],
+               :agent
+               [:and
+                {:description
+                 "The agent whose authored plan contains this item; reverse pull :my.plan.item/_agent finds that agent's items."}
+                :seon.db/ref],
+               :parent
+               [:and
+                {:description
+                 "An optional plan-item ref expressing authored decomposition."}
+                :seon.db/ref],
+               :needs
+               [:set
+                {:description
+                 "Plan-item refs whose open work currently blocks this item."}
+                :seon.db/ref],
                :about-token [:or :symbol :qualified-keyword],
                ;; The subset branch keeps the outer `:or` structurally present
                ;; so the Datahike bridge uses its scalar EDN codec and preserves
                ;; authored vector order.
-               :about [:or
-                       [:vector :my.plan.item/about-token]
-                       [:= []]],
-               :completed-at :inst,
-               :expected-result [:string {:min 1}],
+               :about
+               [:or
+                {:description
+                 "Ordered function, namespace, and schema tokens this item's work concerns."}
+                [:vector :my.plan.item/about-token]
+                [:= []]],
+               :completed-at
+               [:and
+                {:description
+                 "The completion instant; absence means the item remains open."}
+                :inst],
+               :expected-result
+               [:string
+                {:min 1,
+                 :description
+                 "Optional falsifiable evidence expected when work completes."}],
                :item
                [:map
                 {:seon.db/attributes true,

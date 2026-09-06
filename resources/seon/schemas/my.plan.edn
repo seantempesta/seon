@@ -1,4 +1,8 @@
-#:my.plan{:anchor :seon.db/ref,
+#:my.plan{:anchor
+          [:and
+           {:description
+            "The optional current-position ref stored on an agent entity."}
+           :seon.db/ref],
           :anchor? :boolean,
           :label [:string {:min 1}],
           :after [:vector :my.plan/label],
@@ -43,7 +47,10 @@
            [:my.plan/diff :my.plan/diff]
            [:my.plan/ids :my.plan/ids]],
           :agent-state
-          [:map {:seon.db/attributes true}
+          [:map
+           {:seon.db/attributes true,
+            :description
+            "Stored plan state on an agent: identity plus an optional current-position ref. Plan items connect back through :my.plan.item/agent."}
            [:seon.cluster.agent/id :seon.cluster.agent/id]
            [:my.plan/anchor {:optional true} :my.plan/anchor]],
           :obligation-source [:enum :message :run :test],
@@ -57,10 +64,22 @@
            [:my.plan/obligation-title :my.plan/obligation-title]
            [:my.plan/obligation-ref :my.plan/obligation-ref]],
           :obligations [:vector :my.plan/obligation],
-          :ready [:vector :my.plan.item/item],
+          :ready
+          [:vector
+           {:description
+            "Open authored items whose descendants and dependencies do not block them."}
+           :my.plan.item/item],
           :intent-subjects [:vector :seon.db/ref],
-          :blocked [:vector :my.plan.item/item],
-          :recent-completions [:vector :my.plan.item/item],
+          :blocked
+          [:vector
+           {:description
+            "Open authored items blocked by open work on a needed item."}
+           :my.plan.item/item],
+          :recent-completions
+          [:vector
+           {:description
+            "The bounded most-recent authored items carrying completed-at."}
+           :my.plan.item/item],
           :older-completions :seon.print/elision,
           :ready-items
           [:vector
@@ -70,7 +89,9 @@
           :view
           [:map
            {:seon.render/ai my.plan/render-plan-ai,
-            :seon.render/html my.plan/render-plan-html}
+            :seon.render/html my.plan/render-plan-html,
+            :description
+            "A derived current view of authored plan facts and structurally separate obligations for one agent."}
            [:seon.cluster.agent/id :seon.cluster.agent/id]
            [:my.plan/obligations :my.plan/obligations]
            [:my.plan/ready :my.plan/ready]

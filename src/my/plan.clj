@@ -1,5 +1,10 @@
 (ns my.plan
-  "The fact-first union of derived obligations and authored work."
+  "The agent-linked authored plan graph and its derived current view.
+
+  Plan items are ordinary database entities connected to their agent through
+  `:my.plan.item/agent`; parent and needs refs express decomposition and
+  dependencies. Completion is the presence of `:my.plan.item/completed-at`,
+  while ready and blocked are queries over current facts."
   (:require [clojure.set :as set]
             [clojure.string :as str]
             [seon.config :as config]
@@ -19,7 +24,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (def rules
-  "Datalog rules deriving authored plan graph state from current facts."
+  "Datalog rules deriving readiness and blockage from current item facts."
   '[[(descendant ?ancestor ?node)
      [?node :my.plan.item/parent ?ancestor]]
     [(descendant ?ancestor ?node)
@@ -241,7 +246,7 @@
     (if (error-value? row) row (item-value row))))
 
 (defn add!
-  "Add one new authored plan item for the calling agent."
+  "Add one authored item after validating its agent and item refs."
   {:malli/schema
    [:=> [:cat :my.plan.item/add-request
          :seon.db/connection :seon.cluster.agent/id]
@@ -258,7 +263,7 @@
                 [:my.plan.item/id (:my.plan.item/id item)]))))
 
 (defn complete!
-  "Complete one authored item by asserting its completion instant."
+  "Complete one owned item and clear it when it is the current anchor."
   {:malli/schema
    [:=> [:cat :my.plan.item/id :my.plan.item/completed-at
          :seon.db/connection :seon.cluster.agent/id]
@@ -580,7 +585,12 @@
       (throw throwable))))
 
 (defn plan!
-  "Reconcile one complete authored plan tree at an observed basis."
+  "Reconcile one complete authored plan tree at an observed basis.
+
+  This convenience compiler validates ownership and subject tokens, preserves
+  completed identities, and commits one basis-fenced diff. Direct
+  `seon.db/transact!` writes operate on the same item and agent attributes but
+  do not run these helper checks."
   {:malli/schema
    [:=> [:cat :my.plan/tree :seon.db/database-value
          :seon.db/connection :seon.cluster.agent/id]
@@ -659,7 +669,7 @@
         database agent-id))
 
 (defn ready
-  "List this agent's authored items that are ready now."
+  "Derive this agent's ready authored items from current facts."
   {:malli/schema
    [:=> [:cat :seon.db/db :seon.cluster.agent/id]
     [:or :my.plan/ready-items :seon.error/value]]}
@@ -826,7 +836,11 @@
               :seon.print/requery-id [:seon.cluster.agent/id agent-id]})))))))
 
 (defn plan
-  "Read this agent's derived obligations and authored plan facts."
+  "Read one agent's current obligations and authored plan facts.
+
+  The returned collections are derived values, not attributes stored on the
+  agent. Query or pull `:my.plan.item/agent` and its reverse directly to inspect
+  the graph; `seon.db/transact!` creates and updates those ordinary facts."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.cluster.agent/id]
     [:or :my.plan/view :seon.error/value]]}
@@ -923,6 +937,14 @@
        (when (seq values)
          (str ":\n" (str/join "\n" (map #(str "- " (line %)) values))))))
 
+(defn- plan-introduction
+  []
+  (str "Items connect to this agent through :my.plan.item/agent; "
+       ":parent decomposes work, open :needs refs block work, and "
+       ":completed-at presence completes it. These are ordinary facts that "
+       "seon.db/q and seon.db/pull read and seon.db/transact! can create or "
+       "update; the sections below are derived current state."))
+
 (defn render-plan-ai
   "Render the current plan union as bounded text."
   {:malli/schema [:=> [:cat :my.plan/view] :seon.render/ai]}
@@ -931,9 +953,10 @@
     (str/join
      "\n\n"
      (cond->
-      [(str "Plan for " (pr-str (:seon.cluster.agent/id view))
+      [(str "Current plan for " (pr-str (:seon.cluster.agent/id view))
             (when-let [anchor (:my.plan/anchor view)]
               (str " — anchor " (pr-str anchor))))
+       (plan-introduction)
        (section-ai
         "Derived obligations"
         (:my.plan/obligations view)
@@ -962,7 +985,8 @@
         older (:my.plan/older-completions view)]
     (cond->
      [:section {:class "seon-family-entry my-plan"}
-      [:h2 (str "Plan for " (pr-str (:seon.cluster.agent/id view)))]
+      [:h2 (str "Current plan for " (pr-str (:seon.cluster.agent/id view)))]
+      [:p (plan-introduction)]
       (when-let [anchor (:my.plan/anchor view)]
         [:p {:class "my-plan-anchor"} (str "Anchor " (pr-str anchor))])
       (into [:section {:class "my-plan-obligations"}
