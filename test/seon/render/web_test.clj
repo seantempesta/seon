@@ -740,6 +740,65 @@
         (is (str/includes? body "debug=true")
             "the existing feed receives the experiment request")))))
 
+(deftest debug-datom-links-follow-reference-direction-and-preserve-the-view
+  (let [request {:seon.render.debug/viewer-namespace 'my.viewer
+                 :seon.render.debug/subject [:my/id "before"]
+                 :seon.render/output :seon.render/ai
+                 :seon.render.debug/prompt? true
+                 :seon.render.data/limit 17
+                 :seon.render.data/max-ref-attributes 19
+                 :seon.render.data/max-result-weight 23
+                 :seon.render.web/pull-max-work 29
+                 :seon.render.web/pull-max-results 31
+                 :seon.render.data/cursor
+                 {:seon.render.data/path [:old]
+                  :seon.render.data/offset 7}
+                 :seon.render.data/outgoing-cursor {:old :outgoing}
+                 :seon.render.data/incoming-cursor {:old :incoming}}
+        page (fn [datoms]
+               {:seon.render.data/datoms datoms
+                :seon.render.data/complete? true})
+        render (web-private 'datom-page-html)
+        outgoing (render request #{:my/ref} :outgoing
+                         (page [{:e 10 :a :my/ref :v 20 :tx 30 :added true}
+                                {:e 10 :a :my/name :v "plain"
+                                 :tx 31 :added true}]))
+        incoming (render request #{:my/ref} :incoming
+                         (page [{:e 90 :a :my/ref :v 10
+                                 :tx 32 :added true}]))
+        anchors (fn [tree]
+                  (filter #(and (vector? %) (= :a (first %)))
+                          (tree-seq coll? seq tree)))
+        hrefs (into {}
+                    (map (fn [anchor]
+                           [(get-in anchor [2 1])
+                            (java.net.URLDecoder/decode
+                             (get-in anchor [1 :href]) "UTF-8")]))
+                    (concat (anchors outgoing) (anchors incoming)))
+        target-href (get hrefs "20")
+        source-href (get hrefs "90")
+        attribute-href (get hrefs ":my/ref")]
+    (is (str/includes? target-href "subject=20")
+        "an outgoing ref value follows its target")
+    (is (str/includes? source-href "subject=90")
+        "an incoming ref entity follows its source")
+    (is (str/includes? attribute-href
+                       "subject=[:db/ident :my/ref]")
+        "an attribute follows its installed :db/ident entity")
+    (is (not (find hrefs "\"plain\""))
+        "an ordinary scalar value remains text")
+    (doseq [href [target-href source-href attribute-href]]
+      (is (str/starts-with? href "/ns/my.viewer/debug?")
+          "navigation keeps the viewing namespace")
+      (is (every? #(str/includes? href %)
+                  ["output=:seon.render/ai" "prompt=true" "limit=17"
+                   "maxRefAttributes=19" "maxResultWeight=23"
+                   "maxWork=29" "maxResults=31" "path=[]" "offset=0"])
+          "navigation preserves output and bounds and resets the value cursor")
+      (is (not (or (str/includes? href "outgoingCursor=")
+                   (str/includes? href "incomingCursor=")))
+          "a new subject never carries snapshot-bound page cursors"))))
+
 (deftest canonical-debug-feed-repaints-when-the-subject-changes
   (with-server
     (fn [connection server _context]

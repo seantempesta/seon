@@ -745,8 +745,18 @@
                  continuation})}
      "continue →"]))
 
+(defn- debug-subject-link
+  [debug-request subject label]
+  [:a {:href (debug-page-url
+              debug-request
+              {:seon.render.debug/subject subject
+               :seon.render.data/cursor (data/parse-cursor nil nil)
+               :seon.render.data/outgoing-cursor nil
+               :seon.render.data/incoming-cursor nil})}
+   [:code (pr-str label)]])
+
 (defn- datom-page-html
-  [debug-request direction page]
+  [debug-request ref-attributes direction page]
   [:section {:class "seon-debug-datom-page"}
    [:div {:class "seon-debug-section-line"}
     [:h3 (name direction)]
@@ -765,9 +775,14 @@
         (map (fn [{:keys [e a v tx added]
                    stored :seon.db/stored-value}]
                [:tr
-                [:td [:code (pr-str e)]]
-                [:td [:code (pr-str a)]]
-                [:td [:code (pr-str v)]]
+                [:td (if (= :incoming direction)
+                       (debug-subject-link debug-request e e)
+                       [:code (pr-str e)])]
+                [:td (debug-subject-link debug-request [:db/ident a] a)]
+                [:td (if (and (= :outgoing direction)
+                              (ref-attributes a))
+                       (debug-subject-link debug-request v v)
+                       [:code (pr-str v)])]
                 [:td [:code (if (some? stored) (pr-str stored) "—")]]
                 [:td [:code (pr-str tx)]]
                 [:td (if added "+" "−")]]))
@@ -798,9 +813,15 @@
                 (:seon.render.data/max-result-weight debug-request))]]]))
 
 (defn- debug-observation-html
-  [debug-request observation entity-html restarted?]
-  (hiccup/->string
-   [:section {:id "debug-observation" :class "seon-debug-body seon-debug-observation"}
+  [database debug-request observation entity-html restarted?]
+  (let [ref-attributes
+        (into #{}
+              (keep (fn [[attribute definition]]
+                      (when (= :db.type/ref (:db/valueType definition))
+                        attribute)))
+              (:schema database))]
+    (hiccup/->string
+     [:section {:id "debug-observation" :class "seon-debug-body seon-debug-observation"}
     [:h2 {:class "seon-debug-caption"} "actual entity value"]
     (when restarted?
       [:p {:class "seon-debug-notice"}
@@ -815,16 +836,16 @@
        entity-html
        [:details {:class "seon-debug-evidence"}
         [:summary "raw datom evidence"]
-        (datom-page-html debug-request :outgoing
+        (datom-page-html debug-request ref-attributes :outgoing
                          (:seon.render.data/outgoing observation))
-        (datom-page-html debug-request :incoming
+        (datom-page-html debug-request ref-attributes :incoming
                          (:seon.render.data/incoming observation))
         [:div {:class "seon-debug-identities"}
          [:h3 (str "identities present in this outgoing page · "
                    (if (:seon.render.data/identities-complete? observation)
                      "complete"
                      "partial"))]
-         (debug-value-html (:seon.render.data/identities observation))]]])]))
+         (debug-value-html (:seon.render.data/identities observation))]]])])))
 
 (defn- debug-candidate-html
   [candidate]
@@ -1080,7 +1101,7 @@
          {"debug-inspection-header"
           (debug-header-html debug-request observation acquisition-ms)
           "debug-observation"
-          (debug-observation-html debug-request observation entity-html
+          (debug-observation-html db debug-request observation entity-html
                                   restarted?)
           "debug-selection" (debug-selection-html selection)
           (debug-html-id
