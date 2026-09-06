@@ -827,73 +827,77 @@
       fitted-elision
       (conj fitted-elision))))
 
-(def ^:private html-void-tags
-  #{"area" "base" "br" "col" "embed" "hr" "img" "input" "link"
-    "meta" "param" "source" "track" "wbr"})
-
 (defn- html-size
   [value]
   (count (html/->string value)))
 
 (defn- html-preview
   "Keep a valid Hiccup prefix without slicing markup or attributes."
-  [value budget]
-  (let [marker [:span {:class "seon-print-html-elision"} "… omitted"]
-        budget (max 0 (- budget (html-size marker)))]
-    (letfn [(walk [value budget]
-            (cond
-              (nil? value) [nil budget false]
-              (string? value)
-              (if (<= (count value) budget)
-                [value (- budget (count value)) false]
-                (if (pos? budget)
-                  [(str (subs value 0 (max 0 (dec budget))) "…") 0 true]
-                  [nil budget true]))
-              (vector? value)
-              (let [tag (nth value 0 nil)
-                    body (subvec value 1)
-                    attrs (when (map? (first body)) (first body))
-                    children (if attrs (subvec body 1) body)
-                    base (cond-> [tag] attrs (conj attrs))]
-                (if (> (html-size base) budget)
-                  [nil budget true]
+  [value budget child-limit max-depth marker]
+  (let [budget (max 0 (- budget (html-size marker)))]
+    (letfn [(walk [value budget depth]
+              (cond
+                (nil? value) [nil budget false]
+                (string? value)
+                (if (<= (html-size value) budget)
+                  [value (- budget (html-size value)) false]
+                  (let [limit (min (count value) budget)
+                        [prefix remaining]
+                        (loop [low 0 high limit best nil]
+                          (if (> low high)
+                            [best (if best (- budget (html-size best)) budget)]
+                            (let [mid (quot (+ low high) 2)
+                                  candidate (str (subs value 0 mid) "…")]
+                              (if (<= (html-size candidate) budget)
+                                (recur (inc mid) high candidate)
+                                (recur low (dec mid) best)))))]
+                    [prefix remaining true]))
+                (vector? value)
+                (let [tag (nth value 0 nil)
+                      body (subvec value 1)
+                      attrs (when (map? (first body)) (first body))
+                      children (if attrs (subvec body 1) body)
+                      base (cond-> [tag] attrs (conj attrs))]
+                  (if (or (> (html-size base) budget)
+                          (>= depth max-depth))
+                    [nil budget true]
                     (let [remaining (- budget (html-size base))
-                        [kept _remaining omitted]
-                        (reduce (fn [[kept remaining omitted] child]
-                                  (if (or omitted (zero? remaining))
-                                    [kept remaining true]
-                                    (let [[child remaining' omitted']
-                                          (walk child remaining)]
-                                      [(cond-> kept child (conj child))
-                                       remaining'
-                                       (or omitted omitted')])))
-                                [[] remaining false]
-                                (if (contains? html-void-tags (name tag))
-                                  []
-                                  children))
-                        result (into base kept)
-                        omitted (or omitted (< (count kept) (count children)))]
-                    [result (- budget (html-size result)) omitted])))
-              (sequential? value)
-              (let [[kept remaining omitted]
-                    (reduce (fn [[kept remaining omitted] child]
-                              (if (or omitted (zero? remaining))
-                                [kept remaining true]
-                                (let [[child remaining' omitted']
-                                      (walk child remaining)]
-                                  [(cond-> kept child (conj child)) remaining'
-                                   (or omitted omitted')])))
-                            [[] budget false] value)]
-                [(seq kept) remaining omitted])
-              :else
-              (let [size (html-size value)]
-                (if (<= size budget) [value (- budget size) false]
-                    [nil budget true]))))]
-    (let [[preview _ omitted?] (walk value budget)]
-      (when preview
-        (if omitted?
-          (list preview marker)
-          preview))))))
+                          [kept _remaining omitted]
+                          (reduce (fn [[kept remaining omitted] child]
+                                    (if (or omitted (zero? remaining)
+                                            (>= (count kept) child-limit))
+                                      (reduced [kept remaining true])
+                                      (let [[child remaining' omitted']
+                                            (walk child remaining (inc depth))]
+                                        [(cond-> kept child (conj child))
+                                         remaining'
+                                         (or omitted omitted')])))
+                                  [[] remaining false]
+                                  children)
+                          result (into base kept)
+                          omitted (or omitted (< (count kept) (count children)))]
+                      [result (- budget (html-size result)) omitted])))
+                (sequential? value)
+                (let [[kept remaining omitted]
+                      (reduce (fn [[kept remaining omitted] child]
+                                (if (or omitted (zero? remaining)
+                                        (>= (count kept) child-limit))
+                                  (reduced [kept remaining true])
+                                  (let [[child remaining' omitted']
+                                        (walk child remaining depth)]
+                                    [(cond-> kept child (conj child)) remaining'
+                                     (or omitted omitted')])))
+                              [[] budget false] value)]
+                  [(seq kept) remaining omitted])
+                :else
+                (let [size (html-size value)]
+                  (if (<= size budget) [value (- budget size) false]
+                      [nil budget true]))))]
+      (let [[preview _ omitted?] (walk value budget 0)]
+        (when preview
+          (if omitted?
+            (list preview marker)
+            preview))))))
 
 (defn- projected-text
   [node]
@@ -921,7 +925,7 @@
     {::face ::string ::value text}))
 
 (defn- fit-text
-  [node profile path string-limit]
+  [node profile path child-limit string-limit]
   (let [html-projection? (and (= ::projected (::face node))
                               (= :seon.render/html
                                  (:seon.render/output node)))
@@ -935,11 +939,18 @@
         original (long (or (::length node) (count value)))]
     (if-let [bounded (bounded-text value original string-limit)]
       (if html-projection?
-        (if-let [preview (html-preview (::value node) string-limit)]
+        (let [elision (elision-node profile path (count (::value bounded))
+                                    (- original (count (::value bounded))) original
+                                    :characters "rendered HTML")
+              marker [:span {:class "seon-print-html-elision"
+                             :data-seon-path (pr-str path)}
+                      (render-elision-ai elision)]]
+          (if-let [preview (html-preview (::value node) string-limit
+                                         child-limit
+                                         (:seon.render.profile/max-depth profile)
+                                         marker)]
           (assoc node ::value preview)
-          (elision-node profile path (count (::value bounded))
-                        (- original (count (::value bounded))) original
-                        :characters "rendered HTML"))
+            elision))
         (elision-node profile path (count (::value bounded))
                       (- original (count (::value bounded))) original
                       :characters (pr-str (::value bounded))))
@@ -983,7 +994,7 @@
                 (conj path ::throwable) child-limit string-limit)
 
         (::string ::truncated-string ::projected)
-        (fit-text node profile path string-limit)
+        (fit-text node profile path child-limit string-limit)
 
         node))))
 

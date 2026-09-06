@@ -11,6 +11,7 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [sci.core :as sci]
+            [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.print :as print]
             [seon.render :as render]
@@ -282,10 +283,41 @@
                              :seon.print/value [:pre long-text]}
                             profile)
           html (hiccup/->string (print/emit-hiccup fitted (print/default-options)))]
-      (is (= :seon.print/projected (:seon.print/face fitted)))
-      (is (str/includes? html "<pre>"))
-      (is (str/includes? html "seon-print-html-elision"))
+      (is (= :seon.print/elided (:seon.print/face fitted)))
+      (is (str/includes? html "rendered HTML"))
       (is (not (str/includes? html "[:pre"))))))
+
+(deftest realistic-html-preview-preserves-hiccup-and-fit-bound
+  (let [profile (assoc (render/agent-render-profile
+                        (test-support/effective-config))
+                       :seon.render.profile/token-budget 128
+                       :seon.render.profile/max-depth 2
+                       :seon.render.profile/max-children 1
+                       :seon.render.profile/composition :multiline
+                       :seon.print/requery-id
+                       [:seon.render.call/id :fixture/preview])
+        source (list [:section {:class "preview"}
+                      [:h1 "Visible heading"]
+                      [:div (apply str (repeat 200 "text & value "))]
+                      [:input {:value (apply str (repeat 400 "x"))}]]
+                     [:aside "second fragment"])
+        node {:seon.print/face :seon.print/projected
+              :seon.render/output :seon.render/html
+              :seon.print/value source}
+        fitted (print/fit node profile)
+        output (print/emit-both fitted (print/default-options))
+        html (:seon.print/hiccup output)
+        text (:seon.print/text output)]
+    (is (= :seon.print/projected (:seon.print/face fitted)))
+    (is (hiccup/hiccup? (:seon.print/value fitted)))
+    (let [html-string (hiccup/->string html)]
+      (is (str/includes? html-string "<section"))
+      (is (str/includes? html-string "Visible heading"))
+      (is (str/includes? html-string "seon-print-html-elision"))
+      (is (not (str/includes? html-string "second fragment")))
+      (is (not (str/includes? html-string "[:section"))))
+    (is (<= (tokens/estimate text)
+            (:seon.render.profile/token-budget profile)))))
 
 (deftest oversized-html-projection-elides-without-printing-hiccup-source
   (let [profile (assoc (render/agent-render-profile
