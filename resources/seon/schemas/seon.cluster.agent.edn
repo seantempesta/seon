@@ -79,6 +79,17 @@
                        "must be a process-local atom containing agent routing state"
                        :gen/gen seon.flow/atom-reference-generator}
                       seon.flow/atom-reference?],
+                     :source-submission-request
+                     [:map
+                      [:seon.cluster.loop/cluster
+                       :seon.cluster.loop/cluster]
+                      [:seon.cluster.agent/routing
+                       :seon.cluster.agent/routing]
+                      [:seon.cluster.agent/id :seon.cluster.agent/id]
+                      [:seon.cluster.reply/text :seon.cluster.reply/text]],
+                     :source-submission-result
+                     [:map
+                      [:seon.cluster.run/id :seon.cluster.run/id]],
                      :run :seon.db/ref,
                      ;; The live value returned by `(help)`. These are
                      ;; projections of current facts, never attributes stored

@@ -69,6 +69,7 @@
             [clojure.string :as str]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.loop :as cluster.loop]
+            [seon.cluster.run :as run]
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
@@ -624,6 +625,92 @@
                   [:maybe :seon.cluster.agent/armed]]}
   [routing agent-id]
   (get-in @routing [::armed agent-id]))
+
+(defn submit-source!
+  "Submit system-authored source through the ordinary durable run path.
+
+  Parsing, delimiter repair, evaluation, result bindings, and settlement are
+  the same owners used for a model reply. The run transaction decides whether
+  the agent is busy; after it commits, one payload-free wake starts or arms the
+  agent graph."
+  {:malli/schema
+   [:=> [:catn [:request :seon.cluster.agent/source-submission-request]]
+    [:or :seon.cluster.agent/source-submission-result :seon.error/value]]}
+  [{handle :seon.cluster.loop/cluster
+    routing :seon.cluster.agent/routing
+    agent-id :seon.cluster.agent/id
+    text :seon.cluster.reply/text}]
+  (let [connection (:seon.db/connection handle)
+        database @connection
+        namespace-name
+        (db/q '[:find ?namespace-name .
+                :in $ ?agent-id
+                :where
+                [?agent :seon.cluster.agent/id ?agent-id]
+                [?agent :seon.cluster.agent/namespace ?namespace]
+                [?namespace :seon.ns/name ?namespace-name]]
+              database agent-id)]
+    (cond
+      (:seon.error/kind namespace-name) namespace-name
+
+      (nil? namespace-name)
+      (error/diagnostic
+       {:seon.error/kind ::no-such-agent
+        :seon.error/message
+        "Source submission requires an agent with an assigned namespace."
+        :seon.error/diagnostic-layer ::source-submission
+        :seon.error/diagnostic-operation `submit-source!
+        :seon.error/diagnostic-member :seon.cluster.agent/namespace
+        :seon.error/diagnostic-expected :seon.ns/name
+        :seon.error/diagnostic-offending agent-id
+        :seon.error/diagnostic-cause ::no-such-agent
+        :seon.error/diagnostic-evidence nil})
+
+      :else
+      (let [max-source
+            (get-in handle [:seon.sci.admit/caps
+                            :seon.config.eval.result/max-source])
+            sources (cluster.loop/planned-sources text namespace-name max-source)]
+        (if (:seon.error/kind sources)
+          sources
+          (let [run-id (str "source:" (random-uuid))
+                now (Date.)
+                outcome
+                (db/transact!
+                 connection
+                 {:tx-data
+                  (run/system-run-tx
+                   database
+                   {:seon.cluster.agent/id agent-id
+                    :seon.cluster.run/id run-id
+                    :seon.cluster.run/process
+                    (:seon.cluster.run/process handle)
+                    :seon.cluster.run/opened-at now
+                    :seon.cluster.run/starting-ns
+                    [:seon.ns/name namespace-name]
+                    :seon.cluster.run/plan-digest (run/plan-digest sources)
+                    :seon.cluster.run/sources sources})})]
+            (if (:seon.error/kind outcome)
+              outcome
+              (let [channel
+                    (or (:seon.cluster.wake/channel (armed routing agent-id))
+                        (:seon.cluster.wake/channel handle))]
+                (if (async/offer! channel ::wake)
+                  {:seon.cluster.run/id run-id}
+                  (error/diagnostic
+                   {:seon.error/kind ::source-submission-undeliverable
+                    :seon.error/message
+                    "The source run committed, but its wake was not delivered."
+                    :seon.error/diagnostic-layer ::source-submission
+                    :seon.error/diagnostic-operation `submit-source!
+                    :seon.error/diagnostic-member
+                    :seon.cluster.wake/channel
+                    :seon.error/diagnostic-expected ::wake
+                    :seon.error/diagnostic-offending run-id
+                    :seon.error/diagnostic-cause
+                    ::source-submission-undeliverable
+                    :seon.error/diagnostic-evidence
+                    {:seon.cluster.run/id run-id}}))))))))))
 
 (defn fenced?
   "True when this agent is QUARANTINED: armed, routed, mailbox closed.

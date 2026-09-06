@@ -455,10 +455,10 @@
     (fn [connection]
       (db/transact!
        connection
-       [{:seon.ns/name 'my.agents.replay}
+       [{:seon.ns/name 'replay.start}
         {:seon.cluster.agent/id "replay-agent"
          :seon.cluster.agent/namespace
-         [:seon.ns/name 'my.agents.replay]}])
+         [:seon.ns/name 'replay.start]}])
       (let [opening-commit-id (db/commit-id @connection)]
         (db/transact!
          connection
@@ -495,7 +495,63 @@
                      [?form :seon.cluster.run.form/ordinal 0]
                      [?form :seon.cluster.run.form/ns ?namespace]
                      [?namespace :seon.ns/name ?namespace-name]]
-                   @connection))))))
+                   @connection)))
+      (is (= [{:seon.cluster.eval/ordinal 0
+               :seon.cluster.eval/source "(def replayed 1)"
+               :seon.ns/name 'replay.start}]
+             (db/q '[:find ?ordinal ?source ?namespace-name
+                     :keys seon.cluster.eval/ordinal
+                           seon.cluster.eval/source
+                           seon.ns/name
+                     :where
+                     [?run :seon.cluster.run/id "replay-run"]
+                     [?evaluation :seon.cluster.eval/run ?run]
+                     [?evaluation :seon.cluster.eval/ordinal ?ordinal]
+                     [?evaluation :seon.cluster.eval/source ?source]
+                     [?evaluation :seon.cluster.eval/ns ?namespace]
+                     [?namespace :seon.ns/name ?namespace-name]]
+                   @connection))
+          "the system run records its complete pending evaluation intent"))))
+
+(deftest system-run-refuses-a-concurrent-namespace-reassignment
+  (with-model-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.ns/name 'my.agents.before}
+        {:seon.ns/name 'my.agents.after}
+        {:seon.cluster.agent/id "moving-agent"
+         :seon.cluster.agent/namespace
+         [:seon.ns/name 'my.agents.before]}])
+      (let [before @connection
+            outcome
+            (db/transact!
+             connection
+             (into
+              [[:db/add [:seon.cluster.agent/id "moving-agent"]
+                :seon.cluster.agent/namespace
+                [:seon.ns/name 'my.agents.after]]]
+              (run/system-run-tx
+               before
+               {:seon.cluster.agent/id "moving-agent"
+                ::run/id "moving-run"
+                ::run/process "moving-process"
+                ::run/opened-at t0
+                ::run/starting-ns [:seon.ns/name 'my.agents.before]
+                ::run/plan-digest "moving-digest"
+                ::run/sources
+                [{:seon.cluster.run.form/source "(+ 1 1)"}]})))]
+        (is (= ::run/starting-namespace-changed (::run/rule outcome)))
+        (is (= 'my.agents.before
+               (db/q '[:find ?namespace-name .
+                       :where
+                       [?agent :seon.cluster.agent/id "moving-agent"]
+                       [?agent :seon.cluster.agent/namespace ?namespace]
+                       [?namespace :seon.ns/name ?namespace-name]]
+                     @connection))
+            "the refusing transaction also rolls back reassignment")
+        (is (nil? (db/pull @connection [:db/id]
+                           [::run/id "moving-run"])))))))
 
 (deftest settlement-mints-rows-for-unindexed-call-targets
   ;; Resolvable calls point only at the complete program population.
@@ -522,12 +578,6 @@
           {:seon.cluster.run.form/source "(missing.target/nope)"}
           {:seon.cluster.run.form/source
            "(require 'unindexed.required)"}]}))
-      (db/transact!
-       connection
-       (run/receipt-start-tx
-        {::run/id "macro-call-run"
-         :seon.cluster.eval/ordinal 0
-         :seon.cluster.eval/at t0}))
       (let [macro-row
             (db/pull @connection
                      [:db/id :seon.fn/source :seon.fn/macro?]
@@ -552,12 +602,6 @@
         (is (some #(= "seon.bootstrap/help" (:seon.fn/sym %))
                   (:seon.fn/calls form))
             "the resolvable macro call lands as a lookup-ref edge"))
-      (db/transact!
-       connection
-       (run/receipt-start-tx
-        {::run/id "macro-call-run"
-         :seon.cluster.eval/ordinal 1
-         :seon.cluster.eval/at t0}))
       (let [result
             (db/transact!
              connection
@@ -579,12 +623,6 @@
           "an unresolvable mention is not a call edge")
       (is (nil? (:db/id (db/pull @connection [:db/id]
                                  [:seon.ns/name 'unindexed.required]))))
-      (db/transact!
-       connection
-       (run/receipt-start-tx
-        {::run/id "macro-call-run"
-         :seon.cluster.eval/ordinal 2
-         :seon.cluster.eval/at t0}))
       (let [result
             (db/transact!
              connection
@@ -617,13 +655,14 @@
               {:datahike.read/attributes :all
                :datahike.read/cache-eligible? false}}]
             settle!
-            (fn [run-id]
-              (db/transact!
-               connection
-               (run/receipt-start-tx
-                {::run/id run-id
-                 :seon.cluster.eval/ordinal 0
-                 :seon.cluster.eval/at t0}))
+            (fn [run-id start?]
+              (when start?
+                (db/transact!
+                 connection
+                 (run/receipt-start-tx
+                  {::run/id run-id
+                   :seon.cluster.eval/ordinal 0
+                   :seon.cluster.eval/at t0})))
               (db/transact!
                connection
                (run/receipt-settle-tx
@@ -661,7 +700,7 @@
            ::run/sources
            [{:seon.cluster.run.form/source
              "{:my.refresh/value 42}"}]}))
-        (settle! "system-source")
+        (settle! "system-source" false)
         (close! "system-source")
         (let [prior-id (run/form-identity "system-source" 0)]
           (is (= evidence
@@ -724,7 +763,7 @@
                        ::run/plan-digest "agent-source-digest"
                        ::run/sources
                        [{:seon.cluster.run.form/source "(+ 1 1)"}]}))
-        (settle! "agent-source")
+        (settle! "agent-source" true)
         (close! "agent-source")
         (is (= ::run/refresh-agent-authored
                (::run/rule

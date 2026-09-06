@@ -340,6 +340,120 @@
               (:seon.cluster.agent-test/listener-key event-source))
   (async/close! (:seon.cluster.agent-test/events event-source)))
 
+(deftest system-source-submission-uses-the-ordinary-durable-run
+  (with-connection
+    (fn [connection ctx]
+      (let [routing (armory)
+            armer-channel (async/chan (async/sliding-buffer 1))
+            armer-completion (async/promise-chan)
+            text (str "; Read one value.\n(+ 1 1)\n"
+                      "; Consume the preceding result.\n(identity result/e0)")]
+        (db/transact!
+         connection
+         [(agent-row "source-agent")
+          (config-row "source-submission"
+                      {:seon.config.run/max-episode-runs 100})])
+        (let [cluster-handle
+              (assoc (handle connection ctx)
+                     :seon.cluster.wake/channel armer-channel
+                     :seon.cluster.loop/completion armer-completion
+                     :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate)
+              armer-graph
+              (flow/create-flow
+               {:procs
+                {::agent/armer
+                 {:proc (flow/process #'agent/armer-step {:workload :io})
+                  :args {:seon.cluster.loop/cluster cluster-handle
+                         :seon.cluster.agent/routing routing}}}
+                :conns []})]
+          (flow/start armer-graph)
+          (flow/resume armer-graph)
+          (try
+            (let [events (database-events connection)]
+              (try
+                (is (nil? (agent/armed routing "source-agent")))
+                (let [submission
+                      (agent/submit-source!
+                       {:seon.cluster.loop/cluster cluster-handle
+                        :seon.cluster.agent/routing routing
+                        :seon.cluster.agent/id "source-agent"
+                        :seon.cluster.reply/text text})
+                      run-id (:seon.cluster.run/id submission)
+                      terminal-db
+                      (await-database-state!
+                       connection
+                       (:seon.cluster.agent-test/events events)
+                       #(some?
+                         (:seon.cluster.run/closed-at
+                          (db/pull % [:seon.cluster.run/closed-at]
+                                   [:seon.cluster.run/id run-id]))))
+                      sources
+                      (db/q '[:find ?ordinal ?source
+                              :keys seon.cluster.run.form/ordinal
+                                    seon.cluster.run.form/source
+                              :in $ ?run-id
+                              :where
+                              [?run :seon.cluster.run/id ?run-id]
+                              [?form :seon.cluster.run.form/run ?run]
+                              [?form :seon.cluster.run.form/ordinal ?ordinal]
+                              [?form :seon.cluster.run.form/source ?source]]
+                            terminal-db run-id)
+                      results
+                      (db/q '[:find ?ordinal ?result
+                              :in $ ?run-id
+                              :where
+                              [?run :seon.cluster.run/id ?run-id]
+                              [?evaluation :seon.cluster.eval/run ?run]
+                              [?evaluation :seon.cluster.eval/ordinal ?ordinal]
+                              [?evaluation :seon.cluster.eval/result-edn ?result]]
+                            terminal-db run-id)]
+                  (is (string? run-id))
+                  (is (some? (agent/armed routing "source-agent"))
+                      "the existing armer owns unarmed delivery")
+                  (is (= [{:seon.cluster.run.form/ordinal 0
+                           :seon.cluster.run.form/source
+                           "; Read one value.\n(+ 1 1)"}
+                          {:seon.cluster.run.form/ordinal 1
+                           :seon.cluster.run.form/source
+                           "; Consume the preceding result.\n(identity result/e0)"}]
+                         (sort-by :seon.cluster.run.form/ordinal sources))
+                      "comments and exact forms pass through the ordinary parser")
+                  (is (= [[0 "2"] [1 "2"]] (sort-by first results))
+                      "both ordinary evaluation results settle durably")
+                  (is (inst? (:seon.cluster.run/closed-at
+                              (db/pull terminal-db
+                                       [:seon.cluster.run/closed-at]
+                                       [:seon.cluster.run/id run-id]))))
+                  (is (empty?
+                       (db/q '[:find [?attempt ...]
+                               :in $ ?run-id
+                               :where
+                               [?run :seon.cluster.run/id ?run-id]
+                               [?attempt :seon.ai.attempt/run ?run]]
+                             terminal-db run-id))
+                      "the system-authored run makes no provider attempt"))
+                (finally
+                  (stop-database-events! connection events))))
+            (finally
+              (flow/stop armer-graph)
+              (async/<!! armer-completion)
+              (disarm-all! routing)
+              (async/close! armer-channel)))
+          (db/transact!
+           connection
+           (run/open-tx {:seon.cluster.run/id "already-open"
+                         :seon.cluster.run/agent
+                         [:seon.cluster.agent/id "source-agent"]
+                         :seon.cluster.run/opened-at now}))
+          (let [refusal
+                (agent/submit-source!
+                 {:seon.cluster.loop/cluster cluster-handle
+                  :seon.cluster.agent/routing routing
+                  :seon.cluster.agent/id "source-agent"
+                  :seon.cluster.reply/text "(+ 2 2)"})]
+            (is (= ::run/agent-already-running (::run/rule refusal))
+                "the transaction authority refuses a second open run")))))))
+
 (deftest graph-definition-inherits-the-cluster-io-executor
   (with-connection
     (fn [connection ctx]

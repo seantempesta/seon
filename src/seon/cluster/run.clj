@@ -622,6 +622,21 @@
   [run-id ordinal]
   (pr-str [:seon.cluster.run.form/id run-id ordinal]))
 
+(defn plan-digest
+  "The SHA-256 identity of one ordered source plan."
+  {:malli/schema [:=> [:catn [:sources :seon.cluster.reply/sources]]
+                  ::plan-digest]}
+  [sources]
+  (schema/sha-256
+   [(.getBytes (pr-str sources) StandardCharsets/UTF_8)]))
+
+(defn- resolve-namespace-name
+  [db namespace-ref]
+  (cond
+    (vector? namespace-ref) (second namespace-ref)
+    namespace-ref (:seon.ns/name
+                   (db/pull db [:seon.ns/name] namespace-ref))))
+
 (defn plan-call
   "Freeze the plan, inside the transaction.
   Assert the digest and the
@@ -654,11 +669,7 @@
                [?agent :seon.cluster.agent/namespace ?namespace]
                [?namespace :seon.ns/name ?namespace-name]]
              db (:db/id (::agent run)))
-        requested-starting-namespace
-        (cond
-          (vector? starting-ns) (second starting-ns)
-          starting-ns (:seon.ns/name
-                       (db/pull db [:seon.ns/name] starting-ns)))
+        requested-starting-namespace (resolve-namespace-name db starting-ns)
         starting-namespace
         (or requested-starting-namespace agent-namespace)
         existing-form-count
@@ -675,6 +686,10 @@
       (refuse! `plan-call ::not-call-situation request))
     (when-not starting-namespace
       (refuse! `plan-call ::starting-namespace-missing request))
+    (when (and (= :system author)
+               requested-starting-namespace
+               (not= requested-starting-namespace agent-namespace))
+      (refuse! `plan-call ::starting-namespace-changed request))
     (let [;; THE PARSE-TIME NAMESPACE IS PROJECTED, NEVER DERIVED HERE.
           ;; The splitter carries the reader's namespace-in-effect; this
           ;; freeze upserts that `:seon.ns` by its identity attribute and
@@ -741,11 +756,14 @@
   [request]
   [[:db.fn/call #'open-call request]])
 
+(declare receipt-start-tx)
+
 (defn system-run-tx
-  "Open, claim, and plan one system-authored run for an existing agent.
+  "Open, claim, plan, and start every evaluation of one system-authored run.
 
   The caller owns the ordered sources and their digest. The ordinary run
-  transaction functions retain every custody, pointer, and plan fence."
+  transaction functions retain every custody, pointer, plan, and evaluation
+  fence. The entire execution intent is durable in this one transaction."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.run/system-run-request]
                   :seon.store/transaction-data]}
@@ -757,9 +775,11 @@
          starting-ns ::starting-ns
          plan-digest ::plan-digest
          sources ::sources
-         trigger ::trigger} request]
-    (into [] cat
-          [(open-tx
+         trigger ::trigger} request
+        starting-namespace (resolve-namespace-name database starting-ns)]
+    (into []
+          (concat
+           (open-tx
             (cond-> {::id run-id
                      ::agent [:seon.cluster.agent/id agent-id]
                      ::opening-commit-id (db/commit-id database)
@@ -773,7 +793,19 @@
                             ::process process
                             ::starting-ns starting-ns
                             ::plan-digest plan-digest
-                            ::sources sources})])))
+                            ::sources sources})
+           (mapcat
+            (fn [ordinal source]
+              (receipt-start-tx
+               {::id run-id
+                :seon.cluster.eval/ordinal (long ordinal)
+                :seon.cluster.eval/at opened-at
+                :seon.cluster.eval/source
+                (:seon.cluster.run.form/source source)
+                :seon.cluster.eval/ns
+                [:seon.ns/name
+                 (or (:seon.ns/name source) starting-namespace)]}))
+            (range) sources)))))
 
 (defn append-generated-call
   "Append exactly one system-authored form to a held generated run.
