@@ -80,6 +80,35 @@
            (is (not= :seon.render/missing-declaration
                      (:seon.error/kind (render-ai request))))))))))
 
+(deftest pulled-entity-selection-and-invocation-share-transaction-shape
+  (support/with-database
+   (fn [connection]
+     (db/transact!
+      connection
+      [{:seon.cluster.agent/id "pulled-render-owner"}
+       {:my.plan.item/id "pulled-render-item"
+        :my.plan.item/title "Render the pulled item"
+        :my.plan.item/agent
+        [:seon.cluster.agent/id "pulled-render-owner"]
+        :my.plan.item/about ['my.plan/render-item-html]}])
+     (let [database @connection
+           pulled (db/pull database '[*]
+                           [:my.plan.item/id "pulled-render-item"])
+           prepared (value/transacted pulled database)
+           rendered (render-html
+                     (render-request database
+                                     (support/fork-cluster-ctx connection)
+                                     'my.plan
+                                     pulled))]
+       (is (integer? (:my.plan.item/agent prepared)))
+       (is (= ['my.plan/render-item-html]
+              (:my.plan.item/about prepared))
+           "a scalar EDN vector is not mistaken for cardinality-many")
+       (is (= prepared (value/transacted (dissoc pulled :db/id) database))
+           "normalization does not depend on a root :db/id projection")
+       (is (str/includes? (hiccup/->string rendered)
+                          "Render the pulled item"))))))
+
 (deftest candidate-input-and-output-must-fit-the-same-arity
   (support/with-database
    (fn [connection]

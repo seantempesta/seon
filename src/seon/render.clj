@@ -163,9 +163,13 @@
   ;; for producer selection and invocation. The universal floor is the sole
   ;; exception below: arbitrary value keys never become its unit keys.
   (let [argument (render-argument request)
-        value (:seon.render/value argument)]
+        value (:seon.render/value argument)
+        producer-value (if (map? value)
+                         (render.value/transacted value
+                                                  (:seon.db/db request))
+                         value)]
     (if (map? value)
-      (assoc (merge value (dissoc argument :seon.render/value))
+      (assoc (merge producer-value (dissoc argument :seon.render/value))
              :seon.render/value value)
       argument)))
 
@@ -225,10 +229,11 @@
   (render.value/transacted entity))
 
 (defn- schema-producers
-  [projection value output]
+  [projection request value output]
   (when (map? value)
     (let [transacted-matches
-          (schema/matching-shapes-in projection (render.value/transacted value))
+          (schema/matching-shapes-in
+           projection (render.value/transacted value (:seon.db/db request)))
           ;; A pull has two honest shapes. Refs and cardinality-many values
           ;; validate in transaction form, while tuple/vector value attributes
           ;; validate exactly as pulled. A pulled entity admits only shapes
@@ -266,8 +271,8 @@
       producers)))
 
 (defn- schema-producer
-  [projection value output]
-  (let [producers (schema-producers projection value output)]
+  [projection request value output]
+  (let [producers (schema-producers projection request value output)]
     (cond
       (= 1 (count producers)) (first producers)
       (> (count producers) 1) (ambiguity nil output producers))))
@@ -286,7 +291,9 @@
         declared (when attribute
                    (attribute-producer projection request :seon.render/form))]
     (if (= selected declared)
-      (get (render.value/transacted (render-value request)) attribute)
+      (get (render.value/transacted (render-value request)
+                                    (:seon.db/db request))
+           attribute)
       (if (floor-producer? selected)
         (render-argument request)
         (producer-argument request)))))
@@ -297,7 +304,7 @@
            (:seon.render.walk/attribute request))
     (or (attribute-producer projection request output)
         'seon.render/render-form)
-    (schema-producer projection value output)))
+    (schema-producer projection request value output)))
 
 (def ^:private selection-stage-order
   [:explicit-value :explicit-request :namespace :schema :floor])
@@ -396,7 +403,7 @@
                  (:seon.render.walk/attribute request))
           [(or (attribute-producer projection request output)
                'seon.render/render-form)]
-          (or (schema-producers projection value output) []))
+          (or (schema-producers projection request value output) []))
         selection-error (when (> (count producers) 1)
                           (ambiguity nil output producers))
         status (cond selection-error :ambiguous
@@ -532,7 +539,8 @@
   (let [value (render-value request)
         matches (concat
                  (schema/matching-shapes-in
-                  projection (render.value/transacted value))
+                  projection
+                  (render.value/transacted value (:seon.db/db request)))
                  (schema/matching-shapes-in projection value))]
     (or (->> matches
              (filter #(= selected (get % output)))

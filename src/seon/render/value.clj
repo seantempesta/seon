@@ -12,21 +12,51 @@
 (schema.edn/load! {})
 
 (defn transacted
-  "Restore a pulled entity to the transaction shape used for selection."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [entity]
-  (into {}
-        (map (fn [[attribute value]]
-               [attribute
-                (cond
-                  (and (map? value) (contains? value :db/id)) (:db/id value)
-                  (and (sequential? value)
-                       (seq value)
-                       (every? #(and (map? %) (contains? % :db/id)) value))
-                  (into #{} (map :db/id) value)
-                  (sequential? value) (set value)
-                  :else value)]))
-        (dissoc entity :db/id)))
+  "Restore a pulled entity to its transaction shape.
+
+  With a database value, installed Datahike value type and cardinality are the
+  authority: refs become entity ids, cardinality-many values become sets, and
+  scalar EDN vectors remain vectors. The one-argument arity preserves the
+  established shape-only behavior for callers without database custody."
+  {:malli/schema
+   [:function
+    [:=> [:catn [::entity :map]] :map]
+    [:=> [:catn [::entity :map]
+                 [::database :seon.db/db]]
+     :map]]}
+  ([entity]
+   (into {}
+         (map (fn [[attribute value]]
+                [attribute
+                 (cond
+                   (and (map? value) (find value :db/id)) (:db/id value)
+                   (and (sequential? value)
+                        (seq value)
+                        (every? #(and (map? %) (find % :db/id)) value))
+                   (into #{} (map :db/id) value)
+                   (sequential? value) (set value)
+                   :else value)]))
+         (dissoc entity :db/id)))
+  ([entity database]
+   (into {}
+         (map (fn [[attribute value]]
+                (let [{:db/keys [valueType cardinality]}
+                      (get-in database [:schema attribute])
+                      ref-id #(if (and (map? %) (find % :db/id))
+                                (:db/id %)
+                                %)]
+                  [attribute
+                   (cond
+                     (= :db.type/ref valueType)
+                     (if (= :db.cardinality/many cardinality)
+                       (into #{} (map ref-id) value)
+                       (ref-id value))
+
+                     (= :db.cardinality/many cardinality)
+                     (set value)
+
+                     :else value)])))
+         (dissoc entity :db/id))))
 
 (defn render-database-identity-ai
   "Readable identity face for an admitted immutable database value."

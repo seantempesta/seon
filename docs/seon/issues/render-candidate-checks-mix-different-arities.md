@@ -67,13 +67,36 @@ independent candidate predicates. It still reached `eval.clj:747` with the
 same missing-root error after 78 passing assertions. The arity repair therefore
 does not cause the confirmation failure. Current evaluation derives the program
 row from the generation-stamped SCI Var and carries its restorable root in
-`:seon.sci.eval/defs`; the failing fixture transacts only the program row and
-calls the cold `install-row!` seam. The production loop settles the definitions
-and calls `install-evaluated-row!`. The SCI owner should reconcile that fixture
-with the evaluated-install seam and ensure the evaluated path does not perform
-a second cold root lookup after transferring the exact evaluated root.
+`:seon.sci.eval/defs`; the failing fixture transacted only the program row and
+called the cold `install-row!` seam. The production loop settles the definitions
+and calls `install-evaluated-rows!`.
+
+The fixture now passes the real evaluation with its unmarked durable program row
+through `install-evaluated-rows!`. That function marks only its private install
+copy as evaluated after transferring the exact roots, so `install-row!` does not
+perform a second cold root lookup. A fresh JVM run of
+`renderer-invocation-is-sci-only-and-live-var-backed` reported 1 test, 80
+passing assertions, 0 failures, and 0 errors. No handwritten root descriptor is
+present in the fixture.
 
 After the final fixture-cost cleanup, a direct JVM run of the two added
 `clojure.test` vars reported 2 tests, 7 passing assertions, 0 failures, and 0
 errors. Both fixtures build from `seon.schema.edn/packaged-forms`, so the
 regressions do not invoke the declaration-population fallback.
+
+On 2026-09-06, live debug rendering exposed a second way selection and
+invocation could inspect different arguments. Subject `32011` in the
+`lab-browser-0906` cluster pulled `:my.plan.item/agent` as `{:db/id 31810}`.
+Schema selection matched `my.plan/render-item-html` against the transaction
+shape containing the ref id, but invocation handed SCI the pulled ref map and
+failed its `:my.plan.item/item` input contract. The database-aware arity of
+`seon.render.value/transacted` now uses installed Datahike value type and
+cardinality for the one prepared producer argument: refs become ids,
+cardinality-many values become sets, and scalar EDN vectors remain vectors.
+
+The focused
+`pulled-entity-selection-and-invocation-share-transaction-shape` run reported
+76 passing assertions, 0 failures, and 0 errors. The legacy one-argument
+`transacted` arity remains shape-only and still maps sequential values to sets;
+callers without database custody, including `my.plan/item-value`, retain that
+limitation.
