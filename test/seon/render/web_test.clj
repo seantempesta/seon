@@ -983,6 +983,101 @@
              (not (str/includes? observation-html "<details open")))
         "structural value and raw datoms are present but collapsed")))
 
+(deftest debug-experiment-leads-with-paired-selection-and-hides-empty-stages
+  (let [candidate (fn [producer status]
+                    {:seon.render.selection.candidate/producer producer
+                     :seon.render.selection.candidate/status status})
+        experiment
+        (fn [selected selected-output alternative]
+          {:seon.render/selection
+           {:seon.render.selection/selected selected
+            :seon.render.selection/stages
+            [{:seon.render.selection.stage/name :namespace
+              :seon.render.selection.stage/status :selected
+              :seon.render.selection.stage/candidates
+              [(candidate selected :compatible)]}
+             {:seon.render.selection.stage/name :schema
+              :seon.render.selection.stage/status :not-consulted
+              :seon.render.selection.stage/candidates
+              [(candidate alternative :compatible)
+               (candidate 'my.render/rejected :rejected)]}
+             {:seon.render.selection.stage/name :floor
+              :seon.render.selection.stage/status :not-consulted
+              :seon.render.selection.stage/candidates []}]}
+           :seon.render/previews {selected selected-output
+                                  alternative selected-output}
+           :seon.render/entries {}})
+        rendered
+        ((web-private 'debug-experiments-html)
+         {:seon.render.debug/viewer-namespace 'my.viewer}
+         {:seon.render/ai
+          (experiment 'my.render/ai "selected AI" 'my.render/other-ai)
+          :seon.render/html
+          (experiment 'my.render/html [:p "selected HTML"]
+                      'my.render/other-html)})]
+    (is (< (.indexOf rendered "selected AI")
+           (.indexOf rendered "alternative renderers"))
+        "the paired selected values are visible before any disclosure")
+    (is (and (str/includes? rendered "selected AI")
+             (str/includes? rendered "selected HTML")))
+    (is (and (str/includes? rendered "<details class=\"seon-debug-alternative-renderers\"")
+             (str/includes? rendered "my.render/other-ai")
+             (str/includes? rendered "my.render/other-html")))
+    (is (not (str/includes? rendered "my.render/rejected"))
+        "rejected candidates are absent rather than empty cards")
+    (is (not (str/includes? rendered ":floor"))
+        "an empty stage is absent")))
+
+(deftest debug-found-values-render-scalars-and-connected-entities-in-pairs
+  (let [values (atom [])
+        observation
+        {:seon.render.data/outgoing
+         {:seon.render.data/datoms
+          [{:e 1 :a :seon.cluster.agent/id :v "example" :tx 10}
+           {:e 1 :a :my.plan.item/agent :v 2 :tx 11}]}
+         :seon.render.data/incoming
+         {:seon.render.data/datoms
+          [{:e 3 :a :seon.cluster.message/to :v 1 :tx 12}]}}
+        render-request
+        {:seon.db/db ::database
+         :seon.render/retained-calls {}
+         :seon.render/captured-calls (atom {})}
+        render-found (web-private 'debug-found-values-html)]
+    (with-redefs [db/identity-attributes
+                  (constantly #{:seon.cluster.agent/id})
+                  render/render-call
+                  (fn [request]
+                    (swap! values conj
+                           [(:seon.render/value request)
+                            (:seon.render/output request)
+                            (:seon.render.call/id request)])
+                    (if (= :seon.render/html (:seon.render/output request))
+                      [:p "HTML preview"]
+                      "AI preview"))]
+      (let [html (hiccup/->string
+                  (render-found
+                   render-request
+                   {:seon.render.debug/viewer-namespace 'my.viewer
+                    :seon.render.debug/subject
+                    [:seon.cluster.agent/id "example"]}
+                   observation
+                   #{:my.plan.item/agent :seon.cluster.message/to}
+                   {2 {:my.plan.item/id "plan"}
+                    3 {:seon.cluster.message/id "message"}}))]
+        (is (= 6 (count @values)) "each of three rows renders AI and HTML")
+        (is (= #{{:seon.cluster.agent/id "example"}
+                 {:my.plan.item/id "plan"}
+                 {:seon.cluster.message/id "message"}}
+               (into #{} (map first) @values))
+            "identity scalars are shaped for their schema and refs use entities")
+        (is (every? #(= :seon.render.web/found-value (first (nth % 2)))
+                    @values)
+            "every preview uses the existing retained render-call identity")
+        (is (and (str/includes? html "seon-debug-found-values")
+                 (= 3 (count (re-seq #"seon-debug-found-value\"" html)))
+                 (= 3 (count (re-seq #"AI preview" html)))
+                 (= 3 (count (re-seq #"HTML preview" html)))))))))
+
 (deftest debug-renderer-definition-uses-retained-program-source
   (let [render-definition (web-private 'debug-renderer-definition)
         entry {:seon.render.call/static-evidence
@@ -1122,20 +1217,25 @@
           :seon.render.call/read-evidence
           [{:seon.db/source-argument-position 0
             :seon.db/read-request
-            {:seon.db/read-operation :q
-             :seon.db/query-request {:query '[:find ?e]
-                                     :args ['?db]}}
-            :datahike.read/dependency-plan {:datahike.read/attributes #{:seon.ns/name}}
+            {:seon.db/read-operation :pull
+             :seon.db/pull-arguments [[:my.plan.item/title] 32011]}
+            :datahike.read/dependency-plan
+            {:datahike.query.dependency/sources
+             [{:datahike.query.source/symbol '$
+               :datahike.query.source/argument-position 0
+               :datahike.query.source/attributes #{:my.plan.item/title}}]}
             :datahike.read/revision
-            {:datahike.cache/connection-id [:connection :one]
-             :datahike.cache/generation #uuid "00000000-0000-0000-0000-000000000001"
-             :datahike.read/attributes #{:seon.ns/name}}}]})
+            {:datahike.read/attributes #{:my.plan.item/title}
+             :datahike.read/cache-eligible? false}
+            :seon.db/read-result {:my.plan.item/title "retained"}}]})
         html (hiccup/->string rendered)]
-    (is (str/includes? html "database read dependencies · 1 evidence entries"))
+    (is (str/includes? html "database read dependencies · 1 evidence entry"))
     (is (str/includes? html "render basis transaction 42"))
-    (is (str/includes? html ":seon.db/read-operation :q"))
+    (is (str/includes? html ":read-operation :pull"))
     (is (str/includes? html ":datahike.read/dependency-plan"))
-    (is (str/includes? html ":datahike.read/revision"))))
+    (is (str/includes? html ":datahike.read/revision"))
+    (is (str/includes? html "retained read result"))
+    (is (str/includes? html "retained"))))
 
 (deftest debug-read-dependencies-distinguishes-empty-from-absent
   (let [render ((web-private 'debug-read-dependencies-html)

@@ -1415,6 +1415,62 @@ details.tool-call-details[open] .tool-preview {
 .seon-debug-candidate + .seon-debug-candidate {
   margin-top: 0.5rem;
 }
+.seon-debug-selected-previews {
+  margin-top: 0.75rem;
+}
+.seon-debug-alternative-renderers {
+  margin-top: 0.75rem;
+  color: var(--color-text-400);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+.seon-debug-found-values {
+  margin-top: 1rem;
+  border-top: 1px solid var(--color-base-800);
+  padding-top: 0.75rem;
+}
+.seon-debug-found-value {
+  min-width: 0;
+  margin-top: 0.65rem;
+}
+.seon-debug-found-value > h3 {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+.seon-agent-identity-entry .seon-kicker {
+  margin: 0 0 0.2rem;
+  color: var(--color-signal);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+}
+.seon-agent-identity-entry h3 {
+  margin: 0 0 0.5rem;
+  color: var(--color-text-50);
+  font-size: 0.9rem;
+}
+.seon-agent-identity-entry dl {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+}
+.seon-agent-identity-entry dl > div {
+  display: grid;
+  grid-template-columns: minmax(5rem, auto) minmax(0, 1fr);
+  gap: 0.5rem;
+}
+.seon-agent-identity-entry dt {
+  color: var(--color-text-400);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+}
+.seon-agent-identity-entry dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text-100);
+  overflow-wrap: anywhere;
+}
 .seon-debug-stage-status,
 .seon-debug-candidate-reason {
   margin: 0.25rem 0;

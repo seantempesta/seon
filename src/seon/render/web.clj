@@ -1134,7 +1134,9 @@
     (let [evidence (:seon.render.call/read-evidence entry)]
       [:details {:class "seon-debug-read-dependencies"}
        [:summary (str "database read dependencies · " (count evidence)
-                      " evidence entries")]
+                      (if (= 1 (count evidence))
+                        " evidence entry"
+                        " evidence entries"))]
        [:p {:class "seon-debug-read-basis"}
         "render basis transaction "
         (pr-str (:seon.render.call/basis-transaction entry))]
@@ -1151,7 +1153,12 @@
                       [:seon.db/source-argument-position
                        :seon.db/read-request
                        :datahike.read/dependency-plan
-                       :datahike.read/revision]))]]))
+                       :datahike.read/revision]))
+                    (if (find read :seon.db/read-result)
+                      [:details
+                       [:summary "retained read result"]
+                       (debug-value-html (:seon.db/read-result read))]
+                      [:p "Read result was not retained."])]]))
                evidence)
          [:p "No database read evidence was retained."])])
     [:details {:class "seon-debug-read-dependencies"}
@@ -1189,74 +1196,185 @@
      (when-let [entry (get entries producer)]
        (debug-renderer-definition entry))]))
 
-(defn- debug-experiment-stage-column
-  [debug-request output experiment stage]
+(defn- debug-applicable-candidates
+  [experiment]
+  (let [selected (get-in experiment
+                         [:seon.render/selection
+                          :seon.render.selection/selected])]
+    (into []
+          (comp
+           (map-indexed vector)
+           (mapcat
+            (fn [[priority stage]]
+              (map #(assoc % ::stage stage ::priority priority)
+                   (:seon.render.selection.stage/candidates stage))))
+           (filter #(= :compatible
+                       (:seon.render.selection.candidate/status %)))
+           (remove #(= selected
+                       (:seon.render.selection.candidate/producer %))))
+          (get-in experiment
+                  [:seon.render/selection
+                   :seon.render.selection/stages]))))
+
+(defn- debug-selected-projection-html
+  [debug-request output experiment]
   (let [selection (:seon.render/selection experiment)
         selected (:seon.render.selection/selected selection)
         previews (:seon.render/previews experiment)
         entries (:seon.render/entries experiment)
-        candidates (:seon.render.selection.stage/candidates stage)
-        compatible (filterv #(= :compatible
-                                (:seon.render.selection.candidate/status %))
-                            candidates)
-        rejected (filterv #(= :rejected
-                              (:seon.render.selection.candidate/status %))
-                          candidates)]
-    [:section {:class "seon-debug-projection-column"}
-     [:h4 (if (= output :seon.render/ai) "AI" "HTML")]
+        selected-stage
+        (some #(when (= :selected
+                        (:seon.render.selection.stage/status %))
+                 %)
+              (:seon.render.selection/stages selection))
+        rendered (if (contains? selected-stage
+                                :seon.render.selection.stage/value)
+                   (:seon.render.selection.stage/value selected-stage)
+                   (get previews selected))]
+    (cond
+      (:seon.error/kind selection)
+      [:section {:class "seon-debug-projection-column"}
+       [:h4 (if (= output :seon.render/ai) "AI" "HTML")]
+       (debug-value-html selection)]
+
+      (nil? rendered) nil
+
+      :else
+      [:section {:class "seon-debug-projection-column"}
+       [:h4 (if (= output :seon.render/ai) "AI" "HTML")]
+       (debug-preview-html output rendered)
+       (when (qualified-symbol? selected)
+         [:details {:class "seon-debug-selected-renderer"}
+          [:summary
+           "renderer "
+           (debug-renderer-link
+            (assoc debug-request :seon.render/output output) selected)]
+          (when-let [entry (get entries selected)]
+            (debug-read-dependencies-html entry))
+          (when-let [entry (get entries selected)]
+            (debug-renderer-contract entry selected))
+          (when-let [entry (get entries selected)]
+            (debug-renderer-definition entry))])])))
+
+(defn- debug-alternative-html
+  [debug-request output experiment candidate]
+  (let [stage (::stage candidate)]
+    [:li
      [:p {:class "seon-debug-stage-status"}
-      (name (:seon.render.selection.stage/status stage))]
-     (when (contains? stage :seon.render.selection.stage/value)
-       (debug-preview-html output
-                           (:seon.render.selection.stage/value stage)))
-     (if (seq compatible)
-       (into [:div {:class "seon-debug-candidates"}]
-             (map (partial debug-experiment-candidate-html
-                           debug-request output selected
-                           (:seon.render.selection.stage/status stage)
-                           previews entries))
-             compatible)
-       [:p {:class "seon-render-pending"} "No applicable renderer."])
-     (when (seq rejected)
-       [:details {:class "seon-debug-rejected-candidates"}
-        [:summary (str (count rejected) " rejected")]
-        (into [:div {:class "seon-debug-candidates"}]
-              (map (partial debug-experiment-candidate-html
-                            debug-request output selected
-                            (:seon.render.selection.stage/status stage)
-                            previews entries))
-              rejected)])
-     (when-let [selection-error (:seon.render.selection.stage/error stage)]
-       (debug-value-html selection-error))]))
+      (pr-str (:seon.render.selection.stage/name stage))]
+     (debug-experiment-candidate-html
+      debug-request output
+      (get-in experiment [:seon.render/selection
+                          :seon.render.selection/selected])
+      (:seon.render.selection.stage/status stage)
+      (:seon.render/previews experiment)
+      (:seon.render/entries experiment)
+      candidate)]))
 
 (defn- debug-experiments-html
-  [debug-request experiments]
+  ([debug-request experiments]
+   (debug-experiments-html debug-request experiments nil))
+  ([debug-request experiments found-values]
   (hiccup/->string
    [:section {:id "debug-selection"
               :class "seon-debug-body seon-debug-selection"}
     [:h2 {:class "seon-debug-caption"} "renderer experiment"]
     [:p {:class "seon-debug-description"}
-     "Priority runs from most specific to least. Both projections show every applicable renderer; shadowed candidates are previews, not the actual selection."]
-    (into
-     [:ol {:class "seon-debug-experiment-stages"}]
-     (map-indexed
-      (fn [index ai-stage]
-        (let [html-stage
-              (get-in experiments
-                      [:seon.render/html :seon.render/selection
-                       :seon.render.selection/stages index])]
-          [:li
-           [:h3 (pr-str (:seon.render.selection.stage/name ai-stage))]
-           [:div {:class "seon-debug-projection-grid"}
-            (debug-experiment-stage-column
-             debug-request :seon.render/ai
-             (:seon.render/ai experiments) ai-stage)
-            (debug-experiment-stage-column
-             debug-request :seon.render/html
-             (:seon.render/html experiments) html-stage)]]))
-      (get-in experiments
-              [:seon.render/ai :seon.render/selection
-               :seon.render.selection/stages])))]))
+     "The selected value is shown in both projections. Alternative applicable renderers remain in priority order."]
+    [:div {:class "seon-debug-projection-grid seon-debug-selected-previews"}
+     (debug-selected-projection-html
+      debug-request :seon.render/ai (:seon.render/ai experiments))
+     (debug-selected-projection-html
+      debug-request :seon.render/html (:seon.render/html experiments))]
+    (let [alternatives
+          (->> [:seon.render/ai :seon.render/html]
+               (mapcat
+                (fn [output]
+                  (map #(vector output %)
+                       (debug-applicable-candidates (get experiments output)))))
+               (sort-by (comp ::priority second)))]
+      (when (seq alternatives)
+        [:details {:class "seon-debug-alternative-renderers"}
+         [:summary (str "alternative renderers · " (count alternatives))]
+         (into [:ol {:class "seon-debug-experiment-stages"}]
+               (map (fn [[output candidate]]
+                      (debug-alternative-html
+                       debug-request output (get experiments output) candidate)))
+               alternatives)]))
+    found-values])))
+
+(defn- debug-found-value
+  [render-request debug-request ref-attributes identity-attributes
+   direction datom value]
+  (let [{:keys [e a v]} datom
+        path (if (= :outgoing direction) [a] [])
+        destination (if (= :outgoing direction) v e)
+        label (str (name direction) " " (pr-str a)
+                   (when (and (= :outgoing direction)
+                              (not (ref-attributes a)))
+                     " · inspect full attribute"))
+        selected-link
+        (cond
+          (and (= :outgoing direction) (identity-attributes a))
+          (debug-subject-link debug-request e label)
+
+          (and (= :outgoing direction) (not (ref-attributes a)))
+          (debug-path-link debug-request path label)
+
+          :else (debug-subject-link debug-request destination label))
+        render-one
+        (fn [output]
+          (render/render-call
+           (assoc render-request
+                  :seon.render/value value
+                  :seon.render/output output
+                  :seon.render.call/id
+                  [::found-value direction e a v path output])))]
+    [:article {:class "seon-debug-found-value"}
+     [:h3 selected-link]
+     [:div {:class "seon-debug-projection-grid"}
+      [:section {:class "seon-debug-projection-column"}
+       [:h4 "AI"]
+       (debug-preview-html :seon.render/ai (render-one :seon.render/ai))]
+      [:section {:class "seon-debug-projection-column"}
+       [:h4 "HTML"]
+       (debug-preview-html :seon.render/html (render-one :seon.render/html))]]]))
+
+(defn- debug-found-values-html
+  [render-request debug-request observation ref-attributes related-entities]
+  (let [identity-attributes
+        (set (db/identity-attributes (:seon.db/db render-request)))
+        outgoing
+        (keep
+         (fn [{:keys [a v] :as datom}]
+           (let [value (if (ref-attributes a)
+                         (get related-entities v)
+                         (if (identity-attributes a) {a v} v))]
+             (when (some? value)
+               [:outgoing datom value])))
+         (get-in observation [:seon.render.data/outgoing
+                              :seon.render.data/datoms]))
+        incoming
+        (keep (fn [{:keys [e] :as datom}]
+                (when-let [value (get related-entities e)]
+                  [:incoming datom value]))
+              (get-in observation [:seon.render.data/incoming
+                                   :seon.render.data/datoms]))
+        rows (concat outgoing incoming)]
+    (cond
+      (:seon.error/kind related-entities)
+      [:section {:class "seon-debug-found-values"}
+       [:h2 {:class "seon-debug-caption"} "found values"]
+       (debug-value-html related-entities)]
+
+      (seq rows)
+      (into [:section {:class "seon-debug-found-values"}
+             [:h2 {:class "seon-debug-caption"} "found values"]]
+            (map (fn [[direction datom value]]
+                   (debug-found-value render-request debug-request
+                                      ref-attributes identity-attributes
+                                      direction datom value)))
+            rows))))
 
 (declare refresh-retained-read-evidence)
 
@@ -1458,9 +1576,40 @@
                             :max-results (::pull-max-results effective-request)
                             :max-result-weight
                             (:seon.render.data/max-result-weight
-                             effective-request)})]
+                             effective-request)})
+                  ref-attributes (installed-ref-attributes database)
+                  outgoing (get-in observation
+                                   [:seon.render.data/outgoing
+                                    :seon.render.data/datoms])
+                  incoming (get-in observation
+                                   [:seon.render.data/incoming
+                                    :seon.render.data/datoms])
+                  related-eids
+                  (into []
+                        (comp
+                         (distinct))
+                        (concat
+                         (keep (fn [{:keys [a v]}]
+                                 (when (ref-attributes a) v))
+                               outgoing)
+                         (map :e incoming)))
+                  related-values
+                  (when (seq related-eids)
+                    (db/pull-many
+                     database
+                     {:selector '[*]
+                      :eids related-eids
+                      :max-work (::pull-max-work effective-request)
+                      :max-results (::pull-max-results effective-request)
+                      :max-result-weight
+                      (:seon.render.data/max-result-weight
+                       effective-request)}))]
               {::debug-request effective-request
                ::observation observation
+               ::related-entities
+               (if (:seon.error/kind related-values)
+                 related-values
+                 (zipmap related-eids related-values))
                ::restarted? restarted?
                ::acquisition acquisition
                ::acquisition-ms
@@ -1487,6 +1636,7 @@
         (acquire-debug-data db debug-request retained-calls)
         debug-request (::debug-request debug-data-output)
         observation (::observation debug-data-output)
+        related-entities (::related-entities debug-data-output)
         ref-attributes (installed-ref-attributes db)
         restarted? (::restarted? debug-data-output)
         acquisition (::acquisition debug-data-output)
@@ -1564,6 +1714,10 @@
            (debug-render-experiment render-request :seon.render/html
                                     [(:seon.render.debug/subject debug-request)
                                      (:seon.render.data/path cursor)])})
+        found-values
+        (when (and render-request (map? related-entities))
+          (debug-found-values-html render-request debug-request observation
+                                   ref-attributes related-entities))
         render-call-entry (get @captured-calls call-id)
         prompt-id (str "debug-ai-"
                        (or (:seon.cluster.agent/id debug-request) "inspection"))
@@ -1585,7 +1739,8 @@
           "debug-graph"
           (debug-graph-html debug-request ref-attributes observation)
           "debug-selection" (if experiments
-                              (debug-experiments-html debug-request experiments)
+                              (debug-experiments-html debug-request experiments
+                                                      found-values)
                               (debug-selection-html debug-request
                                                     render-call-entry))
           (debug-html-id
