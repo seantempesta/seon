@@ -6,6 +6,28 @@ tags: [research, agent, context, render, data-model]
 
 # Design lab milestone 1: smallest inspection slice — 2026-09-05
 
+## Browser verification — 2026-09-06
+
+The browser bridge is available again. A fresh hidden in-app tab loaded
+`/ns/seon.flow/debug` from default PID 14798 and returned actual rendered DOM,
+at database basis 536871054, commit
+`6a9d8ba3-0ea7-5985-ab19-941c52cc8dc9`.
+The header identifies viewer `seon.flow`, subject `[:seon.ns/name seon.flow]`,
+database identity, and HTML output. The structural floor shows actual namespace
+attributes. The selected function is `seon.render.ns/render-html`; actual output
+contains the namespace heading, docstring, and namespace declaration before a
+requery-bearing omission. This is useful-prefix evidence for the currently
+loaded preview implementation, not proof that its pending source/test edits
+are integrated or that the new graph layout exists.
+
+Visible gaps: the page still uses the old stacked layout, raw datom cells are
+not yet links, and no graph is mounted. Structural output labels `SHOWING 1–8
+OF 8` while a subsequent elision says four children were omitted; that label
+must distinguish acquired page size from displayed fitted content. The
+first-paint completion duration was not measured by this browser observation.
+The cache regression remains red as recorded in the working edge; do not infer
+unchanged-input reuse from a quickly loaded page.
+
 This is a read-only source inspection for milestone 1 of the
 [design-lab PRD](../plan/design-lab-prd-2026-09-05.md). I read that PRD and
 the related
