@@ -364,7 +364,7 @@
                                  (request connection
                                           (async/chan)))))))))))
 
-(deftest prompt-budget-compacts-then-refuses-at-distance-zero
+(deftest prompt-budget-is-informational-and-does-not-compact
   (planted
    (fn [connection context-channel]
      (db/transact! connection
@@ -384,11 +384,12 @@
        (with-redefs [render/acquire-context! acquire]
          (let [compacted (prompt/prompt @connection
                                         (request connection context-channel))]
-           (is (= [2 1] @distances))
-           (is (= "fits nine" (:seon.cluster.prompt/text compacted)))
-           (is (<= (-> compacted :seon.context/contributions first
-                       :seon.context.contribution/tokens)
-                   3))))
+           (is (= [2] @distances))
+           (is (= (apply str (repeat 40 "x"))
+                  (:seon.cluster.prompt/text compacted)))
+           (is (= :seon.ai.tokens/over
+                  (get-in compacted [:seon.ai.tokens/budget-report
+                                     :seon.ai.tokens/verdict])))))
        (reset! distances [])
        (with-redefs [render/acquire-context!
                      (fn [_ render-request]
@@ -397,15 +398,13 @@
                         :seon.render.history/segments
                         [(apply str (repeat 40 "x"))]
                         :seon.db/db (:seon.db/db render-request)})]
-         (let [refusal (prompt/prompt @connection
-                                      (request connection context-channel))]
-           (is (= [2 1 0] @distances))
-           (is (= :seon.cluster.prompt/budget-exceeded
-                  (:seon.error/kind refusal)))
-           (is (= 0 (get-in refusal [:seon.error/data
-                                     :seon.render/distance])))
-           (is (= 3 (get-in refusal [:seon.error/data
-                                     :seon.config.ai/prompt-token-budget])))))))))
+         (let [complete (prompt/prompt @connection
+                                       (request connection context-channel))]
+           (is (= [2] @distances))
+           (is (= (apply str (repeat 40 "x"))
+                  (:seon.cluster.prompt/text complete)))
+           (is (= 3 (get-in complete [:seon.ai.tokens/budget-report
+                                      :seon.config.ai/prompt-token-budget])))))))))
 
 (defn- recorded-usage-tx
   "Facts one settled attempt already commits: the exact prompt characters
@@ -431,7 +430,7 @@
                "completion_tokens" 1
                "total_tokens" (inc provider-tokens)})}]))
 
-(deftest a-prompt-the-provider-counts-over-budget-is-refused-not-sent
+(deftest provider-calibration-reports-over-budget-without-refusing
   ;; THE CLASS: the guard was correct against a measurement that was
   ;; not. `chars/4` ran ~23% low against DeepSeek, so prompts left the
   ;; process up to 3,059 tokens over a declared 32,768 with no refusal
@@ -470,16 +469,17 @@
                        (fn [_ render-request]
                          {:seon.cluster.prompt/text text
                           :seon.db/db (:seon.db/db render-request)})]
-           (let [refusal (prompt/prompt @connection
-                                        (request connection context-channel))]
+           (let [result (prompt/prompt @connection
+                                       (request connection context-channel))]
              (is (= 106 (tokens/estimate text))
                  "the measured prior catches the first turn too")
-             (is (= :seon.cluster.prompt/budget-exceeded
-                    (:seon.error/kind refusal))
-                 "the calibrated estimate refuses it")
-             (is (= 106 (get-in refusal [:seon.error/data
-                                         :seon.ai.tokens/estimated])))
+             (is (= text (:seon.cluster.prompt/text result)))
+             (is (= :seon.ai.tokens/over
+                    (get-in result [:seon.ai.tokens/budget-report
+                                    :seon.ai.tokens/verdict])))
+             (is (= 106 (get-in result [:seon.ai.tokens/budget-report
+                                        :seon.ai.tokens/estimated])))
              (is (= :seon.ai.tokens/observed
-                    (get-in refusal [:seon.error/data
-                                     :seon.ai.tokens/basis]))
-                 "the refusal names which basis measured it"))))))))
+                    (get-in result [:seon.ai.tokens/budget-report
+                                    :seon.ai.tokens/basis]))
+                 "the report names which basis measured it"))))))))

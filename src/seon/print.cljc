@@ -2,7 +2,6 @@
   "Emits admitted print nodes through text and hiccup sinks."
   (:require [clojure.string :as str]
             [clojure.test.check.generators :as gen]
-            [seon.ai.tokens :as tokens]
             [seon.render.hiccup :as html]
             [seon.schema :as schema]
             #?(:clj [seon.schema.edn :as schema.edn])
@@ -999,43 +998,15 @@
         node))))
 
 (defn fit
-  "Fit one admitted node to one declared presentation profile.
+  "Return one admitted node without presentation-size cuts.
 
-  Token size is measured only through `seon.ai.tokens/estimate`. Structural
-  cuts remain ordinary elision nodes carrying their continuation facts."
+  The profile remains carried for presentation identity and composition.
+  Admission elisions already present in the node remain ordinary data."
   {:malli/schema
    [:=> [:cat :seon.print/node :seon.render.profile/profile]
     :seon.print/node]}
-  [node profile]
-  (let [budget (:seon.render.profile/token-budget profile)
-        initial-children (:seon.render.profile/max-children profile)
-        initial-depth (:seon.render.profile/max-depth profile)
-        options (assoc (default-options) ::length nil ::level nil)
-        string-floor (max 1 (::width options))
-        initial-strings (max string-floor (tokens/estimate-chars budget))]
-    (loop [child-limit initial-children
-           depth-limit initial-depth
-           string-limit initial-strings]
-      (let [candidate (fit-node node
-                                (assoc profile
-                                       :seon.render.profile/max-depth
-                                       depth-limit)
-                                0 [] child-limit string-limit)]
-        (cond
-          (<= (tokens/estimate (emit-text candidate options)) budget)
-          candidate
-
-          (pos? child-limit)
-          (recur (quot child-limit 2) depth-limit string-limit)
-
-          (pos? depth-limit)
-          (recur child-limit (dec depth-limit) string-limit)
-
-          (> string-limit string-floor)
-          (recur child-limit depth-limit
-                 (max string-floor (quot string-limit 2)))
-
-          :else candidate)))))
+  [node _profile]
+  node)
 
 (schema/register-core-predicate! 'seon.print/sink? sink?)
 (schema/register-core-predicate! 'seon.print/print-number? print-number?)

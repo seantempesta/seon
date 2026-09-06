@@ -551,6 +551,7 @@
     arguments :seon.sci.eval/args
     time-limit-ms :seon.sci.eval/time-limit-ms
     caps :seon.sci.admit/caps
+    unbounded? :seon.sci.admit/unbounded?
     read-evidence-sink :seon.db/read-evidence-sink
     on-core-error :seon.config/on-core-error}]
   (let [started-at (System/nanoTime)
@@ -588,11 +589,14 @@
                           (apply sci-var prepared))
                   invocation-record (record-fn :ok)]
               (admit/admit-value
-               {:seon.sci.admit/value value
-                :seon.sci.admit/interrupt-fn interrupt-fn
-                :seon.sci.admit/caps caps
-                :seon.config/on-core-error on-core-error
-                :seon.sci.admit/record invocation-record})))))
+               (cond->
+                {:seon.sci.admit/value value
+                 :seon.sci.admit/interrupt-fn interrupt-fn
+                 :seon.sci.admit/caps caps
+                 :seon.config/on-core-error on-core-error
+                 :seon.sci.admit/record invocation-record}
+                 unbounded?
+                 (assoc :seon.sci.admit/unbounded? true)))))))
       (catch Throwable throwable
         (let [record-value
               (if-let [record-fn (::record @arm-state)]

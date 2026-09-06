@@ -256,7 +256,7 @@
       (is (= (normalize-whitespace text)
              (normalize-whitespace (lexical-hiccup-text hiccup)))))))
 
-(deftest terminal-projections-fit-to-complete-elision-values
+(deftest terminal-projections-ignore-presentation-size-fields
   (let [profile (assoc (render/agent-render-profile
                         (test-support/effective-config))
                        :seon.render.profile/token-budget 16
@@ -270,21 +270,15 @@
                              :seon.render/output :seon.render/ai
                              :seon.print/value long-text}
                             profile)]
-      (is (= :seon.print/elided (:seon.print/face fitted)))
-      (is (= :characters (:seon.print/elision-unit fitted)))
-      (is (= [:seon.render.call/id :fixture/long]
-             (:seon.print/requery-id fitted)))
-      (is (pos? (:seon.print/omitted fitted)))
-      (is (= (:seon.render.data/total fitted)
-             (+ (:seon.render.data/next-offset fitted)
-                (:seon.print/omitted fitted)))))
+      (is (= :seon.print/projected (:seon.print/face fitted)))
+      (is (= long-text (:seon.print/value fitted))))
     (let [fitted (print/fit {:seon.print/face :seon.print/projected
                              :seon.render/output :seon.render/html
                              :seon.print/value [:pre long-text]}
                             profile)
           html (hiccup/->string (print/emit-hiccup fitted (print/default-options)))]
-      (is (= :seon.print/elided (:seon.print/face fitted)))
-      (is (str/includes? html "rendered HTML"))
+      (is (= :seon.print/projected (:seon.print/face fitted)))
+      (is (str/includes? html long-text))
       (is (not (str/includes? html "[:pre"))))))
 
 (deftest realistic-html-preview-preserves-hiccup-and-fit-bound
@@ -313,13 +307,13 @@
     (let [html-string (hiccup/->string html)]
       (is (str/includes? html-string "<section"))
       (is (str/includes? html-string "Visible heading"))
-      (is (str/includes? html-string "seon-print-html-elision"))
-      (is (not (str/includes? html-string "second fragment")))
+      (is (not (str/includes? html-string "seon-print-html-elision")))
+      (is (str/includes? html-string "second fragment"))
       (is (not (str/includes? html-string "[:section"))))
-    (is (<= (tokens/estimate text)
-            (:seon.render.profile/token-budget profile)))))
+    (is (> (tokens/estimate text)
+           (:seon.render.profile/token-budget profile)))))
 
-(deftest oversized-html-projection-elides-without-printing-hiccup-source
+(deftest oversized-html-projection-remains-complete-hiccup
   (let [profile (assoc (render/agent-render-profile
                         (test-support/effective-config))
                        :seon.render.profile/token-budget 1
@@ -331,11 +325,11 @@
                                  (apply str (repeat 200 "x"))]}
         fitted (print/fit node profile)
         html (hiccup/->string (print/emit-hiccup fitted (print/default-options)))]
-    (is (= :seon.print/elided (:seon.print/face fitted)))
+    (is (= :seon.print/projected (:seon.print/face fitted)))
     (is (not (str/includes? html "[:section")))
-    (is (str/includes? html "rendered HTML"))))
+    (is (str/includes? html (apply str (repeat 200 "x"))))))
 
-(deftest fit-cuts-breadth-before-windowing-one-line-strings
+(deftest fit-preserves-breadth-and-long-strings
   (let [text (apply str (repeat 36 \x))
         line-width (:seon.print/width (print/default-options))
         profile (render/agent-render-profile
@@ -356,10 +350,9 @@
                 :seon.print/level nil))]
     (is (str/includes? emitted (pr-str text))
         "a one-line string remains readable before structural breadth")
-    (is (< (count (:seon.print/items fitted)) 116)
-        "the 116-row result pays its token budget by cutting breadth")
-    (is (= line-width (:seon.render.data/next-offset long-string-fit))
-        "a long string never fits below the printer's one-line width")))
+    (is (= 116 (count (:seon.print/items fitted))))
+    (is (= (* 2 line-width)
+           (count (:seon.print/value long-string-fit))))))
 
 (deftest tagged-envelope-never-collides-with-authored-print-keywords
   (let [value {:seon.print/face :seon.print/elided

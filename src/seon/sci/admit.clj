@@ -94,9 +94,11 @@
 (defn- take-node!
   "Consume one node from the budget; false when it is exhausted."
   [state]
-  (if (pos? @(:nodes state))
+  (if (:unbounded? state)
+    true
+    (if (pos? @(:nodes state))
     (do (vswap! (:nodes state) dec) true)
-    (do (vreset! (:capped? state) true) false)))
+    (do (vreset! (:capped? state) true) false))))
 
 (defn- flag!
   "Record that something was elided or truncated."
@@ -150,24 +152,26 @@
          accumulated (emit)]
     (cond
       (nil? remaining) accumulated
-      (zero? @(:nodes state)) (elide! state)
+      (and (not (:unbounded? state)) (zero? @(:nodes state))) (elide! state)
       :else
       (let [after (next remaining)
             ;; width means WIDTH: cut only once `width` items are shown and
             ;; more remain (the 2026-08-01 off-by-one class — a marker that
             ;; replaces the last item is strictly less informative than it)
-            cut-for-width? (and after (>= taken width))
-            cut-for-nodes? (and after (= 1 @(:nodes state)))]
+            cut-for-width? (and (not (:unbounded? state)) after (>= taken width))
+            cut-for-nodes? (and (not (:unbounded? state)) after (= 1 @(:nodes state)))]
         (if (or cut-for-width? cut-for-nodes?)
           (append-elision! state accumulated emit)
           ;; When siblings remain, hold one node aside for their cut marker.
           ;; A nested child may consume everything else, but it can never
           ;; silently erase the parent's remaining siblings.
           (let [reserved? (some? after)]
-            (when reserved? (vswap! (:nodes state) dec))
+            (when (and reserved? (not (:unbounded? state)))
+              (vswap! (:nodes state) dec))
             (take-node! state)
             (let [child (project (first remaining) depth state)]
-              (when reserved? (vswap! (:nodes state) inc))
+              (when (and reserved? (not (:unbounded? state)))
+                (vswap! (:nodes state) inc))
               (recur after
                      (inc taken)
                      (emit accumulated child)))))))))
@@ -186,24 +190,26 @@
          accumulated []]
     (cond
       (nil? remaining) accumulated
-      (< @(:nodes state) 2) (elide! state)
+      (and (not (:unbounded? state)) (< @(:nodes state) 2)) (elide! state)
       :else
       (let [after (next remaining)
             ;; same width-means-width rule as project-entries above
-            cut-for-width? (and after (>= taken width))
-            cut-for-nodes? (and after (< @(:nodes state) 3))]
+            cut-for-width? (and (not (:unbounded? state)) after (>= taken width))
+            cut-for-nodes? (and (not (:unbounded? state)) after (< @(:nodes state) 3))]
         (if (or cut-for-width? cut-for-nodes?)
           (mark-map-cut! state accumulated)
           (let [[entry-key entry-value] (first remaining)
                 reserved? (some? after)]
-            (when reserved? (vswap! (:nodes state) dec))
+            (when (and reserved? (not (:unbounded? state)))
+              (vswap! (:nodes state) dec))
             ;; a map entry is TWO nodes, and a half-projected entry is not an
             ;; entry: take both or neither
             (take-node! state)
             (take-node! state)
             (let [projected-key (project entry-key depth state)
                   projected-value (project entry-value depth state)]
-              (when reserved? (vswap! (:nodes state) inc))
+              (when (and reserved? (not (:unbounded? state)))
+                (vswap! (:nodes state) inc))
               (recur after
                      (inc taken)
                      (conj accumulated [projected-key projected-value])))))))))
@@ -214,7 +220,7 @@
                 :seon.config.eval.result/max-collection
                 :seon.config.eval.result/max-string]}
         (:caps state)
-        deep? (>= depth max-depth)
+        deep? (and (not (:unbounded? state)) (>= depth max-depth))
         child-depth (inc depth)
         identity-node (delay (identity-only-node value child-depth state))]
     (cond
@@ -235,10 +241,11 @@
       (value-node ::print/inst (java.util.Date. (inst-ms value)))
 
       (string? value)
-      (let [node
-            (print/admit-string
-             {:seon.print/text value
-              :seon.config.eval.result/max-string max-string})]
+      (let [node (if (:unbounded? state)
+                   {::print/face ::print/string ::print/value value}
+                   (print/admit-string
+                    {:seon.print/text value
+                     :seon.config.eval.result/max-string max-string}))]
         (when (= ::print/truncated-string (::print/face node))
           (flag! state))
         node)
@@ -365,7 +372,8 @@
       ;; a marker is a structure, so at the depth cap the elision scalar
       ;; is the only thing that fits — the same rule the walk itself
       ;; follows, applied to the failure path
-      (if (>= depth (:seon.config.eval.result/max-depth (:caps state)))
+      (if (and (not (:unbounded? state))
+               (>= depth (:seon.config.eval.result/max-depth (:caps state))))
         (elide! state)
         (do
           (vreset! (:capped? state) true)
@@ -449,7 +457,7 @@
   (canonical-edn print-node))
 
 (defn- admit*
-  [{::keys [value interrupt-fn caps record]
+  [{::keys [value interrupt-fn caps record unbounded?]
     supplied-projection :seon.schema/projection
     on-core-error :seon.config/on-core-error}]
   (let [projection (or supplied-projection (schema/handed-projection))
@@ -459,6 +467,7 @@
                ;; Identity projection is handed by the operation boundary.
                ;; Ordinary scalar/collection admissions never require it.
                :projection projection
+               :unbounded? (true? unbounded?)
                ;; the root is a node like any other
                :nodes (volatile! (dec (long (:seon.config.eval.result/max-nodes
                                              caps))))

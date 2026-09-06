@@ -137,17 +137,6 @@
       (assoc :seon.print/requery-refusal
              "the value has no durable blob or entity identity"))))
 
-(defn- page-size
-  [unit]
-  (long
-   (min (or (:seon.render.value/max-collection unit)
-            (:seon.render.value/max-collection
-             (:seon.render.value/options unit))
-            (:seon.config.eval.result/max-collection
-             (:seon.sci.admit/caps unit)))
-        (:seon.config.eval.result/max-collection
-         (:seon.sci.admit/caps unit)))))
-
 (defn- stable-entries
   [value]
   (cond
@@ -206,30 +195,30 @@
 
 (defn- display-value
   [unit]
-  (if (and (:seon.render.value/route-base unit)
-           (:seon.render.data/cursor unit))
-    (window
-     (:seon.render/value unit)
-     (long (get-in unit [:seon.render.data/cursor
-                         :seon.render.data/offset] 0))
-     (page-size unit))
-    (let [raw (:seon.render/value unit)
-          total (counted-size raw)]
-      {:seon.render.value/window raw
-       :seon.render.value/steps []
-       :seon.render.value/offset 0
-       :seon.render.value/shown (or total 0)
-       :seon.render.value/total total
-       :seon.render.value/more? false})))
+  (let [raw (:seon.render/value unit)
+        total (counted-size raw)]
+    {:seon.render.value/window raw
+     :seon.render.value/steps []
+     :seon.render.value/offset 0
+     :seon.render.value/shown (or total 0)
+     :seon.render.value/total total
+     :seon.render.value/more? false}))
 
 (defn- admitted-projection
-  [value caps]
-  (let [admitted
+  [value unit]
+  (let [caps (:seon.sci.admit/caps unit)
+        interrupt-fn (get-in unit [:seon.sci.eval/ctx
+                                   :seon.sci.kernel/guard
+                                   :seon.sci.kernel/interrupt-fn])
+        admitted
         (admit/admit-value
-         {:seon.sci.admit/value value
-          :seon.sci.admit/caps caps
-          :seon.sci.admit/interrupt-fn (fn [])
-          :seon.config/on-core-error :record})]
+         (cond->
+          {:seon.sci.admit/value value
+           :seon.sci.admit/caps caps
+           :seon.sci.admit/interrupt-fn (or interrupt-fn (fn []))
+           :seon.config/on-core-error :record}
+           interrupt-fn
+           (assoc :seon.sci.admit/unbounded? true)))]
     {:seon.render.value/tree
      (:seon.sci.admit/print-node admitted)
      :seon.render.value/semantic (:seon.sci.admit/value admitted)
@@ -480,17 +469,16 @@
 (defn- pager
   [unit path {:seon.render.value/keys [offset shown total more?]}]
   (when (:seon.render.value/route-base unit)
-    (let [size (page-size unit)]
-      [:div {:class "seon-data-pager"}
+    [:div {:class "seon-data-pager"}
        (when (pos? offset)
-         (path-link unit path (max 0 (- offset size))
+         (path-link unit path 0
                     "← previous" "seon-data-page"))
        [:span {:class "seon-data-range"}
         (str "showing " (if (zero? shown) 0
                             (str (inc offset) "–" (+ offset shown)))
              (when total (str " of " total)))]
        (when more?
-         (path-link unit path (+ offset shown) "next →" "seon-data-page"))])))
+         (path-link unit path (+ offset shown) "next →" "seon-data-page"))]))
 
 (defn prepare
   "Admit once, recursively dispatch declared producers, fit, then emit."
@@ -503,7 +491,7 @@
   ([unit]
    (prepare unit :seon.render/ai))
   ([unit output]
-   (when-let [caps (:seon.sci.admit/caps unit)]
+   (when (:seon.sci.admit/caps unit)
     (let [display (display-value unit)
           admitted (if-let [result-edn (:seon.cluster.eval/result-edn unit)]
                      (let [tree (edn/read-string result-edn)]
@@ -512,7 +500,7 @@
                         (admit/semantic-value tree)
                         :seon.render.value/truncated? false})
                      (admitted-projection
-                      (:seon.render.value/window display) caps))
+                      (:seon.render.value/window display) unit))
           registered (registered-layout unit
                                         (:seon.render.value/semantic admitted))
           profile (cond-> (render-profile unit)
@@ -633,12 +621,16 @@
         node (if (and (map? parsed) (contains? parsed :seon.print/face))
                parsed
                (:seon.render.value/tree
-                (admitted-projection parsed (:seon.sci.admit/caps unit))))]
+                (admitted-projection parsed unit)))]
     (admit/print-node-edn
      (print/fit node
                 (assoc (render-profile unit)
                        :seon.render.profile/max-children
-                       (max 0 (dec (page-size unit))))))))
+                       (max 0
+                            (dec (long
+                                  (get-in unit
+                                          [:seon.sci.admit/caps
+                                           :seon.config.eval.result/max-collection])))))))))
 
 (defn- render-prepared
   [unit output]

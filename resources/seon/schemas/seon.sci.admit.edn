@@ -9,6 +9,7 @@
                    {:optional true}
                    :seon.sci.admit/record]],
                  :capped? :boolean,
+                 :unbounded? :boolean,
                  :caps
                  [:map
                   [:seon.config.eval.result/max-depth
@@ -45,6 +46,9 @@
                   [:seon.sci.admit/caps :seon.sci.admit/caps]
                   [:seon.config/on-core-error
                    :seon.config/on-core-error]
+                  [:seon.sci.admit/unbounded?
+                   {:optional true}
+                   :seon.sci.admit/unbounded?]
                   [:seon.schema/projection
                    {:optional true}
                    :seon.schema/projection]

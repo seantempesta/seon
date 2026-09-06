@@ -405,3 +405,19 @@
                                :seon.config/on-core-error mode))]
           (is (string? (:seon.cluster.eval/result-edn admitted))
               (str mode ": a marker is the codec working, not failing")))))))
+
+(deftest render-admission-can-preserve-a-complete-value-under-the-same-guard
+  (let [{:keys [interrupt-fn calls]} (armed)
+        narrow (assoc caps
+                      :seon.config.eval.result/max-depth 1
+                      :seon.config.eval.result/max-collection 1
+                      :seon.config.eval.result/max-string 1
+                      :seon.config.eval.result/max-nodes 2)
+        value ["complete" [1 2 3]]
+        admitted (admit/admit-value
+                  (assoc (request value interrupt-fn narrow)
+                         :seon.sci.admit/unbounded? true))]
+    (is (= value (:seon.sci.admit/value admitted)))
+    (is (false? (:seon.sci.admit/capped? admitted)))
+    (is (pos? (calls))
+        "complete render admission still consults the armed interrupt")))

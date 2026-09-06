@@ -8,18 +8,10 @@
   the final REPL-state line carries volatile basis and time after the provider
   cache boundary.
 
-  THE BUDGET IS ENFORCED IN THE PROVIDER'S OWN UNITS. `chars/4` ran
-  23-26% low against DeepSeek, so this guard was correct against a
-  measurement that was not, and prompts left the process up to 3,059
-  tokens over a declared 32,768 with no refusal (whole-system-arc
-  observer, 2026-08-08). [[model-calibration]] now fits the ratio to
-  this model's own recorded usage before the check, and the check is
-  `seon.ai.tokens/budget-report` — the one judgement that carries the
-  calibration's observed error band, so a prompt that only fits by less
-  than the measurement's own accuracy is admitted LOUDLY instead of
-  silently."
+  Prompt size remains measured in the provider's own units and returned as
+  an informative `seon.ai.tokens/budget-report`; it does not constrain the
+  rendered context during the current unlimited-render experiment."
   (:require [clojure.edn :as edn]
-            [taoensso.timbre :as log]
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.cluster.message :as message]
@@ -179,57 +171,24 @@
                 (- next-estimated estimated)})))
       contributions)))
 
-(defn- acquire-within-budget
-  [database request budget calibration agent-id]
-  (loop [distance (long (get request :seon.render/distance default-depth))]
-    (let [acquired (render/acquire-context!
-                    (:seon.render/context-channel request)
-                    (assoc request
-                           :seon.db/db database
-                           :seon.render/distance distance))]
-      (if (:seon.error/kind acquired)
-        acquired
-        (let [text (:seon.cluster.prompt/text acquired)
-              segments (:seon.render.history/segments acquired)
-              report (tokens/budget-report text budget calibration)
-              contributions (history-contributions segments calibration)]
-          (case (:seon.ai.tokens/verdict report)
-        ;; ADMITTED, BUT NOT SILENTLY: the point estimate fits and the
-        ;; calibration's own worst observed miss does not. Saying
-        ;; nothing here is exactly how three over-budget prompts left
-        ;; the process, so the note is loud and the report rides the
-        ;; returned value where a test and a caller can both read it.
-        :seon.ai.tokens/near-limit
-        (do (log/warn
-             (str "seon prompt for agent " agent-id
-                  " is within its budget only by less than the "
-                  "calibration's own accuracy: "
-                  (tokens/report-sentence report)))
-            {:seon.cluster.prompt/text text
-             :seon.context/contributions contributions
-             :seon.ai.tokens/budget-report report
-             :seon.db/db (:seon.db/db acquired)})
-
-        :seon.ai.tokens/within
+(defn- acquire-context-report
+  [database request budget calibration]
+  (let [distance (long (get request :seon.render/distance default-depth))
+        acquired (render/acquire-context!
+                  (:seon.render/context-channel request)
+                  (assoc request
+                         :seon.db/db database
+                         :seon.render/distance distance))]
+    (if (:seon.error/kind acquired)
+      acquired
+      (let [text (:seon.cluster.prompt/text acquired)
+            segments (:seon.render.history/segments acquired)
+            report (tokens/budget-report text budget calibration)]
         {:seon.cluster.prompt/text text
-         :seon.context/contributions contributions
+         :seon.context/contributions
+         (history-contributions segments calibration)
          :seon.ai.tokens/budget-report report
-         :seon.db/db (:seon.db/db acquired)}
-
-        :seon.ai.tokens/over
-        (if (pos? distance)
-          (recur (dec distance))
-          {:seon.error/kind ::budget-exceeded
-           :seon.cluster.prompt/budget-exceeded budget
-           :seon.error/message
-           (str "At render distance 0 the prompt still needs "
-                (tokens/report-sentence report) ". It was not sent.")
-           :seon.error/data
-           (assoc report
-                  :seon.config.ai/prompt-token-budget budget
-                  :seon.context.contribution/tokens
-                  (:seon.ai.tokens/estimated report)
-                  :seon.render/distance distance)})))))))
+         :seon.db/db (:seon.db/db acquired)}))))
 
 (defn prompt
   "Acquire one retained walk for the agent holding the request's run.
@@ -257,12 +216,11 @@
         settings (effective-ai-settings database agent-id)]
     (if (:seon.error/kind settings)
       settings
-      (acquire-within-budget
+      (acquire-context-report
        database request
        (:seon.config.ai/prompt-token-budget settings)
        (model-calibration
         database
         (:seon.config.ai/model settings)
         (tokens/prior-calibration
-         (:seon.config.ai/chars-per-token-prior settings)))
-       agent-id))))
+         (:seon.config.ai/chars-per-token-prior settings)))))))
