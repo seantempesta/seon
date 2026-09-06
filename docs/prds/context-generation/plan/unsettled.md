@@ -1278,3 +1278,20 @@ hid all found-value previews. Pull and pull-many acquisition now omit result
 count/weight limits; their work bound and the separate graph index pagination
 remain. This does not establish that discovery is fast: live measurement and
 the end-to-end refresh proof are still required.
+
+The owner now explicitly requires an automatically updated development branch.
+The existing hook invokes `bin/seon init --changed` only on the shared root;
+it publishes `current-src` but does not update a running cluster. Manual
+refork/restart is not the desired development workflow. The dedicated live
+cluster must receive admitted indexed changes, update loaded behavior, and
+refresh the existing UI while retaining agent facts and context selections.
+This intentionally supersedes sovereign-old-program behavior for the opted-in
+development cluster only. The automatic workflow is not yet implemented.
+
+Root verified the refreshed Juniper page on port 7766 after publishing digest
+`2e2301360d913ca35a1c64f93291f3c33924c32c883c3fcfed2d781c443e6e5c`:
+attribute/value cards identify stored values and referenced entities, and the
+selected identity transcript evaluates `(seon.cluster.agent/whoami)` without
+embedding the agent id. A separate fresh Juniper SCI fork returned the correct
+identity in 73 ms. Found-value AI cards still display source without evaluated
+results; these are not complete context blocks yet.

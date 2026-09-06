@@ -102,7 +102,7 @@ must be verified on this actual page; the remaining acquisition limits also
 need reconciliation with the owner's unrestricted rendering experiment.
 
 The more specific page-refresh cache deletion is tracked in
-`runtime-evaluation-reexecutes-retained-render-source.md`. Its regression
+`archive/runtime-evaluation-reexecutes-retained-render-source.md`. Its regression
 reproduces the duplicate clearing after the earlier invalidation correction.
 
 Correct the existing retained call/invocation cache in `seon.render.web` and
