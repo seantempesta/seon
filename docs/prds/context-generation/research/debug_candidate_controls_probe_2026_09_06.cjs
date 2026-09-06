@@ -45,6 +45,15 @@ const assert = require('node:assert/strict');
     assert(htmlPreview.includes('After live update'));
     assert(aiPreview.includes('After live update'));
 
+    const inspectionUrl = page.url();
+    const sourceDisclosure = htmlChoice.locator('.seon-debug-function-definition');
+    await sourceDisclosure.locator('summary').click();
+    const sourceText = await sourceDisclosure.locator('pre code').innerText();
+    assert(sourceText.startsWith('(defn render-item-html'));
+    assert(sourceText.includes(':my.plan.item/item'));
+    assert.equal(page.url(), inspectionUrl, 'stored source opens without leaving the inspected value');
+    assert.equal(new URL(page.url()).searchParams.get('subject'), '32011');
+
     const definition = await htmlChoice
       .locator('.seon-debug-section-line a').getAttribute('href');
     const definitionUrl = new URL(definition, page.url());
@@ -78,6 +87,7 @@ const assert = require('node:assert/strict');
       htmlPreview,
       aiPreview,
       definition,
+      inlineStoredDefinition: true,
       functionNavigation: true,
       referenceNavigation: true,
       errors,

@@ -41,3 +41,8 @@ Dependency grounding: Datahike's `branch-as-db` and
 path check. The focused probe admits default config, source, tests and schemas
 while excluding unrelated `config/test.edn`. This corrects a publication
 trigger, using the existing publication mechanism.
+
+After the selected-value and inline-definition UI changes (`93cc6bab0`), the
+same live readback found head `6a9dbb6f-928d-50b8-af34-a31819f283d5` and again
+confirmed the artifact head and current file snapshot match. No manual source
+publication was needed for those edits.

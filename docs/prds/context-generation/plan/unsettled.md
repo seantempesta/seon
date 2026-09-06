@@ -8,6 +8,16 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Inline definition inspection is verified (`809e726d9`, corrected `93cc6bab0`):
+candidate cards expose the retained SCI function source without leaving the
+input. A live mismatch exposed a fixture using the raw DB key instead of
+`:seon.sci.eval/function-source`; the correction has five passing focused
+assertions, including an actual acquired program record. The browser opens the
+definition without changing subject/URL and retains paired output. This is
+function definition evidence, not an executed producing form. The full goal
+remains active; source-run submission and producing-form integration are not
+claimed complete by these visualization improvements.
+
 Selected-value inspection correction: the existing URL cursor now selects the
 input for structural display, actual output and both candidate experiments.
 Previously only the structural display followed that path. Browser proof clicks

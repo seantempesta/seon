@@ -6,6 +6,24 @@ tags: [research, context, render]
 
 # Design Lab first inspection slice completion audit — 2026-09-06
 
+## Selected values and inline definitions — current checkpoint
+
+`3ac4f5e5d` fixes a source/browser-confirmed mismatch: URL paths formerly
+selected only the structural display while candidates and output kept rendering
+the whole entity. One selected value now drives all three. The clickable scalar
+datom link, visible path, return-to-entity and invalid-path diagnostic have live
+browser proof at unchanged basis 536871436. Focused path/header/link coverage
+passed 24 assertions. The graph and viewer stay on the original entity.
+
+`809e726d9` adds inline function definitions; `93cc6bab0` corrects the actual
+retained SCI record key after the browser exposed a misleading fabricated
+fixture. Five focused assertions now include the acquired program row.
+The controls probe opens the actual definition without changing subject/URL,
+then verifies ordinary function/ref navigation still works. No JavaScript
+errors. These are hot-reloaded web-owner proofs on `lab-browser-0906`.
+The source-run/producing-form requirements below remain incomplete; displaying
+a function definition does not claim its source was the producing call.
+
 ## Updated checkpoint at `b979cbac1`
 
 The earlier table below is retained as a dated audit of `c94e68e11`, not the

@@ -32,6 +32,9 @@ identities so simultaneously inspected paths cannot overwrite each other.
 
 ## Live verification
 
+Implementation: `3ac4f5e5d`. Focused selected-path/header checks passed 11
+assertions, and the corrected URL-decoding link expectation passed 13 assertions.
+
 Hot-reloaded the corrected `seon.render.web` JVM Var definitions and restored
 instrumentation using the handed cluster projection. The browser probe now
 clicks the stored title value, positively observes the AI and HTML scalar floor
