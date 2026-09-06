@@ -8,6 +8,26 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Browser checkpoint, 2026-09-06: the live debug page now draws the actual
+34-node/33-reference graph alongside selected output. Browser-discovered
+container, event namespace, status replacement, and parent-selector defects
+were fixed (see `docs/seon/issues/debug-graph-model-did-not-prove-visible-interaction.md`).
+The committed browser probe verifies preserved instance/viewport/selection on
+client reconciliation, edge detail, physical node-click navigation retaining
+the viewing namespace, and no horizontal overflow at 390 px after native
+resize. No JavaScript errors. Warm local ready samples ranged from roughly
+56 to 686 ms; these are observations, not a latency guarantee. Proof used
+hot-reloaded JVM web Vars and current static assets on default PID 14798,
+not a freshly forked cluster's indexed program. Actual database-change→SSE→
+browser update remains unproven by this probe. The complete goal remains open.
+
+Owner decision, 2026-09-06 (supersedes the thinking-field experiment below):
+drop `:seon.render/thinking` for now. Author ordinary source containing thinking
+comments and executable forms; reuse the existing reader and evaluation path,
+and render the ordered source plus actual results. Results never become
+executable source merely because their printed representation contains forms.
+Keep this structure available for graph coverage and dependency analysis.
+
 Owner coverage objective, 2026-09-06: efficiently explain the data within N
 hops of the agent entity using knowledge of the actual graph and the queries
 that generated each block. Define the neighborhood from one immutable database
