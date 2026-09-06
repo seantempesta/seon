@@ -8,6 +8,19 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Owner proposal, 2026-09-06: let an AI render produce source for the existing
+reply reader, forming blocks of explanation, executable forms, and evaluated
+results. Analyze the source with the existing clj-kondo owner; combine those
+references with actual database-read and displayed-value provenance to select
+and order explanations across blocks. This is an experiment, not a changed
+render contract. Source references, facts read, facts displayed after fitting,
+and concepts explained are distinct observations. `seon.print/references`
+already discovers symbols and schema-derived identities in structured print
+nodes, but does not prove which attributes were visibly explained. Never
+reparse evaluated output as executable source or infer database identities
+from arbitrary prose/numbers. Preserve actual history and effect order;
+compare dependency ordering of independent generated explanation reads.
+
 Owner direction, 2026-09-06: context discovery must start from the database,
 including the agent entity and its related entities. The plan should introduce
 current work and teach direct queries and transactions over those same facts,
