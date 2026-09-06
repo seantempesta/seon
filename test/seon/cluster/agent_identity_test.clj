@@ -61,6 +61,11 @@
                 "Cluster \"identity-cluster\"")
            (agent/render-identity-text queried))
         "the terminal formatter returns only the queried identity value")
+    (let [database-error
+          {:seon.error/kind :seon.db/pull-failed
+           :seon.error/message "identity query failed"}]
+      (is (= database-error (agent/render-identity-text database-error))
+          "the terminal formatter preserves a flat query error"))
     (is (not (str/includes? source "Namespace my.agents.identity-root"))
         "the source does not fabricate its eventual query result")))
 
