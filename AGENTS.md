@@ -277,8 +277,11 @@ caller. Diagnostics tell the truth or say nothing: a thread dump that omits
 virtual threads lies.
 
 Outward values cross one total render contract: renders never throw and
-never refuse an ordinary value; output is bounded through the one
-`seon.print/fit` owner; omitted detail is an elision value — ordinary data
+never refuse an ordinary value. Rendering size, depth, child-count, and token
+limits are disabled for design experimentation; `seon.print/fit` preserves
+the complete admitted node. Query-work bounds, evaluation deadlines, and
+ordinary evaluation-result storage admission remain separate. Previously
+omitted detail is an elision value — ordinary data
 carrying count, path, and requery identity — never bare truncation; a floor
 hit is counted, never silent. UGLY OUTPUT IS A DEFECT (standing order):
 every agent that meets an unreadable rendered result reports it or files
@@ -465,7 +468,7 @@ writing.
 | base SCI context / turn fork / agent context | THREE THINGS: the cluster's acquired program-only ctx; each turn's fresh generation-aware `sci/fork`; what `/ai` renders into the prompt — which never gates execution (`src/seon/sci/eval.clj`) | "the context" for all three |
 | candidate context | a built context used to test a definition before installing it; `sci/fork` is admissible (copy-on-write Vars) | sandbox ctx, scratch fork |
 | editor, revision, proof (curation) | a revision is ordered form sources as data; a proof is mechanical re-execution on a fresh fork; adoption via `:seon.cluster.run/supersedes` ([PRD](docs/prds/sci-execution-runtime/plan/session-curation-prd-2026-08-04.md)) | curator, repair agent |
-| render profile | the database-derived consumer fit policy applied by the one `seon.print/fit` owner (`resources/seon/schemas/seon.render.profile.edn` ↔ `src/seon/print.cljc`) | cap, window |
+| render profile | database-derived presentation identity and composition; size fields remain descriptive while rendering limits are disabled (`resources/seon/schemas/seon.render.profile.edn` ↔ `src/seon/print.cljc`) | cap, window |
 | elision value | ordinary data describing omitted count, path, next offset, and requery identity (`resources/seon/schemas/seon.print.edn` ↔ `src/seon/print.cljc`) | ellipsis, truncation marker |
 | `:seon.fn/external-sink`, `:seon.fn/projection-boundary` | queryable program-graph leaf facts; `seon.fn/output-path-report` derives projected/bypass/unresolved paths (`resources/seon/schemas/seon.fn.edn` ↔ `src/seon/fn.clj`) | sink roster, output allowlist |
 | **[TARGET] root maintenance portfolio** | root's declared scheduled reclamation/inspection/repair tasks ([design](docs/prds/sci-execution-runtime/research/scheduler-mining-and-gc-design-2026-08-04.md)); update this row when the owners land | maintenance daemon |
