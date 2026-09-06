@@ -21,6 +21,7 @@
 (def ^:private namespace-selector
   [:seon.ns/name
    :seon.ns/source
+   :seon.ns/doc
    {:seon.ns/requires [:seon.ns/name]}
    {:seon.ns/aliases
     [:seon.ns.alias/local :seon.ns.alias/target-ns]}])
@@ -328,6 +329,7 @@
                ::read-bounds bounds
                ::namespace-name namespace-name
                ::namespace-source (:seon.ns/source row)
+               ::namespace-doc (:seon.ns/doc row)
                ::distance distance
                ::requires (vec (require-specs row))
                ::functions functions
@@ -566,14 +568,6 @@
   [function]
   (block/surface-id (keyword (:seon.fn/sym function))))
 
-(defn- full-function-html
-  [function]
-  [[:dt {:id (function-id function)
-         :class "seon-namespace-function-name"}
-    [:code (:seon.fn/sym function)]]
-   [:dd {:class "seon-namespace-function-definition"}
-    [:pre [:code (function-source function)]]]])
-
 (defn- compact-function-html
   [function]
   [[:dt {:id (function-id function)
@@ -602,9 +596,10 @@
            (into [:ul] items)])))))
 
 (defn- full-html-view
-  [{::keys [db schema-row-cache namespace-name namespace-source requires
-            functions own-schemas owner-agent-id] :as data}]
+  [{::keys [db schema-row-cache namespace-name namespace-source namespace-doc
+            requires functions own-schemas owner-agent-id] :as data}]
   (let [bounds (::read-bounds data)
+        source-less? (str/blank? namespace-source)
         source (if (str/blank? namespace-source)
                  (pr-str (ns-form namespace-name requires))
                  namespace-source)
@@ -615,19 +610,38 @@
       schema-section
       (into
        [:section {:class "seon-family-entry seon-namespace-entry"}
-        [:h2 [:code (str namespace-name)]]
-        [:pre {:class "seon-namespace-source"} [:code source]]]
+        [:h2 [:code (str namespace-name)]]]
        (cond-> []
+         (first-doc-line namespace-doc)
+         (conj [:p {:class "seon-namespace-description"}
+                (first-doc-line namespace-doc)])
+         (seq requires)
+         (conj [:p {:class "seon-namespace-requires"}
+                "Requires " [:code (pr-str (vec requires))]])
          (seq functions)
          (conj (into [:dl {:class "seon-namespace-definitions"}]
-                     (mapcat full-function-html functions)))
+                     (mapcat compact-function-html functions)))
          (seq own-schemas)
          (conj [:pre {:class "seon-namespace-own-schemas"}
                 [:code (str/join "\n" (map compact-schema-line own-schemas))]])
          schema-section (conj schema-section)
          (and (empty? functions) (empty? own-schemas))
          (conj [:p {:class "seon-namespace-empty"}
-                (empty-text owner-agent-id)]))))))
+                (empty-text owner-agent-id)])
+         true
+         (conj
+          [:details {:class "seon-namespace-source"}
+           [:summary "namespace source"]
+           [:pre [:code source]]
+           (when (and source-less? (seq functions))
+             (into
+              [:div {:class "seon-namespace-member-sources"}]
+              (map (fn [function]
+                     [:details
+                      [:summary [:code (:seon.fn/sym function)]]
+                      [:pre [:code (function-source function)]]])
+                   functions)))])
+         )))))
 
 (defn- compact-html-view
   [{::keys [db schema-row-cache namespace-name requires functions own-schemas

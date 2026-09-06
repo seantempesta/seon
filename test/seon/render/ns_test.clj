@@ -9,6 +9,8 @@
             [malli.registry :as mr]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
+            [seon.print :as print]
+            [seon.render :as render]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.ns :as sut]
@@ -174,6 +176,55 @@
           (is (str/includes? html exact-source))
           (is (str/includes? html "fixture.total/fallback"))
           (is (reader-valid? ai)))))))
+
+(deftest fitted-full-html-leads-with-description-and-function-summaries
+  (support/with-database
+    (fn [connection]
+      (let [namespace-name 'fixture.presentation
+            source (str "(ns fixture.presentation)\n"
+                        (apply str (repeat 4000 "source-body "))
+                        "source-tail-marker")]
+        (install-namespace!
+         connection namespace-name source []
+         [(function-row
+           namespace-name 'useful "(defn useful [value] value)"
+           {:seon.fn/spec "[:=> [:cat :string] :string]"
+            :seon.fn/doc "Return the useful value."})])
+        (db/transact! connection
+                      [{:seon.ns/name namespace-name
+                        :seon.ns/doc
+                        "Useful namespace summary.\n\nLonger stewardship text."}])
+        (let [raw (sut/render-html
+                   (namespace-unit @connection namespace-name 1 100000))
+              raw-html (hiccup/->string raw)
+              profile (assoc (render/agent-render-profile
+                              (support/effective-config))
+                             :seon.render.profile/token-budget 256
+                             :seon.render.profile/max-depth 12
+                             :seon.render.profile/max-children 32
+                             :seon.render.profile/composition :multiline
+                             :seon.print/requery-id
+                             [:seon.ns/name namespace-name])
+              fitted (print/fit
+                      {:seon.print/face :seon.print/projected
+                       :seon.render/output :seon.render/html
+                       :seon.print/value raw}
+                      profile)
+              fitted-html
+              (hiccup/->string
+               (print/emit-hiccup fitted (print/default-options)))]
+          (is (< (.indexOf raw-html "Useful namespace summary.")
+                 (.indexOf raw-html "fixture.presentation/useful")
+                 (.indexOf raw-html "namespace source"))
+              "useful namespace facts precede the source disclosure")
+          (is (and (str/includes? fitted-html "Useful namespace summary.")
+                   (str/includes? fitted-html "fixture.presentation/useful")
+                   (str/includes? fitted-html "Return the useful value."))
+              "the final fitted HTML retains the summary and callable API")
+          (is (and (str/includes? fitted-html "namespace source")
+                   (str/includes? fitted-html "seon-print-html-elision")
+                   (not (str/includes? fitted-html "source-tail-marker")))
+              "source remains inspectable through a bounded disclosure"))))))
 
 (deftest source-less-agent-namespace-routes-to-the-full-stub
   (support/with-database
