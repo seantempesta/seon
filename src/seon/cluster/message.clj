@@ -434,6 +434,25 @@
 ;;; The family default render
 ;;; ---------------------------------------------------------------------------
 
+(defn- agent-reference-id
+  [database reference]
+  (let [entity-id
+        (cond
+          (map? reference)
+          (or (when-let [entry (find reference :seon.cluster.agent/id)]
+                [:seon.cluster.agent/id (val entry)])
+              (:db/id reference))
+
+          :else reference)]
+    (when (and database entity-id)
+      (let [result
+            (db/q '[:find ?id .
+                    :in $ ?agent
+                    :where [?agent :seon.cluster.agent/id ?id]]
+                  database entity-id)]
+        (when-not (:seon.error/kind result)
+          result)))))
+
 (defn render-ai
   "`:seon.render/ai` — one message, as the sentence it was.
 
@@ -449,25 +468,26 @@
   is the same rule the retired prompt prose applied, moved to the
   family that owns the fact.
 
-  The refs pull as `{:db/id N}`, so naming the agents costs one small
-  query against the database value riding on the unit. Nil without one:
-  a unit with no database value cannot name anybody, and a projection
-  with nothing to say says nothing."
+  Render preparation may supply a ref as an entity-id map, identity map, or
+  lookup ref. Naming an agent resolves each shape against the database value
+  riding on the unit. A present ref that does not resolve stays visibly
+  unresolved; only an absent `from` means outside the cluster."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
-  (let [db (get unit :seon.db/db)
+  (let [database (get unit :seon.db/db)
         content (get unit ::content)
-        agent-id (fn [ref]
-                   (when (and db (:db/id ref))
-                     (db/q '[:find ?id .
-                            :in $ ?agent
-                            :where [?agent :seon.cluster.agent/id ?id]]
-                          db (:db/id ref))))]
+        from-ref (get unit ::from)
+        to-ref (get unit ::to)]
     (when content
-      (let [from (agent-id (get unit ::from))
-            to (agent-id (get unit ::to))]
-        (str (if from (str "Agent " from " said") "From outside this cluster")
-             (when to (str " to " to))
+      (let [from (agent-reference-id database from-ref)
+            to (agent-reference-id database to-ref)]
+        (str (cond
+               from (str "Agent " from " said")
+               from-ref (str "An unresolved sender " (pr-str from-ref) " said")
+               :else "From outside this cluster")
+             (cond
+               to (str " to " to)
+               to-ref (str " to unresolved recipient " (pr-str to-ref)))
              ": " content)))))
 
 (defn render-html

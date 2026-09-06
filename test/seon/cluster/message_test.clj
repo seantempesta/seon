@@ -57,6 +57,42 @@
                    {:seon.cluster.agent/id "bob"}])
       (body connection))))
 
+(deftest message-render-resolves-supported-agent-ref-shapes
+  (with-database
+    (fn [connection]
+      (let [database @connection
+            alice-eid (:db/id (db/pull database '[:db/id]
+                                       [:seon.cluster.agent/id "alice"]))]
+        (is (= "Agent alice said to bob: hello"
+               (message/render-ai
+                {:seon.db/db database
+                 :seon.cluster.message/content "hello"
+                 :seon.cluster.message/from
+                 [:seon.cluster.agent/id "alice"]
+                 :seon.cluster.message/to
+                 {:seon.cluster.agent/id "bob"}})))
+        (is (= "Agent alice said to bob: hello"
+               (message/render-ai
+                {:seon.db/db database
+                 :seon.cluster.message/content "hello"
+                 :seon.cluster.message/from {:db/id alice-eid}
+                 :seon.cluster.message/to
+                 [:seon.cluster.agent/id "bob"]})))
+        (is (= "An unresolved sender [:seon.cluster.agent/id \"nobody\"] said to bob: hello"
+               (message/render-ai
+                {:seon.db/db database
+                 :seon.cluster.message/content "hello"
+                 :seon.cluster.message/from
+                 [:seon.cluster.agent/id "nobody"]
+                 :seon.cluster.message/to
+                 [:seon.cluster.agent/id "bob"]})))
+        (is (= "From outside this cluster to bob: hello"
+               (message/render-ai
+                {:seon.db/db database
+                 :seon.cluster.message/content "hello"
+                 :seon.cluster.message/to
+                 [:seon.cluster.agent/id "bob"]})))))))
+
 (defn- ask!
   "Commit one message from OUTSIDE the agent population — a human's.
   No `from`, and no triggering transaction: the head of a chain."
