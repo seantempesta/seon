@@ -1041,6 +1041,19 @@
        [:summary "declared contract and arities"]
        (debug-value-html contract)])))
 
+(defn- debug-renderer-definition
+  [call-entry]
+  (let [source (get-in call-entry
+                       [:seon.render.call/static-evidence
+                        :seon.render.call/declaration-row
+                        :seon.fn/source])]
+    (if (string? source)
+      [:details {:class "seon-debug-function-definition"}
+       [:summary "function definition"]
+       [:pre [:code source]]]
+      [:p {:class "seon-debug-renderer-source-missing"}
+       "No source is stored for this function."])))
+
 (defn- debug-candidate-html
   [debug-request call-entry candidate]
   (let [producer (:seon.render.selection.candidate/producer candidate)]
@@ -1140,7 +1153,9 @@
          (get-in entry [:seon.render.call/static-evidence
                         :seon.render.call/argument]))])
      (when-let [entry (get entries producer)]
-       (debug-renderer-contract entry producer))]))
+       (debug-renderer-contract entry producer))
+     (when-let [entry (get entries producer)]
+       (debug-renderer-definition entry))]))
 
 (defn- debug-experiment-stage-column
   [debug-request output experiment stage]

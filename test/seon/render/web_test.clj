@@ -983,6 +983,25 @@
              (not (str/includes? observation-html "<details open")))
         "structural value and raw datoms are present but collapsed")))
 
+(deftest debug-renderer-definition-uses-retained-program-source
+  (let [render-definition (web-private 'debug-renderer-definition)
+        entry {:seon.render.call/static-evidence
+               {:seon.render.call/declaration-row
+                {:seon.fn/source "(defn render-card [x] (<unsafe> x))"}}}
+        present (hiccup/->string (render-definition entry))
+        missing (hiccup/->string
+                 (render-definition
+                  {:seon.render.call/static-evidence
+                   {:seon.render.call/declaration-row {}}}))]
+    (is (and (str/includes? present "function definition")
+             (str/includes? present
+                            "(defn render-card [x] (&lt;unsafe&gt; x))"))
+        "the stored declaration source is visible and escaped as code")
+    (is (not (str/includes? present "<unsafe>"))
+        "stored source cannot become markup")
+    (is (str/includes? missing "No source is stored for this function.")
+        "an absent stored definition is explicit rather than blank or fabricated")))
+
 (deftest debug-graph-model-preserves-datom-identity-and-direction
   (let [request {:seon.render.debug/viewer-namespace 'my.viewer
                  :seon.render.debug/subject 42
