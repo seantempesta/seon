@@ -32,8 +32,10 @@ Two defects compound:
    `e8d218690` to cut fsync count). A leaf holds up to 4096 datoms; with
    4 MB values a leaf serializes to 0.5–2.0 GiB (`pss/leaf` visible in the
    file header). Every transaction that adds a datom to such a leaf writes
-   a NEW copy of the whole leaf, and with `:keep-history? true` the old
-   copy is retained forever. 142 leaf files of 0.5–2.0 GiB, sizes rising
+   a NEW copy of the whole leaf. Retention of old commit snapshots depends
+   on the garbage collector's `remove-before` policy; `:keep-history? true`
+   additionally preserves temporal datom indices, not every old leaf forever.
+   142 leaf files of 0.5–2.0 GiB, sizes rising
    monotonically per commit, are exactly that sequence.
 
 Growth stopped when the fault storm stopped (log: last `render.data/at`
@@ -87,16 +89,16 @@ for the existing blob publication mechanism. The focused regression
 passed with 9 assertions, including a 100,000-character Throwable message,
 contract schema, and offending arguments under a 4,096-byte fact bound.
 
-The issue remains open pending the file-backed 500-fault growth measurement
-and live reset-boundary verification required above.
+The issue remains open: the file-backed measurement below does not meet the
+original kilobyte-growth target, and the final integrated live proof is owed.
 
 The first combined file-backed gate (`tmp/test-runs/run.7Lwok8`) ran 34 tests
 and 224 assertions with 6 failures and no errors. Its 500-fault measurement
 was 56,381,169 bytes before the first fault, 56,457,046 after one, and
 147,575,152 after 500: 91,193,983 bytes of growth. The largest inline fact was
-658 bytes, so inline bounding worked while the repeated full-evidence blob
-publication still failed the required storage-growth bound. This is measured
-red evidence, not acceptance.
+658 bytes, so inline bounding worked while the store still exceeded the
+required growth bound. This measurement alone does not attribute the excess
+to blob publication. This is measured red evidence, not acceptance.
 
 A second pure probe found a publication edge below the nominal threshold: a
 2,000-character flat error produced 2,289 bytes of admitted `data-content`, a
@@ -105,3 +107,13 @@ stages only when `data-size` exceeds 4,096 would discard the omitted admitted
 evidence. Blob publication must therefore also occur whenever fitted
 `data-edn` differs from `data-content`; short unchanged evidence remains inline
 without a blob.
+
+The corrected same-policy file-backed regression measured 52,750,724 bytes
+after initial collection, 53,263,771 after one fault, and 143,665,214 after
+500. Collection reduced that to 56,242,009 bytes: 3,491,285 bytes of retained
+growth. All 500 facts and the one shared evidence blob remained retrievable;
+the largest inline evidence was 658 characters. Two tests passed with 18
+assertions. The full measurement and reference-code grounding are in the
+[storage audit](../../prds/context-generation/research/form-evaluation-storage-audit-2026-09-05.md).
+This proves bounded inline evidence and working reclamation under the tested
+policy, not flat storage growth or an adequate production collection schedule.
