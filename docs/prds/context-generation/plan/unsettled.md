@@ -8,6 +8,23 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Active goal renewed 2026-09-06: finish the common source → existing reader →
+ordinary SCI execution → stored result → transcript path for AI rendering,
+then compose those blocks into agent context. Completion requires personally
+inspecting live identity, plan, and message data and both output projections;
+useful output, faithful namespace prompts and values, shared result reuse,
+concatenation, and live updates must all be demonstrated. Passing isolated
+tests or improving the preview layout alone is insufficient.
+
+Current implementation work: source submission's transaction namespace check
+and unarmed execution proof; source/result composition research at the existing
+render and prompt boundaries; live HTML/data quality inspection. The prior
+paused submission changes are being reviewed for adoption, not assumed correct.
+Live `pull` confirms Juniper 32120 has its namespace and cluster refs, two
+plan-item reverse refs, a plan anchor, and two sample root messages plus the
+system bootstrap task. The current identity AI output is still comment-wrapped
+data plus source, and message HTML shares a single sentence with its AI output.
+
 Owner transcript direction, 2026-09-06: renderer metadata belongs outside the
 AI output box. That box must show the actual agent-visible text: authored
 thought comments, executable forms, and their actual stored outputs. Use the
