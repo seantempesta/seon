@@ -8,6 +8,29 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Owner cache direction, 2026-09-06: evaluating a renderer for visualization
+must populate the same invocation cache later consumers use. Presentation
+call IDs are not invocation identity. Reuse requires the same actual function,
+output, prepared inputs and program world, with current database read evidence;
+do not scan every retained call to discover a hit. The existing render proc
+owns this cache. Executed source forms use their ordinary stored results;
+opening an inspection must not rerun them. Cross-surface reuse is being
+implemented and must be proven with invocation counts before claiming it.
+
+Owner clarification — all rendering limits, 2026-09-06: disable presentation
+size, depth, child-count, and token-budget enforcement for experimentation.
+Keep measured costs visible; query execution bounds and evaluation deadlines
+are separate from rendering. Do not replace limits with enormous constants.
+Implementation and live verification are in progress, not yet complete.
+
+Owner visualization direction, 2026-09-06: show both `:seon.render/ai` and
+`:seon.render/html` outputs in each ordered renderer comparison. The list runs
+from most specific to least specific and distinguishes the current selection,
+lower-priority alternatives, rejected contracts, and missing projections.
+Derive ordering from the existing selection owner and pair projections through
+declarations or their selection stage, never function-name guesses. Actual
+candidate previews must reuse the existing invocation and retained-call path.
+
 Owner steering — visualization and design iteration, 2026-09-06: stop trying
 to solve namespace rendering or the entire platform before experimentation.
 Implementation agents are paused and their unfinished shared-tree edits are
