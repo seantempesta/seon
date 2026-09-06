@@ -239,3 +239,92 @@ that retracting a run retracts its forms and their evaluations while a context
 contribution cannot silently retain a dangling evaluation ref. Adding
 `eval/form` while retaining all existing run/ordinal/source/ns fields would be
 smaller code churn but would preserve every duplicate and add another one.
+
+## Counterexample: repeated execution of one source
+
+The preceding form-owned evaluation recommendation needs one refinement. Two
+candidate models expose it:
+
+**A. One accreting entity per executed form.** The entity carries run-local
+ordinal, author, parse namespace, source text, refresh lineage, and all eventual
+evaluation metadata. This removes the form/evaluation join and is the simplest
+query shape. It still creates a new entity with the same potentially large
+source string for every automatic refresh. The current refresh writer proves
+this is normal rather than hypothetical: it creates a successor run/form at
+ordinal zero, copies the prior source and namespace, and links `refreshes`
+(`src/seon/cluster/run.clj:1010-1072`). A therefore minimizes entity count and
+joins but not repeated source facts.
+
+**B. Stable source plus run occurrences.** A content-addressed source entity
+owns the exact form-source bytes once. Each run owns ordered component
+occurrences. An occurrence carries ordinal, author, parse namespace and refresh
+lineage and points to the stable source. Its evaluation metadata belongs to
+that occurrence. This adds one ordinary hop when rendering, but a refresh adds
+only a new occurrence, result metadata, and refs; it does not assert the source
+string again. For repeated renderer refreshes, B minimizes actual duplicate
+facts while keeping queries finite and direct.
+
+The literal variant “stable source entity with many evaluation component
+children” is insufficient. The same bytes can execute in different namespaces,
+runs, and ordinals. `result/eN` is scoped to the turn fork and derived from the
+run occurrence's ordinal (`src/seon/sci/eval.clj:533-547`); authorship and
+refresh lineage are likewise occurrence facts. Hanging evaluations directly
+from source would require each evaluation to point back to an occurrence or
+repeat run/ordinal/ns, recreating the mirrors. The useful B shape is therefore
+source → bytes, run → component occurrences, occurrence → component evaluation.
+
+A minimal map is:
+
+```clojure
+{:seon.cluster.run/id "source:…"
+ :seon.cluster.run/reply "<exact submitted reply>"
+ :seon.cluster.run/forms
+ [{:seon.cluster.run.form/id "[:seon.cluster.run.form/id … 0]"
+   :seon.cluster.run.form/ordinal 0
+   :seon.cluster.run.form/author :system
+   :seon.cluster.run.form/ns [:seon.ns/name 'my.agents.juniper]
+   :seon.cluster.run.form/source [:seon.cluster.form.source/digest "sha256…"]
+   :seon.cluster.run.form/refreshes [:seon.cluster.run.form/id "…prior…"]
+   :seon.cluster.run.form/evaluation
+   {:seon.cluster.eval/id "[run-id 0]"
+    :seon.cluster.eval/at #inst "…"
+    :seon.cluster.eval/result-edn "…"
+    :seon.cluster.eval/read-basis-transaction 123
+    :seon.cluster.eval/read-evidence […]}}]}
+
+{:seon.cluster.form.source/digest "sha256…"
+ :seon.cluster.form.source/text "(my.plan/plan \"juniper\")"}
+```
+
+The digest must cover exact UTF-8 form-source bytes only. Namespace must not be
+part of source identity: the same string in two namespaces is the same source
+artifact but two different executions. Conversely, normalized EDN or the read
+form is not an acceptable identity because comments, CRLF, reader spelling and
+repair output are user-visible source. The reader preserves exact event spans,
+and reply planning intentionally attaches surrounding comments/prose to the
+executed form source (`src/seon/cluster/reply.clj:129-159,242-267`). The stable
+source stores that final planned form-source byte string. The run's existing
+raw reply remains the authority for the exact unsplit submission, because no
+set of planned slices should be asked to reconstruct it.
+
+Failure cases make the boundaries concrete:
+
+- Same source bytes, different namespace: share source entity; keep distinct
+  occurrences and evaluations.
+- Renderer emits changed code: new digest/source entity and occurrence;
+  `refreshes` connects occurrences, never source entities.
+- Renderer emits identical code after relevant data changes: reuse source
+  entity; new occurrence/evaluation records the new basis and result.
+- Reader repair changes executable bytes: the repaired planned source gets its
+  own digest; raw reply still records what was submitted.
+- Agent enters the same source as a preview used earlier: share source bytes,
+  preserve separate occurrences with `author :agent` versus `:system`.
+- Agent locks a preview: contribution references that system occurrence's
+  evaluation. Locking does not mint another occurrence or change authorship.
+
+For repeated rendering, B is the better stored model despite its one extra
+join. A is attractive only if source values are assumed tiny and refresh rare,
+which contradicts the active renderer path. B also avoids backlink arrays:
+reverse Datalog traversal answers source-to-occurrences and
+evaluation-to-occurrence. The implementation should not add a source-to-
+evaluations collection or store `result/eN`; both are derivable mirrors.
