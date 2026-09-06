@@ -3,6 +3,7 @@
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.agent :as agent]
             [seon.db :as db]
+            [seon.config :as config]
             [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
@@ -65,6 +66,10 @@
 (deftest identity-map-and-omitted-arguments-use-the-same-function
   (with-agent
     (fn [connection]
+      (db/transact! connection
+                    (filterv :seon.call-preparation/key
+                             (:seon.config/initialization
+                              (config/compile-manifest {}))))
       (let [database @connection
             expected (agent/whoami database agent-id)
             context (sci.eval/cluster-ctx database connection)

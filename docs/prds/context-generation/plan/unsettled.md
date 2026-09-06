@@ -1314,3 +1314,12 @@ The previous single-arity identity gate passed 2 tests / 83 assertions; that
 result does not cover the new arity. Context selection transcript projection
 and lock route remain unverified in the browser. Review caught and corrected
 the lock handler's incorrect service connection key before deployment.
+
+Gate `run.GU24ot` completed: 20 tests, 246 assertions, 18 failures and one
+error. Exact selected-evaluation projection passed. The new argless SCI test
+refused zero args; inspection found its fixture omitted the initialization
+facts declaring supplied arguments. The fixture now derives those rows from
+canonical `config/compile-manifest`; re-verification is pending. Transcript
+failures include obsolete token-elision expectations after the owner's removal
+of rendering limits, plus other output expectations still to inspect. Do not
+report this gate green or restore removed limits to satisfy old tests.
