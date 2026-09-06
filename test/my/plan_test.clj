@@ -9,6 +9,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.schema]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
 
 (def ^:private t0-ms 1786500000000)
@@ -184,6 +185,16 @@
               older (:my.plan/older-completions current)
               source (plan/render-plan-ai current)
               ai (plan/format-plan-ai current)
+              evaluated
+              (sci.eval/evaluate
+               {:seon.cluster.run.form/source source
+                :seon.cluster.run.form/ns [:seon.ns/name 'fixture.plan]
+                :seon.cluster.agent/id "alice"
+                :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                :seon.sci.admit/caps
+                (config/result-caps (support/effective-config))
+                :seon.sci.eval/time-limit-ms 5000
+                :seon.config/on-core-error :panic})
               html (plan/render-plan-html current)]
           (testing "the view reconstructs from the current database value"
             (is (= ["open"] (mapv :my.plan.item/id (:my.plan/ready current))))
@@ -196,6 +207,7 @@
             (is (seon.schema/valid-candidate-value? :my.plan/view current))
             (is (str/includes? source "my.plan/format-plan-ai"))
             (is (str/includes? source "my.plan/plan"))
+            (is (= ai (:seon.sci.admit/value evaluated)))
             (is (seon.schema/valid-candidate-value? :seon.render/ai source))
             (is (seon.schema/valid-candidate-value? :seon.render/hiccup html))
             (is (str/includes? ai "Current work"))

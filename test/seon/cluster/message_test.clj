@@ -26,8 +26,10 @@
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
             [seon.cluster.wake :as wake]
+            [seon.config :as config]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
@@ -93,13 +95,32 @@
                  :seon.cluster.message/to
                  [:seon.cluster.agent/id "bob"]})))))))
 
-(deftest message-ai-is-parseable-source-over-the-durable-message
-  (let [source (message/render-ai {:seon.cluster.message/id "message-1"})
-        planned (cluster.loop/planned-sources source 'my.agents.alice 4096)]
-    (is (= 1 (count planned)))
-    (is (= source (:seon.cluster.run.form/source (first planned))))
-    (is (str/includes? source "seon.db/pull"))
-    (is (str/includes? source "seon.cluster.message/format-ai"))))
+(deftest message-ai-source-evaluates-through-the-agent-database
+  (with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.cluster.message/id "message-1"
+         :seon.cluster.message/from [:seon.cluster.agent/id "alice"]
+         :seon.cluster.message/to [:seon.cluster.agent/id "bob"]
+         :seon.cluster.message/content "hello"
+         :seon.cluster.message/at now}])
+      (let [source (message/render-ai {:seon.cluster.message/id "message-1"})
+            planned (cluster.loop/planned-sources source 'my.agents.alice 4096)
+            evaluated
+            (sci.eval/evaluate
+             {:seon.cluster.run.form/source
+              (:seon.cluster.run.form/source (first planned))
+              :seon.cluster.run.form/ns [:seon.ns/name 'my.agents.alice]
+              :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
+              :seon.sci.admit/caps
+              (config/result-caps (test-support/effective-config))
+              :seon.sci.eval/time-limit-ms 5000
+              :seon.config/on-core-error :panic})]
+        (is (= 1 (count planned)))
+        (is (= "Agent alice said to bob: hello"
+               (:seon.sci.admit/value evaluated)))
+        (is (nil? (:seon.cluster.eval/error evaluated)))))))
 
 (deftest message-html-separates-attribution-time-and-authored-content
   (with-database

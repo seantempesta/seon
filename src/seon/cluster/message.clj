@@ -436,7 +436,8 @@
 
 (defn- agent-reference-id
   [database reference]
-  (let [entity-id
+  (or (:seon.cluster.agent/id reference)
+      (let [entity-id
         (cond
           (map? reference)
           (or (when-let [entry (find reference :seon.cluster.agent/id)]
@@ -444,14 +445,14 @@
               (:db/id reference))
 
           :else reference)]
-    (when (and database entity-id)
-      (let [result
-            (db/q '[:find ?id .
-                    :in $ ?agent
-                    :where [?agent :seon.cluster.agent/id ?id]]
-                  database entity-id)]
-        (when-not (:seon.error/kind result)
-          result)))))
+        (when (and database entity-id)
+          (let [result
+                (db/q '[:find ?id .
+                        :in $ ?agent
+                        :where [?agent :seon.cluster.agent/id ?id]]
+                      database entity-id)]
+            (when-not (:seon.error/kind result)
+              result))))))
 
 (defn format-ai
   "Format one message as the terminal sentence it was.
@@ -495,16 +496,14 @@
   (when-let [id (get unit ::id)]
     (pr-str
      (list `format-ai
-           (list 'assoc
-                 (list 'seon.db/pull 'db
-                       '[:seon.cluster.message/id
-                         :seon.cluster.message/content
-                         {:seon.cluster.message/from
-                          [:db/id :seon.cluster.agent/id]}
-                         {:seon.cluster.message/to
-                          [:db/id :seon.cluster.agent/id]}]
-                       [::id id])
-                 :seon.db/db 'db)))))
+           (list 'seon.db/pull
+                 '[:seon.cluster.message/id
+                   :seon.cluster.message/content
+                   {:seon.cluster.message/from
+                    [:db/id :seon.cluster.agent/id]}
+                   {:seon.cluster.message/to
+                    [:db/id :seon.cluster.agent/id]}]
+                 [::id id])))))
 
 (defn render-html
   "`:seon.render/html` — one message, with the same facts as its AI twin."

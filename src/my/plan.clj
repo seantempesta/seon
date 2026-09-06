@@ -842,7 +842,8 @@
   agent. Query or pull `:my.plan.item/agent` and its reverse directly to inspect
   the graph; `seon.db/transact!` creates and updates those ordinary facts."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.cluster.agent/id]
+   [:=> [:catn [:database :seon.db/database-value]
+               [:agent-id :seon.cluster.agent/id]]
     [:or :my.plan/view :seon.error/value]]}
   [database agent-id]
   (let [agent-entity (agent-eid database agent-id)]
@@ -889,6 +890,8 @@
 (defn- item-line
   [item]
   (str (pr-str (:my.plan.item/id item)) ": " (:my.plan.item/title item)
+       (when-let [description (:my.plan.item/description item)]
+         (str " — " description))
        (when-let [expected (:my.plan.item/expected-result item)]
          (str " — expect " expected))))
 
@@ -902,9 +905,11 @@
   "Render source which reads and formats one authored plan item."
   {:malli/schema [:=> [:cat :my.plan.item/item] :seon.render/ai]}
   [item]
-  (pr-str (list `format-item-ai
-                (list 'seon.db/pull 'db item-selector
-                      [:my.plan.item/id (:my.plan.item/id (item-value item))]))))
+  (pr-str
+   (list `format-item-ai
+         (list 'seon.db/pull item-selector
+               [:my.plan.item/id
+                (:my.plan.item/id (item-value item))]))))
 
 (defn render-item-html
   "Render one authored plan item as Hiccup."
@@ -936,7 +941,7 @@
   [items]
   (pr-str
    (list `format-ready-items-ai
-         (list 'seon.db/pull-many 'db item-selector
+         (list 'seon.db/pull-many item-selector
                (mapv (fn [item]
                        [:my.plan.item/id (:my.plan.item/id item)])
                      items)))))
@@ -959,8 +964,11 @@
 (defn- plan-introduction
   []
   (str "Items connect to this agent through :my.plan.item/agent; "
-       ":parent decomposes work, open :needs refs block work, and "
-       ":completed-at presence completes it. These are ordinary facts that "
+       ":my.plan.item/parent decomposes work, open :my.plan.item/needs refs "
+       "block work, and :my.plan.item/completed-at presence completes it. "
+       "For example: (seon.db/transact! [{:db/id "
+       "[:my.plan.item/id \"item-id\"] :my.plan.item/title \"Updated title\"}]). "
+       "These are ordinary facts that "
        "seon.db/q and seon.db/pull read and seon.db/transact! can create or "
        "update; the sections below are derived current state."))
 
@@ -995,7 +1003,8 @@
   [view]
   (pr-str
    (list `format-plan-ai
-         (list `plan 'db (:seon.cluster.agent/id view)))))
+         (list `plan (list 'seon.db/db)
+               (:seon.cluster.agent/id view)))))
 
 (defn- item-list-html
   [title items css-class]
