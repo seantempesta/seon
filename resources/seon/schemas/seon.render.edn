@@ -21,7 +21,31 @@
                [:seon.config/on-core-error :seon.config/on-core-error]
                [:seon.render/ai {:optional true} :qualified-symbol]
                [:seon.render/html {:optional true} :qualified-symbol]
-               [:seon.render/form {:optional true} :qualified-symbol]],
+               [:seon.render/form {:optional true} :qualified-symbol]
+               [:seon.render/selection-inspection {:optional true} [:map]]
+               [:seon.render/retained-calls
+                {:optional true}
+                [:map-of {:gen/return {}}
+                 [:vector :seon.schema/value] [:map]]]
+               [:seon.render/captured-calls
+                {:optional true}
+                :seon.call-preparation/state]
+               [:seon.render/invocations
+                {:optional true}
+                [:map-of {:gen/return {}}
+                 [:vector :seon.schema/value] [:vector [:map]]]]
+               [:seon.render/captured-invocations
+                {:optional true}
+                :seon.call-preparation/state]
+               [:seon.render/candidate-call-ids
+                {:optional true}
+                [:set [:vector :seon.schema/value]]]
+               [:seon.render.call/id
+                {:optional true}
+                [:vector :seon.schema/value]]
+               [:seon.render.call/selected-producer
+                {:optional true}
+                :qualified-symbol]],
               :candidate-request
               [:map
                [:seon.db/db :seon.db/database-value]

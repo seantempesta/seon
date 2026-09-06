@@ -1123,7 +1123,13 @@
         selected (:seon.render.selection/selected selection)
         previews (:seon.render/previews experiment)
         entries (:seon.render/entries experiment)
-        candidates (:seon.render.selection.stage/candidates stage)]
+        candidates (:seon.render.selection.stage/candidates stage)
+        compatible (filterv #(= :compatible
+                                (:seon.render.selection.candidate/status %))
+                            candidates)
+        rejected (filterv #(= :rejected
+                              (:seon.render.selection.candidate/status %))
+                          candidates)]
     [:section {:class "seon-debug-projection-column"}
      [:h4 (if (= output :seon.render/ai) "AI" "HTML")]
      [:p {:class "seon-debug-stage-status"}
@@ -1131,14 +1137,23 @@
      (when (contains? stage :seon.render.selection.stage/value)
        (debug-preview-html output
                            (:seon.render.selection.stage/value stage)))
-     (if (seq candidates)
+     (if (seq compatible)
        (into [:div {:class "seon-debug-candidates"}]
              (map (partial debug-experiment-candidate-html
                            debug-request output selected
                            (:seon.render.selection.stage/status stage)
                            previews entries))
-             candidates)
-       [:p {:class "seon-render-pending"} "No candidate."])
+             compatible)
+       [:p {:class "seon-render-pending"} "No applicable renderer."])
+     (when (seq rejected)
+       [:details {:class "seon-debug-rejected-candidates"}
+        [:summary (str (count rejected) " rejected")]
+        (into [:div {:class "seon-debug-candidates"}]
+              (map (partial debug-experiment-candidate-html
+                            debug-request output selected
+                            (:seon.render.selection.stage/status stage)
+                            previews entries))
+              rejected)])
      (when-let [selection-error (:seon.render.selection.stage/error stage)]
        (debug-value-html selection-error))]))
 
@@ -1171,10 +1186,45 @@
               [:seon.render/ai :seon.render/selection
                :seon.render.selection/stages])))]))
 
+(declare refresh-retained-read-evidence)
+
 (defn- debug-render-experiment
   [render-request output subject]
   (let [request (assoc render-request :seon.render/output output)
-        inspection (render/selection-inspection request)
+        selection-call-id [::inspection-selection subject output]
+        ctx (:seon.sci.eval/ctx request)
+        static-evidence
+        {:seon.render.call/producer 'seon.render/selection-inspection
+         :seon.render.call/argument
+         [(:seon.render/value request) output
+          (some-> (:seon.sci.kernel/program-snapshot ctx) deref)
+          (get (sci.kernel/context-projection ctx)
+               :seon.schema.projection/fingerprint)]}
+        previous (get (:seon.render/retained-calls request) selection-call-id)
+        reusable? (and previous
+                       (= static-evidence
+                          (:seon.render.call/static-evidence previous))
+                       (db/read-evidence-current?
+                        (:seon.db/db request)
+                        (:seon.render.call/read-evidence previous)))
+        captured (atom [])
+        inspection
+        (if reusable?
+          (:seon.render.call/output previous)
+          (binding [db/*read-evidence-sink* captured]
+            (render/selection-inspection request)))
+        selection-entry
+        (if reusable?
+          (update previous :seon.render.call/read-evidence
+                  #(refresh-retained-read-evidence (:seon.db/db request) %))
+          {:seon.render.call/static-evidence static-evidence
+           :seon.render.call/read-evidence
+           (db/read-evidence @captured {:seon.db/retain-read-results? true})
+           :seon.render.call/basis-transaction
+           (db/basis-t (:seon.db/db request))
+           :seon.render.call/output inspection})
+        _ (swap! (:seon.render/captured-calls request)
+                 assoc selection-call-id selection-entry)
         candidates
         (into []
               (comp
@@ -1864,14 +1914,20 @@
                       (filter (fn [[_agent-id stream]]
                                 (unsettled-stream? database stream)))
                       (::streams state))
-        results
-        (into {}
-              (map (fn [registration-key]
-                     [registration-key
-                      (page-refresh state database streams profile
-                                    registration-key derive-all?
-                                    invalidate-calls?)]))
-              watched)
+        [results pass-invocations]
+        (reduce
+         (fn [[results invocations] registration-key]
+           (let [result (page-refresh (assoc state ::invocations invocations)
+                                      database streams profile registration-key
+                                      derive-all? invalidate-calls?)
+                 invocations (if (::retained-only? result)
+                               invocations
+                               (merge invocations
+                                      (:seon.render/captured-invocations
+                                       result)))]
+             [(assoc results registration-key result) invocations]))
+         [{} (if invalidate-calls? {} (::invocations state))]
+         watched)
         paint-results (into {}
                             (remove (comp ::retained-only? val))
                             results)
@@ -1920,14 +1976,8 @@
                   (:seon.render/captured-calls result)))
          (::calls state)
          results)
-        invocations
-        (reduce-kv
-         (fn [retained _registration-key result]
-           (merge retained (:seon.render/captured-invocations result)))
-         (if invalidate-calls? {} (::invocations state))
-         results)
         invocations (select-keys
-                     invocations
+                     pass-invocations
                      (reachable-invocation-keys calls (::ai-calls state)))
         _ (when (or invalidate-calls?
                     (not= packages (::packages state)))
