@@ -12,6 +12,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.core.async.flow :as flow]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -418,7 +419,13 @@
                            "; Consume the preceding result.\n(identity result/e0)"}]
                          (sort-by :seon.cluster.run.form/ordinal sources))
                       "comments and exact forms pass through the ordinary parser")
-                  (is (= [[0 "2"] [1 "2"]] (sort-by first results))
+                  (is (= [[0 {:seon.print/face :seon.print/number
+                              :seon.print/value 2}]
+                          [1 {:seon.print/face :seon.print/number
+                              :seon.print/value 2}]]
+                         (mapv (fn [[ordinal result]]
+                                 [ordinal (edn/read-string result)])
+                               (sort-by first results)))
                       "both ordinary evaluation results settle durably")
                   (is (inst? (:seon.cluster.run/closed-at
                               (db/pull terminal-db

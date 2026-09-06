@@ -207,3 +207,62 @@ This audit supports resuming the slice. A controlled MCP experiment against an
 already armed agent whose namespace is held stable can use the paused seam and
 inspect the returned run through the existing transcript renderers. General
 adoption waits on the namespace authority check and the unarmed positive proof.
+
+## Integration proof — 2026-09-06
+
+Commits `671657d51` and `423d46b1c` complete the one-path integration. The
+first adds `submit-source!`, starts evaluation rows atomically with the
+system-authored run, and compares the parse namespace with the agent's current
+assignment inside Datahike's transaction function. The second makes model
+replies and submitted source share `planned-sources` and `run/plan-digest`.
+
+The focused regression command was:
+
+```bash
+clojure -M:dev:test -e "(require 'clojure.test 'seon.cluster.run-test 'seon.cluster.agent-test) (binding [clojure.test/*report-counters* (ref clojure.test/*initial-report-counters*)] (clojure.test/test-vars [#'seon.cluster.run-test/system-run-refuses-a-concurrent-namespace-reassignment #'seon.cluster.agent-test/system-source-submission-uses-the-ordinary-durable-run]) (let [c @clojure.test/*report-counters*] (prn {:focused-test-counters c}) (shutdown-agents) (System/exit (if (zero? (+ (:fail c) (:error c))) 0 1))))"
+```
+
+It exited zero with `{:test 2, :pass 83, :fail 0, :error 0}`. The source test
+begins with an unarmed agent, lets the existing armer own delivery, evaluates
+through `seon.sci.eval/evaluate`, observes the closed run, and finds no provider
+attempt. The namespace test puts reassignment before `system-run-tx` in one
+transaction; `plan-call` reads that transaction's current database value,
+refuses `:starting-namespace-changed`, and rolls the entire transaction back.
+
+The live proof used a disposable operator root and ordinary boot:
+
+```bash
+mkdir -p tmp/source-submission-live-2026-09-06
+bin/seon --root tmp/source-submission-live-2026-09-06 init
+bin/seon --root tmp/source-submission-live-2026-09-06 start source-proof
+```
+
+Through that cluster's JVM REPL, the proof selected its running instance and
+called `seon.cluster.agent/submit-source!` for `root` with this exact text:
+
+```clojure
+; Read one value.
+(+ 1 1)
+; Consume the preceding result.
+(identity result/e0)
+```
+
+The call returned run id
+`source:51132364-af2c-4ae6-880d-91794c95fd89`. A database query by that id
+returned `closed-at` `2026-09-06T20:49:03Z`, the two exact commented sources at
+ordinals 0 and 1, and these stored evaluation results:
+
+```clojure
+[{:ordinal 0,
+  :result "#:seon.print{:face :seon.print/number, :value 2}"}
+ {:ordinal 1,
+  :result "#:seon.print{:face :seon.print/number, :value 2}"}]
+```
+
+The same query returned `:provider-attempts []`. The stored second value proves
+that the ordinary turn installed `result/e0` before evaluating the second form;
+the closed run and empty attempt set prove that submitted system source settled
+without entering the provider path. An initial inspection requested the
+nonexistent attribute `:seon.cluster.run/disposition` and returned the expected
+typed `:seon.db/invalid-read`; the corrected pull above uses only declared run
+attributes.
