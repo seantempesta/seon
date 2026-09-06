@@ -8,6 +8,29 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Owner direction, 2026-09-06: context discovery must start from the database,
+including the agent entity and its related entities. The plan should introduce
+current work and teach direct queries and transactions over those same facts,
+including creating related data. Inspect and improve `my.plan` in place. Current
+source already declares an optional `:my.plan/anchor` on agent state and
+`:my.plan.item/agent`, `/parent`, and `/needs` refs on items; do not add a
+mirrored plan population merely to make the connection visible. Verify actual
+population, reverse-pull discovery, and direct transaction semantics before
+claiming this works end to end.
+
+The owner rejects hand-written layout as the general solution. The fixed
+three-entry primer below is a return-shape experiment, not the proposed
+composition algorithm. Its latest third form returns thinking conditional on
+the actual plan plus its AI rendering; all three evaluations succeeded, but
+this still does not establish general discovery, ordering, or composition.
+Current ordering is owned by `seon.render.walk/ordered-episode`, while
+`my.plan/render-plan-ai` and `/render-plan-html` manually assemble sections.
+Evaluate recursive rendering of ordinary data and forms through the existing
+selection/floor mechanism; distinguish executable dependencies, explanatory
+ordering, and visual layout rather than assuming one graph order solves all
+three. The Datahike findings are in
+[context-query generation](../research/datahike-context-query-generation-2026-09-06.md).
+
 Temporal teaching experiment, owner discussion 2026-09-06: compare compact
 forms with a useful mix of `pull`, `q`, `since`, `as-of`, and `history` when
 those operations answer a relevant question. Do not require all operations in

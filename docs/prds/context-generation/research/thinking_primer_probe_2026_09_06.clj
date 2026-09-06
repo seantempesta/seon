@@ -26,8 +26,29 @@
    {:seon.render/thinking
     "Use those functions together: derive this agent's plan from its database, then render that value. The result tells us whether there is work to pursue."
     :seon.repl/form
-    (list 'my.plan/render-plan-ai
-          (list 'my.plan/plan (list 'seon.db/db) agent-id))}])
+    (list
+     '(fn [plan]
+        {:seon.render/thinking
+         (cond
+           (:seon.error/kind plan)
+           "The plan query refused. Inspect that error before treating the plan as empty."
+
+           (seq (:my.plan/ready plan))
+           "There is ready work. Start there; follow a plan item's references when you need its supporting context."
+
+           (seq (:my.plan/blocked plan))
+           "The authored work is blocked. Follow its dependency references before adding more work."
+
+           (seq (:my.plan/obligations plan))
+           "The system has derived obligations. Read them before creating a separate authored plan."
+
+           :else
+           "There is no ready or blocked authored work and no derived obligation. An empty plan is a useful answer; look to the triggering message for the next task.")
+         :seon.render/ai
+         (if (:seon.error/kind plan)
+           (pr-str plan)
+           (my.plan/render-plan-ai plan))})
+     (list 'my.plan/plan (list 'seon.db/db) agent-id))}])
 
 (defn- run-example
   [cluster-name agent-id]
