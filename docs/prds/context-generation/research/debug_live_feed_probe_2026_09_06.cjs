@@ -2,6 +2,8 @@
 // Waits for the orchestrator's explicit transaction on its own scratch cluster.
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
+const beforeText = process.argv[4] || 'Before live update';
+const afterText = process.argv[5] || 'After live update';
 (async () => {
   const browser = await chromium.launch({
     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -15,13 +17,13 @@ const assert = require('node:assert/strict');
     let navigations = 0;
     page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigations++; });
     await page.goto(process.argv[2], { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => {
+    await page.waitForFunction(expected => {
       const output = document.querySelector('#debug-html-inspection')?.innerText || '';
-      return (output.includes('Before live update') || output.includes(':seon.error/')) &&
+      return (output.includes(expected) || output.includes(':seon.error/')) &&
         document.querySelector('[data-graph-canvas]')?._cyreg?.cy?.edges().length > 0;
-    });
+    }, beforeText);
     const firstOutput = await page.locator('#debug-html-inspection').innerText();
-    assert(firstOutput.includes('Before live update'), firstOutput);
+    assert(firstOutput.includes(beforeText), firstOutput);
     const before = await page.evaluate(() => {
       const container = document.querySelector('[data-graph-canvas]');
       const cy = container._cyreg.cy;
@@ -31,10 +33,10 @@ const assert = require('node:assert/strict');
         edges: cy.edges().length, nodes: cy.nodes().length };
     });
     console.log(JSON.stringify({ readyForTransaction: true, before }));
-    await page.waitForFunction(() =>
-      document.querySelector('#debug-html-inspection')?.innerText.includes('After live update') &&
+    await page.waitForFunction(expected =>
+      document.querySelector('#debug-html-inspection')?.innerText.includes(expected) &&
       document.querySelector('[data-graph-canvas]')?._cyreg?.cy?.edges().length === 2,
-    null, { timeout: 60000 });
+    afterText, { timeout: 60000 });
     const after = await page.evaluate(() => {
       const container = document.querySelector('[data-graph-canvas]');
       const cy = container._cyreg.cy;

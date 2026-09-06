@@ -17,8 +17,12 @@ The initial attempt exposed selection/invocation using different pulled-ref
 shapes; `f609acb71` fixes the shared argument preparation (76 focused assertions
 passed). Reproducible fixture, exact transaction, and proof limits are in
 [live feed proof](../research/debug-live-feed-proof-2026-09-06.md).
-Renderer-evaluation-only live update and actual producing-form display remain
-open; the complete inspection goal is not yet achieved.
+The subsequent SCI definition-only probe also passed: an MCP redefinition of
+`my.plan/render-item-html` changed the open browser output at the unchanged
+database basis, preserving graph/container/viewport without navigation. The
+original definition was restored immediately from the scratch database's exact
+source. Actual producing-form display and the remaining audited inspection
+requirements remain open; the complete goal is not yet achieved.
 
 Browser checkpoint, 2026-09-06: the live debug page now draws the actual
 34-node/33-reference graph alongside selected output. Browser-discovered

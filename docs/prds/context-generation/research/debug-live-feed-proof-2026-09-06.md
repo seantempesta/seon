@@ -73,7 +73,32 @@ exited successfully. The local screenshot is
 `tmp/debug-live-feed-2026-09-06.png`.
 
 This proves an actual transaction through the existing live feed into a browser
-on an isolated cluster. It does not yet prove a renderer-definition-only
-evaluation triggers the correct output change, nor the producing-form display.
+on an isolated cluster. It does not prove the producing-form display.
 The web/render JVM Vars were hot-reloaded; this is not a claim that an existing
 cluster automatically adopted a new indexed program publication.
+
+## SCI definition-only update
+
+The same browser script accepts optional before/after text arguments. With
+`After live update` and `Live renderer update`, it reached ready state before
+this MCP SCI evaluation in namespace `my.plan`, cluster `lab-browser-0906`:
+
+```clojure
+(defn render-item-html
+  "Render a plan item for the live-update proof."
+  {:malli/schema [:=> [:cat :my.plan.item/item] :seon.render/hiccup]}
+  [item]
+  [:article [:h3 (:my.plan.item/title item)] [:p "Live renderer update"]])
+```
+
+The evaluation returned successfully in 34 ms (host envelope timing). The
+already open browser then displayed the marker with exactly one navigation
+(initial load), no JavaScript errors, the same container and Cytoscape instance,
+and unchanged zoom/pan. Nodes/edges remained 3/2. Database basis stayed
+536870954 and the commit ID stayed unchanged: this was a runtime-definition
+update, not a database transaction.
+
+Before editing, the exact original `:seon.fn/source` was read by function
+identity from the scratch database. It was restored with the same SCI tool
+immediately after the successful browser proof; restoration returned
+successfully in 26 ms. No source file or default-cluster definition was changed.
