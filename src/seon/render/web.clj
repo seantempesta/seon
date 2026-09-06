@@ -795,8 +795,18 @@
         (:seon.render.data/datoms page))]
       (continuation-html debug-request direction page)])])
 
+(defn- debug-program-identity
+  [database ctx]
+  (let [projection (sci.kernel/context-projection ctx)]
+    {:seon.source/digest
+     (db/q '[:find ?digest .
+             :where [_ :seon.source/digest ?digest]]
+           database)
+     :seon.schema.projection/fingerprint
+     (:seon.schema.projection/fingerprint projection)}))
+
 (defn- debug-header-html
-  [debug-request observation acquisition-ms]
+  [debug-request observation acquisition-ms program-identity]
   (hiccup/->string
    [:header {:id "debug-inspection-header" :class "seon-debug-header"}
     [:div
@@ -808,6 +818,13 @@
     [:div
      [:span "snapshot"]
      [:code (pr-str (:seon.render.data/snapshot observation))]]
+    [:div
+     [:span "indexed source digest"]
+     [:code (pr-str (:seon.source/digest program-identity))]]
+    [:div
+     [:span "schema projection fingerprint"]
+     [:code (pr-str
+             (:seon.schema.projection/fingerprint program-identity))]]
     [:div
      [:span "output"]
      [:code (pr-str (:seon.render/output debug-request))]]
@@ -1217,10 +1234,13 @@
                                 (:seon.cluster.agent/id debug-request))]
           (debug-prompt db connection agent-id caps
                         (assoc handle :seon.render/profile profile)))
+        program-identity
+        (debug-program-identity db (:seon.sci.eval/ctx handle))
         page
         (cond->
          {"debug-inspection-header"
-          (debug-header-html debug-request observation acquisition-ms)
+          (debug-header-html debug-request observation acquisition-ms
+                             program-identity)
           "debug-observation"
           (debug-observation-html ref-attributes debug-request observation entity-html
                                   restarted?)

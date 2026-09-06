@@ -740,6 +740,41 @@
         (is (str/includes? body "debug=true")
             "the existing feed receives the experiment request")))))
 
+(deftest debug-header-identifies-the-handed-program-and-projection
+  (support/with-database
+    (fn [connection]
+      (let [ctx (support/fork-cluster-ctx connection)
+            program-identity
+            ((web-private 'debug-program-identity) @connection ctx)
+            projection (sci.kernel/context-projection ctx)
+            header ((web-private 'debug-header-html)
+                    {:seon.render.debug/viewer-namespace 'my.viewer
+                     :seon.render.debug/subject [:my/id "subject"]
+                     :seon.render/output :seon.render/html
+                     :seon.render.web/pull-max-work 40
+                     :seon.render.web/pull-max-results 40
+                     :seon.render.data/max-result-weight 4000}
+                    {:seon.render.data/snapshot
+                     (db/database-value-identity @connection)}
+                    1.0
+                    program-identity)]
+        (is (= (apply str (repeat 64 "0"))
+               (:seon.source/digest program-identity))
+            "the header identity is the digest recorded by this cluster database")
+        (is (= (:seon.schema.projection/fingerprint projection)
+               (:seon.schema.projection/fingerprint program-identity))
+            "the fingerprint comes from the handed SCI context projection")
+        (is (str/includes? header
+                           (str "indexed source digest</span><code>&quot;"
+                                (:seon.source/digest program-identity)
+                                "&quot;"))
+            "the digest is labelled as indexed source, not current loaded code")
+        (is (str/includes?
+             header
+             (str "schema projection fingerprint</span><code>"
+                  (:seon.schema.projection/fingerprint program-identity)))
+            "the exact context projection fingerprint is visible")))))
+
 (deftest debug-datom-links-follow-reference-direction-and-preserve-the-view
   (let [request {:seon.render.debug/viewer-namespace 'my.viewer
                  :seon.render.debug/subject [:my/id "before"]
