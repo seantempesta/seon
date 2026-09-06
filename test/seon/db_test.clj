@@ -472,7 +472,12 @@
      (let [subject [:seon.ns/name 'seon.flow]
            captured (atom [])
            original (binding [db/*read-evidence-sink* captured]
-                      (db/pull @connection '[*] subject))
+                      (db/pull @connection
+                               {:selector '[*]
+                                :eid subject
+                                :max-work 4000
+                                :max-results 4000
+                                :max-result-weight 4000}))
            durable (db/read-evidence @captured)
            process-local
            (db/read-evidence @captured
@@ -494,6 +499,43 @@
                        :seon.ns/doc "semantic-replay-changed"}])
        (is (false? (db/read-evidence-current? @connection process-local))
            "a changed selected value invalidates the retained read")))))
+
+(deftest process-local-replay-declines-unbounded-and-opaque-read-results
+  (test-support/with-database
+   (fn [connection]
+     (let [unbounded-captured (atom [])]
+       (binding [db/*read-evidence-sink* unbounded-captured]
+         (db/q '[:find [?name ...]
+                 :where [_ :seon.ns/name ?name]]
+               @connection))
+       (is (not-any? #(find % :seon.db/read-result)
+                     (db/read-evidence
+                      @unbounded-captured
+                      {:seon.db/retain-read-results? true}))
+           "an unbounded read cannot enter semantic replay")))))
+
+(deftest semantic-replay-declines-opaque-and-lazy-values-without-realizing
+  (let [stabilize @(ns-resolve 'seon.db 'stable-read-result)
+        request {:seon.db/read-operation :q
+                 :seon.db/query-request
+                 {:query '[:find ?value . :in $ ?value]
+                  :args []
+                  :max-work 10
+                  :max-results 10
+                  :max-result-weight 10}}
+        source-touched? (atom false)
+        dangerous (lazy-seq (reset! source-touched? true) [1])]
+    (is (= [true [1 #uuid "00000000-0000-0000-0000-000000000000"]]
+           (stabilize request
+                      (list 1
+                            #uuid "00000000-0000-0000-0000-000000000000")))
+        "a finite counted EDN sequence remains eligible")
+    (is (= [false nil] (stabilize request (Object.)))
+        "an opaque object is not semantic replay evidence")
+    (is (= [false nil] (stabilize request dangerous))
+        "an uncounted sequence is not semantic replay evidence")
+    (is (false? @source-touched?)
+        "declining a lazy value never touches its source")))
 
 (deftest component-expanded-pull-evidence-detects-a-child-only-change
   (test-support/with-database

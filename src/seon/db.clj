@@ -225,11 +225,27 @@
       :seon.db/source-argument-position 0
       :datahike.read/dependency-plan plan})))
 
+(defn- bounded-read-request?
+  [request]
+  (let [bounds (case (:seon.db/read-operation request)
+                 :q (:seon.db/query-request request)
+                 :pull (first (:seon.db/pull-arguments request))
+                 :pull-many (first (:seon.db/pull-arguments request))
+                 :index-page (:seon.db/index-page-options request)
+                 nil)]
+    (and (map? bounds)
+         (pos-int? (:max-result-weight bounds))
+         (or (= :index-page (:seon.db/read-operation request))
+             (and (pos-int? (:max-work bounds))
+                  (pos-int? (:max-results bounds)))))))
+
 (defn- stable-read-result
-  [result]
+  [request result]
   (letfn [(stable [value]
             (cond
-              (or (db.utils/db? value) (connector/connection? value))
+              (or (db.utils/db? value)
+                  (connector/connection? value)
+                  (record? value))
               [false nil]
 
               (map? value)
@@ -258,12 +274,19 @@
                       [true #{}]
                       value)
 
-              (sequential? value)
+              (and (sequential? value) (counted? value))
               (let [children (map stable value)]
                 [(every? first children) (mapv second children)])
 
-              :else [true value]))]
-    (stable result)))
+              (or (nil? value) (boolean? value) (number? value)
+                  (string? value) (keyword? value) (symbol? value)
+                  (char? value) (inst? value) (uuid? value))
+              [true value]
+
+              :else [false nil]))]
+    (if (bounded-read-request? request)
+      (stable result)
+      [false nil])))
 
 (defn- append-query-evidence!
   [request response result]
@@ -420,7 +443,8 @@
            (let [[replayable? stable-result]
                  (when (and (:seon.db/retain-read-results? options)
                             (find entry :seon.db/read-result))
-                   (stable-read-result (:seon.db/read-result entry)))]
+                   (stable-read-result (:seon.db/read-request entry)
+                                       (:seon.db/read-result entry)))]
            (cond->
             {:seon.db/source-argument-position source-position
              :datahike.read/dependency-plan plan
@@ -503,6 +527,7 @@
              (try
                (let [[replayable? result]
                      (stable-read-result
+                      (:seon.db/read-request evidence)
                       (replay-read database (:seon.db/read-request evidence)))]
                  (and replayable?
                       (= (:seon.db/read-result evidence) result)))
