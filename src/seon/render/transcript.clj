@@ -550,9 +550,12 @@
   ([db run-id agent-id limit]
    (history db run-id agent-id limit nil))
   ([db run-id agent-id limit selected-run-id]
-   (let [ids (if selected-run-id
-               (selected-run-entity-ids db selected-run-id limit)
-               (candidate-entity-ids db agent-id limit))
+   (history db run-id agent-id limit selected-run-id nil))
+  ([db run-id agent-id limit selected-run-id selected-evaluations]
+   (let [ids (cond
+               (some? selected-evaluations) {:eval (vec selected-evaluations)}
+               selected-run-id (selected-run-entity-ids db selected-run-id limit)
+               :else (candidate-entity-ids db agent-id limit))
         messages (pulled-many db message-selector (:message ids))
         receipts (pulled-many db receipt-selector (:eval ids))
         inputs (pulled-many db form-selector (:input ids))
@@ -867,12 +870,14 @@
         candidate-limit (long (get-in unit [:seon.sci.admit/caps
                                             :seon.config.eval.result/max-nodes]))
         selected-run-id (::selected-run-id unit)
-        total (if selected-run-id
-                (selected-run-count db selected-run-id candidate-limit)
-                (history-count db agent-id))
+        selected-evaluations (:seon.context.contribution/evaluations unit)
+        total (cond
+                (some? selected-evaluations) (count selected-evaluations)
+                selected-run-id (selected-run-count db selected-run-id candidate-limit)
+                :else (history-count db agent-id))
         entries (if (and db agent-id)
                   (history db (:seon.cluster.run/id unit)
-                           agent-id candidate-limit selected-run-id)
+                           agent-id candidate-limit selected-run-id selected-evaluations)
                   [])
         pinned (into []
                      (comp (filter ::pinned?)

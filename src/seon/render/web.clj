@@ -55,6 +55,7 @@
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
             [seon.config :as config]
+            [seon.context :as context]
             [seon.db :as db]
             [seon.oversight :as oversight]
             [seon.render :as render]
@@ -1312,6 +1313,35 @@
                alternatives)]))
     found-values])))
 
+(defn- debug-context-html
+  [render-request selection source-call]
+  (let [agent-id (:seon.cluster.agent/id render-request)
+        run-id (:seon.render.call/source-run-id source-call)]
+    [:section {:class "seon-debug-found-values"}
+     [:h2 {:class "seon-debug-caption"} "Context selection"]
+     [:p {:class "seon-debug-description"}
+      "Lock an evaluated preview to keep its forms and results in this agent’s context. Stored evaluations are shared by reference; locking does not execute them again."]
+     (when (and agent-id run-id (:seon.render.call/output source-call))
+       [:form {(keyword "data-on:submit")
+               (str "@post('" (route/path ::route/agent-context {:id agent-id})
+                    "', {contentType:'form'})")}
+        [:input {:type "hidden" :name "run" :value run-id}]
+        [:button {:type "submit" :class "seon-bar-send"} "Lock preview into context"]])
+     (cond
+       (:seon.error/kind selection) (debug-value-html selection)
+       (empty? selection) [:p "No previews locked yet."]
+       :else
+       (into [:div]
+             (map
+              (fn [contribution]
+                (let [unit (merge render-request contribution)]
+                  [:article {:class "seon-debug-found-value"}
+                   [:header {:class "seon-debug-value-header"}
+                    [:h3 (str "Block " (inc (:seon.context.contribution/position contribution)))]]
+                   [:pre {:class "seon-debug-candidate-preview"}
+                    (transcript/render-ai unit)]])))
+             selection))]))
+
 (defn- debug-found-value
   [render-request debug-request ref-attributes identity-attributes
    direction datom value]
@@ -1713,6 +1743,7 @@
   [::debug-data
    (select-keys debug-request
                 [:seon.render.debug/subject
+                 :seon.cluster.agent/id
                  :seon.render.data/limit
                  :seon.render.data/max-ref-attributes
                  :seon.render.data/max-result-weight
@@ -1815,6 +1846,9 @@
                       :eids related-eids
                       :max-work (::pull-max-work effective-request)}))]
               {::debug-request effective-request
+               ::context-selection
+               (when-let [agent-id (:seon.cluster.agent/id debug-request)]
+                 (context/selection database agent-id))
                ::observation observation
                ::related-entities
                (if (:seon.error/kind related-values)
@@ -1983,7 +2017,10 @@
           (debug-graph-html debug-request ref-attributes observation)
           "debug-selection" (if experiments
                               (debug-experiments-html debug-request experiments
-                                                      found-values)
+                                                      [:div found-values
+                                                       (debug-context-html render-request
+                                                        (::context-selection debug-data-output)
+                                                        ai-call-entry)])
                               (debug-selection-html debug-request
                                                     render-call-entry))
           (debug-html-id
@@ -3374,6 +3411,26 @@
                (assoc :seon.cluster.message/inbound-content
                       (get params "content"))))))
 
+(defn- context-response
+  [service request]
+  (let [params (decode-form request)
+        connection (:seon.store/connection-object service)
+        result (db/transact!
+                connection
+                {:tx-data
+                 [[:db.fn/call #'context/append-tx
+                   {:seon.cluster.agent/id (get-in request [:path-params :id])
+                    :seon.cluster.run/id (get params "run")
+                    :seon.context.contribution/id (str (random-uuid))}]]
+                 :tx-meta
+                 (inbound-tx-meta @connection
+                                  (:seon.cluster.run/process service)
+                                  (:seon.cluster.agent/id service))})]
+    (if (:seon.error/kind result)
+      {:status 422 :headers {"content-type" "text/plain; charset=utf-8"}
+       :body (pr-str result)}
+      {:status 204 :headers {} :body nil})))
+
 (defn- feed-response
   [service request]
   (feed request
@@ -3512,6 +3569,7 @@
                   ::route/agent #(agent-alias-response service false %)
                   ::route/agent-debug #(agent-alias-response service true %)
                   ::route/agent-message #(inbound-response service %)
+                  ::route/agent-context #(context-response service %)
                   ::route/feed #(feed-response service %)
                   ::route/data #(data-response service %)
                   ::route/css #(static-response "css" %)

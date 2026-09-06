@@ -17,6 +17,9 @@
    ["/agent/{id}/message" {:name ::agent-message
                             :post {:middleware [::same-origin]
                                    :handler ::agent-message}}]
+   ["/agent/{id}/context" {:name ::agent-context
+                          :post {:middleware [::same-origin]
+                                 :handler ::agent-context}}]
    ["/feed/{id}" {:name ::feed
                    :get {:handler ::feed}}]
    ["/data" {:name ::data

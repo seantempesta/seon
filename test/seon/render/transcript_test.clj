@@ -1085,3 +1085,25 @@
     (support/assert-check!
      check
      "Every transcript must preserve time order, totality, and its budget.")))
+
+(deftest selected-evaluations-project-only-their-stored-source-and-result
+  (support/with-database
+   (fn [connection]
+     (seed-populated-history! connection)
+     (let [database @connection
+           evaluation (:db/id (db/pull database [:db/id]
+                                      [:seon.cluster.eval/id "eval-result"]))
+           selected (assoc (unit database 10000)
+                           :seon.context.contribution/evaluations #{evaluation})
+           basis (db/basis-t database)
+           rendered (transcript/render-ai selected)]
+       (is (integer? evaluation) "the selection must identify a real evaluation")
+       (is (str/includes? rendered "(+ 20 22)"))
+       (is (str/includes? rendered "42"))
+       (is (not (str/includes? rendered "Start with the failed deployment.")))
+       (is (not (str/includes? rendered "Repair the owning namespace.")))
+       (is (= rendered (transcript/render-ai selected)))
+       (is (= basis (db/basis-t @connection))
+           "projection neither evaluates the source nor persists a duplicate")
+       (is (= "" (transcript/render-ai
+                   (assoc selected :seon.context.contribution/evaluations #{}))))))))

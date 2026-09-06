@@ -35,10 +35,11 @@ not database facts.
 |---|---|
 | `GET /` | alias to the configured root agent's namespace page |
 | `GET /ns/{namespace}` | canonical namespace page |
-| `GET /ns/{namespace}/debug` | read-only entity/render inspection in that viewing namespace; it does not create a namespace owner |
+| `GET /ns/{namespace}/debug` | entity/render inspection in that viewing namespace; source previews use the existing run execution path, and it does not create a namespace owner |
 | `GET /agent/{id}` | alias to that agent's namespace page |
 | `GET /agent/{id}/debug` | alias to that agent's debug surface |
 | `POST /agent/{id}/message` | same-origin inbound-message commit |
+| `POST /agent/{id}/context` | same-origin append of references to an evaluated preview through `seon.context/append-tx` |
 | `GET /feed/{id}` | the existing Datastar SSE feed; debug requests carry `?debug=true`, viewer, subject, output, bounds, and cursors |
 | `GET /data` | schema/entity `get-in` surface |
 | `GET /css/{*path}`, `GET /js/{*path}` | packaged public resources |
