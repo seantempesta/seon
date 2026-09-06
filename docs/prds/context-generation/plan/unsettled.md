@@ -17,6 +17,20 @@ owns this cache. Executed source forms use their ordinary stored results;
 opening an inspection must not rerun them. Cross-surface reuse is being
 implemented and must be proven with invocation counts before claiming it.
 
+Rendering-limit checkpoint, 2026-09-06: `cc667a426` disables the formatter,
+prompt, and render-admission cuts; `f48d27012` renders all namespace/transcript
+data admitted by their query bounds. Focused admission/print gate: 25 tests,
+111 assertions, zero failures/errors. A live hot-reload probe preserved full
+data under depth/width/string caps of 1 and a two-node cap. The actual
+`/ns/seon.flow/debug` browser now contains both AI and HTML function summaries
+through the final output path (308 ms observed ready time, no JavaScript
+errors); `debug_complete_render_probe_2026_09_06.cjs` preserves the check.
+The page still needs long-line containment, and shared invocation-cache
+behavior is not yet proven. These observations exercise hot-loaded JVM Vars
+on `lab-browser-0906`, not a fresh fork's indexed source. Initial source hook
+publication encountered concurrent initialization lock contention; subsequent
+publication succeeded.
+
 Owner clarification — all rendering limits, 2026-09-06: disable presentation
 size, depth, child-count, and token-budget enforcement for experimentation.
 Keep measured costs visible; query execution bounds and evaluation deadlines
