@@ -52,9 +52,10 @@ const fs = require('node:fs');
     assert.equal(await rootMessageHTML.locator('.seon-message-meta').count(), 1,
       'HTML must expose one message metadata header');
     const messageMeta = await rootMessageHTML.locator('.seon-message-meta').innerText();
-    for (const text of ['Agent root', '→', 'Agent juniper', '#inst']) {
+    for (const text of ['Agent root', '→', 'Agent juniper', '2026-09-06T19:35:00Z']) {
       assert(messageMeta.includes(text), `message metadata must include ${text}`);
     }
+    assert(!messageMeta.includes('#inst'), 'human metadata must omit Clojure literal syntax');
     assert.equal(await rootMessageHTML.locator('.seon-message-content').innerText(),
       'Please make your current plan and the messages you receive easy to understand together. ' +
       'Start by inspecting the data connected to your agent entity.',
