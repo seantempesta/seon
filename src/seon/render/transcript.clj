@@ -697,14 +697,7 @@
           (::output entry)
           (assoc :seon.cluster.eval/output
                  (bounded-scalar unit (::output entry))))
-        result (rendered-family unit entity 2)
-        shown-result
-        (if (and (::read-basis entry)
-                 (seq bounded-result-text)
-                 (str/ends-with? result bounded-result-text))
-          (str (subs result 0 (- (count result) (count bounded-result-text)))
-               "t=" (::read-basis entry) " " bounded-result-text)
-          result)]
+        shown-result (run/render-receipt-ai entity)]
     (str (prompted-source entry)
          (when (seq shown-result) (str "\n" shown-result)))))
 

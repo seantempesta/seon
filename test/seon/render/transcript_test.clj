@@ -9,7 +9,9 @@
             [seon.ai.tokens :as tokens]
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
+            [seon.cluster.run :as run]
             [seon.config :as config]
+            [seon.render :as render]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
@@ -27,6 +29,60 @@
          :seon.config.eval.result/max-string 4096
          :seon.config.eval.result/max-source 1048576
          :seon.config.eval.result/max-nodes 4096))
+
+(declare unit)
+
+(deftest stored-evaluations-are-terminal-transcript-values
+  (support/with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.cluster.agent/id agent-id}
+        {:seon.cluster.run/id "terminal-values"
+         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+         :seon.cluster.run/opened-at (java.util.Date. 0)}
+        {:seon.cluster.run.form/id "terminal-result-form"
+         :seon.cluster.run.form/run [:seon.cluster.run/id "terminal-values"]
+         :seon.cluster.run.form/ordinal 0
+         :seon.cluster.run.form/source "(swap! executions inc)"}
+        {:seon.cluster.eval/id "terminal-result"
+         :seon.cluster.eval/run [:seon.cluster.run/id "terminal-values"]
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/at (java.util.Date. 1)
+         :seon.cluster.eval/read-basis-transaction 17
+         :seon.cluster.eval/output "once\n"
+         :seon.cluster.eval/result-edn "1"}
+        {:seon.cluster.run.form/id "terminal-error-form"
+         :seon.cluster.run.form/run [:seon.cluster.run/id "terminal-values"]
+         :seon.cluster.run.form/ordinal 1
+         :seon.cluster.run.form/source "(throw (Exception. \"source error\"))"}
+        {:seon.cluster.eval/id "terminal-error"
+         :seon.cluster.eval/run [:seon.cluster.run/id "terminal-values"]
+         :seon.cluster.eval/ordinal 1
+         :seon.cluster.eval/at (java.util.Date. 2)
+         :seon.cluster.eval/error "stored error"}])
+      (let [receipt-render run/render-receipt-ai
+            receipt-calls (atom 0)
+            rendered
+            (with-redefs [render/render-call
+                          (fn [_]
+                            (throw (ex-info "stored result rediscovered a renderer" {})))
+                          run/render-receipt-ai
+                          (fn [unit]
+                            (swap! receipt-calls inc)
+                            (receipt-render unit))]
+              (transcript/render-run-ai
+               (assoc (unit @connection 100000)
+                      :seon.cluster.run/id "terminal-values"
+                      :seon.cluster.run/agent
+                      {:seon.cluster.agent/id agent-id})))]
+        (is (= 2 @receipt-calls))
+        (is (str/includes? rendered
+                           "user=> (swap! executions inc)\nonce\n1"))
+        (is (str/includes? rendered
+                           "user=> (throw (Exception. \"source error\"))"))
+        (is (str/includes? rendered "stored error"))
+        (is (not (str/includes? rendered "t=17")))))))
 
 (defn- at
   [offset]
@@ -224,8 +280,8 @@
           (is (str/includes?
                ai
                "Agent transcript-peer said to transcript-agent: Repair the owning namespace."))
-          (is (str/includes? ai "t=41 42")
-              "the receipt's read basis is rendered beside its result")
+          (is (not (str/includes? ai "t=41"))
+              "the receipt's read basis remains metadata, not result text")
           (is (str/includes?
                ai
                "Agent transcript-agent said to transcript-peer: I cannot make the requested edit."))
@@ -238,7 +294,7 @@
                ai
                (str "my.agents.transcript=> ;; calculate the answer\n"
                     "(do (println \"side effect\") (+ 20 22))\n"
-                    "side effect\nt=41 42")))
+                    "side effect\n42")))
           (is (str/includes? ai "waiting for the peer review"))
           (is (str/includes? ai "Execution error (ArithmeticException) at"))
           (is (str/includes? ai "Divide by zero"))
