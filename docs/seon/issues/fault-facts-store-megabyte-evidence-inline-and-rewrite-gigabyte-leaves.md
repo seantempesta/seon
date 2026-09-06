@@ -117,3 +117,14 @@ assertions. The full measurement and reference-code grounding are in the
 [storage audit](../../prds/context-generation/research/form-evaluation-storage-audit-2026-09-05.md).
 This proves bounded inline evidence and working reclamation under the tested
 policy, not flat storage growth or an adequate production collection schedule.
+
+Live checkpoint 2026-09-06: default PID 14798 (started 00:19:25Z) answers MCP.
+One immutable-database observation through `seon.problems` found one fault of
+each signature: `seon.instrument/contract-violated`, message
+`seon.fn/analyze-forms violated its contract (invalid-output): missing required key`,
+and `seon.schedule/settlement-refused`, message
+`The maintenance receipt transaction was refused.` The failed root run is
+`1161c65f-2c79-4949-8fbe-b9c78eedb544`, attributed to the former message.
+These are actual remaining errors; recurrence rate and their underlying causes
+were not established by this single observation. The historical core-fault
+storm must not be declared gone merely because the process is alive.

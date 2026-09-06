@@ -6,6 +6,45 @@ tags: [prd, agent, context, architecture]
 
 # The working edge — context-generation program
 
+## Design-lab planning checkpoint — 2026-09-06
+
+The owner approved the planning approach and requested research agents plus
+a mockup. Research is committed: [graph source review](../research/graph-visualization-source-review-2026-09-05.md)
+(`70ea7a53c`) and [interaction semantics](../research/inspection-interaction-review-2026-09-06.md)
+(`2244b15a4`). Cytoscape 3.30.4 is pinned under `reference-code/cytoscape`.
+The interactive conversation mockup was presented with explicit example data;
+it is not production evidence or approval of every interaction shown.
+
+The implementation dependencies are: correct linked datoms and distinct
+subject/viewer first; one persistent graph of that same bounded observation
+second; same-snapshot multi-subject composition before accumulated expansion;
+candidate source/contracts from actual selection evidence alongside that work.
+Alternative renderer execution remains a separately labelled experiment; the
+mockup's local preview must not become an implicit production invocation.
+
+| Work / uncertainty | Smallest decisive verification | Stop / reuse rule |
+|---|---|---|
+| Reference navigation | One focused case covering outgoing ref, incoming source, attribute identity, scalar non-ref, and retained viewer | No namespace-wide suite; reuse this proof until navigation inputs change. |
+| Unrelated transactions rerender | Diagnose retained evidence; rerun only `unrelated-transaction-reuses-debug-observation-and-render-call` after the owner fix | Current red: observation stays 1, discovery/invocation rise to 2. Do not rerun already-green DB safety tests for an unchanged DB owner. |
+| Useful bounded HTML | Finish the existing preview-focused cases and inspect actual HTML once | Do not rerun the long grammar property while iterating on preview presentation. |
+| Graph identity and lifecycle | One directed multiedge/self-loop specimen; ten model patches, then remove the graph element | One instance, preserved positions, exact qualified attributes, destruction on removal. No new backend or layout benchmark until this passes. |
+| Accumulated exploration | Expand two subjects and transact a connecting ref; assert every returned page has one database identity | Client-only unions fail this requirement. Compose bounded existing observations server-side before claiming live accumulated exploration. |
+| Actual output and updates | One already-open page; selected-data change and rendering-helper change, then restore both | Same captured render-call supplies explanation and output. Measure complete paint, not only loading-shell HTTP latency. |
+
+Current runtime evidence: MCP answers on PID 14798, start
+2026-09-06T00:19:25Z, prepl 55586. Publication succeeded after removing the
+proven stale kondo CLJ cache entry; default was reforked from
+`6a9cb133-e5c9-50d3-ae7c-b373eac32476`. This does not certify the runtime clean:
+MCP reports one `seon.fn/analyze-forms` invalid-output core fault, one
+maintenance settlement refusal, and one failed root run. These are tracked
+in the existing fault-storage issue pending cause inspection; do not start
+another broad repair campaign unless one blocks the decisive UI proof.
+
+Root's last focused verification: DB semantic replay 78/0/0, bounded/opaque
+request refusal 1/0/0, lazy/opaque safety 4/0/0, runtime-evaluation wake 8/0/0;
+web unrelated-transaction reuse 2/2/0. Counts are pass/fail/error, from
+`tmp/design-lab-cache-final.log`; the web cache is explicitly still red.
+
 ## Active execution goals — dinner continuation, 2026-09-05
 
 **Owner correction: planning before further implementation (2026-09-05).**
