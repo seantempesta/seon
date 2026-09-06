@@ -104,3 +104,20 @@ The naked empty map is exactly the old misleading face: it neither says the
 cluster is absent nor lists the available cluster names. This proves the
 staleness surface can hide a newly landed agent-facing diagnostic even when
 the operator just reported a successful new-cluster boot.
+
+## Juniper development UI, 2026-09-06
+
+After host reloading the context selection UI in the isolated
+`tmp/juniper-context-live` root, the open debug page showed a typed invalid
+read: `:seon.context.contribution/agent` was absent from the cluster schema.
+The new host code loaded successfully, while the cluster still held its older
+indexed source/schema commit. HTTP 200 did not establish a working page.
+The browser's old numeric subject also resolved to a maintenance schedule
+following an earlier refork; the namespace URL without `subject` correctly
+selects the current owner.
+
+The owner now requires an opted-in dev cluster to retain its agent facts and
+converge functions, schemas, tests, loaded behavior, and UI automatically on
+source publication. Repeated destructive refork is not the remedy. An Astra
+implementation is extending the existing publication/indexing owners; until
+its live proof passes, host reload alone must not be reported as convergence.
