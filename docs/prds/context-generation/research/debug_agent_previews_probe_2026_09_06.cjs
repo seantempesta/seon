@@ -1,6 +1,7 @@
 // Read-only browser proof against the seeded Juniper debug page.
 const {chromium} = require('playwright');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 
 (async () => {
   const browser = await chromium.launch({
@@ -40,6 +41,34 @@ const assert = require('node:assert/strict');
     for (const row of await rows.all()) {
       assert.equal(await row.locator('.seon-debug-projection-column').count(), 2);
     }
+    const rootMessage = rows.filter({hasText:
+      'Please make your current plan and the messages you receive easy to understand together.'});
+    assert.equal(await rootMessage.count(), 1, 'the first root message must identify one row');
+    const rootMessageAI = rootMessage.locator('.seon-debug-projection-column').nth(0);
+    const rootMessageHTML = rootMessage.locator('.seon-debug-projection-column').nth(1);
+    assert((await rootMessageAI.innerText()).includes(
+      'Agent root said to juniper: Please make your current plan and the messages'),
+    'the existing exact AI message sentence must remain visible');
+    assert.equal(await rootMessageHTML.locator('.seon-message-meta').count(), 1,
+      'HTML must expose one message metadata header');
+    const messageMeta = await rootMessageHTML.locator('.seon-message-meta').innerText();
+    for (const text of ['Agent root', '→', 'Agent juniper', '#inst']) {
+      assert(messageMeta.includes(text), `message metadata must include ${text}`);
+    }
+    assert.equal(await rootMessageHTML.locator('.seon-message-content').innerText(),
+      'Please make your current plan and the messages you receive easy to understand together. ' +
+      'Start by inspecting the data connected to your agent entity.',
+    'HTML authored content must be separate and free of attribution prefixes');
+    const plan = rows.filter({hasText: 'Make my plan and messages useful context'}).filter({
+      has: page.locator('.my-plan-item'),
+    }).first();
+    assert.equal(await plan.locator('.my-plan-id').innerText(), '"juniper/understand-context"');
+    assert((await plan.locator('.my-plan-expected').innerText()).startsWith('Expected:'),
+      'the plan criterion must retain its explicit label');
+    const screenshotDirectory = 'tmp/agent-preview-baseline';
+    fs.mkdirSync(screenshotDirectory, {recursive: true});
+    await plan.screenshot({path: `${screenshotDirectory}/juniper-plan.png`});
+    await rootMessage.screenshot({path: `${screenshotDirectory}/juniper-root-message.png`});
     assert(!(await page.locator('#debug-selection').innerText()).includes('No applicable renderer.'));
     const alternatives = page.locator('.seon-debug-alternative-renderers');
     if (await alternatives.count()) {
@@ -53,7 +82,10 @@ const assert = require('node:assert/strict');
     if (process.argv[3]) await page.screenshot({path: process.argv[3], fullPage: false});
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({url: page.url(), readyMs, rowCount, pairedIdentity: true,
-      planAndMessagesVisible: true, applicableAlternativesOnly: true, errors}));
+      planAndMessagesVisible: true, messageHTMLSeparated: true,
+      screenshots: [`${screenshotDirectory}/juniper-plan.png`,
+                    `${screenshotDirectory}/juniper-root-message.png`],
+      applicableAlternativesOnly: true, errors}));
   } finally {
     await browser.close();
   }
