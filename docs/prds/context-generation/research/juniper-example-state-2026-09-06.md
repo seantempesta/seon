@@ -1,3 +1,9 @@
+---
+title: Juniper agent context example
+date: 2026-09-06
+status: in-progress
+---
+
 # Juniper example — 2026-09-06
 
 Owner direction: use the visualization to change stored attributes, values,
@@ -21,7 +27,7 @@ Verified with MCP `seon.db/pull`: the agent, namespace, anchor, two reverse
 plan refs, and both root-sent message refs exist. The debug route returned
 HTTP 200 in 0.477 seconds:
 
-http://127.0.0.1:7773/ns/my.agents.juniper/debug?subject=32455
+[Juniper debug view](http://127.0.0.1:7773/ns/my.agents.juniper/debug?subject=32455)
 
 ## Current composition finding
 
