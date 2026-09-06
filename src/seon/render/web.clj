@@ -1432,8 +1432,48 @@
            [:seon.cluster.run/id
             :seon.cluster.run/closed-at
             :seon.cluster.run/error
+            {:seon.cluster.run/starting-ns [:seon.ns/name]}
             {:seon.cluster.run/agent [:db/id :seon.cluster.agent/id]}]
            [:seon.cluster.run/id run-id]))
+
+(defn- assigned-agent-namespace
+  [database agent-id]
+  (get-in (db/pull database
+                   [{:seon.cluster.agent/namespace [:seon.ns/name]}]
+                   [:seon.cluster.agent/id agent-id])
+          [:seon.cluster.agent/namespace :seon.ns/name]))
+
+(defn- reusable-source-run-id
+  "Return the exact call's stored run when regenerated source still denotes it."
+  [request current source]
+  (let [previous (get (:seon.render/retained-calls request)
+                      (:seon.render.call/id request))
+        run-id (:seon.render.call/source-run-id previous)
+        database (:seon.db/db request)
+        run (when run-id (source-run database run-id))
+        current-namespace
+        (assigned-agent-namespace database (:seon.cluster.agent/id request))
+        starting-namespace
+        (get-in run [:seon.cluster.run/starting-ns :seon.ns/name])]
+    (when (and (= source (:seon.render.call/source previous))
+               (= (get-in current [:seon.render.call/static-evidence
+                                   :seon.render.call/producer])
+                  (get-in previous [:seon.render.call/static-evidence
+                                    :seon.render.call/producer]))
+               (some? (:seon.render/program-snapshot current))
+               (some? (:seon.render/projection current))
+               (identical? (:seon.render/program-snapshot current)
+                           (:seon.render/program-snapshot previous))
+               (identical? (:seon.render/projection current)
+                           (:seon.render/projection previous))
+               (= (:seon.cluster.agent/id request)
+                  (get-in run [:seon.cluster.run/agent
+                               :seon.cluster.agent/id]))
+               (some? current-namespace)
+               (= current-namespace starting-namespace)
+               (db/read-evidence-current?
+                database (evaluation-read-evidence database run-id)))
+      run-id)))
 
 (defn- render-source-call
   "Submit one explicitly authored AI candidate, then derive its stored result.
@@ -1458,7 +1498,9 @@
                                  % call-entry)
                             %)
                          (get @captured-invocations invocation-key))
-        source (:seon.render.call/source invocation)]
+        source (:seon.render.call/source invocation)
+        previous-run-id (when source
+                          (reusable-source-run-id request call-entry source))]
     (if (or (not source) (:seon.render.call/output invocation))
       rendered
       (let [held (when-not (:seon.render.call/source-run-id invocation)
@@ -1466,6 +1508,7 @@
                                    (:seon.cluster.agent/id request)))
             held-run-id (:seon.cluster.run/id held)
             run-id (or (:seon.render.call/source-run-id invocation)
+                       previous-run-id
                        (:seon.render.call/source-run-id request))
             submission
             (when (and (not run-id) (not held-run-id))
@@ -1504,6 +1547,7 @@
             enrich
             (fn [entry]
               (cond-> entry
+                source (assoc :seon.render.call/source source)
                 run-id (assoc :seon.render.call/source-run-id run-id)
                 (and submission-error (not transient-submission-error?))
                 (assoc :seon.render.call/output submission-error)
