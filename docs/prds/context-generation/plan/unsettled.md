@@ -8,6 +8,15 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Selected-value inspection correction: the existing URL cursor now selects the
+input for structural display, actual output and both candidate experiments.
+Previously only the structural display followed that path. Browser proof clicks
+the stored title, observes its scalar floor outputs in AI and HTML, returns to
+the unchanged entity and graph, and verifies a missing-path diagnostic. Basis
+536871436 stayed unchanged. The header labels configured query bounds honestly.
+See `../research/debug_selected_value_probe_2026_09_06.cjs` and the resolved
+`debug-selected-value-keeps-entity-renderers` issue.
+
 Stored-run visualization now uses the existing transcript renderers by default
 (`a34f91ae5`). The focused test passed 89 assertions; a fresh branch's browser
 shows stored forms and results in both AI and HTML without changing its basis
