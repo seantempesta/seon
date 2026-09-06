@@ -25,6 +25,7 @@ const assert = require('node:assert/strict');
     await found.waitFor();
     const foundText = await found.innerText();
     for (const text of ['Make my plan and messages useful context',
+                        'Agent root said to juniper',
                         'Please make your current plan and the messages',
                         'Show Sean which function renders each block']) {
       assert(foundText.includes(text), `found values must preview ${text}`);

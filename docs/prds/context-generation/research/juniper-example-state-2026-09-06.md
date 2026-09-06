@@ -11,7 +11,7 @@ Owner direction: use the visualization to change stored attributes, values,
 refs, and render functions together, then test the assembled context with live
 agents. Existing data placement is not a design constraint.
 
-Live fixture on `lab-run-inspection`:
+Initial fixture on `lab-run-inspection` (before the later fresh-source refork):
 
 - Agent `juniper`, entity 32455, namespace `my.agents.juniper`.
 - Two authored plan items, 32651 and 32652, each referencing Juniper through
@@ -42,5 +42,36 @@ messages as the requested two logical blocks.
 This is evidence about today's implementation, not a ruling to retain the
 model. Next experiment: show a useful current-plan block with a real update
 form, a received-message block, and the exact concatenated AI outputs.
-Do not present the fixture as completion of that renderer work or as an
-actual provider prompt.
+Do not present the fixture as an actual provider prompt.
+
+## Paired preview checkpoint
+
+The current disposable example was reforked after publication and reseeded:
+Juniper is now entity 32120. [Open the current example](http://127.0.0.1:7773/ns/my.agents.juniper/debug?subject=32120).
+`juniper_fixture_2026_09_06.clj` recreates the sample facts; its single seed
+transaction avoids racing the generated bootstrap through `my.plan/plan!`.
+
+The browser proof `debug_agent_previews_probe_2026_09_06.cjs` verifies paired
+identity previews with the actual reusable database query, 12 found-value rows,
+plan and message content, collapsed applicable-only alternatives, and no browser
+errors. A warm pass measured 886 ms; the clean-start pass measured 3907 ms.
+The measurements include browser navigation and assertions, not only rendering.
+
+Identity and web focused checks passed 3 tests/87 assertions and 5 tests/91
+assertions respectively. Schema discovery now excludes schemas without the
+requested renderer before ranking specificity, and hands its explicit projection
+across the schema bridge. Message rendering understands admitted lookup refs,
+preserving root attribution rather than labeling those messages external.
+
+The clean start still records `seon.bootstrap/entry-source` rejecting nil for
+both generated bootstrap runs. This remains unresolved; preview verification
+does not establish a healthy live agent turn. First-party on-demand loading also
+remains an explicit design question in
+[the loader audit](first-party-function-loading-audit-2026-09-06.md).
+
+Result binding isolation was independently verified in two SCI forks using the
+same `result/e314159` symbol: each returned its own value, the base context had
+no binding, and the host JVM namespace was unchanged. Reproduce with
+`result_binding_isolation_2026_09_06.clj`. Ordinary durable result projections
+are evaluation facts (`:seon.cluster.eval/result-edn` / `:result-blob`), not a
+process-global table of result Vars.

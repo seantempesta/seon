@@ -16,8 +16,12 @@ query, agent id, assigned namespace, and cluster before proceeding to distance
 rendering. Data attributes, values, refs, and renderer functions are all open to
 revision during these experiments. The live Juniper fixture and reproducible
 seed are recorded in [the example state](../research/juniper-example-state-2026-09-06.md).
-Implementation and live verification of these preview changes are in progress;
-the existence of seeded facts does not complete their rendering.
+Paired previews are browser-verified on Juniper's current entity 32120: identity
+query/card, plan and message rows, and collapsed applicable alternatives. Focused
+identity and web checks passed. Generated bootstrap still rejects a nil entry at
+`seon.bootstrap/entry-source`; the preview milestone does not establish healthy
+agent execution. First-party loading remains unresolved: see
+[the version-aware loader audit](../research/first-party-function-loading-audit-2026-09-06.md).
 
 Inline definition inspection is verified (`809e726d9`, corrected `93cc6bab0`):
 candidate cards expose the retained SCI function source without leaving the

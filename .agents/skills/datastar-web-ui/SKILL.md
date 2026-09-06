@@ -1,5 +1,7 @@
 ---
 name: datastar-web-ui
+type: skill
+status: active
 description: "Work on Seon's Datastar web renderer, route table, namespace pages, debug pages, SSE feeds, message submission, block morphs, backpressure, layout, or render cost. Load before changing seon.render.web, seon.render.route, or another seon.render.* web owner, and before proposing a broader canvas or control surface."
 ---
 
@@ -63,9 +65,14 @@ Keep AI context and namespace-page HTML on the same visible walk. HTML `page-of`
 `seon.render/walk`, which calls the same neighborhood and assembles the AI projection
 (`src/seon/render/web.clj:300-350,1326-1399`,
 `src/seon/render.clj:147-226`, `src/seon/render/walk.clj:693-876`). The debug
-surface is an inspection of one arbitrary database entity: it shows bounded
-structural floor HTML, the real ordered render selection and candidates, the
-actual selected output, and raw datom evidence. An agent prompt comparison is
+surface inspects one arbitrary database entity. Selected AI and HTML previews
+appear side by side; applicable alternatives appear in a collapsed list in
+priority order. Found datom values also have paired previews, and refs preview
+their connected entities. One evidence-captured `pull-many` acquires these
+entities; previews use the existing render-call and invocation caches
+(`src/seon/render/web.clj:1199-1375`, `:1490-1740`). Absent renderer slots are
+omitted; actual renderer and acquisition errors stay visible. Structural floor
+HTML and raw datoms remain available as evidence. An agent prompt comparison is
 available explicitly with `?prompt=true`; it is not derived by the initial GET
 (`src/seon/render/web.clj:800-1090,2260-2337`). All results use the existing
 render functions, retained-call evidence, revisioned packages, and feed. Do not
