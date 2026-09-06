@@ -62,6 +62,14 @@
   (swap! entered inc)
   (nil? database))
 
+(defn probe-repeated-database
+  "A repeated supplied type cannot identify a partially omitted slot."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.db/database-value] :boolean]}
+  [_first _second]
+  (swap! entered inc)
+  true)
+
 (defn probe-untouched
   "A contracted probe declaring nothing suppliable."
   {:malli/schema [:=> [:cat :string] :string]}
@@ -422,6 +430,7 @@
           'probe-received-connection? #'probe-received-connection?
           'probe-received-both #'probe-received-both
           'probe-nilable-second #'probe-nilable-second
+          'probe-repeated-database #'probe-repeated-database
           'probe-untouched #'probe-untouched
           'probe-current-database #'probe-current-database
           'probe-shortcut #'probe-shortcut
@@ -465,9 +474,8 @@
                             " q)) (outer \"a\"))")))
                "which falsifies any design preparing at one named entrance")))))))
 
-(deftest a-two-slot-arity-derives-one-shorter-shape
-  (testing "ruling 2's all-or-nothing model: the arity minus ALL its slots,
-            never a subset of them"
+(deftest a-two-slot-arity-prepares-only-unique-partial-placements
+  (testing "the cached all-default shape and schema-decided partial calls"
     (test-support/with-database
      (fn [connection]
        (db/transact! connection database-rows)
@@ -477,10 +485,27 @@
                            "seon.call-preparation-test/probe-received-both")]
          (is (= #{1 3} (set (keys (:seon.call-preparation/by-supplied-count
                                    plan))))
-             "3 is the declared arity and 1 its one derived shape; 2 — a
-              single-slot omission — is deliberately not a call shape")
+             "partial placements are decided from values, never enumerated")
          (is (= [true true] (probe ctx "probe-received-both \"a\""))
-             "and the one-argument call receives both declared values"))))))
+             "the one-argument call receives both declared values")
+         (is (= [true true]
+                (sci/eval-string*
+                 ctx
+                 (str "(seon.call-preparation-test/probe-received-both \"a\" "
+                      "(seon.call-preparation-test/probe-current-database))")))
+             "an explicit trailing database survives a leading omission")
+         (reset! entered 0)
+         (let [refusal
+               (sci/eval-string*
+                ctx
+                (str "(seon.call-preparation-test/probe-repeated-database "
+                     "(seon.call-preparation-test/probe-current-database))"))]
+           (is (= :seon.call-preparation/ambiguous-call
+                  (:seon.error/kind refusal)))
+           (is (= #{[0] [1]}
+                  (set (:seon.call-preparation/candidates
+                        (:seon.error/data refusal)))))
+           (is (zero? @entered) "an ambiguous call never enters the body")))))))
 
 (deftest the-leave-off-the-database-shortcut-survives-the-general-planner
   (testing "ruling #41's positional shortcut, decided by the leading slot's
@@ -632,6 +657,19 @@
              current (cp/snapshot @connection acquired-projection)
              invocation-plan
              (cp/plan (get ctx cp/carrier) @connection current "my.plan/plan")
+             target-fingerprint
+             (db/q '[:find ?fingerprint .
+                     :where
+                     [?function :seon.fn/sym "my.plan/plan"]
+                     [?function :seon.fn/arities ?arity]
+                     [?arity :seon.fn.arity/arguments ?argument]
+                     [?argument :seon.fn.argument/index 0]
+                     [?argument :seon.fn.argument/schema ?shape]
+                     [?shape :seon.schema.shape/fingerprint ?fingerprint]]
+                   @connection)
+             default-fingerprint
+             (get-in current [:seon.call-preparation/supplied-defaults
+                              :seon.db/db :seon.call-preparation/shape])
              omitted (try
                        (sci/eval-string* live "(my.plan/plan \"missing\")")
                        (catch Throwable cause cause))
@@ -641,12 +679,17 @@
               (str "(my.plan/plan "
                    "(seon.call-preparation-test/probe-current-database) "
                    "\"missing\")"))]
-         (is (= [0]
-                (mapv :seon.fn.argument/index
-                      (get-in invocation-plan
-                              [:seon.call-preparation/by-supplied-count 1
-                               :seon.call-preparation/inserts])))
-             "the complete indexed contract derives the leading database slot")
+         (is (contains? (:seon.call-preparation/supplied-defaults current)
+                        :seon.db/db)
+             (pr-str (:seon.call-preparation/refusals current)))
+         (is (= default-fingerprint target-fingerprint)
+             (pr-str {:default default-fingerprint :target target-fingerprint}))
+         (let [prepared (cp/prepare current environment invocation-plan
+                                    ["missing"])]
+           (is (= 2 (count prepared)))
+           (is (db/database-value? (first prepared)))
+           (is (= "missing" (second prepared))
+               "an explicit agent wins even when both slots have defaults"))
          (is (= "my.plan/plan" @observed)
              "SCI hands the hook the indexed callee identity")
          (is (not (instance? Throwable omitted))

@@ -819,6 +819,20 @@ and the GIT FRAMING adopted (conversational, owner-ruled):**
   argument-address facts (the verified premise failure: `input-refs`
   is a bare schema-ref set with no address); P12 implementation is the
   next indexing lane after the rename pass.
+  **Amendment, 2026-09-06 (owner's explicit database-omission and
+  caller-wins instruction):** preserve both database and current-agent
+  supplied defaults while accepting `(my.plan/plan "juniper")`. A shorter
+  call may omit some supplied slots when its ordered explicit arguments
+  fit exactly one placement under the declared slot schemas. Multiple
+  valid placements return `:seon.call-preparation/ambiguous-call` before
+  any supplier or callee runs. Existing full-arity calls and the existing
+  leading-database dispatch retain precedence. The planner retains at most
+  two paths per declared-position/supplied-count pair; it never expands
+  every omitted subset. This accretes previously unsupported partial calls
+  and amends the all-or-nothing restriction above. Owner and regression:
+  `src/seon/call_preparation.clj`,
+  `test/seon/call_preparation_test.clj`; causal evidence in
+  [the call-preparation issue](../../../seon/issues/archive/focused-test-projection-omits-sci-source-callees.md).
 - **THE EXCLUSIVE-SWEEP DESIGN IS SEALED (owner, same day):**
   [exclusive-sweep-design-2026-08-05.md](exclusive-sweep-design-2026-08-05.md)
   is ruled with its three core recommendations accepted — Datahike's

@@ -29,15 +29,16 @@
   caller that passes a database value keeps it unchanged through the whole
   call. Elide for current, pass for consistent.
 
-  This namespace is P17 slice S1: the rows, the plan-derivation query, and
-  the cluster-local plan cache. Wiring the hook into
-  `seon.sci.eval/evaluate` and `kernel/invoke` — and the complete argument
-  transformation with its three failure faces — is S2. [[prepare]] here is
-  the composition seam S2 finishes, not the finished behavior matrix."
+  The acquired context installs this hook and its cluster-local plan
+  state. Full arities and the cached all-default shape retain precedence;
+  other shorter calls require a unique placement under the declared slot
+  schemas before any missing value is supplied."
   (:require [clojure.test.check.generators :as gen]
             [datahike.core :as datahike]
+            [malli.core :as m]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.fn.schema-shape :as schema-shape]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -427,7 +428,8 @@
                   (map (fn [[_ candidate]]
                          [(:seon.call-preparation/shape candidate) candidate]))
                   admitted)]
-        {:seon.call-preparation/supplied-defaults admitted
+        {:seon.schema/projection projection
+         :seon.call-preparation/supplied-defaults admitted
          :seon.call-preparation/prepared-symbols
          (prepared-symbols database fingerprint-index)
          :seon.call-preparation/validators
@@ -548,6 +550,35 @@
     [?argument :seon.fn.argument/rest? ?rest?]
     [?argument :seon.fn.argument/schema ?shape]
     [?shape :seon.schema.shape/fingerprint ?fingerprint]])
+
+(def ^:private argument-shape-query
+  '[:find ?order ?index ?form
+    :in $ ?sym
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order ?order]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?argument :seon.fn.argument/index ?index]
+    [?argument :seon.fn.argument/schema ?shape]
+    [?shape :seon.schema.shape/form ?form]])
+
+(defn- argument-validators
+  [database current sym]
+  (let [projection (:seon.schema/projection current)]
+    (into {}
+          (map (fn [[order rows]]
+                 [order
+                  (mapv (fn [[_ _ form]]
+                          (m/validator
+                           (schema/compilable-form
+                            (schema-shape/row-form
+                             {:seon.schema.shape/form form})
+                            (:seon.schema.projection/predicate-functions
+                             projection))
+                           (:seon.schema.projection/compile-options projection)))
+                        (sort-by second rows))]))
+          (group-by first (db/q database argument-shape-query sym)))))
 
 (def ^:private map-entry-query
   ;; REQUIRED keys of a top-level argument map only. Selection joins BOTH the
@@ -706,8 +737,17 @@
                           acc)))
                     {}
                     entries)
-            arity-plans (arity-plan-rows arities slots-by-arity
-                                         entries-by-arity)
+            validators (when (some #(> (count (:slots %)) 1)
+                                   (vals slots-by-arity))
+                         (argument-validators database current sym))
+            arity-plans
+            (mapv (fn [arity]
+                    (cond-> arity
+                      (and (not (:seon.call-preparation/variadic? arity))
+                           (> (count (:seon.call-preparation/slots arity)) 1))
+                      (assoc :seon.call-preparation/argument-validators
+                             (get validators (:seon.fn.arity/order arity)))))
+                  (arity-plan-rows arities slots-by-arity entries-by-arity))
             fixed (remove :seon.call-preparation/variadic? arity-plans)
             exact-by-count
             (reduce (fn [acc arity]
@@ -722,8 +762,8 @@
                     fixed)
             ;; ONE derived shape per fixed arity: the arity minus ALL its
             ;; suppliable slots. No middle-omission combinatorics — a
-            ;; caller either writes the declared shape or the one shorter
-            ;; shape, and nothing in between has a meaning to guess at.
+            ;; Partial omissions are decided from the actual argument values
+            ;; in prepare; they are never enumerated in this count index.
             derived-by-count
             (reduce
              (fn [acc arity]
@@ -928,6 +968,60 @@
         (:seon.call-preparation/omitted dispatch)))
     answer))
 
+(defn- partial-insertions
+  "Keep at most two paths per [declared position, supplied count].
+
+  Matching has polynomial work in the declared arity and actual argument
+  count. Two paths suffice to prove ambiguity; enumerating every omitted
+  subset would make a large ambiguous arity exponential. No supplier runs
+  until the complete placement has been decided."
+  [arity arguments]
+  (let [slots (into {} (map (juxt :seon.fn.argument/index identity))
+                    (:seon.call-preparation/slots arity))
+        validators (:seon.call-preparation/argument-validators arity)
+        supplied (count arguments)
+        retain (fn [states consumed paths]
+                 (update states consumed
+                         #(into [] (take 2) (concat % paths))))]
+    (when (and validators
+               (< supplied (:seon.fn.arity/argument-count arity)))
+      (get
+       (reduce
+        (fn [states [position valid?]]
+          (reduce-kv
+           (fn [next-states consumed paths]
+             (cond-> next-states
+               (and (< consumed supplied) (valid? (nth arguments consumed)))
+               (retain (inc consumed) paths)
+               (get slots position)
+               (retain consumed (mapv #(conj % (get slots position)) paths))))
+           (sorted-map) states))
+        (sorted-map 0 [[]])
+        (map-indexed vector validators))
+       supplied))))
+
+(defn- partial-preparation
+  [plan-value arguments]
+  (let [candidates
+        (into []
+              (comp
+               (mapcat
+                (fn [arity]
+                  (map (fn [inserts]
+                         {:seon.call-preparation/ambiguous? false
+                          :seon.fn.arity/order (:seon.fn.arity/order arity)
+                          :seon.call-preparation/inserts inserts
+                          :seon.call-preparation/entries
+                          (:seon.call-preparation/entries arity)})
+                       (partial-insertions arity arguments))))
+               (take 2))
+              (:seon.call-preparation/arities plan-value))]
+    (case (count candidates)
+      0 nil
+      1 (first candidates)
+      {:seon.call-preparation/ambiguous? true
+       :seon.call-preparation/candidates (candidate-indexes candidates)})))
+
 (defn prepare
   "Prepare one call's arguments against its plan, or refuse as a value.
 
@@ -950,10 +1044,11 @@
     arguments
     (let [sym (:seon.fn/sym plan-value)
           supplied (count arguments)
-          answer (some-> (get (:seon.call-preparation/by-supplied-count
-                               plan-value)
-                              supplied)
-                         (as-> found (decided current found arguments)))]
+          answer (or (some-> (get (:seon.call-preparation/by-supplied-count
+                                   plan-value)
+                                  supplied)
+                             (as-> found (decided current found arguments)))
+                     (partial-preparation plan-value arguments))]
       (cond
         (nil? answer) arguments
 

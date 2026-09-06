@@ -80,6 +80,7 @@
 
  :snapshot
  [:map
+  [:seon.schema/projection {:optional true} :seon.schema/projection]
   [:seon.call-preparation/supplied-defaults
    :seon.call-preparation/supplied-defaults]
   [:seon.call-preparation/validators :seon.call-preparation/validators]
@@ -109,6 +110,7 @@
  :empty? :boolean,
  :supplied-count :int,
  :candidates [:vector [:vector :seon.fn.argument/index]],
+ :argument-validators [:vector :seon.schema/compiled-validator],
 
  :arity-plan
  [:map
@@ -118,6 +120,8 @@
   [:seon.call-preparation/variadic? :seon.call-preparation/variadic?]
   [:seon.call-preparation/rest-slot? :seon.call-preparation/rest-slot?]
   [:seon.call-preparation/slots :seon.call-preparation/slots]
+  [:seon.call-preparation/argument-validators
+   {:optional true} :seon.call-preparation/argument-validators]
   [:seon.call-preparation/entries :seon.call-preparation/slots]],
 
  :arity-plans [:vector :seon.call-preparation/arity-plan],
