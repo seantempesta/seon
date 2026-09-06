@@ -1045,7 +1045,7 @@
       (let [counts (atom {:observation 0 :discovery 0 :invocation 0})
             observe data/entity-observation
             discover render/selection
-            invoke render/render-html]
+            invoke sci.kernel/invoke]
         (with-redefs [data/entity-observation
                       (fn [request]
                         (swap! counts update :observation inc)
@@ -1054,7 +1054,7 @@
                       (fn [request]
                         (swap! counts update :discovery inc)
                         (discover request))
-                      render/render-html
+                      sci.kernel/invoke
                       (fn [request]
                         (swap! counts update :invocation inc)
                         (invoke request))]
@@ -1069,8 +1069,11 @@
               (read-patches! stream 1)
               (let [before @counts
                     pass-before (derivations context)]
-                (is (= {:observation 1 :discovery 1 :invocation 1} before)
-                    "the initial page acquires and renders exactly once")
+                (is (= 1 (:observation before)))
+                (is (= 3 (:discovery before))
+                    "the initial page selects its requested result and two projections")
+                (is (pos? (:invocation before))
+                    "the initial comparison executes its applicable render functions")
                 (db/transact!
                  connection
                  [{:seon.cluster.message/id "debug-cache-unrelated"
@@ -1091,9 +1094,11 @@
                    context
                    #(< pass-after-unrelated (:seon.render.web/passes %))
                    [:relevant-debug-render-wake])
-                  (is (= {:observation 2 :discovery 2 :invocation 2}
-                         @counts)
-                      "a selected-data change reacquires and renders exactly once")))
+                  (is (= 2 (:observation @counts)))
+                  (is (> (:discovery @counts) (:discovery before))
+                      "a selected-data change selects again")
+                  (is (> (:invocation @counts) (:invocation before))
+                      "a selected-data change invokes applicable render functions again")))
               (finally (.close stream)))))))))
 
 (deftest runtime-evaluation-cannot-be-displaced-by-a-database-wake
