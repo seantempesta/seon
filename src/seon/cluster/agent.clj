@@ -144,13 +144,9 @@
   to query an explicit snapshot.
   Use seon.db/pull when the identity attributes themselves are needed as data."
   {:malli/schema
-   [:function
-    [:=> [:cat]
-     [:or [:maybe :string] :seon.error/value]]
-    [:=> [:cat :seon.cluster.agent/identity-request]
-     [:or [:maybe :string] :seon.error/value]]]}
-  ([] (whoami {}))
-  ([request]
+   [:=> [:cat :seon.cluster.agent/identity-request]
+    [:or [:maybe :string] :seon.error/value]]}
+  [request]
    (let [agent-data (db/pull (:seon.db/db request) identity-selector
                            [:seon.cluster.agent/id (:seon.cluster.agent/id request)])]
      (if (:seon.error/kind agent-data)
@@ -162,7 +158,7 @@
                (get-in agent-data [:seon.cluster.agent/cluster :seon.cluster/name])]
            (str "Agent     " agent-id
                 (when namespace-name (str "\nNamespace " namespace-name))
-                (when cluster-name (str "\nCluster   " cluster-name)))))))))
+                (when cluster-name (str "\nCluster   " cluster-name))))))))
 
 (defn render-identity-ai
   "Render the ordinary query that returns an agent's identity text."

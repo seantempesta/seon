@@ -106,10 +106,8 @@
                 :seon.config/on-core-error :panic
                 :seon.cluster.run.form/source source
                 :seon.cluster.run.form/ns [:seon.ns/name namespace-name]}))]
-        (is (= [0 1] (mapv :seon.fn.arity/argument-count arities))
-            "indexing retains both declared arities instead of flattening them")
-        (is (= 2 (count (set (map :seon.fn.arity/input arities))))
-            "each arity has its own input contract")
+        (is (= [1] (mapv :seon.fn.arity/argument-count arities))
+            "the argumentless SCI call uses the one declared request-map arity")
         (is (every? :seon.fn.arity/output arities))
         (is (some? live))
         (is (= expected (:seon.sci.admit/value (evaluate "(seon.cluster.agent/whoami)"))))
