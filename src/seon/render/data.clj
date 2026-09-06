@@ -74,6 +74,24 @@
           {:seon.render.data/value value}
           path))
 
+(defn pull-at
+  "Pull one identified entity and return the value at `cursor`.
+
+  A database refusal remains the refusal. A missing path remains the precise
+  `at` refusal; nil is returned only when nil is the value at a present path."
+  {:malli/schema
+   [:=> [:cat :seon.db/pull-selector :seon.db/entity-id
+         :seon.render.data/cursor]
+    [:or :seon.render/value :seon.error/value]]}
+  [selector entity-id cursor]
+  (let [pulled (db/pull selector entity-id)]
+    (if (:seon.error/kind pulled)
+      pulled
+      (let [selected (at pulled cursor)]
+        (if (:seon.error/kind selected)
+          selected
+          (:seon.render.data/value selected))))))
+
 (defn- observation-error [kind message]
   {:seon.error/kind kind :seon.error/message message})
 

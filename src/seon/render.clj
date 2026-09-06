@@ -148,6 +148,8 @@
                               :seon.render.data/total
                               :seon.render/distance
                               :seon.render/profile
+                              :seon.render.value/root
+                              :seon.render.data/cursor
                               :seon.render.walk/attribute
                               :seon.cluster.run/live-processes
                               :seon.ai/partial
@@ -361,11 +363,13 @@
    :seon.render.selection/selected selected})
 
 (defn- floor-producer
-  [output]
+  [request output]
   (case output
     :seon.render/form 'seon.render/render-form
     :seon.render/html 'seon.render.value/render-html
-    'seon.render.value/render-ai))
+    (if (:seon.render.call/source-output? request)
+      'seon.render/render-default-ai-source
+      'seon.render.value/render-ai)))
 
 (defn- explicit-value-stage
   [request output]
@@ -447,7 +451,7 @@
     :explicit-request (explicit-request-stage request output)
     :namespace (namespace-stage request output output-schema)
     :schema (schema-stage request projection value output)
-    :floor (let [selected (floor-producer output)]
+    :floor (let [selected (floor-producer request output)]
              (selected-stage
               (selection-stage :floor :selected
                                [(selection-candidate selected)])
@@ -906,21 +910,48 @@
       [identity-attribute (get entity identity-attribute)]
       (:db/id entity))))
 
+(defn- source-provenance-error
+  [unit]
+  {:seon.error/kind ::missing-source-provenance
+   :seon.error/message
+   "Default AI source requires an entity identity or stored evaluation result reference."
+   :seon.error/diagnostic-layer :render
+   :seon.error/diagnostic-operation 'seon.render/render-form
+   :seon.error/diagnostic-member :seon.render.value/root
+   :seon.error/diagnostic-expected
+   [:or :seon.render.walk/lookup :seon.cluster.eval/result-blob]
+   :seon.error/diagnostic-offending
+   (select-keys unit [:seon.render.value/root
+                      :seon.cluster.eval/result-blob])
+   :seon.error/diagnostic-cause ::missing-source-provenance
+   :seon.error/diagnostic-evidence nil})
+
 (defn render-form
   "Spell the structural read that reproduces one reached database value."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :seon.render/form :seon.error/value]]}
   [unit]
-  (if-let [attribute (:seon.render.walk/attribute unit)]
-    (list 'db/q
-          (list 'quote
-                [:find [(list 'pull '?entity '[*]) '...]
-                 :where ['?entity attribute]])
-          'db)
-    (list 'db/pull
-          'db
-          (list 'quote '[*])
-          (entity-lookup (:seon.db/db unit)
-                         (:seon.render/value unit)))))
+  (let [value (:seon.render/value unit)
+        root (or (:seon.render.value/root unit)
+                 (when (map? value)
+                   (entity-lookup (:seon.db/db unit) value)))
+        cursor (:seon.render.data/cursor unit)
+        path (:seon.render.data/path cursor)]
+    (cond
+      (nil? root) (source-provenance-error unit)
+      (seq path) (list 'seon.render.data/pull-at
+                       (list 'quote '[*]) root cursor)
+      :else (list 'seon.db/pull (list 'quote '[*]) root))))
+
+(defn render-default-ai-source
+  "Return authored source that reproduces a value for terminal rendering."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :string :seon.error/value]]}
+  [unit]
+  (let [form (render-form unit)]
+    (if (:seon.error/kind form)
+      form
+      (pr-str form))))
 
 (defn render-form-value
   "Render one value as the Clojure form that reads it."
