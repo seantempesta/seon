@@ -59,8 +59,8 @@
                    :run
                    [:map
                     {:seon.db/attributes true,
-                     :seon.render/ai seon.cluster.run/render-ai,
-                     :seon.render/html seon.cluster.run/render-html}
+                     :seon.render/ai seon.render.transcript/render-run-ai,
+                     :seon.render/html seon.render.transcript/render-run-html}
                     [:seon.cluster.run/id :seon.cluster.run/id]
                     [:seon.cluster.run/agent :seon.cluster.run/agent]
                     [:seon.cluster.run/trigger

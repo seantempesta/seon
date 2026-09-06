@@ -14,6 +14,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.context :as context]
             [seon.cluster.run :as run]
+            [seon.error :as error]
             [seon.print :as print]
             [seon.render :as render]
             [seon.render.agent :as agent]
@@ -291,7 +292,10 @@
                     :where
                     [?run :seon.cluster.run/id ?run-id]
                     [?form :seon.cluster.run.form/run ?run]
-                    [?form :seon.cluster.run.form/ordinal ?ordinal]]
+                    [?form :seon.cluster.run.form/ordinal ?ordinal]
+                    (not-join [?run ?ordinal]
+                              [?receipt :seon.cluster.eval/run ?run]
+                              [?receipt :seon.cluster.eval/ordinal ?ordinal])]
                   :args [db run-id]
                   :order-by '[?ordinal :asc]
                   :limit bounded-limit}))
@@ -752,9 +756,19 @@
   [unit]
   (let [db (:seon.db/db unit)
         agent-id (:seon.cluster.agent/id unit)
+        selected-run-id (::selected-run-id unit)
         connection (:seon.db/connection unit)]
     (if (and db agent-id)
-      (->> (db/q '[:find [?attempt ...]
+      (->> (if selected-run-id
+            (db/q '[:find [?attempt ...]
+                    :in $ ?run-id
+                    :where
+                    [?run :seon.cluster.run/id ?run-id]
+                    [?attempt :seon.ai.attempt/run ?run]
+                    (or [?attempt :seon.ai.attempt/reasoning]
+                        [?attempt :seon.ai.attempt/reasoning-blob])]
+                  db selected-run-id)
+            (db/q '[:find [?attempt ...]
                    :in $ ?agent-id
                    :where
                    [?agent :seon.cluster.agent/id ?agent-id]
@@ -762,7 +776,7 @@
                    [?attempt :seon.ai.attempt/run ?run]
                    (or [?attempt :seon.ai.attempt/reasoning]
                        [?attempt :seon.ai.attempt/reasoning-blob])]
-                 db agent-id)
+                  db agent-id))
            (pulled-many db reasoning-attempt-selector)
            (keep (fn [attempt]
                    (let [digest (:seon.ai.attempt/reasoning-blob attempt)
@@ -888,12 +902,61 @@
   (let [{::keys [pinned entries elided]} (projection unit)]
     (ai-output pinned entries elided)))
 
+(declare transcript-unit)
+
+(defn- selected-run-identities
+  [unit]
+  (let [db (:seon.db/db unit)
+        agent (:seon.cluster.run/agent unit)
+        agent-ref (if (map? agent) (:db/id agent) agent)
+        supplied-agent-id (when (map? agent) (:seon.cluster.agent/id agent))
+        queried (when (and (nil? supplied-agent-id)
+                           db (integer? agent-ref))
+                  (db/q '[:find ?agent-id .
+                          :in $ ?agent
+                          :where
+                          [?agent :seon.cluster.agent/id ?agent-id]]
+                        db agent-ref))]
+    {::selected-run-id (:seon.cluster.run/id unit)
+     ::selected-agent-id
+     (or supplied-agent-id (when-not (:seon.error/kind queried) queried))
+     ::selected-run-error (when (:seon.error/kind queried) queried)}))
+
+(defn- missing-selected-run
+  [unit identities]
+  (error/diagnostic
+   {:seon.error/kind ::selected-run-unavailable
+    :seon.error/message
+    "The selected run is unavailable because its run, agent, or database identity is missing."
+    :seon.error/diagnostic-layer :render
+    :seon.error/diagnostic-operation 'seon.render.transcript/render-run
+    :seon.error/diagnostic-member :seon.cluster.run/run
+    :seon.error/diagnostic-expected
+    [:seon.db/db :seon.cluster.run/id :seon.cluster.agent/id]
+    :seon.error/diagnostic-offending
+    (select-keys unit [:seon.cluster.run/id :seon.cluster.run/agent])
+    :seon.error/diagnostic-cause ::selected-run-unavailable
+    :seon.error/diagnostic-evidence identities}))
+
 (defn render-run-ai
   "Render a bounded run's stored forms and evaluation results."
-  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :string :seon.error/value]]}
   [unit]
-  (render-ai (assoc unit ::selected-run-id
-                    (:seon.cluster.run/id unit))))
+  (let [{run-id ::selected-run-id agent-id ::selected-agent-id
+         identity-error ::selected-run-error
+         :as identities}
+        (selected-run-identities unit)]
+    (cond
+      identity-error identity-error
+      (and (:seon.db/db unit) run-id agent-id)
+      (let [unit (assoc (transcript-unit
+                         (assoc unit :seon.cluster.agent/id agent-id))
+                        ::selected-run-id run-id)
+            status (run/render-ai unit)
+            transcript (render-ai unit)]
+        (str status (when (seq transcript) (str "\n" transcript))))
+      :else (missing-selected-run unit identities))))
 
 (defn message-form
   "Return the ordinary message read form for one message entity."
@@ -992,10 +1055,23 @@
 
 (defn render-run-html
   "Render a bounded run's stored forms and evaluation results as Hiccup."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :seon.render/hiccup :seon.error/value]]}
   [unit]
-  (render-html (assoc unit ::selected-run-id
-                      (:seon.cluster.run/id unit))))
+  (let [{run-id ::selected-run-id agent-id ::selected-agent-id
+         identity-error ::selected-run-error
+         :as identities}
+        (selected-run-identities unit)]
+    (cond
+      identity-error identity-error
+      (and (:seon.db/db unit) run-id agent-id)
+      (let [unit (assoc (transcript-unit
+                         (assoc unit :seon.cluster.agent/id agent-id))
+                        ::selected-run-id run-id)]
+        [:section {:class "seon-run-transcript"}
+         (run/render-html unit)
+         (render-html unit)])
+      :else (missing-selected-run unit identities))))
 
 (defn- transcript-unit
   [unit]
