@@ -74,14 +74,16 @@ add a parallel renderer, walk, or delivery path.
 AI and HTML remain distinct projections: AI returns text and HTML returns
 Hiccup. Recursive render-function selection applies at every admitted value depth,
 and selected render-function output is terminal (`src/seon/render.clj:300-334,344-369`).
-Generic preparation enriches elisions and calls the single `seon.print/fit`
-owner (`src/seon/render/value.clj:220-269`;
-`src/seon/print.cljc:669-675,750-785`). The current agent profile derives from
-config facts (`src/seon/render.clj:37-57`; `config/default.edn:60-70`).
-The MCP projection already applies its own explicit `:seon.render.profile/mcp`
-fit profile (`src/seon/cluster.clj:377-389`; `test/seon/cluster/mcp_test.clj:156-171`).
-Operator, runner, and log profiles remain **[TARGET]**; do not add local caps
-for those consumers while their output-floor conversions are pending.
+Rendering limits are disabled for experimentation. `seon.print/fit` preserves
+the admitted node (`src/seon/print.cljc:1000-1011`); do not restore size,
+depth, or child cuts from older examples. Floor preparation uses the carried
+SCI interrupt when bypassing presentation admission caps
+(`src/seon/render/value.clj:207-225`). Prompt construction acquires once at the
+requested distance and retains token measurements without budget enforcement
+(`src/seon/cluster/prompt.clj:174-193`). Query-work bounds, evaluation deadlines,
+and ordinary stored-result admission are separate; existing admission elisions
+remain honest evidence of unavailable data. The owner direction is recorded
+in `docs/prds/context-generation/plan/unsettled.md`.
 
 ## Preserve the live delivery path
 
