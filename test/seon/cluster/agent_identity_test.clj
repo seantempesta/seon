@@ -30,17 +30,39 @@
             entry (agent/identity-form unit)
             result (binding [db/*conn* connection]
                      (eval (:seon.repl/form entry)))]
-        (is (= "; Who am I?" (:seon.repl/comment entry)))
+        (is (= ";; Who am I?" (:seon.repl/comment entry)))
         (is (= {:seon.cluster.agent/id agent-id
                 :seon.cluster.agent/namespace
                 {:seon.ns/name namespace-name}
                 :seon.cluster.agent/cluster
                 {:seon.cluster/name cluster-name}}
                result))
-        (is (= (agent/render-identity-ai unit)
-               (agent/render-identity-ai
-                {:seon.render/value result
-                 :seon.cluster.agent/id agent-id})))))))
+        (is (= (agent/render-identity-text result)
+               (str "Agent \"identity-root\"\n"
+                    "Namespace my.agents.identity-root\n"
+                    "Cluster \"identity-cluster\"")))))))
+
+(deftest identity-ai-source-and-terminal-value-are-separated
+  (let [unit {:seon.cluster.agent/id agent-id}
+        queried {:seon.cluster.agent/id agent-id
+                 :seon.cluster.agent/namespace
+                 {:seon.ns/name namespace-name}
+                 :seon.cluster.agent/cluster
+                 {:seon.cluster/name cluster-name}}
+        source (agent/render-identity-ai unit)]
+    (is (= (str ";; Who am I?\n"
+                (pr-str
+                 (list 'seon.cluster.agent/render-identity-text
+                       (:seon.repl/form (agent/identity-form unit)))))
+           source)
+        "the preview is an authored comment plus one executable query form")
+    (is (= (str "Agent \"identity-root\"\n"
+                "Namespace my.agents.identity-root\n"
+                "Cluster \"identity-cluster\"")
+           (agent/render-identity-text queried))
+        "the terminal formatter returns only the queried identity value")
+    (is (not (str/includes? source "Namespace my.agents.identity-root"))
+        "the source does not fabricate its eventual query result")))
 
 (deftest identity-renders-for-agents-and-humans
   (with-agent
@@ -51,11 +73,9 @@
             html (agent/render-identity-html unit)]
         (testing "AI identity is concise and explicit"
           (is (str/includes? ai (pr-str agent-id)))
-          (is (str/includes? ai (str namespace-name)))
-          (is (str/includes? ai (pr-str cluster-name)))
           (is (str/includes? ai
-                             (pr-str (:seon.repl/form
-                                      (agent/identity-form unit))))))
+                             "seon.cluster.agent/render-identity-text"))
+          (is (str/includes? ai "seon.db/pull")))
         (testing "HTML identity is a labelled card"
           (is (str/includes? (pr-str html) agent-id))
           (is (str/includes? (pr-str html) (str namespace-name)))
@@ -74,5 +94,6 @@
           unit {:seon.db/db database-error
                 :seon.cluster.agent/id agent-id}]
       (is (:seon.error/kind database-error))
-      (is (= database-error (agent/render-identity-ai unit)))
+      (is (str/includes? (agent/render-identity-ai unit)
+                         (pr-str agent-id)))
       (is (= database-error (agent/render-identity-html unit))))))

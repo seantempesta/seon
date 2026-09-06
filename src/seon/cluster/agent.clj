@@ -129,7 +129,7 @@
   "Return the database read that reproduces an agent's identity."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
   [unit]
-  {:seon.repl/comment "; Who am I?"
+  {:seon.repl/comment ";; Who am I?"
    :seon.repl/form
    (list 'seon.db/pull
          (list 'quote identity-selector)
@@ -146,29 +146,30 @@
           (:seon.render/value unit)
           unit)))))
 
+(defn render-identity-text
+  "Format queried agent identity facts as concise plain text."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [agent-data]
+  (let [agent-id (:seon.cluster.agent/id agent-data)
+        namespace-name
+        (get-in agent-data [:seon.cluster.agent/namespace :seon.ns/name])
+        cluster-name
+        (get-in agent-data [:seon.cluster.agent/cluster :seon.cluster/name])]
+    (when agent-id
+      (str "Agent " (pr-str agent-id)
+           (when namespace-name (str "\nNamespace " namespace-name))
+           (when cluster-name (str "\nCluster " (pr-str cluster-name)))))))
+
 (defn render-identity-ai
-  "Render an agent's id, namespace, and cluster as concise identity."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or [:maybe :string] :seon.error/value]]}
+  "Render the ordinary query that returns an agent's identity text."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
-  (let [agent-data (identity-data unit)]
-    (if (:seon.error/kind agent-data)
-      agent-data
-      (let [agent-id (:seon.cluster.agent/id agent-data)
-            namespace-name
-            (get-in agent-data
-                    [:seon.cluster.agent/namespace :seon.ns/name])
-            cluster-name
-            (get-in agent-data
-                    [:seon.cluster.agent/cluster :seon.cluster/name])]
-        (when agent-id
-          (str "; Identity derived from current database facts:\n"
-               "; You are agent " (pr-str agent-id) ".\n"
-               (when namespace-name (str "; Namespace: " namespace-name "\n"))
-               (when cluster-name
-                 (str "; Cluster: " (pr-str cluster-name) "\n"))
-               "; Query this identity again:\n"
-               (pr-str (:seon.repl/form (identity-form unit)))))))))
+  (when (:seon.cluster.agent/id unit)
+    (str (:seon.repl/comment (identity-form unit))
+         "\n"
+         (pr-str
+          (list 'seon.cluster.agent/render-identity-text
+                (:seon.repl/form (identity-form unit)))))))
 
 (defn render-identity-html
   "Render an agent's id, namespace, and cluster as an identity card."
