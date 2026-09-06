@@ -822,16 +822,18 @@
               (:schema database))]
     (hiccup/->string
      [:section {:id "debug-observation" :class "seon-debug-body seon-debug-observation"}
-    [:h2 {:class "seon-debug-caption"} "actual entity value"]
+    [:h2 {:class "seon-debug-caption"} "stored data"]
     (when restarted?
       [:p {:class "seon-debug-notice"}
        "Data changed; pagination restarted at the newest snapshot."])
     (if (:seon.error/kind observation)
       (debug-value-html observation)
-      [:div
+      [:details {:class "seon-debug-structural-detail"}
+       [:summary
+        (str "structural value · eid "
+             (pr-str (:seon.render.data/eid observation)))]
        [:p {:class "seon-debug-fact"}
-        (str "eid " (pr-str (:seon.render.data/eid observation))
-             " · ref attributes probed "
+        (str "ref attributes probed "
              (:seon.render.data/ref-attributes-probed observation))]
        entity-html
        [:details {:class "seon-debug-evidence"}
@@ -871,23 +873,28 @@
      (debug-value-html error))])
 
 (defn- debug-selection-html
-  [selection]
+  [selection declaration-row]
   (hiccup/->string
    [:section {:id "debug-selection"
               :class "seon-debug-body seon-debug-selection"}
-    [:h2 {:class "seon-debug-caption"} "renderer selection"]
+    [:h2 {:class "seon-debug-caption"} "selected renderer"]
     (if-not selection
       [:p {:class "seon-render-pending"}
        "Selection is unavailable because no complete render value was acquired."]
-      [:details {:class "seon-debug-selection-detail"}
-       [:summary
-        [:span "selected "]
-        [:code (pr-str (:seon.render.selection/selected selection))]]
+      [:div
        [:p {:class "seon-debug-selected"}
-        "Ordered precedence and compatible candidates"]
-       (into [:ol {:class "seon-debug-stages"}]
-             (map debug-stage-html)
-             (:seon.render.selection/stages selection))])]))
+        [:code (pr-str (:seon.render.selection/selected selection))]]
+       (when-let [description (:seon.fn/doc declaration-row)]
+         [:p {:class "seon-debug-description"}
+          [:span "description"]
+          " "
+          description])
+       [:details {:class "seon-debug-selection-detail"}
+        [:summary "selection evidence"]
+        [:p "Ordered precedence and compatible candidates"]
+        (into [:ol {:class "seon-debug-stages"}]
+              (map debug-stage-html)
+              (:seon.render.selection/stages selection))]])]))
 
 (defn- debug-output-html
   [debug-request acquisition rendered]
@@ -895,7 +902,7 @@
    [:section {:id (debug-html-id
                    (or (:seon.cluster.agent/id debug-request) "inspection"))
               :class "seon-debug-body seon-debug-body-html"}
-    [:h2 {:class "seon-debug-caption"} "actual selected output"]
+    [:h2 {:class "seon-debug-caption"} "rendered result"]
     (cond
       (:seon.error/kind acquisition)
       [:div
@@ -911,6 +918,22 @@
 
       :else
       (debug-value-html rendered))]))
+
+(defn- debug-experiment-placeholder
+  [output-id]
+  [:div {:class "seon-debug-experiment"}
+   [:section {:id output-id
+              :class "seon-debug-body seon-debug-body-html"}
+    [:p {:class "seon-render-pending"}
+     "Loading the rendered result…"]]
+   [:section {:id "debug-selection"
+              :class "seon-debug-body seon-debug-selection"}
+    [:p {:class "seon-render-pending"}
+     "Loading renderer selection…"]]
+   [:section {:id "debug-observation"
+              :class "seon-debug-body seon-debug-observation"}
+    [:p {:class "seon-render-pending"}
+     "Loading bounded structural observation…"]]])
 
 (defn- debug-data-call-id
   [debug-request]
@@ -1086,9 +1109,12 @@
                  :seon.render/retained-calls retained-calls
                  :seon.render/captured-calls captured-calls))
         rendered (when render-request (render/render-call render-request))
-        selection (get-in @captured-calls
-                          [call-id :seon.render.call/static-evidence
-                           :seon.render/selection])
+        render-static-evidence
+        (get-in @captured-calls
+                [call-id :seon.render.call/static-evidence])
+        selection (:seon.render/selection render-static-evidence)
+        declaration-row
+        (:seon.render.call/declaration-row render-static-evidence)
         prompt-id (str "debug-ai-"
                        (or (:seon.cluster.agent/id debug-request) "inspection"))
         prompt-result
@@ -1103,7 +1129,7 @@
           "debug-observation"
           (debug-observation-html db debug-request observation entity-html
                                   restarted?)
-          "debug-selection" (debug-selection-html selection)
+          "debug-selection" (debug-selection-html selection declaration-row)
           (debug-html-id
            (or (:seon.cluster.agent/id debug-request) "inspection"))
           (debug-output-html debug-request acquisition rendered)}
@@ -2358,19 +2384,7 @@
            [:div [:span "output"]
             [:code (pr-str (:seon.render/output debug-request))]]]
           [:div {:class "seon-debug-grid"}
-           [:div {:class "seon-debug-experiment"}
-            [:section {:id "debug-observation"
-                       :class "seon-debug-body seon-debug-observation"}
-             [:p {:class "seon-render-pending"}
-              "Loading bounded structural observation…"]]
-            [:section {:id "debug-selection"
-                       :class "seon-debug-body seon-debug-selection"}
-             [:p {:class "seon-render-pending"}
-              "Loading renderer selection…"]]
-            [:section {:id output-id
-                       :class "seon-debug-body seon-debug-body-html"}
-             [:p {:class "seon-render-pending"}
-              "Loading the actual selected output…"]]]
+           (debug-experiment-placeholder output-id)
            prompt-section]]]]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}

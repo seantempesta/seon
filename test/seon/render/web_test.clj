@@ -799,6 +799,64 @@
                    (str/includes? href "incomingCursor=")))
           "a new subject never carries snapshot-bound page cursors"))))
 
+(deftest debug-layout-leads-with-the-rendered-result-and-real-description
+  (let [placeholder
+        (hiccup/->string
+         ((web-private 'debug-experiment-placeholder)
+          "debug-html-inspection"))
+        output-position (.indexOf placeholder "id=\"debug-html-inspection\"")
+        selection-position (.indexOf placeholder "id=\"debug-selection\"")
+        observation-position (.indexOf placeholder "id=\"debug-observation\"")
+        selection
+        {:seon.render.selection/selected 'my.render/card
+         :seon.render.selection/stages
+         [{:seon.render.selection.stage/name :namespace
+           :seon.render.selection.stage/status :selected
+           :seon.render.selection.stage/candidates
+           [{:seon.render.selection.candidate/producer 'my.render/card
+             :seon.render.selection.candidate/status :compatible}]}]}
+        selected-html
+        ((web-private 'debug-selection-html)
+         selection
+         {:seon.fn/doc "Render the actual <card>."})
+        undocumented-html
+        ((web-private 'debug-selection-html) selection {})
+        observation-html
+        ((web-private 'debug-observation-html)
+         {:schema {}}
+         {:seon.render.debug/viewer-namespace 'my.viewer}
+         {:seon.render.data/eid 42
+          :seon.render.data/ref-attributes-probed 0
+          :seon.render.data/outgoing
+          {:seon.render.data/datoms []
+           :seon.render.data/complete? true}
+          :seon.render.data/incoming
+          {:seon.render.data/datoms []
+           :seon.render.data/complete? true}
+          :seon.render.data/identities []
+          :seon.render.data/identities-complete? true}
+         [:div "structural marker"]
+         false)]
+    (is (< -1 output-position selection-position observation-position)
+        "the stable feed targets appear in rendered-result-first order")
+    (is (str/includes?
+         selected-html
+         "<p class=\"seon-debug-description\"><span>description</span> Render the actual &lt;card&gt;.</p>")
+        "the selected declaration's actual :seon.fn/doc is the description")
+    (is (and (str/includes? selected-html "selection evidence")
+             (str/includes? selected-html "my.render/card")
+             (str/includes? selected-html "compatible"))
+        "ranked candidate evidence remains available in its disclosure")
+    (is (not (str/includes? undocumented-html "seon-debug-description"))
+        "an absent declaration doc does not invent a description")
+    (is (and (str/includes?
+              observation-html
+              "<details class=\"seon-debug-structural-detail\">")
+             (str/includes? observation-html "structural marker")
+             (str/includes? observation-html "raw datom evidence")
+             (not (str/includes? observation-html "<details open")))
+        "structural value and raw datoms are present but collapsed")))
+
 (deftest canonical-debug-feed-repaints-when-the-subject-changes
   (with-server
     (fn [connection server _context]
