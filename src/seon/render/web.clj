@@ -41,6 +41,7 @@
   `on-open`, and the next commit re-offers the wake."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
+            [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -296,8 +297,13 @@
       [:title (str "seon · " (or viewer-namespace id))]
       [:link {:rel "stylesheet"
               :href (route/path ::route/css {:path "output.css"})}]
+      (when viewer-namespace
+        [:script {:src (route/path ::route/js {:path "cytoscape.min.js"})}])
       [:script {:type "module"
-                :src (route/path ::route/js {:path "datastar.js"})}]]
+                :src (route/path ::route/js {:path "datastar.js"})}]
+      (when viewer-namespace
+        [:script {:type "module"
+                  :src (route/path ::route/js {:path "seon-graph.js"})}])]
      ;; SEMANTIC CLASSES, not utility strings, for the same reason the
      ;; render surfaces already use them (the note above `.seon-problems`
      ;; in `input.css`): the document frame is one thing, it is styled in
@@ -813,14 +819,8 @@
                 (:seon.render.data/max-result-weight debug-request))]]]))
 
 (defn- debug-observation-html
-  [database debug-request observation entity-html restarted?]
-  (let [ref-attributes
-        (into #{}
-              (keep (fn [[attribute definition]]
-                      (when (= :db.type/ref (:db/valueType definition))
-                        attribute)))
-              (:schema database))]
-    (hiccup/->string
+  [ref-attributes debug-request observation entity-html restarted?]
+  (hiccup/->string
      [:section {:id "debug-observation" :class "seon-debug-body seon-debug-observation"}
     [:h2 {:class "seon-debug-caption"} "stored data"]
     (when restarted?
@@ -847,7 +847,94 @@
                    (if (:seon.render.data/identities-complete? observation)
                      "complete"
                      "partial"))]
-         (debug-value-html (:seon.render.data/identities observation))]]])])))
+         (debug-value-html (:seon.render.data/identities observation))]]])]))
+
+(defn- installed-ref-attributes
+  [database]
+  (into #{}
+        (keep (fn [[attribute definition]]
+                (when (= :db.type/ref (:db/valueType definition)) attribute)))
+        (:schema database)))
+
+(defn- graph-node-id
+  [branch eid]
+  (pr-str [branch eid]))
+
+(defn- graph-model
+  [debug-request ref-attributes observation]
+  (when-not (:seon.error/kind observation)
+    (let [snapshot (:seon.render.data/snapshot observation)
+          branch (:db-name snapshot)
+          selected-eid (:seon.render.data/eid observation)
+          selected-id (graph-node-id branch selected-eid)
+          datoms (concat (get-in observation [:seon.render.data/outgoing
+                                              :seon.render.data/datoms])
+                         (get-in observation [:seon.render.data/incoming
+                                              :seon.render.data/datoms]))
+          edges (into (sorted-map)
+                      (keep (fn [{:keys [e a v tx]}]
+                              (when (ref-attributes a)
+                                (let [id (pr-str [branch e a v tx])]
+                                  [id {:data {:id id
+                                              :source (graph-node-id branch e)
+                                              :target (graph-node-id branch v)
+                                              :attribute (str a)}}]))))
+                      datoms)
+          eids (into #{selected-eid}
+                     (mapcat (juxt :e :v))
+                     (filter #(ref-attributes (:a %)) datoms))
+          selected-label
+          (or (some->> (:seon.render.data/identities observation)
+                       (sort-by (juxt (comp str :a) (comp pr-str :v)))
+                       first :v pr-str)
+              (pr-str selected-eid))
+          nodes (mapv (fn [eid]
+                        {:data {:id (graph-node-id branch eid)
+                                :label (if (= eid selected-eid)
+                                         selected-label (pr-str eid))
+                                :href (debug-page-url
+                                       debug-request
+                                       {:seon.render.debug/subject eid
+                                        :seon.render.data/cursor
+                                        (data/parse-cursor nil nil)
+                                        :seon.render.data/outgoing-cursor nil
+                                        :seon.render.data/incoming-cursor nil})}})
+                      (sort-by pr-str eids))]
+      {:elements {:nodes nodes :edges (vec (vals edges))}
+       "seon.graph/selected" selected-id
+       "seon.graph/snapshot" snapshot})))
+
+(defn- json-script-text
+  [value]
+  (str/replace (json/write-str value) "<" "\\u003c"))
+
+(defn- debug-graph-html
+  [debug-request ref-attributes observation]
+  (hiccup/->string
+   (if-let [model (graph-model debug-request ref-attributes observation)]
+     [:section {:id "debug-graph" :class "seon-debug-graph"
+                :data-seon-graph ""}
+      [:h2 {:class "seon-debug-graph-heading"} "reference graph"]
+      [:canvas {:class "seon-debug-graph-canvas"
+                :data-graph-canvas "" :data-ignore-morph ""}]
+      [:script {:type "application/json" :data-graph-model ""}
+       (hiccup/raw (json-script-text model))]
+      [:p {:class "seon-debug-graph-status" :data-graph-detail ""
+           :aria-live "polite"}
+       (str "Loaded " (count (get-in model [:elements :edges]))
+            " reference assertions; outgoing "
+            (if (get-in observation [:seon.render.data/outgoing
+                                     :seon.render.data/complete?])
+              "complete" "partial")
+            ", incoming "
+            (if (get-in observation [:seon.render.data/incoming
+                                     :seon.render.data/complete?])
+              "complete" "partial") ".")]]
+     [:section {:id "debug-graph" :class "seon-debug-graph"}
+      [:h2 {:class "seon-debug-graph-heading"} "reference graph"]
+      [:p {:class "seon-debug-graph-status" :data-graph-detail ""
+           :aria-live "polite"}
+       "Graph unavailable because the bounded observation is unavailable."]])))
 
 (defn- debug-candidate-html
   [candidate]
@@ -933,7 +1020,12 @@
    [:section {:id "debug-observation"
               :class "seon-debug-body seon-debug-observation"}
     [:p {:class "seon-render-pending"}
-     "Loading bounded structural observation…"]]])
+     "Loading bounded structural observation…"]]
+   [:section {:id "debug-graph" :class "seon-debug-graph"}
+    [:h2 {:class "seon-debug-graph-heading"} "reference graph"]
+    [:p {:class "seon-debug-graph-status" :data-graph-detail ""
+         :aria-live "polite"}
+     "Loading bounded reference graph…"]]])
 
 (defn- debug-data-call-id
   [debug-request]
@@ -1050,6 +1142,7 @@
         (acquire-debug-data db debug-request retained-calls)
         debug-request (::debug-request debug-data-output)
         observation (::observation debug-data-output)
+        ref-attributes (installed-ref-attributes db)
         restarted? (::restarted? debug-data-output)
         acquisition (::acquisition debug-data-output)
         acquisition-ms (::acquisition-ms debug-data-output)
@@ -1127,8 +1220,10 @@
          {"debug-inspection-header"
           (debug-header-html debug-request observation acquisition-ms)
           "debug-observation"
-          (debug-observation-html db debug-request observation entity-html
+          (debug-observation-html ref-attributes debug-request observation entity-html
                                   restarted?)
+          "debug-graph"
+          (debug-graph-html debug-request ref-attributes observation)
           "debug-selection" (debug-selection-html selection declaration-row)
           (debug-html-id
            (or (:seon.cluster.agent/id debug-request) "inspection"))

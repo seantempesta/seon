@@ -823,7 +823,7 @@
         ((web-private 'debug-selection-html) selection {})
         observation-html
         ((web-private 'debug-observation-html)
-         {:schema {}}
+         #{}
          {:seon.render.debug/viewer-namespace 'my.viewer}
          {:seon.render.data/eid 42
           :seon.render.data/ref-attributes-probed 0
@@ -856,6 +856,49 @@
              (str/includes? observation-html "raw datom evidence")
              (not (str/includes? observation-html "<details open")))
         "structural value and raw datoms are present but collapsed")))
+
+(deftest debug-graph-model-preserves-datom-identity-and-direction
+  (let [request {:seon.render.debug/viewer-namespace 'my.viewer
+                 :seon.render.debug/subject 42
+                 :seon.render/output :seon.render/html
+                 :seon.render.data/outgoing-cursor {:old true}
+                 :seon.render.data/incoming-cursor {:old true}}
+        observation
+        {:seon.render.data/eid 42
+         :seon.render.data/snapshot
+         {:db-name :fixture :t 10
+          :datahike/commit-id #uuid "00000000-0000-0000-0000-000000000010"}
+         :seon.render.data/identities
+         [{:e 42 :a :fixture/id :v "</script><selected>" :tx 90}]
+         :seon.render.data/outgoing
+         {:seon.render.data/datoms
+          [{:e 42 :a :fixture/ref :v 7 :tx 100 :added true}
+           {:e 42 :a :fixture/scalar :v "plain" :tx 100 :added true}
+           {:e 42 :a :fixture/ref :v 42 :tx 102 :added true}]
+          :seon.render.data/complete? false}
+         :seon.render.data/incoming
+         {:seon.render.data/datoms
+          [{:e 9 :a :fixture/ref :v 42 :tx 101 :added true}
+           {:e 8 :a :fixture/ref :v 42 :tx 103 :added true}]
+          :seon.render.data/complete? true}}
+        model ((web-private 'graph-model) request #{:fixture/ref} observation)
+        nodes (get-in model [:elements :nodes])
+        edges (get-in model [:elements :edges])
+        html ((web-private 'debug-graph-html)
+              request #{:fixture/ref} observation)]
+    (is (= (pr-str [:fixture 42]) (get model "seon.graph/selected")))
+    (is (= #{(pr-str [:fixture 42]) (pr-str [:fixture 7])
+             (pr-str [:fixture 9]) (pr-str [:fixture 8])}
+           (into #{} (map #(get-in % [:data :id])) nodes)))
+    (is (= #{(pr-str [:fixture 42 :fixture/ref 7 100])
+             (pr-str [:fixture 42 :fixture/ref 42 102])
+             (pr-str [:fixture 9 :fixture/ref 42 101])
+             (pr-str [:fixture 8 :fixture/ref 42 103])}
+           (into #{} (map #(get-in % [:data :id])) edges)))
+    (is (every? #(= ":fixture/ref" (get-in % [:data :attribute])) edges))
+    (is (str/includes? html "outgoing partial, incoming complete"))
+    (is (str/includes? html "\\u003c\\/script>\\u003cselected>"))
+    (is (not (str/includes? html "</script><selected>")))))
 
 (deftest canonical-debug-feed-repaints-when-the-subject-changes
   (with-server
