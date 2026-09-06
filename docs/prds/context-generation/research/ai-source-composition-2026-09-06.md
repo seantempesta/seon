@@ -248,3 +248,129 @@ the stored run/evaluation identities retained by this invocation cache. It must
 not call the idle-agent submission seam, open nested runs, or execute one run
 per renderer leaf. That batching and held-run wiring is outside this debug-cache
 slice.
+
+## Stored-history integration audit — 2026-09-06
+
+The current source confirms that the replacement can stay inside the existing
+owners, but it also narrows the earlier batching proposal. `generate-turn`
+currently asks `bootstrap/next-entry` for exactly one dependency-ready entry,
+appends exactly one form, and immediately resumes that ordinal
+(`src/seon/cluster/loop.clj:1909-2002`). `append-generated-call` deliberately
+requires the preceding ordinal to be terminal before accepting its successor
+(`src/seon/cluster/run.clj:810-879`). That serial frontier is the authority.
+Joining multiple apparently independent sources into one append transaction
+would require widening the transaction contract and supplies no necessary
+guarantee. The minimum change preserves one append and one evaluation per
+frontier step; it does **not** mean one run per leaf. Every generated source is
+an ordinal in the already-held run.
+
+### Exact replacement flow
+
+1. `bootstrap/pull-result` continues to acquire and order candidates. Replace
+   `root-candidate` and candidate entry construction with an invocation
+   descriptor carrying the existing render call/invocation identity and the
+   explicitly requested authored AI source. Delete `entry-source`, `entries`,
+   and the `:seon.repl/entry` conversion. The current unconditional conversion
+   is visible at `src/seon/bootstrap.clj:119-132,521-606`.
+2. `next-entry-in` continues to query the held run's stored form/evaluation
+   pairs in ordinal order. Match each settled ordinal to its candidate by the
+   retained invocation identity recorded with the generated form, rather than
+   by source-string equality. Source text is payload, not identity. The next
+   candidate is the first candidate whose declared dependencies are satisfied
+   by those stored admitted result nodes.
+3. `generate-turn` passes that source directly through the existing
+   `planned-sources` reader seam, requires the one-candidate result to contain
+   exactly one parsed form, and hands that exact source/namespace to
+   `append-generated-tx`. The transaction owner and `resume-turn` remain
+   unchanged. A multi-form renderer source is a typed candidate error at this
+   boundary unless the owner separately widens “one candidate = one ordinal”;
+   silently splitting it would destroy the candidate-to-evaluation identity.
+4. Once the generated prefix is terminal, `render.walk/history` queries its
+   stored form/evaluation rows and builds transcript entries with the existing
+   terminal result formatter. Delete `generic-history-entries` and both
+   neighborhood render passes (`src/seon/render/walk.clj:730-829`); they now
+   simulate source plus result from current values and can differ from what ran.
+5. `context-pass` keeps its per-agent retained entries and segment
+   concatenation, but observations come from the stored-history query. Its
+   current retention and concatenation are already isolated in
+   `history-segments`, `history-text`, and `context-pass`
+   (`src/seon/render/web.clj:2447-2505`). It must not call source producers.
+
+### Cached and uncached candidates
+
+An invocation with `:seon.render.call/source-run-id` and a terminal stored run
+is already evaluated. Resolve that run's exact form/evaluation rows and reuse
+their bytes and read evidence. Context inclusion performs zero submission and
+zero evaluation. `render-source-call` already derives terminal output from the
+retained run and enriches the same invocation entry with evaluation read
+evidence (`src/seon/render/web.clj:1438-1515`).
+
+An invocation carrying authored source but no run identity has two distinct
+custody cases. While the agent has a held generated run, it becomes the next
+eligible ordinal in that run through `append-generated-tx`; it must not enter
+`submit-source!`. When no run is held, the explicit debug action may use
+`submit-source!` and retain its returned run identity as it does now. The
+current debug owner already records a held run as
+`:seon.render.call/source-blocked-run-id`; that is an observation, not a queued
+submission. Bootstrap must re-derive eligibility from the held run and the
+candidate invocation, then append at the transaction authority.
+
+If a cached debug run belongs to the same agent but is outside the held
+generated run, its stored transcript entry can be included directly as the
+selected candidate contribution. It cannot masquerade as an ordinal of the
+held run, and it must not be appended or evaluated again merely for display.
+The current schema has no generated-form-to-external-evaluation relation and a
+turn fork does not bind another run's result as its own `result/eN`; therefore a
+later generated source that depends on that symbol cannot yet consume the
+cross-run result. That dependency case is an unresolved provenance gap, not
+permission to re-execute a cached candidate silently.
+
+### Ordering and inclusion
+
+Actual agent history is ordered by its durable run/form ordinals and is always
+included independently of render candidates. Generated context candidates are
+ordered by `pull-result`/`ordered-episode`; only candidates admitted into the
+held run appear, and they appear in that run's ordinal order after settlement.
+A debug preview is not history merely because it has a terminal system run.
+It enters agent context only when bootstrap selects its invocation for the
+held generated prefix. The current `generic-history-entries` ordering trick
+that moves `current-task?` last is deleted with the simulated entries; the
+stored-history query must express the desired actual-history/current-trigger/
+generated-prefix segment order explicitly.
+
+### Implementation ownership
+
+- `src/seon/bootstrap.clj` and its focused tests: candidate ordering,
+  dependency frontier, invocation identity, removal of entry simulation.
+- `src/seon/cluster/loop.clj` and `src/seon/cluster/run.clj` plus their focused
+  tests: parse the selected source and append it to the already-held run. The
+  transaction fences remain in `append-generated-call`.
+- `src/seon/render/walk.clj` and transcript tests: query stored forms and
+  evaluations, terminally format their admitted results, delete
+  `generic-history-entries`.
+- `src/seon/render/web.clj` and focused web tests: retain/concatenate those
+  stored observations and preserve the debug invocation-to-run identity. No
+  new cache or registry belongs here.
+- The schema owner must declare one explicit invocation reference on a
+  generated form if invocation identity cannot be reconstructed from existing
+  facts. It must not use source hash/equality as a substitute.
+
+### Remaining decisions
+
+1. **Invocation provenance fact.** Current run-form facts carry run, ordinal,
+   author, source, and namespace, but no render invocation reference. Choose a
+   real ref/identity attribute before implementation; source equality is
+   demonstrably ambiguous.
+2. **Historical debug-result dependencies.** Direct context inclusion reuses a
+   terminal debug run without execution. There is no relation or SCI binding
+   allowing a later held-run source to depend on that external evaluation.
+   Cross-run dependency reuse requires an explicit provenance/binding decision
+   and is not part of deleting simulated history.
+3. **Segment ordering.** Durable facts determine order within runs, but the
+   product order between prior agent history, current trigger, and the newly
+   generated prefix must be stated once in the context PRD before replacing
+   the current `current-task?` placement.
+
+These choices do not justify a new proc, cache, evaluator, or per-candidate
+run. They determine only which existing fact connects the selected invocation
+to the form/evaluation that actually ran.
