@@ -1028,6 +1028,58 @@
     (is (not (str/includes? rendered ":floor"))
         "an empty stage is absent")))
 
+(deftest selected-ai-experiment-reuses-the-canonical-executed-call
+  (let [selected 'my.render/selected
+        alternative 'my.render/alternative
+        calls (atom [])
+        captured (atom {})
+        inspection
+        {:seon.render.selection/selected selected
+         :seon.render.selection/stages
+         [{:seon.render.selection.stage/name :namespace
+           :seon.render.selection.stage/status :selected
+           :seon.render.selection.stage/candidates
+           [{:seon.render.selection.candidate/producer selected
+             :seon.render.selection.candidate/status :compatible}
+            {:seon.render.selection.candidate/producer alternative
+             :seon.render.selection.candidate/status :compatible}]}]}
+        selected-entry {:seon.render.call/producer selected}
+        request {:seon.render/value {:my/value 1}
+                 :seon.render/retained-calls {}
+                 :seon.render/captured-calls captured
+                 :seon.sci.eval/ctx nil
+                 :seon.db/db ::database}]
+    (with-redefs [render/selection-inspection (constantly inspection)
+                  render/render-call
+                  (fn [request]
+                    (swap! calls conj
+                           (:seon.render.call/selected-producer request))
+                    "alternative output")
+                  sci.kernel/context-projection (constantly ::projection)
+                  db/basis-t (constantly 1)]
+      (let [experiment
+            ((web-private 'debug-render-experiment)
+             request :seon.render/ai ::subject
+             {:seon.render.call/producer selected
+              :seon.render.call/output "Agent \"juniper\"\nNamespace my.agents.juniper"
+              :seon.render.call/entry selected-entry})]
+        (is (= [alternative] @calls)
+            "the selected producer is not invoked a second time")
+        (is (= "Agent \"juniper\"\nNamespace my.agents.juniper"
+               (get-in experiment [:seon.render/previews selected])))
+        (is (= selected-entry
+               (get-in experiment [:seon.render/entries selected])))
+        (let [html ((web-private 'debug-experiments-html)
+                    {} {:seon.render/ai experiment
+                        :seon.render/html
+                        {:seon.render/selection
+                         {:seon.render.selection/selected nil}
+                         :seon.render/previews {}
+                         :seon.render/entries {}}})]
+          (is (and (str/includes? html "Agent &quot;juniper&quot;\nNamespace")
+                   (not (str/includes? html "&quot;Agent")))
+              "the paired AI preview presents multiline terminal text without EDN quotes"))))))
+
 (deftest debug-selected-renderer-metadata-is-outside-preview
   (let [selected 'my.render/ai
         experiment

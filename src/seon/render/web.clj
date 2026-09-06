@@ -1579,7 +1579,7 @@
         output))))
 
 (defn- debug-render-experiment
-  [render-request output subject]
+  [render-request output subject selected-call]
   (let [request (assoc render-request :seon.render/output output)
         selection-call-id [::inspection-selection subject output]
         ctx (:seon.sci.eval/ctx request)
@@ -1630,17 +1630,29 @@
         (into {}
               (map (fn [producer]
                      [producer
-                      (render/render-call
-                       (assoc request
-                              :seon.render/selection-inspection inspection
-                              :seon.render.call/selected-producer producer
-                              :seon.render.call/id (call-id producer)))]))
+                      (if (and selected-call
+                               (= producer
+                                  (:seon.render.selection/selected inspection))
+                               (= producer
+                                  (:seon.render.call/producer selected-call)))
+                        (:seon.render.call/output selected-call)
+                        (render/render-call
+                         (assoc request
+                                :seon.render/selection-inspection inspection
+                                :seon.render.call/selected-producer producer
+                                :seon.render.call/id (call-id producer))))]))
               candidates)
         entries (into {}
                       (map (fn [producer]
                              [producer
-                              (get @(:seon.render/captured-calls request)
-                                   (call-id producer))]))
+                              (if (and selected-call
+                                       (= producer
+                                          (:seon.render.selection/selected inspection))
+                                       (= producer
+                                          (:seon.render.call/producer selected-call)))
+                                (:seon.render.call/entry selected-call)
+                                (get @(:seon.render/captured-calls request)
+                                     (call-id producer)))]))
                       candidates)]
     {:seon.render/selection inspection
      :seon.render/previews previews
@@ -1897,11 +1909,14 @@
               (debug-value-html rendered-value)
               rendered-value)))
         captured-calls (atom {data-call-id debug-data-entry})
-        call-id [::inspection-render
-                 (:seon.render.debug/viewer-namespace debug-request)
-                 (:seon.render.debug/subject debug-request)
-                 (:seon.render.data/path cursor)
-                 (:seon.render/output debug-request)]
+        call-id-for
+        (fn [output]
+          [::inspection-render
+           (:seon.render.debug/viewer-namespace debug-request)
+           (:seon.render.debug/subject debug-request)
+           (:seon.render.data/path cursor)
+           output])
+        call-id (call-id-for (:seon.render/output debug-request))
         render-request
         (when selected?
           (assoc render-custody
@@ -1912,17 +1927,42 @@
                  :seon.render/captured-calls captured-calls
                  :seon.render/invocations retained-invocations
                  :seon.render/captured-invocations captured-invocations))
-        rendered (when render-request (render-source-call render-request))
+        ai-call-id (call-id-for :seon.render/ai)
+        ai-render-request
+        (when render-request
+          (assoc render-request
+                 :seon.render/output :seon.render/ai
+                 :seon.render.call/id ai-call-id))
+        ai-rendered (when ai-render-request
+                      (render-source-call ai-render-request))
+        ai-call-entry (get @captured-calls ai-call-id)
+        ai-selected-producer
+        (get-in ai-call-entry [:seon.render.call/static-evidence
+                               :seon.render.call/producer])
+        ai-preview
+        (if (and (nil? ai-rendered)
+                 (:seon.render.call/source ai-call-entry))
+          "The selected source is running through the agent's ordinary episode."
+          ai-rendered)
+        rendered (when render-request
+                   (if (= :seon.render/ai
+                          (:seon.render/output debug-request))
+                     ai-rendered
+                     (render-source-call render-request)))
         experiments
         (when render-request
           {:seon.render/ai
            (debug-render-experiment render-request :seon.render/ai
                                     [(:seon.render.debug/subject debug-request)
-                                     (:seon.render.data/path cursor)])
+                                     (:seon.render.data/path cursor)]
+                                    {:seon.render.call/producer ai-selected-producer
+                                     :seon.render.call/output ai-preview
+                                     :seon.render.call/entry ai-call-entry})
            :seon.render/html
            (debug-render-experiment render-request :seon.render/html
                                     [(:seon.render.debug/subject debug-request)
-                                     (:seon.render.data/path cursor)])})
+                                     (:seon.render.data/path cursor)]
+                                    nil)})
         found-values
         (when (and render-request (map? related-entities))
           (debug-found-values-html render-request debug-request observation
