@@ -21,6 +21,17 @@ searches that supplied namespace; :437-498 nested traversal checks explicit and
 schema renderers only. This is a source finding; a two-viewer live regression
 is not yet run. [Investigation](../../prds/context-generation/research/design-lab-investigation-2026-09-05.md).
 
+The two-viewer browser proof on 2026-09-06 found an additional direct-selection
+failure after the pulled-ref invocation repair. For subject `32011`, viewer
+`my.plan` lists `my.plan/render-item-html` as
+`rejected :no-same-arity-match` in the namespace stage, then selects and
+successfully invokes the same function in the schema stage. Source inspection
+identifies the mismatch: `seon.render/selection` asks an HTML namespace
+candidate to return `:seon.render/html` (`src/seon/render.clj:448-451`), while
+the function correctly declares `:seon.render/hiccup`. The former is the
+declaration property's symbol-or-Hiccup value schema, not an invoked renderer's
+return schema (`resources/seon/schemas/seon.render.edn:1-35,105-106`).
+
 ## Owner
 
 The existing selection and recursive invocation in seon.render and its caller
