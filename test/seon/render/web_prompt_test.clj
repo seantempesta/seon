@@ -1,67 +1,71 @@
 (ns seon.render.web-prompt-test
   "Tests the debug prompt comparison's independent evidence labels."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
-            [seon.render.web :as web]))
+            [seon.render.web]
+            [seon.test-support :as support]))
 
-(def ^:private latest-captured-prompt
-  (ns-resolve 'seon.render.web 'latest-captured-prompt))
 (def ^:private debug-prompt
   (ns-resolve 'seon.render.web 'debug-prompt))
 (def ^:private debug-ai-html
   (ns-resolve 'seon.render.web 'debug-ai-html))
 
-(deftest captured-prompt-retains-its-independent-evidence
-  (with-redefs [db/q (fn [_]
-                       [["captured text" 42 "capture-42"]])]
-    (is (= {:seon.render.debug/prompt "captured text"
-            :seon.render.debug/prompt-kind :captured
-            :seon.render.debug/prompt-basis-t 42
-            :seon.render.debug/prompt-id "capture-42"}
-           (latest-captured-prompt :db :agent-1)))))
-
-(deftest debug-prompt-keeps-captured-and-prospective-results
-  (let [captured {:seon.render.debug/prompt "old"
-                  :seon.render.debug/prompt-kind :captured
-                  :seon.render.debug/prompt-basis-t 10
-                  :seon.render.debug/prompt-id "capture-10"}
-        prospective {:seon.render.debug/prompt "new"
+(deftest debug-prompt-compares-a-real-capture-with-the-prospective-result
+  (support/with-database
+   (fn [connection]
+     (db/transact!
+      connection
+      [{:seon.cluster.agent/id "agent-1"}
+       {:seon.cluster.run/id "run-1"
+        :seon.cluster.run/agent [:seon.cluster.agent/id "agent-1"]}
+       {:seon.context.capture/id "capture-42"
+        :seon.context.capture/run [:seon.cluster.run/id "run-1"]
+        :seon.context.capture/basis-t 42
+        :seon.context.capture/prompt "captured text"}])
+     (with-redefs-fn
+       {#'seon.render.web/prospective-prompt
+        (constantly {:seon.render.debug/prompt "prospective text"
                      :seon.render.debug/prompt-kind :prospective
-                     :seon.render.debug/prompt-basis-t 11
-                     :seon.render.debug/prompt-id [:prospective 11 :agent-1]}]
-    (with-redefs-fn {#'seon.render.web/latest-captured-prompt
-                     (constantly captured)
-                     #'seon.render.web/prospective-prompt
-                     (constantly prospective)}
-      #(is (= {:seon.render.debug/prompt-kind :captured
-               :seon.render.debug/prompt "old"
-               :seon.render.debug/prompt-basis-t 10
-               :seon.render.debug/prompt-id "capture-10"
-               :seon.render.debug/captured captured
-               :seon.render.debug/prospective prospective}
-              (debug-prompt :db :connection :agent-1 :caps :context))))))
+                     :seon.render.debug/prompt-basis-t 43})}
+       #(let [comparison (debug-prompt (db/db connection)
+                                       connection "agent-1" :caps :context)]
+          (is (= "captured text"
+                 (get-in comparison
+                         [:seon.render.debug/captured
+                          :seon.render.debug/prompt])))
+          (is (= 42 (get-in comparison
+                            [:seon.render.debug/captured
+                             :seon.render.debug/prompt-basis-t])))
+          (is (= "capture-42"
+                 (get-in comparison
+                         [:seon.render.debug/captured
+                          :seon.render.debug/prompt-id])))
+          (is (= "prospective text"
+                 (get-in comparison
+                         [:seon.render.debug/prospective
+                          :seon.render.debug/prompt])))
+          (is (= 43 (get-in comparison
+                            [:seon.render.debug/prospective
+                             :seon.render.debug/prompt-basis-t]))))))))
 
-(deftest debug-html-labels-unavailable-prospective-prompt-honestly
-  (testing "both panes retain their source label and database basis"
-    (let [captured {:seon.render.debug/prompt "historical prompt"
-                    :seon.render.debug/prompt-kind :captured
-                    :seon.render.debug/prompt-basis-t 10
-                    :seon.render.debug/prompt-id "capture-10"}
-          prospective {:seon.render.debug/prompt-kind :unavailable
-                       :seon.render.debug/prompt-basis-t 12
-                       :seon.render.debug/prompt-id [:prospective 12 :agent-1]
-                       :seon.error/value
-                       {:seon.error/kind :seon.render.web/prospective-failed
-                        :seon.error/data
-                        {:seon.error/diagnostic-cause "test failure"}}}
-          html (debug-ai-html
-                "agent-1"
-                {:seon.render.debug/prompt-kind :captured
-                 :seon.render.debug/captured captured
-                 :seon.render.debug/prospective prospective})]
-      (is (.contains html "historical captured prompt"))
-      (is (.contains html "newly computed prospective prompt"))
-      (is (.contains html "database basis 10"))
-      (is (.contains html "database basis 12"))
-      (is (.contains html "historical prompt"))
-      (is (.contains html "seon.render.web/prospective-failed")))))
+(deftest debug-prompt-labels-an-unavailable-prospective-result-without-a-capture
+  (support/with-database
+   (fn [connection]
+     (with-redefs-fn
+       {#'seon.render.web/prospective-prompt
+        (constantly {:seon.render.debug/prompt-kind :unavailable
+                     :seon.render.debug/prompt-basis-t 7
+                     :seon.error/value
+                     {:seon.error/kind :seon.render.web/prospective-failed
+                      :seon.error/data
+                      {:seon.error/diagnostic-cause "test failure"}}})}
+       #(let [comparison (debug-prompt (db/db connection)
+                                       connection "missing-agent" :caps :context)
+              html (debug-ai-html "missing-agent" comparison)]
+          (is (nil? (:seon.render.debug/captured comparison)))
+          (is (= :unavailable
+                 (:seon.render.debug/prompt-kind comparison)))
+          (is (.contains html "historical captured prompt"))
+          (is (.contains html "newly computed prospective prompt"))
+          (is (.contains html "database basis 7"))
+          (is (.contains html "prospective-failed")))))))
