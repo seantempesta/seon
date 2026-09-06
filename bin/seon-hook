@@ -1150,6 +1150,8 @@
                  (str/ends-with? lower ".cljc"))
              (or (beneath? (root-file "src") file-path)
                  (beneath? (root-file "test") file-path)))
+        (= (absolute-file-path (root-file "config/default.edn"))
+           (absolute-file-path file-path))
         (schema-resource-path? file-path))))
 
 (defn- current-source-feedback
