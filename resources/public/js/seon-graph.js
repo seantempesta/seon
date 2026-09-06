@@ -136,7 +136,7 @@ const graphStyle = (section) => {
         'target-arrow-color': inspection,
         'target-arrow-shape': 'triangle',
         color: text,
-        label: 'data(attribute)',
+        label: '',
         'font-size': 9,
         'text-background-color': base,
         'text-background-opacity': 0.9,
@@ -151,6 +151,12 @@ const graphStyle = (section) => {
         'border-color': text,
         'line-color': text,
         'target-arrow-color': text,
+      },
+    },
+    {
+      selector: 'edge:selected',
+      style: {
+        label: 'data(attribute)',
       },
     },
   ]
@@ -206,7 +212,15 @@ const reconcile = (cy, model, canvas, firstModel) => {
   })
 
   if (firstModel && cy.elements().nonempty()) {
-    cy.fit(cy.elements(), 32)
+    cy.layout({
+      name: 'concentric',
+      fit: true,
+      padding: 32,
+      animate: false,
+      nodeDimensionsIncludeLabels: true,
+      concentric: (node) => node.id() === model.selected ? 1 : 0,
+      levelWidth: () => 1,
+    }).run()
   } else {
     cy.viewport({ pan, zoom })
   }
