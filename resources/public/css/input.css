@@ -88,6 +88,8 @@
   --color-warning: #fbbf24;
   --color-info: #60a5fa;
   --color-eval: #c084fc;
+  /* Inspection links complement Phosphor amber without implying success. */
+  --color-inspection: #b3c79a;
 
   /* Log type colors */
   --color-log-launch: #a78bfa;
@@ -1195,6 +1197,19 @@ details.tool-call-details[open] .tool-preview {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  background: var(--color-base-900);
+}
+.seon-debug a {
+  color: var(--color-inspection);
+  text-underline-offset: 0.2em;
+}
+.seon-debug a:hover {
+  color: var(--color-text-50);
+  text-decoration: underline;
+}
+.seon-debug :focus-visible {
+  outline: 2px solid var(--color-inspection);
+  outline-offset: 3px;
 }
 .seon-debug-grid {
   display: grid;
@@ -1209,7 +1224,7 @@ details.tool-call-details[open] .tool-preview {
   flex: 0 0 auto;
   flex-wrap: wrap;
   gap: 0.25rem 1rem;
-  padding: 0.45rem 0.6rem;
+  padding: 0.8rem 1rem;
   border-bottom: 1px solid var(--color-base-800);
   background: var(--color-base-900);
   color: var(--color-text-200);
@@ -1236,6 +1251,18 @@ details.tool-call-details[open] .tool-preview {
 .seon-debug-experiment > .seon-debug-body {
   overflow: visible;
   border-bottom: 1px solid var(--color-base-800);
+}
+.seon-debug-description {
+  max-width: 80ch;
+  margin: 0.5rem 0 1rem;
+  color: var(--color-text-300);
+  line-height: 1.65;
+}
+.seon-debug .seon-debug-output-preview {
+  padding: 1rem;
+  border: 1px solid var(--color-base-800);
+  border-radius: 0.5rem;
+  background: var(--color-base-900);
 }
 .seon-debug-section-line {
   display: flex;
