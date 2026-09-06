@@ -264,7 +264,20 @@ overwrote its atom. Bootstrap receipt settlement also produced an invalid
 database-argument contract error; investigation remains open. These failures
 prevent claiming the inspection milestone complete despite successful boot.
 
-**Milestone status — 2026-09-05, implementation authorized**
+**Current verification checkpoint — 2026-09-06**
+
+Actual entity data, refs, ordered paired candidate outputs, supplied arguments,
+contracts, independent viewers and graph navigation now have focused and live
+browser proof. Shared invocation reuse and invalidation on relevant facts and
+SCI changes are verified. Agentless inspections leave the database basis and
+agent population unchanged. The [completion audit](../research/design-lab-completion-audit-2026-09-06.md)
+records the exact evidence and limits. The full goal stays open for actual
+producing source with ordinary stored form/results; paused source-run work has
+not been resumed or replaced with another evaluator. Later context-design and
+consolidation milestones remain experiments, not prerequisites silently folded
+into this inspection checkpoint.
+
+**Earlier milestone status — 2026-09-05, implementation authorized**
 
 - [x] Trace existing cluster/SCI/render ownership and record evidence.
 - [ ] 0: Prerequisites — **in progress**. Same-arity renderer fix committed (`f0f28b086`), live-probed;
