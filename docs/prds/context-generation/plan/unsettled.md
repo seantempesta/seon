@@ -8,6 +8,18 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Owner coverage objective, 2026-09-06: efficiently explain the data within N
+hops of the agent entity using knowledge of the actual graph and the queries
+that generated each block. Define the neighborhood from one immutable database
+value with explicit reference directions. Measure attribute/value coverage,
+not merely visited entity IDs. Query/pull selection identifies source data;
+rendering and final fitting determine what was actually displayed, summarized,
+or elided. Compare candidate blocks by additional coverage, repetition, complete
+context tokens, and database work. Encourage ordinary agent-authored functions
+over these facts; derive provenance at existing read/render seams rather than
+requiring agents to hand-maintain coverage lists. This is the proposed
+experiment; exact displayed-fact provenance is not implemented yet.
+
 Owner proposal, 2026-09-06: let an AI render produce source for the existing
 reply reader, forming blocks of explanation, executable forms, and evaluated
 results. Analyze the source with the existing clj-kondo owner; combine those
