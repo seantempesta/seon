@@ -8,6 +8,40 @@ tags: [prd, agent, context, architecture]
 
 ## Active execution goals — dinner continuation, 2026-09-05
 
+**Owner correction: planning before further implementation (2026-09-05).**
+The immediate deliverable is a source-grounded UI design and an efficient
+execution plan, not another round of reactive repairs. Preserve the complete
+debug-UI objective below, but defer its implementation sequence until this
+planning checkpoint is recorded:
+
+- Specify what each screen region displays, what each click does, and how
+  graph selection, stored datoms, renderer ranking, and actual output stay
+  connected. Distinguish existing behavior from proposed behavior.
+- Use the graph research agent's pinned Cytoscape source review to choose
+  navigation, incoming/outgoing expansion, large-data limits, incremental
+  updates, and lifecycle handling. Produce a concrete visual proposal before
+  spending more time polishing the current layout.
+- Classify each remaining defect as blocking that experience or independently
+  deferrable. Work only on the critical path; keep unrelated platform findings
+  in their existing issue notes rather than expanding the implementation.
+- For each uncertainty, name the smallest falsifying REPL probe or focused
+  test, its expected result, its bound, and the decision it will resolve.
+  Preserve successful evidence with its code basis; repeat only after a
+  relevant change or a new counterexample.
+- The orchestrator owns one serial integration gate. Agents may run only the
+  explicitly assigned focused tests; namespace-wide/full suites, automatic
+  confirmation fanout, repeated source publication, and independent resets
+  are not default lane work. Inspect live process ownership before stopping
+  an existing run; never infer completion from silence.
+- Delegate bounded source research and disjoint implementation only after
+  inputs, outputs, ownership, and acceptance are written. Before each launch,
+  explain how its result changes the next decision. Stop obsolete work.
+
+Completion of this checkpoint means a reviewable visual proposal, an ordered
+implementation dependency list, and a bounded verification matrix. It does
+not mark the full active debug-UI goal complete. The owner asked to discuss
+the display, so do not treat an unanswered layout preference as approval.
+
 The owner asked for continued autonomous progress while away. This ordering
 supersedes the older session checkpoints below for the current design-lab work.
 The existing active goal remains incomplete; source edits, delegation, an HTTP
