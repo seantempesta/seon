@@ -1432,26 +1432,14 @@
                   prepared
                   (planned-sources reply-text namespace-name max-source)
                   sources (if (vector? prepared) prepared [])
-                  threshold
-                  (db/q '[:find ?threshold .
-                          :where
-                          [_ :seon.config.eval.result/blob-threshold ?threshold]]
-                        database)
-                  reply-size (long (count reply-text))
-                  reply-stage (when (and threshold (> reply-size threshold))
-                                (blob/stage! connection reply-text))
+                  staged-reply (run/stage-reply! connection reply-text)
                   plan-request
-                  (cond-> {:seon.cluster.run/id run-id
-                           :seon.cluster.run/process process
-                           :seon.cluster.run/plan-digest
-                           (run/plan-digest sources)
-                           :seon.cluster.run/reply-size reply-size
-                           :seon.cluster.run/sources sources}
-                    reply-stage
-                    (assoc :seon.cluster.run/reply-blob
-                           (:seon.blob/digest reply-stage))
-                    (nil? reply-stage)
-                    (assoc :seon.cluster.run/reply reply-text))
+                  (merge (dissoc staged-reply :seon.blob/staged-writes)
+                         {:seon.cluster.run/id run-id
+                          :seon.cluster.run/process process
+                          :seon.cluster.run/plan-digest
+                          (run/plan-digest sources)
+                          :seon.cluster.run/sources sources})
                   intent-tx
                   (into (run/plan-tx plan-request)
                         (mapcat
@@ -1468,7 +1456,7 @@
                          (range) sources))
                   outcome
                   (blob/with-publication!
-                   connection (cond-> [] reply-stage (conj reply-stage))
+                   connection (:seon.blob/staged-writes staged-reply)
                    #(db/transact! connection {:tx-data intent-tx}))]
               (cond
                 (:seon.error/kind outcome) (fail! outcome)

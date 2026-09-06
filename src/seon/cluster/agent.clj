@@ -73,6 +73,7 @@
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.blob :as blob]
             [seon.env :as env]
             [seon.error :as error]
             [seon.flow :as seon.flow]
@@ -682,21 +683,25 @@
           sources
           (let [run-id (str "source:" (random-uuid))
                 now (Date.)
+                staged-reply (run/stage-reply! connection text)
                 outcome
-                (db/transact!
-                 connection
-                 {:tx-data
-                  (run/system-run-tx
-                   database
-                   {:seon.cluster.agent/id agent-id
-                    :seon.cluster.run/id run-id
-                    :seon.cluster.run/process
-                    (:seon.cluster.run/process handle)
-                    :seon.cluster.run/opened-at now
-                    :seon.cluster.run/starting-ns
-                    [:seon.ns/name namespace-name]
-                    :seon.cluster.run/plan-digest (run/plan-digest sources)
-                    :seon.cluster.run/sources sources})})]
+                (blob/with-publication!
+                 connection (:seon.blob/staged-writes staged-reply)
+                 #(db/transact!
+                   connection
+                   {:tx-data
+                    (run/system-run-tx
+                     database
+                     (merge (dissoc staged-reply :seon.blob/staged-writes)
+                            {:seon.cluster.agent/id agent-id
+                             :seon.cluster.run/id run-id
+                             :seon.cluster.run/process
+                             (:seon.cluster.run/process handle)
+                             :seon.cluster.run/opened-at now
+                             :seon.cluster.run/starting-ns
+                             [:seon.ns/name namespace-name]
+                             :seon.cluster.run/plan-digest (run/plan-digest sources)
+                             :seon.cluster.run/sources sources}))}))]
             (if (:seon.error/kind outcome)
               outcome
               (let [channel

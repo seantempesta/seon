@@ -46,6 +46,9 @@
                     [:seon.cluster.run/starting-ns :seon.cluster.run/starting-ns]
                     [:seon.cluster.run/plan-digest :seon.cluster.run/plan-digest]
                     [:seon.cluster.run/sources :seon.cluster.reply/sources]
+                    [:seon.cluster.run/reply {:optional true} :seon.cluster.run/reply]
+                    [:seon.cluster.run/reply-blob {:optional true} :seon.cluster.run/reply-blob]
+                    [:seon.cluster.run/reply-size {:optional true} :seon.cluster.run/reply-size]
                     [:seon.cluster.run/trigger {:optional true} :seon.cluster.run/trigger]],
                    :generated-run-request
                    [:map

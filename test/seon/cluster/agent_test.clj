@@ -409,6 +409,11 @@
                               [?evaluation :seon.cluster.eval/result-edn ?result]]
                             terminal-db run-id)]
                   (is (string? run-id))
+                  (is (= text
+                         (:seon.cluster.run/reply
+                          (db/pull terminal-db [:seon.cluster.run/reply]
+                                   [:seon.cluster.run/id run-id])))
+                      "the run retains exact submitted source, not reconstructed forms")
                   (is (some? (agent/armed routing "source-agent"))
                       "the existing armer owns unarmed delivery")
                   (is (= [{:seon.cluster.run.form/ordinal 0

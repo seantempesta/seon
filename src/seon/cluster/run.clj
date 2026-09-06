@@ -87,6 +87,25 @@
           :where [_ :seon.config.eval.result/blob-threshold ?threshold]]
         db))
 
+(defn stage-reply!
+  "Stage exact submitted source using the run reply storage contract."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection :string]
+    [:map
+     [:seon.cluster.run/reply-size :seon.cluster.run/reply-size]
+     [:seon.cluster.run/reply {:optional true} :seon.cluster.run/reply]
+     [:seon.cluster.run/reply-blob {:optional true} :seon.cluster.run/reply-blob]
+     [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
+  [connection text]
+  (let [threshold (result-blob-threshold @connection)
+        size (long (count text))
+        staged (when (and threshold (> size threshold))
+                 (blob/stage! connection text))]
+    (cond-> {::reply-size size
+             :seon.blob/staged-writes (cond-> [] staged (conj staged))}
+      staged (assoc ::reply-blob (:seon.blob/digest staged))
+      (nil? staged) (assoc ::reply text))))
+
 (defn- store-def-values!
   [connection evaluation]
   (let [threshold (result-blob-threshold @connection)]
@@ -789,11 +808,13 @@
                       ::process process
                       ::live-processes #{process}
                       ::now opened-at})
-           (system-plan-tx {::id run-id
-                            ::process process
-                            ::starting-ns starting-ns
-                            ::plan-digest plan-digest
-                            ::sources sources})
+           (system-plan-tx
+            (merge (select-keys request [::reply ::reply-blob ::reply-size])
+                   {::id run-id
+                    ::process process
+                    ::starting-ns starting-ns
+                    ::plan-digest plan-digest
+                    ::sources sources}))
            (mapcat
             (fn [ordinal source]
               (receipt-start-tx

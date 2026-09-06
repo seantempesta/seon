@@ -1323,3 +1323,19 @@ canonical `config/compile-manifest`; re-verification is pending. Transcript
 failures include obsolete token-elision expectations after the owner's removal
 of rendering limits, plus other output expectations still to inspect. Do not
 report this gate green or restore removed limits to satisfy old tests.
+
+Exact source fix, personally probed 2026-09-06: source run
+`source:419ae083-201e-44fc-b6c1-dc2a3e054d61` in `juniper-context` stored the
+47-character submitted text byte-for-byte, including CRLF, comment, and blank
+line. Its two evaluations settled with 3 and "second". Rendering its stored
+transcript twice returned equal text and retained exactly the same two eval
+identities. A whole-cluster basis comparison changed during the first probe;
+it cannot isolate writes by this read amid other active graphs. The scoped
+identity comparison is the valid observation. This proves the live host path,
+not restart or browser lock/diff completion.
+
+Both model replies and renderer submissions now share `run/stage-reply!` and
+`blob/with-publication!`; the system-run request schema admits the existing
+reply/reply-blob/reply-size facts, forwarded into the existing plan transaction.
+No new source or result family was introduced. The existing agent submission
+regression now checks exact stored reply. Its gate is pending.
