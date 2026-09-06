@@ -147,3 +147,63 @@ The lab should initially refuse when the target agent already has an open run;
 run would require a new durable scheduling decision and is outside this slice.
 The UI should show pending, running, and terminal state by querying the returned
 run's facts and should render no invented synchronous result.
+
+## Paused implementation audit — 2026-09-06
+
+The paused working-tree implementation follows the seam above. Its
+`submit-source!` parses through the shared reply preparation, transacts one
+`system-run-tx`, and only then offers a payload-free wake
+(`src/seon/cluster/agent.clj:550-634`). `system-run-tx` now creates the open,
+claim, system-authored plan, and every pending evaluation in one transaction
+(`src/seon/cluster/run.clj:757-805`). The normal work derivation therefore sees
+the plan digest and selects `:resume`, never the provider `:call` branch
+(`src/seon/cluster/work.clj:531-567`). `resume-turn` evaluates the ordered forms
+in one SCI turn fork, installs each `result/eN` binding for the next form, and
+settles the batch through the existing transaction functions
+(`src/seon/cluster/loop.clj:1645-1855`). No new evaluator or run state machine
+is present.
+
+Two facts remain to prove or repair before this becomes a general submission
+surface:
+
+1. **Unarmed delivery is unproved, not a confirmed defect.** The current test
+   arms its target before submission (`test/seon/cluster/agent_test.clj:343-425`).
+   When no armed mailbox exists, `submit-source!` offers to the existing armer
+   channel. The armer derives unarmed agents from facts, calls the single
+   `arm!` owner, and `arm!` primes the new sliding-one mailbox
+   (`src/seon/cluster/agent.clj:709-769,918-934`). An offer is deliberately
+   unacknowledged, but that alone is not a defect: these are level-triggered
+   “look” signals and coalescing is free. A focused positive test still needs
+   to submit to an unarmed existing agent, observe that it becomes armed, and
+   await the returned run's terminal stored results under the existing
+   backstop. Do not add a second caller that arms agents directly; the armer is
+   the existing authority.
+2. **Namespace reassignment exposes a real unchecked race in the paused
+   composition.** Reassignment is explicitly supported as an ordinary
+   cardinality-one transaction
+   (`test/seon/cluster/agent_namespace_test.clj:31-49`). `submit-source!` reads
+   the assigned namespace before parsing and hands it to `system-run-tx`
+   (`src/seon/cluster/agent.clj:564-613`). The transaction functions correctly
+   re-decide open-run custody: a concurrent run causes `open-call` to refuse
+   the entire transaction. They do not validate that the requested starting
+   namespace still equals the agent's current namespace. `plan-call` derives
+   the current assignment but intentionally prefers a supplied starting
+   namespace (`src/seon/cluster/run.clj:661-675`). A concurrent reassignment can
+   therefore commit source parsed for the former namespace. The minimum repair
+   is a compare-at-authority check inside the same transaction, against the
+   namespace used for parsing. A post-commit query or silent switch would not
+   repair the attribution.
+
+The no-provider terminal path is structurally complete but its focused proof
+should remain explicit. The paused test already expects two stored evaluation
+results and no `:seon.ai.attempt` rows. It should also assert `closed-at` and,
+for a queued message or schedule trigger, that the source run neither claims
+nor answers that trigger. A held planned run legitimately runs first; after it
+closes, the ordinary self-wake derives the still-unanswered trigger. These are
+regressions over existing mechanisms, not a reason to add a source queue or a
+second scheduling path.
+
+This audit supports resuming the slice. A controlled MCP experiment against an
+already armed agent whose namespace is held stable can use the paused seam and
+inspect the returned run through the existing transcript renderers. General
+adoption waits on the namespace authority check and the unarmed positive proof.
