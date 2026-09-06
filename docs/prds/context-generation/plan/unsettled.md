@@ -8,6 +8,16 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Live acceptance is currently blocked by a reproduced preview feedback loop,
+recorded in [the execution identity issue](../../../seon/issues/debug-source-execution-invalidates-its-own-preview.md).
+The isolated current-source browser created at least 49 identical identity
+source runs in 19 seconds; its cluster is stopped and its database retained.
+The existing shared user page was not changed. The focused cache test below
+did not model run writes changing the acquired agent argument, so it cannot
+establish safe live reuse. Correct the existing retained execution identity
+before exposing this source path on the shared page or broadening it to all
+found values. Pending and terminal transaction wakes both belong in the proof.
+
 Current integration checkpoint: `5083a373e` retains the selected debug AI
 candidate's ordinary submitted run identity in the existing invocation cache
 (one focused test, 79 assertions). This is selected-preview coverage only:
