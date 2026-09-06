@@ -123,6 +123,38 @@
        (is (str/includes? (hiccup/->string rendered)
                           "Render the pulled item"))))))
 
+(deftest non-rendering-more-specific-schema-does-not-shadow-agent-identity
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "agent-render-selection")
+     (db/transact!
+      connection
+      (agent/creation-tx
+       {:seon.cluster.agent/id "identity-agent"
+        :seon.cluster/name "agent-render-selection"
+        :seon.ns/name fixture-a}))
+     (let [database @connection
+           pulled (db/pull database '[*]
+                           [:seon.cluster.agent/id "identity-agent"])
+           request (assoc (render-request database
+                                          (support/fork-cluster-ctx connection)
+                                          nil pulled)
+                          :seon.render/output :seon.render/ai
+                          :seon.render/profile
+                          {:seon.render.profile/id :test/agent
+                           :seon.render.profile/token-budget 100
+                           :seon.render.profile/max-depth 4
+                           :seon.render.profile/max-children 10
+                           :seon.render.profile/composition
+                           :seon.render.profile.composition/context})
+           projection-state-var
+           (ns-resolve 'seon.schema '*projection-state*)]
+       (with-bindings {projection-state-var nil}
+         (let [decision (selection request)]
+           (is (= 'seon.cluster.agent/render-identity-ai
+                  (:seon.render.selection/selected decision)))
+           (is (str/includes? (render-ai request) "identity-agent"))))))))
+
 (deftest candidate-input-and-output-must-fit-the-same-arity
   (support/with-database
    (fn [connection]

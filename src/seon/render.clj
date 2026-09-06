@@ -247,45 +247,50 @@
 
 (defn- schema-producers
   [projection request value output]
-  (when (map? value)
-    (let [transacted-matches
-          (schema/matching-shapes-in
-           projection (render.value/transacted value (:seon.db/db request)))
-          ;; A pull has two honest shapes. Refs and cardinality-many values
-          ;; validate in transaction form, while tuple/vector value attributes
-          ;; validate exactly as pulled. A pulled entity admits only shapes
-          ;; whose required attributes are database-storable; open request
-          ;; envelopes must not acquire a one-key value renderer.
-          pulled-matches (schema/matching-shapes-in projection value)
-          matches
-          (->> (concat transacted-matches pulled-matches)
-               (filter
-                #(or (not (:db/id value))
-                     (every?
-                      (partial schema.datahike/storable-attribute-in?
-                               projection)
-                      (:seon.schema/required-attrs %))))
-               (reduce (fn [by-key row]
-                         (assoc by-key (:seon.schema/key row) row))
-                       (sorted-map))
-               vals)
-          matches
-          (if (:db/id value)
-            (let [specificity (apply max 0
-                                     (map (comp count
-                                                :seon.schema/required-attrs)
-                                          matches))]
-              (filter #(= specificity
-                          (count (:seon.schema/required-attrs %)))
-                      matches))
-            matches)
-          producers
-          (->> matches
-               (keep #(get % output))
-               distinct
-               (sort-by str)
-               vec)]
-      producers)))
+  (schema/call-with-projection
+   projection
+   (fn []
+     (when (map? value)
+       (let [transacted-matches
+             (schema/matching-shapes-in
+              projection (render.value/transacted value (:seon.db/db request)))
+             ;; A pull has two honest shapes. Refs and cardinality-many values
+             ;; validate in transaction form, while tuple/vector value attributes
+             ;; validate exactly as pulled. A pulled entity admits only shapes
+             ;; whose required attributes are database-storable; open request
+             ;; envelopes must not acquire a one-key value renderer.
+             pulled-matches (schema/matching-shapes-in projection value)
+             matches
+             (->> (concat transacted-matches pulled-matches)
+                  (filter
+                   #(or (not (:db/id value))
+                        (every?
+                         (partial schema.datahike/storable-attribute-in?
+                                  projection)
+                         (:seon.schema/required-attrs %))))
+                  (reduce (fn [by-key row]
+                            (assoc by-key (:seon.schema/key row) row))
+                          (sorted-map))
+                  vals)
+             matches
+             (filter #(get % output) matches)
+             matches
+             (if (:db/id value)
+               (let [specificity (apply max 0
+                                        (map (comp count
+                                                   :seon.schema/required-attrs)
+                                             matches))]
+                 (filter #(= specificity
+                             (count (:seon.schema/required-attrs %)))
+                         matches))
+               matches)
+             producers
+             (->> matches
+                  (map #(get % output))
+                  distinct
+                  (sort-by str)
+                  vec)]
+         producers)))))
 
 (defn- schema-producer
   [projection request value output]
