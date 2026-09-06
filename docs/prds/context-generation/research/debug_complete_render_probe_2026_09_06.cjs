@@ -22,11 +22,17 @@ const assert = require('node:assert/strict');
       })));
     assert(evidence.some(column => column.output === 'HTML' && column.text.includes('seon.flow/start-graph!')),
       'a function summary must remain visible in actual HTML output');
-    assert(evidence.some(column => column.output === 'AI' && column.text.includes('seon.flow/start-graph!')),
+    assert(evidence.some(column => column.output === 'AI' && column.text.includes('(ns seon.flow') && column.text.includes('(defn start-graph!')),
       'AI projection must be present alongside HTML');
     assert.deepEqual(errors, []);
     if (process.argv[3]) await page.screenshot({path: process.argv[3], fullPage: false});
+    const desktop = await page.evaluate(() => ({width: innerWidth, scroll: document.documentElement.scrollWidth}));
+    assert(desktop.scroll <= desktop.width, 'complete output stays within the desktop layout');
+    await page.setViewportSize({width: 390, height: 844});
+    await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth, {}, {timeout: 3000});
+    const mobile = await page.evaluate(() => ({width: innerWidth, scroll: document.documentElement.scrollWidth}));
+    assert(mobile.scroll <= mobile.width, 'complete output stays within the mobile layout');
     console.log(JSON.stringify({readyMs: performance.now() - start,
-      columns: evidence.map(({output, text}) => ({output, characters: text.length})), errors}));
+      columns: evidence.map(({output, text}) => ({output, characters: text.length})), desktop, mobile, errors}));
   } finally { await browser.close(); }
 })().catch(error => {console.error(error); process.exitCode = 1;});

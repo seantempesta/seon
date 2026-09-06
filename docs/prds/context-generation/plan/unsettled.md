@@ -14,8 +14,11 @@ call IDs are not invocation identity. Reuse requires the same actual function,
 output, prepared inputs and program world, with current database read evidence;
 do not scan every retained call to discover a hit. The existing render proc
 owns this cache. Executed source forms use their ordinary stored results;
-opening an inspection must not rerun them. Cross-surface reuse is being
-implemented and must be proven with invocation counts before claiming it.
+opening an inspection must not rerun them. Cross-surface reuse is implemented in the existing render proc. The focused
+regression counts actual SCI invocations: two presentation IDs reuse one
+invocation, an unrelated transaction reuses it, and a changed queried fact
+invokes again. Eight focused checks passed with 131 assertions and no failures
+or errors. This is not a claim that the entire web suite is green.
 
 Rendering-limit checkpoint, 2026-09-06: `cc667a426` disables the formatter,
 prompt, and render-admission cuts; `f48d27012` renders all namespace/transcript
@@ -25,8 +28,17 @@ data under depth/width/string caps of 1 and a two-node cap. The actual
 `/ns/seon.flow/debug` browser now contains both AI and HTML function summaries
 through the final output path (308 ms observed ready time, no JavaScript
 errors); `debug_complete_render_probe_2026_09_06.cjs` preserves the check.
-The page still needs long-line containment, and shared invocation-cache
-behavior is not yet proven. These observations exercise hot-loaded JVM Vars
+A later browser pass exposed missing function summaries: generic producer
+preparation dropped the entity `:db/id` before the namespace renderer queried
+its functions. The live database has 50 matching functions; the prepared
+argument lacks the id. Restoring the acquired root id at generic producer preparation restores the
+actual namespace outputs in both projections. The browser probe checks the
+qualified HTML summary and the actual AI namespace plus unqualified `defn`;
+these are intentionally different outputs. The final browser pass passed at 1440 and 390 pixels with no JavaScript errors
+and 161 ms observed completion. The graph library already resizes its canvas;
+the probe now waits for that observable result instead of assuming two animation
+frames suffice. The actual plan entity 32011 also appears in both projections.
+These are hot-loaded Var proofs on the same branch. These observations exercise hot-loaded JVM Vars
 on `lab-browser-0906`, not a fresh fork's indexed source. Initial source hook
 publication encountered concurrent initialization lock contention; subsequent
 publication succeeded.

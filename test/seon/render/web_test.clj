@@ -841,7 +841,7 @@
                    (str/includes? href "incomingCursor=")))
           "a new subject never carries snapshot-bound page cursors"))))
 
-(deftest debug-layout-leads-with-the-rendered-result-and-real-description
+(deftest debug-layout-leads-with-renderer-comparison-and-real-description
   (let [placeholder
         (hiccup/->string
          ((web-private 'debug-experiment-placeholder)
@@ -908,8 +908,8 @@
           :seon.render.data/identities-complete? true}
          [:div "structural marker"]
          false)]
-    (is (< -1 output-position selection-position observation-position)
-        "the stable feed targets appear in rendered-result-first order")
+    (is (< -1 selection-position output-position observation-position)
+        "the comparison precedes the duplicate selected output and structural evidence")
     (is (str/includes?
          selected-html
          "<p class=\"seon-debug-description\"><span>description</span> Render the actual &lt;card&gt;.</p>")
