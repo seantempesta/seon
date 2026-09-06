@@ -117,8 +117,11 @@ arg is the violation, not a positional one.
 Hot reload changes the loaded Var only; it does not change database program
 facts. The edit hook publishes safe source changes to the one `:current-src`
 branch and performs a complete scratch rebuild for structural changes. Existing
-clusters remain sovereign. `bin/seon init CLUSTER --force` is the destructive refork
-(`AGENTS.md`, “Hot reload is not program-graph indexing”).
+ordinary clusters remain sovereign. `bin/seon init CLUSTER --force` is the
+destructive refork. The explicitly selected development cluster instead adopts
+source in place through `bin/seon init --dev CLUSTER`; its own JVM updates
+indexed facts, loaded definitions, and SCI before recording the adopted commit
+(`src/seon/cluster.clj`, `development-source-refresh!`).
 
 Use concrete types. The omission ruling is exact: `[:maybe]` is allowed in
 in-memory function RETURN contracts (stored attributes stay nil-free — the

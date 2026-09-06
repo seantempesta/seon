@@ -2,6 +2,7 @@
               :built-at :inst,
               :built? :boolean,
               :commit-id :uuid,
+              :database :seon.db/database-value,
               :current
               [:map
                [:seon.source/branch :seon.source/branch]
@@ -13,6 +14,7 @@
               :expected-commit-id :uuid,
               :file-digests [:map-of :string :seon.source/digest],
               :populate :qualified-symbol,
+              :previous-database :seon.db/database-value,
               :activation :qualified-symbol,
               :activation-closure
               [:and {:seon.db/component true} :seon.db/ref],

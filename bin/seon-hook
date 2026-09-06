@@ -1155,7 +1155,7 @@
         (schema-resource-path? file-path))))
 
 (defn- current-source-feedback
-  "Publish edited first-party source through the live operator when possible."
+  "Publish edited source and update the explicitly selected development cluster."
   [event config]
   (let [paths (->> (event-file-paths event)
                    (filter source-index-path?)
@@ -1168,15 +1168,22 @@
       (try
         (let [result
               (process/sh
-               {:cmd (into [(str (root-file "bin/seon"))
-                            "init" "--changed"]
-                           paths)
+               {:cmd (into
+                      (cond-> [(str (root-file "bin/seon"))]
+                        (get-in config [:current-source :root])
+                        (into ["--root" (str (root-file
+                                             (get-in config [:current-source :root])))])
+                        true (conj "init")
+                        (get-in config [:current-source :cluster])
+                        (into ["--dev" (get-in config [:current-source :cluster])])
+                        true (conj "--changed"))
+                      paths)
                 :dir repo-root
                 :out :string
                 :err :string
                 :continue true})]
           (if (zero? (:exit result))
-            (str/trim (:out result))
+            (last (remove str/blank? (str/split-lines (:out result))))
             (clip-feedback
              config
              (str "ADVISORY — current-src publication failed; inspect the "

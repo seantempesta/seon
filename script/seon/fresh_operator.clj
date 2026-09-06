@@ -444,13 +444,24 @@
 
 (defn- parse-init-arguments
   [arguments]
-  (if (= "--changed" (first arguments))
+  (cond
+    (= "--dev" (first arguments))
+    (let [name (valid-name! (second arguments))
+          remaining (vec (drop 2 arguments))]
+      (when (and (seq remaining) (not= "--changed" (first remaining)))
+        (fail! "Use `init --dev NAME [--changed PATH...]`."
+               {:seon.fresh-operator/arguments arguments}))
+      (assoc (parse-init-arguments remaining)
+             :seon.fresh-operator/development-cluster name))
+
+    (= "--changed" (first arguments))
     (let [paths (vec (rest arguments))]
       (when (or (empty? paths) (some str/blank? paths))
         (fail! "Use `init --changed PATH...`."
                {:seon.fresh-operator/arguments arguments}))
       {:seon.fresh-operator/changed-paths paths
        :seon.fresh-operator/force? false})
+    :else
     (case (count arguments)
       0
       {:seon.fresh-operator/force? false}
@@ -2273,11 +2284,12 @@
                 ~operation)))))
 
 (defn- init-form
-  [root name force? changed-paths source-process? publish-before-fork?]
+  [root name force? changed-paths source-process? publish-before-fork?
+   development-cluster]
   (let [cluster-root (str (cluster-root root))
         changed-paths (mapv #(str (if (fs/absolute? (fs/path %))
                                     (fs/path %)
-                                    (fs/path root %)))
+                                    (fs/path (repository-root) %)))
                             changed-paths)
         cold-source (gensym "source")
         cold-store (gensym "store")
@@ -2288,6 +2300,10 @@
                               publish-before-fork?))
         operation
         (cond
+          development-cluster
+          `(seon.cluster/refresh-source! ~cluster-root ~changed-paths
+                                        ~development-cluster)
+
           (seq changed-paths)
           `(seon.cluster/refresh-source! ~cluster-root ~changed-paths)
 
@@ -2410,10 +2426,19 @@
                     (flush))]
               (with-bindings
                 {progress-var# progress!#}
-                (try
-                  ~emitted-operation
-                  (finally
-                    ~(refresh-instrument-form)))))
+                (let [primary-failure# (volatile! nil)]
+                  (try
+                    ~emitted-operation
+                    (catch Throwable failure#
+                      (vreset! primary-failure# failure#)
+                      (throw failure#))
+                    (finally
+                      (try
+                        ~(refresh-instrument-form)
+                        (catch Throwable restore-failure#
+                          (if-let [failure# @primary-failure#]
+                            (.addSuppressed failure# restore-failure#)
+                            (throw restore-failure#)))))))))
            emitted-operation)))))
 
 (defn- source-process-value!
@@ -2450,7 +2475,7 @@
   ([root arguments]
    (init! root arguments false))
   ([root arguments publish-before-fork?]
-  (let [{:seon.fresh-operator/keys [name force? changed-paths]}
+  (let [{:seon.fresh-operator/keys [name force? changed-paths development-cluster]}
         (parse-init-arguments arguments)
         _ (operator.state/claim-root-under-lock!
            (repository-root) root (ephemeral-owner root) name)
@@ -2476,14 +2501,14 @@
             (prepl-eval!
              (:seon.fresh-operator/transport-advertisement anchor)
              (init-form root name force? changed-paths false
-                        publish-before-fork?)
+                        publish-before-fork? development-cluster)
              (operator-silence-backstop-ms {})
              (fn [event]
                (when (= :out (:tag event))
                  (print (:val event))
                  (flush))))))
 
-          (seq changed-paths)
+          (or development-cluster (seq changed-paths))
           (fail! "Incremental source publication requires a running operator JVM."
                  {:seon.fresh-operator/changed-paths changed-paths})
 
@@ -2491,7 +2516,7 @@
           (let [outcome
                 (source-process-value!
                  root (init-form root name force? changed-paths true
-                                 publish-before-fork?))]
+                                 publish-before-fork? development-cluster))]
             (if-let [message (:seon.fresh-operator/message outcome)]
               (fail! message (:seon.fresh-operator/data outcome))
               (:seon.fresh-operator/value outcome))))

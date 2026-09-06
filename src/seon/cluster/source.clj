@@ -14,6 +14,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.db :as db]
+            [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn])
@@ -154,6 +155,37 @@
                :seon.store/branch current-branch})]
     {:seon.source/branch current-branch
      :seon.source/commit-id commit-id}))
+
+(defn database
+  "Read the exact published source commit without opening its branch."
+  {:malli/schema
+   [:=> [:cat :seon.store/store :seon.source/commit-id]
+    :seon.db/database-value]}
+  [store commit-id]
+  (or (d/commit-as-db (:seon.store/connection-object store) commit-id)
+      (refuse! ::source-absent "the adopted source commit is unavailable"
+               {:seon.source/commit-id commit-id})))
+
+(defn deleted-identities
+  "Identities with historical definitions and no current definition."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value] :seon.fn.file/identities]}
+  [database]
+  (let [history (db/history database)]
+    (into []
+          (mapcat
+           (fn [attribute]
+             (let [source-attribute
+                   (:seon.program/source-attribute (program/shape attribute))]
+               (map (fn [value] [attribute value])
+                    (db/q '[:find [?value ...]
+                            :in $ $history ?identity-attribute ?source-attribute
+                            :where
+                            [?entity ?identity-attribute ?value]
+                            (not [?entity ?source-attribute])
+                            [$history ?entity ?source-attribute]]
+                          database history attribute source-attribute)))))
+          program/identity-attributes)))
 
 (defn- scratch-branch
   []

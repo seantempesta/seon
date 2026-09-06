@@ -106,7 +106,9 @@ produced. The boot order:
    code reads the database, never files or env vars. One non-executing
    `:current-src` branch holds indexed code; a new cluster forks its exact
    published commit ID — near-instant, never a re-index. An existing
-   cluster remains a sovereign older program until destructively reforked.
+   ordinary cluster remains a sovereign older program until destructively
+   reforked. An explicitly selected development cluster adopts published
+   program facts in place, preserving its agent facts, in its own JVM.
 4. **Flow.** EVERY AGENT IS ITS OWN FLOW GRAPH, created with the agent from
    one blueprint, parked between episodes, kicked off by the messages it
    receives; per cluster, a few shared plumbing graphs (render pipeline,
@@ -135,9 +137,13 @@ loaded behavior; file edits do not mutate the database's program facts. The
 edit hook statically analyzes changed first-party files and publishes safe
 same-identity upserts to `:current-src`; uncertain projections fall back to
 a complete build. `bin/seon init` is the explicit complete publication;
-existing clusters are never synchronized. A live proof after file edits must
-name whether it exercised a hot-reloaded Var or a cluster forked from the
-newly published commit.
+ordinary clusters are never synchronized. `bin/seon init --dev NAME` adopts
+the publication on an explicitly selected development cluster in its own
+JVM; the edit hook's `:current-source` root and cluster select that target.
+Its adoption commit is recorded only after schema and program reconciliation,
+loaded definitions, and SCI acquisition succeed. A live proof after file
+edits must name whether it exercised a hot-reloaded Var, a new fork, or this
+in-place development adoption; browser paint requires its own observation.
 
 **Transport law:** anything recovery or another process could ever need is
 a DATABASE FACT — identities, receipts, messages, errors, the settled

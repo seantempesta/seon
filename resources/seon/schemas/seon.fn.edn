@@ -53,6 +53,9 @@
             {:optional true}
             :seon.db/connection]
            [:seon.db/process {:optional true} :seon.db/ref]
+           [:seon.source/previous-database
+            {:optional true} :seon.source/previous-database]
+           [:seon.source/database {:optional true} :seon.source/database]
            [:seon.fn/roots {:optional true} :seon.fn/roots]
            [:seon.fn/manifest
             {:optional true}

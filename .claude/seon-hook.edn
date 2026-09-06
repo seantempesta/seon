@@ -17,7 +17,9 @@
  {:enabled true}
 
  :current-source
- {:enabled true}
+ {:enabled true
+  :root "tmp/juniper-context-live"
+  :cluster "juniper-context"}
 
  ;; The standing review rubric is DATA: `:skills` names skill directories
  ;; under `.agents/skills/`, each of whose `SKILL.md` is read fresh on every

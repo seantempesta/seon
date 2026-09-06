@@ -459,6 +459,15 @@
    :seon.dev.fresh-operator-test/output @output-future})
 
 (deftest init-changed-paths-are-an-explicit-source-publication-mode
+  (is (= {:seon.fresh-operator/development-cluster "development"
+          :seon.fresh-operator/changed-paths ["src/seon/fn.clj"]
+          :seon.fresh-operator/force? false}
+         (operator-private-value
+          'parse-init-arguments
+          ["--dev" "development" "--changed" "src/seon/fn.clj"])))
+  (is (= {:seon.fresh-operator/development-cluster "development"
+          :seon.fresh-operator/force? false}
+         (operator-private-value 'parse-init-arguments ["--dev" "development"])))
   (is (= {:seon.fresh-operator/changed-paths
           ["src/seon/fn.clj" "test/seon/fn_test.clj"]
           :seon.fresh-operator/force? false}

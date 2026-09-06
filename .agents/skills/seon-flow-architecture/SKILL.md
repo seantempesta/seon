@@ -6,7 +6,10 @@ description: "How Seon is architected on core.async.flow — procs, workloads, b
 # Seon flow architecture
 
 Seon's runtime is `core.async.flow` graphs in one JVM process; one JVM may host
-several sovereign clusters (`src/seon/cluster.clj:2578-2760`). There is no
+several sovereign clusters (`src/seon/cluster.clj`). An explicitly selected
+development cluster occupies its own JVM because its in-place source adoption
+updates process-wide Vars (`development-source-refresh!` in that owner).
+There is no
 central loop, no dispatcher, no scheduler entity — that shape is banned by
 owner ruling ("a JavaScript event loop inside Clojure"). If you are about to
 write one, stop and read *The banned shapes* below.

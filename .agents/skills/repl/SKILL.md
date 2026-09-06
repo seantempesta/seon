@@ -199,11 +199,16 @@ That live Var update is not database program-graph indexing. File or
 schema-resource edits do not change a cluster's `:seon.fn`, `:seon.ns`,
 `:seon.schema`, or `:seon.test` facts. The edit hook statically publishes safe
 changes to the one `:current-src` branch and selects a complete rebuild for
-structural changes; existing clusters never synchronize. `bin/seon init
+structural changes; ordinary clusters never synchronize. `bin/seon init
 CLUSTER --force` destroys and reforks that branch from the published commit.
-A REPL proof after an edit must say whether it proves only the loaded Var or a
-cluster forked from the newly published commit (`AGENTS.md`, “Hot reload is
-not program-graph indexing”).
+An explicitly selected development cluster in its own JVM instead receives
+`bin/seon init --dev CLUSTER`, which reconciles indexed facts and updates
+loaded definitions and SCI while preserving agent facts. The hook's
+`:current-source` root and cluster select this target
+(`src/seon/cluster.clj`, `development-source-refresh!`; `bin/seon-hook`,
+`current-source-feedback`). A REPL proof names the loaded Var, new fork, or
+in-place adoption it exercised; an adoption marker alone does not prove
+browser paint.
 
 ## Fast diagnosis
 

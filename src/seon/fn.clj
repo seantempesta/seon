@@ -1884,13 +1884,123 @@
            (sort-by (comp pr-str key) tempids))
      :seon.fn/index-keyword-operations keyword-operations}))
 
+(defn- normalized-index-row
+  "Compare stored refs by identity and anonymous components by their values."
+  [database row identity-attributes]
+  (let [entity (memoize #(db/pull database '[*] %))
+        row-identity
+        (fn [row]
+          (some (fn [attribute]
+                  (when-let [entry (find row attribute)]
+                    [attribute (val entry)]))
+                identity-attributes))]
+    (letfn [(normalize-map [row]
+              (reduce-kv
+               (fn [result attribute value]
+                 (if (= :db/id attribute)
+                   result
+                   (assoc result attribute
+                          (if (= :db.cardinality/many
+                                 (get-in (:schema database)
+                                         [attribute :db/cardinality]))
+                            (into #{} (map normalize-value) value)
+                            (normalize-value value)))))
+               {} row))
+            (normalize-value [value]
+              (cond
+                (map? value)
+                (let [expanded (if (= #{:db/id} (set (keys value)))
+                                 (entity (:db/id value))
+                                 value)]
+                  (or (row-identity expanded) (normalize-map expanded)))
+
+                (vector? value) (mapv normalize-value value)
+                (set? value) (into #{} (map normalize-value) value)
+                :else value))]
+      (normalize-map (program/canonical-row row)))))
+
+(defn reconcile-tx
+  "Replace source definitions while retaining identities and agent facts.
+
+  Immutable source identities identify definitions removed by an edit.
+  The current writer database decides their exact replacement, so a concurrent
+  agent transaction cannot make an earlier read authoritative."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value [:vector :map]
+          :seon.fn.file/identities]
+    [:vector :seon.schema/value]]}
+  [database rows previous-identities]
+  (let [identity-attributes (db/identity-attributes database)
+        desired-identities (into #{} (map program/row-identity) rows)
+        removed (remove desired-identities previous-identities)
+        desired
+        (into (vec rows)
+              (map (fn [[attribute value]] {attribute value}))
+              removed)
+        changes
+        (into []
+              (keep
+               (fn [row]
+                 (let [current (db/pull database '[*] (program/row-identity row))
+                       normalized-current
+                       (normalized-index-row database current identity-attributes)
+                       normalized-desired
+                       (normalized-index-row database row identity-attributes)]
+                   (when (not= normalized-current normalized-desired)
+                     {:seon.program/row row
+                      :seon.fn/retractions
+                      (if-let [entity-id (:db/id current)]
+                        (vec (butlast
+                              (program/exact-replacement-tx
+                               (assoc normalized-current :db/id entity-id)
+                               normalized-desired)))
+                        [])}))))
+              desired)
+        {entities :seon.fn/index-entities
+         identity-operations :seon.fn/index-identity-operations
+         keyword-operations :seon.fn/index-keyword-operations}
+        (compile-index-transaction (mapv :seon.program/row changes)
+                                   identity-attributes)]
+    (into (into (into (into [] (mapcat :seon.fn/retractions) changes)
+                          identity-operations)
+                    entities)
+          keyword-operations)))
+
+(defn- published-index-rows
+  "Read compiled rows with portable program refs and complete owned components."
+  [database]
+  (letfn [(reference [value]
+            (let [pulled (db/pull database '[*] (:db/id value))]
+              (or (program/row-identity pulled) (row pulled))))
+          (row [entity]
+            (reduce-kv
+             (fn [result attribute value]
+               (cond
+                 (= :db/id attribute) result
+                 (= :db.type/ref (get-in (:schema database) [attribute :db/valueType]))
+                 (assoc result attribute
+                        (if (= :db.cardinality/many
+                               (get-in (:schema database) [attribute :db/cardinality]))
+                          (mapv reference value)
+                          (reference value)))
+                 :else (assoc result attribute value)))
+             {} entity))]
+    (into []
+          (mapcat (fn [attribute]
+                    (map #(row (db/pull database '[*] %))
+                         (db/q '[:find [?entity ...] :in $ ?attribute
+                                 :where [?entity ?attribute]]
+                               database attribute))))
+          program/identity-attributes)))
+
 (defn index!
   "Populate one fresh source scratch branch from static analysis.
 
   The optional callback receives bounded progress lines while contract rows
   are derived and after each ordered phase commits. Observation never changes
   transaction boundaries; the scratch branch remains unpublished until every
-  phase and the source seal commit."
+  phase and the source seal commit. An explicit previous source database
+  selects in-place reconciliation for an opted-in development cluster."
   {:malli/schema
    [:function
     [:=> [:cat :seon.fn/index-request] :seon.reconcile/result]
@@ -1898,9 +2008,13 @@
      :seon.reconcile/result]]}
   ([request]
    (index! request nil))
-  ([{connection :seon.db/connection process :seon.db/process :as request}
+  ([{connection :seon.db/connection process :seon.db/process
+     previous-database :seon.source/previous-database
+     source-database :seon.source/database :as request}
     progress!]
-   (let [rows (desired-rows request progress!)
+   (let [rows (if source-database
+                (published-index-rows source-database)
+                (desired-rows request progress!))
          _ (assert-one-row-per-identity! rows)
          _ (assert-populated! rows)
          existing (some (fn [identity-attribute]
@@ -1909,11 +2023,59 @@
                                  :where [?entity ?attribute]]
                                 @connection identity-attribute))
                         [:seon.ns/name :seon.fn/sym :seon.test/sym])]
-     (when existing
+     (when (and existing (not previous-database))
        (throw (ex-info "Program indexing requires a fresh source scratch branch."
                        {:seon.error/kind ::index-refused
                         ::existing-program-entity existing :seon.fn/index-refused true})))
-     (let [identity-attributes (db/identity-attributes @connection)
+     (if previous-database
+       (let [previous-identities
+             (into []
+                   (mapcat
+                    (fn [attribute]
+                      (map (fn [value] [attribute value])
+                           (db/q '[:find [?value ...]
+                                   :in $ ?attribute
+                                   :where
+                                   [?entity ?attribute ?value]
+                                   [?entity :seon.schema.admission/source :core]]
+                                 previous-database attribute))))
+                   program/identity-attributes)
+             report
+             (require-committed!
+              (db/transact!
+               connection
+               (cond-> {:tx-data [[:db.fn/call reconcile-tx rows previous-identities]]}
+                 process (assoc :tx-meta {:seon.db/process process})))
+              :seon.fn/population)
+             changed-entities (into #{} (map :e) (:tx-data report))
+             previous-identity-attributes (db/identity-attributes previous-database)
+             current-identity-attributes (db/identity-attributes (:db-after report))
+             source-changed-identities
+             (into #{}
+                   (keep (fn [row]
+                           (let [identity (program/row-identity row)]
+                             (when (not=
+                                    (normalized-index-row
+                                     previous-database
+                                     (db/pull previous-database '[*] identity)
+                                     previous-identity-attributes)
+                                    (normalized-index-row
+                                     (:db-after report) row
+                                     current-identity-attributes))
+                               identity))))
+                   rows)
+             removed-identities
+             (remove (into #{} (map program/row-identity) rows)
+                     previous-identities)
+             changed-identities
+             (into (into source-changed-identities removed-identities)
+                   (keep #(program/row-identity
+                           (db/pull (:db-after report) program/identity-attributes %)))
+                   changed-entities)]
+         {:seon.reconcile/converged? (empty? changed-identities)
+          :seon.reconcile/operations (count changed-identities)
+          :seon.program/identities (vec changed-identities)})
+       (let [identity-attributes (db/identity-attributes @connection)
            {entities :seon.fn/index-entities
             identity-operations :seon.fn/index-identity-operations
             keyword-operations :seon.fn/index-keyword-operations}
@@ -1927,4 +2089,4 @@
                             (into (into identity-operations entities)
                                   keyword-operations))
        {:seon.reconcile/converged? false
-        :seon.reconcile/operations (count rows)}))))
+        :seon.reconcile/operations (count rows)})))))

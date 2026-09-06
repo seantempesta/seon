@@ -32,6 +32,7 @@
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
             [datahike.gc-guard :as gc-guard]
+            [sci.core :as sci]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.source :as source]
             [seon.cluster.registry :as registry]
@@ -1647,7 +1648,8 @@
             snapshot-before (current-source-snapshot)
             known-functions (seon.fn/manifest-function-symbols manifest)
             changes
-            (mapv
+            (try
+             (mapv
              (fn [path]
                (let [file (io/file path)
                      current (seon.fn/artifact-by-path manifest path)
@@ -1668,7 +1670,14 @@
                      :else :added)
                    :seon.fn.change/current-artifact current
                    :seon.fn.change/desired-artifact desired})))
-             paths)
+              paths)
+             (catch clojure.lang.ExceptionInfo failure
+               (if (= :seon.fn/index-refused (:seon.error/kind (ex-data failure)))
+                 ;; A new callee in another edited file is absent from the
+                 ;; old manifest. The complete analyzer is authoritative;
+                 ;; it either resolves the new population or refuses it.
+                 [{:seon.fn.change/action :full-rebuild}]
+                 (throw failure))))
             snapshot-after (current-source-snapshot)
             digest-after (:seon.source/digest snapshot-after)
             unreported-current?
@@ -1701,7 +1710,130 @@
             (write-source-artifact! root
                                     (source-artifact result next-manifest
                                                      snapshot-after))
-            result))))))
+            (assoc result :seon.program/rows rows)))))))
+
+(defn- development-source-refresh!
+  [held-store instance before-publication published]
+  (let [connection (:seon.boot/cluster-connection instance)
+        cluster-name (get-in instance [:seon.boot/advertisement :seon.boot/cluster-name])
+        cluster-ref [:seon.cluster/name cluster-name]
+        ctx (:seon.sci.eval/ctx instance)
+        prior-commit (:seon.source/commit-id
+                      (db/pull @connection [:seon.source/commit-id] cluster-ref))
+        previous-database (if prior-commit
+                            (source/database held-store prior-commit)
+                            @connection)
+        published-database (source/database held-store (:seon.source/commit-id published))
+        forms (:seon.schema.projection/forms
+               (schema/projection-from-database published-database))
+        _ (report-source-progress! "development schema declarations")
+        _ (schema/call-with-forms
+           forms
+           #(require-committed!
+             (db/transact!
+              connection
+              {:tx-data
+               [[:db.fn/call
+                 (fn [database]
+                   (declaration-changes database forms cluster-name))]]})
+             {:seon.boot/population :seon.schema/declarations}))
+        scalar-rows (:seon.program/rows published)
+        scalar? (and scalar-rows
+                     (= prior-commit (:seon.source/commit-id before-publication)))
+        _ (report-source-progress! "development program reconciliation")
+        changed-identities
+        (if scalar?
+          (do
+            (when (seq scalar-rows)
+              (require-committed!
+               (db/transact! connection {:tx-data scalar-rows})
+               {:seon.boot/population :seon.fn/population}))
+            (mapv (fn [row]
+                    (some (fn [attribute]
+                            (when-let [entry (find row attribute)]
+                              [attribute (val entry)]))
+                          [:seon.ns/name :seon.fn/sym :seon.test/sym]))
+                  scalar-rows))
+          (:seon.program/identities
+           (seon.fn/index!
+            {:seon.db/connection connection
+             :seon.source/database published-database
+             :seon.source/previous-database previous-database}
+            *source-progress!*)))
+        database @connection
+        projection (schema/projection-from-database database)
+        deleted-identities (source/deleted-identities database)
+        namespaces
+        (into #{}
+              (keep (fn [[attribute value]]
+                      (case attribute
+                        :seon.ns/name value
+                        (:seon.fn/sym :seon.test/sym)
+                        (symbol (namespace (symbol value)))
+                        nil)))
+              (if prior-commit
+                changed-identities
+                (mapv (fn [namespace-name] [:seon.ns/name namespace-name])
+                      (db/q '[:find [?name ...]
+                              :where [?namespace :seon.ns/name ?name]
+                              [?namespace :seon.ns/source]]
+                            database))))]
+    (report-source-progress! "development loaded definitions")
+    ;; Clojure reload leaves removed interns behind. Remove only definitions
+    ;; whose identity now has no source, retaining their durable tombstones.
+    (doseq [[attribute function-symbol :as deleted-identity] deleted-identities
+            :when (#{:seon.fn/sym :seon.test/sym} attribute)]
+      (let [qualified (symbol function-symbol)
+            namespace-name (symbol (namespace qualified))
+            local-name (symbol (name qualified))]
+        (when (find-ns namespace-name)
+          (ns-unmap namespace-name local-name))
+        (when (get (sci/namespace-state ctx) namespace-name)
+         (schema/call-with-projection
+         projection
+         #(sci.eval/install-row!
+         {:seon.sci.eval/ctx ctx :seon.db/db database
+          :seon.sci.eval/prepared-projection projection
+          :seon.program/row
+          {:seon.program/delete-identities [deleted-identity]
+           :seon.program/ns [:seon.ns/name namespace-name]
+           :seon.program/source
+           (pr-str (list 'ns-unmap (list 'quote namespace-name)
+                         (list 'quote local-name)))}})))))
+    (doseq [namespace-name (sort-by str namespaces)
+            :when (and (find-ns namespace-name)
+                       (:seon.ns/source
+                        (db/pull database [:seon.ns/source]
+                                 [:seon.ns/name namespace-name])))]
+      (report-source-progress! (str "development reload " namespace-name))
+      (require namespace-name :reload))
+    (report-source-progress! "development SCI acquisition")
+    (let [result (sci.eval/acquire! {:seon.sci.eval/ctx ctx
+                                    :seon.db/db database
+                                    :seon.schema/projection projection})]
+      (when (seq (:seon.sci.eval/acquisition-refusals result))
+        (refused! "Development SCI acquisition refused committed definitions."
+                  result)))
+    (env/advance-projection! (get ctx env/state-carrier)
+                             (db/basis-t database) projection)
+    (when-not (= (:seon.source/digest published)
+                 (:seon.source/digest (current-source-snapshot)))
+      (refused! "Source changed during development adoption; the next edit must converge it."
+                {:seon.source/commit-id (:seon.source/commit-id published)}))
+    ;; This fact means all three steps succeeded. A reload or acquisition
+    ;; error leaves the old commit, so the next edit retries reconciliation.
+    (require-committed!
+     (db/transact! connection
+                   {:tx-data [{:db/id cluster-ref
+                               :seon.source/commit-id
+                               (:seon.source/commit-id published)}]})
+     {:seon.boot/population :seon.source/commit-id})
+    (when-let [channel (get-in instance
+                              [:seon.render.web/view
+                               :seon.render.web/runtime-eval-channel])]
+      (async/offer! channel :seon.render.web/runtime-eval))
+    (report-source-progress! "development cluster converged")
+    nil))
 
 (defn refresh-source!
   "Publish the current source tree onto the one `current-src` branch.
@@ -1712,22 +1844,37 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.boot/root] :seon.source/published]
-    [:=> [:cat :seon.boot/root [:vector :string]] :seon.source/published]]}
+    [:=> [:cat :seon.boot/root [:vector :string]] :seon.source/published]
+    [:=> [:cat :seon.boot/root [:vector :string] [:maybe :seon.boot/cluster-name]]
+     :seon.source/published]]}
   ([root]
    (refresh-source! root []))
   ([root changed-paths]
+   (refresh-source! root changed-paths nil))
+  ([root changed-paths development-cluster]
    (report-source-progress! "request accepted")
    (locking source-refresh-monitor
      (report-source-progress! "bootstrap configuration")
-     (let [config (resolve-bootstrap {:seon.boot/root root})
+     (let [instance (when development-cluster
+                      (get @running-instances development-cluster))
+           _ (when (and development-cluster
+                        (or (not instance) (not= 1 (count @running-instances))))
+               (refused! "Development updates require their own running JVM."
+                         {:seon.boot/cluster-name development-cluster}))
+           config (resolve-bootstrap {:seon.boot/root root})
            store-dir (:seon.boot/store-dir config)
            _ (report-source-progress! "store acquisition")
            held-store (acquire-root-store! store-dir)]
        (try
          (report-source-progress! "source build")
-         (if (seq changed-paths)
-           (incremental-source-refresh! root held-store changed-paths)
-           (full-source-refresh! root held-store))
+         (let [before-publication (source/current held-store)
+               published (if (seq changed-paths)
+                           (incremental-source-refresh! root held-store changed-paths)
+                           (full-source-refresh! root held-store))]
+           (when instance
+             (development-source-refresh! held-store instance
+                                          before-publication published))
+           (dissoc published :seon.program/rows))
          (finally
            (release-root-store! store-dir)))))))
 
