@@ -1092,6 +1092,67 @@
                     "the initial paint and both code changes rederive once")
                 (finally (.close stream))))))))))
 
+(deftest runtime-evaluation-drops-a-closed-debug-pages-package
+  (with-server
+    (fn [_connection server context]
+      (let [phase (atom 0)
+            calls (atom {})
+            original (web-private 'debug-page-result)
+            decorated
+            (fn [& args]
+              (let [viewer (:seon.render.debug/viewer-namespace (nth args 2))
+                    marker (str viewer "-runtime-phase-" @phase)]
+                (swap! calls update viewer (fnil inc 0))
+                (update-in (apply original args)
+                           [:seon.render.web/page
+                            "debug-inspection-header"]
+                           str/replace
+                           "</header>"
+                           (str "<span>" marker "</span></header>"))))
+            subject (URLEncoder/encode
+                     (pr-str [:seon.ns/name 'seon.flow]) "UTF-8")
+            feed-url (fn [viewer]
+                       (str "/feed/" agent-id
+                            "?debug=true&viewer=" viewer
+                            "&subject=" subject
+                            "&output=%3Aseon.render%2Fhtml"))]
+        (with-redefs-fn
+          {(ns-resolve 'seon.render.web 'debug-page-result) decorated}
+          (fn []
+            (let [closed-view (open-feed server (feed-url "my.plan"))
+                  active-view (open-feed server (feed-url "seon.flow"))]
+              (try
+                (read-until! closed-view "my.plan-runtime-phase-0")
+                (read-until! active-view "seon.flow-runtime-phase-0")
+                (.close closed-view)
+                (support/await-event!
+                 (future
+                   (loop []
+                     (if (some (fn [[registration-key _tabs]]
+                                 (= 'my.plan
+                                    (get-in registration-key
+                                            [1 :seon.render.debug/viewer-namespace])))
+                               @(:registration context))
+                       (recur)
+                       true)))
+                 [:closed-debug-registration-removed])
+                (reset! phase 1)
+                (is (async/offer! (:runtime-eval-channel context)
+                                  :seon.render.web/runtime-eval))
+                (read-until! active-view "seon.flow-runtime-phase-1")
+                (is (= 1 (get @calls 'my.plan))
+                    "the closed page was not derived for the code event")
+                (let [reopened (open-feed server (feed-url "my.plan"))]
+                  (try
+                    (is (str/includes?
+                         (read-until! reopened "my.plan-runtime-phase-1")
+                         "my.plan-runtime-phase-1")
+                        "reopen derives current code at an unchanged database basis")
+                    (is (= 2 (get @calls 'my.plan))
+                        "the closed page's old package was not reused")
+                    (finally (.close reopened))))
+                (finally (.close active-view))))))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The wire — the rung's claim
 ;;; ---------------------------------------------------------------------------

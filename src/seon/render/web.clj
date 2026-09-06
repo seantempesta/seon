@@ -1582,6 +1582,31 @@
             {::retained-only? true
              :seon.render/captured-calls calls}))))))
 
+(defn- watched-registration-keys
+  [registration]
+  (into (sorted-set-by #(compare (pr-str %1) (pr-str %2)))
+        (keep (fn [[registration-key tabs]]
+                (when (pos? (long tabs)) registration-key)))
+        @registration))
+
+(defn- invalidate-runtime-derived-state
+  "Drop code-derived values a runtime evaluation could no longer refresh.
+
+  Active packages remain as revision predecessors for their immediate repaint.
+  A closed page has no consumer to refresh during that pass, so retaining its
+  package would let a later reopen accept old code solely because the database
+  basis is unchanged. Calls, fragments, and generated agent context are also
+  code-derived and must be derived again after an evaluation."
+  [state]
+  (let [watched (watched-registration-keys
+                 (:seon.render.web/registration state))]
+    (assoc state
+           ::packages (select-keys (::packages state) watched)
+           ::fragments {}
+           ::calls {}
+           ::ai-calls {}
+           ::ai-entries {})))
+
 (defn- render-pass
   "Derive every registered page and retain its serialized package.
 
@@ -1597,10 +1622,7 @@
   ([state database derive-all? invalidate-calls?]
   (let [handle (:seon.cluster.loop/cluster state)
         registration (:seon.render.web/registration state)
-        watched (into (sorted-set-by #(compare (pr-str %1) (pr-str %2)))
-                      (keep (fn [[registration-key tabs]]
-                              (when (pos? (long tabs)) registration-key)))
-                      @registration)
+        watched (watched-registration-keys registration)
         profile (or (::profile state)
                     (when (seq watched)
                       (render/agent-render-profile
@@ -1669,7 +1691,8 @@
                   (:seon.render/captured-calls result)))
          (::calls state)
          results)
-        _ (when (not= packages (::packages state))
+        _ (when (or invalidate-calls?
+                    (not= packages (::packages state)))
             (reset! (:seon.render.web/latest-packages state) packages))
         state (-> state
                   (update ::passes inc)
@@ -1909,6 +1932,7 @@
                  (assoc-in state
                            [::streams (:seon.cluster.agent/id message)]
                            message)
+                 ::runtime-eval (invalidate-runtime-derived-state state)
                  state)
          connection (:seon.db/connection
                      (:seon.cluster.loop/cluster state))
