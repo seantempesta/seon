@@ -8,6 +8,7 @@
             [my.plan :as plan]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.schema]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
@@ -58,7 +59,7 @@
             :my.plan.item/needs #{[:my.plan.item/id "prepare"]}})
       (is (= ["prepare"] (mapv :my.plan.item/id
                                 (plan/ready @connection "alice"))))
-      (let [view (plan/plan @connection "alice")]
+      (let [view (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"})]
         (is (= [:my.plan.item/id "root"] (:my.plan/anchor view)))
         (is (= ["prepare"] (mapv :my.plan.item/id (:my.plan/ready view))))
         (is (= ["verify"] (mapv :my.plan.item/id (:my.plan/blocked view)))))
@@ -161,7 +162,7 @@
          :seon.test/error-count 0
          :seon.test/run-basis-t (db/basis-t @connection)
          :seon.test/run-at (at 3)}])
-      (let [view (plan/plan @connection "alice")
+      (let [view (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"})
             sources (mapv :my.plan/obligation-source
                           (:my.plan/obligations view))]
         (is (= [:message :run :test] sources))
@@ -176,7 +177,7 @@
       (is (= [:run :run :test]
              (mapv :my.plan/obligation-source
                    (:my.plan/obligations
-                    (plan/plan @connection "alice"))))))))
+                    (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"}))))))))
 
 (deftest rebirth-uses-only-current-facts-and-honest-elision
   (with-plan
@@ -187,17 +188,33 @@
           (let [id (format "done-%02d" index)]
             (add connection id (str "Completed " index))
             (plan/complete! id (at index) connection "alice")))
-        (let [current (plan/plan @connection "alice")
+        (let [current (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"})
               recent (:my.plan/recent-completions current)
               older (:my.plan/older-completions current)
               source (plan/render-plan-ai current)
               ai (plan/format-plan-ai current)
+              acquired (sci.eval/cluster-ctx @connection connection)
+              environment
+              (env/refuse-incomplete-environment!
+               (env/environment
+                {:seon.boot/cluster-name "plan-render"
+                 :seon.db/connection connection
+                 :seon.schema/projection (:seon.schema/projection acquired)}))
+              base (env/carry-state acquired
+                                    (env/environment-state environment))
               evaluated
               (sci.eval/evaluate
                {:seon.cluster.run.form/source source
                 :seon.cluster.run.form/ns [:seon.ns/name 'fixture.plan]
                 :seon.cluster.agent/id "alice"
-                :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                :seon.sci.eval/ctx
+                (:seon.sci.eval/ctx
+                 (sci.eval/fork-for-turn
+                  {:seon.sci.eval/ctx
+                   base
+                   :seon.db/db @connection
+                   :seon.db/connection connection
+                   :seon.cluster.agent/id "alice"}))
                 :seon.sci.admit/caps
                 (config/result-caps (support/effective-config))
                 :seon.sci.eval/time-limit-ms 5000
@@ -350,13 +367,13 @@
         (is (zero? (item-count @connection))))
       (let [before
             (set (map :my.plan/obligation-id
-                      (:my.plan/obligations (plan/plan @connection "alice"))))
+                      (:my.plan/obligations (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"}))))
             applied
             (plan/plan! [{:my.plan.item/title "Authored only"}]
                         @connection connection "alice")
             after
             (set (map :my.plan/obligation-id
-                      (:my.plan/obligations (plan/plan @connection "alice"))))]
+                      (:my.plan/obligations (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"}))))]
         (is (= #{"question" "later"} before))
         (is (= before after))
         (is (= 1 (:my.plan/added (:my.plan/diff applied))))))))
@@ -436,3 +453,55 @@
                                    :where [?subject :seon.schema/key ?key]]
                                  @connection subject)))
                      (plan/ready-subjects @connection "alice"))))))))
+
+(deftest plan-request-map-receives-the-calling-agents-world
+  (with-plan
+    (fn [connection]
+      (db/transact! connection
+                    (filterv :seon.call-preparation/key
+                             (:seon.config/initialization
+                              (config/compile-manifest {}))))
+      (add connection "alice-work" "Alice work")
+      (plan/add! {:my.plan.item/id "bob-work"
+                  :my.plan.item/title "Bob work"}
+                 connection "bob")
+      (let [database @connection
+            acquired (sci.eval/cluster-ctx database connection)
+            environment
+            (env/refuse-incomplete-environment!
+             (env/environment
+              {:seon.boot/cluster-name "plan-map-defaults"
+               :seon.db/connection connection
+               :seon.schema/projection (:seon.schema/projection acquired)}))
+            base (env/carry-state acquired
+                                  (env/environment-state environment))
+            evaluate
+            (fn [agent-id source]
+              (let [live (:seon.sci.eval/ctx
+                          (sci.eval/fork-for-turn
+                           {:seon.sci.eval/ctx base
+                            :seon.db/db database
+                            :seon.db/connection connection
+                            :seon.cluster.agent/id agent-id}))]
+                (:seon.sci.admit/value
+                 (sci.eval/evaluate
+                  {:seon.sci.eval/ctx live
+                   :seon.cluster.agent/id agent-id
+                   :seon.sci.admit/caps
+                   (config/result-caps (support/effective-config))
+                   :seon.sci.eval/time-limit-ms 5000
+                   :seon.config/on-core-error :panic
+                   :seon.cluster.run.form/source source
+                   :seon.cluster.run.form/ns
+                   [:seon.ns/name 'fixture.plan]}))))
+            alice (evaluate "alice" "(my.plan/plan {})")
+            bob (evaluate "bob" "(my.plan/plan {})")
+            explicit
+            (evaluate "alice"
+                      "(my.plan/plan {:seon.cluster.agent/id \"bob\"})")]
+        (is (= ["alice-work"]
+               (mapv :my.plan.item/id (:my.plan/ready alice))))
+        (is (= ["bob-work"]
+               (mapv :my.plan.item/id (:my.plan/ready bob))))
+        (is (= bob explicit)
+            "an explicit map entry wins over the calling agent default")))))

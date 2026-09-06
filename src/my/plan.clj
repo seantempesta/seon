@@ -842,10 +842,9 @@
   agent. Query or pull `:my.plan.item/agent` and its reverse directly to inspect
   the graph; `seon.db/transact!` creates and updates those ordinary facts."
   {:malli/schema
-   [:=> [:catn [:database :seon.db/database-value]
-               [:agent-id :seon.cluster.agent/id]]
+   [:=> [:catn [:request :my.plan/request]]
     [:or :my.plan/view :seon.error/value]]}
-  [database agent-id]
+  [{database :seon.db/db agent-id :seon.cluster.agent/id}]
   (let [agent-entity (agent-eid database agent-id)]
     (if (error-value? agent-entity)
       agent-entity
@@ -1038,10 +1037,10 @@
 (defn render-plan-ai
   "Render source which derives and formats the current plan union."
   {:malli/schema [:=> [:cat :my.plan/view] :seon.render/ai]}
-  [view]
+  [_view]
   (pr-str
    (list `format-plan-ai
-         (list `plan (:seon.cluster.agent/id view)))))
+         (list `plan {}))))
 
 (defn- item-list-html
   [title items css-class]

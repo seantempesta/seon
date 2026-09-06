@@ -640,13 +640,16 @@
        ;; This ordinary call is also the program-graph edge that makes the
        ;; source-string callee part of a reduced focused-test projection.
        (is (= :my.plan/agent-not-found
-              (:seon.error/kind (plan/plan @connection "missing"))))
+              (:seon.error/kind
+               (plan/plan {:seon.db/db @connection
+                           :seon.cluster.agent/id "missing"}))))
        (let [ctx (sci.eval/cluster-ctx @connection connection)
              acquired-projection (:seon.schema/projection ctx)
              environment
              (env/refuse-incomplete-environment!
               (env/environment {:seon.boot/cluster-name "plan-call"
                                 :seon.db/connection connection
+                                :seon.cluster.agent/id "missing"
                                 :seon.schema/projection acquired-projection}))
              observed (atom nil)
              live (-> (env/carry-state ctx (env/environment-state environment))
@@ -657,39 +660,23 @@
              current (cp/snapshot @connection acquired-projection)
              invocation-plan
              (cp/plan (get ctx cp/carrier) @connection current "my.plan/plan")
-             target-fingerprint
-             (db/q '[:find ?fingerprint .
-                     :where
-                     [?function :seon.fn/sym "my.plan/plan"]
-                     [?function :seon.fn/arities ?arity]
-                     [?arity :seon.fn.arity/arguments ?argument]
-                     [?argument :seon.fn.argument/index 0]
-                     [?argument :seon.fn.argument/schema ?shape]
-                     [?shape :seon.schema.shape/fingerprint ?fingerprint]]
-                   @connection)
-             default-fingerprint
-             (get-in current [:seon.call-preparation/supplied-defaults
-                              :seon.db/db :seon.call-preparation/shape])
              omitted (try
-                       (sci/eval-string* live "(my.plan/plan \"missing\")")
+                       (sci/eval-string* live "(my.plan/plan {})")
                        (catch Throwable cause cause))
              explicit
              (sci/eval-string*
               live
-              (str "(my.plan/plan "
-                   "(seon.call-preparation-test/probe-current-database) "
-                   "\"missing\")"))]
+              (str "(my.plan/plan {:seon.db/db "
+                   "(seon.call-preparation-test/probe-current-database), "
+                   ":seon.cluster.agent/id \"missing\"})"))]
          (is (contains? (:seon.call-preparation/supplied-defaults current)
                         :seon.db/db)
              (pr-str (:seon.call-preparation/refusals current)))
-         (is (= default-fingerprint target-fingerprint)
-             (pr-str {:default default-fingerprint :target target-fingerprint}))
-         (let [prepared (cp/prepare current environment invocation-plan
-                                    ["missing"])]
-           (is (= 2 (count prepared)))
-           (is (db/database-value? (first prepared)))
-           (is (= "missing" (second prepared))
-               "an explicit agent wins even when both slots have defaults"))
+         (let [prepared (cp/prepare current environment invocation-plan [{}])]
+           (is (= 1 (count prepared)))
+           (is (db/database-value? (:seon.db/db (first prepared))))
+           (is (= "missing"
+                  (:seon.cluster.agent/id (first prepared)))))
          (is (= "my.plan/plan" @observed)
              "SCI hands the hook the indexed callee identity")
          (is (not (instance? Throwable omitted))

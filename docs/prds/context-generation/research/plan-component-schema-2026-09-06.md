@@ -232,3 +232,26 @@ This uses actual stored content, not invented fixture prose. The probe ordered
 by entity id solely because the current model lacks authored sibling position;
 that is not the intended order authority. The proposed position attribute fixes
 that missing fact. Nested component ownership is not installed yet.
+
+## Named request-map lookup ruling, 2026-09-06
+
+Agent-facing lookup and render functions default through one named, spec'ed
+request map. For `my.plan/plan`, the required request members are
+`:seon.db/db` and `:seon.cluster.agent/id`. Agent source calls `(my.plan/plan
+{})`; the shared SCI call-preparation hook fills absent required entries from
+the calling turn's environment. An explicit `(my.plan/plan
+{:seon.cluster.agent/id "other"})` keeps the caller's value and receives only
+the absent database entry. This is the existing required-map-entry preparation
+mechanism in `src/seon/call_preparation.clj:1070-1105`, not a function-local
+lookup or another default path.
+
+Positional conveniences remain appropriate only when their position is useful
+to the operation. Database and current-agent custody are named world values,
+so a two-positional lookup arity is not retained. The render source calls the
+same map API with `{}`; pure terminal formatters continue to accept already
+derived plan data.
+
+This lookup correction does not install the component schema above. The writer
+contract for replacing the current flat `add!` and label/after/children
+`plan!` inputs remains separate unresolved work. Existing plan facts and writer
+semantics remain unchanged by the request-map lookup slice.

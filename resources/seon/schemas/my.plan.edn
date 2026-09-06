@@ -53,6 +53,10 @@
             "Stored plan state on an agent: identity plus an optional current-position ref. Plan items connect back through :my.plan.item/agent."}
            [:seon.cluster.agent/id :seon.cluster.agent/id]
            [:my.plan/anchor {:optional true} :my.plan/anchor]],
+          :request
+          [:map
+           [:seon.db/db :seon.db/database-value]
+           [:seon.cluster.agent/id :seon.cluster.agent/id]],
           :obligation-source [:enum :message :run :test],
           :obligation-id [:string {:min 1}],
           :obligation-title [:string {:min 1}],
