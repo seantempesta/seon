@@ -60,7 +60,25 @@
          :seon.cluster.eval/run [:seon.cluster.run/id "terminal-values"]
          :seon.cluster.eval/ordinal 1
          :seon.cluster.eval/at (java.util.Date. 2)
-         :seon.cluster.eval/error "stored error"}])
+         :seon.cluster.eval/error "stored error"}
+        {:seon.cluster.run.form/id "terminal-string-form"
+         :seon.cluster.run.form/run [:seon.cluster.run/id "terminal-values"]
+         :seon.cluster.run.form/ordinal 2
+         :seon.cluster.run.form/source "(identity \"alpha\\nbeta\")"}
+        {:seon.cluster.eval/id "terminal-string"
+         :seon.cluster.eval/run [:seon.cluster.run/id "terminal-values"]
+         :seon.cluster.eval/ordinal 2
+         :seon.cluster.eval/at (java.util.Date. 3)
+         :seon.cluster.eval/result-edn (pr-str "alpha\nbeta")}
+        {:seon.cluster.run.form/id "terminal-nested-string-form"
+         :seon.cluster.run.form/run [:seon.cluster.run/id "terminal-values"]
+         :seon.cluster.run.form/ordinal 3
+         :seon.cluster.run.form/source "(identity {:text \"alpha\\nbeta\"})"}
+        {:seon.cluster.eval/id "terminal-nested-string"
+         :seon.cluster.eval/run [:seon.cluster.run/id "terminal-values"]
+         :seon.cluster.eval/ordinal 3
+         :seon.cluster.eval/at (java.util.Date. 4)
+         :seon.cluster.eval/result-edn (pr-str {:text "alpha\nbeta"})}])
       (let [receipt-render run/render-receipt-ai
             receipt-calls (atom 0)
             rendered
@@ -76,12 +94,16 @@
                       :seon.cluster.run/id "terminal-values"
                       :seon.cluster.run/agent
                       {:seon.cluster.agent/id agent-id})))]
-        (is (= 2 @receipt-calls))
+        (is (= 4 @receipt-calls))
         (is (str/includes? rendered
                            "user=> (swap! executions inc)\nonce\n1"))
         (is (str/includes? rendered
                            "user=> (throw (Exception. \"source error\"))"))
         (is (str/includes? rendered "stored error"))
+        (is (str/includes? rendered
+                           "user=> (identity \"alpha\\nbeta\")\nalpha\nbeta"))
+        (is (str/includes? rendered
+                           "user=> (identity {:text \"alpha\\nbeta\"})\n{:text \"alpha\\nbeta\"}"))
         (is (not (str/includes? rendered "t=17")))))))
 
 (defn- at

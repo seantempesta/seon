@@ -660,6 +660,8 @@
                          (merge (print/default-options)
                                 (:seon.print/options unit)))
 
+        (string? read-value) read-value
+
         :else (floor-text unit read-value)))))
 
 (defn- prompted-source
