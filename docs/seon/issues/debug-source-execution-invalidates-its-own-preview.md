@@ -65,6 +65,30 @@ on every database fact. Ignoring false read validity or returning a permanent
 stale-result refusal would not fix the requested behavior. Do not classify this
 as another presentation-key mismatch.
 
+## Browser reopen falsifier after metadata correction
+
+`cd0c4e03b` excludes the internal maximum-transaction coherence reads from
+evaluation evidence while retaining supplied-default declaration and supplier
+dependencies. A fresh isolated cluster at
+`tmp/render-source-live-2026-09-06-metadata` initially retained one execution
+through a bounded feed close/reopen probe.
+
+Root's subsequent in-app browser inspection of the namespace debug route on
+port 7928, subject 32317, produced a second identical identity execution:
+`source:9f1bbfe3-1a5f-4420-a8a2-ad25a533e852`, opened at
+21:48:48.027 UTC, following
+`source:f9da2695-c9f1-4b29-b527-b1621aa067ea`. This falsifies reuse across the
+actual browser registration. The registration differences and retained call
+lifetime still need examination; two executions alone do not establish another
+unbounded loop. The owning agent stopped this isolated cluster to preserve
+evidence. The issue remains open.
+
+The same inspection found that the lower AI result serialized the entire
+transcript as a quoted string with escaped newlines, while the run reference
+preview displayed its multiline text correctly. The selected paired preview
+still showed authored source without its evaluated result. Those presentation
+boundaries must consume the existing terminal text directly.
+
 ## Owner and acceptance
 
 Correct the existing retained call/invocation cache in `seon.render.web` and
