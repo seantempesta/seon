@@ -1020,8 +1020,7 @@
   [view]
   (pr-str
    (list `format-plan-ai
-         (list `plan (list 'seon.db/db)
-               (:seon.cluster.agent/id view)))))
+         (list `plan (:seon.cluster.agent/id view)))))
 
 (defn- item-list-html
   [title items css-class]

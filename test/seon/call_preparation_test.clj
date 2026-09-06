@@ -611,6 +611,7 @@
   (testing "a real first-party call uses its contracted shorter shape"
     (test-support/with-database
      (fn [connection]
+       (db/transact! connection database-rows)
        ;; This ordinary call is also the program-graph edge that makes the
        ;; source-string callee part of a reduced focused-test projection.
        (is (= :my.plan/agent-not-found
@@ -622,11 +623,18 @@
               (env/environment {:seon.boot/cluster-name "plan-call"
                                 :seon.db/connection connection
                                 :seon.schema/projection acquired-projection}))
-             live (env/carry-state ctx (env/environment-state environment))
+             observed (atom nil)
+             live (-> (env/carry-state ctx (env/environment-state environment))
+                      (assoc :call-preparation-hook
+                             (fn [runtime callee arguments]
+                               (reset! observed (cp/callee-identity callee))
+                               (cp/hook runtime callee arguments))))
              current (cp/snapshot @connection acquired-projection)
              invocation-plan
              (cp/plan (get ctx cp/carrier) @connection current "my.plan/plan")
-             omitted (sci/eval-string* live "(my.plan/plan \"missing\")")
+             omitted (try
+                       (sci/eval-string* live "(my.plan/plan \"missing\")")
+                       (catch Throwable cause cause))
              explicit
              (sci/eval-string*
               live
@@ -639,6 +647,10 @@
                               [:seon.call-preparation/by-supplied-count 1
                                :seon.call-preparation/inserts])))
              "the complete indexed contract derives the leading database slot")
+         (is (= "my.plan/plan" @observed)
+             "SCI hands the hook the indexed callee identity")
+         (is (not (instance? Throwable omitted))
+             (some-> ^Throwable omitted ex-message))
          (is (= :my.plan/agent-not-found (:seon.error/kind omitted)))
          (is (= omitted explicit)
              "an explicit database wins and reaches the same function body"))))))
