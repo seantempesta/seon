@@ -773,7 +773,9 @@
                  (source-call (request [:debug] {} first-invocations
                                        first-calls {}
                                        {:seon.ns/name fixture-a}))
-                 registration-key [:source-cache-tab]
+                 registration-key
+                 [:seon.render.web/debug-tab
+                  {:seon.cluster.agent/id "source-cache-agent"}]
                  invalidated
                  (target-call
                   'seon.render.web 'invalidate-runtime-derived-state
@@ -798,11 +800,27 @@
                  second-invocations (atom {})
                  second-calls (atom {})
                  second-output
-                 (source-call
-                  (request [:debug] @first-invocations second-invocations
-                           second-calls retained-after-runtime-eval
-                           {:seon.ns/name fixture-a
-                            :seon.cluster.run/_agent [{:db/id 9001}]}))
+                 (:seon.render.call/output
+                  (with-redefs-fn
+                    {(ns-resolve 'seon.render.web 'debug-page-result)
+                     (fn [_database _connection _debug _caps _profile _handle
+                          retained invocations captured]
+                       (let [output
+                             (source-call
+                              (request [:debug] invocations captured
+                                       second-calls retained
+                                       {:seon.ns/name fixture-a
+                                        :seon.cluster.run/_agent
+                                        [{:db/id 9001}]}))]
+                         (reset! second-invocations @captured)
+                         {:seon.render.call/output output}))}
+                    (fn []
+                      ((ns-resolve 'seon.render.web 'page-refresh)
+                       (assoc invalidated
+                              :seon.cluster.loop/cluster
+                              {:seon.db/connection connection
+                               :seon.sci.admit/caps caps})
+                       @connection {} {} registration-key true true))))
                  third-invocations (atom {})
                  third-calls (atom {})
                  third-output
@@ -825,7 +843,7 @@
              (is (= 2 @source-invocations)
                  "one entity change regenerates source; the second presentation reuses it")
              (is (= 1 @submissions)
-                 "pending and terminal refreshes retain one execution identity")
+                 "the runtime-evaluation page refresh retains one execution identity")
              (is (= "(+ 1 1)" (:seon.render.call/source retained)))
              (is (= "source-cache-run"
                     (:seon.render.call/source-run-id retained)))

@@ -2272,12 +2272,10 @@
         agent-id (if debug?
                    (:seon.cluster.agent/id debug-request)
                    registration-key)
-        retained-invocations (if invalidate-calls? {} (::invocations state))
+        retained-invocations (::invocations state)
         captured-invocations (atom {})]
     (if debug?
-      (let [retained (if invalidate-calls?
-                       {}
-                       (get-in state [::calls registration-key] {}))
+      (let [retained (get-in state [::calls registration-key] {})
             candidates (candidate-call-ids retained database)
             package (get-in state [::packages registration-key])]
         ;; A join marker shares the newest-only interest channel with database
@@ -2297,9 +2295,7 @@
                                    package))
            :seon.render/captured-calls retained
            :seon.render/captured-invocations retained-invocations}))
-      (let [retained (if invalidate-calls?
-                       {}
-                       (get-in state [::calls registration-key] {}))
+      (let [retained (get-in state [::calls registration-key] {})
             candidates (candidate-call-ids retained database)
             call-id (root-call-id :seon.render/html registration-key)
             request
@@ -2430,7 +2426,7 @@
                                       (:seon.render/captured-invocations
                                        result)))]
              [(assoc results registration-key result) invocations]))
-         [{} (if invalidate-calls? {} (::invocations state))]
+         [{} (::invocations state)]
          watched)
         paint-results (into {}
                             (remove (comp ::retained-only? val))
