@@ -1151,6 +1151,33 @@
                     (is (= 2 (get @calls 'my.plan))
                         "the closed page's old package was not reused")
                     (finally (.close reopened))))
+                (.close active-view)
+                (support/await-event!
+                 (future
+                   (loop []
+                     (if (seq @(:registration context))
+                       (recur)
+                       true)))
+                 [:all-debug-registrations-removed])
+                (reset! phase 2)
+                (let [passes-before (derivations context)]
+                  (is (async/offer! (:runtime-eval-channel context)
+                                    :seon.render.web/runtime-eval))
+                  (await-ping! context
+                               #(< passes-before
+                                   (:seon.render.web/passes %))
+                               [:unwatched-runtime-eval])
+                  (is (empty? @(:latest-packages context))
+                      "a code event with no watchers publishes an empty cache"))
+                (let [reopened (open-feed server (feed-url "my.plan"))]
+                  (try
+                    (is (str/includes?
+                         (read-until! reopened "my.plan-runtime-phase-2")
+                         "my.plan-runtime-phase-2")
+                        "a new subscriber after an unwatched event derives current code")
+                    (is (= 3 (get @calls 'my.plan))
+                        "no package survived the zero-watcher code event")
+                    (finally (.close reopened))))
                 (finally (.close active-view))))))))))
 
 ;;; ---------------------------------------------------------------------------
