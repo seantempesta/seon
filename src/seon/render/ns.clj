@@ -599,7 +599,6 @@
   [{::keys [db schema-row-cache namespace-name namespace-source namespace-doc
             requires functions own-schemas owner-agent-id] :as data}]
   (let [bounds (::read-bounds data)
-        source-less? (str/blank? namespace-source)
         source (if (str/blank? namespace-source)
                  (pr-str (ns-form namespace-name requires))
                  namespace-source)
@@ -615,12 +614,12 @@
          (first-doc-line namespace-doc)
          (conj [:p {:class "seon-namespace-description"}
                 (first-doc-line namespace-doc)])
-         (seq requires)
-         (conj [:p {:class "seon-namespace-requires"}
-                "Requires " [:code (pr-str (vec requires))]])
          (seq functions)
          (conj (into [:dl {:class "seon-namespace-definitions"}]
                      (mapcat compact-function-html functions)))
+         (seq requires)
+         (conj [:p {:class "seon-namespace-requires"}
+                "Requires " [:code (pr-str (vec requires))]])
          (seq own-schemas)
          (conj [:pre {:class "seon-namespace-own-schemas"}
                 [:code (str/join "\n" (map compact-schema-line own-schemas))]])
@@ -632,15 +631,17 @@
          (conj
           [:details {:class "seon-namespace-source"}
            [:summary "namespace source"]
-           [:pre [:code source]]
-           (when (and source-less? (seq functions))
-             (into
-              [:div {:class "seon-namespace-member-sources"}]
-              (map (fn [function]
-                     [:details
-                      [:summary [:code (:seon.fn/sym function)]]
-                      [:pre [:code (function-source function)]]])
-                   functions)))])
+           [:pre [:code source]]])
+         (seq functions)
+         (conj
+          (into
+           [:details {:class "seon-namespace-member-sources"}
+            [:summary "member definition sources"]]
+           (map (fn [function]
+                  [:details
+                   [:summary [:code (:seon.fn/sym function)]]
+                   [:pre [:code (function-source function)]]])
+                functions)))
          )))))
 
 (defn- compact-html-view

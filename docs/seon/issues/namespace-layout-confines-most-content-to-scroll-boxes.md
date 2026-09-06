@@ -51,3 +51,27 @@ and prioritize the namespace description and useful function summaries. A
 collapsed disclosure alone is insufficient if its entire source still consumes
 the same fit budget before the summaries. Verify the fitted output, not only
 unfitted Hiccup or the absence of horizontal overflow.
+
+## Summary-first renderer falsifier and correction — 2026-09-06
+
+The first summary-first change was still wrong. Live screenshot
+`tmp/debug-summary-first-2026-09-06.png` showed the namespace heading and doc,
+then an elision of 4,934 of 8,210 characters, with no callable summary. The
+requires value remained ahead of functions and consumed the fitted prefix.
+
+It also treated `:seon.ns/source` as the whole source file. The live
+`seon.flow` value is 1,086 characters, ends at the `AtomicLong` import, and
+contains no `defn`. This matches the indexing authority: `namespace-row`
+stores `exact-source` for the analyzed namespace declaration at
+`src/seon/fn.clj:214-221`; function declarations independently store their
+own exact source at `src/seon/sci/reader.cljc:385-402`.
+
+The corrected `full-html-view` orders the namespace doc and compact function
+summaries before requires. It keeps namespace source and every member's stored
+source in trailing disclosures, without assuming one duplicates the other.
+The focused final-fit regression uses sixteen actual namespace refs, two
+contracted functions, and a long namespace source under the shipped 1,024-token
+profile. It passed 76 assertions with no failures or errors: both callable
+summaries survive the final `seon.print/fit`, exact sources remain in collapsed
+disclosures before fitting, and later detail is represented by the existing
+HTML elision. Browser acceptance remains outstanding, so this issue stays open.

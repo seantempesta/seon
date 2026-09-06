@@ -181,26 +181,39 @@
   (support/with-database
     (fn [connection]
       (let [namespace-name 'fixture.presentation
+            required-names
+            (mapv #(symbol (str "fixture.required." %)) (range 16))
             source (str "(ns fixture.presentation)\n"
                         (apply str (repeat 4000 "source-body "))
                         "source-tail-marker")]
         (install-namespace!
          connection namespace-name source []
          [(function-row
+           namespace-name 'alpha "(defn alpha [value] value)"
+           {:seon.fn/spec "[:=> [:cat :string] :string]"
+            :seon.fn/doc "Return the first useful value."})
+          (function-row
            namespace-name 'useful "(defn useful [value] value)"
            {:seon.fn/spec "[:=> [:cat :string] :string]"
             :seon.fn/doc "Return the useful value."})])
-        (db/transact! connection
-                      [{:seon.ns/name namespace-name
-                        :seon.ns/doc
-                        "Useful namespace summary.\n\nLonger stewardship text."}])
+        (db/transact!
+         connection
+         (conj
+          (mapv (fn [required-name] {:seon.ns/name required-name})
+                required-names)
+          {:seon.ns/name namespace-name
+           :seon.ns/doc
+           "Useful namespace summary.\n\nLonger stewardship text."
+           :seon.ns/requires
+           (mapv (fn [required-name] [:seon.ns/name required-name])
+                 required-names)}))
         (let [raw (sut/render-html
                    (namespace-unit @connection namespace-name 1 100000))
               raw-html (hiccup/->string raw)
               profile (assoc (render/agent-render-profile
                               (support/effective-config))
-                             :seon.render.profile/token-budget 256
-                             :seon.render.profile/max-depth 12
+                             :seon.render.profile/token-budget 1024
+                             :seon.render.profile/max-depth 8
                              :seon.render.profile/max-children 32
                              :seon.render.profile/composition :multiline
                              :seon.print/requery-id
@@ -215,16 +228,22 @@
                (print/emit-hiccup fitted (print/default-options)))]
           (is (< (.indexOf raw-html "Useful namespace summary.")
                  (.indexOf raw-html "fixture.presentation/useful")
+                 (.indexOf raw-html "Requires")
                  (.indexOf raw-html "namespace source"))
-              "useful namespace facts precede the source disclosure")
+              "callable summaries precede requires and source")
           (is (and (str/includes? fitted-html "Useful namespace summary.")
+                   (str/includes? fitted-html "fixture.presentation/alpha")
                    (str/includes? fitted-html "fixture.presentation/useful")
                    (str/includes? fitted-html "Return the useful value."))
               "the final fitted HTML retains the summary and callable API")
-          (is (and (str/includes? fitted-html "namespace source")
-                   (str/includes? fitted-html "seon-print-html-elision")
+          (is (and (str/includes? raw-html "namespace source")
+                   (str/includes? raw-html "member definition sources")
+                   (str/includes? raw-html "(defn useful [value] value)")
+                   (not (str/includes? raw-html "<details open")))
+              "exact namespace and member source remain in disclosures")
+          (is (and (str/includes? fitted-html "seon-print-html-elision")
                    (not (str/includes? fitted-html "source-tail-marker")))
-              "source remains inspectable through a bounded disclosure"))))))
+              "the final output bounds later detail honestly"))))))
 
 (deftest source-less-agent-namespace-routes-to-the-full-stub
   (support/with-database
