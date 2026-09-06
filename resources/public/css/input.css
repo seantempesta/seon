@@ -1222,6 +1222,35 @@ details.tool-call-details[open] .tool-preview {
 .seon-debug-grid:has(> .seon-debug-prompt-detail) {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
+.seon-debug-grid:has(> .seon-debug-graph) {
+  grid-template-columns: minmax(20rem, 0.9fr) minmax(0, 1.1fr);
+  height: auto;
+  overflow: auto;
+}
+.seon-debug-grid:has(> .seon-debug-graph) > .seon-debug-prompt-detail {
+  grid-column: 1 / -1;
+}
+.seon-debug-graph {
+  min-width: 0;
+  padding: 1rem;
+  border-right: 1px solid var(--color-base-800);
+  background: var(--color-base-900);
+}
+.seon-debug-graph-heading {
+  margin: 0 0 0.5rem;
+  color: var(--color-text-200);
+  font-size: 0.8rem;
+}
+.seon-debug-graph-canvas {
+  width: 100%;
+  height: 400px;
+}
+.seon-debug-graph-status,
+.seon-debug-graph [data-graph-detail] {
+  color: var(--color-text-300);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
 .seon-debug-structural-detail > summary {
   padding: 0.6rem 0;
   color: var(--color-text-200);
@@ -1400,6 +1429,10 @@ details.tool-call-details[open] .tool-preview {
   .seon-debug-experiment {
     overflow: visible;
     border-right: 0;
+  }
+  .seon-debug-graph {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-base-800);
   }
   .seon-debug-prompt-detail {
     overflow: visible;

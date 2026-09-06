@@ -8,6 +8,29 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Temporal teaching experiment, owner discussion 2026-09-06: compare compact
+forms with a useful mix of `pull`, `q`, `since`, `as-of`, and `history` when
+those operations answer a relevant question. Do not require all operations in
+every primer. Keep information/concept coverage, duplicate information,
+complete context tokens, database work/latency, and source characters as
+separate measurements; shortest source is not yet a ruled optimization target.
+The Datahike source research owns the exact temporal semantics and query
+examples. Receiving a message, processing it, and actually including it in an
+agent context must not be conflated when deriving what is new.
+
+Executed primer experiment is persisted in
+`../research/thinking_primer_probe_2026_09_06.clj`: three forms in a disposable
+SCI turn fork (`dir my.plan`, one bounded query for two function docs/arglists,
+and `render-plan-ai` composed with `plan`). All three returned without eval
+errors; observed evaluations were 14.4, 11.8, and 9.3 ms respectively, one
+sample only. `dir` produced 12 public names; the batched query produced two
+function maps; root's plan output had zero obligations, ready items, blocked
+items and recent completions. The admitted values were inspected directly;
+the file now emits their ordinary printed representation. Its thinking text
+is still authored per example, so it does not yet prove data-dependent thinking
+or minimal-form selection. Live macro expansion also proved `doc` and `dir`
+are single-argument, contrary to the suspected completed bulk extension.
+
 Owner display direction, 2026-09-06: keep the clean layout, warm the palette
 to complement the existing Phosphor Terminal theme, and avoid excessive orange.
 The updated mockup uses warm charcoal/cream, muted sage selections and sparse

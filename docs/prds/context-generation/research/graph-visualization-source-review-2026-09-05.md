@@ -63,7 +63,7 @@ selection.
 Cytoscape was absent from `package.json`, `.gitmodules`, and `reference-code/`
 before this review. The official upstream is now vendored as
 `reference-code/cytoscape` at the commit peeled from annotated tag `v3.30.4`:
-tag object `f42689f16a9b32ab1af8e131ed392622cf697c94`, commit
+commit
 `a4de13e0c1668436273c82f90613c6e5911f3f32`. Its package declares version
 3.30.4 and MIT licensing, and contains the release asset
 `dist/cytoscape.min.js`. Copying that asset into Seon's packaged public
