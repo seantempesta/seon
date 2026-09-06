@@ -674,6 +674,25 @@
                  (is (= 2 @invocations)
                      "a changed read dependency invokes again"))))))))))
 
+(deftest generic-renderer-receives-the-acquired-entity-id
+  (support/with-database
+   (fn [connection]
+     (db/transact! connection [{:seon.ns/name fixture-a
+                                :seon.ns/doc "identity input"}])
+     (let [database @connection
+           entity (db/pull database '[*] [:seon.ns/name fixture-a])
+           ctx (support/fork-cluster-ctx connection)]
+       (sci/binding [sci/ns (sci/create-ns fixture-a)]
+         (sci/eval-form ctx '(defn namespace-ai [value]
+                               (str (:db/id value) ":"
+                                    (:seon.ns/name value)))))
+       (is (= (str (:db/id entity) ":" fixture-a)
+              (target-call
+               'seon.render 'render-call
+               (assoc (render-request database ctx fixture-a entity)
+                      :seon.render/output :seon.render/ai)))
+           "a generic renderer can use the acquired entity identity")))))
+
 (deftest broken-renderer-is-private-to-browser-and-loud-to-owner
   (support/with-database
    (fn [connection]

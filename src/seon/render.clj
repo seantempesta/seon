@@ -178,8 +178,10 @@
   (let [argument (render-argument request)
         value (:seon.render/value argument)
         producer-value (if (map? value)
-                         (render.value/transacted value
-                                                  (:seon.db/db request))
+                         (cond-> (render.value/transacted
+                                  value (:seon.db/db request))
+                           (find value :db/id)
+                           (assoc :db/id (:db/id value)))
                          value)]
     (if (map? value)
       (assoc (merge producer-value
