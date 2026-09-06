@@ -1,6 +1,8 @@
 (ns render-source-reuse-probe-2026-09-06
-  (:require [seon.db :as db]
+  (:require [clojure.core.async.flow :as flow]
+            [seon.db :as db]
             [seon.operator]
+            [seon.operator.runtime :as runtime]
             [seon.render.web]))
 
 ; Load through MCP JVM evaluation on the explicitly selected owned cluster.
@@ -40,3 +42,32 @@
      :seon.proof/stale-reads
      (mapv :seon.db/read-request
            (remove #(db/read-evidence-current? database [%]) evidence))}))
+
+(defn after-refresh
+  "Wait under a caller bound for a later render pass and drained runtime input."
+  [cluster-name agent-id previous-passes timeout-ms]
+  (let [graph (:seon.flow/graph (get @runtime/running-instances cluster-name))
+        deadline (+ (System/nanoTime) (* 1000000 timeout-ms))]
+    (loop []
+      (let [ping (get (flow/ping graph :timeout-ms 1000) :seon.render.web/render)
+            passes (get-in ping [:clojure.core.async.flow/state
+                                 :seon.render.web/passes])
+            buffered (get-in ping [:clojure.core.async.flow/ins
+                                   :seon.render.web/runtime-eval
+                                   :buffer :count])]
+        (cond
+          (and passes (> passes previous-passes) (= 0 buffered))
+          {:seon.proof/passes passes
+           :seon.proof/runtime-buffer buffered
+           :seon.proof/watched
+           (get-in ping [:clojure.core.async.flow/state
+                         :seon.render.web/watched-agents])
+           :seon.proof/snapshot (snapshot cluster-name agent-id)}
+
+          (< (System/nanoTime) deadline) (recur)
+
+          :else
+          {:seon.error/kind :seon.proof/render-timeout
+           :seon.error/message "The watched render did not drain runtime input."
+           :seon.proof/passes passes
+           :seon.proof/runtime-buffer buffered})))))

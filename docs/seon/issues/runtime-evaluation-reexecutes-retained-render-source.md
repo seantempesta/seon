@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, web, runtime, wave/context-fixes]
 ---
@@ -89,3 +89,23 @@ remain valid.
 - A fresh watched Juniper page retains its run identity after a read-only MCP
   evaluation while continuing to repaint.
 - Existing changed-code and closed-page invalidation behavior remains intact.
+
+## Live resolution
+
+On 2026-09-06 the owned `juniper-context` cluster was freshly forked from
+commit `6a9deb67-3354-5d81-be93-c47a6ca95bf1`, program digest
+`be49a7ffc93a1514627057eedc290b4f7a9f14efb4186d2d3589f3b64ee8165b`.
+No Var was hot reloaded. The watched `/ns/my.agents.juniper/debug` page kept
+exactly one terminal source run,
+`source:b3ffc62b-2723-47ac-a884-af1ee23a0eb4`, while read-only MCP returns
+requested refresh. The render proc advanced from 21 to 29 passes with one
+watched page and its runtime-evaluation buffer drained to zero. All sixteen
+stored read dependencies remained current. The stored evaluation contained
+the executed two-line `render-identity-text` / `whoami` source and the correct
+Juniper identity string, without an evaluation error.
+
+The committed `render_source_reuse_probe_2026_09_06.clj` records the bounded
+snapshot and refresh proof. This is an execution-reuse proof for that indexed
+program; later UI cap edits require their own final published fork. The
+broader web gate failures above remain an integration limitation, not a green
+claim. The separate freshness-query dissolution remains a follow-up design.
