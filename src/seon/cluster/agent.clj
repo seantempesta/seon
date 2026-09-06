@@ -195,13 +195,14 @@
            [:header
             [:p {:class "seon-kicker"} "Agent"]
             [:h3 [:code agent-id]]]
+           [:p "This agent maintains its own plan and responds to messages. Its connected facts supply the context it sees when it works."]
            (into [:dl]
                  (cond-> []
                    namespace-name
-                   (conj [:div [:dt "Namespace"]
+                   (conj [:div [:dt "Namespace · its functions and definitions"]
                           [:dd [:code (str namespace-name)]]])
                    cluster-name
-                   (conj [:div [:dt "Cluster"]
+                   (conj [:div [:dt "Cluster · its shared database"]
                           [:dd [:code cluster-name]]])))])))))
 
 (defn render-situation-ai

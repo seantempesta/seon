@@ -1238,3 +1238,28 @@ the helper exists: focused tests and a named live proof remain required.
 At this checkpoint MCP `runtime_status` answered for `default` (PID 94171,
 start 2026-09-05T19:02:38Z), reporting eight stale Vars and four errored
 receipts. This is connectivity evidence, not a clean runtime baseline.
+
+## Juniper renderer inspection — 2026-09-06
+
+Root personally inspected the existing Juniper browser page on cluster
+`lab-run-inspection`, port 7773, subject 32120. The plan HTML did not identify
+ownership/current focus and foregrounded raw item ids. The general
+`my.plan/render-item-html` now derives the owner and current focus from the
+supplied database, explains that the agent maintains its plan, and presents
+expected outcomes as “Done when.” References remain in a disclosure.
+`render-plan-html` uses human explanations instead of schema prose, and
+`seon.cluster.agent/render-identity-html` explains namespace/cluster meaning.
+
+The existing Vars were hot-reloaded through MCP, instrumentation restored,
+and the already-open browser updated through its existing feed. Root verified
+“juniper’s plan · Current focus” and the second open step in the actual page.
+The edit hook also published source; this live proof exercises hot-reloaded
+Vars, not a newly forked cluster. AI previews on this older cluster still use
+old output and the full context lock/diff integration remains unfinished.
+
+The owner now requires pure render semantics: unchanged inputs reuse results;
+relevant changed inputs automatically re-execute. Locked form/result references
+remain the baseline for derived diffs; appending changes or compacting changes
+the agent's ordered context selection. Earlier explicit-rerun-only research is
+superseded by this instruction. Context authority must be structured references
+to existing forms/evaluations, with text and HTML projected at the boundary.
