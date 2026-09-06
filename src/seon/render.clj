@@ -104,20 +104,33 @@
 
 (defn- target-profile
   [request]
-  (cond-> (request-profile request)
+  (let [value (render-value request)
+        database (:seon.db/db request)
+        identity-requery
+        (when (and database (map? value))
+          (some (fn [attribute]
+                  (when-let [entry (find value attribute)]
+                    [attribute (val entry)]))
+                (db/identity-attributes database)))]
+    (cond-> (request-profile request)
     (:seon.cluster.eval/result-blob request)
     (assoc :seon.print/requery-id
            [:seon.blob/digest (:seon.cluster.eval/result-blob request)])
 
+    (and (nil? (:seon.cluster.eval/result-blob request)) identity-requery)
+    (assoc :seon.print/requery-id identity-requery)
+
     (and (nil? (:seon.cluster.eval/result-blob request))
+         (nil? identity-requery)
          (:seon.render.call/id request))
     (assoc :seon.print/requery-id
            [:seon.render.call/id (:seon.render.call/id request)])
 
     (and (nil? (:seon.cluster.eval/result-blob request))
+         (nil? identity-requery)
          (nil? (:seon.render.call/id request)))
     (assoc :seon.print/requery-refusal
-           "The rendered value has no stable requery identity.")))
+           "The rendered value has no stable requery identity."))))
 
 (defn- render-argument
   [request]
@@ -169,9 +182,11 @@
                                                   (:seon.db/db request))
                          value)]
     (if (map? value)
-      (assoc (merge producer-value (dissoc argument :seon.render/value))
+      (assoc (merge producer-value
+                    (dissoc argument :seon.render/value
+                            :seon.render.call/id))
              :seon.render/value value)
-      argument)))
+      (dissoc argument :seon.render.call/id))))
 
 (defn- floor-producer?
   [selected]
@@ -460,6 +475,41 @@
               (finish-selection stages (val selected) (rest stage-names))
               (recur (rest stage-names) stages))))))))
 
+(defn selection-inspection
+  "Inspect every priority stage while preserving the actual decision."
+  {:malli/schema
+   [:=> [:catn [::request :seon.render/selection-request]]
+    :seon.render/selection]}
+  [{ctx :seon.sci.eval/ctx
+    output :seon.render/output
+    :as request}]
+  (let [decision (selection request)
+        profile (request-profile request)]
+    (if (:seon.error/kind profile)
+      decision
+      (let [request (assoc request :seon.render/profile profile)
+            value (render-value request)
+            projection (sci.kernel/context-projection ctx)
+            output-schema (case output
+                            :seon.render/ai :seon.render/ai
+                            :seon.render/html :seon.render/hiccup
+                            :seon.render/form :seon.render/form)
+            stages (mapv (fn [stage-name]
+                           (:seon.render.selection/stage
+                            (selection-stage-result
+                             stage-name request projection value output
+                             output-schema)))
+                         selection-stage-order)
+            actual-stages (:seon.render.selection/stages decision)]
+        (assoc decision :seon.render.selection/stages
+               (mapv (fn [stage actual]
+                       (if (= :not-consulted
+                              (:seon.render.selection.stage/status actual))
+                         (assoc stage :seon.render.selection.stage/status
+                                :not-consulted)
+                         actual))
+                     stages actual-stages))))))
+
 (defn- producer
   [request output _output-schema]
   (:seon.render.selection/selected
@@ -479,8 +529,8 @@
       (assoc :seon.render/value (dissoc value :seon.db/db)))))
 
 (defn- call-static-evidence
-  [request decision]
-  (let [selected (:seon.render.selection/selected decision)
+  [request decision selected]
+  (let [
         projection (sci.kernel/context-projection (:seon.sci.eval/ctx request))
         argument (invocation-argument-evidence projection request selected)]
     {:seon.render/selection decision
@@ -490,6 +540,16 @@
      (sci.kernel/program-function (:seon.sci.eval/ctx request) selected)
      :seon.render.call/argument argument}))
 
+(defn- compatible-selection-candidate?
+  [decision candidate-producer]
+  (some (fn [stage]
+          (some #(and (= candidate-producer
+                         (:seon.render.selection.candidate/producer %))
+                      (= :compatible
+                         (:seon.render.selection.candidate/status %)))
+                (:seon.render.selection.stage/candidates stage)))
+        (:seon.render.selection/stages decision)))
+
 (defn- call-cache-evidence
   [request selected]
   (let [ctx (:seon.sci.eval/ctx request)
@@ -498,14 +558,40 @@
      (some-> (:seon.sci.kernel/program-snapshot ctx) deref)
      ::projection projection
      ::selection-input
-     [(select-keys request
-                   [:seon.render/namespace
-                    :seon.render/output
-                    :seon.render/ai
-                    :seon.render/html
-                    :seon.render/form
-                    :seon.render.walk/attribute])
-      (invocation-argument-evidence projection request selected)]}))
+     [selected
+      (:seon.render/output request)
+      (invocation-argument-evidence projection request selected)
+      (select-keys request [:seon.sci.admit/caps
+                            :seon.sci.eval/time-limit-ms
+                            :seon.config/on-core-error])]}))
+
+(declare same-call-cache-evidence?)
+
+(defn- invocation-cache-key
+  [request selected evidence]
+  [selected
+   (:seon.render/output request)
+   (System/identityHashCode (::program-snapshot evidence))
+   (get (::projection evidence) :seon.schema.projection/fingerprint)
+   (hash (::selection-input evidence))])
+
+(defn- reusable-invocation
+  [database bucket evidence]
+  (some (fn [entry]
+          (when (and (same-call-cache-evidence? entry evidence)
+                     (db/read-evidence-current?
+                      database (:seon.render.call/read-evidence entry)))
+            entry))
+        bucket))
+
+(defn- retain-invocation!
+  [captured cache-key retained-bucket entry]
+  (when captured
+    (swap! captured assoc cache-key
+           (conj (into []
+                       (remove #(same-call-cache-evidence? % entry))
+                       retained-bucket)
+                 entry))))
 
 (defn- same-call-cache-evidence?
   [previous current]
@@ -588,6 +674,7 @@
           :seon.db/db (:seon.db/db request)
           :seon.fn/sym (str selected)
           :seon.sci.eval/args [argument]
+          :seon.sci.admit/unbounded? true
           :seon.sci.eval/time-limit-ms time-limit-ms
           :seon.sci.admit/caps caps
           :seon.config/on-core-error on-core-error}
@@ -727,6 +814,44 @@
             (:seon.print/hiccup emitted)
             (:seon.print/text emitted)))))))
 
+(defn- raw-output
+  [request output selected]
+  (let [projection (sci.kernel/context-projection
+                    (:seon.sci.eval/ctx request))
+        rendered (invoke-selected request selected)]
+    (case output
+      :seon.render/ai
+      (if (or (nil? rendered) (string? rendered) (:seon.error/kind rendered))
+        rendered
+        {:seon.error/kind ::invalid-ai-output
+         :seon.render/invalid-output :ai
+         :seon.error/message "The selected AI renderer did not return text."
+         :seon.error/data {:seon.render/output rendered}})
+
+      :seon.render/html
+      (if (or (nil? rendered)
+              (:seon.error/kind rendered)
+              (hiccup/hiccup? rendered))
+        rendered
+        {:seon.error/kind ::invalid-html-output
+         :seon.render/invalid-output :html
+         :seon.error/message "The selected HTML renderer did not return Hiccup."
+         :seon.error/data {:seon.render/output rendered}})
+
+      :seon.render/form
+      (if (valid-projection? projection :seon.render/form rendered)
+        rendered
+        {:seon.error/kind ::invalid-form-output
+         :seon.render/invalid-output :form
+         :seon.error/message "The selected form renderer did not return a form."
+         :seon.error/data {:seon.render/output rendered}}))))
+
+(defn- present-output
+  [request output raw]
+  (if (= output :seon.render/form)
+    raw
+    (fit-terminal request output raw)))
+
 (defn render-ai
   "Render one value as text through the unique selected live SCI Var."
   {:malli/schema [:=> [:cat :seon.render/call-request]
@@ -738,13 +863,12 @@
     (if (:seon.error/kind profile)
       profile
       (let [request (assoc request :seon.render/profile profile)
-            rendered (invoke-producer request :seon.render/ai :seon.render/ai)]
-        (if (or (nil? rendered) (string? rendered) (:seon.error/kind rendered))
-          (fit-terminal request :seon.render/ai rendered)
-          {:seon.error/kind ::invalid-ai-output
-           :seon.render/invalid-output :ai
-           :seon.error/message "The selected AI renderer did not return text."
-           :seon.error/data {:seon.render/output rendered}})))))
+            selected (or (:seon.render.call/selected-producer request)
+                         (producer request :seon.render/ai :seon.render/ai))]
+        (if (:seon.error/kind selected)
+          selected
+          (present-output request :seon.render/ai
+                          (raw-output request :seon.render/ai selected)))))))
 
 (defn render-html
   "Render one value as Hiccup through the unique selected live SCI Var."
@@ -757,16 +881,13 @@
     (if (:seon.error/kind profile)
       profile
       (let [request (assoc request :seon.render/profile profile)
-            rendered (invoke-producer request :seon.render/html
-                                      :seon.render/html)]
-        (if (or (nil? rendered)
-                (:seon.error/kind rendered)
-                (hiccup/hiccup? rendered))
-          (fit-terminal request :seon.render/html rendered)
-          {:seon.error/kind ::invalid-html-output
-           :seon.render/invalid-output :html
-           :seon.error/message "The selected HTML renderer did not return Hiccup."
-           :seon.error/data {:seon.render/output rendered}})))))
+            selected (or (:seon.render.call/selected-producer request)
+                         (producer request :seon.render/html
+                                   :seon.render/html))]
+        (if (:seon.error/kind selected)
+          selected
+          (present-output request :seon.render/html
+                          (raw-output request :seon.render/html selected)))))))
 
 (defn- entity-lookup
   [database entity]
@@ -854,12 +975,45 @@
             (when (and call-id captured-calls)
               (swap! captured-calls assoc call-id entry))
             (:seon.render.call/output previous))
-          (let [decision (selection request)
-                selected (:seon.render.selection/selected decision)]
+          (let [requested-candidate
+                (:seon.render.call/selected-producer request)
+                decision (or (:seon.render/selection-inspection request)
+                             (if requested-candidate
+                               (selection-inspection request)
+                               (selection request)))
+                selected
+                (if requested-candidate
+                  (if (compatible-selection-candidate? decision
+                                                       requested-candidate)
+                    requested-candidate
+                    (error/diagnostic
+                     {:seon.error/kind ::candidate-not-applicable
+                      :seon.error/message
+                      "The requested renderer is not an applicable candidate."
+                      :seon.error/diagnostic-layer :render
+                      :seon.error/diagnostic-operation 'seon.render/render-call
+                      :seon.error/diagnostic-member
+                      :seon.render.call/selected-producer
+                      :seon.error/diagnostic-expected :compatible
+                      :seon.error/diagnostic-offending requested-candidate
+                      :seon.error/diagnostic-cause ::candidate-not-applicable
+                      :seon.error/diagnostic-evidence decision}))
+                  (:seon.render.selection/selected decision))]
             (if (:seon.error/kind selected)
               selected
-              (let [static-evidence (call-static-evidence request decision)
+              (let [static-evidence (call-static-evidence request decision
+                                                          selected)
                     cache-evidence (call-cache-evidence request selected)
+                    invocation-key (invocation-cache-key request selected
+                                                         cache-evidence)
+                    retained-invocations (:seon.render/invocations request)
+                    captured-invocations
+                    (:seon.render/captured-invocations request)
+                    retained-invocation
+                    (reusable-invocation database
+                                         (get retained-invocations
+                                              invocation-key)
+                                         cache-evidence)
                     reusable? (and previous
                                    (same-call-cache-evidence?
                                     previous cache-evidence)
@@ -871,20 +1025,33 @@
                                         database
                                         (:seon.render.call/read-evidence
                                          previous))))
-                captured (atom [])
-                rendered (if reusable?
-                           (:seon.render.call/output previous)
-                           (let [prepared-request
-                                 (assoc request
-                                        :seon.render.call/selected-producer
-                                        selected
-                                        :seon.render.call/captured-reads
-                                        captured)]
-                             ((case output
-                                :seon.render/ai render-ai
-                                :seon.render/html render-html
-                                :seon.render/form render-form-value)
-                              prepared-request)))
+                    captured (atom [])
+                    invocation-reusable? (some? retained-invocation)
+                    raw (if invocation-reusable?
+                          (:seon.render.call/output retained-invocation)
+                          (raw-output
+                           (assoc request
+                                  :seon.render.call/selected-producer selected
+                                  :seon.render.call/captured-reads captured)
+                           output selected))
+                    invocation-entry
+                    (merge
+                     (if invocation-reusable?
+                       (refresh-read-evidence database retained-invocation)
+                       {:seon.render.call/read-evidence
+                        (db/read-evidence
+                         @captured {:seon.db/retain-read-results? true})
+                        :seon.render.call/basis-transaction
+                        (db/basis-t database)
+                        :seon.render.call/output raw})
+                     cache-evidence)
+                    _ (retain-invocation!
+                       captured-invocations invocation-key
+                       (get retained-invocations invocation-key)
+                       invocation-entry)
+                    rendered (if reusable?
+                               (:seon.render.call/output previous)
+                               (present-output request output raw))
                     entry (merge
                            (if reusable?
                              (if check-read-evidence?
@@ -892,13 +1059,12 @@
                                previous)
                              {:seon.render.call/static-evidence static-evidence
                               :seon.render.call/read-evidence
-                              (db/read-evidence
-                               @captured
-                               {:seon.db/retain-read-results? true})
+                              (:seon.render.call/read-evidence invocation-entry)
                               :seon.render.call/basis-transaction
                               (db/basis-t database)
                               :seon.render.call/output rendered})
-                           cache-evidence)]
+                           cache-evidence
+                           {:seon.render.call/invocation-key invocation-key})]
             (when (and call-id captured-calls)
               (swap! captured-calls assoc call-id entry))
             ;; Render cost serves the agent-context consumer. A real prompt
@@ -907,6 +1073,7 @@
             ;; still retain call evidence, but a read-only page observation
             ;; must never transact.
             (when (and (not reusable?)
+                       (not invocation-reusable?)
                        call-id
                        captured-calls
                        (:seon.cluster.run/id request)

@@ -429,13 +429,19 @@
     stream-partial :seon.ai/partial
     retained :seon.render.web/retained-fragments
     retained-calls :seon.render/retained-calls
+    retained-invocations :seon.render/invocations
+    captured-invocations :seon.render/captured-invocations
     :as request}]
-  (let [captured-calls (atom {})
+  (let [retained-invocations (or retained-invocations {})
+        captured-invocations (or captured-invocations (atom {}))
+        captured-calls (atom {})
         render-request
         (cond-> (assoc (walk-request db caps id :seon.render/html
                                      connection request)
                        :seon.render/retained-calls retained-calls
-                       :seon.render/captured-calls captured-calls)
+                       :seon.render/captured-calls captured-calls
+                       :seon.render/invocations retained-invocations
+                       :seon.render/captured-invocations captured-invocations)
           (:seon.render/candidate-call-ids request)
           (assoc :seon.render/candidate-call-ids
                  (:seon.render/candidate-call-ids request))
@@ -536,6 +542,7 @@
     {:seon.render.web/page page
      :seon.render.web/fragments fragments
      :seon.render/captured-calls @captured-calls
+     :seon.render/captured-invocations @captured-invocations
      :seon.db/tx-data
      (into [] (mapcat :seon.db/tx-data) units)}))
 
@@ -1075,6 +1082,130 @@
                 (map (partial debug-stage-html debug-request call-entry))
                 (:seon.render.selection/stages selection))]])])))
 
+(defn- debug-preview-html
+  [output rendered]
+  [:div {:class "seon-debug-candidate-preview"}
+   (cond
+     (:seon.error/kind rendered) (debug-value-html rendered)
+     (= output :seon.render/html) rendered
+     :else [:pre (str rendered)])])
+
+(defn- debug-experiment-candidate-html
+  [debug-request output selected stage-status previews entries candidate]
+  (let [producer (:seon.render.selection.candidate/producer candidate)
+        compatible? (= :compatible
+                       (:seon.render.selection.candidate/status candidate))]
+    [:article {:class "seon-debug-candidate"}
+     [:div {:class "seon-debug-section-line"}
+      (debug-renderer-link (assoc debug-request :seon.render/output output)
+                           producer)
+      [:span (cond
+               (and (= :selected stage-status) (= selected producer)) "chosen"
+               (= :ambiguous stage-status) "compatible · ambiguous"
+               compatible? "shadowed · unconsulted"
+               :else "rejected")]]
+     (when-let [reason (:seon.render.selection.candidate/reason candidate)]
+       [:p {:class "seon-debug-candidate-reason"} (name reason)])
+     (when compatible?
+       (debug-preview-html output (get previews producer)))
+     (when-let [entry (get entries producer)]
+       [:details {:class "seon-debug-call-evidence"}
+        [:summary "supplied argument"]
+        (debug-value-html
+         (get-in entry [:seon.render.call/static-evidence
+                        :seon.render.call/argument]))])
+     (when-let [entry (get entries producer)]
+       (debug-renderer-contract entry producer))]))
+
+(defn- debug-experiment-stage-column
+  [debug-request output experiment stage]
+  (let [selection (:seon.render/selection experiment)
+        selected (:seon.render.selection/selected selection)
+        previews (:seon.render/previews experiment)
+        entries (:seon.render/entries experiment)
+        candidates (:seon.render.selection.stage/candidates stage)]
+    [:section {:class "seon-debug-projection-column"}
+     [:h4 (if (= output :seon.render/ai) "AI" "HTML")]
+     [:p {:class "seon-debug-stage-status"}
+      (name (:seon.render.selection.stage/status stage))]
+     (when (contains? stage :seon.render.selection.stage/value)
+       (debug-preview-html output
+                           (:seon.render.selection.stage/value stage)))
+     (if (seq candidates)
+       (into [:div {:class "seon-debug-candidates"}]
+             (map (partial debug-experiment-candidate-html
+                           debug-request output selected
+                           (:seon.render.selection.stage/status stage)
+                           previews entries))
+             candidates)
+       [:p {:class "seon-render-pending"} "No candidate."])
+     (when-let [selection-error (:seon.render.selection.stage/error stage)]
+       (debug-value-html selection-error))]))
+
+(defn- debug-experiments-html
+  [debug-request experiments]
+  (hiccup/->string
+   [:section {:id "debug-selection"
+              :class "seon-debug-body seon-debug-selection"}
+    [:h2 {:class "seon-debug-caption"} "renderer experiment"]
+    [:p {:class "seon-debug-description"}
+     "Priority runs from most specific to least. Both projections show every applicable renderer; shadowed candidates are previews, not the actual selection."]
+    (into
+     [:ol {:class "seon-debug-experiment-stages"}]
+     (map-indexed
+      (fn [index ai-stage]
+        (let [html-stage
+              (get-in experiments
+                      [:seon.render/html :seon.render/selection
+                       :seon.render.selection/stages index])]
+          [:li
+           [:h3 (pr-str (:seon.render.selection.stage/name ai-stage))]
+           [:div {:class "seon-debug-projection-grid"}
+            (debug-experiment-stage-column
+             debug-request :seon.render/ai
+             (:seon.render/ai experiments) ai-stage)
+            (debug-experiment-stage-column
+             debug-request :seon.render/html
+             (:seon.render/html experiments) html-stage)]]))
+      (get-in experiments
+              [:seon.render/ai :seon.render/selection
+               :seon.render.selection/stages])))]))
+
+(defn- debug-render-experiment
+  [render-request output subject]
+  (let [request (assoc render-request :seon.render/output output)
+        inspection (render/selection-inspection request)
+        candidates
+        (into []
+              (comp
+               (mapcat :seon.render.selection.stage/candidates)
+               (filter #(= :compatible
+                           (:seon.render.selection.candidate/status %)))
+               (map :seon.render.selection.candidate/producer)
+               (distinct))
+              (:seon.render.selection/stages inspection))
+        call-id (fn [producer]
+                  [::inspection-candidate subject output producer])
+        previews
+        (into {}
+              (map (fn [producer]
+                     [producer
+                      (render/render-call
+                       (assoc request
+                              :seon.render/selection-inspection inspection
+                              :seon.render.call/selected-producer producer
+                              :seon.render.call/id (call-id producer)))]))
+              candidates)
+        entries (into {}
+                      (map (fn [producer]
+                             [producer
+                              (get @(:seon.render/captured-calls request)
+                                   (call-id producer))]))
+                      candidates)]
+    {:seon.render/selection inspection
+     :seon.render/previews previews
+     :seon.render/entries entries}))
+
 (defn- debug-output-html
   [debug-request acquisition rendered]
   (hiccup/->string
@@ -1101,14 +1232,14 @@
 (defn- debug-experiment-placeholder
   [output-id]
   [:div {:class "seon-debug-experiment"}
-   [:section {:id output-id
-              :class "seon-debug-body seon-debug-body-html"}
-    [:p {:class "seon-render-pending"}
-     "Loading the rendered result…"]]
    [:section {:id "debug-selection"
               :class "seon-debug-body seon-debug-selection"}
     [:p {:class "seon-render-pending"}
      "Loading renderer selection…"]]
+   [:section {:id output-id
+              :class "seon-debug-body seon-debug-body-html"}
+    [:p {:class "seon-render-pending"}
+     "Loading the rendered result…"]]
    [:section {:id "debug-observation"
               :class "seon-debug-body seon-debug-observation"}
     [:p {:class "seon-render-pending"}
@@ -1226,7 +1357,8 @@
      ::debug-data-entry entry}))
 
 (defn- debug-page-result
-  [db connection debug-request caps profile handle retained-calls]
+  [db connection debug-request caps profile handle retained-calls
+   retained-invocations captured-invocations]
   (let [{debug-data-output ::debug-data-output
          data-call-id ::debug-data-call-id
          debug-data-entry ::debug-data-entry}
@@ -1291,8 +1423,18 @@
                  :seon.render/output (:seon.render/output debug-request)
                  :seon.render.call/id call-id
                  :seon.render/retained-calls retained-calls
-                 :seon.render/captured-calls captured-calls))
+                 :seon.render/captured-calls captured-calls
+                 :seon.render/invocations retained-invocations
+                 :seon.render/captured-invocations captured-invocations))
         rendered (when render-request (render/render-call render-request))
+        experiments
+        (when render-request
+          {:seon.render/ai
+           (debug-render-experiment render-request :seon.render/ai
+                                    (:seon.render.debug/subject debug-request))
+           :seon.render/html
+           (debug-render-experiment render-request :seon.render/html
+                                    (:seon.render.debug/subject debug-request))})
         render-call-entry (get @captured-calls call-id)
         prompt-id (str "debug-ai-"
                        (or (:seon.cluster.agent/id debug-request) "inspection"))
@@ -1313,8 +1455,10 @@
                                   restarted?)
           "debug-graph"
           (debug-graph-html debug-request ref-attributes observation)
-          "debug-selection" (debug-selection-html debug-request
-                                                   render-call-entry)
+          "debug-selection" (if experiments
+                              (debug-experiments-html debug-request experiments)
+                              (debug-selection-html debug-request
+                                                    render-call-entry))
           (debug-html-id
            (or (:seon.cluster.agent/id debug-request) "inspection"))
           (debug-output-html debug-request acquisition rendered)}
@@ -1324,7 +1468,8 @@
                                 prompt-result)))]
     {:seon.render.web/page page
      :seon.render.web/fragments {}
-     :seon.render/captured-calls @captured-calls}))
+     :seon.render/captured-calls @captured-calls
+     :seon.render/captured-invocations @captured-invocations}))
 
 (defn join-package
   "Return the render proc's settled package unchanged.
@@ -1461,6 +1606,12 @@
                          calls)]
     interest))
 
+(defn- reachable-invocation-keys
+  [calls ai-calls]
+  (into #{}
+        (keep :seon.render.call/invocation-key)
+        (mapcat vals (concat (vals calls) (vals ai-calls)))))
+
 (defn- current-read-evidence
   [database retained]
   (db/read-evidence
@@ -1584,7 +1735,9 @@
         debug-request (when debug? (second registration-key))
         agent-id (if debug?
                    (:seon.cluster.agent/id debug-request)
-                   registration-key)]
+                   registration-key)
+        retained-invocations (if invalidate-calls? {} (::invocations state))
+        captured-invocations (atom {})]
     (if debug?
       (let [retained (if invalidate-calls?
                        {}
@@ -1598,12 +1751,14 @@
         ;; only advances its observed database basis below.
         (if (or invalidate-calls? (nil? package) (seq candidates))
           (debug-page-result database connection debug-request caps profile
-                             handle retained)
+                             handle retained retained-invocations
+                             captured-invocations)
           {::retained-only? true
            ::advance-basis? (not= (db/basis-t database)
                                   (:seon.render.package/basis-transaction
                                    package))
-           :seon.render/captured-calls retained}))
+           :seon.render/captured-calls retained
+           :seon.render/captured-invocations retained-invocations}))
       (let [retained (if invalidate-calls?
                        {}
                        (get-in state [::calls registration-key] {}))
@@ -1627,6 +1782,8 @@
                      :seon.render.web/retained-fragments
                      (get-in state [::fragments registration-key] {})
                      :seon.render/retained-calls retained
+                     :seon.render/invocations retained-invocations
+                     :seon.render/captured-invocations captured-invocations
                      :seon.render/candidate-call-ids candidates
                      :seon.render.walk/lookup
                      [:seon.cluster.agent/id agent-id]
@@ -1645,10 +1802,13 @@
                                (:acquisition root)))
                 calls (assoc (:seon.render/captured-calls result)
                              call-id (:entry root))]
-            (assoc result :seon.render/captured-calls calls))
+            (assoc result
+                   :seon.render/captured-calls calls
+                   :seon.render/captured-invocations @captured-invocations))
           (let [calls (assoc retained call-id (:entry root))]
             {::retained-only? true
-             :seon.render/captured-calls calls}))))))
+             :seon.render/captured-calls calls
+             :seon.render/captured-invocations retained-invocations}))))))
 
 (defn- watched-registration-keys
   [registration]
@@ -1673,6 +1833,7 @@
            ::fragments {}
            ::calls {}
            ::ai-calls {}
+           ::invocations {}
            ::ai-entries {})))
 
 (defn- render-pass
@@ -1759,6 +1920,15 @@
                   (:seon.render/captured-calls result)))
          (::calls state)
          results)
+        invocations
+        (reduce-kv
+         (fn [retained _registration-key result]
+           (merge retained (:seon.render/captured-invocations result)))
+         (if invalidate-calls? {} (::invocations state))
+         results)
+        invocations (select-keys
+                     invocations
+                     (reachable-invocation-keys calls (::ai-calls state)))
         _ (when (or invalidate-calls?
                     (not= packages (::packages state)))
             (reset! (:seon.render.web/latest-packages state) packages))
@@ -1770,7 +1940,8 @@
     [(assoc state
             ::packages packages
             ::fragments fragments
-            ::calls calls)
+            ::calls calls
+            ::invocations invocations)
      (when changed? packages)])))
 
 (defn append-history
@@ -1845,6 +2016,7 @@
         agent-id (:seon.cluster.agent/id request)
         database (:seon.db/db request)
         retained (get-in state [::ai-calls agent-id] {})
+        retained-invocations (::invocations state)
         entries (get-in state [::ai-entries agent-id] [])
         candidates (candidate-call-ids retained database)
         call-id (root-call-id :seon.render/ai agent-id)]
@@ -1853,6 +2025,7 @@
               :seon.render.history/segments (history-segments entries)
               :seon.db/db database}]
       (let [captured-calls (atom {})
+            captured-invocations (atom retained-invocations)
             render-request
             (assoc request
                    :seon.render.walk/lookup
@@ -1861,6 +2034,8 @@
                    (long (:seon.render/distance request 2))
                    :seon.render/retained-calls retained
                    :seon.render/captured-calls captured-calls
+                   :seon.render/invocations retained-invocations
+                   :seon.render/captured-invocations captured-invocations
                    :seon.render/candidate-call-ids candidates)
             root (refresh-root render-request retained call-id candidates)
             refresh? (or (empty? entries)
@@ -1880,7 +2055,11 @@
             entries (append-history entries observations)
             state (-> state
                       (assoc-in [::ai-calls agent-id] retained-calls)
-                      (assoc-in [::ai-entries agent-id] entries))]
+                      (assoc ::invocations @captured-invocations)
+                      (assoc-in [::ai-entries agent-id] entries))
+            state (update state ::invocations select-keys
+                          (reachable-invocation-keys (::calls state)
+                                                     (::ai-calls state)))]
         [state {:seon.cluster.prompt/text (history-text entries)
                 :seon.render.history/segments (history-segments entries)
                 :seon.db/db database}]))))
@@ -1968,6 +2147,7 @@
           ::fragments {}
           ::calls {}
           ::ai-calls {}
+          ::invocations {}
           ::ai-entries {}
           ::streams {}
           ::passes 0
