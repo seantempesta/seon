@@ -517,12 +517,18 @@
 ;;; Plan derivation — one Datalog query set over the P12 argument addresses
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private contract-transaction-query
-  '[:find (max ?tx) .
-    :in $ ?sym
-    :where
-    [?function :seon.fn/sym ?sym]
-    [?function _ _ ?tx]])
+(defn- contract-transaction
+  [database sym]
+  ;; Like the supplied-default basis, this is cache coherence rather than a
+  ;; semantic read. The plan's queries capture the actual contract attributes.
+  (binding [db/*read-evidence-sink* nil]
+    (db/q database
+          '[:find (max ?tx) .
+            :in $ ?sym
+            :where
+            [?function :seon.fn/sym ?sym]
+            [?function _ _ ?tx]]
+          sym)))
 
 (def ^:private arity-query
   '[:find ?order ?min ?count ?max
@@ -700,7 +706,7 @@
          :seon.fn/sym]
     [:or :seon.call-preparation/plan :seon.error/value :nil]]}
   [database current sym]
-  (let [contract-t (db/q database contract-transaction-query sym)]
+  (let [contract-t (contract-transaction database sym)]
     (when (number? contract-t)
       (let [index (by-fingerprint
                    (:seon.call-preparation/supplied-defaults current))
@@ -844,7 +850,7 @@
 
       (and usable?
            (= (:seon.call-preparation/contract-t held)
-              (db/q database contract-transaction-query sym)))
+              (contract-transaction database sym)))
       (do (swap! call-state assoc-in
                  [:seon.call-preparation/plans sym
                   :seon.call-preparation/verified-through-t]

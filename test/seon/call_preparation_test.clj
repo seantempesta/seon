@@ -698,13 +698,18 @@
          (is (= omitted explicit)
              "an explicit database wins and reaches the same function body"))))))
 
-(deftest snapshot-cache-coherence-does-not-widen-evaluation-evidence
+(deftest call-preparation-cache-coherence-does-not-widen-evaluation-evidence
   (test-support/with-database
    (fn [connection]
      (db/transact! connection database-rows)
      (let [captured (atom [])
-           _snapshot (binding [db/*read-evidence-sink* captured]
-                       (cp/snapshot @connection (projection)))
+           call-state (cp/state)
+           sym "seon.call-preparation-test/probe-current-database"
+           invocation-plan
+           (binding [db/*read-evidence-sink* captured]
+             (let [current (cp/current-snapshot call-state @connection
+                                                (projection))]
+               (cp/plan call-state @connection current sym)))
            evidence (db/read-evidence
                      @captured {:seon.db/retain-read-results? true})
            attributes
@@ -723,12 +728,27 @@
                        :where
                        [?row :seon.call-preparation/key :seon.db/db]]
                      @connection)]
+       (is (map? invocation-plan))
        (is (seq evidence))
        (is (not-any? #(= :all (:datahike.read/dependency-plan %)) evidence)
            "the snapshot's internal max-tx basis is not a semantic read")
        (is (every? attributes (cp/row-attributes))
            "precise supplied-default declaration dependencies remain")
        (is (db/read-evidence-current? @connection evidence))
+       (db/transact! connection [{:seon.ns/name 'unrelated-evidence-one}])
+       (is (db/read-evidence-current? @connection evidence)
+           "cold plan derivation is independent of unrelated settlement facts")
+       (let [warm-captured (atom [])
+             warm-plan
+             (binding [db/*read-evidence-sink* warm-captured]
+               (let [current (cp/current-snapshot call-state @connection
+                                                  (projection))]
+                 (cp/plan call-state @connection current sym)))
+             warm-evidence (db/read-evidence @warm-captured)]
+         (is (= invocation-plan warm-plan))
+         (db/transact! connection [{:seon.ns/name 'unrelated-evidence-two}])
+         (is (db/read-evidence-current? @connection warm-evidence)
+             "warm contract revalidation does not become a semantic read"))
        (db/transact!
         connection
         [{:seon.call-preparation/key :test/alternate-database
