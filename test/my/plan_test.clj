@@ -63,6 +63,44 @@
                    (db/pull @connection '[*]
                             [:my.plan.item/id "verify"]))))))))
 
+(deftest plan-items-are-ordinary-agent-linked-database-facts
+  (with-plan
+    (fn [connection]
+      (let [item-id "ordinary-fact"]
+        (db/transact!
+         connection
+         [{:db/id "new-plan-item"
+           :my.plan.item/id item-id
+           :my.plan.item/title "Inspect the facts"
+           :my.plan.item/agent [:seon.cluster.agent/id "alice"]}])
+        (let [pulled
+              (db/pull
+               @connection
+               [{:my.plan.item/_agent
+                 [:my.plan.item/id :my.plan.item/title]}]
+               [:seon.cluster.agent/id "alice"])]
+          (is (= [{:my.plan.item/id item-id
+                   :my.plan.item/title "Inspect the facts"}]
+                 (:my.plan.item/_agent pulled))))
+        (db/transact!
+         connection
+         [{:db/id [:my.plan.item/id item-id]
+           :my.plan.item/title "Inspect the updated facts"}])
+        (is (= "Inspect the updated facts"
+               (get-in
+                (db/pull
+                 @connection
+                 [{:my.plan.item/_agent
+                   [:my.plan.item/id :my.plan.item/title]}]
+                 [:seon.cluster.agent/id "alice"])
+                [:my.plan.item/_agent 0 :my.plan.item/title])))
+        (is (= [item-id]
+               (mapv :my.plan.item/id
+                     (plan/ready @connection "alice"))))
+        (is (= ["Inspect the updated facts"]
+               (mapv :my.plan.item/title
+                     (plan/ready @connection "alice"))))))))
+
 (deftest a-drained-parent-becomes-ready-for-verify-and-close
   (let [check
         (tc/quick-check
