@@ -2,6 +2,7 @@
   "Tests the debug prompt comparison's independent evidence labels."
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.render.web]
             [seon.test-support :as support]))
 
@@ -56,9 +57,16 @@
         (constantly {:seon.render.debug/prompt-kind :unavailable
                      :seon.render.debug/prompt-basis-t 7
                      :seon.error/value
-                     {:seon.error/kind :seon.render.web/prospective-failed
-                      :seon.error/data
-                      {:seon.error/diagnostic-cause "test failure"}}})}
+                     (error/diagnostic
+                      {:seon.error/kind :seon.render.web/prospective-failed
+                       :seon.error/message "test failure"
+                       :seon.error/diagnostic-layer :debug-page
+                       :seon.error/diagnostic-operation 'test
+                       :seon.error/diagnostic-member :prompt
+                       :seon.error/diagnostic-expected :prompt
+                       :seon.error/diagnostic-offending :agent
+                       :seon.error/diagnostic-cause "test failure"
+                       :seon.error/diagnostic-evidence :seon.error/unknown})})}
        #(let [comparison (debug-prompt (db/db connection)
                                        connection "missing-agent" :caps :context)
               html (debug-ai-html "missing-agent" comparison)]
