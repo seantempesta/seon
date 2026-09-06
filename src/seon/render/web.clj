@@ -882,7 +882,9 @@
                    debug-request
                    {:seon.render.data/cursor (data/parse-cursor nil nil)})}
         "return to entity"]])
-    [:div
+    [:details {:class "seon-debug-evidence"}
+     [:summary "Database and render diagnostics"]
+     [:div
      [:span "snapshot"]
      [:code (pr-str (:seon.render.data/snapshot observation))]]
     [:div
@@ -893,17 +895,17 @@
      [:code (pr-str
              (:seon.schema.projection/fingerprint program-identity))]]
     [:div
-     [:span "output"]
-     [:nav {:aria-label "Rendered output"}
-      (output-link :seon.render/html "HTML")
-      (output-link :seon.render/ai "AI")]]
-    [:div
      [:span "render value acquisition"]
      [:code (str acquisition-ms " ms · query bounds: work ≤ "
                 (::pull-max-work debug-request)
                 " · results ≤ " (::pull-max-results debug-request)
                 " · weight ≤ "
-                (:seon.render.data/max-result-weight debug-request))]]])))
+                (:seon.render.data/max-result-weight debug-request))]]]
+    [:div
+     [:span "output"]
+     [:nav {:aria-label "Rendered output"}
+      (output-link :seon.render/html "HTML")
+      (output-link :seon.render/ai "AI")]]])))
 
 (defn- debug-observation-html
   [ref-attributes debug-request observation entity-html restarted?]
