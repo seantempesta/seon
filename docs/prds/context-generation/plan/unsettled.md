@@ -8,6 +8,17 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Live checkpoint: `75d6c3787` and `12aeef5de` improve the existing message
+HTML and plan CSS. Root personally inspected both crops after host Var reload:
+message attribution and compact UTC timestamp sit above the authored content;
+plan description and expected result are distinct. The browser proof at
+`152fab80d` passes with 12 paired rows, 293 ms readiness, and no page errors.
+This does not establish the AI execution/cache integration. `671657d51` commits
+the source-submission authority fix and real-evaluator regression, but final
+verification is still pending: setup failed while loading the transcript test
+namespace, which subsequently loaded on its own. No passing execution claim
+is inferred from that standalone load.
+
 Owner clarification, 2026-09-06: debug outputs are possible transcript values,
 not automatically the agent's actual history. Connect the agent's run-loop
 data, submitted forms, and evaluated results to its entity and render them
