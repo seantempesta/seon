@@ -915,8 +915,10 @@
      [:section {:id "debug-graph" :class "seon-debug-graph"
                 :data-seon-graph ""}
       [:h2 {:class "seon-debug-graph-heading"} "reference graph"]
-      [:canvas {:class "seon-debug-graph-canvas"
-                :data-graph-canvas "" :data-ignore-morph ""}]
+      [:div {:class "seon-debug-graph-canvas"
+             :data-graph-canvas "" :data-ignore-morph ""
+             :role "img"
+             :aria-label "Reference graph around the selected entity"}]
       [:script {:type "application/json" :data-graph-model ""}
        (hiccup/raw (json-script-text model))]
       [:p {:class "seon-debug-graph-status" :data-graph-status ""}

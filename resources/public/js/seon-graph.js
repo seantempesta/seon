@@ -250,7 +250,6 @@ attribute({
         elements: [],
         layout: { name: 'preset' },
         style: graphStyle(el),
-        minZoom: 0.2,
         maxZoom: 3,
       })
     } catch (error) {

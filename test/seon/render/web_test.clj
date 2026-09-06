@@ -897,6 +897,11 @@
            (into #{} (map #(get-in % [:data :id])) edges)))
     (is (every? #(= ":fixture/ref" (get-in % [:data :attribute])) edges))
     (is (str/includes? html "outgoing partial, incoming complete"))
+    (is (and (str/includes? html "<div")
+             (str/includes? html "class=\"seon-debug-graph-canvas\"")
+             (str/includes? html "role=\"img\"")
+             (not (str/includes? html "<canvas")))
+        "Cytoscape receives an ordinary container for its child canvases")
     (is (and (str/includes? html "data-graph-status")
              (str/includes? html "data-graph-detail")
              (str/includes? html
