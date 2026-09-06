@@ -8,6 +8,23 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Owner display direction, 2026-09-06: keep the clean layout, warm the palette
+to complement the existing Phosphor Terminal theme, and avoid excessive orange.
+The updated mockup uses warm charcoal/cream, muted sage selections and sparse
+amber. The default inspection should show the rendered value plus its producing
+Clojure form, with raw stored attributes/datoms behind disclosure. A short
+description may come from the selected function's docstring.
+
+Open design experiment from the owner: optional `:seon.render/thinking` for a
+data-dependent explanation. Proposed interpretation is authored explanation
+metadata computed alongside a render result, sharing its input snapshot and
+read dependencies; it is not a third output projection or a new stored mirror.
+Docstring text describes the function generally and must not be presented as
+a data-dependent explanation. The producing form must come from actual
+acquisition/invocation evidence; never fabricate a replayable query from only
+the printed result. This is a design proposal, not an installed schema or a
+settled return-contract change.
+
 The owner approved the planning approach and requested research agents plus
 a mockup. Research is committed: [graph source review](../research/graph-visualization-source-review-2026-09-05.md)
 (`70ea7a53c`) and [interaction semantics](../research/inspection-interaction-review-2026-09-06.md)
