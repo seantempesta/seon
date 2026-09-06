@@ -6,6 +6,49 @@ tags: [prd, agent, context, architecture]
 
 # The working edge — context-generation program
 
+## Active execution goals — dinner continuation, 2026-09-05
+
+The owner asked for continued autonomous progress while away. This ordering
+supersedes the older session checkpoints below for the current design-lab work.
+The existing active goal remains incomplete; source edits, delegation, an HTTP
+loading shell, and tests alone are not completion evidence.
+
+1. **Run a coherent current program.** Resolve the reproducible source-analysis
+   arity discrepancy, finish and commit the bounded HTML preview, then publish,
+   refork and start the shared default cluster. Verify that `1f3c099d2` is
+   included, record the published source identity and process identity, and
+   prove a clean generated opening, including the previously missing empty
+   agent namespace. The cluster is stopped at this checkpoint.
+2. **Complete the first usable debug inspection.** Show actual entity datoms
+   and reference navigation, the real ranked render selection, and useful
+   bounded AI/HTML output. Verify arbitrary subjects and distinct viewers,
+   pagination, missing-data diagnostics, and a readable wide/narrow layout.
+   Use an isolated headless browser if the desktop remains locked.
+3. **Prove live updates and bounded work.** On an already-open view, change and
+   restore relevant data and a rendering helper through the MCP evaluation
+   tools. Verify automatic repaint, unchanged-input reuse, unrelated-transaction
+   reuse before discovery/invocation, and recovery by a late-joining feed.
+   Record cold/warm complete-render timings and actual work counts; investigate
+   surprising cost instead of hiding it behind delivery suppression.
+4. **Close the storage and recovery defects needed for reliable experiments.**
+   Confirm bounded fault facts on the fresh cluster and measure store growth.
+   Check the existing garbage collector before adding machinery; reclaim only
+   proven inactive disposable test roots. Coordinate the global write bound and
+   missing-result recovery with the other agent's already-owned work.
+5. **Simplify evaluation bookkeeping from the completed audit.** Prototype the
+   one-form-entity model and recovery ordering against actual transactions,
+   including newly appended forms after an interrupted generated run. Delete
+   redundant state only after those invariants are proven. If a cross-owner
+   design decision is still necessary, persist concrete alternatives and keep
+   advancing independent work; do not invent a choice for the absent owner.
+
+At every coherent checkpoint: run the relevant focused checks, verify the live
+behavior, commit explicit owned paths, push, and update the linked
+[inspection evidence](../research/design-lab-inspection-slice-2026-09-05.md).
+Report failures and limits honestly. No paid model calls are needed for these
+checks. The first inspection milestone may complete before the wider storage
+and simplification work; do not report the whole platform finished on that basis.
+
 *THE one live record of current state and ordering (owner ruling,
 2026-08-29): write-through in the session it changes, path-limited
 commits. The sci-execution-runtime `unsettled.md` is tombstoned and
