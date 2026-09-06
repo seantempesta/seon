@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, datahike, render, performance]
+tags: [issue, database, render, performance, wave/store-perf]
 ---
 
 # Identify shared store growth during renderer changes
@@ -23,3 +23,6 @@ Before resetting away evidence, measure those owners and identify which writes
 account for growth. Verify that rendering and repeated context consumption do
 not create additional evaluations or persistent artifacts for unchanged inputs.
 Do not infer a fault loop or publication defect from physical size alone.
+
+The next session check reported 9.76 GiB, with the same three live clusters
+and PID 14798. No reset was performed; the evidence remains available.

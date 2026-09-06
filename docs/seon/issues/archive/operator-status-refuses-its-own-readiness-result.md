@@ -47,3 +47,14 @@ secondary contract wall.
 ## Closure — 2026-08-13
 
 `seon.operator/status` now declares `[:or :seon.operator/status :seon.error/value]` (`src/seon/operator.clj:83-86`, verified 2026-08-13).
+
+## Live recurrence observation — 2026-09-06
+
+The long-lived shared JVM (PID 14798, cluster `lab-run-inspection`) again
+returned `seon.operator/status violated its contract (invalid-output): missing
+required key` through MCP JVM evaluation of `(seon.operator/status)`.
+`bin/seon status` independently reported all three clusters alive. The MCP
+connection itself answered; the failure was the evaluated function's output
+contract. This does not yet establish a regression in current source: the
+running JVM predates the current edits. Reproduce on a fresh current-source
+process before reopening the implementation defect or changing its schema.

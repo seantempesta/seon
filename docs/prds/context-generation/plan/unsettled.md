@@ -8,6 +8,25 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Current integration checkpoint: `5083a373e` retains the selected debug AI
+candidate's ordinary submitted run identity in the existing invocation cache
+(one focused test, 79 assertions). This is selected-preview coverage only:
+found-value candidates and context assembly still require the shared ordered
+source integration. `c1b1996f6` makes the default source read the exact entity
+or cursor value, with actual SCI execution proof (3 tests, 82 assertions).
+`fa492a172` renders top-level multiline result strings directly while keeping
+nested strings structured. `d020f547e` preserves database errors in plan and
+message formatters and gives plan updates a real present item id.
+
+The owner requires omitted database arguments to work in the common execution
+machinery for every caller. Live elided `seon.db/q`, `pull`, and `pull-many`
+succeed, but a fresh SCI fixture calling `(my.plan/plan "alice")` reports an
+arity error despite the declared database-value argument. The existing call
+preparation and indexed argument facts are being investigated; explicit
+`(seon.db/db)` in that generated form is not proof that general supply works.
+An isolated current-source browser proof is underway. The shared 7773 page has
+not yet been claimed to show the newly executed source previews.
+
 Owner reminder: renderer functions can declare a database argument. Existing
 SCI call preparation supplies the current database value when that argument is
 omitted; an explicit caller-supplied database wins. Reuse and verify that
