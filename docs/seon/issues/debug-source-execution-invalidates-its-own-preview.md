@@ -31,6 +31,23 @@ execution identity together with producer-input evidence allows another run.
 The exact invalidating evidence must be verified by the correction; do not
 infer it solely from the number of runs.
 
+## Second live falsifier and correction
+
+The next isolated build included `bffaa3779`, preserving the prior call's run
+identity across changes to its acquired argument. It still created six source
+runs/evaluations during the bounded eight-second feed probe and was stopped.
+Inspection identified another invalidation owner: each ordinary evaluation
+announces `:seon.render.web/runtime-eval`, whose handler cleared all retained
+calls and invocation entries before the following settlement wake.
+
+`ab558c858` retains source execution references through that event while
+discarding output, producer-input reuse evidence, and invocation caches. The
+next pass must regenerate the producer's source and validate its stored run's
+program, starting namespace, agent, and evaluation read evidence. Retaining a
+complete reusable output entry here would instead mask live code changes.
+This correction still needs a successful fresh live proof; its focused test
+is not closure of this issue.
+
 ## Owner and acceptance
 
 Correct the existing retained call/invocation cache in `seon.render.web` and
