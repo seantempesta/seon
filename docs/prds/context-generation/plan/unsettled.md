@@ -8,6 +8,19 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Owner transcript direction, 2026-09-06: renderer metadata belongs outside the
+AI output box. That box must show the actual agent-visible text: authored
+thought comments, executable forms, and their actual stored outputs. Use the
+ordinary namespace prompt (`my.agents.juniper=>`) from each execution entry,
+including namespace changes. Returned values and formatted prose are never
+comment-prefixed. Renderer identity, priority, contracts, read evidence, and
+definition source belong in separate inspection details. Reuse the existing
+reader, run execution, result storage, and transcript renderer; a generated
+query beside acquired data is not evidence that the query executed. Metadata
+separation is implemented in `90b46572a`; the identity renderer still emits
+source text and needs the existing source/run integration before its preview
+can honestly show an executed form and result.
+
 Owner's current visual iteration: show found values as paired AI/HTML previews
 first. Clicking a value exposes other applicable renderers in priority order;
 absent renderers and empty stages do not appear. Actual rendering errors remain

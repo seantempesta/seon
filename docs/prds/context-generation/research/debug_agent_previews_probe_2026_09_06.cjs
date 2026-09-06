@@ -21,6 +21,10 @@ const assert = require('node:assert/strict');
       assert(selectedText.includes(text), `identity preview must include ${text}`);
     }
     assert.equal(await selected.locator(':scope > .seon-debug-projection-column').count(), 2);
+    assert.equal(await selected.locator('.seon-debug-selected-renderer').count(), 0,
+      'renderer metadata must stay outside the output pair');
+    assert.equal(await page.locator('#debug-selection .seon-debug-selected-renderer').count(), 2,
+      'both selected renderers must remain inspectable outside the output pair');
     const found = page.locator('.seon-debug-found-values');
     await found.waitFor();
     const foundText = await found.innerText();
