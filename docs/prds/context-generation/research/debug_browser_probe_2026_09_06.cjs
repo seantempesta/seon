@@ -21,6 +21,10 @@ const assert = require('node:assert/strict');
       return canvas?._cyreg?.cy?.nodes().length > 0;
     });
     const readyMs = performance.now() - started;
+    if (process.argv[4]) {
+      assert((await page.locator('#debug-html-inspection').innerText()).includes(process.argv[4]),
+        'required callable summary must survive the actual final HTML fit');
+    }
     const initial = await page.evaluate(() => {
       const canvas = document.querySelector('[data-graph-canvas]');
       const cy = canvas._cyreg.cy;
