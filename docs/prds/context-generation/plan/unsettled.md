@@ -8,6 +8,12 @@ tags: [prd, agent, context, architecture]
 
 ## Design-lab planning checkpoint — 2026-09-06
 
+Owner reminder: renderer functions can declare a database argument. Existing
+SCI call preparation supplies the current database value when that argument is
+omitted; an explicit caller-supplied database wins. Reuse and verify that
+mechanism for generated forms. A free lexical `db` symbol is not argument
+injection, and no separate injection implementation belongs in rendering.
+
 Execution prerequisite now verified (`f93dae52f`): the final focused source
 submission checks pass 2 tests / 83 assertions. An isolated ordinary boot
 submitted two commented forms, closed their run, stored both numeric results,
