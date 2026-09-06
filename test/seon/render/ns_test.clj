@@ -8,6 +8,7 @@
             [seon.db :as db]
             [malli.registry :as mr]
             [seon.ai.tokens :as tokens]
+            [seon.config :as config]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.ns :as sut]
@@ -79,6 +80,22 @@
           :seon.fn/source source
           :seon.fn/private? false}
          options))
+
+(deftest bounded-read-refusals-remain-flat-errors
+  (support/with-database
+    (fn [connection]
+      (let [effective (support/effective-config)
+            caps (assoc (config/result-caps effective)
+                        :seon.config.eval.result/max-nodes 1
+                        :seon.config.eval.result/max-collection 1)
+            unit (assoc (namespace-unit @connection 'seon.flow 1 100000)
+                        :seon.sci.admit/caps caps)
+            ai (sut/render-ai unit)
+            html (sut/render-html unit)]
+        (is (= ai html)
+            "both projections return the same refusal from the owning read")
+        (is (= :seon.db/invalid-read (:seon.error/kind ai)))
+        (is (string? (:seon.error/message ai)))))))
 
 (deftest populated-namespace-renders-the-inverse-distance-gradient
   (support/with-database
@@ -382,4 +399,3 @@
 ;; docs/seon/issues/registered-render-producers-fall-through-to-generic-map-rendering.md
 ;; and the S2 (render data) rebuild's seam — the wave restores designed
 ;; regressions; the doomed pins are parked, not polished.
-

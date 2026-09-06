@@ -48,15 +48,19 @@
       (pos-int? max-collection)
       (assoc :max-results max-collection))))
 
+(defn- error-value?
+  [value]
+  (and (map? value) (keyword? (:seon.error/kind value))))
+
 (defn- namespace-row
   [unit]
   (let [db (:seon.db/db unit)
         eid (:db/id unit)]
     (if (and db eid)
-      (merge unit
-             (db/pull db (merge (read-bounds unit)
-                                {:selector namespace-selector
-                                 :eid eid})))
+      (let [row (db/pull db (merge (read-bounds unit)
+                                   {:selector namespace-selector
+                                    :eid eid}))]
+        (if (error-value? row) row (merge unit row)))
       unit)))
 
 (defn- function-rows
@@ -71,24 +75,28 @@
                      :in $ ?namespace selector
                      :where [?function :seon.fn/ns ?namespace]]
                    :args [db namespace-eid function-selector]}))]
-      (vec (sort-by :seon.fn/sym rows)))))
+      (if (error-value? rows)
+        rows
+        (vec (sort-by :seon.fn/sym rows))))))
 
 (defn- own-schema-rows
   [db bounds namespace-name distance]
   (if-not (and db namespace-name (pos? distance))
     []
-    (->> (db/q
-          (merge bounds
-                 {:query
-                  '[:find [(pull ?schema selector) ...]
-                    :in $ ?namespace-name selector
-                    :where
-                    [?schema :seon.schema/key ?key]
-                    [(namespace ?key) ?key-namespace]
-                    [(= ?key-namespace ?namespace-name)]]
-                  :args [db (str namespace-name) schema-selector]}))
-         (sort-by (comp str :seon.schema/key))
-         vec)))
+    (let [rows
+          (db/q
+           (merge bounds
+                  {:query
+                   '[:find [(pull ?schema selector) ...]
+                     :in $ ?namespace-name selector
+                     :where
+                     [?schema :seon.schema/key ?key]
+                     [(namespace ?key) ?key-namespace]
+                     [(= ?key-namespace ?namespace-name)]]
+                   :args [db (str namespace-name) schema-selector]}))]
+      (if (error-value? rows)
+        rows
+        (->> rows (sort-by (comp str :seon.schema/key)) vec)))))
 
 (defn- schema-row
   [db bounds schema-key]
@@ -188,31 +196,34 @@
               remaining (subvec queue 1)]
           (if (contains? seen schema-key)
             (recur remaining seen emitted definitions)
-            (let [definition
-                  (or (get definitions schema-key)
-                      (some-> (cached-schema-row db bounds cache schema-key)
-                              schema-definition))
-                  child-keys
-                  (or (some-> definition ::schema-form schema-form-refs) #{})
-                  seen' (conj seen schema-key)
-                  emittable? (and definition
-                                  (not (contains? own-keys schema-key)))
-                  definitions'
-                  (cond-> definitions
-                    definition (assoc schema-key definition))]
-              (if (and emittable?
-                       (>= (count emitted) referenced-schema-cap))
-                {::schema-keys (vec (sort emitted))
-                 ::schema-definitions definitions'
-                 ::schemas-capped? true}
-                (recur (->> (concat remaining child-keys)
-                            (remove seen')
-                            distinct
-                            sort
-                            vec)
-                       seen'
-                       (cond-> emitted emittable? (conj schema-key))
-                       definitions')))))))))
+            (let [row (when-not (get definitions schema-key)
+                        (cached-schema-row db bounds cache schema-key))]
+              (if (error-value? row)
+                row
+                (let [definition
+                      (or (get definitions schema-key)
+                          (schema-definition row))
+                      child-keys
+                      (or (some-> definition ::schema-form schema-form-refs) #{})
+                      seen' (conj seen schema-key)
+                      emittable? (and definition
+                                      (not (contains? own-keys schema-key)))
+                      definitions'
+                      (cond-> definitions
+                        definition (assoc schema-key definition))]
+                  (if (and emittable?
+                           (>= (count emitted) referenced-schema-cap))
+                    {::schema-keys (vec (sort emitted))
+                     ::schema-definitions definitions'
+                     ::schemas-capped? true}
+                    (recur (->> (concat remaining child-keys)
+                                (remove seen')
+                                distinct
+                                sort
+                                vec)
+                           seen'
+                           (cond-> emitted emittable? (conj schema-key))
+                           definitions')))))))))))
 
 (defn- schema-definition-text
   [{::keys [schema-source schema-form]}]
@@ -233,8 +244,10 @@
          db bounds cache
          (into [] (keep :seon.fn/spec) functions)
          own-rows)]
-    {::schema-keys (::schema-keys closure)
-     ::schemas-capped? (::schemas-capped? closure)}))
+    (if (error-value? closure)
+      closure
+      {::schema-keys (::schema-keys closure)
+       ::schemas-capped? (::schemas-capped? closure)})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; One deterministic namespace representation
@@ -293,35 +306,42 @@
 
 (defn- render-data
   [unit]
-  (let [row (namespace-row unit)
-        db (:seon.db/db unit)
-        bounds (read-bounds unit)
-        namespace-name (or (:seon.ns/name row) 'unknown.namespace)
-        distance (max 0 (long (get unit :seon.render/distance 1)))
-        all-functions (if (pos? distance)
-                        (function-rows db bounds (:db/id unit))
-                        [])
-        functions (if (= 1 distance)
-                    all-functions
-                    (vec (remove :seon.fn/private? all-functions)))
-        own-schemas (own-schema-rows db bounds namespace-name distance)]
-    {::db db
-     ::read-bounds bounds
-     ::namespace-name namespace-name
-     ::namespace-source (:seon.ns/source row)
-     ::distance distance
-     ::requires (vec (require-specs row))
-     ::functions functions
-     ::own-schemas own-schemas
-     ::profile-id (get-in unit [:seon.render/profile
-                                :seon.render.profile/id]
-                          :seon.render.profile/unspecified)
-     ::schema-row-cache
-     (atom (into {} (map (juxt :seon.schema/key identity)) own-schemas))
-     ::owner-agent-id (when (and db
-                                (empty? functions)
-                                (empty? own-schemas))
-                        (agent/owner-of db namespace-name))}))
+  (let [row (namespace-row unit)]
+    (if (error-value? row)
+      row
+      (let [db (:seon.db/db unit)
+            bounds (read-bounds unit)
+            namespace-name (or (:seon.ns/name row) 'unknown.namespace)
+            distance (max 0 (long (get unit :seon.render/distance 1)))
+            all-functions (if (pos? distance)
+                            (function-rows db bounds (:db/id unit))
+                            [])]
+        (if (error-value? all-functions)
+          all-functions
+          (let [functions (if (= 1 distance)
+                            all-functions
+                            (vec (remove :seon.fn/private? all-functions)))
+                own-schemas (own-schema-rows db bounds namespace-name distance)]
+            (if (error-value? own-schemas)
+              own-schemas
+              {::db db
+               ::read-bounds bounds
+               ::namespace-name namespace-name
+               ::namespace-source (:seon.ns/source row)
+               ::distance distance
+               ::requires (vec (require-specs row))
+               ::functions functions
+               ::own-schemas own-schemas
+               ::profile-id (get-in unit [:seon.render/profile
+                                          :seon.render.profile/id]
+                                    :seon.render.profile/unspecified)
+               ::schema-row-cache
+               (atom (into {} (map (juxt :seon.schema/key identity))
+                           own-schemas))
+               ::owner-agent-id (when (and db
+                                          (empty? functions)
+                                          (empty? own-schemas))
+                                  (agent/owner-of db namespace-name))})))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bounded, whole-section assembly
@@ -417,22 +437,24 @@
 
 (defn- referenced-schema-ai-section
   [db bounds schema-row-cache functions own-schemas]
-  (let [{::keys [schema-keys schemas-capped?]}
-        (referenced-schema-summary db bounds schema-row-cache
-                                   functions own-schemas)]
-    (when (or (seq schema-keys) schemas-capped?)
-      (str/join
-       "\n"
-       (cond-> []
-         (seq schema-keys)
-         (into (map (fn [schema-key]
-                      (pr-str {:seon.schema/key schema-key})))
-               schema-keys)
-         schemas-capped?
-         (conj (pr-str
-                {:seon.error/message
-                 (str referenced-schema-cap
-                      "+ referenced schemas are reachable through the database.")})))))))
+  (let [summary (referenced-schema-summary db bounds schema-row-cache
+                                           functions own-schemas)]
+    (if (error-value? summary)
+      summary
+      (let [{::keys [schema-keys schemas-capped?]} summary]
+        (when (or (seq schema-keys) schemas-capped?)
+          (str/join
+           "\n"
+           (cond-> []
+             (seq schema-keys)
+             (into (map (fn [schema-key]
+                          (pr-str {:seon.schema/key schema-key})))
+                   schema-keys)
+             schemas-capped?
+             (conj (pr-str
+                    {:seon.error/message
+                     (str referenced-schema-cap
+                          "+ referenced schemas are reachable through the database.")})))))))))
 
 (defn- full-ai-text
   [{::keys [db schema-row-cache namespace-name namespace-source requires
@@ -451,29 +473,33 @@
         schema-section
         (referenced-schema-ai-section
          db bounds schema-row-cache functions own-schemas)]
-    (str/join
-     "\n\n"
-     (cond-> [source]
-       (seq member-parts) (into member-parts)
-       schema-section (conj schema-section)
-       (and (empty? functions) (empty? own-schemas))
-       (conj (pr-str (empty-value owner-agent-id)))))))
+    (if (error-value? schema-section)
+      schema-section
+      (str/join
+       "\n\n"
+       (cond-> [source]
+         (seq member-parts) (into member-parts)
+         schema-section (conj schema-section)
+         (and (empty? functions) (empty? own-schemas))
+         (conj (pr-str (empty-value owner-agent-id))))))))
 
 (defn- compact-ai-items
   [{::keys [db schema-row-cache functions own-schemas] :as data}]
   (let [bounds (::read-bounds data)
-        {::keys [schema-keys schemas-capped?]}
-        (referenced-schema-summary db bounds schema-row-cache
-                                   functions own-schemas)]
-    (vec
-     (concat
-      (map compact-function-value functions)
-      (map compact-schema-value own-schemas)
-      (map (fn [schema-key] {:seon.schema/key schema-key}) schema-keys)
-      (when schemas-capped?
-        [{:seon.error/message
-          (str referenced-schema-cap
-               "+ referenced schemas are reachable through the database.")}])))))
+        summary (referenced-schema-summary db bounds schema-row-cache
+                                           functions own-schemas)]
+    (if (error-value? summary)
+      summary
+      (let [{::keys [schema-keys schemas-capped?]} summary]
+        (vec
+         (concat
+          (map compact-function-value functions)
+          (map compact-schema-value own-schemas)
+          (map (fn [schema-key] {:seon.schema/key schema-key}) schema-keys)
+          (when schemas-capped?
+            [{:seon.error/message
+              (str referenced-schema-cap
+                   "+ referenced schemas are reachable through the database.")}])))))))
 
 (defn- compact-ai-text
   [{::keys [namespace-name requires functions own-schemas owner-agent-id
@@ -496,7 +522,9 @@
     0 (str (::namespace-name data))
     1 (full-ai-text data)
     (let [items (compact-ai-items data)]
-      (compact-ai-text data items (count items)))))
+      (if (error-value? items)
+        items
+        (compact-ai-text data items (count items))))))
 
 (defn- minimal-ai-text
   [{::keys [namespace-name requires functions own-schemas owner-agent-id
@@ -515,18 +543,20 @@
   (if (or (nil? budget) (< (::distance data) 2))
     (ai-text data)
     (let [items (compact-ai-items data)
-          item-count (count items)
-          render #(compact-ai-text data items %)
-          initial (render 0)]
-      (if-not (within-budget? initial budget)
-        (minimal-ai-text data)
-        (loop [included 0]
-          (let [next-count (inc included)
-                candidate (when (<= next-count item-count)
-                            (render next-count))]
-            (if (and candidate (within-budget? candidate budget))
-              (recur next-count)
-              (render included))))))))
+          item-count (when-not (error-value? items) (count items))]
+      (if (error-value? items)
+        items
+        (let [render #(compact-ai-text data items %)
+              initial (render 0)]
+          (if-not (within-budget? initial budget)
+            (minimal-ai-text data)
+            (loop [included 0]
+              (let [next-count (inc included)
+                    candidate (when (<= next-count item-count)
+                                (render next-count))]
+                (if (and candidate (within-budget? candidate budget))
+                  (recur next-count)
+                  (render included))))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; HTML twin
@@ -554,20 +584,22 @@
 
 (defn- referenced-schema-html
   [db bounds schema-row-cache functions own-schemas]
-  (let [{::keys [schema-keys schemas-capped?]}
-        (referenced-schema-summary db bounds schema-row-cache
-                                   functions own-schemas)
-        items
-        (cond-> (mapv (fn [schema-key]
-                        [:li [:code (pr-str schema-key)]])
-                      schema-keys)
-          schemas-capped?
-          (conj [:li (str referenced-schema-cap
-                          "+ referenced schemas capped; more reachable via the db")]))]
-    (when (or (seq schema-keys) schemas-capped?)
-      [:section {:class "seon-namespace-referenced-schemas"}
-       [:h3 "Referenced schemas"]
-       (into [:ul] items)])))
+  (let [summary (referenced-schema-summary db bounds schema-row-cache
+                                           functions own-schemas)]
+    (if (error-value? summary)
+      summary
+      (let [{::keys [schema-keys schemas-capped?]} summary
+            items
+            (cond-> (mapv (fn [schema-key]
+                            [:li [:code (pr-str schema-key)]])
+                          schema-keys)
+              schemas-capped?
+              (conj [:li (str referenced-schema-cap
+                              "+ referenced schemas capped; more reachable via the db")]))]
+        (when (or (seq schema-keys) schemas-capped?)
+          [:section {:class "seon-namespace-referenced-schemas"}
+           [:h3 "Referenced schemas"]
+           (into [:ul] items)])))))
 
 (defn- full-html-view
   [{::keys [db schema-row-cache namespace-name namespace-source requires
@@ -579,21 +611,23 @@
         schema-section
         (referenced-schema-html db bounds schema-row-cache
                                 functions own-schemas)]
-    (into
-     [:section {:class "seon-family-entry seon-namespace-entry"}
-      [:h2 [:code (str namespace-name)]]
-      [:pre {:class "seon-namespace-source"} [:code source]]]
-     (cond-> []
-       (seq functions)
-       (conj (into [:dl {:class "seon-namespace-definitions"}]
-                   (mapcat full-function-html functions)))
-       (seq own-schemas)
-       (conj [:pre {:class "seon-namespace-own-schemas"}
-              [:code (str/join "\n" (map compact-schema-line own-schemas))]])
-       schema-section (conj schema-section)
-       (and (empty? functions) (empty? own-schemas))
-       (conj [:p {:class "seon-namespace-empty"}
-              (empty-text owner-agent-id)])))))
+    (if (error-value? schema-section)
+      schema-section
+      (into
+       [:section {:class "seon-family-entry seon-namespace-entry"}
+        [:h2 [:code (str namespace-name)]]
+        [:pre {:class "seon-namespace-source"} [:code source]]]
+       (cond-> []
+         (seq functions)
+         (conj (into [:dl {:class "seon-namespace-definitions"}]
+                     (mapcat full-function-html functions)))
+         (seq own-schemas)
+         (conj [:pre {:class "seon-namespace-own-schemas"}
+                [:code (str/join "\n" (map compact-schema-line own-schemas))]])
+         schema-section (conj schema-section)
+         (and (empty? functions) (empty? own-schemas))
+         (conj [:p {:class "seon-namespace-empty"}
+                (empty-text owner-agent-id)]))))))
 
 (defn- compact-html-view
   [{::keys [db schema-row-cache namespace-name requires functions own-schemas
@@ -605,26 +639,28 @@
         schema-section
         (referenced-schema-html db bounds schema-row-cache
                                 included own-schemas)]
-    (into
-     [:section {:class "seon-family-entry seon-namespace-entry"}
-      [:h2 [:code (str namespace-name)]]]
-     (cond-> []
-       (seq requires)
-       (conj [:p {:class "seon-namespace-requires"}
-              "Requires " [:code (pr-str (vec requires))]])
-       (seq own-schemas)
-       (conj [:pre {:class "seon-namespace-own-schemas"}
-              [:code (str/join "\n" (map compact-schema-line own-schemas))]])
-       schema-section (conj schema-section)
-       (seq included)
-       (conj (into [:dl {:class "seon-namespace-definitions"}]
-                   (mapcat compact-function-html included)))
-       (and (empty? functions) (empty? own-schemas))
-       (conj [:p {:class "seon-namespace-empty"}
-              (empty-text owner-agent-id)])
-       (pos? omitted)
-       (conj [:p {:class "seon-namespace-elision"}
-              (omission-text 0 omitted)])))))
+    (if (error-value? schema-section)
+      schema-section
+      (into
+       [:section {:class "seon-family-entry seon-namespace-entry"}
+        [:h2 [:code (str namespace-name)]]]
+       (cond-> []
+         (seq requires)
+         (conj [:p {:class "seon-namespace-requires"}
+                "Requires " [:code (pr-str (vec requires))]])
+         (seq own-schemas)
+         (conj [:pre {:class "seon-namespace-own-schemas"}
+                [:code (str/join "\n" (map compact-schema-line own-schemas))]])
+         schema-section (conj schema-section)
+         (seq included)
+         (conj (into [:dl {:class "seon-namespace-definitions"}]
+                     (mapcat compact-function-html included)))
+         (and (empty? functions) (empty? own-schemas))
+         (conj [:p {:class "seon-namespace-empty"}
+                (empty-text owner-agent-id)])
+         (pos? omitted)
+         (conj [:p {:class "seon-namespace-elision"}
+                (omission-text 0 omitted)]))))))
 
 (defn- html-view
   [data included-count]
@@ -689,15 +725,20 @@
 
 (defn render-ai
   "Render a namespace as valid, distance-sensitive Clojure."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or [:maybe :string] :seon.error/value]]}
   [unit]
   (let [data (render-data unit)]
-    (budgeted-ai data (token-budget unit))))
+    (if (error-value? data)
+      data
+      (budgeted-ai data (token-budget unit)))))
 
 (defn render-html
   "Render the namespace's same definitions as stable HTML entries."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:maybe :seon.render/hiccup]]}
+                  [:or [:maybe :seon.render/hiccup] :seon.error/value]]}
   [unit]
   (let [data (render-data unit)]
-    (budgeted-html data (token-budget unit))))
+    (if (error-value? data)
+      data
+      (budgeted-html data (token-budget unit)))))
