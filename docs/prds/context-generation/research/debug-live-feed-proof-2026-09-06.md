@@ -102,3 +102,20 @@ Before editing, the exact original `:seon.fn/source` was read by function
 identity from the scratch database. It was restored with the same SCI tool
 immediately after the successful browser proof; restoration returned
 successfully in 26 ms. No source file or default-cluster definition was changed.
+
+## Same subject, two viewers
+
+`debug_two_viewers_probe_2026_09_06.cjs` opened subject 32011 through
+`seon.flow` and `my.plan`. Both showed the same entity, graph snapshot, two
+reference assertions, and actual plan-item output. Their candidate lists
+reflected their different viewing namespaces. Read-only MCP checks before and
+after showed basis 536870954 and exactly one agent (root, owning
+`my.agents.root`): inspecting the two agentless namespaces created no agents
+or transactions.
+
+This comparison exposed two remaining defects rather than proving selection
+complete. `my.plan/render-item-html` was rejected at the namespace stage but
+selected at the schema stage; investigation identified a return-contract name
+mismatch. After hot-reloading the new header, the reopened `my.plan` viewer
+could still serve an older cached header without source/projection identity,
+even after a runtime wake. Both findings are assigned to the existing owners.
