@@ -281,7 +281,7 @@
               delta (into []
                           (remove before-sources)
                           (candidate-sources after))]
-          (is (= ["(db/pull db (quote [*]) [:seon.fn/sym \"fixture.intent/target\"])"
+          (is (= ["(seon.db/pull (quote [*]) [:seon.fn/sym \"fixture.intent/target\"])"
                   "(dir fixture.intent)"
                   (str "; First real use — the indexed call-edge demonstration.\n"
                        "(clojure.test/test-var (var fixture.intent/target-usage))")]

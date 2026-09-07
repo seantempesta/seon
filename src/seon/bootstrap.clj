@@ -527,6 +527,8 @@
                 :seon.render/value
                 (situation (:seon.db/db request) agent-id)
                 :seon.render/output :seon.render/form
+                :seon.render.call/selected-producer
+                'seon.cluster.agent/situation-form
                 :seon.render.call/id
                 [:seon.render/form (:seon.render.walk/lookup request)]))]
     {:seon.repl/key root-key
