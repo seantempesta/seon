@@ -761,43 +761,46 @@
     (into []
           (keep
            (fn [unit]
-             (let [lookup (:seon.render.walk/lookup unit)
-                   entry-key [lookup (:seon.render.walk/path unit)]
-                   rendered (:seon.render/output unit)
-                   distance (:seon.render/distance unit)
-                   message-eid
-                   (when (= :seon.cluster.message/id (first lookup))
-                     (:db/id (db/entity database lookup)))
-                   current-task?
-                   (and message-eid
-                        (= :seon.context/current-trigger
-                           (context/message-custody
-                            database
-                            (:seon.cluster.run/id request)
-                            (:seon.cluster.agent/id request)
-                            message-eid)))]
+             (let [rendered (:seon.render/output unit)]
                (when (and (string? rendered)
                           (seq rendered)
                           (nil? (:seon.error/value unit)))
-                 (cond->
-                  {:seon.render.history/call-id
-                   (if current-task?
-                     [::current-task (:seon.cluster.agent/id request)]
-                     entry-key)
-                   :seon.render.history/basis-transaction
-                   (observation-basis captured [:seon.render/ai lookup distance]
-                                      basis)
-                   ;; THE SUBJECT IS THE UNIT'S OWN IDENTITY. Supersession
-                   ;; used to compare rendered forms, which meant a fact
-                   ;; question answered by the shape of a formatted value.
-                   :seon.render.history/subject lookup
-                   :seon.render.history/bytes rendered}
-                   current-task?
-                   (assoc :seon.render.history/current-task? true))))))
+                 (let [lookup (:seon.render.walk/lookup unit)
+                       distance (:seon.render/distance unit)
+                       message-eid
+                       (when (= :seon.cluster.message/id (first lookup))
+                         (:db/id (db/entity database lookup)))
+                       current-task?
+                       (and message-eid
+                            (= :seon.context/current-trigger
+                               (context/message-custody
+                                database
+                                (:seon.cluster.run/id request)
+                                (:seon.cluster.agent/id request)
+                                message-eid)))]
+                   (cond->
+                    {:seon.render.history/call-id
+                     (if current-task?
+                       [::current-task (:seon.cluster.agent/id request)]
+                       [lookup (:seon.render.walk/path unit)])
+                     :seon.render.history/basis-transaction
+                     (observation-basis captured
+                                        [:seon.render/ai lookup distance]
+                                        basis)
+                     ;; THE SUBJECT IS THE UNIT'S OWN IDENTITY. Supersession
+                     ;; used to compare rendered forms, which meant a fact
+                     ;; question answered by the shape of a formatted value.
+                     :seon.render.history/subject lookup
+                     :seon.render.history/bytes rendered}
+                     current-task?
+                     (assoc :seon.render.history/current-task? true)))))))
           value-units)))
 
 (defn history
-  "Derive ordered form/printed-value entries for one agent from one walk."
+  "Derive the agent's ordered prompt entries from one walk.
+
+  Each entry carries the bytes its unit's own `:seon.render/ai` producer
+  emitted — the ONE grammar the page and the history unit read (PRD §4)."
   {:malli/schema [:=> [:cat :seon.render.walk/history-request] [:vector :map]]}
   [{captured :seon.render/captured-calls
     :as request}]
