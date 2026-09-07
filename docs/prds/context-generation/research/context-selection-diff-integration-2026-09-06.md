@@ -328,3 +328,78 @@ which contradicts the active renderer path. B also avoids backlink arrays:
 reverse Datalog traversal answers source-to-occurrences and
 evaluation-to-occurrence. The implementation should not add a source-to-
 evaluations collection or store `result/eN`; both are derivable mirrors.
+
+## Source producers versus stored transcripts
+
+The preview mismatch is a contract defect. `render-source-call` marks every AI
+request with `:seon.render.call/source-output?`; `render/render-call` then
+considers every non-floor string authored source (`src/seon/render.clj:
+1073-1106`). A run's declared AI renderer is `transcript/render-run-ai`, which
+instead returns already stored forms and results (`resources/seon/schemas/
+seon.cluster.run.edn:62-67`; `src/seon/render/transcript.clj:945-962`). Executing
+that text again can repeat effects. Reader classification cannot recover the
+missing intent: historical source can be syntactically executable.
+
+Reuse the existing `:seon.render/source` return schema. Actual source-producing
+functions declare it; terminal text functions retain their contracts. The
+index already records arity output refs and return shapes (`src/seon/program.cljc:
+542-587`), and the acquired immutable projection carries indexed contracts.
+Malli's function-arity/input/output operations are the existing same-arity
+selection idiom (`src/seon/schema.clj:3131-3155`). Inspect the input-compatible
+arity's top-level source return, including nullable/error union arms; a source
+reference nested inside an arbitrary returned collection is insufficient.
+Neither function names, string syntax, nor a run-valued input establishes it.
+
+Every selected, attribute, and alternative preview then uses the same existing
+source-call step. Its render-call entry receives `source` only for a declared
+source return. Source submits through the existing `submit-source!` owner and
+retains `source-run-id`; terminal text displays directly without parsing.
+AI namespace matching must also admit the existing source return contract.
+No output selector, registry, evaluator, or cache is added. The existing
+request hint remains solely to select the debug query-generating floor; it
+cannot establish execution eligibility for a selected producer.
+
+The eventual terminal composition must carry its existing run id and
+`:seon.context.contribution/evaluations` in the request/call entry. Terminal
+transcript locking references those original evaluations without a new run.
+Whole-run locking already belongs to `append-tx`, which derives all terminal
+evaluation refs at the writer. Exact subset locking needs that same request
+and writer to accept the existing evaluations field and validate membership,
+ownership and settlement atomically; silently locking the whole run is not
+exact subset selection. Terminal text with no evaluation refs is displayable
+but is not evidence that an evaluation occurred.
+
+This is not implemented by copying a run id from an arbitrary renderer input:
+that renderer may display a summary or subset. Without explicit data proving
+the displayed evaluation selection, no terminal lock is exposed. The current
+implementation slice retains actual source-run locking and leaves terminal
+evaluation-reference composition unresolved.
+
+The current namespace producer is mixed: distance zero returns a bare namespace
+spelling, distance one emits ns/def/register forms, and larger distances return
+a vector mixing an ns form and summary data (`src/seon/render/ns.clj:461-529`).
+An unconditional source contract would misdescribe that behavior. It must
+remain terminal until its owner makes its intent uniform; this source-contract
+slice must not execute its display text accidentally.
+
+The recurring proof shows a source producer submits through the ordinary run
+owner while a terminal transcript submits nothing even when its text contains
+effectful forms. It checks indexed output references and preserves the stored
+evaluation population. Terminal locking remains unresolved as described above.
+
+Contract matching also reuses the schema projection's existing compiled-value
+holder. Construction and materialization retain the function schemas they
+already compile; their arity input validators are realized once in that holder.
+`function-matching-outputs-in` returns declared output forms for accepting
+arities. The existing accepts/returns helpers and source eligibility share
+those arities, with no renderer-specific compiler or additional cache. The
+same-arity regression refuses new Malli compilation after the initial query.
+Derived projections already receive a fresh compiled holder, preserving schema
+isolation when declarations change.
+
+Verification: `bin/test seon.render-source-test seon.render-simplification-test`
+passed 24 tests / 209 assertions on 2026-09-06 (run.64tIru). The earlier
+run.x4ukvB failed on missing fixture profile/form facts and a stale explicit-id
+identity-source expectation; those were corrected. Live preview readiness is
+not established by this gate: publication instrumentation and the previously
+faulted render proc remain separate integration work.

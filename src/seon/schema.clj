@@ -218,6 +218,12 @@
        :else value))
    (form/widen-component-children form)))
 
+(defn- compiled-function-arities [compiled]
+  (mapv (fn [arity]
+          (let [{:keys [input output]} (m/-function-info arity)]
+            [(m/validator input) (m/form output)]))
+        (m/-function-schema-arities compiled)))
+
 (defn- with-compiled-cache
   "Give one projection its own holder for state compiled FROM it.
 
@@ -238,8 +244,14 @@
    projection derived by changing forms would otherwise carry its parent's
    compiled answers for definitions it no longer has. It needs no key,
    because its key is the value it hangs on."
-  [projection]
-  (assoc projection :seon.schema.projection/compiled (atom {})))
+  ([projection] (with-compiled-cache projection {}))
+  ([projection compiled-contracts]
+   (assoc projection :seon.schema.projection/compiled
+          (atom (into {}
+                      (map (fn [[sym compiled]]
+                             [[::function-arities sym]
+                              (delay (compiled-function-arities compiled))]))
+                      compiled-contracts)))))
 
 (defn- projection-cache
   "The holder [[with-compiled-cache]] installed, or nil.
@@ -1661,8 +1673,7 @@
           pure-predicate-symbols #{}
           predicate-functions {}}
      :as options}]
-   (with-compiled-cache
-    (if (contains? forms :seon.schema.projection/forms)
+   (if (contains? forms :seon.schema.projection/forms)
      (materialize-projection
       (compose-projection-data forms function-contracts)
       options)
@@ -1867,7 +1878,7 @@
          :seon.schema.projection/fingerprint fingerprint}]
     (when validate-render-contracts?
       (assert-render-contracts! projection (keys forms)))
-    projection)))))
+    (with-compiled-cache projection compiled-function-contracts)))))
 
 (def ^:private projection-runtime-keys
   #{:seon.schema.projection/registry
@@ -2132,14 +2143,14 @@
      ;; validation and pure-data derivation was completed before publication.
      (doseq [[_ form] compiled-forms]
        (m/schema form options))
-     (doseq [[_ contract] (bound-forms contracts predicate-functions)]
-       (m/function-schema contract options))
      (with-compiled-cache
       (assoc pure-data
              :seon.schema.projection/registry registry
              :seon.schema.projection/compile-options options
              :seon.schema.projection/predicate-functions
-             predicate-functions)))))
+             predicate-functions)
+      (update-vals (bound-forms contracts predicate-functions)
+                   #(m/function-schema % options))))))
 
 (defn- predicate-functions-with
   [projection definitions]
@@ -3077,6 +3088,35 @@
       schema-key
       {:registry (:seon.schema.projection/registry projection)})))
 
+(defn- function-arities-in [projection function-symbol]
+  (projection-cache-value
+   projection [::function-arities function-symbol]
+   (fn []
+     (if-let [contract
+              (get (:seon.schema.projection/function-contracts projection)
+                   function-symbol)]
+       (compiled-function-arities
+        (m/function-schema
+         (compilable-form
+          contract (:seon.schema.projection/predicate-functions projection))
+         {:registry (:seon.schema.projection/registry projection)}))
+       []))))
+
+(defn function-matching-outputs-in
+  "Return the declared output forms of the arities accepting `arguments`.
+
+  Input validators belong to the immutable projection's existing compiled
+  holder; discovery never recompiles a retained arity."
+  {:malli/schema
+   [:=> [:catn [::projection ::projection]
+         [::function-symbol :qualified-symbol]
+         [::arguments :seon.schema/arguments]]
+    [:vector ::value]]}
+  [projection function-symbol arguments]
+  (into []
+        (keep (fn [[accepts? output]] (when (accepts? arguments) output)))
+        (function-arities-in projection function-symbol)))
+
 (defn function-accepts-in?
   "True when one arity of `function-symbol` accepts `arguments` in `projection`.
 
@@ -3088,18 +3128,8 @@
     :boolean]}
   [projection function-symbol arguments]
   (try
-    (boolean
-     (when-let [contract
-                (get (:seon.schema.projection/function-contracts projection)
-                     function-symbol)]
-       (let [compiled
-             (m/function-schema
-              contract
-              {:registry (:seon.schema.projection/registry projection)})]
-         (some (fn [arity]
-                 (let [input (:input (m/-function-info arity))]
-                   ((m/validator input) arguments)))
-               (m/-function-schema-arities compiled)))))
+    (boolean (seq (function-matching-outputs-in
+                   projection function-symbol arguments)))
     (catch Throwable _ false)))
 
 (defn function-returns-in?
@@ -3114,18 +3144,8 @@
     :boolean]}
   [projection function-symbol output-schema]
   (try
-    (when-let [contract
-               (get (:seon.schema.projection/function-contracts projection)
-                    function-symbol)]
-      (let [compiled
-            (m/function-schema
-             contract
-             {:registry (:seon.schema.projection/registry projection)})]
-        (boolean
-         (some (fn [arity]
-                 (= output-schema
-                    (m/form (:output (m/-function-info arity)))))
-               (m/-function-schema-arities compiled)))))
+    (boolean (some (fn [[_ output]] (= output-schema output))
+                   (function-arities-in projection function-symbol)))
     (catch Throwable _ false)))
 
 (defn function-accepts-and-returns-in?
@@ -3138,19 +3158,9 @@
     :boolean]}
   [projection function-symbol arguments output-schema]
   (try
-    (boolean
-     (when-let [contract
-                (get (:seon.schema.projection/function-contracts projection)
-                     function-symbol)]
-       (let [compiled
-             (m/function-schema
-              contract
-              {:registry (:seon.schema.projection/registry projection)})]
-         (some (fn [arity]
-                 (let [{:keys [input output]} (m/-function-info arity)]
-                   (and ((m/validator input) arguments)
-                        (= output-schema (m/form output)))))
-               (m/-function-schema-arities compiled)))))
+    (boolean (some #{output-schema}
+                   (function-matching-outputs-in
+                    projection function-symbol arguments)))
     (catch Throwable _ false)))
 
 (defn projection-explainer

@@ -152,7 +152,7 @@
 
 (defn render-ai
   "`:seon.render/ai` — one cluster and its load-bearing connections."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/source]]}
   [unit]
   (when-let [name (:seon.cluster/name unit)]
     (let [database (:seon.db/db unit)

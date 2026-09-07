@@ -2,6 +2,7 @@
   "Behavioral gates for ruling #50's minimal render model."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [malli.core :as m]
             [sci.core :as sci]
             [seon.cluster.agent :as agent]
             [seon.config :as config]
@@ -21,6 +22,12 @@
 (def ^:private fixture-b 'seon.render-simplification.fixture-b)
 (def ^:private fixture-ambiguous
   'seon.render-simplification.fixture-ambiguous)
+
+(defn authored-source
+  "Return the declared source used by the retained-execution regression."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
+  [_unit]
+  "(+ 1 1)")
 
 (defn- target-call
   [namespace-name function-name request]
@@ -153,7 +160,7 @@
          (let [decision (selection request)]
            (is (= 'seon.cluster.agent/render-identity-ai
                   (:seon.render.selection/selected decision)))
-           (is (str/includes? (render-ai request) "identity-agent"))))))))
+           (is (= "(seon.cluster.agent/whoami)" (render-ai request)))))))))
 
 (deftest candidate-input-and-output-must-fit-the-same-arity
   (support/with-database
@@ -200,7 +207,19 @@
                    {:seon.render.selection.candidate/producer matching
                     :seon.render.selection.candidate/status :compatible}]
                   (:seon.render.selection.stage/candidates
-                   namespace-stage)))))))))
+                   namespace-stage)))
+           (with-redefs [m/function-schema
+                         (fn [& _] (throw (ex-info "unexpected recompilation" {})))
+                         m/validator
+                         (fn [& _] (throw (ex-info "unexpected validator compilation" {})))]
+             (is (schema/function-accepts-in?
+                  projection matching [{:seon.render/value 7}]))
+             (is (schema/function-returns-in?
+                  projection matching :seon.render/ai))
+             (is (schema/function-accepts-and-returns-in?
+                  projection matching [{:seon.render/value 7}] :seon.render/ai))
+             (is (= [:int] (schema/function-matching-outputs-in
+                            projection cross-arity [{:seon.render/value 7}]))))))))))
 
 (deftest explicit-value-selection-records-a-value-without-calling-it-a-producer
   (support/with-database
@@ -710,6 +729,7 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "source-cache")
+     (is (= "(+ 1 1)" (authored-source {})))
      (db/transact!
       connection
       (concat
@@ -740,6 +760,7 @@
              (assoc (render-request @connection ctx fixture-a
                                     value)
                     :seon.render/output :seon.render/ai
+                    :seon.render/ai 'seon.render-simplification-test/authored-source
                     :seon.render/profile
                     {:seon.render.profile/id :test/source-cache
                      :seon.render.profile/token-budget 1000
@@ -755,8 +776,6 @@
                     :seon.cluster.agent/id "source-cache-agent"
                     :seon.cluster.loop/cluster {}
                     :seon.cluster.agent/routing (atom {})))]
-       (sci/binding [sci/ns (sci/create-ns fixture-a)]
-         (sci/eval-form ctx '(defn namespace-ai [_] "(+ 1 1)")))
        (with-redefs-fn
          {#'kernel/invoke
           (fn [invocation]

@@ -162,7 +162,7 @@
 
 (defn render-identity-ai
   "Render the ordinary query that returns an agent's identity text."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/source]]}
   [unit]
   (when (:seon.cluster.agent/id unit)
     (pr-str (list `whoami))))

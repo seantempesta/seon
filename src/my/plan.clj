@@ -905,7 +905,7 @@
 
 (defn render-item-ai
   "Render source which reads and formats one authored plan item."
-  {:malli/schema [:=> [:cat :my.plan.item/item] :seon.render/ai]}
+  {:malli/schema [:=> [:cat :my.plan.item/item] :seon.render/source]}
   [item]
   (pr-str
    (list `format-item-ai
@@ -963,7 +963,7 @@
 
 (defn render-ready-items-ai
   "Render source which reads and formats the supplied ready item selection."
-  {:malli/schema [:=> [:cat :my.plan/ready-items] :seon.render/ai]}
+  {:malli/schema [:=> [:cat :my.plan/ready-items] :seon.render/source]}
   [items]
   (pr-str
    (list `format-ready-items-ai
@@ -1036,7 +1036,7 @@
 
 (defn render-plan-ai
   "Render source which derives and formats the current plan union."
-  {:malli/schema [:=> [:cat :my.plan/view] :seon.render/ai]}
+  {:malli/schema [:=> [:cat :my.plan/view] :seon.render/source]}
   [_view]
   (pr-str
    (list `format-plan-ai

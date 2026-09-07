@@ -157,7 +157,7 @@
       (min parsed maximum)
       fallback)))
 
-(declare query-entity route-namespace agent-namespace)
+(declare query-entity route-namespace agent-namespace render-source-call)
 
 (def ^:private debug-defaults
   {:seon.render.data/limit 40
@@ -1407,7 +1407,7 @@
           :else (debug-subject-link debug-request destination label))
         render-one
         (fn [output]
-          (render/render-call
+          (render-source-call
            (assoc render-request
                   :seon.render/value value
                   :seon.render/output output
@@ -1569,6 +1569,8 @@
   [request]
   (let [captured-invocations (:seon.render/captured-invocations request)
         request (cond-> request
+                  ;; This chooses the authored query floor only. The selected
+                  ;; producer's indexed return contract determines execution.
                   (= :seon.render/ai (:seon.render/output request))
                   (assoc :seon.render.call/source-output? true)
 
@@ -1715,7 +1717,7 @@
                                (= producer
                                   (:seon.render.call/producer selected-call)))
                         (:seon.render.call/output selected-call)
-                        (render/render-call
+                        (render-source-call
                          (assoc request
                                 :seon.render/selection-inspection inspection
                                 :seon.render.call/selected-producer producer

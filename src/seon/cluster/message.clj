@@ -494,7 +494,7 @@
 
 (defn render-ai
   "`:seon.render/ai` — source which reads and formats this message."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/source]]}
   [unit]
   (when-let [id (get unit ::id)]
     (pr-str

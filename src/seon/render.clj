@@ -198,6 +198,26 @@
                'seon.render.value/render-html}
              selected))
 
+(defn- source-return?
+  [output]
+  (letfn [(branches [output]
+            (case output
+              :seon.render/source #{:source}
+              (:nil :seon.error/value) #{}
+              (case (when (vector? output) (first output))
+                (:maybe :or) (into #{} (mapcat branches)
+                                   (cond-> (rest output)
+                                     (map? (second output)) rest))
+                #{:other})))]
+    (= #{:source} (branches output))))
+
+(defn- source-producer?
+  "Read source intent from input-compatible indexed return contracts."
+  [projection selected arguments]
+  (let [outputs (schema/function-matching-outputs-in
+                 projection selected arguments)]
+    (and (seq outputs) (every? source-return? outputs))))
+
 (defn- namespace-candidates
   "Ordered public-function evidence from the explicit owning namespace.
 
@@ -220,8 +240,10 @@
              (distinct)
              (map
               (fn [candidate]
-                (if (schema/function-accepts-and-returns-in?
-                     projection candidate [argument] output-schema)
+                (if (or (schema/function-accepts-and-returns-in?
+                         projection candidate [argument] output-schema)
+                        (and (= :seon.render/ai output-schema)
+                             (source-producer? projection candidate [argument])))
                   {:seon.render.selection.candidate/producer candidate
                    :seon.render.selection.candidate/status :compatible}
                   {:seon.render.selection.candidate/producer candidate
@@ -951,7 +973,7 @@
 (defn render-default-ai-source
   "Return authored source that reproduces a value for terminal rendering."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or :string :seon.error/value]]}
+                  [:or :seon.render/source :seon.error/value]]}
   [unit]
   (let [form (render-form unit)]
     (if (:seon.error/kind form)
@@ -1072,8 +1094,9 @@
                     invocation-reusable? (some? retained-invocation)
                     source-output?
                     (and (= output :seon.render/ai)
-                         (:seon.render.call/source-output? request)
-                         (not (floor-producer? selected)))
+                         (source-producer?
+                          (sci.kernel/context-projection (:seon.sci.eval/ctx request))
+                          selected [(producer-argument request)]))
                     raw (if invocation-reusable?
                           (or (:seon.render.call/source retained-invocation)
                               (:seon.render.call/output retained-invocation))
@@ -1107,7 +1130,9 @@
                        (get retained-invocations invocation-key)
                        invocation-entry)
                     rendered (if authored-source?
-                               (:seon.render.call/output invocation-entry)
+                               (if captured-invocations
+                                 (:seon.render.call/output invocation-entry)
+                                 raw)
                                (if reusable?
                                (:seon.render.call/output previous)
                                (present-output request output raw)))
