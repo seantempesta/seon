@@ -865,11 +865,18 @@
     (hiccup/->string
    [:header {:id "debug-inspection-header" :class "seon-debug-header"}
     [:div
-     [:span "viewer"]
-     [:code (pr-str (:seon.render.debug/viewer-namespace debug-request))]]
+     [:span "Context for"]
+     [:code (or (:seon.cluster.agent/id debug-request)
+                (str (:seon.render.debug/viewer-namespace debug-request)))]]
     [:div
-     [:span "subject"]
-     [:code (pr-str (:seon.render.debug/subject debug-request))]]
+     [:span "Viewing entity"]
+     [:code (pr-str (:seon.render.debug/subject debug-request))]
+     (when-let [agent-id (:seon.cluster.agent/id debug-request)]
+       [:a {:href (debug-page-url
+                    debug-request
+                    {:seon.render.debug/subject [:seon.cluster.agent/id agent-id]
+                     :seon.render.data/cursor (data/parse-cursor nil nil)})}
+        "View agent entity"])]
     (when (seq path)
       [:div
        [:span "selected path"]
