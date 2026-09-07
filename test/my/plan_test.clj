@@ -35,6 +35,12 @@
    (plan/add! (merge {:my.plan.item/id id :my.plan.item/title title} more)
               connection "alice")))
 
+(defn- steps-of
+  [connection agent-id]
+  (into #{} (map :db/id)
+        (:my.plan/steps (db/pull @connection [:my.plan/steps]
+                                 [:seon.cluster.agent/id agent-id]))))
+
 (defn- plan-of
   ([connection] (plan-of connection "alice"))
   ([connection agent-id]
@@ -64,7 +70,7 @@
     (fn [connection]
       (let [current (plan-of connection)
             ai (plan/format-plan-ai current)
-            html (plan/render-plan-html #{} @connection "alice")]
+            html (plan/render-plan-html (steps-of connection "alice") @connection)]
         (is (= [] (:my.plan/steps current)))
         (is (= [] (:my.plan/ready current)))
         (is (not (contains? current :my.plan/current-step)))
@@ -187,7 +193,7 @@
            {:my.plan/parent-step [:my.plan.item/id "root"]})
       (let [current (plan-of connection)
             ai (plan/format-plan-ai current)
-            html (plan/render-plan-html #{} @connection "alice")
+            html (plan/render-plan-html (steps-of connection "alice") @connection)
             printed (pr-str html)]
         (is (= 1 (count (re-seq #"Plan for alice" ai))))
         (is (= 1 (count (re-seq #"my-plan-tree" printed))))
@@ -221,7 +227,7 @@
             entity-ids (set (db/q '[:find [?step ...]
                                     :where [?step :my.plan.item/id]]
                                   @connection))
-            html (plan/render-plan-html #{} @connection "alice")
+            html (plan/render-plan-html (steps-of connection "alice") @connection)
             ai (plan/format-plan-ai current)]
         (is (= [{:my.plan.item/id "prepare"}] (:my.plan/needs step))
             "a dependency travels as its stable identity")
@@ -431,7 +437,7 @@
       (let [current (plan/plan {:seon.db/db @connection
                                 :seon.cluster.agent/id "juniper"})
             ai (plan/format-plan-ai current)
-            printed (pr-str (plan/render-plan-html #{} @connection "juniper"))]
+            printed (pr-str (plan/render-plan-html (steps-of connection "juniper") @connection))]
         (is (= ["juniper/understand-context"
                 "juniper/inspect-identity-messages"
                 "juniper/render-plan"

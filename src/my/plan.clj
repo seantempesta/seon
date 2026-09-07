@@ -1097,15 +1097,26 @@
       (into [:ol {:class "my-plan-tree"}] (first (nest steps 0))))))
 
 (defn render-plan-html
-  "Render this agent's whole plan as bounded Hiccup.
+  "Render the plan these steps belong to as bounded Hiccup.
 
-  Call preparation supplies the database and the calling agent, so both
+  The steps are the agent's `:my.plan/steps` value; their owner derives from
+  the component edge, and call preparation supplies the database. Both
   projections derive the same value from the same reader."
-  {:malli/schema [:=> [:cat :my.plan/steps :seon.db/database-value
-                       :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :my.plan/steps :seon.db/database-value]
                   :seon.render/hiccup]}
-  [_steps database agent-id]
-  (let [view (plan {:seon.db/db database :seon.cluster.agent/id agent-id})]
+  [steps database]
+  ;; The owner is a fact on the value: the agent whose component edge holds
+  ;; these steps. Nothing about the caller decides whose plan this is.
+  (let [agent-id (when (seq steps)
+                   (db/q '[:find ?id .
+                           :in $ ?step
+                           :where
+                           [?agent :my.plan/steps ?step]
+                           [?agent :seon.cluster.agent/id ?id]]
+                         database (first steps)))
+        view (if agent-id
+               (plan {:seon.db/db database :seon.cluster.agent/id agent-id})
+               {:my.plan/steps [] :my.plan/ready [] :my.plan/blocked []})]
     (if (error-value? view)
       [:section {:class "seon-family-entry my-plan"}
        [:p {:class "my-plan-error"} (:seon.error/message view)]]
@@ -1114,7 +1125,7 @@
             older (:my.plan/older-completions view)]
         (cond->
          (into [:section {:class "seon-family-entry my-plan"}
-                [:h2 (str agent-id "’s plan")]]
+                [:h2 (if agent-id (str agent-id "’s plan") "Plan")]]
                (remove nil?)
          [(when-let [objective (first steps)]
             [:p {:class "my-plan-objective"}
