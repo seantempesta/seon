@@ -74,6 +74,24 @@ Rules the emitter enforces rather than hopes for:
   asserts no emitted line begins with `;` except the agent's own comment,
   and that `";; result/"` appears nowhere.
 
+The HTML projection is the same evaluation with the comment as its own
+element rather than a line of the prompt — which is the whole reason the
+comment is stored apart from the source. Probed on the shape a pull
+produces:
+
+```clojure
+[:article {:class "seon-family-entry seon-eval-entry"}
+ [:p {:class "seon-eval-comment"} "; Works. But without a :malli/schema it stays my scratch."]
+ [:pre [:code {:class "seon-eval-prompt"} "my.agents.juniper=> (dir my.run)"]]
+ [:pre [:code {:class "seon-eval-response"}
+        "#:seon.repl{:value [my.run/complete my.run/wait], :result result/e4, :out \"complete\\nwait\\n\", :ms 7}"]]]
+```
+
+`entity-emission` accepts both the evaluation's and the frozen form's
+spelling of source, ordinal and namespace, so the two families render
+through one grammar for as long as they remain two entities — the merge in
+§4.1 removes the second spelling rather than a second renderer.
+
 ## 2. The comment is a fact, not a prefix
 
 `seon.cluster.reply/plan-sources` used to concatenate the prose above a form
@@ -136,9 +154,17 @@ Named exactly, so nobody has to rediscover it:
    dropping the `/form` pass drops that gate. The replacement gate must be a
    fact — the unit's lookup naming `:seon.cluster.eval/id` (plus the message
    arm) — not the shape of a rendered value.
-3. **`sci.eval/bind-result!` does not rehydrate** `result/eN` from stored
-   `result-edn`, so a later turn still cannot `(count result/e0)`
-   (ruling 59c).
+3. **Result rehydration landed but its gate had not reported.**
+   `sci.eval/fork-for-turn` now binds `result/eN` for the run's already
+   settled evaluations from their stored nodes, through the inverse that
+   already existed — `seon.sci.admit/semantic-value` — so a later turn can
+   `(count result/e0)`. A node that kept only a name (var, type, class,
+   object, failed, throwable, truncated, elided, projected, pruned) binds
+   NOTHING: ruling 59c's no-handle, because an unresolved symbol is honest
+   and a handle onto a description of a value is not. The regression is
+   `seon.sci.eval-test/a-later-turn-reaches-the-values-its-earlier-forms-produced`;
+   it was written and lints clean but `bin/test seon.sci.eval-test` had not
+   finished when this lane ended. **Run it before trusting it.**
 4. **The one end-to-end regression is not written.** `seon.repl-test` proves
    the grammar over emissions (9 tests, 18 assertions, green); the spec's
    proof — one reply evaluated once through `evaluate-sources`, asserting
@@ -160,6 +186,32 @@ Named exactly, so nobody has to rediscover it:
 - **`seon.cluster.reply-test` was already red before this lane touched it.**
   Baseline measured at commit `6a16fb60e` in an isolated worktree so the
   attribution is evidence rather than assertion; see §6.
+
+## 5b. The reds this lane's rewiring leaves open
+
+Confirmed reproducible by the runner's own confirmation pass, under
+`bin/test seon.repl-test seon.cluster.run-test seon.render.transcript-test
+seon.render-coverage-test seon.cluster.reply-test seon.bootstrap-test`:
+
+| test | reading |
+|---|---|
+| `seon.render.transcript-test/a-tight-budget-degrades-then-elides-loudly` | asserts the OLD byte grammar |
+| `…/durable-history-entries-never-invent-executions` | asserts the OLD byte grammar |
+| `…/error-receipt-without-triage-has-an-execution-error-face` | asserts the OLD byte grammar |
+| `…/history-unit-derives-both-projections-from-one-bounded-derivation` | asserts the OLD byte grammar |
+| `…/malformed-receipt-bytes-and-any-unique-about-stay-replayable` | asserts the OLD byte grammar |
+| `…/populated-history-restores-the-repl-fidelity-checklist` | asserts the OLD byte grammar |
+| `…/receipt-content-enters-the-shared-capped-floor` | asserts the OLD byte grammar |
+| `…/selected-evaluations-project-only-their-stored-source-and-result` | asserts the OLD byte grammar |
+| `seon.cluster.reply-test/a-fenced-reply-retains-surrounding-prose-as-comments` | this lane's OWN updated expectation is still wrong — check how trailing prose joins a comment |
+| `seon.cluster.run-test/settlement-mints-rows-for-unindexed-call-targets` | **UNATTRIBUTED** |
+
+The last row is the one that matters. `seon.cluster.run-test` was never
+baselined at HEAD in this lane, so whether that failure is inherited or
+caused here is unknown. **Do not assume it is a stale expectation.** Either
+baseline `bin/test seon.cluster.run-test` at `6a16fb60e` in a detached
+worktree, or treat commit `5ac5bfe34` as revertable until it is explained.
+An unattributed red is a hypothesis, not a finding.
 
 ## 6. Gate tallies
 

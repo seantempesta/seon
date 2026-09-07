@@ -1621,7 +1621,10 @@
                  {:seon.sci.eval/ctx base-ctx
                   :seon.db/db @connection
                   :seon.db/connection connection
-                  :seon.cluster.agent/id agent-id}))
+                  :seon.cluster.agent/id agent-id
+                  ;; The turn's fork rebinds this run's settled results, so a
+                  ;; later form can name a value an earlier one produced.
+                  :seon.cluster.run/id run-id}))
         trigger (phase #(message/trigger @connection run-id))]
     (if-let [failure (some #(when (:seon.error/kind %) %)
                            [forked trigger])]

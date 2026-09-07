@@ -2099,3 +2099,49 @@
            "nor is the kernel's own refusal flattened into invocation-failed")
        (is (some? (:seon.sci.admit/record (:seon.error/data invoked)))
            "a preserved refusal still gains the boundary's own evidence")))))
+
+(deftest a-later-turn-reaches-the-values-its-earlier-forms-produced
+  (testing "ruling 59c: settled evaluations rebind as result/eN handles"
+    (test-support/with-database
+      (fn [connection]
+        (test-support/seed-cluster! connection "result-rehydration")
+        (db/transact!
+         connection
+         [{:seon.cluster.agent/id "rehydrator"
+           :seon.cluster/name "result-rehydration"}])
+        (db/transact!
+         connection
+         [{:seon.cluster.run/id "rehydration-run"
+           :seon.cluster.run/agent [:seon.cluster.agent/id "rehydrator"]
+           :seon.cluster.run/opened-at (java.util.Date.)}
+          {:seon.cluster.eval/id "[\"rehydration-run\" 0]"
+           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run"]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at (java.util.Date.)
+           :seon.cluster.eval/source "[1 2 3]"
+           :seon.cluster.eval/result-edn
+           (str "#:seon.print{:face :seon.print/vector, :items ["
+                "#:seon.print{:face :seon.print/number, :value 1} "
+                "#:seon.print{:face :seon.print/number, :value 2} "
+                "#:seon.print{:face :seon.print/number, :value 3}]}")}
+          ;; A node that kept only a name never held the value.
+          {:seon.cluster.eval/id "[\"rehydration-run\" 1]"
+           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run"]
+           :seon.cluster.eval/ordinal 1
+           :seon.cluster.eval/at (java.util.Date.)
+           :seon.cluster.eval/source "(atom 1)"
+           :seon.cluster.eval/result-edn
+           "#:seon.print{:face :seon.print/object, :name \"clojure.lang.Atom\"}"}])
+        (let [ctx (:seon.sci.eval/ctx
+                   (eval/fork-for-turn
+                    {:seon.sci.eval/ctx (test-support/fork-cluster-ctx
+                                         connection)
+                     :seon.db/db @connection
+                     :seon.db/connection connection
+                     :seon.cluster.agent/id "rehydrator"
+                     :seon.cluster.run/id "rehydration-run"}))]
+          (is (= 3 (sci/eval-string* ctx "(count result/e0)"))
+              "a later turn counts the value an earlier form produced")
+          (is (= [1 2 3] (sci/eval-string* ctx "result/e0")))
+          (is (thrown? Throwable (sci/eval-string* ctx "result/e1"))
+              "an opaque node binds no handle rather than a lie about one"))))))
