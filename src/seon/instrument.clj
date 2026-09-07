@@ -6,13 +6,13 @@
   a preference dressed as a rule.
 
   THE SELECTION IS COMPUTED, and the computation is one sentence: every
-  loaded public var carrying `:malli/schema`. There is no namespace
+  loaded var carrying `:malli/schema`. There is no namespace
   prefix, no allow list, and no exclusion list — a name-based rule is
   the hand list the standing ruling bans. It excludes every hot inner
   function BY CONSTRUCTION, which is the part worth understanding:
   `admit`'s `project`/`project-node`/`project-map`/`take-node!` and
   `eval`'s `arm`/`diagnosis`/`failure-value` are all `defn-` with no
-  schema, so \"public + schema\" already means \"a boundary\", and
+  schema, so \"schema\" already means \"a declared boundary\", and
   instrumentation lands on boundaries and nowhere else without anybody
   maintaining that fact.
 
@@ -112,7 +112,7 @@
   {:malli/schema [:=> [:cat] [:set :any]]}
   []
   (into #{}
-        (comp (mapcat ns-publics)
+        (comp (mapcat ns-interns)
               (map val)
               (filter (fn [candidate]
                         (and (bound? candidate)
@@ -533,7 +533,7 @@
                       (ex-info (:seon.error/message diagnostic)
                                diagnostic failure)))))))
            (->> (all-ns)
-                (mapcat ns-publics)
+                (mapcat ns-interns)
                 (map val)
                 (sort-by (comp str var-symbol)))))))
 

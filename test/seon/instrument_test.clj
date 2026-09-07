@@ -127,6 +127,10 @@
   [value]
   value)
 
+(defn- ^{:malli/schema [:=> [:cat :int] :int]} private-integer-boundary
+  [value]
+  (if (zero? value) "invalid output" value))
+
 (defn ^{:malli/schema [:=> [:cat [:maybe :string]] [:maybe :string]]}
   optional-positional
   [value]
@@ -644,19 +648,25 @@
 ;;; The selection is computed
 ;;; ---------------------------------------------------------------------------
 
-(deftest the-selection-is-public-vars-with-schemas-and-nothing-else
+(deftest the-selection-is-declared-vars-with-schemas-and-nothing-else
   (instrumented!
    (fn [_]
      (let [wrapped (instrument/instrumented)]
        (is (contains? wrapped #'error/value) "a public var with a schema")
-       (is (not-any? (fn [candidate] (:private (meta candidate))) wrapped)
-           "no private var is instrumented — which is what keeps every
-            hot inner walker out BY CONSTRUCTION rather than by a list")
+       (is (contains? wrapped #'private-integer-boundary)
+           "a private callable with a declared contract is also a boundary")
        (is (every? (fn [candidate]
                      (some? (mi/-schema candidate)))
                    wrapped)
            "and every wrapped var carries a schema: the selection is the
-            computation, not a roster")))))
+            computation, not a roster")
+       (doseq [[kind call]
+               [[:input #(apply private-integer-boundary ["not an integer"])]
+                [:output #(private-integer-boundary 0)]]]
+         (let [failure (try (call) (catch Exception thrown thrown))]
+           (is (= :seon.instrument/contract-violated
+                  (:seon.error/kind (ex-data failure)))
+               (str "private boundary rejects invalid " (name kind)))))))))
 
 (deftest the-work-launcher-api-is-collected-without-an-allowlist
   (instrumented!
