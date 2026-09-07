@@ -321,3 +321,46 @@ basis without reexecution. This supersedes durable preview submission as
 the intended design. The completed correction above remains a verified
 checkpoint; further work must remove preview submission from the run path,
 reusing the existing parser, SCI evaluation, and settlement owners.
+
+## Memory-only evaluation extraction — 2026-09-07
+
+`seon.cluster.loop/evaluate-sources` extracts the ordered reduction from
+`resume-turn`; the ordinary turn now calls that same function. It receives
+the prepared sources, an existing turn fork, the starting namespace and
+ordinal, and evaluation controls. Each returned entry carries its resolved
+form, ordinal, and the existing evaluation value. `sci.eval/bind-result!`
+maintains `result/eN`; `:seon.sci.eval/ending-ns` determines the next form's
+namespace. Parsing remains `loop/planned-sources`; guarded execution and
+admission remain `sci.eval/evaluate` and `sci.admit/admit`. Admission constructs
+values and EDN without writing blobs. `run/settlement-projection` is the
+existing later staging boundary and is not called by this reduction.
+
+The first gate falsified a superficially sufficient snapshot fix. An explicit
+`:seon.db/db` in the scoped environment affected declared suppliers, but the
+native two-argument `db/pull` arity read through `*conn*` directly. After a
+deliberate intervening transaction, the batch's last read saw a newly created
+entity even though every reported basis was the old snapshot. The gate was
+24 tests, 181 assertions, one failure and one error; the error was an old
+namespace regression calling the removed private form helper
+(`tmp/evaluate-sources-gate.log`).
+
+The owner approved an explicit immutable read value at the existing DB
+boundary, separate from `*conn*`: blob, web, filesystem, background and
+foreign-connection checks require that Var to remain a live connection.
+`db/*read-database*` now carries only the evaluator's handed snapshot through
+native elided read arities. The existing supplier also honors that scoped
+environment snapshot. Explicit function database arguments still win;
+absence retains ordinary current reads. The evaluation's binding restores
+the prior value even when source throws. Ordinary turns omit the snapshot
+and retain per-form current reads; previews supply one snapshot for the
+whole batch. This is transient evaluation custody, not another cache.
+
+The corrected batch and ordinary-loop gate passed: 24 tests, 187 assertions,
+zero failures and zero errors (`tmp/evaluate-sources-green-gate.log`). The
+fresh-fixture proof does not yet establish live adoption: `env/scope` still
+has a process-lifetime delayed member set, so the running Environment owner
+must learn the new member from its supplied projection. Blind namespace
+reload is unsafe because Clojure recompiles `defrecord`: a disposable live
+probe confirmed old instances cease to satisfy a later `instance?` predicate.
+Guarding the constructor's bound Var did not solve that class identity
+problem. No production record workaround has been installed.

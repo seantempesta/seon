@@ -71,6 +71,27 @@
                      [:seon.print/options
                       {:optional true}
                       :seon.print/options]],
+                    :admitted-form
+                    [:map
+                     [:seon.cluster.run.form/source :seon.cluster.run.form/source]
+                     [:seon.cluster.run.form/ns :seon.cluster.run.form/ns]],
+                    :evaluated-source
+                    [:map
+                     [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+                     [:seon.cluster.loop/admitted-form :seon.cluster.loop/admitted-form]
+                     [:seon.sci.eval/evaluation :seon.cluster.loop/evaluation]],
+                    :evaluated-sources [:vector :seon.cluster.loop/evaluated-source],
+                    :evaluate-sources-request
+                    [:map
+                     [:seon.cluster.loop/cluster :seon.cluster.loop/cluster]
+                     [:seon.db/db {:optional true} :seon.db/database-value]
+                     [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                     [:seon.cluster.agent/id :seon.cluster.agent/id]
+                     [:seon.cluster.run/id {:optional true} :seon.cluster.run/id]
+                     [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+                     [:seon.ns/name :seon.ns/name]
+                     [:seon.cluster.reply/sources :seon.cluster.reply/sources]
+                     [:seon.sci.eval/defs-notices {:optional true} :seon.sci.eval/defs-notices]],
                     :forms-run [:int {:min 0}],
                     :now :inst,
                     :phase [:enum :claim :fork :prompt :freeze :evaluate :delivery],

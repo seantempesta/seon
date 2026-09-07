@@ -444,10 +444,9 @@
   ; third is adding one row here plus one ordinary contracted function that
   ; takes this cluster's environment; no dispatch code changes.
   ;
-  ; `:seon.db/db` is CURRENT by construction: the supplier derefs the
-  ; connection at call time, so an elided database value is always the
-  ; latest committed one. A caller that needs a consistent basis passes its
-  ; own value and it wins. Elide for current, pass for consistent.
+  ; An explicit evaluation snapshot supplies one consistent read basis.
+  ; Otherwise the supplier derefs the connection at call time. A database
+  ; value passed directly to a function always wins over supplied defaults.
   {:seon.call-preparation/key :seon.db/db
    :seon.call-preparation/schema [:seon.schema/key :seon.db/database-value]
    :seon.call-preparation/supplier

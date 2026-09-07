@@ -5,7 +5,9 @@
                  [:seon.schema/projection
                   {:optional true}
                   :seon.schema/projection]],
-                :args [:vector :any],
+                :args [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                          :seon.schema.admission/reason "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation."
+                          :gen/elements [nil true 0 "" :k [] {} #{}]}]],
                 :ctx
                 [:fn
                  {:error/message "must be an SCI evaluation context"
@@ -20,7 +22,9 @@
                 :ending-ns :symbol,
                 :evaluation
                 [:map
-                 [:seon.sci.admit/value :any]
+                 [:seon.sci.admit/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                          :seon.schema.admission/reason "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation."
+                          :gen/elements [nil true 0 "" :k [] {} #{}]}]]
                  [:seon.cluster.eval/result-edn
                   :seon.cluster.eval/result-edn]
                  [:seon.cluster.eval/error
@@ -80,7 +84,9 @@
                 :invocation-result
                 [:map
                  [:seon.sci.admit/print-node :seon.print/node]
-                 [:seon.sci.admit/value :any]
+                 [:seon.sci.admit/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                          :seon.schema.admission/reason "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation."
+                          :gen/elements [nil true 0 "" :k [] {} #{}]}]]
                  [:seon.sci.admit/capped? :seon.sci.admit/capped?]
                  [:seon.sci.admit/record :seon.sci.admit/record]],
                 :referenced-vars [:set :symbol],
@@ -99,6 +105,9 @@
                  [:seon.sci.eval/ctx
                   {:optional true}
                   :seon.sci.eval/ctx]
+                 [:seon.db/db
+                  {:optional true}
+                  :seon.db/database-value]
                  [:seon.cluster.agent/id
                   {:optional true}
                   :seon.cluster.agent/id]
@@ -120,7 +129,9 @@
                  [:seon.def/ns :seon.def/ns]
                  [:seon.def/name :seon.def/name]
                  [:seon.def/atom? {:optional true} :seon.def/atom?]
-                 [:seon.sci.eval/value :any]],
+                 [:seon.sci.eval/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                          :seon.schema.admission/reason "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation."
+                          :gen/elements [nil true 0 "" :k [] {} #{}]}]]],
                 :defs [:vector :seon.sci.eval/def-candidate],
                 :defs-fork-request
                 [:map

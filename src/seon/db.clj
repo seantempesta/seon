@@ -74,6 +74,13 @@
   "The current cluster's live branch connection, bound by its owning pass."
   nil)
 
+(def ^:dynamic *read-database*
+  "An explicitly handed immutable read basis, scoped by an evaluation.
+
+  The connection remains separate: blob and effect owners require its live
+  connection semantics. Absence preserves current reads through *conn*."
+  nil)
+
 (def ^:dynamic ^:private *receipt*
   "The current evaluation receipt lookup ref, bound with connection custody."
   nil)
@@ -133,9 +140,10 @@
 
 (defn- current-database-value
   []
-  (if (nil? *conn*)
-    (missing-connection-error "a database value")
-    (resolve-database-value *conn*)))
+  (or *read-database*
+      (if (nil? *conn*)
+        (missing-connection-error "a database value")
+        (resolve-database-value *conn*))))
 
 (defn- current-connection
   []
@@ -1059,23 +1067,22 @@
    {::needed needed}))
 
 (defn supplied-database-value
-  "This environment's CURRENT database value, derefed at call time.
+  "Supply an explicitly scoped database value, or the connection's current value.
 
-  Deriving rather than storing is the whole point of the current mode: a
-  database value kept on the environment would go stale silently, while
-  `(d/db connection)` at preparation time is always the latest committed
-  value. A caller that needs one consistent basis passes its own database
-  value and it wins — elide for current, pass for consistent."
+  A computation carrying a snapshot keeps that basis across its nested
+  calls. Without a supplied snapshot, preparation dereferences the live
+  connection as before. Explicit function arguments always win."
   {:malli/schema
    [:=> [:cat :seon.env/environment]
     [:or :seon.db/database-value :seon.error/value]]}
   [environment]
   (if-not (env/environment? environment)
     (unsupplied-custody-error "a database value")
-    (let [connection (:seon.db/connection environment)]
-      (if (nil? connection)
-        (unsupplied-custody-error "a database value")
-        (resolve-database-value connection)))))
+    (or (:seon.db/db environment)
+        (let [connection (:seon.db/connection environment)]
+          (if (nil? connection)
+            (unsupplied-custody-error "a database value")
+            (resolve-database-value connection))))))
 
 (defn supplied-connection
   "This environment's live branch connection."

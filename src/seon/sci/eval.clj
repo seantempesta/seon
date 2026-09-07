@@ -2162,6 +2162,8 @@
         ;; and silently omit the agent/run/form members.
         base-evaluation-ctx (or ctx (build-base-ctx))
         turn-members (cond-> {}
+                       (:seon.db/db request)
+                       (assoc :seon.db/db (:seon.db/db request))
                        agent-id
                        (assoc :seon.cluster.agent/id agent-id)
                        run-id
@@ -2227,6 +2229,7 @@
      projection-state
      (fn []
        (with-bindings {#'db/*conn* connection
+                       #'db/*read-database* (:seon.db/db turn-environment)
                        #'db/*receipt* receipt
                        #'effect/*request-context*
                        (when (and run-id (some? form-ordinal) cluster-name)

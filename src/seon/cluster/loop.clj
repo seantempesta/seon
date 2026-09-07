@@ -245,89 +245,6 @@
   (when (schema/valid-candidate-value? :my.message/value value)
     value))
 
-(defn- evaluation-receipt
-  "The one receipt projection built from a completed evaluation."
-  [{:keys [:seon.cluster.run/id :seon.cluster.run/process
-           :seon.cluster.run.form/ordinal :seon.sci.eval/evaluation
-           :seon.problems/form-problem :seon.def/rows :my.run/value]
-    settlement-evaluation ::settlement-evaluation}]
-  (let [error (or (:seon.cluster.eval/error evaluation)
-                  (:seon.cluster.eval/error form-problem))
-        kind (or (:seon.error/kind (:seon.sci.admit/value evaluation))
-                 (:seon.error/kind form-problem))]
-    (cond-> {:seon.cluster.run/id id
-             :seon.cluster.run/process process
-             :seon.cluster.eval/ordinal ordinal}
-      (:seon.cluster.eval/result-edn settlement-evaluation)
-      (assoc :seon.cluster.eval/result-edn
-             (:seon.cluster.eval/result-edn settlement-evaluation))
-      (:seon.cluster.eval/result-blob settlement-evaluation)
-      (assoc :seon.cluster.eval/result-blob
-             (:seon.cluster.eval/result-blob settlement-evaluation))
-      (:seon.cluster.eval/result-size settlement-evaluation)
-      (assoc :seon.cluster.eval/result-size
-             (:seon.cluster.eval/result-size settlement-evaluation))
-      error (assoc :seon.cluster.eval/error error)
-      (:seon.cluster.eval/triage-edn evaluation)
-      (assoc :seon.cluster.eval/triage-edn
-             (:seon.cluster.eval/triage-edn evaluation))
-      (:seon.cluster.eval/interrupted-at evaluation)
-      (assoc :seon.cluster.eval/interrupted-at
-             (:seon.cluster.eval/interrupted-at evaluation))
-      kind (assoc :seon.error/kind kind)
-      (:seon.cluster.eval/output evaluation)
-      (assoc :seon.cluster.eval/output
-             (:seon.cluster.eval/output evaluation))
-      (seq (:seon.cluster.eval/read-evidence evaluation))
-      (assoc :seon.cluster.eval/read-evidence
-             (:seon.cluster.eval/read-evidence evaluation))
-      (:seon.cluster.eval/read-basis-transaction evaluation)
-      (assoc :seon.cluster.eval/read-basis-transaction
-             (:seon.cluster.eval/read-basis-transaction evaluation))
-      (:seon.cluster.eval/ns evaluation)
-      (assoc :seon.cluster.eval/ns (:seon.cluster.eval/ns evaluation))
-      (:seon.sci.eval/ending-ns evaluation)
-      (assoc :seon.sci.eval/ending-ns
-             (:seon.sci.eval/ending-ns evaluation))
-      (:seon.test.accretion/gate-tests settlement-evaluation)
-      (assoc :seon.test.accretion/gate-tests
-             (mapv (fn [test-symbol] [:seon.test/sym test-symbol])
-                   (:seon.test.accretion/gate-tests settlement-evaluation)))
-      (some? (:seon.test.accretion/gate-test-count settlement-evaluation))
-      (assoc :seon.test.accretion/gate-test-count
-             (:seon.test.accretion/gate-test-count settlement-evaluation))
-      (some? (:seon.test.accretion/gate-pass-count settlement-evaluation))
-      (assoc :seon.test.accretion/gate-pass-count
-             (:seon.test.accretion/gate-pass-count settlement-evaluation))
-      (some? (:seon.test.accretion/gate-fail-count settlement-evaluation))
-      (assoc :seon.test.accretion/gate-fail-count
-             (:seon.test.accretion/gate-fail-count settlement-evaluation))
-      (:seon.test.accretion/seed settlement-evaluation)
-      (assoc :seon.test.accretion/seed
-             (:seon.test.accretion/seed settlement-evaluation))
-      (some? (:seon.test.accretion/case-count settlement-evaluation))
-      (assoc :seon.test.accretion/case-count
-             (:seon.test.accretion/case-count settlement-evaluation))
-      (some? (:seon.test.accretion/executed-count settlement-evaluation))
-      (assoc :seon.test.accretion/executed-count
-             (:seon.test.accretion/executed-count settlement-evaluation))
-      (:seon.test.accretion/status settlement-evaluation)
-      (assoc :seon.test.accretion/status
-             (:seon.test.accretion/status settlement-evaluation))
-      (:seon.test.accretion/report-blob settlement-evaluation)
-      (assoc :seon.test.accretion/report-blob
-             (:seon.test.accretion/report-blob settlement-evaluation))
-      (:seon.test.accretion/report-size settlement-evaluation)
-      (assoc :seon.test.accretion/report-size
-             (:seon.test.accretion/report-size settlement-evaluation))
-      (:seon.program/row evaluation)
-      (assoc :seon.program/row
-             (:seon.program/row evaluation))
-      (::run/form-facts evaluation)
-      (assoc ::run/form-facts (::run/form-facts evaluation))
-      (seq rows) (assoc :seon.def/rows rows)
-      value (assoc :my.run/value value))))
-
 (defn- append-output
   [evaluation lines]
   (if (seq lines)
@@ -684,7 +601,7 @@
         (run/settlement-projection cluster evaluation)
         rows (def-rows database agent-id defs-evaluation ordinal)
         receipt
-        (evaluation-receipt
+        (run/evaluation-facts
          (cond-> {:seon.cluster.run/id run-id
                   :seon.cluster.run/process process
                   :seon.cluster.run.form/ordinal ordinal
@@ -1184,21 +1101,6 @@
            [?namespace :seon.ns/name ?starting-ns]]
          db run-id)))
 
-(defn- admitted-form
-  "One durable run form projected into its evaluation namespace."
-  [{db :seon.db/db
-    run-id :seon.cluster.run/id
-    ordinal :seon.cluster.run.form/ordinal
-    current-namespace ::current-namespace
-    fallback-namespace ::fallback-namespace}]
-  (let [form (form-data db run-id ordinal)
-        evaluation-namespace
-        (or current-namespace
-            (second (:seon.cluster.run.form/ns form))
-            fallback-namespace)]
-    (assoc form :seon.cluster.run.form/ns
-           [:seon.ns/name evaluation-namespace])))
-
 (defn- evaluation-request
   "One admitted form projected into the guarded evaluation request."
   [{form ::admitted-form
@@ -1214,13 +1116,13 @@
            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
            :seon.sci.eval/ctx ctx
            :seon.cluster.agent/id agent-id
-           :seon.cluster.run/id run-id
            :seon.cluster.run.form/ordinal form-ordinal
            :seon.boot/cluster-name (:seon.cluster/name cluster)
            :seon.sci.eval/time-limit-ms
            (:seon.config.eval/time-limit-ms cluster)
            :seon.config/on-core-error
            (:seon.config/on-core-error cluster)}
+           run-id (assoc :seon.cluster.run/id run-id)
            (:seon.flow/work-launcher cluster)
            (assoc :seon.flow/work-launcher
                   (:seon.flow/work-launcher cluster)))))
@@ -1630,6 +1532,77 @@
               ;; delivery machinery does the rest
               :else (fail! failure))))))))
 
+(defn evaluate-sources
+  "Evaluate ordered sources in one fork without settling or staging them.
+
+  An explicit database is the basis of every form. Otherwise each form sees
+  the connection's current value, as in an ordinary turn. Results and namespace
+  changes advance the same fork; callers decide whether to persist outcomes."
+  {:malli/schema [:=> [:cat :seon.cluster.loop/evaluate-sources-request]
+                  :seon.cluster.loop/evaluated-sources]}
+  [{cluster ::cluster
+    snapshot :seon.db/db
+    ctx :seon.sci.eval/ctx
+    agent-id :seon.cluster.agent/id
+    run-id :seon.cluster.run/id
+    first-ordinal :seon.cluster.run.form/ordinal
+    sources :seon.cluster.reply/sources
+    starting-namespace :seon.ns/name
+    defs-notices :seon.sci.eval/defs-notices}]
+  (let [connection (:seon.db/connection cluster)
+        evaluate (requiring-resolve (:seon.cluster.loop/evaluate cluster))]
+    (loop [remaining (seq sources)
+           ordinal first-ordinal
+           namespace-name starting-namespace
+           results []]
+      (if-let [source (first remaining)]
+        (let [form (assoc source :seon.cluster.run.form/ns
+                          [:seon.ns/name namespace-name])
+              database (or snapshot @connection)
+              captured (atom [])
+              request
+              (cond-> (evaluation-request
+                       {::admitted-form form
+                        ::evaluation-namespace namespace-name
+                        ::cluster cluster
+                        :seon.sci.eval/ctx ctx
+                        :seon.cluster.agent/id agent-id
+                        :seon.cluster.run.form/ordinal ordinal
+                        :seon.cluster.run/id run-id})
+                snapshot (assoc :seon.db/db snapshot)
+                (and (empty? results) (seq defs-notices))
+                (assoc :seon.sci.eval/output-prefix (str/join "\n" defs-notices)))
+              evaluation
+              (binding [db/*read-evidence-sink* captured]
+                (render/call-with-walk-context
+                 {:seon.db/db database
+                  :seon.db/connection connection
+                  :seon.cluster.agent/id agent-id
+                  :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                  :seon.sci.eval/ctx ctx
+                  :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)
+                  :seon.config/on-core-error (:seon.config/on-core-error cluster)}
+                 #(evaluate request)))
+              evaluation
+              (if (:seon.error/kind evaluation)
+                {:seon.sci.admit/value evaluation
+                 :seon.cluster.eval/result-edn (pr-str evaluation)
+                 :seon.cluster.eval/error (:seon.error/message evaluation)
+                 :seon.error/kind (:seon.error/kind evaluation)}
+                evaluation)
+              evaluation
+              (assoc evaluation
+                     :seon.cluster.eval/read-evidence (db/read-evidence @captured)
+                     :seon.cluster.eval/read-basis-transaction (db/basis-t database))]
+          (sci.eval/bind-result! ctx ordinal (:seon.sci.admit/value evaluation))
+          (recur (next remaining) (inc ordinal)
+                 (or (:seon.sci.eval/ending-ns evaluation) namespace-name)
+                 (conj results
+                       {:seon.cluster.run.form/ordinal ordinal
+                        ::admitted-form form
+                        :seon.sci.eval/evaluation evaluation})))
+        results))))
+
 (defn- resume-turn
   "Evaluate an intent-frozen turn in memory, then settle the whole batch once."
   [{cluster ::cluster work ::work now ::now report ::report}]
@@ -1643,11 +1616,9 @@
                   :seon.db/db @connection
                   :seon.db/connection connection
                   :seon.cluster.agent/id agent-id}))
-        compiled-evaluate
-        (phase #(requiring-resolve (:seon.cluster.loop/evaluate cluster)))
         trigger (phase #(message/trigger @connection run-id))]
     (if-let [failure (some #(when (:seon.error/kind %) %)
-                           [forked compiled-evaluate trigger])]
+                           [forked trigger])]
       (do
         (settle! {::cluster cluster
                   ::now now
@@ -1670,86 +1641,23 @@
                        database run-id first-ordinal)
                  sort
                  vec)
-            evaluate
-            (fn [request]
-              (let [snapshot @connection
-                    evidence-sink (atom [])
-                    evaluation
-                    (binding [db/*read-evidence-sink* evidence-sink]
-                      (render/call-with-walk-context
-                       {:seon.db/db snapshot
-                        :seon.db/connection connection
-                        :seon.cluster.agent/id agent-id
-                        :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-                        :seon.sci.eval/ctx ctx
-                        :seon.sci.eval/time-limit-ms
-                        (:seon.config.eval/time-limit-ms cluster)
-                        :seon.config/on-core-error
-                        (:seon.config/on-core-error cluster)}
-                       #(compiled-evaluate request)))
-                    evidence (db/read-evidence @evidence-sink)]
-                (cond-> (assoc evaluation
-                               :seon.cluster.eval/read-evidence evidence)
-                  (seq evidence)
-                  (assoc :seon.cluster.eval/read-basis-transaction
-                         (db/basis-t snapshot)))))
-            evaluate-all
-            (fn []
-              (loop [remaining ordinals
-                     namespace-name
-                     (fold-namespace database run-id first-ordinal)
-                     results []]
-                (if-let [ordinal (first remaining)]
-                  (let [form
-                        (admitted-form
-                         {:seon.db/db database
-                          :seon.cluster.run/id run-id
-                          :seon.cluster.run.form/ordinal ordinal
-                          ::current-namespace namespace-name
-                          ::fallback-namespace
-                          (sci.eval/agent-namespace database agent-id)})
-                        evaluation-namespace
-                        (second (:seon.cluster.run.form/ns form))
-                        request
-                        (evaluation-request
-                         (cond->
-                          {::admitted-form form
-                           ::evaluation-namespace evaluation-namespace
-                           ::cluster cluster
-                           :seon.sci.eval/ctx ctx
-                           :seon.cluster.agent/id agent-id
-                           :seon.cluster.run/id run-id
-                           :seon.cluster.run.form/ordinal ordinal}
-                           (and (empty? results) (seq defs-notices))
-                           (assoc :seon.sci.eval/output-prefix
-                                  (str/join "\n" defs-notices))))
-                        evaluation (phase #(evaluate request))
-                        evaluation
-                        (if (:seon.error/kind evaluation)
-                          {:seon.sci.admit/value evaluation
-                           :seon.cluster.eval/result-edn (pr-str evaluation)
-                           :seon.cluster.eval/error
-                           (:seon.error/message evaluation)
-                           :seon.error/kind (:seon.error/kind evaluation)}
-                          evaluation)]
-                    (sci.eval/bind-result!
-                     ctx ordinal (:seon.sci.admit/value evaluation))
-                    (recur (next remaining)
-                           (or (:seon.sci.eval/ending-ns evaluation)
-                               evaluation-namespace)
-                           (conj results {:ordinal ordinal
-                                          :form form
-                                          :evaluation evaluation})))
-                  results)))
-            ;; The run-loop proc already executes on the compute workload.
-            ;; Each SCI form has its own enforced `time-limit`; submitting each
-            ;; form (or this whole batch) back to the same executor adds a
-            ;; needless hand-off and can self-starve a single-worker launcher.
-            evaluated (evaluate-all)
+            evaluated
+            (phase
+             #(evaluate-sources
+               {::cluster cluster
+                :seon.sci.eval/ctx ctx
+                :seon.cluster.agent/id agent-id
+                :seon.cluster.run/id run-id
+                :seon.cluster.run.form/ordinal first-ordinal
+                :seon.ns/name (or (fold-namespace database run-id first-ordinal)
+                                  (sci.eval/agent-namespace database agent-id))
+                :seon.sci.eval/defs-notices defs-notices
+                :seon.cluster.reply/sources
+                (mapv (fn [ordinal] (form-data database run-id ordinal)) ordinals)}))
             defining
             (into []
                   (keep-indexed
-                   (fn [index {:keys [form evaluation]}]
+                   (fn [index {form ::admitted-form evaluation :seon.sci.eval/evaluation}]
                      (when (:seon.program/row evaluation)
                        [index
                         {:seon.cluster.run.form/source
@@ -1775,20 +1683,21 @@
                 (reduce
                  (fn [all [[index _] [form-facts row]]]
                    (-> all
-                       (assoc-in [index :evaluation :seon.program/row] row)
+                       (assoc-in [index :seon.sci.eval/evaluation :seon.program/row] row)
                        (assoc-in
-                        [index :evaluation ::run/form-facts]
+                        [index :seon.sci.eval/evaluation ::run/form-facts]
                         (assoc form-facts
                                :db/id
                                [:seon.cluster.run.form/id
                                 (run/form-identity
-                                 run-id (:ordinal (nth all index)))]))))
+                                 run-id (:seon.cluster.run.form/ordinal (nth all index)))]))))
                  evaluated
                  (map vector defining analyzed))
                 gated
                 (mapv
-                 (fn [{:keys [ordinal form evaluation] :as item}]
-                   (assoc item :evaluation
+                 (fn [{ordinal :seon.cluster.run.form/ordinal form ::admitted-form
+                       evaluation :seon.sci.eval/evaluation :as item}]
+                   (assoc item :seon.sci.eval/evaluation
                           (gate-function-install
                            cluster ctx agent-id
                            (run/receipt-identity run-id ordinal)
@@ -1796,7 +1705,7 @@
                  evaluated)
                 requests
                 (mapv
-                 (fn [{:keys [ordinal evaluation]}]
+                 (fn [{ordinal :seon.cluster.run.form/ordinal evaluation :seon.sci.eval/evaluation}]
                    (let [problem
                          (phase
                           #(problems/form-problem
@@ -1829,7 +1738,7 @@
                   :seon.sci.eval/installations
                   (into []
                         (keep
-                         (fn [{evaluation :evaluation}]
+                         (fn [{evaluation :seon.sci.eval/evaluation}]
                            (let [row (:seon.program/row evaluation)]
                              (when (and row
                                         (sci.eval/committed-row?

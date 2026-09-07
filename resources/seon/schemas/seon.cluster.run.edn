@@ -37,6 +37,16 @@
                    :process [:string {:min 1}],
                    :starting-ns :seon.db/ref,
                    :supersedes [:set :seon.db/ref],
+                   :evaluation-facts-request
+                   [:map
+                    [:seon.cluster.run/id :seon.cluster.run/id]
+                    [:seon.cluster.run/process :seon.cluster.run/process]
+                    [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+                    [:seon.sci.eval/evaluation :seon.cluster.loop/evaluation]
+                    [:seon.cluster.loop/settlement-evaluation :seon.cluster.loop/evaluation]
+                    [:seon.problems/form-problem {:optional true} :seon.problems/form-problem]
+                    [:seon.def/rows {:optional true} :seon.def/rows]
+                    [:my.run/value {:optional true} :my.run/value]],
                    :system-run-request
                    [:map
                     [:seon.cluster.agent/id :seon.cluster.agent/id]

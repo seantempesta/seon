@@ -225,30 +225,6 @@
                 @connection))
             "the durable attempt and display gauges settle together")))))
 
-(deftest admitted-form-preserves-current-namespace-and-source
-  (let [db {:immutable :database-value}
-        form {:seon.cluster.run.form/source "(+ 1 2)"
-              :seon.cluster.run.form/ns [:seon.ns/name 'parse.namespace]}
-        calls (atom [])]
-    (with-redefs-fn
-      {(ns-resolve 'seon.cluster.loop 'form-data)
-       (fn [actual-db run-id ordinal]
-         (swap! calls conj [:form actual-db run-id ordinal])
-         form)}
-      (fn []
-        (is (= {:seon.cluster.run.form/source "(+ 1 2)"
-                :seon.cluster.run.form/ns
-                [:seon.ns/name 'current.namespace]}
-               ((private-loop-fn 'admitted-form)
-                {:seon.db/db db
-                 :seon.cluster.run/id "run-1"
-                 :seon.cluster.run.form/ordinal 3
-                 :seon.cluster.loop/current-namespace 'current.namespace
-                 :seon.cluster.loop/fallback-namespace 'fallback.namespace})))
-        (is (= [[:form db "run-1" 3]] @calls))
-        (is (= "(+ 1 2)" (:seon.cluster.run.form/source form))
-            "the evaluator receives the durable source without a second admission pass")))))
-
 (deftest evaluation-request-projects-the-admitted-form-and-cluster-controls
   (let [ctx {:live :context}
         form {:seon.cluster.run.form/source "(inc 2)"
@@ -502,30 +478,36 @@
                            [:seon.sci.eval/ending-ns]
                            [:seon.cluster.eval/id (pr-str [run-id 0])]))))
           (let [fold-namespace (private-loop-fn 'fold-namespace)
-                admitted-form (private-loop-fn 'admitted-form)
                 resumed-namespace (fold-namespace @connection run-id 1)
-                form
-                (admitted-form
-                 {:seon.db/db @connection
-                  :seon.cluster.run/id run-id
-                  :seon.cluster.run.form/ordinal 1
-                  :seon.cluster.loop/current-namespace resumed-namespace
-                  :seon.cluster.loop/fallback-namespace starting-ns})
-                evaluation
-                (sci.eval/evaluate
-                 {:seon.cluster.run.form/source
-                  (:seon.cluster.run.form/source form)
-                  :seon.cluster.run.form/ns
-                  (:seon.cluster.run.form/ns form)
-                  :seon.sci.eval/ctx ctx
-                  :seon.sci.admit/caps
-                  (config/result-caps (config/defaults))
-                  :seon.sci.eval/time-limit-ms 2000
-                  :seon.config/on-core-error :panic
-                  :seon.boot/cluster-name cluster-name
-                  :seon.cluster.agent/id agent-id
-                  :seon.cluster.run/id run-id
-                  :seon.cluster.run.form/ordinal 1})]
+                defaults (config/defaults)
+                channel (async/chan 1)
+                cluster (merge defaults
+                               {:seon.db/connection connection
+                                :seon.cluster/name cluster-name
+                                :seon.cluster.run/process process
+                                :seon.sci.eval/ctx ctx
+                                :seon.cluster.wake/channel channel
+                                :seon.render/context-channel channel
+                                :seon.cluster.loop/completion channel
+                                :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
+                                :seon.sci.admit/caps (config/result-caps defaults)
+                                :seon.config.eval/time-limit-ms 2000
+                                :seon.config/on-core-error :panic})
+                outcome
+                (try
+                  (first
+                   (cluster.loop/evaluate-sources
+                    {:seon.cluster.loop/cluster cluster
+                     :seon.sci.eval/ctx ctx
+                     :seon.cluster.agent/id agent-id
+                     :seon.cluster.run/id run-id
+                     :seon.cluster.run.form/ordinal 1
+                     :seon.ns/name resumed-namespace
+                     :seon.cluster.reply/sources
+                     [((private-loop-fn 'form-data) @connection run-id 1)]}))
+                  (finally (async/close! channel)))
+                form (:seon.cluster.loop/admitted-form outcome)
+                evaluation (:seon.sci.eval/evaluation outcome)]
             (is (= ending-ns resumed-namespace))
             (is (= [:seon.ns/name ending-ns]
                    (:seon.cluster.run.form/ns form)))

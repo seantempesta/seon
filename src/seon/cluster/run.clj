@@ -132,6 +132,91 @@
       :seon.blob/staged-writes []}
      (:seon.sci.eval/defs evaluation))))
 
+(defn evaluation-facts
+  "Project a completed evaluation into its existing settlement facts."
+  {:malli/schema [:=> [:cat :seon.cluster.run/evaluation-facts-request]
+                  :seon.cluster.eval/settle-request]}
+  [{:keys [:seon.cluster.run/id :seon.cluster.run/process
+           :seon.cluster.run.form/ordinal :seon.sci.eval/evaluation
+           :seon.problems/form-problem :seon.def/rows :my.run/value]
+    settlement-evaluation :seon.cluster.loop/settlement-evaluation}]
+  (let [error (or (:seon.cluster.eval/error evaluation)
+                  (:seon.cluster.eval/error form-problem))
+        kind (or (:seon.error/kind (:seon.sci.admit/value evaluation))
+                 (:seon.error/kind form-problem))]
+    (cond-> {:seon.cluster.run/id id
+             :seon.cluster.run/process process
+             :seon.cluster.eval/ordinal ordinal}
+      (:seon.cluster.eval/result-edn settlement-evaluation)
+      (assoc :seon.cluster.eval/result-edn
+             (:seon.cluster.eval/result-edn settlement-evaluation))
+      (:seon.cluster.eval/result-blob settlement-evaluation)
+      (assoc :seon.cluster.eval/result-blob
+             (:seon.cluster.eval/result-blob settlement-evaluation))
+      (:seon.cluster.eval/result-size settlement-evaluation)
+      (assoc :seon.cluster.eval/result-size
+             (:seon.cluster.eval/result-size settlement-evaluation))
+      error (assoc :seon.cluster.eval/error error)
+      (:seon.cluster.eval/triage-edn evaluation)
+      (assoc :seon.cluster.eval/triage-edn
+             (:seon.cluster.eval/triage-edn evaluation))
+      (:seon.cluster.eval/interrupted-at evaluation)
+      (assoc :seon.cluster.eval/interrupted-at
+             (:seon.cluster.eval/interrupted-at evaluation))
+      kind (assoc :seon.error/kind kind)
+      (:seon.cluster.eval/output evaluation)
+      (assoc :seon.cluster.eval/output
+             (:seon.cluster.eval/output evaluation))
+      (seq (:seon.cluster.eval/read-evidence evaluation))
+      (assoc :seon.cluster.eval/read-evidence
+             (:seon.cluster.eval/read-evidence evaluation))
+      (:seon.cluster.eval/read-basis-transaction evaluation)
+      (assoc :seon.cluster.eval/read-basis-transaction
+             (:seon.cluster.eval/read-basis-transaction evaluation))
+      (:seon.cluster.eval/ns evaluation)
+      (assoc :seon.cluster.eval/ns (:seon.cluster.eval/ns evaluation))
+      (:seon.sci.eval/ending-ns evaluation)
+      (assoc :seon.sci.eval/ending-ns
+             (:seon.sci.eval/ending-ns evaluation))
+      (:seon.test.accretion/gate-tests settlement-evaluation)
+      (assoc :seon.test.accretion/gate-tests
+             (mapv (fn [test-symbol] [:seon.test/sym test-symbol])
+                   (:seon.test.accretion/gate-tests settlement-evaluation)))
+      (some? (:seon.test.accretion/gate-test-count settlement-evaluation))
+      (assoc :seon.test.accretion/gate-test-count
+             (:seon.test.accretion/gate-test-count settlement-evaluation))
+      (some? (:seon.test.accretion/gate-pass-count settlement-evaluation))
+      (assoc :seon.test.accretion/gate-pass-count
+             (:seon.test.accretion/gate-pass-count settlement-evaluation))
+      (some? (:seon.test.accretion/gate-fail-count settlement-evaluation))
+      (assoc :seon.test.accretion/gate-fail-count
+             (:seon.test.accretion/gate-fail-count settlement-evaluation))
+      (:seon.test.accretion/seed settlement-evaluation)
+      (assoc :seon.test.accretion/seed
+             (:seon.test.accretion/seed settlement-evaluation))
+      (some? (:seon.test.accretion/case-count settlement-evaluation))
+      (assoc :seon.test.accretion/case-count
+             (:seon.test.accretion/case-count settlement-evaluation))
+      (some? (:seon.test.accretion/executed-count settlement-evaluation))
+      (assoc :seon.test.accretion/executed-count
+             (:seon.test.accretion/executed-count settlement-evaluation))
+      (:seon.test.accretion/status settlement-evaluation)
+      (assoc :seon.test.accretion/status
+             (:seon.test.accretion/status settlement-evaluation))
+      (:seon.test.accretion/report-blob settlement-evaluation)
+      (assoc :seon.test.accretion/report-blob
+             (:seon.test.accretion/report-blob settlement-evaluation))
+      (:seon.test.accretion/report-size settlement-evaluation)
+      (assoc :seon.test.accretion/report-size
+             (:seon.test.accretion/report-size settlement-evaluation))
+      (:seon.program/row evaluation)
+      (assoc :seon.program/row
+             (:seon.program/row evaluation))
+      (::form-facts evaluation)
+      (assoc ::form-facts (::form-facts evaluation))
+      (seq rows) (assoc :seon.def/rows rows)
+      value (assoc :my.run/value value))))
+
 (defn- result-window-page-size
   [db]
   (db/q '[:find ?size .
