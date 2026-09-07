@@ -460,13 +460,35 @@ bytes for the selected contribution should come from the same transcript
 entries.
 
 One adjacent query risk needs an explicit regression. The default transcript
-receipt query currently selects active runs by agent without inspecting
-`:seon.cluster.run.form/author` (`src/seon/render/transcript.clj:170-183` and
-`:242-278`). Therefore a system-authored preview can enter an unfiltered
-ordinary transcript independently of selection. Selected-evaluation mode must
-continue to admit those exact system evaluations, while ordinary agent history
-must filter on the stored `:agent` form author. Otherwise the new explicit
-selection path can duplicate a preview that leaked through ordinary history.
+receipt query currently selects active runs by agent without inspecting source
+provenance (`src/seon/render/transcript.clj:170-183` and `:242-278`). Therefore
+a system-authored preview can enter an unfiltered ordinary transcript
+independently of selection. Filtering ordinary history to `:agent` authors is
+wrong: generated opening forms are deliberately `:system` authored and must
+remain in context.
+
+The required distinction is already recorded without a name convention.
+`generated-run-tx` opens an opening run with
+`:seon.cluster.work/situation :generate` (`src/seon/cluster/run.clj:955-980`),
+and every generated form is appended while that transition holds
+(`src/seon/cluster/run.clj:831-900`). `generation-complete-call` later retracts
+`:generate` and asserts `:call` (`src/seon/cluster/run.clj:908-945`). In
+contrast, `submit-source!` enters `system-run-tx`; its `open-call` defaults
+directly to `:call` (`src/seon/cluster/agent.clj:633-706` and
+`src/seon/cluster/run.clj:421-457`). With history enabled, a bounded Datahike
+history query for the run's prior `:generate` datom is exact durable provenance
+even after the current value becomes `:call`.
+
+Ordinary transcript selection should therefore admit agent-authored forms OR
+forms whose run has a historical `:generate` situation. Exact selected-
+evaluation mode continues to admit the contribution's referenced system
+preview evaluations. A focused proof needs three rows: an agent reply and a
+generated opening both appear without selection; a debug-submitted system run
+does not appear until its evaluation ref is selected. This avoids a new origin
+attribute. If Datahike history is ever disabled for runs, that configuration
+must refuse this classification rather than silently treating absence as a
+preview; only then would a declared run-source origin at `open-call`/
+`generated-run-tx` become necessary.
 
 ## Plan source live proof
 
