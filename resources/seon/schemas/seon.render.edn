@@ -146,6 +146,11 @@
                 :gen/gen seon.render.hiccup/hiccup-generator}
                seon.render.hiccup/hiccup?],
               :html [:or :qualified-symbol :seon.render/hiccup],
+              :units
+              [:vector
+               {:description
+                "Ordered forward attributes and reverse relationships rendered as self-contained entity-debug units."}
+               :qualified-keyword],
               :namespace :symbol,
               :output
               [:enum :seon.render/ai :seon.render/html :seon.render/form],

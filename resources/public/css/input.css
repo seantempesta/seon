@@ -1394,6 +1394,7 @@ details.tool-call-details[open] .tool-preview {
   height: 0;
   min-width: 0;
   min-height: 0;
+  overflow: auto;
 }
 .seon-debug-grid:has(> .seon-debug-prompt-detail) {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1643,9 +1644,8 @@ details.tool-call-details[open] .tool-preview {
   font-size: 0.7rem;
 }
 .seon-debug-found-values {
-  margin-top: 1rem;
-  border-top: 1px solid var(--color-base-800);
-  padding-top: 0.75rem;
+  min-width: 0;
+  padding: 0.75rem 1rem 2rem;
 }
 .seon-debug-found-value {
   min-width: 0;
@@ -1665,12 +1665,50 @@ details.tool-call-details[open] .tool-preview {
   border-bottom: 1px solid var(--color-base-700);
   background: var(--color-base-850);
 }
+.seon-debug-value-header h2,
 .seon-debug-value-header h3 {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 1rem;
   font-weight: 650;
   color: var(--color-inspection);
+}
+.seon-debug-attribute-unit > .seon-debug-renderers,
+.seon-debug-other-references {
+  padding: 0.6rem 1rem;
+}
+.seon-debug-attribute-unit > .seon-debug-renderers > summary {
+  color: var(--color-text-300);
+  cursor: pointer;
+}
+.seon-debug-other-references {
+  margin-top: 1.25rem;
+  border-top: 1px solid var(--color-base-700);
+}
+.seon-debug-empty {
+  color: var(--color-text-400);
+  font-style: italic;
+}
+.seon-debug-experiment > .seon-debug-found-values {
+  grid-column: 1;
+  min-width: 0;
+}
+.seon-debug-attribute-unit + .seon-debug-attribute-unit {
+  margin-top: 0.85rem;
+}
+.seon-debug-stored-value > summary {
+  cursor: pointer;
+}
+.seon-debug-context-actions {
+  margin-top: 0.75rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--color-base-800);
+}
+.seon-debug-context-actions > h4 {
+  margin: 0 0 0.35rem;
+  color: var(--color-text-200);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .seon-debug-data-details {
   padding: 0.6rem 1rem;

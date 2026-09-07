@@ -6,7 +6,18 @@
                        :seon.render/html
                        seon.cluster.agent/render-identity-html,
                        :seon.render/form
-                       seon.cluster.agent/identity-form}
+                       seon.cluster.agent/identity-form,
+                       :seon.render/units
+                       [:seon.cluster.agent/id
+                        :seon.cluster.agent/namespace
+                        :seon.cluster.agent/cluster
+                        :seon.cluster.agent/run
+                        :my.plan/steps
+                        :my.plan/current-step
+                        :seon.cluster.message/_to
+                        :seon.cluster.run/_agent
+                        :seon.context.contribution/_agent
+                        :seon.error/_agent]}
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
                       [:seon.cluster.agent/namespace
                        {:optional true}
@@ -36,7 +47,11 @@
                       [:seon.cluster.loop/cluster
                        :seon.cluster.loop/cluster]
                       [:seon.cluster.agent/id :seon.cluster.agent/id]],
-                     :cluster :seon.db/ref,
+                     :cluster
+                     [:and
+                      {:description
+                       "The cluster this agent belongs to: one database branch, its agents, and their shared plumbing."}
+                      :seon.db/ref],
                      :context-links
                      [:map
                       #:seon.db{:attributes true}
@@ -69,14 +84,23 @@
                       [:seon.cluster.agent/routing
                        :seon.cluster.agent/routing]],
                      :eid :int,
-                     :id [:string {:min 1, :seon.db/identity true}],
+                     :id
+                     [:string
+                      {:min 1,
+                       :seon.db/identity true,
+                       :description
+                       "The agent's identity: the name every message, run, and namespace assignment resolves it by."}],
                      :identity-request
                      [:map
                       [:seon.db/db :seon.db/database-value]
                       [:seon.cluster.agent/id :seon.cluster.agent/id]],
                      :instructions [:set :seon.db/ref],
                      :namespace
-                     [:and #:seon.db{:unique true} :seon.db/ref],
+                     [:and
+                      {:seon.db/unique true,
+                       :description
+                       "The namespace this agent owns and evaluates in; at most one agent is assigned to a namespace."}
+                      :seon.db/ref],
                      :routing
                      [:fn
                       {:error/message
@@ -96,7 +120,11 @@
                      :source-submission-result
                      [:map
                       [:seon.cluster.run/id :seon.cluster.run/id]],
-                     :run :seon.db/ref,
+                     :run
+                     [:and
+                      {:description
+                       "The run this agent currently holds; absent between episodes."}
+                      :seon.db/ref],
                      ;; The live value returned by `(help)`. These are
                      ;; projections of current facts, never attributes stored
                      ;; on the agent. Adding a member here is how the generated
