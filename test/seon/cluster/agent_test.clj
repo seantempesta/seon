@@ -443,14 +443,27 @@
                       "the run retains exact submitted source, not reconstructed forms")
                   (is (some? (agent/armed routing "source-agent"))
                       "the existing armer owns unarmed delivery")
+                  ;; THE COMMENT IS ITS OWN FACT beside the form it
+                  ;; introduces, so a prompt line holds exactly one form.
                   (is (= [{:seon.cluster.run.form/ordinal 0
-                           :seon.cluster.run.form/source
-                           "; Read one value.\n(+ 1 1)"}
+                           :seon.cluster.run.form/source "(+ 1 1)"}
                           {:seon.cluster.run.form/ordinal 1
-                           :seon.cluster.run.form/source
-                           "; Read a second value.\n(identity (+ 1 1))"}]
+                           :seon.cluster.run.form/source "(identity (+ 1 1))"}]
                          (sort-by :seon.cluster.run.form/ordinal sources))
-                      "comments and exact forms pass through the ordinary parser")
+                      "exact forms pass through the ordinary parser")
+                  (is (= ["; Read one value." "; Read a second value."]
+                         (mapv second
+                               (sort-by
+                                first
+                                (db/q '[:find ?ordinal ?comment
+                                        :in $ ?run-id
+                                        :where
+                                        [?run :seon.cluster.run/id ?run-id]
+                                        [?evaluation :seon.cluster.eval/run ?run]
+                                        [?evaluation :seon.cluster.eval/ordinal ?ordinal]
+                                        [?evaluation :seon.cluster.eval/comment ?comment]]
+                                      terminal-db run-id))))
+                      "and each agent comment is stored beside its own form")
                   (is (= [[0 {:seon.print/face :seon.print/number
                               :seon.print/value 2}]
                           [1 {:seon.print/face :seon.print/number
