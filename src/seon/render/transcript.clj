@@ -601,10 +601,19 @@
   ;; Transcript values are immutable history entries. Give the shared value
   ;; floor an explicit, content-stable block identity when this internal
   ;; projection is not itself running as a retained render call.
-  (value/render-ai
-   (cond-> (assoc unit :seon.render/value value)
-     (nil? (:seon.render.call/id unit))
-     (assoc :seon.render.call/id [::history-value value]))))
+  ;;
+  ;; THE FLOOR IS A RENDER CALL AND A RENDER CALL NEEDS ITS SCI CONTEXT. A
+  ;; derivation reached without one — an attribute-declared producer receives
+  ;; the attribute value and the call-prepared database, and nothing else —
+  ;; prints the value with the reader's own printer rather than throwing an
+  ;; instrumentation violation into a transcript that was only reporting
+  ;; the history it was only reporting.
+  (if (:seon.sci.eval/ctx unit)
+    (value/render-ai
+     (cond-> (assoc unit :seon.render/value value)
+       (nil? (:seon.render.call/id unit))
+       (assoc :seon.render.call/id [::history-value value])))
+    (pr-str value)))
 
 (defn- bounded-scalar
   [unit value]
