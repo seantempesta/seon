@@ -202,23 +202,31 @@
                  :seon.schema/projection (:seon.schema/projection acquired)}))
               base (env/carry-state acquired
                                     (env/environment-state environment))
-              evaluated
-              (sci.eval/evaluate
-               {:seon.cluster.run.form/source source
-                :seon.cluster.run.form/ns [:seon.ns/name 'fixture.plan]
-                :seon.cluster.agent/id "alice"
-                :seon.sci.eval/ctx
-                (:seon.sci.eval/ctx
-                 (sci.eval/fork-for-turn
-                  {:seon.sci.eval/ctx
-                   base
-                   :seon.db/db @connection
-                   :seon.db/connection connection
-                   :seon.cluster.agent/id "alice"}))
-                :seon.sci.admit/caps
-                (config/result-caps (support/effective-config))
-                :seon.sci.eval/time-limit-ms 5000
-                :seon.config/on-core-error :panic})
+              evaluate-source
+              (fn [rendered-source]
+                (sci.eval/evaluate
+                 {:seon.cluster.run.form/source rendered-source
+                  :seon.cluster.run.form/ns [:seon.ns/name 'fixture.plan]
+                  :seon.cluster.agent/id "alice"
+                  :seon.sci.eval/ctx
+                  (:seon.sci.eval/ctx
+                   (sci.eval/fork-for-turn
+                    {:seon.sci.eval/ctx
+                     base
+                     :seon.db/db @connection
+                     :seon.db/connection connection
+                     :seon.cluster.agent/id "alice"}))
+                  :seon.sci.admit/caps
+                  (config/result-caps (support/effective-config))
+                  :seon.sci.eval/time-limit-ms 5000
+                  :seon.config/on-core-error :panic}))
+              evaluated (evaluate-source source)
+              ready-item (first (:my.plan/ready current))
+              item-evaluated
+              (evaluate-source (plan/render-item-ai ready-item))
+              ready-evaluated
+              (evaluate-source
+               (plan/render-ready-items-ai (:my.plan/ready current)))
               html (plan/render-plan-html current)]
           (testing "the view reconstructs from the current database value"
             (is (= ["open"] (mapv :my.plan.item/id (:my.plan/ready current))))
@@ -232,6 +240,10 @@
             (is (str/includes? source "my.plan/format-plan-ai"))
             (is (str/includes? source "my.plan/plan"))
             (is (= ai (:seon.sci.admit/value evaluated)))
+            (is (= (plan/format-item-ai ready-item)
+                   (:seon.sci.admit/value item-evaluated)))
+            (is (= (plan/format-ready-items-ai (:my.plan/ready current))
+                   (:seon.sci.admit/value ready-evaluated)))
             (is (seon.schema/valid-candidate-value? :seon.render/ai source))
             (is (seon.schema/valid-candidate-value? :seon.render/hiccup html))
             (is (str/includes? ai "Current work"))

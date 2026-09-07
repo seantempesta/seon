@@ -57,6 +57,31 @@
           [:map
            [:seon.db/db :seon.db/database-value]
            [:seon.cluster.agent/id :seon.cluster.agent/id]],
+          :pulled-reference [:map [:db/id :seon.db/ref]],
+          :pulled-item
+          [:map
+           {:description
+            "The Datahike pull projection read by plan source renderers before transaction-shape normalization."}
+           [:my.plan.item/id :my.plan.item/id]
+           [:my.plan.item/title :my.plan.item/title]
+           [:my.plan.item/agent :my.plan/pulled-reference]
+           [:my.plan.item/description
+            {:optional true}
+            :my.plan.item/description]
+           [:my.plan.item/parent
+            {:optional true}
+            :my.plan/pulled-reference]
+           [:my.plan.item/needs
+            {:optional true}
+            [:vector :my.plan/pulled-reference]]
+           [:my.plan.item/about {:optional true} :my.plan.item/about]
+           [:my.plan.item/completed-at
+            {:optional true}
+            :my.plan.item/completed-at]
+           [:my.plan.item/expected-result
+            {:optional true}
+            :my.plan.item/expected-result]],
+          :pulled-items [:vector :my.plan/pulled-item],
           :obligation-source [:enum :message :run :test],
           :obligation-id [:string {:min 1}],
           :obligation-title [:string {:min 1}],

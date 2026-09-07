@@ -896,7 +896,9 @@
 
 (defn format-item-ai
   "Format one authored plan item as terminal text."
-  {:malli/schema [:=> [:cat [:or :my.plan.item/item :seon.error/value]]
+  {:malli/schema [:=> [:cat [:or :my.plan.item/item
+                             :my.plan/pulled-item
+                             :seon.error/value]]
                   [:or :string :seon.error/value]]}
   [item]
   (if (error-value? item)
@@ -951,7 +953,9 @@
 
 (defn format-ready-items-ai
   "Format a supplied ready authored plan frontier as terminal text."
-  {:malli/schema [:=> [:cat [:or :my.plan/ready-items :seon.error/value]]
+  {:malli/schema [:=> [:cat [:or :my.plan/ready-items
+                             :my.plan/pulled-items
+                             :seon.error/value]]
                   [:or :string :seon.error/value]]}
   [items]
   (if (error-value? items)
