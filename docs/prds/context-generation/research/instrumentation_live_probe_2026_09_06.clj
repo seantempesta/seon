@@ -13,7 +13,7 @@
       projection (seon.sci.kernel/context-projection ctx)
       caps (:seon.sci.admit/caps (:seon.cluster.loop/cluster instance))
       eligible (into #{}
-                     (comp (mapcat ns-publics)
+                     (comp (mapcat ns-interns)
                            (map val)
                            (filter #(and (bound? %)
                                          (:malli/schema (meta %))
