@@ -18,6 +18,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [malli.core :as m]
             [sci.core :as sci]
             [seon.cluster.reply :as reply]
             [seon.schema :as schema]
@@ -217,6 +218,35 @@
             :seon.ns/name 'my.gen.alpha}
            (last (reply/sources "(ns my.gen.alpha)\n(def a 1)\nThat is all.")))
         "the prose is the form's own comment fact, never glued to its source")))
+
+;;; ---------------------------------------------------------------------------
+;;; Every arity is a call like any other
+;;; ---------------------------------------------------------------------------
+
+;;; The one-argument arity used to hand `nil` to a parameter it declares as
+;;; `:seon.ns/name`, so `(sources text)` — the simplest probe of the reader
+;;; there is — refused under instrumentation while behaving identically to
+;;; `(sources text 'user)`, because `user` is already the reader's own
+;;; starting namespace (`seon.sci.reader/read`). The regression instruments
+;;; the declared contract LOCALLY, so it proves the arity without mutating a
+;;; var the shared worker JVM also runs other tests through.
+(deftest every-declared-arity-satisfies-its-own-contract
+  (let [projection (schema/build-projection (schema/registered-schemas))
+        checked (m/-instrument
+                 {:schema (:malli/schema (meta #'reply/sources))
+                  :scope #{:input :output}}
+                 reply/sources
+                 {:registry (:seon.schema.projection/registry projection)})
+        text ";; a note\n(def a 1)\n(inc a)"]
+    (is (= ["(def a 1)" "(inc a)"]
+           (mapv :seon.cluster.run.form/source (checked text)))
+        "the one-argument arity passes its own input contract")
+    (is (= (reply/sources text 'user) (checked text))
+        "and names the namespace the reader would have defaulted to anyway")
+    (is (= ["(def a 1)" "(inc a)"]
+           (mapv :seon.cluster.run.form/source (checked text 'my.gen.alpha)))
+        "as do the two- and three-argument arities")
+    (is (vector? (checked text 'my.gen.alpha (count text))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Refusals — flat values, never throws

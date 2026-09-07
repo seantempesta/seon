@@ -373,7 +373,15 @@
     whole text read as prose. Prose accompanying a form still rides
     that form's source as comments; prose ALONE is a refusal, because a
     plan source with no reader event settles no receipt and would close
-    the run with an unsettled form."
+    the run with an unsettled form.
+
+  THE ONE-ARGUMENT ARITY SUPPLIES `user` DELIBERATELY, because that is
+  already the reader's own starting namespace when none is handed to it
+  (`seon.sci.reader/read`, `(or namespace-name 'user)`). It used to pass
+  `nil` into a parameter declared `:seon.ns/name`, so the simplest probe
+  of the reader refused under instrumentation while the behaviour was
+  identical; naming the reader's default costs nothing and keeps the
+  contract honest. Every production caller passes the run's namespace."
   {:malli/schema
    [:function
     [:=> [:cat :seon.cluster.reply/text]
@@ -383,7 +391,7 @@
     [:=> [:cat :seon.cluster.reply/text :seon.ns/name
           :seon.config.eval.result/max-source]
      [:or :seon.cluster.reply/sources :seon.error/value]]]}
-  ([text] (sources text nil (count text)))
+  ([text] (sources text 'user (count text)))
   ([text namespace-name]
    (sources text namespace-name (count text)))
   ([text namespace-name max-source]
