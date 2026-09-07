@@ -277,14 +277,22 @@
        vec))
 
 (defn- unowned-namespaces
-  "Source-bearing program namespaces with no assigned agent."
+  "Source-bearing program namespaces with no steward.
+
+  OWNERSHIP IS THE NAMESPACE'S OWN `:seon.ns/steward` FACT, asserted inside
+  the creation transaction (`seon.cluster.agent/steward-call`) and read by
+  `seon.cluster.agent/steward-of`. This used to invert
+  `:seon.cluster.agent/namespace`, but that attribute is assignment, not
+  ownership: it is not unique, several agents may be assigned one namespace,
+  and a namespace every agent had merely been assigned still answered
+  \"owned\". Absence of a steward is what nobody can fake."
   [db]
   (->> (db/q '[:find [?name ...]
               :where
               [?namespace :seon.ns/name ?name]
               [?namespace :seon.ns/source _]
               (not [?namespace :seon.schema.admission/source :core])
-              (not [_ :seon.cluster.agent/namespace ?namespace])]
+              (not [?namespace :seon.ns/steward _])]
             db)
        sort
        (mapv (fn [namespace-name]

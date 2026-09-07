@@ -93,7 +93,12 @@
             "the first creator remains the steward; the second does not
             displace it")))))
 
-(deftest source-bearing-namespaces-without-owners-derive-one-problem-line
+;;; OWNERSHIP IS THE STEWARD FACT, AND ONLY THAT. The problem line used to
+;;; invert `:seon.cluster.agent/namespace`, which is assignment: it is not
+;;; unique, so `example.assigned` below — a namespace an agent merely works
+;;; in, that nobody stewards — answered "owned" and the problem the report
+;;; exists to raise went silent. That is the absence-reads-as-health class.
+(deftest source-bearing-namespaces-without-a-steward-derive-one-problem-line
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "test")
@@ -101,17 +106,33 @@
                   [{:seon.ns/name 'example.unowned
                     :seon.ns/source "(ns example.unowned)"
                     :seon.schema.admission/source :agent}
+                   {:seon.ns/name 'example.assigned
+                    :seon.ns/source "(ns example.assigned)"
+                    :seon.schema.admission/source :agent}
                    {:seon.ns/name 'example.owned
                     :seon.ns/source "(ns example.owned)"
                     :seon.schema.admission/source :agent}
                    {:seon.cluster.agent/id "owner"
                     :seon.cluster.agent/cluster [:seon.cluster/name "test"]
                     :seon.cluster.agent/namespace
-                    [:seon.ns/name 'example.owned]}])
+                    [:seon.ns/name 'example.owned]}
+                   {:seon.cluster.agent/id "worker"
+                    :seon.cluster.agent/cluster [:seon.cluster/name "test"]
+                    :seon.cluster.agent/namespace
+                    [:seon.ns/name 'example.assigned]}])
+      (db/transact! connection
+                  [[:db/add [:seon.ns/name 'example.owned] :seon.ns/steward
+                    [:seon.cluster.agent/id "owner"]]])
       (let [value (found connection)
             log-line (problems/log-report value)]
-        (is (= [{:seon.ns/name 'example.unowned}]
-               (:seon.problems/unowned-namespaces value)))
+        (is (= [{:seon.ns/name 'example.assigned}
+                {:seon.ns/name 'example.unowned}]
+               (:seon.problems/unowned-namespaces value))
+            "an assigned namespace nobody stewards is still unowned")
+        (is (= "owner" (agent/steward-of @connection 'example.owned)))
+        (is (nil? (agent/steward-of @connection 'example.assigned)))
         (is (str/includes? log-line
                            "unowned-namespace namespace=example.unowned"))
+        (is (str/includes? log-line
+                           "unowned-namespace namespace=example.assigned"))
         (is (not (str/includes? log-line "example.owned")))))))
