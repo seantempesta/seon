@@ -160,12 +160,28 @@
                 (when namespace-name (str "\nNamespace " namespace-name))
                 (when cluster-name (str "\nCluster   " cluster-name))))))))
 
+(def ^:private identity-source
+  "The identity unit's teaching comments and the one form that answers them."
+  (str ";; Who am I? Identity is not remembered — it is three attributes stored\n"
+       ";; on my own entity, and `whoami` reads them from the current database.\n"
+       (pr-str (list `whoami))))
+
 (defn render-identity-ai
   "Render the ordinary query that returns an agent's identity text."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/source]]}
   [unit]
   (when (:seon.cluster.agent/id unit)
-    (pr-str (list `whoami))))
+    identity-source))
+
+(defn render-id-ai
+  "Render the identity unit's source from the agent's own id attribute.
+
+  The unit's stored value is `:seon.cluster.agent/id` itself. The source runs
+  through the ordinary reply reader in the agent's fork, where call preparation
+  supplies both the database and the calling agent to [[whoami]]."
+  {:malli/schema [:=> [:cat :seon.cluster.agent/id] :seon.render/source]}
+  [_agent-id]
+  identity-source)
 
 (defn render-identity-html
   "Render an agent's id, namespace, and cluster as an identity card."
@@ -201,6 +217,30 @@
                    cluster-name
                    (conj [:div [:dt "Cluster"]
                           [:dd [:code cluster-name]]])))])))))
+
+(defn render-id-html
+  "Render the identity unit as a compact labeled card.
+
+  The unit's stored value is `:seon.cluster.agent/id`; call preparation
+  supplies the database, so the card reads id, namespace, and cluster from the
+  same three attributes [[whoami]] reads."
+  {:malli/schema [:=> [:cat :seon.cluster.agent/id :seon.db/database-value]
+                  :seon.render/hiccup]}
+  [agent-id database]
+  (let [rendered (render-identity-html {:seon.db/db database
+                                        :seon.cluster.agent/id agent-id})]
+    (cond
+      (:seon.error/kind rendered)
+      [:article {:class "seon-family-entry seon-agent-identity-entry"}
+       [:p {:class "seon-agent-identity-unavailable"}
+        (:seon.error/message rendered)]]
+
+      (nil? rendered)
+      [:article {:class "seon-family-entry seon-agent-identity-entry"}
+       [:p {:class "seon-agent-identity-unavailable"}
+        (str "No agent entity carries the id " (pr-str agent-id) ".")]]
+
+      :else rendered)))
 
 (defn render-situation-ai
   "Render the live situation as concise orientation for the agent.

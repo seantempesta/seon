@@ -88,6 +88,10 @@
                      [:string
                       {:min 1,
                        :seon.db/identity true,
+                       :seon.render/ai
+                       seon.cluster.agent/render-id-ai,
+                       :seon.render/html
+                       seon.cluster.agent/render-id-html,
                        :description
                        "The agent's identity: the name every message, run, and namespace assignment resolves it by."}],
                      :identity-request
