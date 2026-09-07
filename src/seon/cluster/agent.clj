@@ -76,6 +76,7 @@
             [seon.blob :as blob]
             [seon.env :as env]
             [seon.error :as error]
+            [seon.schema :as schema]
             [seon.flow :as seon.flow]
             [seon.schedule :as schedule]
             [seon.schema.edn :as schema.edn])
@@ -703,6 +704,8 @@
   [routing agent-id]
   (get-in @routing [::armed agent-id]))
 
+(declare submit-source-in-projection)
+
 (defn submit-source!
   "Submit system-authored source through the ordinary durable run path.
 
@@ -714,6 +717,16 @@
   {:malli/schema
    [:=> [:catn [:request :seon.cluster.agent/source-submission-request]]
     [:or :seon.cluster.agent/source-submission-result :seon.error/value]]}
+  [{handle :seon.cluster.loop/cluster :as request}]
+  ;; The submission thread otherwise pays the cold projection rebuild
+  ;; (measured 728 → 147 ms per source turn); the handle carries its world.
+  (if-let [projection-state (:seon.sci.eval/projection-state handle)]
+    (schema/call-with-projection-state
+     projection-state
+     #(submit-source-in-projection request))
+    (submit-source-in-projection request)))
+
+(defn- submit-source-in-projection
   [{handle :seon.cluster.loop/cluster
     routing :seon.cluster.agent/routing
     agent-id :seon.cluster.agent/id
