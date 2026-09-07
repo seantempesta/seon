@@ -1,0 +1,4 @@
+; Reproducible UI experiment: source forms execute, provider calls lack a key.
+{:seon.config/on-core-error :panic
+ :seon.config.ai/api-key-variable "SEON_DESIGN_LAB_NO_CREDENTIAL"
+ :seon.config.ai.backup/model :seon.config/absent}
