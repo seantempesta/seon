@@ -157,6 +157,9 @@ my.tools=> (println "hi")
   (`result-edn`/`result-blob`), never stored a second time; a clipped value
   carries its elision node with a requery form (ruling 63c, B4), so no
   `capped?` key. Ruling 45 holds: nothing comment-shaped.
+- The response is one datum. A wide value may wrap across lines by the
+  printer's width; every wrapped line is a continuation of that one map and
+  never comment-shaped (owner, 2026-09-07 afternoon).
 - A multi-form reply echoes per form, in the namespace in effect for that
   form (`evaluate-sources` already threads it). Comments sit above the prompt
   so a prompt line holds exactly one form and HTML can label the comment.
