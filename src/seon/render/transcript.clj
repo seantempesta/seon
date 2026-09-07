@@ -1014,7 +1014,8 @@
                                              :seon.config.eval.result/max-nodes]))
         candidates
         (history db (:seon.cluster.run/id unit) agent-id
-                 candidate-count)
+                 candidate-count (::selected-run-id unit)
+                 (:seon.context.contribution/evaluations unit))
         entries
         (mapv
          (fn [entry]

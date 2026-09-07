@@ -1103,6 +1103,12 @@
        (is (not (str/includes? rendered "Start with the failed deployment.")))
        (is (not (str/includes? rendered "Repair the owning namespace.")))
        (is (= rendered (transcript/render-ai selected)))
+       (let [entries (transcript/history-entries selected)]
+         (is (= 1 (count entries)))
+         (is (= "(+ 20 22)" (:seon.render.history/form (first entries))))
+         (is (= "42" (:seon.render.history/printed-value (first entries))))
+         (is (= [] (transcript/history-entries
+                    (assoc selected :seon.context.contribution/evaluations #{})))))
        (is (= basis (db/basis-t @connection))
            "projection neither evaluates the source nor persists a duplicate")
        (is (= "" (transcript/render-ai

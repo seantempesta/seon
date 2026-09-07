@@ -6,6 +6,25 @@ tags: [prd, agent, context, architecture]
 
 # The working edge — context-generation program
 
+## Integration checkpoint — 2026-09-06, provider-bound context
+
+The owner reiterated that the debug UI is an iteration surface for the actual
+context sent through the agent loop. Completion requires a real context request
+containing the selected structured evaluations, followed by a live agent using
+that context; paired previews alone are insufficient.
+
+Root found that `transcript/history-entries` ignored selected evaluation refs
+while `transcript/render-ai` honored them. Both now pass the same selection to
+the existing history query. The selected-evaluation regression also checks the
+structured source/result entries and an explicitly empty selection. Its focused
+gate is running; provider composition and memory-only preview integration are
+still unfinished. The edit-hook diagnostic gate passed 8 tests / 43 assertions.
+
+Personal browser inspection of the updated fixture found the new plan tasks in
+paired previews, but parent/dependency labels still expose numeric entity refs.
+Source adoption currently refuses a manifest contract; the operator lane is
+investigating. Do not infer that a file edit has reached the live cluster.
+
 ## Owner ruling — previews remain in memory, 2026-09-06
 
 The owner clarified that preview results are cached in memory, not persisted.
