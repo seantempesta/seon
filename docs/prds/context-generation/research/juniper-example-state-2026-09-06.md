@@ -11,6 +11,25 @@ Owner direction: use the visualization to change stored attributes, values,
 refs, and render functions together, then test the assembled context with live
 agents. Existing data placement is not a design constraint.
 
+## Server recovery checkpoint — 2026-09-07
+
+The same development server reopened at 01:30:23 UTC. Root personally inspected
+`tmp/juniper-refusal-fixed.png` and its text capture. HTTP 200, no browser errors,
+and the evaluated identity preview has a visible lock action. This is partial
+recovery: attribute cards still show busy-agent refusals, so paired preview
+acceptance remains incomplete.
+
+The shared refusal correction `f923496f9` preserves the classified exception's
+message when its data omits `:seon.error/message`; a legitimate busy response now
+satisfies the error contract instead of becoming an instrumentation fault.
+Its focused database/transaction checks passed 46 tests and 350 assertions.
+Execution-reference preservation is committed separately as `e4e302532`.
+Two subsequent live count probes both returned 241 runs and 1651 error-message
+entities; latest fault 39719 predates the correction (01:27:12 UTC). This short
+observation does not establish long-term stability. The owned root retains
+13.61 GiB of prior diagnostic history; cleanup awaits completion of the bounded
+preview correction so a reset does not hide the reproduction.
+
 ## Live verification checkpoint — 2026-09-07 01:12 UTC
 
 The owned development root is `tmp/juniper-context-live`, cluster
