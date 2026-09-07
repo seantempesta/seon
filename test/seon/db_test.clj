@@ -5,6 +5,7 @@
             [datahike.pull-api :as pull-api]
             [my.message :as message]
             [seon.config :as config]
+            [seon.cluster.run :as run]
             [seon.db :as db]
             [seon.instrument :as instrument]
             [seon.render :as render]
@@ -162,6 +163,41 @@
     :seon.error/diagnostic-cause
     :seon.error/diagnostic-evidence-availability
     :seon.error/diagnostic-evidence})
+
+(deftest transaction-wrappers-cannot-hide-a-classified-refusal
+  (test-support/with-database
+   (fn [connection]
+     (let [refusal {:seon.error/kind :seon.cluster.run/refused
+                    :seon.cluster.run/rule
+                    :seon.cluster.run/agent-already-running}
+           wrapped (ex-info "classified transition refusal"
+                            refusal
+                            (ex-info "transaction wrapper"
+                                     {:seon.cluster.run/id nil}))]
+       (with-redefs [d/transact (fn [& _] (throw wrapped))]
+         (is (= refusal (db/transact! connection []))
+             "a deeper unclassified wrapper cannot replace the refusal")))
+     (db/transact! connection
+                   [{:seon.cluster.agent/id "busy-agent"}])
+     (is (map? (db/transact!
+                connection
+                (run/open-tx
+                 {:seon.cluster.run/id "already-open"
+                  :seon.cluster.run/agent
+                  [:seon.cluster.agent/id "busy-agent"]
+                  :seon.cluster.run/opened-at (java.util.Date.)}))))
+     (let [result
+           (db/transact!
+            connection
+            (run/open-tx
+             {:seon.cluster.run/id "contending-run"
+              :seon.cluster.run/agent
+              [:seon.cluster.agent/id "busy-agent"]
+              :seon.cluster.run/opened-at (java.util.Date.)}))]
+       (is (= :seon.cluster.run/refused (:seon.error/kind result)))
+       (is (= :seon.cluster.run/agent-already-running
+              (:seon.cluster.run/rule result))
+           "real run contention preserves the rule needed by source preview")))))
 
 (deftest edn-backed-reads-return-distinguishable-logical-values
   (test-support/with-database
