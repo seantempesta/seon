@@ -156,6 +156,39 @@
            (context/comparison
             @connection
             (request "compact-agent" "compact-after" "compact-choice"))
+           memory-basis (db/basis-t @connection)
+           memory-request
+           (assoc (request "compact-agent" "not-persisted" "compact-choice")
+                  :seon.cluster.loop/evaluated-sources
+                  [{:seon.cluster.run.form/ordinal 0
+                    :seon.cluster.loop/admitted-form
+                    {:seon.cluster.run.form/source "(identity 1)"
+                     :seon.cluster.run.form/ns [:seon.ns/name 'compact.context]}
+                    :seon.sci.eval/evaluation
+                    {:seon.sci.admit/value 2 :seon.cluster.eval/result-edn "2"}}])
+           memory-comparison (context/comparison @connection memory-request)
+           _ (is (= memory-basis (db/basis-t @connection)))
+           _ (is (= :ready (:seon.context.comparison/status memory-comparison)))
+           _ (is (= expected (set (:seon.context.comparison/baseline-evaluations
+                                   memory-comparison))))
+           _ (is (= (:seon.cluster.loop/evaluated-sources memory-request)
+                    (:seon.cluster.loop/evaluated-sources memory-comparison)))
+           _ (is (= :seon.context/unfinished-evaluation
+                    (:seon.context/selection-refused
+                     (context/comparison
+                      @connection
+                      (update-in memory-request
+                                 [:seon.cluster.loop/evaluated-sources 0
+                                  :seon.sci.eval/evaluation]
+                                 dissoc :seon.cluster.eval/result-edn)))))
+           _ (is (= :different-source
+                    (:seon.context.comparison/status
+                     (context/comparison
+                      @connection
+                      (assoc-in memory-request
+                                [:seon.cluster.loop/evaluated-sources 0
+                                 :seon.cluster.loop/admitted-form :seon.cluster.run.form/ns]
+                                [:seon.ns/name 'another.context])))))
            committed
            (db/transact!
             connection

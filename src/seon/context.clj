@@ -278,10 +278,10 @@
                        database run-eid))))
 
 (defn comparison
-  "Compare a locked contribution with a refreshed run of the same form source.
+  "Compare assembled context with current evaluations of the same source.
 
-  Returns evaluation refs only. An open refreshed run is explicitly pending;
-  different ordered source or namespace facts are explicitly distinguished."
+  Accept cached evaluations or a saved run. Different ordered source or
+  namespace facts are explicitly distinguished; nothing is evaluated here."
   {:malli/schema
    [:=> [:catn [:database :seon.db/database-value]
                 [:request :seon.context/comparison-request]]
@@ -289,6 +289,8 @@
   [database request]
   (let [agent-id (:seon.cluster.agent/id request)
         run-id (:seon.cluster.run/id request)
+        evaluated-sources (:seon.cluster.loop/evaluated-sources request)
+        in-memory? (some? evaluated-sources)
         contribution-id (:seon.context.contribution/id request)
         contribution
         (db/pull database
@@ -299,10 +301,10 @@
         agent-data (db/pull database [:db/id]
                        [:seon.cluster.agent/id agent-id])
         refreshed
-        (db/pull database
+        (when-not in-memory? (db/pull database
                  [:db/id :seon.cluster.run/closed-at
                  {:seon.cluster.run/agent [:db/id]}]
-                 [:seon.cluster.run/id run-id])
+                 [:seon.cluster.run/id run-id]))
         eligibility (when (:seon.cluster.run/closed-at refreshed)
                       (eligible-run database request))
         baseline-runs
@@ -318,30 +320,45 @@
                      (get-in contribution
                              [:seon.context.contribution/agent :db/id]))
                ::foreign-contribution
-               (nil? refreshed) ::no-such-run
-               (not= (:db/id agent-data)
-                     (get-in refreshed [:seon.cluster.run/agent :db/id]))
+               (and (not in-memory?) (nil? refreshed)) ::no-such-run
+               (and (not in-memory?)
+                    (not= (:db/id agent-data)
+                          (get-in refreshed [:seon.cluster.run/agent :db/id])))
                ::foreign-run
                (not= 1 (count baseline-runs)) ::contribution-run-ambiguous
+               (and in-memory?
+                    (not-every? #(run/terminal? (:seon.sci.eval/evaluation %))
+                                evaluated-sources))
+               ::unfinished-evaluation
                (:rule eligibility) (:rule eligibility))]
     (cond
       (map? rule) rule
       rule (selection-refusal rule request
                               {:seon.context.contribution/id contribution-id
                                :seon.cluster.run/id run-id})
-      (not (:seon.cluster.run/closed-at refreshed))
+      (and (not in-memory?) (not (:seon.cluster.run/closed-at refreshed)))
       {:seon.context.comparison/status :pending}
       :else
       (let [baseline-run (first baseline-runs)
-            same-source? (= (ordered-run-source database baseline-run)
-                            (ordered-run-source database (:db/id refreshed)))]
+            current-source
+            (if in-memory?
+              (mapv (fn [{ordinal :seon.cluster.run.form/ordinal
+                          form :seon.cluster.loop/admitted-form}]
+                      {:seon.cluster.run.form/ordinal ordinal
+                       :seon.cluster.run.form/source (:seon.cluster.run.form/source form)
+                       :seon.ns/name (second (:seon.cluster.run.form/ns form))})
+                    evaluated-sources)
+              (ordered-run-source database (:db/id refreshed)))
+            same-source? (= (ordered-run-source database baseline-run) current-source)]
         (if-not same-source?
           {:seon.context.comparison/status :different-source}
-          {:seon.context.comparison/status :ready
+          (cond-> {:seon.context.comparison/status :ready
            :seon.context.comparison/baseline-evaluations
-           (ordered-run-evaluations database baseline-run)
-           :seon.context.comparison/refreshed-evaluations
-           (ordered-run-evaluations database (:db/id refreshed))})))))
+           (ordered-run-evaluations database baseline-run)}
+            in-memory? (assoc :seon.cluster.loop/evaluated-sources evaluated-sources)
+            (not in-memory?)
+            (assoc :seon.context.comparison/refreshed-evaluations
+                   (ordered-run-evaluations database (:db/id refreshed)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Message custody in one run's rendered context
