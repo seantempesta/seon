@@ -635,6 +635,66 @@
              (= :my.plan.item/id (first reference)))
     (second reference)))
 
+(def ^:private comparable-selector
+  '[:my.plan.item/id
+    :my.plan.item/position
+    :my.plan.item/title
+    :my.plan.item/description
+    :my.plan.item/expected-result
+    :my.plan.item/completed-at
+    :my.plan.item/about
+    {:my.plan.item/needs [:my.plan.item/id]}
+    {:my.plan.item/steps [:my.plan.item/id]}])
+
+(defn- comparable
+  [position title description expected completed-at about parent needs]
+  {::position position
+   ::title title
+   ::description description
+   ::expected expected
+   ::completed-at completed-at
+   ::about about
+   ::parent parent
+   ::needs needs})
+
+(defn- stored-comparables
+  "The current authored content of each owned step, keyed by identity."
+  [database ids]
+  (let [rows (db/pull-many database comparable-selector
+                           (mapv (fn [id] [:my.plan.item/id id]) (sort ids)))
+        rows (if (error-value? rows) [] rows)
+        parents (into {}
+                      (mapcat (fn [row]
+                                (map (fn [child]
+                                       [(:my.plan.item/id child)
+                                        (:my.plan.item/id row)])
+                                     (:my.plan.item/steps row))))
+                      rows)]
+    (into {}
+          (map (fn [row]
+                 [(:my.plan.item/id row)
+                  (comparable (:my.plan.item/position row)
+                              (:my.plan.item/title row)
+                              (:my.plan.item/description row)
+                              (:my.plan.item/expected-result row)
+                              (:my.plan.item/completed-at row)
+                              (:my.plan.item/about row)
+                              (get parents (:my.plan.item/id row))
+                              (into #{} (map :my.plan.item/id)
+                                    (:my.plan.item/needs row)))]))
+          rows)))
+
+(defn- entry-comparable
+  [entry needs-by-id]
+  (comparable (:my.plan.item/position entry)
+              (:my.plan.item/title entry)
+              (:my.plan.item/description entry)
+              (:my.plan.item/expected-result entry)
+              (:my.plan.item/completed-at entry)
+              (:my.plan.item/about entry)
+              (::parent-id entry)
+              (set (get needs-by-id (:my.plan.item/id entry)))))
+
 (defn- compile-tree
   [database agent-id input]
   (let [agent-entity (agent-eid database agent-id)]
@@ -739,11 +799,32 @@
                              database agent-entity))
               [[:db/retract agent-entity :my.plan/current-step]])
             added (count (remove #(contains? existing (:my.plan.item/id %))
-                                 entries))]
+                                 entries))
+            stored (stored-comparables database existing)
+            changed (count
+                     (filter (fn [entry]
+                               (let [id (:my.plan.item/id entry)]
+                                 (and (contains? stored id)
+                                      (not= (get stored id)
+                                            (entry-comparable
+                                             entry needs-by-id)))))
+                             entries))]
         {::tx-data (vec (concat step-maps [agent-map] scalars
                                 (or clear-current []) retractions))
+         ::converged? (and (zero? added)
+                           (zero? changed)
+                           (zero? (count retractions))
+                           (empty? scalars)
+                           (nil? clear-current)
+                           (= current
+                              (db/q '[:find ?id .
+                                      :in $ ?agent
+                                      :where
+                                      [?agent :my.plan/current-step ?step]
+                                      [?step :my.plan.item/id ?id]]
+                                    database agent-entity)))
          ::diff {:my.plan/added added
-                 :my.plan/changed (- (count entries) added)
+                 :my.plan/changed changed
                  :my.plan/retracted (count retractions)}}))))
 
 (defn plan!
@@ -763,18 +844,22 @@
   [input database connection agent-id]
   (try
     (let [compiled (compile-tree database agent-id input)
-          tx-data (::tx-data compiled)
-          basis (db/basis-t database)
-          result (db/transact!
-                  connection
-                  {:tx-data tx-data
-                   :datahike/expected-basis-t basis
-                   :tx-meta {:seon.db/user [:seon.cluster.agent/id agent-id]}})]
-      (if (error-value? result)
-        result
-        {:my.plan/converged? false
+          basis (db/basis-t database)]
+      (if (::converged? compiled)
+        {:my.plan/converged? true
          :my.plan/basis-t basis
-         :my.plan/diff (::diff compiled)}))
+         :my.plan/diff (::diff compiled)}
+        (let [result
+              (db/transact!
+               connection
+               {:tx-data (::tx-data compiled)
+                :datahike/expected-basis-t basis
+                :tx-meta {:seon.db/user [:seon.cluster.agent/id agent-id]}})]
+          (if (error-value? result)
+            result
+            {:my.plan/converged? false
+             :my.plan/basis-t basis
+             :my.plan/diff (::diff compiled)}))))
     (catch clojure.lang.ExceptionInfo failure
       (flat-refusal failure))))
 

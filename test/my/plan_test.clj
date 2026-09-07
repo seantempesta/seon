@@ -308,9 +308,16 @@
                     {:my.plan/steps [{:my.plan.item/id "root"
                                       :my.plan.item/title "Improve the plan"}]}
                     @connection connection "alice")]
-        (is (= {:my.plan/added 0 :my.plan/changed 1 :my.plan/retracted 1}
-               (:my.plan/diff result)))
-        (is (= ["root"] (ids (:my.plan/steps (plan-of connection)))))))))
+        (is (= {:my.plan/added 0 :my.plan/changed 0 :my.plan/retracted 1}
+               (:my.plan/diff result))
+            "an unchanged step is not counted as changed")
+        (is (= ["root"] (ids (:my.plan/steps (plan-of connection)))))
+        (is (:my.plan/converged?
+             (plan/plan!
+              {:my.plan/steps [{:my.plan.item/id "root"
+                                :my.plan.item/title "Improve the plan"}]}
+              @connection connection "alice"))
+            "reconciling the same tree again writes nothing")))))
 
 (deftest ready-subjects-resolve-from-the-component-tree
   (with-plan

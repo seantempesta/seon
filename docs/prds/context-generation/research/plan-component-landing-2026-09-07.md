@@ -98,7 +98,13 @@ seon.cluster.message/render-inbox-ai whose declared input
 :seon.cluster.message/inbox-value does not accept the declaring shape.` That is
 the messages/units lane hitting the SAME coherence constraint described above;
 the fix there is the same one: declare the attribute key itself as the
-producer's first input. It blocks verification, not this lane's commits.
+producer's first input. It blocked verification, not this lane's commits, and
+cleared on its own by 05:10.
+
+`seon.render-simplification-test/authored-source-invocation-reuses-one-stored-run-across-presentations`
+was red at 04:55 (`:seon.render.call/source-run-id` nil). It names no plan
+attribute or function and belongs to the render source-run cache, not this
+lane.
 
 ## Exact AI text for the example fixture
 
@@ -309,6 +315,6 @@ Produced by `my.plan/render-plan-html`, pretty-printed by
 
 ```text
 bin/test my.plan-test
-Ran 17 tests containing 148 assertions.
+Ran 17 tests containing 146 assertions.
 0 failures, 0 errors.
 ```
