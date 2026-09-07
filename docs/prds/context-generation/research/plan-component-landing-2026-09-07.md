@@ -102,9 +102,18 @@ producer's first input. It blocked verification, not this lane's commits, and
 cleared on its own by 05:10.
 
 `seon.render-simplification-test/authored-source-invocation-reuses-one-stored-run-across-presentations`
-was red at 04:55 (`:seon.render.call/source-run-id` nil). It names no plan
-attribute or function and belongs to the render source-run cache, not this
-lane.
+was red at 04:55 and again at 05:20 (`:seon.render.call/source-run-id` nil,
+`:seon.render.web/evaluator-absent`). It names no plan attribute or function and
+belongs to the render source-run cache, not this lane.
+
+`seon.render-simplification-test/non-rendering-more-specific-schema-does-not-shadow-agent-identity`
+was red at 05:20 because `seon.cluster.agent/render-identity-ai` now prefixes
+two thinking comment lines while the test still expects the bare
+`(seon.cluster.agent/whoami)` string. That is the agent-units lane, not this one.
+
+Green at the same run: `seon.bootstrap-test`, `seon.call-preparation-test`,
+`seon.schema.datahike-test` (54 tests, 359 assertions with the two
+render-simplification reds above as the only failures).
 
 ## Exact AI text for the example fixture
 
