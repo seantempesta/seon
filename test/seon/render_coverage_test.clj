@@ -9,6 +9,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
+            [seon.repl :as repl]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
             [seon.render.walk :as walk]
@@ -200,8 +201,8 @@
          (select-keys
           (family-properties :seon.cluster.agent/creation-result)
           [:seon.render/ai :seon.render/html])))
-  (is (= {:seon.render/ai `run/render-receipt-ai
-          :seon.render/html `run/render-receipt-html}
+  (is (= {:seon.render/ai `repl/render-ai
+          :seon.render/html `repl/render-html}
          (select-keys (family-properties :seon.cluster.eval/receipt)
                       [:seon.render/ai :seon.render/html])))
   (is (= {:seon.render/ai `cluster/render-ai

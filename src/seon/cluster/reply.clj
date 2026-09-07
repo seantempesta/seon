@@ -249,22 +249,30 @@
            remaining (seq code-events)
            forms []]
       (if-let [{::keys [start end ns] form-source ::source} (first remaining)]
-        (let [prose (comment-source (subs source cursor start))
-              plan-source (str (when-not (str/blank? prose)
-                                 (str prose "\n"))
-                               form-source)]
+        (let [prose (comment-source (subs source cursor start))]
           (recur end (next remaining)
                  (conj forms
-                       (cond-> {:seon.cluster.run.form/source plan-source}
+                       (cond-> {:seon.cluster.run.form/source form-source}
+                         (not (str/blank? prose))
+                         (assoc :seon.cluster.eval/comment prose)
                          ns (assoc :seon.ns/name ns)))))
-        ;; TRAILING PROSE RIDES THE FORM IT FOLLOWS. It used to become its
-        ;; own comment-only plan source, which is the shape that recorded a
-        ;; form row no receipt could ever settle.
+        ;; THE PROSE AND THE FORM ARE TWO FACTS, NOT ONE STRING. They used to
+        ;; be concatenated, which put the agent's comment on the prompt line
+        ;; and made a prompt hold more than the one form it prompts for.
+        ;;
+        ;; TRAILING PROSE STILL RIDES THE FORM IT FOLLOWS, now into that
+        ;; form's comment. Prose alone was once its own plan source, which is
+        ;; the shape that recorded a form row no receipt could ever settle.
         (let [prose (comment-source (subs source cursor))]
           (cond-> forms
             (and (seq forms) (not (str/blank? prose)))
             (update (dec (count forms))
-                    update :seon.cluster.run.form/source str "\n" prose)))))))
+                    (fn [form]
+                      (assoc form :seon.cluster.eval/comment
+                             (if-some [existing (:seon.cluster.eval/comment
+                                                 form)]
+                               (str existing "\n" prose)
+                               prose))))))))))
 
 (defn- no-forms-message
   "Name what the reply carried instead of forms."

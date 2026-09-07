@@ -16,6 +16,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
+            [seon.repl :as repl]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
 
@@ -187,13 +188,13 @@
               :seon.print/value :text}
              {:seon.print/face :seon.print/string
               :seon.print/value "alpha\nbeta"}]]})}])
-      (let [receipt-render run/render-receipt-ai
+      (let [receipt-render repl/response
             receipt-calls (atom 0)
             rendered
             (with-redefs [render/render-call
                           (fn [_]
                             (throw (ex-info "stored result rediscovered a renderer" {})))
-                          run/render-receipt-ai
+                          repl/response
                           (fn [unit]
                             (swap! receipt-calls inc)
                             (receipt-render unit))]

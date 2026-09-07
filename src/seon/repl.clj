@@ -175,3 +175,78 @@
     (str (when (seq prose) (str (str/trim-newline prose) "\n"))
          (or prompt-ns 'user) "=> " source
          (when answer (str "\n" answer)))))
+
+;;; ---------------------------------------------------------------------------
+;;; The evaluation entity's two projections
+;;;
+;;; Both are the same bytes by construction: `/html` labels the comment and
+;;; the response, and `/ai` is the text the agent reads. Neither invents a
+;;; second grammar, because both call `text`/`response`.
+;;; ---------------------------------------------------------------------------
+
+(defn entity-emission
+  "One pulled evaluation entity as an emission this namespace can render.
+
+  The prompt namespace is the evaluation's own `:seon.cluster.eval/ns` when
+  the pull reached its name; an unreached namespace prints as `user`, which
+  is what a REPL with no namespace in effect is called."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.repl/emission]}
+  [unit]
+  (cond-> (select-keys unit [:seon.cluster.eval/source
+                             :seon.cluster.eval/comment
+                             :seon.cluster.eval/ordinal
+                             :seon.cluster.eval/result-edn
+                             :seon.cluster.eval/error
+                             :seon.cluster.eval/triage-edn
+                             :seon.cluster.eval/output
+                             :seon.sci.eval/ending-ns
+                             :seon.eval/duration-ms
+                             :seon.print/options])
+    ;; ONE ENTITY, TWO SPELLINGS DURING THE MERGE. A frozen form and its
+    ;; evaluation are becoming one entity per (run, ordinal); until the form
+    ;; family is gone, either attribute names the same source, and neither
+    ;; renders through a second grammar.
+    (and (nil? (:seon.cluster.eval/source unit))
+         (:seon.cluster.run.form/source unit))
+    (assoc :seon.cluster.eval/source (:seon.cluster.run.form/source unit))
+
+    (and (nil? (:seon.cluster.eval/ordinal unit))
+         (:seon.cluster.run.form/ordinal unit))
+    (assoc :seon.cluster.eval/ordinal (:seon.cluster.run.form/ordinal unit))
+
+    (get-in unit [:seon.cluster.eval/ns :seon.ns/name])
+    (assoc :seon.ns/name (get-in unit [:seon.cluster.eval/ns :seon.ns/name]))
+
+    (get-in unit [:seon.cluster.run.form/ns :seon.ns/name])
+    (assoc :seon.ns/name
+           (get-in unit [:seon.cluster.run.form/ns :seon.ns/name]))))
+
+(defn render-ai
+  "`:seon.render/ai` — one evaluation, as the REPL session it was."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  [unit]
+  (let [emission (entity-emission unit)]
+    (when (seq (:seon.cluster.eval/source emission))
+      (text emission))))
+
+(defn render-html
+  "`:seon.render/html` — the same evaluation, with the comment labeled.
+
+  The comment is its own element rather than a line of the prompt, which is
+  the whole reason it is stored apart from the source it introduces."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/hiccup]]}
+  [unit]
+  (let [emission (entity-emission unit)
+        prose (:seon.cluster.eval/comment emission)
+        answer (response emission)]
+    (when (seq (:seon.cluster.eval/source emission))
+      (into [:article {:class "seon-family-entry seon-eval-entry"}]
+            (cond-> []
+              (seq prose)
+              (conj [:p {:class "seon-eval-comment"} prose])
+              :always
+              (conj [:pre [:code {:class "seon-eval-prompt"}
+                           (str (or (:seon.ns/name emission) 'user) "=> "
+                                (:seon.cluster.eval/source emission))]])
+              answer
+              (conj [:pre [:code {:class "seon-eval-response"} answer]]))))))

@@ -91,17 +91,23 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest the-source-is-exactly-what-the-agent-wrote
-  (testing "including the comment that precedes a form"
-    (is (= [";; a note\n(def a 1)" "(inc a)"]
-           (sources ";; a note\n(def a 1)\n(inc a)"))))
+  (testing "the comment that precedes a form is its own fact beside it"
+    (is (= ["(def a 1)" "(inc a)"]
+           (sources ";; a note\n(def a 1)\n(inc a)"))
+        "a prompt line holds exactly the one form it prompts for")
+    (is (= [";; a note" nil]
+           (mapv :seon.cluster.eval/comment
+                 (reply/sources ";; a note\n(def a 1)\n(inc a)")))))
   (testing "and nesting, whitespace and strings containing parens"
     (is (= ["(println \"a ) b\")" "(inc 1)"]
            (sources "(println \"a ) b\")\n(inc 1)")))
     (is (= ["(defn f [x]\n  (let [y (* x 2)]\n    {:y y}))"]
            (sources "(defn f [x]\n  (let [y (* x 2)]\n    {:y y}))"))))
   (testing "parenthesized code mentioned in prose is still prose"
-    (is (= ["; I will run (+ 1 2) now.\n(+ 1 2)"]
-           (sources "I will run (+ 1 2) now.\n(+ 1 2)")))))
+    (is (= ["(+ 1 2)"] (sources "I will run (+ 1 2) now.\n(+ 1 2)")))
+    (is (= ["; I will run (+ 1 2) now."]
+           (mapv :seon.cluster.eval/comment
+                 (reply/sources "I will run (+ 1 2) now.\n(+ 1 2)"))))))
 
 (deftest crlf-events-stay-within-the-original-reply
   (let [text "; 😀 note\r\n(+ 1 2)\r\n"
@@ -111,8 +117,9 @@
       (let [{::reply/keys [source start end]} event]
         (is (= source (subs text start end)))
         (is (<= start end (count text)))))
-    (is (= ["; 😀 note\r\n(+ 1 2)"]
-           (sources text)))))
+    (is (= ["(+ 1 2)"] (sources text)))
+    (is (= ["; 😀 note"]
+           (mapv :seon.cluster.eval/comment (reply/sources text))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Forms and prose — comments record text, only forms run
@@ -142,27 +149,32 @@
                     "Then I will finish.\n"
                     "(my.run/complete \"3\")\n"
                     "That is all.")]
-      (is (= ["; First I will add the values.\n(+ 1 2)"
-              "; Then I will finish.\n(my.run/complete \"3\")\n; That is all."]
-             (sources text)))))
+      (is (= ["(+ 1 2)" "(my.run/complete \"3\")"] (sources text)))
+      (is (= ["; First I will add the values."
+              "; Then I will finish.\n; That is all."]
+             (mapv :seon.cluster.eval/comment (reply/sources text)))
+          "trailing prose still rides the form it follows, as its comment")))
 
   (testing "the live word-salad reply freezes one form, not its 22 prose tokens"
     (let [text (str "I defined a function to sum integers from 1 to n, "
                     "called it with 10 to get 55, and reported the action.\n"
                     "(my.run/complete \"reported\")")
           result (sources text)]
+      (is (= ["(my.run/complete \"reported\")"] result))
       (is (= [(str "; I defined a function to sum integers from 1 to n, "
-                   "called it with 10 to get 55, and reported the action.\n"
-                   "(my.run/complete \"reported\")")]
-             result))
+                   "called it with 10 to get 55, and reported the action.")]
+             (mapv :seon.cluster.eval/comment (reply/sources text))))
       (is (= '(my.run/complete "reported") (read-back (first result))))
       (is (not-any? #{"I" "defined" "1" "10" "get" "55"} result)
           "none of the live prose tokens becomes its own plan source")))
 
   (testing "invalid prose tokens are comments while a same-line form survives"
-    (is (= ["; denied /etc/hosts now.\n(my.run/complete \"denied\")"]
-           (sources
-            "denied /etc/hosts now.(my.run/complete \"denied\")")))))
+    (is (= ["(my.run/complete \"denied\")"]
+           (sources "denied /etc/hosts now.(my.run/complete \"denied\")")))
+    (is (= ["; denied /etc/hosts now."]
+           (mapv :seon.cluster.eval/comment
+                 (reply/sources
+                  "denied /etc/hosts now.(my.run/complete \"denied\")"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Attribution — the reader's namespace-in-effect, projected verbatim
@@ -193,7 +205,8 @@
   (testing "prose carried into a form does not disturb attribution"
     (is (= [{:seon.cluster.run.form/source "(ns my.gen.alpha)"
              :seon.ns/name 'user}
-            {:seon.cluster.run.form/source "; Now the function.\n(defn f [] 1)"
+            {:seon.cluster.run.form/source "(defn f [] 1)"
+             :seon.cluster.eval/comment "; Now the function."
              :seon.ns/name 'my.gen.alpha}]
            (reply/sources
             "(ns my.gen.alpha)\nNow the function.\n(defn f [] 1)"))))
@@ -253,16 +266,19 @@
                    :seon.cluster.reply/refused-tag-error))))
 
 (deftest a-fenced-reply-retains-surrounding-prose-as-comments
-  (is (= ["; Sure — here is the plan.\n\n(def a 1)"
-          "(my.run/complete \"done\")\n; Let me know if that works."]
-         (sources
-          (str "Sure — here is the plan.\n\n"
-               "```clojure\n(def a 1)\n(my.run/complete \"done\")\n```\n\n"
-               "Let me know if that works.")))))
+  (let [text (str "Sure — here is the plan.\n\n"
+                  "```clojure\n(def a 1)\n(my.run/complete \"done\")\n```\n\n"
+                  "Let me know if that works.")]
+    (is (= ["(def a 1)" "(my.run/complete \"done\")"] (sources text)))
+    (is (= ["; Sure — here is the plan." "; Let me know if that works."]
+           (mapv :seon.cluster.eval/comment (reply/sources text)))
+        "the prose is retained as each form's own comment, not glued to it")))
 
 (deftest tilde-fences-have-the-same-presentation-semantics
-  (is (= ["; Here:\n(+ 1 2)\n; Done."]
-         (sources "Here:\n~~~clojure\n(+ 1 2)\n~~~\nDone."))))
+  (let [text "Here:\n~~~clojure\n(+ 1 2)\n~~~\nDone."]
+    (is (= ["(+ 1 2)"] (sources text)))
+    (is (= ["; Here:\n; Done."]
+           (mapv :seon.cluster.eval/comment (reply/sources text))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The class: a plan source the reader finds no event in

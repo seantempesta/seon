@@ -900,14 +900,17 @@
            (mapcat
             (fn [ordinal source]
               (receipt-start-tx
-               {::id run-id
-                :seon.cluster.eval/ordinal (long ordinal)
-                :seon.cluster.eval/at opened-at
-                :seon.cluster.eval/source
-                (:seon.cluster.run.form/source source)
-                :seon.cluster.eval/ns
-                [:seon.ns/name
-                 (or (:seon.ns/name source) starting-namespace)]}))
+               (cond-> {::id run-id
+                        :seon.cluster.eval/ordinal (long ordinal)
+                        :seon.cluster.eval/at opened-at
+                        :seon.cluster.eval/source
+                        (:seon.cluster.run.form/source source)
+                        :seon.cluster.eval/ns
+                        [:seon.ns/name
+                         (or (:seon.ns/name source) starting-namespace)]}
+                 (:seon.cluster.eval/comment source)
+                 (assoc :seon.cluster.eval/comment
+                        (:seon.cluster.eval/comment source)))))
             (range) sources)))))
 
 (defn append-generated-call
@@ -926,6 +929,7 @@
          receipt-at :seon.cluster.eval/at
          ordinal :seon.cluster.run.form/ordinal
          source :seon.cluster.run.form/source
+         comment :seon.cluster.eval/comment
          namespace-name :seon.ns/name} request
         held (held-run db `append-generated-call request)
         run-eid (:db/id held)
@@ -973,11 +977,12 @@
         [:db/add run-eid ::forms form-id]]
        (receipt-start-call
         db
-        {::id id
-         :seon.cluster.eval/ordinal ordinal
-         :seon.cluster.eval/at receipt-at
-         :seon.cluster.eval/source source
-         :seon.cluster.eval/ns [:seon.ns/name namespace-name]})))))
+        (cond-> {::id id
+                  :seon.cluster.eval/ordinal ordinal
+                  :seon.cluster.eval/at receipt-at
+                  :seon.cluster.eval/source source
+                  :seon.cluster.eval/ns [:seon.ns/name namespace-name]}
+           comment (assoc :seon.cluster.eval/comment comment)))))))
 
 (defn append-generated-tx
   "Transaction data appending one dependency-ready generated form."
@@ -1182,6 +1187,8 @@
                [:seon.cluster.eval/at :seon.cluster.eval/at]
                [:seon.cluster.eval/source {:optional true}
                 :seon.cluster.eval/source]
+               [:seon.cluster.eval/comment {:optional true}
+                :seon.cluster.eval/comment]
                [:seon.cluster.eval/ns {:optional true}
                 :seon.cluster.eval/ns]]]
     [:vector :some]]}
@@ -1191,7 +1198,7 @@
 (defn- receipt-row
   [run-eid request]
   (let [{::keys [id]
-         :seon.cluster.eval/keys [ordinal at source ns]} request
+         :seon.cluster.eval/keys [ordinal at source ns comment]} request
         receipt-id (receipt-identity id ordinal)]
     (cond-> {:db/id receipt-id
              :seon.cluster.eval/id receipt-id
@@ -1199,6 +1206,9 @@
              :seon.cluster.eval/ordinal ordinal
              :seon.cluster.eval/at at}
       source (assoc :seon.cluster.eval/source source)
+      ;; The agent's prose is its own fact beside the source it introduces,
+      ;; so a prompt line holds exactly the one form it prompts for.
+      comment (assoc :seon.cluster.eval/comment comment)
       ns (assoc :seon.cluster.eval/ns ns))))
 
 (defn receipt-start-call
@@ -1214,6 +1224,8 @@
           [:seon.cluster.eval/at :seon.cluster.eval/at]
           [:seon.cluster.eval/source {:optional true}
            :seon.cluster.eval/source]
+          [:seon.cluster.eval/comment {:optional true}
+           :seon.cluster.eval/comment]
           [:seon.cluster.eval/ns {:optional true}
            :seon.cluster.eval/ns]]]
     [:vector :some]]}
@@ -2338,64 +2350,6 @@
   [unit]
   (when-let [text (render-ai unit)]
     [:article {:class "seon-family-entry seon-run-entry"}
-     [:p text]]))
-
-(defn render-form-ai
-  "`:seon.render/ai` — one planned form, as the agent wrote it."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
-  [unit]
-  (when-let [source (get unit :seon.cluster.run.form/source)]
-    (str "Form " (get unit :seon.cluster.run.form/ordinal) ": " source)))
-
-(defn render-form-html
-  "`:seon.render/html` — one form, with the same facts as its AI twin."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:maybe :seon.render/hiccup]]}
-  [unit]
-  (when-let [text (render-form-ai unit)]
-    [:article {:class "seon-family-entry seon-form-entry"}
-     [:p text]]))
-
-(defn render-receipt-ai
-  "`:seon.render/ai` — the exact output and bare result of one form.
-
-  Printed output precedes the result. Failures reconstruct Clojure's
-  standard concise REPL error from the recorded `ex-triage` data.
-  A receipt with no terminal value says nothing: a running REPL has not
-  printed a result, and recovery interruption is not English narration."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
-  [unit]
-  (let [result (get unit :seon.cluster.eval/result-edn)
-        output (get unit :seon.cluster.eval/output)
-        triage-edn (get unit :seon.cluster.eval/triage-edn)
-        error
-        (when (get unit :seon.cluster.eval/error)
-          (or
-           (when triage-edn
-             (try
-               (-> triage-edn
-                   edn/read-string
-                   main/ex-str
-                   str/trim-newline)
-               (catch Throwable _
-                 nil)))
-           (get unit :seon.cluster.eval/error)))
-        terminal (or error result)]
-    (when (or (seq output) (some? terminal))
-      (str output
-           (when (and (seq output)
-                      (some? terminal)
-                      (not (str/ends-with? output "\n")))
-             "\n")
-           terminal))))
-
-(defn render-receipt-html
-  "`:seon.render/html` — one receipt, with the same facts as its AI twin."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:maybe :seon.render/hiccup]]}
-  [unit]
-  (when-let [text (render-receipt-ai unit)]
-    [:article {:class "seon-family-entry seon-receipt-entry"}
      [:p text]]))
 
 ;;; ---------------------------------------------------------------------------

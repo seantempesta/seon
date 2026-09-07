@@ -22,6 +22,9 @@
                      :seon.cluster.run.form/ordinal]
                     [:seon.cluster.run.form/source
                      :seon.cluster.run.form/source]
+                    [:seon.cluster.eval/comment
+                     {:optional true}
+                     :seon.cluster.eval/comment]
                     [:seon.ns/name :seon.ns/name]],
                    :generation-complete-request
                    [:map

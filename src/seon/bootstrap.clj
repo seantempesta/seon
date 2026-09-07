@@ -116,12 +116,20 @@
        "it once, query its stored :seon.fn/spec, then complete with a short "
        "reply naming what you built and its contract."))
 
-(defn entry-source
-  "Render one comment/form entry as ordinary reader source."
-  {:malli/schema [:=> [:cat :seon.repl/entry]
-                  :seon.cluster.run.form/source]}
-  [{comment :seon.repl/comment form :seon.repl/form}]
-  (str (when comment (str comment "\n")) (pr-str form)))
+(defn- entry-form-source
+  "The reader source of one entry's FORM, without its comment.
+
+  The comment is a fact beside the source, not part of it: a prompt line
+  holds exactly the one form it prompts for, and the stored source is what
+  the reader read. This is also the string a stored generated form is
+  compared against, so the two must be derived the same way."
+  [{form :seon.repl/form}]
+  (pr-str form))
+
+(defn- entry-cost-source
+  "Everything one entry costs the agent to read: its comment and its form."
+  [{comment :seon.repl/comment :as entry}]
+  (str (when comment (str comment "\n")) (entry-form-source entry)))
 
 (defn- entries
   [rendered]
@@ -396,7 +404,7 @@
 (defn- candidate-cost
   [candidate]
   (long (or (tokens/estimate
-             (entry-source (:seon.repl/entry candidate)))
+             (entry-cost-source (:seon.repl/entry candidate)))
             0)))
 
 (defn- restrict-acquisition
@@ -561,7 +569,8 @@
                     (:seon.repl/candidates pull)))
             candidate-by-source
             (reduce (fn [by-source candidate]
-                      (let [source (entry-source (:seon.repl/entry candidate))]
+                      (let [source (entry-form-source
+                                    (:seon.repl/entry candidate))]
                         ;; Identical structural reads can explain several pulled
                         ;; members. Candidate order is already stable; retain its
                         ;; first subject so receipts have one deterministic key.
@@ -592,7 +601,7 @@
                                          :seon.repl/settled settled))
             index (count rows)
             prior-sources (mapv second rows)
-            expected-sources (mapv entry-source (take index episode))]
+            expected-sources (mapv entry-form-source (take index episode))]
         (when-not (= prior-sources expected-sources)
           (let [message
                 (str "The generated opening prefix differs from its receipts: expected "

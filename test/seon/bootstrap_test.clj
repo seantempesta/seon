@@ -103,7 +103,7 @@
         (is (not-any? #(= 'outside.pull (:seon.repl/subject %))
                       (:seon.repl/candidates pull))
             "membership comes only from the bounded pull")
-        (let [opening-source (bootstrap/entry-source first-entry)
+        (let [opening-source (pr-str (:seon.repl/form first-entry))
               situation (bootstrap/situation @connection agent-id)
               node (:seon.sci.admit/print-node
                     (admit/admit-value
@@ -152,7 +152,7 @@
                 "listing subjects are their pulled stable identities")
             (is (map? next-entry)
                 "the live post-receipt pull derives one successor entry")
-            (is (not= opening-source (bootstrap/entry-source next-entry)))
+            (is (not= opening-source (pr-str (:seon.repl/form next-entry))))
             (is (= next-entry
                    (bootstrap/next-entry
                     (generator-request connection)
@@ -225,12 +225,14 @@
 (deftest authored-plan-machinery-is-deleted
   (is (nil? (io/resource "seon/bootstrap.edn")))
   (doseq [old '[packaged-forms population-tx ordered-sources agent-sources
-                plan-digest help-text]]
+                plan-digest help-text entry-source]]
     (is (nil? (ns-resolve 'seon.bootstrap old)) (str old " is deleted"))))
 
 (defn- candidate-sources
   [pull]
-  (mapv (comp bootstrap/entry-source :seon.repl/entry)
+  ;; The stored source of a generated form is its FORM, without the comment
+  ;; that introduces it: the comment is its own fact beside it.
+  (mapv (comp pr-str :seon.repl/form :seon.repl/entry)
         (:seon.repl/candidates pull)))
 
 (deftest intent-membership-is-the-only-opening-delta-and-is-budgeted

@@ -39,32 +39,37 @@
             [seon.cluster.run :as run]
             [seon.error :as error]
             [seon.fn :as seon.fn]
+            [seon.repl :as repl]
             [seon.schema]
             [seon.test-support :as test-support]))
 
-(deftest receipt-ai-is-only-repl-output
-  (is (= "42"
-         (run/render-receipt-ai {:seon.cluster.eval/result-edn "42"})))
-  (is (= "side effect\nnil"
-         (run/render-receipt-ai
-          {:seon.cluster.eval/output "side effect\n"
-           :seon.cluster.eval/result-edn "nil"})))
-  (is (nil? (run/render-receipt-ai {})))
-  (is (nil? (run/render-receipt-ai
-             {:seon.cluster.eval/interrupted-at true})))
+(deftest evaluation-ai-is-only-the-repl-session
+  (is (= "my.probe=> (+ 40 2)\n#:seon.repl{:value 42, :result result/e0}"
+         (repl/render-ai
+          {:seon.cluster.eval/source "(+ 40 2)"
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/ns {:seon.ns/name 'my.probe}
+           :seon.cluster.eval/result-edn
+           "#:seon.print{:face :seon.print/number, :value 42}"})))
+  (is (nil? (repl/render-ai {}))
+      "an evaluation with no source is not a REPL entry")
+  (is (= "user=> (side-effect)"
+         (repl/render-ai {:seon.cluster.eval/source "(side-effect)"
+                          :seon.cluster.eval/interrupted-at true}))
+      "an interrupted evaluation prints a prompt and no answer")
   (let [triage-edn
         (try
           (/ 1 0)
           (catch Throwable throwable
             (pr-str (main/ex-triage (Throwable->map throwable)))))
         rendered
-        (run/render-receipt-ai
-         {:seon.cluster.eval/error "Divide by zero"
+        (repl/render-ai
+         {:seon.cluster.eval/source "(/ 1 0)"
+          :seon.cluster.eval/ordinal 0
+          :seon.cluster.eval/error "Divide by zero"
           :seon.cluster.eval/triage-edn triage-edn})]
-    (is (str/starts-with? rendered
-                          "Execution error (ArithmeticException) at"))
-    (is (str/ends-with? rendered "Divide by zero"))
-    (is (= 2 (count (str/split-lines rendered))))
+    (is (str/includes? rendered ":error \"Execution error (ArithmeticException) at"))
+    (is (str/includes? rendered "Divide by zero"))
     (is (not (str/includes? rendered "Form ")))
     (is (not (str/includes? rendered "failed:")))))
 

@@ -1347,14 +1347,18 @@
                         (mapcat
                          (fn [ordinal source]
                            (run/receipt-start-tx
-                            {:seon.cluster.run/id run-id
-                             :seon.cluster.eval/ordinal (long ordinal)
-                             :seon.cluster.eval/at now
-                             :seon.cluster.eval/source
-                             (:seon.cluster.run.form/source source)
-                             :seon.cluster.eval/ns
-                             [:seon.ns/name
-                              (or (:seon.ns/name source) namespace-name)]}))
+                            (cond-> {:seon.cluster.run/id run-id
+                                     :seon.cluster.eval/ordinal (long ordinal)
+                                     :seon.cluster.eval/at now
+                                     :seon.cluster.eval/source
+                                     (:seon.cluster.run.form/source source)
+                                     :seon.cluster.eval/ns
+                                     [:seon.ns/name
+                                      (or (:seon.ns/name source)
+                                          namespace-name)]}
+                              (:seon.cluster.eval/comment source)
+                              (assoc :seon.cluster.eval/comment
+                                     (:seon.cluster.eval/comment source)))))
                          (range) sources))
                   outcome
                   (blob/with-publication!
@@ -1880,12 +1884,21 @@
             (db/transact!
              connection
              (run/append-generated-tx
-              {:seon.cluster.run/id run-id
-               :seon.cluster.run/process process
-               :seon.cluster.eval/at now
-               :seon.cluster.run.form/ordinal ordinal
-               :seon.cluster.run.form/source (bootstrap/entry-source entry)
-               :seon.ns/name (sci.eval/agent-namespace @connection agent-id)}))]
+              (cond-> {:seon.cluster.run/id run-id
+                       :seon.cluster.run/process process
+                       :seon.cluster.eval/at now
+                       :seon.cluster.run.form/ordinal ordinal
+                       ;; THE COMMENT AND THE FORM ARE TWO FIELDS. A generated
+                       ;; opening reads back through the one REPL grammar, so
+                       ;; its prose sits above the prompt exactly like an
+                       ;; agent's own.
+                       :seon.cluster.run.form/source
+                       (pr-str (:seon.repl/form entry))
+                       :seon.ns/name
+                       (sci.eval/agent-namespace @connection agent-id)}
+                (:seon.repl/comment entry)
+                (assoc :seon.cluster.eval/comment
+                       (:seon.repl/comment entry)))))]
         (if (:seon.error/kind appended)
           (do
             (settle! {::cluster cluster

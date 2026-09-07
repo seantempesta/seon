@@ -6,7 +6,6 @@
   agent's runs. Raw facts never acquire a detail level; every full, summary,
   and elided decision is derived for this call."
   (:require [clojure.edn :as edn]
-            [clojure.main :as main]
             [clojure.string :as str]
             [seon.db :as db]
             [seon.ai.tokens :as tokens]
@@ -23,6 +22,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.walk :as walk]
+            [seon.repl :as repl]
             [seon.sci.reader :as reader])
   (:import [java.io PushbackReader StringReader]))
 
@@ -56,6 +56,9 @@
    :seon.cluster.eval/triage-edn
    :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/output
+   :seon.cluster.eval/comment
+   :seon.eval/duration-ms
+   :seon.sci.eval/ending-ns
    :seon.problems/id
    :seon.error/kind
    {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
@@ -67,6 +70,7 @@
    :seon.cluster.run.form/id
    :seon.cluster.run.form/ordinal
    :seon.cluster.run.form/source
+   :seon.cluster.eval/comment
    {:seon.cluster.run.form/ns [:db/id :seon.ns/name]}
    {:seon.cluster.run.form/run
     [:db/id
@@ -471,6 +475,9 @@
      ::error-kind (:seon.error/kind receipt)
      ::problem-id (:seon.problems/id receipt)
      ::interrupted-at (:seon.cluster.eval/interrupted-at receipt)
+     ::comment (:seon.cluster.eval/comment receipt)
+     ::duration-ms (:seon.eval/duration-ms receipt)
+     ::ending-ns (:seon.sci.eval/ending-ns receipt)
      ::output (:seon.cluster.eval/output receipt)}))
 
 (defn- input-entry
@@ -486,6 +493,7 @@
    ::run-opened-at (get-in form [:seon.cluster.run.form/run
                                  :seon.cluster.run/opened-at])
    ::source (:seon.cluster.run.form/source form)
+   ::comment (:seon.cluster.eval/comment form)
    ::namespace
    (or (get-in form [:seon.cluster.run.form/ns :seon.ns/name])
        (get-in form [:seon.cluster.run.form/run
@@ -681,44 +689,39 @@
 
         :else (floor-text unit read-value)))))
 
-(defn- prompted-source
-  [entry]
-  (str (or (::namespace entry) 'user) "=> " (::source entry)))
+(defn- emission
+  "One transcript entry as the REPL emission `seon.repl` renders.
+
+  The transcript owns the BOUNDING — the render unit's floor, its elision
+  root, and its print options are what keep a value inside this call's
+  budget — and `seon.repl` owns the GRAMMAR. The already-bounded value text
+  travels as the node, so the one generator never re-derives what this call
+  already decided, and the page, the history unit and the prompt read the
+  same bytes because they read the same function."
+  [unit entry]
+  (cond-> {:seon.cluster.eval/source (::source entry)
+           :seon.ns/name (or (::namespace entry) 'user)}
+    (::comment entry) (assoc :seon.cluster.eval/comment (::comment entry))
+    (::ordinal entry) (assoc :seon.cluster.eval/ordinal (::ordinal entry))
+    (::result entry) (assoc :seon.print/node
+                            (bounded-result unit (::result entry)))
+    (::error entry) (assoc :seon.cluster.eval/error
+                           (bounded-scalar unit (::error entry)))
+    (::triage-edn entry) (assoc :seon.cluster.eval/triage-edn
+                                (::triage-edn entry))
+    (::output entry) (assoc :seon.cluster.eval/output
+                            (bounded-scalar unit (::output entry)))
+    (::ending-ns entry) (assoc :seon.sci.eval/ending-ns (::ending-ns entry))
+    (::duration-ms entry) (assoc :seon.eval/duration-ms
+                                 (::duration-ms entry))))
 
 (defn- input-text
-  [_unit entry _detail]
-  (prompted-source entry))
-
-(defn- execution-error-face
-  [error]
-  (-> {:clojure.error/phase :execution
-       :clojure.error/cause error}
-      main/ex-str
-      str/trim-newline))
+  [unit entry _detail]
+  (repl/text (emission unit entry)))
 
 (defn- receipt-text
   [unit entry _detail]
-  (let [bounded-result-text
-        (some->> (::result entry) (bounded-result unit))
-        error (some->> (::error entry) (bounded-scalar unit))
-        entity
-        (cond-> (::entity entry)
-          (::result entry)
-          (assoc :seon.cluster.eval/result-edn
-                 bounded-result-text)
-          error
-          (assoc :seon.cluster.eval/error
-                 (if (::triage-edn entry)
-                   error
-                   (execution-error-face error)))
-          (::triage-edn entry)
-          (assoc :seon.cluster.eval/triage-edn (::triage-edn entry))
-          (::output entry)
-          (assoc :seon.cluster.eval/output
-                 (bounded-scalar unit (::output entry))))
-        shown-result (run/render-receipt-ai entity)]
-    (str (prompted-source entry)
-         (when (seq shown-result) (str "\n" shown-result)))))
+  (repl/text (emission unit entry)))
 
 (defn- undisposed-run-text
   [_unit entry _detail]
@@ -1013,19 +1016,6 @@
   [_recipient]
   (list 'my.message/inbox))
 
-(defn- receipt-printed-value
-  [unit entry]
-  (let [text (receipt-text unit entry :full)
-        prompt (prompted-source entry)]
-    (when (< (count prompt) (count text))
-      (subs text (inc (count prompt))))))
-
-(defn- entry-bytes
-  [namespace-name form printed-value]
-  (str (or namespace-name 'user) "=> "
-       (if (string? form) form (pr-str form))
-       (when (seq printed-value) (str "\n" printed-value))))
-
 (defn- entry-basis
   [db entry]
   (reduce (fn [latest datom]
@@ -1055,20 +1045,24 @@
         entries
         (mapv
          (fn [entry]
-           (let [form (::source entry)
-                 printed-value
-                 (case (::kind entry)
-                   :input nil
-                   :eval (receipt-printed-value unit entry))]
+           ;; ONE GENERATOR. The bytes are `seon.repl/text`'s, so this unit,
+           ;; the debug page's AI column and the provider prompt cannot drift
+           ;; apart: there is no second place that decides how an evaluation
+           ;; reads.
+           (let [entry (cond-> entry
+                         (nil? (::namespace entry))
+                         (assoc ::namespace namespace-name))
+                 emitted (emission unit entry)]
              {:seon.render.history/call-id
               [:seon.render.transcript/entry (::kind entry) (::id entry)]
               :seon.render.history/basis-transaction
               (or (::read-basis entry) (entry-basis db entry))
-              :seon.render.history/form form
-              :seon.render.history/printed-value printed-value
-              :seon.render.history/bytes
-              (entry-bytes (or (::namespace entry) namespace-name)
-                           form printed-value)}))
+              :seon.render.history/form (::source entry)
+              :seon.render.history/printed-value
+              (case (::kind entry)
+                :input nil
+                :eval (repl/response emitted))
+              :seon.render.history/bytes (repl/text emitted)}))
          (filterv #(contains? #{:input :eval} (::kind %)) candidates))]
     entries))
 

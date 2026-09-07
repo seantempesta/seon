@@ -40,9 +40,9 @@
                     [:map
                     {:seon.db/attributes true,
                      :seon.render/ai
-                      seon.cluster.run/render-receipt-ai,
+                      seon.repl/render-ai,
                       :seon.render/html
-                      seon.cluster.run/render-receipt-html}
+                      seon.repl/render-html}
                      [:seon.cluster.eval/id :seon.cluster.eval/id]
                      [:seon.cluster.eval/run :seon.cluster.eval/run]
                      [:seon.cluster.eval/ordinal
