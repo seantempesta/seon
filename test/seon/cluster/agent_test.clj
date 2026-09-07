@@ -1633,19 +1633,14 @@
                                     "(+ 3 4)"}
                                    {:seon.cluster.eval/source
                                     "(my.message/send \"waiting\" \"must not run\")"}]}))
-        (db/transact! connection
-                    (run/receipt-start-tx {:seon.cluster.run/id "run-dead"
-                                           :seon.cluster.eval/ordinal 0
-                                           :seon.cluster.eval/at now}))
+        ;; ONE ENTITY PER (run, ordinal): the freeze minted all three
+        ;; evaluations with their start instant, exactly as the turn's one
+        ;; intent transaction does. Ordinal 0 settles; 1 and 2 stay running.
         (db/transact! connection
                     (run/receipt-settle-tx {:seon.cluster.run/id "run-dead"
                                             :seon.cluster.eval/ordinal 0
                                             :seon.cluster.eval/result-edn
                                             "3"}))
-        (db/transact! connection
-                    (run/receipt-start-tx {:seon.cluster.run/id "run-dead"
-                                           :seon.cluster.eval/ordinal 1
-                                           :seon.cluster.eval/at now}))
         ;; Messages committed before the crash and never answered remain
         ;; triggers. One belongs to the interrupted agent itself, proving
         ;; recovery ends only the old WORK rather than dropping mail.
@@ -1729,13 +1724,23 @@
                                  [?receipt
                                   :seon.cluster.eval/result-edn ?result]]
                                db)))
-                (is (nil? (db/q '[:find ?receipt .
-                                 :where
-                                 [?run :seon.cluster.run/id "run-dead"]
-                                 [?receipt :seon.cluster.eval/run ?run]
-                                 [?receipt :seon.cluster.eval/ordinal 2]]
-                               db))
-                    "the unstarted capability-shaped suffix has no receipt")
+                ;; ONE ENTITY PER (run, ordinal): the capability-shaped
+                ;; suffix HAS its frozen evaluation — the intent transaction
+                ;; made it durable — and recovery settled it with no result
+                ;; and no error, only the interruption stamp. "It never ran"
+                ;; is the absence of a RESULT, not the absence of the row.
+                (let [suffix (db/q '[:find (pull ?receipt [*]) .
+                                     :where
+                                     [?run :seon.cluster.run/id "run-dead"]
+                                     [?receipt :seon.cluster.eval/run ?run]
+                                     [?receipt :seon.cluster.eval/ordinal 2]]
+                                   db)]
+                  (is (some? suffix)
+                      "the frozen suffix is durable intent")
+                  (is (nil? (:seon.cluster.eval/result-edn suffix))
+                      "the unstarted capability-shaped suffix settled no result")
+                  (is (nil? (:seon.cluster.eval/error suffix))
+                      "and recorded no evaluation error"))
                 (is (not-any? #(str/includes? % "my.message/send")
                               @evaluation-sources)
                     "and it never reached the evaluator"))

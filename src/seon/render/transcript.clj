@@ -58,6 +58,12 @@
    :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/output
    :seon.cluster.eval/comment
+   ;; THE FORM'S OWN PRINT OPTIONS. `bounded-result` reads these off the
+   ;; entry; without them in the pull, every store-derived render printed
+   ;; under the shipped default while the in-memory one printed under the
+   ;; agent's choice, so the page and the stored bytes disagreed.
+   :seon.print/length
+   :seon.print/level
    :seon.eval/duration-ms
    :seon.sci.eval/ending-ns
    :seon.problems/id

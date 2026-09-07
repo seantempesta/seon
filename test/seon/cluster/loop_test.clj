@@ -439,12 +439,7 @@
              (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
                   "attributed-after-resume [] 1)")
              :seon.ns/name starting-ns}]}))
-        (db/transact!
-         connection
-         (run/receipt-start-tx
-          {::run/id run-id
-           :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/at now}))
+        ;; The freeze minted both evaluations; nothing separate starts one.
         (let [ctx (test-support/fork-cluster-ctx connection)
               first-evaluation
               (sci.eval/evaluate
@@ -477,8 +472,11 @@
                   (db/pull @connection
                            [:seon.sci.eval/ending-ns]
                            [:seon.cluster.eval/id (pr-str [run-id 0])]))))
-          (let [fold-namespace (private-loop-fn 'fold-namespace)
-                resumed-namespace (fold-namespace @connection run-id 1)
+          (let [fold-evaluations (private-loop-fn 'fold-evaluations)
+                fold-namespace (private-loop-fn 'fold-namespace)
+                resumed-namespace
+                (fold-namespace @connection run-id
+                                (fold-evaluations @connection run-id) 1)
                 defaults (config/defaults)
                 channel (async/chan 1)
                 cluster (merge defaults
@@ -1243,14 +1241,14 @@
                               {:seon.cluster.agent/id "alice"
                                :seon.cluster.agent/run
                                [:seon.cluster.run/id "run-live"]}]}))))
-      (testing "one frozen form"
+      (testing "one frozen evaluation, then its start and its settlement, all
+                on the ONE entity that (run, ordinal) names"
         (is (map? (db/transact! connection
-                              [{:seon.cluster.eval/id "f-0"
+                              [{:seon.cluster.eval/id "e-0"
                                 :seon.cluster.eval/run
                                 [:seon.cluster.run/id "run-live"]
                                 :seon.cluster.eval/ordinal 0
-                                :seon.cluster.eval/source "(+ 1 1)"}]))))
-      (testing "a running receipt (no terminal fact) and its settlement"
+                                :seon.cluster.eval/source "(+ 1 1)"}])))
         (is (map? (db/transact! connection
                               [{:seon.cluster.eval/id "e-0"
                                 :seon.cluster.eval/run
@@ -1348,20 +1346,25 @@
       (conj {:seon.cluster.agent/id "agent-a"
              :seon.cluster.agent/run [:seon.cluster.run/id "run-1"]})
 
+      ;; ONE ENTITY PER (run, ordinal), under the ONE identity derivation the
+      ;; writer uses: the freeze asserts the source and the start instant, and
+      ;; the terminal facts accrete onto that same entity.
       planned?
       (into (map (fn [ordinal]
-                   {:seon.cluster.eval/id (str "f-" ordinal)
+                   {:seon.cluster.eval/id (run/receipt-identity "run-1" ordinal)
                     :seon.cluster.eval/run [:seon.cluster.run/id "run-1"]
                     :seon.cluster.eval/ordinal ordinal
+                    :seon.cluster.eval/at now
                     :seon.cluster.eval/source "(+ 1 1)"
                     :seon.cluster.eval/ns [:seon.ns/name 'user]})
                  (range 2)))
 
       (seq receipts)
-      ;; the receipt's state is WHICH terminal fact it carries: :done →
+      ;; the evaluation's state is WHICH terminal fact it carries: :done →
       ;; result-edn, :interrupted → interrupted-at, none → running
       (into (map (fn [[ordinal state]]
-                   (cond-> {:seon.cluster.eval/id (str "e-" ordinal)
+                   (cond-> {:seon.cluster.eval/id
+                            (run/receipt-identity "run-1" ordinal)
                             :seon.cluster.eval/run
                             [:seon.cluster.run/id "run-1"]
                             :seon.cluster.eval/ordinal ordinal
@@ -1378,12 +1381,8 @@
       (commit-run! connection
                    {:held? true
                     :planned? true})
-      (db/transact!
-       connection
-       (run/receipt-start-tx
-        {:seon.cluster.run/id "run-1"
-         :seon.cluster.eval/ordinal 0
-         :seon.cluster.eval/at now}))
+      ;; The freeze already minted ordinal 0 with its start instant; there is
+      ;; no separate receipt to start.
       (let [cluster {:seon.db/connection connection
                      :seon.cluster.run/process process
                      :seon.sci.admit/caps

@@ -52,7 +52,7 @@
                          '[:seon.cluster.run/id :seon.cluster.run/process
                            :seon.cluster.work/situation
                            :seon.cluster.run/plan-digest
-                           {:seon.cluster.run/forms
+                           {:seon.cluster.eval/_run
                             [:seon.cluster.eval/ordinal
                              :seon.cluster.eval/author
                              :seon.cluster.eval/source]}
@@ -65,8 +65,10 @@
         (is (nil? (:seon.cluster.run/plan-digest run))
             "a generated run has no frozen authored plan")
         (is (= :generate (:seon.cluster.work/situation run)))
-        (is (empty? (:seon.cluster.run/forms run))
-            "creation admits no form outside the generator")
+        ;; ONE ENTITY PER (run, ordinal): the evaluations point AT the run,
+        ;; and the run keeps no component mirror of that back-edge.
+        (is (empty? (:seon.cluster.eval/_run run))
+            "creation admits no evaluation outside the generator")
         (is (= (bootstrap/task-message-id agent-id)
                (get-in run [:seon.cluster.run/trigger
                             :seon.cluster.message/id])))

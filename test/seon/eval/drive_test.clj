@@ -20,17 +20,13 @@
           :seon.cluster.run/agent
           [:seon.cluster.agent/id "projection-proof"]
           :seon.cluster.run/opened-at (java.util.Date.)}
-         {:seon.cluster.eval/id "projection-proof-form"
-          :seon.cluster.eval/run
-          [:seon.cluster.run/id "projection-proof-run"]
-          :seon.cluster.eval/ordinal 0
-          :seon.cluster.eval/source "42"}
-         ;; `result-size` is intentionally absent. Receipt rendering derives
+         ;; `result-size` is intentionally absent. Evaluation rendering derives
          ;; from the declared content and must not require that numeric fact.
          {:seon.cluster.eval/id "projection-proof-receipt"
           :seon.cluster.eval/run
           [:seon.cluster.run/id "projection-proof-run"]
           :seon.cluster.eval/ordinal 0
+          :seon.cluster.eval/source "42"
           :seon.cluster.eval/at (java.util.Date.)
           :seon.cluster.eval/result-edn "42"}]})
       (let [database @connection

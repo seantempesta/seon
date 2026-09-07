@@ -102,8 +102,12 @@
                  :seon.render.transcript/id "message"
                  :seon.render.transcript/entity
                  {:db/id 1 :seon.cluster.message/content "hello"}})
+         ;; ONE ENTITY PER (run, ordinal): a frozen form with no terminal
+         ;; fact is an ORDINARY evaluation that has not settled, not a
+         ;; second entry kind. `repl/text` gives it a prompt and no
+         ;; response, which is what the `:input` kind used to mean.
          (merge base
-                {:seon.render.transcript/kind :input
+                {:seon.render.transcript/kind :eval
                  :seon.render.transcript/id "submitted-form"
                  :seon.render.transcript/source "(future-work)"
                  :seon.render.transcript/namespace 'my.agents.test
@@ -130,7 +134,7 @@
       (fn []
         (let [entries (transcript/history-entries unit)
               bytes (mapv :seon.render.history/bytes entries)]
-          (is (= [[:seon.render.transcript/entry :input "submitted-form"]
+          (is (= [[:seon.render.transcript/entry :eval "submitted-form"]
                   [:seon.render.transcript/entry :eval "stored-evaluation"]]
                  (mapv :seon.render.history/call-id entries)))
           (is (= ["my.agents.test=> (future-work)"
@@ -950,20 +954,18 @@
        (= :message-decline event-kind)
        (assoc :my.message/reason (str "declined: " content)))]
     (let [run-id (str "run-" id)
-          form-id (str "form-" id)
           source (if (= :receipt-invalid event-kind)
                    "("
                    (str "(identity " source-index ")"))]
+      ;; ONE ENTITY PER (run, ordinal): the frozen source rides the
+      ;; evaluation it belongs to.
       [{:seon.cluster.run/id run-id
         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
         :seon.cluster.run/opened-at event-at}
-       {:seon.cluster.eval/id form-id
-        :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-        :seon.cluster.eval/ordinal 0
-        :seon.cluster.eval/source source}
        (cond-> {:seon.cluster.eval/id id
                 :seon.cluster.eval/run [:seon.cluster.run/id run-id]
                 :seon.cluster.eval/ordinal 0
+                :seon.cluster.eval/source source
                 :seon.cluster.eval/at event-at}
          (= :receipt-result event-kind)
          (assoc :seon.cluster.eval/result-edn (pr-str source-index))
@@ -1440,25 +1442,24 @@
                                      "one-grammar-stored" 3)])]
                (is (= 2 (:seon.print/length setter))
                    "the evaluation that set *print-length* stores what it set"))
-             ;; AND THE FINDING THIS PROOF TURNED UP, asserted as the truth
-             ;; rather than as the wish: the NEXT form does not inherit it.
-             ;; `seon.sci.eval/evaluate` rebinds `sci/print-length` to its own
-             ;; root value for every form, so a `set!` dies with that form's
-             ;; binding frame — which a REPL session's `set!` must not do.
-             ;; Filed as
-             ;; docs/seon/issues/a-set-of-print-length-does-not-survive-the-next-form.md
+             ;; AND THE SESSION KEEPS IT. An agent's context IS a REPL
+             ;; session, so a `set!` holds until the agent changes it; the
+             ;; turn's fork now carries the binding from one form to the
+             ;; next (`a-set-of-print-length-does-not-survive-the-next-form`,
+             ;; resolved). The FOLLOWING form therefore stores the length it
+             ;; inherited and prints under it.
              (let [follower (db/pull stored-db
                                      [:seon.print/length]
                                      [:seon.cluster.eval/id
                                       (run/receipt-identity
                                        "one-grammar-stored" 4)])
                    clipped (nth stored-bytes 4)]
-               (is (nil? (:seon.print/length follower))
-                   "the following form inherits nothing from the set!")
+               (is (= 2 (:seon.print/length follower))
+                   "the following form inherits the session's print length")
                (is (str/includes? clipped "(vec (range 40))"))
-               (is (str/includes? clipped ":value [0 1 2")
-                   (str "the value is printed under the shipped default, not "
-                        "the agent's choice: " clipped))))
+               (is (str/includes? clipped ":value [0 1 ...]")
+                   (str "the value is printed under the agent's own choice: "
+                        clipped))))
 
            (testing "ruling 45: nothing emitted is comment-shaped"
              (doseq [line (str/split-lines (str/join "\n" stored-bytes))]

@@ -224,3 +224,36 @@ touches the one path whose failure mode is "the cluster does not boot".
 *What we give up:* the ability to open a generated run before knowing its
 first form, and — for the duration — cheap confidence in the boot path.
 
+
+## 6. Gate tallies
+
+Every attribution below is measured in a detached worktree at
+`3f8801d62` — the commit immediately before this step's first commit —
+`tmp/merge-step-baseline`, `reference-code` symlinked to the main tree's
+submodules. Nothing is asserted.
+
+### 6.1 `seon.render.transcript-test` at the baseline
+
+**19 tests / 288 assertions / 27 failures, 0 errors — nine red tests:**
+`a-tight-budget-degrades-then-elides-loudly`,
+`every-generated-history-is-ordered-total-and-token-bounded`,
+`malformed-receipt-bytes-and-any-unique-about-stay-replayable`,
+`one-reply-reads-identically-on-the-page-in-history-and-in-the-prompt`,
+`populated-history-restores-the-repl-fidelity-checklist`,
+`receipt-content-enters-the-shared-capped-floor`,
+`same-instant-bootstrap-prefix-and-newest-tail-preserve-plan-order`,
+`supersession-chains-vanish-before-token-accounting`,
+`tight-budgets-pull-only-a-budget-derived-newest-candidate-set`.
+
+Eight are the disabled-rendering-limits and message-sentence families
+`repl-grammar-greens-2026-09-07.md` §1.2 already recorded. The ninth,
+**`one-reply-reads-identically-…` — this program step's named PROOF — was
+ALREADY RED at the baseline**, turned red by the `print-and-admission` lane's
+`3f8801d62` (a `set!` of `*print-length*` now survives the next form). That
+lane's own landing note §3.2 names the repair and hands it here because
+`src/seon/render/transcript.clj` and its test belong to this lane:
+`receipt-selector` never pulled `:seon.print/length` / `/level` although
+`bounded-result` reads them, so every store-derived render printed under the
+shipped default while the in-memory one printed under the agent's choice.
+Both halves are done here: the two attributes are in the selector, and the
+two assertions that stated the old defect now state the ruled behaviour.

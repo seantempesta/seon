@@ -1676,15 +1676,12 @@
                       :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))}
                      {:seon.cluster.agent/id "alice"
                       :seon.cluster.agent/run [:seon.cluster.run/id "run-crashed"]}
-                     {:seon.cluster.eval/id "f-0"
-                      :seon.cluster.eval/run [:seon.cluster.run/id "run-crashed"]
-                      :seon.cluster.eval/ordinal 0
-                      :seon.cluster.eval/source "(+ 1 1)"}
                      ;; dangling = started with no terminal fact —
                      ;; running IS that absence, there is no status
                      {:seon.cluster.eval/id "e-0"
                       :seon.cluster.eval/run [:seon.cluster.run/id "run-crashed"]
                       :seon.cluster.eval/ordinal 0
+                      :seon.cluster.eval/source "(+ 1 1)"
                       :seon.cluster.eval/at now}])
         (cluster/stop! instance))
 

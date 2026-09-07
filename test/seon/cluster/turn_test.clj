@@ -1924,18 +1924,11 @@
         (db/transact!
          connection
          (into
+          ;; ONE ENTITY PER (run, ordinal): the frozen source and namespace
+          ;; ride the evaluation the start mints. There is no twin row to
+          ;; assert beside it.
           [{:seon.cluster.agent/id "agent-a"
-            :seon.cluster.agent/run [:seon.cluster.run/id route-run]}
-           {:seon.cluster.eval/id "route-form-0"
-            :seon.cluster.eval/run [:seon.cluster.run/id route-run]
-            :seon.cluster.eval/ordinal 0
-            :seon.cluster.eval/source unbound-source
-            :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]}
-           {:seon.cluster.eval/id "route-form-1"
-            :seon.cluster.eval/run [:seon.cluster.run/id route-run]
-            :seon.cluster.eval/ordinal 1
-            :seon.cluster.eval/source "42"
-            :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]}]
+            :seon.cluster.agent/run [:seon.cluster.run/id route-run]}]
           cat
           [(run/receipt-start-tx
             {:seon.cluster.run/id route-run
@@ -3190,7 +3183,7 @@
                   (fn [target transaction]
                     (let [outcome (transact! target transaction)
                           intent? (some #(and (vector? %)
-                                              (= #'run/receipt-start-call
+                                              (= #'run/plan-call
                                                  (second %)))
                                         (:tx-data transaction))]
                       (if (and intent? (compare-and-set! cut? true false))
@@ -3476,7 +3469,7 @@
                 used)
         (pr-str used))))
 
-(deftest generated-fixed-point-advances-the-run-to-call
+(deftest generated-fixed-point-closes-the-run
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
@@ -3515,15 +3508,18 @@
                  {:seon.cluster.loop/cluster cluster
                   :seon.cluster.work/next generated}
                  now))]
-          (is (= :released (:seon.cluster.loop/outcome report)))
-          (is (= :call
-                 (:seon.cluster.work/situation
-                  (db/pull @connection [:seon.cluster.work/situation]
-                           [:seon.cluster.run/id run-id]))))
-          (is (= {:seon.cluster.work/situation :call
-                  :seon.cluster.run/id run-id
-                  :seon.cluster.agent/id "agent-a"}
-                 (work/next-agent-work @connection request)))
+          ;; A GENERATED RUN THAT HAS NOTHING LEFT TO GENERATE IS FINISHED.
+          ;; The `:generate` -> `:call` edge is deleted: it was written by
+          ;; `run/generation-complete-call`, whose only caller was this arm,
+          ;; and no production path reached it — `generated-run-tx`'s only
+          ;; caller is `bootstrap/seed-tx`, whose run id always makes
+          ;; `generate-turn`'s bootstrap? arm true.
+          (is (= :closed (:seon.cluster.loop/outcome report)))
+          (is (inst? (:seon.cluster.run/closed-at
+                      (db/pull @connection [:seon.cluster.run/closed-at]
+                               [:seon.cluster.run/id run-id]))))
+          (is (nil? (work/next-agent-work @connection request))
+              "a closed generated run derives no further work")
           (is (= :system
                  (db/q '[:find ?author .
                          :in $ ?run-id
