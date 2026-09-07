@@ -116,6 +116,20 @@ and projection, the selected one, and names the alternatives instead.
 it is the incoming datoms of the observation the page already holds, which is
 also what restored the retained-observation reuse across an unrelated commit.
 
+## The suite's own reader was the clock
+
+Two debug-feed regressions on a namespace subject stopped receiving their
+first paint. The derivation was not the cause: every render call completed
+(the slowest was 150 ms, the whole page about 0.5 s) and no proc error was
+recorded. A raw byte probe read the same feed for 45 s and got exactly one
+complete event of 949 459 bytes.
+
+`read-patches!` rebuilt the entire accumulated buffer and re-ran a regex over
+it after EVERY byte — quadratic in the page, invisible while pages were small.
+The units page for `seon.flow` is most of a megabyte, which put the read past
+the declared 20-second backstop. The helper now decides at each event
+boundary instead of each byte.
+
 ## What this exposed
 
 - [A render exception stops the render proc and every page then hangs

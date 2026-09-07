@@ -387,24 +387,42 @@
   [text]
   (count (re-seq #"event: datastar-patch-elements" text)))
 
+(def ^:private patch-event-line "event: datastar-patch-elements")
+
+(defn- read-events!
+  "Read complete SSE events, deciding at each event boundary whether to stop.
+
+  The decision is per EVENT, never per byte: rebuilding and rescanning the
+  whole buffer after every byte is quadratic, and one page of a real entity
+  is most of a megabyte — the read, not the page, was the clock that fired."
+  [stream done? closed]
+  (let [out (StringBuilder.)
+        line (StringBuilder.)]
+    (loop [events 0 blank? false]
+      (let [next-byte (.read stream)]
+        (when (neg? next-byte)
+          (throw (ex-info "SSE feed closed before its expected patches."
+                          (assoc closed ::actual (patches (.toString out))))))
+        (let [character (char next-byte)]
+          (.append out character)
+          (if (= \newline character)
+            (let [text (.toString line)
+                  events (if (= patch-event-line text) (inc events) events)
+                  boundary? (and blank? (zero? (.length line)))]
+              (.setLength line 0)
+              (if (and boundary? (done? events (.toString out)))
+                (.toString out)
+                (recur events true)))
+            (do (.append line character)
+                (recur events false))))))))
+
 (defn- read-patches!
   "Read exactly through `expected` complete patch events."
   [stream expected]
   (support/await-event!
-   (future
-     (let [out (StringBuilder.)]
-       (loop []
-         (let [next-byte (.read stream)]
-           (when (neg? next-byte)
-             (throw (ex-info "SSE feed closed before its expected patches."
-                             {::expected expected
-                              ::actual (patches (.toString out))})))
-           (.append out (char next-byte))
-           (let [text (.toString out)]
-             (if (and (= expected (patches text))
-                      (str/ends-with? text "\n\n"))
-               text
-               (recur)))))))
+   (future (read-events! stream
+                         (fn [events _text] (= expected events))
+                         {::expected expected}))
    [:render-patches expected]))
 
 (defn- read-until!
@@ -414,20 +432,9 @@
   tab had to see before the settled value arrived."
   [stream needle]
   (support/await-event!
-   (future
-     (let [out (StringBuilder.)]
-       (loop []
-         (let [next-byte (.read stream)]
-           (when (neg? next-byte)
-             (throw (ex-info "SSE feed closed before its needle."
-                             {::needle needle
-                              ::actual (.toString out)})))
-           (.append out (char next-byte))
-           (let [text (.toString out)]
-             (if (and (str/includes? text needle)
-                      (str/ends-with? text "\n\n"))
-               text
-               (recur)))))))
+   (future (read-events! stream
+                         (fn [_events text] (str/includes? text needle))
+                         {::needle needle}))
    [:render-until needle]))
 
 (defn- read-complete-paint!
