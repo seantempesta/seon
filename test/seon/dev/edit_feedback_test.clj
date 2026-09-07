@@ -30,6 +30,24 @@
   (doseq [^java.io.File file files]
     (when (.exists file) (.delete file))))
 
+(deftest publication-diagnostics-survive-trailing-output
+  (let [failure {:cause "missing schema" :data {:schema :example/input}}
+        envelope (pr-str {:seon.fresh-operator/events
+                          [{:exception true :val (pr-str failure)}
+                           {:tag :out :val "cleanup"}]})
+        cases [{:out (str envelope "\nfinished") :err "warning"}
+               {:out "progress" :err (str envelope "\nwarning")}
+               {:out envelope :err ""}
+               {:out "no structured failure" :err "warning"}]
+        program (str "(binding [*in* (java.io.StringReader. \"{}\") "
+                     "*out* (java.io.StringWriter.)] (load-file \"bin/seon-hook\")) "
+                     "(prn (mapv publication-exception " (pr-str cases) "))")
+        result (run-process {::command ["bb" "-e" program]
+                             ::directory repo-root})]
+    (is (zero? (::exit result)) (::stderr result))
+    (is (= [failure failure failure nil]
+           (edn/read-string (::stdout result))))))
+
 (deftest pre-edit-blocks-reconstructed-error-level-findings
   (let [directory (fixture-directory)
         config (io/file directory "hook.edn")

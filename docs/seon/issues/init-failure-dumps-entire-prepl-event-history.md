@@ -50,3 +50,8 @@ Root replayed the actual failed publication captured in
 `:seon.cluster.loop/evaluate-sources-request`; both were previously hidden by
 the clipped progress events. The operator's direct terminal failure face is
 still outstanding, so this issue remains open.
+
+The hook also searches structured exception events independently in stdout and
+stderr. Trailing cleanup events or stderr warnings no longer hide the cause.
+`publication-diagnostics-survive-trailing-output` exercises those cases and an
+output with no structured exception, which must remain unknown.

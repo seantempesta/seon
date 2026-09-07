@@ -1154,19 +1154,27 @@
            (absolute-file-path file-path))
         (schema-resource-path? file-path))))
 
+(defn- publication-exception
+  [result]
+  (some (fn [line]
+          (try
+            (let [envelope (edn/read-string line)]
+              (when (map? envelope)
+                (some (fn [event]
+                        (when (:exception event)
+                          (try (edn/read-string (:val event))
+                               (catch Exception _ nil))))
+                      (reverse (:seon.fresh-operator/events envelope)))))
+            (catch Exception _ nil)))
+        (concat (reverse (str/split-lines (or (:out result) "")))
+                (reverse (str/split-lines (or (:err result) ""))))))
+
 (defn- publication-failure-message
   [result]
   (let [output (str (:out result) "\n" (:err result))
         evidence (root-file "logs/current-source-failure.log")
         omitted (max 0 (- (count output) hook-log-cap))
-        failure
-        (try
-          (let [envelope (edn/read-string
-                          (last (remove str/blank? (str/split-lines output))))
-                event (last (:seon.fresh-operator/events envelope))]
-            (when (:exception event)
-              (edn/read-string (:val event))))
-          (catch Exception _ nil))]
+        failure (publication-exception result)]
     (io/make-parents evidence)
     (spit evidence
           (str (when (pos? omitted)
