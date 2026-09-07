@@ -2551,17 +2551,23 @@
    A logical call occupies one slot. An unchanged shown basis retains its
    exact bytes in place; a changed basis replaces the old observation and is
    appended after retained history. The current task is the final slot, and a
-   full re-walk cannot reintroduce the task that slot superseded."
+   full re-walk cannot reintroduce the task that slot superseded.
+
+   Supersession compares `:seon.render.history/subject` — the superseded
+   unit's own lookup. It used to compare `:seon.render.history/form`, a
+   rendered form, which answered an identity question with the shape of a
+   formatted value; the form no longer exists because the prompt reads each
+   unit's own `:seon.render/ai` bytes (ruling 44)."
   {:malli/schema [:=> [:cat [:vector :map] [:vector :map]] [:vector :map]]}
   [entries observations]
   (let [current-task? :seon.render.history/current-task?
         current-observation (last (filter current-task? observations))
-        superseded-forms
+        superseded-subjects
         (if current-observation
           (into #{}
                 (comp (filter current-task?)
-                      (map :seon.render.history/form)
-                      (remove #{(:seon.render.history/form
+                      (map :seon.render.history/subject)
+                      (remove #{(:seon.render.history/subject
                                  current-observation)}))
                 entries)
           #{})
@@ -2569,8 +2575,8 @@
         (->> observations
              (remove (fn [entry]
                        (and (not (current-task? entry))
-                            (contains? superseded-forms
-                                       (:seon.render.history/form entry)))))
+                            (contains? superseded-subjects
+                                       (:seon.render.history/subject entry)))))
              ((fn [observed]
                 (concat (remove current-task? observed)
                         (filter current-task? observed)))))]

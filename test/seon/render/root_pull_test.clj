@@ -125,8 +125,13 @@
        (is (= ["The opening message."]
               (mapv :seon.cluster.message/content messages))
            "the as-of root retains the reverse message graph")
-       (is (some #(= '(my.message/read "temporal-root-message")
-                     (:seon.render.history/form %))
+       ;; THE SUBJECT IS A FACT. History used to name the acquired message
+       ;; by the form its retired `:seon.render/form` producer emitted; it
+       ;; now names the entity itself, and the bytes are that message's own
+       ;; `:seon.render/ai` render rather than a second prompt line built
+       ;; around a `pr-str`'d form.
+       (is (some #(= [:seon.cluster.message/id "temporal-root-message"]
+                     (:seon.render.history/subject %))
                  history)
            "history renders the acquired message as its identified value")))))
 

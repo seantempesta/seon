@@ -267,7 +267,7 @@
         {:seon.render.history/call-id [:seon.render.walk/current-task "worker"]
          :seon.render.history/basis-transaction 10
          :seon.render.history/current-task? true
-         :seon.render.history/form '(my.message/read "old-task")
+         :seon.render.history/subject [:seon.cluster.message/id "old-task"]
          :seon.render.history/bytes "worker=> old task"}
         old-task-from-full-snapshot
         (assoc old-task
@@ -282,7 +282,7 @@
         {:seon.render.history/call-id [:seon.render.walk/current-task "worker"]
          :seon.render.history/basis-transaction 11
          :seon.render.history/current-task? true
-         :seon.render.history/form '(my.message/read "current-task")
+         :seon.render.history/subject [:seon.cluster.message/id "current-task"]
          :seon.render.history/bytes "worker=> current task"}
         result (web/append-history [old-task]
                                    [old-task-from-full-snapshot

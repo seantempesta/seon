@@ -187,9 +187,18 @@
        (is (every? (comp seq :seon.render.history/bytes) entries))
        (is (str/includes? text "inspect this walk")
            "the triggering message is an entry in the agent's history")
-       (is (str/includes?
-            text
-            "my.agents.walker=> (my.message/read \"walk-message\")"))
+       ;; ONE GRAMMAR (PRD §4, audit B3). The prompt used to synthesise a
+       ;; `ns=> (pr-str form)` line from a second `:seon.render/form`
+       ;; neighbourhood pass and staple the `/ai` render underneath it, so
+       ;; the model read a prompt line the page never showed and the history
+       ;; unit never produced. The prompt now carries each unit's OWN
+       ;; `:seon.render/ai` bytes and nothing else.
+       (is (str/includes? text "[:seon.cluster.message/id \"walk-message\"]")
+           "the message contributes the source its own /ai producer emits")
+       (is (not (str/includes?
+                 text
+                 "my.agents.walker=> (my.message/read \"walk-message\")"))
+           "the retired /form pairing is not reconstructed")
        (is (not (str/includes? text ";; (seon.render/walk"))
            "the deleted labeled-walk prompt is not reconstructed")
        (is (not (str/includes? text ";; REPL state"))
