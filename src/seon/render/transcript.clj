@@ -478,6 +478,8 @@
      ::interrupted-at (:seon.cluster.eval/interrupted-at receipt)
      ::comment (:seon.cluster.eval/comment receipt)
      ::duration-ms (:seon.eval/duration-ms receipt)
+     ::print-length (:seon.print/length receipt)
+     ::print-level (:seon.print/level receipt)
      ::ending-ns (:seon.sci.eval/ending-ns receipt)
      ::output (:seon.cluster.eval/output receipt)}))
 
@@ -669,9 +671,22 @@
          (when (seq extra) (str "\n" (floor-text unit extra))))))
 
 (defn- bounded-result
-  [unit serialized]
+  "The printed value for one entry, under the print options its FORM set.
+
+  `:seon.print/length` and `/level` are facts of the evaluation — settlement
+  records what the form's `set!` left in effect — so they belong to the
+  entry, not to the render call. Reading only the unit's options printed
+  every stored value under the shipped defaults and silently discarded the
+  agent's own choice (audit C3, the transcript's half)."
+  [unit entry serialized]
   (when (some? serialized)
-    (let [{::keys [read-value unreadable?]} (read-result serialized)]
+    (let [{::keys [read-value unreadable?]} (read-result serialized)
+          options (cond-> (merge (print/default-options)
+                                 (:seon.print/options unit))
+                    (int? (::print-length entry))
+                    (assoc :seon.print/length (::print-length entry))
+                    (int? (::print-level entry))
+                    (assoc :seon.print/level (::print-level entry)))]
       (cond
         unreadable?
         (floor-text unit {:seon.cluster.eval/result-edn serialized
@@ -682,9 +697,7 @@
         ;; construction; `emit-text` prints it quoted, exactly as `pr` would,
         ;; which is also what `seon.repl` does with the same stored node.
         (and (map? read-value) (:seon.print/face read-value))
-        (print/emit-text read-value
-                         (merge (print/default-options)
-                                (:seon.print/options unit)))
+        (print/emit-text read-value options)
 
         (string? read-value) read-value
 
@@ -696,12 +709,14 @@
   A stored evaluation derives it from its own entity id; an in-memory one
   carries the handle the fork actually bound. Either way the name comes from
   the identity the value is reachable under, never from an ordinal that
-  restarts in every run."
+  restarts in every run — and never for a windowed result, whose stored node
+  is one page of a value staged into a blob and which the turn's fork
+  therefore binds to nothing (audit C4)."
   [entry]
   (let [entity (::entity entry)]
     (or (:seon.repl/handle entity)
         (when (and (int? (:db/id entity))
-                   (admit/restorable-node (::result entry)))
+                   (admit/restorable-node (::result entry) entity))
           (admit/result-handle (:db/id entity))))))
 
 (defn- emission
@@ -721,7 +736,11 @@
       (::ordinal entry) (assoc :seon.cluster.eval/ordinal (::ordinal entry))
       handle (assoc :seon.repl/handle handle)
       (::result entry) (assoc :seon.repl/value
-                              (bounded-result unit (::result entry)))
+                              (bounded-result unit entry (::result entry)))
+      (int? (::print-length entry)) (assoc :seon.print/length
+                                           (::print-length entry))
+      (int? (::print-level entry)) (assoc :seon.print/level
+                                          (::print-level entry))
       (::error entry) (assoc :seon.cluster.eval/error
                              (bounded-scalar unit (::error entry)))
       (::triage-edn entry) (assoc :seon.cluster.eval/triage-edn
@@ -732,11 +751,13 @@
       (::duration-ms entry) (assoc :seon.eval/duration-ms
                                    (::duration-ms entry)))))
 
-(defn- input-text
-  [unit entry _detail]
-  (repl/text (emission unit entry)))
+(defn- evaluation-text
+  "One frozen form or settled evaluation, through the one REPL generator.
 
-(defn- receipt-text
+  A frozen form and its evaluation were two arms calling the same function
+  with the same argument. `repl/text` already emits a prompt line and no
+  response when nothing has settled — absence of a terminal fact IS running —
+  so the distinction the two arms encoded is one the generator derives."
   [unit entry _detail]
   (repl/text (emission unit entry)))
 
@@ -770,8 +791,8 @@
      ::execution-error? (some? (::error entry))
      ::text (case (::kind entry)
               :message (message-text unit entry detail)
-              :input (input-text unit entry detail)
-              :eval (receipt-text unit entry detail)
+              :input (evaluation-text unit entry detail)
+              :eval (evaluation-text unit entry detail)
               :run (undisposed-run-text unit entry detail))}))
 
 (defn reasoning-disclosure
@@ -908,15 +929,39 @@
                  ordinal :seon.cluster.run.form/ordinal}]
              (receipt-entry
               {nil (:seon.cluster.run.form/source form)}
-              (assoc evaluation
-                     :seon.cluster.eval/id
-                     (run/receipt-identity (:seon.cluster.run/id unit) ordinal)
-                     :seon.cluster.eval/ordinal ordinal
-                     :seon.cluster.eval/ns
-                     {:seon.ns/name (second (:seon.cluster.run.form/ns form))}
-                     :seon.cluster.eval/read-basis-transaction
-                     (or (:seon.cluster.eval/read-basis-transaction evaluation)
-                         (db/basis-t db)))))
+              (cond-> (assoc evaluation
+                             :seon.cluster.eval/id
+                             (run/receipt-identity
+                              (:seon.cluster.run/id unit) ordinal)
+                             :seon.cluster.eval/ordinal ordinal
+                             :seon.cluster.eval/ns
+                             {:seon.ns/name
+                              (second (:seon.cluster.run.form/ns form))}
+                             :seon.cluster.eval/read-basis-transaction
+                             (or (:seon.cluster.eval/read-basis-transaction
+                                  evaluation)
+                                 (db/basis-t db)))
+                ;; THE COMMENT IS A FACT OF THE FORM THE AGENT WROTE, and it
+                ;; travels on the admitted form until settlement moves it to
+                ;; the evaluation. Reading only the evaluation dropped the
+                ;; agent's own prose out of every in-memory render, so the
+                ;; page's preview and the stored history disagreed by a line.
+                (:seon.cluster.eval/comment form)
+                (assoc :seon.cluster.eval/comment
+                       (:seon.cluster.eval/comment form))
+                ;; The same for the print options the form set: stored they
+                ;; are `:seon.print/length` / `/level`, in flight they are
+                ;; the evaluation's `:seon.print/options` map.
+                (int? (get-in evaluation [:seon.print/options
+                                          :seon.print/length]))
+                (assoc :seon.print/length
+                       (get-in evaluation [:seon.print/options
+                                           :seon.print/length]))
+                (int? (get-in evaluation [:seon.print/options
+                                          :seon.print/level]))
+                (assoc :seon.print/level
+                       (get-in evaluation [:seon.print/options
+                                           :seon.print/level])))))
            evaluated-sources)
           (history db (:seon.cluster.run/id unit) agent-id
                    candidate-count (::selected-run-id unit)

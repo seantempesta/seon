@@ -180,13 +180,12 @@
       (assoc :seon.sci.eval/ending-ns
              (:seon.sci.eval/ending-ns evaluation))
       ;; HOW LONG THE FORM TOOK IS A FACT THE KERNEL ALREADY MEASURED.
-      ;; The record carried it through every arm and unarmed path and then
-      ;; stopped here, so `:seon.repl/ms` was in the grammar and in no
-      ;; response ever emitted (audit F3).
-      (int? (get-in evaluation [:seon.sci.admit/record :seon.eval/duration-ms]))
-      (assoc :seon.eval/duration-ms
-             (get-in evaluation
-                     [:seon.sci.admit/record :seon.eval/duration-ms]))
+      ;; The evaluation carries it under the one spelling every reader uses
+      ;; — the page's in-memory render included — and settlement stopped it
+      ;; here, so `:seon.repl/ms` was in the grammar and in no response ever
+      ;; emitted (audit F3).
+      (int? (:seon.eval/duration-ms evaluation))
+      (assoc :seon.eval/duration-ms (:seon.eval/duration-ms evaluation))
       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
       ;; while sci's binding is still installed (`sci/eval.clj` print-options
       ;; volatile), it is what the response must print the value under.
@@ -1977,14 +1976,24 @@
                           :seon.sci.eval/evaluation]}]
                 (let [settled (settlement-result cluster evaluation)]
                   {:seon.cluster.eval/receipt
-                   (assoc (evaluation-facts
-                           {::id id
-                            :seon.cluster.run.form/ordinal ordinal
-                            :seon.sci.eval/evaluation evaluation
-                            :seon.cluster.loop/settlement-evaluation settled})
-                          :seon.cluster.eval/at (:seon.cluster.eval/at evaluation)
-                          :seon.cluster.eval/source (:seon.cluster.run.form/source admitted-form)
-                          :seon.cluster.eval/ns (:seon.cluster.run.form/ns admitted-form))
+                   (cond-> (assoc (evaluation-facts
+                                   {::id id
+                                    :seon.cluster.run.form/ordinal ordinal
+                                    :seon.sci.eval/evaluation evaluation
+                                    :seon.cluster.loop/settlement-evaluation
+                                    settled})
+                                  :seon.cluster.eval/at
+                                  (:seon.cluster.eval/at evaluation)
+                                  :seon.cluster.eval/source
+                                  (:seon.cluster.run.form/source admitted-form)
+                                  :seon.cluster.eval/ns
+                                  (:seon.cluster.run.form/ns admitted-form))
+                     ;; THE COMMENT RIDES THE ADMITTED FORM, and this path
+                     ;; dropped it, so an evaluation saved from the page lost
+                     ;; the agent's own prose that a settled one keeps.
+                     (:seon.cluster.eval/comment admitted-form)
+                     (assoc :seon.cluster.eval/comment
+                            (:seon.cluster.eval/comment admitted-form)))
                    :seon.blob/staged-writes (vec (:seon.blob/staged-writes settled))}))
               evaluated)
         prepared

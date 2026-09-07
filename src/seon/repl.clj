@@ -258,8 +258,12 @@
     ;; agent never name two values alike. An evaluation with no entity id never
     ;; persisted, and a node that kept only a name never held the value: both
     ;; have no handle, and the response then carries no `:result` key.
+    ;; A WINDOWED RESULT NAMES NOTHING EITHER. The stored node is one page
+    ;; of a value staged into a blob, so the fork binds no handle for it
+    ;; (`bind-stored-results!`) and emitting one here would name a symbol
+    ;; that resolves to nothing. One predicate decides for both.
     (and (int? (:db/id unit))
-         (admit/restorable-node (:seon.cluster.eval/result-edn unit)))
+         (admit/restorable-node (:seon.cluster.eval/result-edn unit) unit))
     (assoc :seon.repl/handle (admit/result-handle (:db/id unit)))))
 
 (defn render-ai

@@ -450,15 +450,36 @@
   Nil for a node that kept only a name, for an unreadable node, and for an
   evaluation that stored none. The question `is this value reachable again?`
   is asked HERE, of the node itself, so nobody has to remember the answer in
-  a flag beside it."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :map]]}
-  [serialized]
-  (when (string? serialized)
-    (let [node (try (edn/read-string serialized) (catch Throwable _ nil))]
-      (when (and (map? node)
-                 (::print/face node)
-                 (not (contains? opaque-result-faces (::print/face node))))
-        node))))
+  a flag beside it.
+
+  The second arity adds the evaluation's own storage facts, and refuses a
+  WINDOWED result. When settlement stages an oversized result
+  (`seon.cluster.run/settlement-result`), `:seon.cluster.eval/result-edn`
+  holds a PAGE of the value, `:seon.cluster.eval/result-blob` names the whole
+  one, and `:seon.cluster.eval/result-size` is the whole one's size. That
+  page's root face is an ordinary `:seon.print/vector` — nothing in the node
+  says it is partial — so asking the node alone binds a truncated collection
+  under a complete-looking handle (audit C4). A caller that has the storage
+  facts must pass them; a caller that has only the node keeps the one-arity
+  answer, which is correct for every evaluation that was never windowed."
+  {:malli/schema
+   [:function
+    [:=> [:cat [:maybe :string]] [:maybe :map]]
+    [:=> [:cat [:maybe :string] :map] [:maybe :map]]]}
+  ([serialized]
+   (when (string? serialized)
+     (let [node (try (edn/read-string serialized) (catch Throwable _ nil))]
+       (when (and (map? node)
+                  (::print/face node)
+                  (not (contains? opaque-result-faces (::print/face node))))
+         node))))
+  ([serialized {digest :seon.cluster.eval/result-blob
+                stored-size :seon.cluster.eval/result-size}]
+   (when-not (or (some? digest)
+                 (and (int? stored-size)
+                      (string? serialized)
+                      (> stored-size (count serialized))))
+     (restorable-node serialized))))
 
 (defn result-handle
   "The symbol naming one stored evaluation's value: `result/e<entity id>`.

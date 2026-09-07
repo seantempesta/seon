@@ -240,4 +240,26 @@
                                :seon.cluster.eval/ordinal 0
                                :seon.cluster.eval/result-edn (number-node 2)})
               ":result"))
-        "an evaluation that never persisted has no identity to name")))
+        "an evaluation that never persisted has no identity to name")
+    ;; A WINDOWED RESULT NAMES NOTHING EITHER (audit C4). The stored node is
+    ;; one page of a value staged into a blob; the turn's fork refuses to
+    ;; bind it, so emitting `:result` would name an unresolved symbol.
+    (is (not (str/includes?
+              (repl/render-ai
+               {:db/id 8145
+                :seon.cluster.eval/source "(vec (range 100000))"
+                :seon.ns/name 'my.agents.juniper
+                :seon.cluster.eval/result-blob (apply str (repeat 64 "0"))
+                :seon.cluster.eval/result-size 999999
+                :seon.cluster.eval/result-edn symbol-vector})
+              ":result"))
+        "a blob-backed window is a page of the value, not the value")
+    (is (not (str/includes?
+              (repl/render-ai
+               {:db/id 8146
+                :seon.cluster.eval/source "(vec (range 50000))"
+                :seon.ns/name 'my.agents.juniper
+                :seon.cluster.eval/result-size 999999
+                :seon.cluster.eval/result-edn symbol-vector})
+              ":result"))
+        "so is a stored size larger than the node measured against it")))

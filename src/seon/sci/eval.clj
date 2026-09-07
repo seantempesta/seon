@@ -1735,22 +1735,31 @@
 
   A node that kept only a name — a Var, an object, a failure, anything past
   the caps — binds NOTHING, because the value it describes was never in it,
-  and an unresolved symbol is the honest answer.
+  and an unresolved symbol is the honest answer. NEITHER DOES A WINDOWED
+  RESULT: when settlement staged the whole value into a blob, the stored node
+  is one PAGE of it whose root face is an ordinary vector, and binding that
+  would answer `(count result/e41)` with the page's size (audit C4). The
+  storage facts travel with the node so `restorable-node` decides once.
 
   Returns the handles it bound."
   [ctx db agent-id]
   (when agent-id
-    (let [rows (db/q '[:find ?evaluation ?result-edn
+    (let [rows (db/q '[:find ?evaluation (pull ?evaluation
+                                               [:seon.cluster.eval/result-edn
+                                                :seon.cluster.eval/result-blob
+                                                :seon.cluster.eval/result-size])
                        :in $ ?agent-id
                        :where
                        [?agent :seon.cluster.agent/id ?agent-id]
                        [?run :seon.cluster.run/agent ?agent]
                        [?evaluation :seon.cluster.eval/run ?run]
-                       [?evaluation :seon.cluster.eval/result-edn ?result-edn]]
+                       [?evaluation :seon.cluster.eval/result-edn _]]
                      db agent-id)]
       (into []
-            (keep (fn [[entity-id serialized]]
-                    (when-let [node (admit/restorable-node serialized)]
+            (keep (fn [[entity-id stored]]
+                    (when-let [node (admit/restorable-node
+                                     (:seon.cluster.eval/result-edn stored)
+                                     stored)]
                       (bind-result! ctx (admit/result-handle (long entity-id))
                                     (admit/semantic-value node)))))
             (sort-by first (or rows []))))))
@@ -2055,6 +2064,14 @@
            :seon.sci.eval/ending-ns ending-namespace
            :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
            :seon.sci.admit/record (:seon.sci.admit/record admitted)}
+    ;; HOW LONG THE FORM TOOK IS A KEY OF THE EVALUATION, not something two
+    ;; readers dig out of the diagnostic record by different routes. The
+    ;; storage projection and the page's in-memory render both read this one
+    ;; spelling, so an unstored record and its stored evaluation cannot
+    ;; disagree about `:seon.repl/ms`.
+    (int? (get-in admitted [:seon.sci.admit/record :seon.eval/duration-ms]))
+    (assoc :seon.eval/duration-ms
+           (get-in admitted [:seon.sci.admit/record :seon.eval/duration-ms]))
     row (assoc :seon.program/row row)
     (seq definitions) (assoc :seon.sci.eval/defs definitions)
     (or (seq output-prefix) (seq (str printed)))
@@ -2083,6 +2100,9 @@
            :seon.cluster.eval/error (:seon.error/message value)
            :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
            :seon.sci.admit/record record}
+    ;; The same one spelling on the failing path.
+    (int? (:seon.eval/duration-ms record))
+    (assoc :seon.eval/duration-ms (:seon.eval/duration-ms record))
     (string? triage-edn)
     (assoc :seon.cluster.eval/triage-edn triage-edn)
     (seq definitions) (assoc :seon.sci.eval/defs definitions)
