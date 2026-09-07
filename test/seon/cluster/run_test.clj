@@ -222,6 +222,67 @@
       (is (= 1 (:seon.cluster.eval/ordinal warning)))
       (is (= 2 (:seon.cluster.run/missing-results warning))))))
 
+(deftest a-frozen-run-holds-exactly-one-evaluation-per-ordinal-and-no-form-entity
+  ;; THE MERGE, ASSERTED AS A COUNT. A frozen plan of N sources leaves N
+  ;; evaluation entities and nothing else: no twin form entity, no second
+  ;; `:db.unique/identity` attribute that a derived identity string could
+  ;; resolve against, and no run-side component list mirroring the back-edge
+  ;; the evaluations already carry.
+  (with-model-database
+    (fn [connection]
+      (db/transact! connection [{:seon.cluster.agent/id "merged-agent"}])
+      (db/transact!
+       connection
+       (run/open-tx {::run/id "merged"
+                     ::run/agent [:seon.cluster.agent/id "merged-agent"]
+                     ::run/opened-at t0}))
+      (db/transact!
+       connection
+       (run/claim-tx {::run/id "merged"
+                      ::run/process "p1"
+                      ::run/live-processes #{"p1"}
+                      ::run/now t0}))
+      (is (= ::committed
+             (transact-or-refusal
+              connection
+              (run/plan-tx {::run/id "merged"
+                            ::run/process "p1"
+                            ::run/starting-ns [:seon.ns/name 'user]
+                            ::run/plan-digest "merged-digest"
+                            :seon.cluster.eval/at t1
+                            ::run/sources
+                            [{:seon.cluster.eval/source "(+ 1 1)"}
+                             {:seon.cluster.eval/source "(+ 2 2)"}
+                             {:seon.cluster.eval/source "(+ 3 3)"}]}))))
+      (let [database (db/db connection)
+            run (run-entity connection "merged")
+            evaluations
+            (db/q '[:find [(pull ?evaluation [*]) ...]
+                    :in $ ?run
+                    :where [?evaluation :seon.cluster.eval/run ?run]]
+                  database (:db/id run))]
+        (is (= 3 (count evaluations))
+            "one entity per (run, ordinal), never two")
+        (is (= [0 1 2] (sort (map :seon.cluster.eval/ordinal evaluations))))
+        (is (= 3 (count (set (map :db/id evaluations))))
+            "three ordinals name three entities, not six")
+        (is (= (set (map #(run/receipt-identity "merged" %) [0 1 2]))
+               (set (map :seon.cluster.eval/id evaluations)))
+            "one identity derivation names every frozen ordinal")
+        (is (= ["(+ 1 1)" "(+ 2 2)" "(+ 3 3)"]
+               (mapv :seon.cluster.eval/source
+                     (sort-by :seon.cluster.eval/ordinal evaluations)))
+            "the frozen source is an attribute of the evaluation itself")
+        (is (every? #(= :agent (:seon.cluster.eval/author %)) evaluations))
+        (is (not-any? run/terminal? evaluations)
+            "the freeze asserts no terminal fact; that absence IS running")
+        (is (empty?
+             (filter #(= "seon.cluster.run.form" (namespace %))
+                     (keys (:schema database))))
+            "no attribute of the deleted form family is installed")
+        (is (nil? (find run :seon.cluster.run/forms))
+            "the run keeps no component mirror of the back-edge")))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Teaching examples — the call shapes, one committed lifecycle
 ;;; ---------------------------------------------------------------------------
