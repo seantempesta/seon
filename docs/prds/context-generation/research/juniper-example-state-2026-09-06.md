@@ -11,6 +11,26 @@ Owner direction: use the visualization to change stored attributes, values,
 refs, and render functions together, then test the assembled context with live
 agents. Existing data placement is not a design constraint.
 
+## Plan change and comparison proof — 2026-09-07
+
+Root locked the plan preview on subject 34626 through the live button, then
+transacted a new title on `juniper/understand-context`: “Compare the locked plan
+with live progress”. The same open browser, with no navigation or reload after
+the transaction, displayed “Changed since locking”, the old title in Block 2's
+locked result and the new title in its current result. HTML also displayed the
+new title. Append and compact buttons appeared; their actions are not yet proven
+by this checkpoint. The locked run was
+`source:1693ee31-a57a-4e02-abc1-589241ec2e5a`.
+
+Reproduction uses the existing browser probe with `--lock --await-change`;
+it announces readiness before the database mutation. Root inspected both
+`tmp/juniper-plan-diff.png` and `tmp/juniper-plan-wrapped.png`. A CSS selector
+covered nested pre elements but missed a pre carrying the preview class itself;
+the shared selector now handles both. `bin/css` rebuilt in 90 ms and browser
+inspection confirmed both complete transcripts wrap within their columns.
+The long generated plan form remains too verbose; wrapping fixes clipping,
+not that outstanding renderer quality problem.
+
 ## Live context lock proof — 2026-09-07
 
 Root drove the actual lock button with the existing browser probe's `--lock`

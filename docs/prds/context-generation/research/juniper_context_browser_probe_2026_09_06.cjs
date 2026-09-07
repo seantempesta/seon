@@ -14,7 +14,7 @@ const fs = require('node:fs/promises');
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     const response = await page.goto(process.argv[2], {waitUntil: 'domcontentloaded', timeout: 30000});
-    await page.locator('.seon-agent-identity-entry').first().waitFor({timeout: 15000});
+    await page.locator('.seon-debug-selected-previews').first().waitFor({timeout: 15000});
     await page.getByText('Context selection', {exact: true}).waitFor({timeout: 15000});
     let readinessError;
     try {
@@ -25,10 +25,16 @@ const fs = require('node:fs/promises');
     if (!readinessError && process.argv.includes('--lock')) {
       const button = page.getByRole('button', {name: 'Lock preview into context', exact: true});
       lockedRun = await button.locator('xpath=ancestor::form').locator('input[name="run"]').inputValue();
+      const beforeCount = await page.getByText('Locked context', {exact: true}).count();
       await button.click();
-      await page.getByText('Locked context', {exact: true}).first().waitFor({timeout: 30000});
+      await page.getByText('Locked context', {exact: true}).nth(beforeCount).waitFor({timeout: 30000});
       await page.getByText('Unchanged', {exact: true}).first().waitFor({timeout: 30000});
       await page.getByText('Locked context', {exact: true}).first().scrollIntoViewIfNeeded();
+    }
+    if (process.argv.includes('--await-change')) {
+      console.log(JSON.stringify({readyForDataChange: true, lockedRun}));
+      await page.getByText('Changed since locking', {exact: true}).first().waitFor({timeout: 60000});
+      await page.getByText('Changed since locking', {exact: true}).first().scrollIntoViewIfNeeded();
     }
     const text = await page.locator('body').innerText();
     await fs.writeFile(`${process.argv[3]}.txt`, text);
