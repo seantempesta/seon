@@ -87,6 +87,41 @@
            (is (not= :seon.render/missing-declaration
                      (:seon.error/kind (render-ai request))))))))))
 
+(deftest attribute-declared-producers-select-for-every-projection
+  ;; A cardinality-many component attribute declares its own AI and HTML
+  ;; producers. A request naming that attribute selects them at the schema
+  ;; stage, ahead of map-shape discovery, and hands the producer the
+  ;; attribute's transacted value rather than the owning entity.
+  (support/with-database
+   (fn [connection]
+     (let [database @connection
+           ctx (support/fork-cluster-ctx connection)
+           projection (kernel/context-projection ctx)
+           entity {:seon.cluster.agent/id "unit-owner"
+                   :my.plan/steps [{:db/id 42 :my.plan.item/id "s1"}]}
+           argument (ns-resolve 'seon.render 'render-invocation-argument)]
+       (doseq [[output producer] [[:seon.render/html 'my.plan/render-plan-html]
+                                  [:seon.render/ai 'my.plan/render-plan-ai]]]
+         (let [request (assoc (render-request database ctx nil entity)
+                              :seon.render/output output
+                              :seon.render.walk/attribute :my.plan/steps)
+               decision (selection request)
+               selected-stage
+               (some #(when (= :selected (:seon.render.selection.stage/status %))
+                        (:seon.render.selection.stage/name %))
+                     (:seon.render.selection/stages decision))]
+           (is (= producer (:seon.render.selection/selected decision)) (str output))
+           (is (= :schema selected-stage) (str output))
+           (is (= (get (value/transacted entity database) :my.plan/steps)
+                  (argument projection request producer))
+               "the producer receives the attribute's value, not the entity")
+           (is (= entity
+                  (:seon.render/value
+                   (argument projection
+                             (dissoc request :seon.render.walk/attribute)
+                             producer)))
+               "without a walk attribute the ordinary unit path is unchanged")))))))
+
 (deftest pulled-entity-selection-and-invocation-share-transaction-shape
   (support/with-database
    (fn [connection]

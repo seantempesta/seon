@@ -330,26 +330,43 @@
             schema.form/attr-form-properties
             (get output))))
 
+(defn- attribute-declared-producers
+  "The producers an attribute declares for `output`, as a candidate vector.
+
+  An attribute may declare a producer for any authored projection. A stored
+  attribute reached by the walk selects that producer ahead of map-shape
+  discovery, which is how a cardinality-many or component attribute renders
+  as one unit. The form projection keeps its floor when nothing is declared."
+  [projection request output]
+  (if-let [declared (attribute-producer projection request output)]
+    [declared]
+    (when (and (= :seon.render/form output)
+               (:seon.render.walk/attribute request))
+      ['seon.render/render-form])))
+
 (defn- render-invocation-argument
   "Supply an attribute declaration with that attribute's value."
   [projection request selected]
   (let [attribute (:seon.render.walk/attribute request)
         declared (when attribute
-                   (attribute-producer projection request :seon.render/form))]
-    (if (= selected declared)
-      (get (render.value/transacted (render-value request)
-                                    (:seon.db/db request))
-           attribute)
+                   (into #{}
+                         (keep #(attribute-producer projection request %))
+                         [:seon.render/form (:seon.render/output request)]))
+        value (render-value request)]
+    (if (contains? declared selected)
+      ;; The walk hands the owning entity; the debug page hands the
+      ;; attribute's value directly. Both reach the producer as that value.
+      (if (and (map? value) (contains? value attribute))
+        (get (render.value/transacted value (:seon.db/db request)) attribute)
+        value)
       (if (floor-producer? selected)
         (render-argument request)
         (producer-argument request)))))
 
 (defn- declared-producer
   [projection request value output]
-  (if (and (= :seon.render/form output)
-           (:seon.render.walk/attribute request))
-    (or (attribute-producer projection request output)
-        'seon.render/render-form)
+  (if-let [producers (attribute-declared-producers projection request output)]
+    (first producers)
     (schema-producer projection request value output)))
 
 (def ^:private selection-stage-order
@@ -447,11 +464,9 @@
 (defn- schema-stage
   [request projection value output]
   (let [producers
-        (if (and (= :seon.render/form output)
-                 (:seon.render.walk/attribute request))
-          [(or (attribute-producer projection request output)
-               'seon.render/render-form)]
-          (or (schema-producers projection request value output) []))
+        (or (attribute-declared-producers projection request output)
+            (schema-producers projection request value output)
+            [])
         selection-error (when (> (count producers) 1)
                           (ambiguity nil output producers))
         status (cond selection-error :ambiguous
