@@ -180,8 +180,12 @@ The five red tests there are `turn-test/a-run-prompts-from-its-opening-database-
 `a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end`,
 `turn-intent-is-the-complete-crash-falsifier`,
 `sci.eval-test/runtime-function-rows-carry-parsed-contract-facts` and
-`static-and-runtime-contracted-definitions-publish-identical-facts`; the
-baseline for them is recorded in §7.
+`static-and-runtime-contracted-definitions-publish-identical-facts`.
+
+**All five are inherited.** The same selection at `bbeb6f651`, before any of
+the four commits, gives 124 tests / 728 assertions / **9 failures, 1 error** —
+the same five test names, the same counts. Nothing in the REPL grammar work
+touched them.
 
 ## 6. The live page, verbatim
 
@@ -231,6 +235,8 @@ continuations of one `#:seon.repl{…}` datum, never comment-shaped, so ruling
    limits is not how they get satisfied.
 2. `forms-run-and-prose-becomes-source-comments`'s one recovery sub-case
    (§1.2), pre-existing.
+2b. The five inherited reds under `seon.sci.eval-test` /
+   `seon.cluster.turn-test` (§5), pre-existing.
 3. PRD §4 item 2 from the previous note — the provider prompt still builds its
    own bytes in `seon.render.walk/generic-history-entries`; the evaluation
    entity is still not merged with the form entity.
