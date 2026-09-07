@@ -6,6 +6,30 @@ tags: [prd, agent, context, architecture]
 
 # The working edge — context-generation program
 
+## Owner ruling — previews remain in memory, 2026-09-06
+
+The owner clarified that preview results are cached in memory, not persisted.
+This supersedes the durable preview-run implementation described in the older
+checkpoints below. Inspecting a renderer must not create durable run, form,
+evaluation, or preview-error records. Reuse the existing parser, SCI evaluator,
+result binding, transcript projection, and invocation cache; separate evaluation
+from persistence within those owners instead of adding a second execution path.
+
+Locking persists the exact cached source, namespace, results, and database basis
+without re-executing, and attaches the ordered evaluation refs to the agent's
+context selection. Relevant data changes replace the current cached preview;
+the locked evaluations remain the comparison baseline. Appending and compacting
+use those same persisted facts. Cache eviction or restart before lock loses only
+an unselected preview; a lock whose cached result is unavailable must explain
+that fact rather than silently evaluate a different result.
+
+No persisted preview-purpose flag is needed. The pending question about how to
+classify durable preview runs is superseded by this ruling. Ordinary agent
+executions remain durable; only selected preview evaluations join their context.
+Implementation is in progress: the live UI still uses durable preview runs as
+of this ruling, despite its lock/change/append/compact browser proofs. Source
+update delivery was separately proven in `f97588da8`.
+
 ## Design-lab planning checkpoint — 2026-09-06
 
 Live acceptance is currently blocked by a reproduced preview feedback loop,
