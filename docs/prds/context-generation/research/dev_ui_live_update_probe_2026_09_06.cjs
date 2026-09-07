@@ -17,13 +17,14 @@ const assert = require('node:assert/strict');
     const heading = page.locator('.seon-agent-identity-entry .seon-kicker').first();
     await heading.waitFor({ timeout: 30000 });
     const before = await heading.innerText();
+    const expected = process.argv[4] || 'Agent identity';
     let navigations = 0;
     page.on('framenavigated', frame => { if (frame === page.mainFrame()) navigations++; });
-    console.log(JSON.stringify({ ready: true, before, url: page.url() }));
-    await page.waitForFunction(() =>
-      document.querySelector('.seon-agent-identity-entry .seon-kicker')?.textContent === 'Agent identity',
-    undefined, { timeout: 120000 });
-    assert.notEqual(before, 'Agent identity', 'proof must observe an actual change');
+    console.log(JSON.stringify({ ready: true, before, expected, url: page.url() }));
+    await page.waitForFunction(expected =>
+      document.querySelector('.seon-agent-identity-entry .seon-kicker')?.textContent === expected,
+    expected, { timeout: 120000 });
+    assert.notEqual(before, expected, 'proof must observe an actual change');
     assert.equal(navigations, 0, 'the existing document must update without navigation');
     assert.deepEqual(errors, []);
     await page.screenshot({ path: process.argv[3], fullPage: false });

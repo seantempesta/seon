@@ -11,7 +11,20 @@ Owner direction: use the visualization to change stored attributes, values,
 refs, and render functions together, then test the assembled context with live
 agents. Existing data placement is not a design constraint.
 
-## Source-to-browser proof still open — 2026-09-07
+## Source-to-browser proof passed — 2026-09-07
+
+The coordinated repeat passed. The existing browser observed the actual heading
+change from “Agent identity” to “Identity”, with zero main-frame navigations and
+no browser errors. The supported apply_patch edit hook published current-src
+`6a9e1884-0925-560d-87d4-42a6001fbe08`, digest
+`81d628973b837aadac49633aa3290c78a813dda33c5904fab46198e8fb42eb4a`.
+Root personally inspected `tmp/juniper-source-proof.png`. The same live-update
+probe now accepts an expected heading argument so repeated proofs must observe
+a real change rather than pass on an already updated heading. AI previews were
+pending at the captured moment; this proves code-to-HTML delivery, not terminal
+AI execution or cache reuse after adoption.
+
+## Earlier source-to-browser attempt — 2026-09-07
 
 Root opened the existing live-update probe with heading “Agent”, then changed
 the identity heading to “Agent identity”. The first shell file edit did not
