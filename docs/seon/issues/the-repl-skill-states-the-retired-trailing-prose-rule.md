@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, repl, docs, wave/docs-honesty]
 ---
@@ -42,3 +42,9 @@ that prose after the last form is kept only by the stored reply text.
 The lane that made the change (`reply-order-and-faults`, 2026-09-07) did not own
 `.agents/skills/`; another lane was editing adjacent REPL owners in the same
 tree at the time.
+
+## Resolution
+
+2026-09-07: the skill line was rewritten to state the current rule (prose
+attaches only to the form it precedes; trailing prose stays in the reply
+text) in the commit that resolves this note.

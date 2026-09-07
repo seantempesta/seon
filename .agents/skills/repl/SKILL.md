@@ -85,9 +85,13 @@ tracks the namespace in effect while reading
 - A bare symbol is a reply form only when it occupies its own source line and
   the reply also contains structured code. This includes a trailing standalone
   symbol that a human might have intended as prose.
-- Other text becomes single-`;` source comments attached to a form — the one
-  it precedes, or for a trailing span the one it follows. This is an internal
-  parser representation of agent-written input, never a displayed result.
+- Other text becomes single-`;` source comments attached to the form it
+  precedes (`src/seon/cluster/reply.clj`, `plan-sources`). Prose after the
+  final form is nobody's comment: `seon.repl/text` renders a comment above its
+  form's prompt, so attaching trailing prose would invert what the agent wrote;
+  it survives only in the durable reply text (`:seon.cluster.run/reply`). This
+  is an internal parser representation of agent-written input, never a
+  displayed result.
 - Markdown fence lines are stripped before reading because backticks otherwise
   read as plausible symbols.
 
