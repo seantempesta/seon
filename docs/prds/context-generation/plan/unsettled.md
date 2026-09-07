@@ -17,6 +17,17 @@ state or mechanism.
 
 ## Integration checkpoint — 2026-09-06, provider-bound context
 
+The shared `transcript/history-entries` now also accepts the execution reducer's
+`:seon.cluster.loop/evaluated-sources` in memory. It uses the same result printer
+as persisted evaluations; no source evaluation or persistence occurs there.
+Focused proof passed 1 test / 86 assertions including fixture assertions: stored
+and in-memory text agree, including original comments, stdout, and result.
+The earlier full transcript gate exposed existing output/budget expectation
+failures plus two incorrect expectations added here; those two expected a bare
+sum but the fixture correctly retained its comments and println form. They are
+corrected. The full namespace is not claimed green. Web cache integration is
+still pending.
+
 The owner reiterated that the debug UI is an iteration surface for the actual
 context sent through the agent loop. Completion requires a real context request
 containing the selected structured evaluations, followed by a live agent using

@@ -993,11 +993,11 @@
           (db/datoms db :eavt (get-in entry [::entity :db/id]))))
 
 (defn history-entries
-  "Return one agent's durable transcript as immutable REPL entries.
+  "Return evaluated forms as immutable REPL entries.
 
-   Stored form source remains byte-faithful and values come only from stored
-   evaluation facts. Messages and run status have their own renderers; neither
-   is presented here as if it had executed."
+   Use supplied in-memory evaluations when present, otherwise query stored
+   evaluations. Both use the same result formatting. This function neither
+   executes source nor persists it."
   {:malli/schema [:=> [:cat :seon.render/unit] [:vector :map]]}
   [unit]
   (let [db (:seon.db/db unit)
@@ -1012,10 +1012,28 @@
               db agent-id)
         candidate-count (long (get-in unit [:seon.sci.admit/caps
                                              :seon.config.eval.result/max-nodes]))
+        evaluated-sources (:seon.cluster.loop/evaluated-sources unit)
         candidates
-        (history db (:seon.cluster.run/id unit) agent-id
-                 candidate-count (::selected-run-id unit)
-                 (:seon.context.contribution/evaluations unit))
+        (if (some? evaluated-sources)
+          (mapv
+           (fn [{form :seon.cluster.loop/admitted-form
+                 evaluation :seon.sci.eval/evaluation
+                 ordinal :seon.cluster.run.form/ordinal}]
+             (receipt-entry
+              {nil (:seon.cluster.run.form/source form)}
+              (assoc evaluation
+                     :seon.cluster.eval/id
+                     (run/receipt-identity (:seon.cluster.run/id unit) ordinal)
+                     :seon.cluster.eval/ordinal ordinal
+                     :seon.cluster.eval/ns
+                     {:seon.ns/name (second (:seon.cluster.run.form/ns form))}
+                     :seon.cluster.eval/read-basis-transaction
+                     (or (:seon.cluster.eval/read-basis-transaction evaluation)
+                         (db/basis-t db)))))
+           evaluated-sources)
+          (history db (:seon.cluster.run/id unit) agent-id
+                   candidate-count (::selected-run-id unit)
+                   (:seon.context.contribution/evaluations unit)))
         entries
         (mapv
          (fn [entry]

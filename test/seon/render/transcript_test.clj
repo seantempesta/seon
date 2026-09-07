@@ -1105,8 +1105,34 @@
        (is (= rendered (transcript/render-ai selected)))
        (let [entries (transcript/history-entries selected)]
          (is (= 1 (count entries)))
-         (is (= "(+ 20 22)" (:seon.render.history/form (first entries))))
-         (is (= "42" (:seon.render.history/printed-value (first entries))))
+         (is (= ";; calculate the answer\n(do (println \"side effect\") (+ 20 22))"
+                (:seon.render.history/form (first entries))))
+         (is (= "side effect\n42" (:seon.render.history/printed-value (first entries))))
+         (let [facts (db/pull database
+                              [:seon.cluster.eval/ordinal
+                               :seon.cluster.eval/result-edn
+                               :seon.cluster.eval/output
+                               {:seon.cluster.eval/ns [:seon.ns/name]}
+                               {:seon.cluster.eval/run [:seon.cluster.run/id]}]
+                              evaluation)
+               in-memory
+               (assoc selected
+                      :seon.cluster.run/id
+                      (get-in facts [:seon.cluster.eval/run :seon.cluster.run/id])
+                      :seon.cluster.loop/evaluated-sources
+                      [{:seon.cluster.run.form/ordinal (:seon.cluster.eval/ordinal facts)
+                        :seon.cluster.loop/admitted-form
+                        {:seon.cluster.run.form/source (:seon.render.history/form (first entries))
+                         :seon.cluster.run.form/ns
+                         [:seon.ns/name (get-in facts [:seon.cluster.eval/ns :seon.ns/name])]}
+                        :seon.sci.eval/evaluation
+                        (select-keys facts [:seon.cluster.eval/result-edn
+                                            :seon.cluster.eval/output])}])]
+           (is (= (mapv :seon.render.history/bytes entries)
+                  (mapv :seon.render.history/bytes
+                        (transcript/history-entries in-memory))))
+           (is (= [] (transcript/history-entries
+                      (assoc in-memory :seon.cluster.loop/evaluated-sources [])))))
          (is (= [] (transcript/history-entries
                     (assoc selected :seon.context.contribution/evaluations #{})))))
        (is (= basis (db/basis-t @connection))
