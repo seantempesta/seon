@@ -107,6 +107,7 @@
            {:description
             "Open authored items whose descendants and dependencies do not block them."}
            :my.plan.item/item],
+          :authored [:vector :my.plan.item/item],
           :intent-subjects [:vector :seon.db/ref],
           :blocked
           [:vector
@@ -132,6 +133,7 @@
             "A derived current view of authored plan facts and structurally separate obligations for one agent."}
            [:seon.cluster.agent/id :seon.cluster.agent/id]
            [:my.plan/obligations :my.plan/obligations]
+           [:my.plan/authored :my.plan/authored]
            [:my.plan/ready :my.plan/ready]
            [:my.plan/blocked :my.plan/blocked]
            [:my.plan/recent-completions :my.plan/recent-completions]

@@ -236,9 +236,21 @@
           :else nil)]
     (if-not entity
       value
-      (cond-> (render.value/transacted entity)
+      (let [stable-ref (fn [reference]
+                         (cond
+                           (and (vector? reference)
+                                (= :my.plan.item/id (first reference))) reference
+                           (and (map? reference)
+                                (:my.plan.item/id reference))
+                           [:my.plan.item/id (:my.plan.item/id reference)]
+                           :else nil))
+            parent (stable-ref (:my.plan.item/parent entity))
+            needs (into #{} (keep stable-ref) (:my.plan.item/needs entity))]
+       (cond-> (render.value/transacted entity)
+        parent (assoc :my.plan.item/parent parent)
+        (seq needs) (assoc :my.plan.item/needs needs)
         (find entity :my.plan.item/about)
-        (assoc :my.plan.item/about (:my.plan.item/about entity))))))
+        (assoc :my.plan.item/about (:my.plan.item/about entity)))))))
 
 (defn- item-row
   [database item]
@@ -855,6 +867,10 @@
          (str "There is no agent named " (pr-str agent-id) ".")
          :seon.error/data {:seon.cluster.agent/id agent-id}}
         (let [anchor (anchor-id database agent-id)
+              authored-rows (current-authored-rows database agent-id)
+              authored (if (error-value? authored-rows)
+                         authored-rows
+                         (mapv item-value authored-rows))
               ready-eids (db/q ready-query database rules agent-id)
               blocked-eids (db/q blocked-query database rules agent-id)
               ready-items
@@ -867,12 +883,13 @@
                 (items-for-eids database anchor blocked-eids))
               derived (obligations database agent-id)
               completions (completion-view database agent-id)
-              values [ready-items blocked-items derived completions]]
+              values [authored ready-items blocked-items derived completions]]
           (if-let [error (some #(when (error-value? %) %) values)]
             error
             (cond->
              {:seon.cluster.agent/id agent-id
               :my.plan/obligations derived
+              :my.plan/authored authored
               :my.plan/ready ready-items
               :my.plan/blocked blocked-items
               :my.plan/recent-completions
@@ -914,15 +931,14 @@
 
 (defn- item-line
   [item]
-  (str (pr-str (:my.plan.item/id item)) ": " (:my.plan.item/title item)
+  (str (:my.plan.item/title item) " [" (:my.plan.item/id item) "]"
        (when-let [description (:my.plan.item/description item)]
-         (str " — " description))
+         (str "\n  " description))
        (when-let [expected (:my.plan.item/expected-result item)]
-         (str " — done when " expected))
-       (when-let [parent (:my.plan.item/parent item)]
-         (str " — under " (pr-str parent)))
-       (when-let [needs (seq (:my.plan.item/needs item))]
-         (str " — needs " (str/join ", " (map pr-str needs))))))
+         (str "\n  Done when: " expected))
+        (when-let [needs (seq (sort-by second (:my.plan.item/needs item)))]
+         (str "\n  Waiting for: "
+              (str/join ", " (map (comp pr-str second) needs))))))
 
 (defn format-item-ai
   "Format one authored plan item as terminal text."
@@ -951,40 +967,38 @@
   [item]
   (let [current? (:my.plan/current? item)
         item (item-value item)
-        completed? (some? (:my.plan.item/completed-at item))]
-    (cond-> [:article {:class (str "seon-family-entry my-plan-item "
-                                  (cond completed? "is-completed"
-                                        current? "is-current"
-                                        :else "is-open"))}
-             [:p {:class "my-plan-id"}
-              [:span {:class "my-plan-state"}
-               (cond completed? "Completed"
-                     current? "Current focus"
-                     :else "Open")]
-              [:code (pr-str (:my.plan.item/id item))]]
-             [:h3 (:my.plan.item/title item)]
-             ]
-      (:my.plan.item/description item)
-      (conj [:p (:my.plan.item/description item)])
-
-      (:my.plan.item/expected-result item)
-      (conj [:p {:class "my-plan-expected"}
-             [:strong "Done when: "] (:my.plan.item/expected-result item)])
-
-      (:my.plan.item/parent item)
-      (conj [:p {:class "my-plan-relation"}
-             [:strong "Part of "]
-             [:code (pr-str (:my.plan.item/parent item))]])
-
-      (seq (:my.plan.item/needs item))
-      (conj [:p {:class "my-plan-relation"}
-             [:strong "Waiting for "]
-             (str/join ", " (map pr-str (:my.plan.item/needs item)))])
-
-      true
-      (conj [:details
-             [:summary "Plan item reference"]
-             [:code (pr-str [:my.plan.item/id (:my.plan.item/id item)])]]))))
+        completed? (some? (:my.plan.item/completed-at item))
+        blocked? (:my.plan/blocked? item)]
+    [:article {:class (str "seon-family-entry my-plan-item "
+                           (cond completed? "is-completed"
+                                 current? "is-current"
+                                 blocked? "is-blocked"
+                                 :else "is-open"))}
+     [:p {:class "my-plan-id"}
+      [:span {:class "my-plan-state"}
+       (cond completed? "Completed"
+             current? "Current focus"
+             blocked? "Blocked"
+             :else "Open")]
+      [:code (:my.plan.item/id item)]]
+     [:h3 (:my.plan.item/title item)]
+     [:details {:open (when current? true)}
+      [:summary "Details"]
+      (when-let [description (:my.plan.item/description item)]
+        [:p description])
+      (when-let [expected (:my.plan.item/expected-result item)]
+        [:p {:class "my-plan-expected"}
+         [:strong "Done when: "] expected])
+      (when-let [parent (:my.plan.item/parent item)]
+        [:p {:class "my-plan-relation"}
+         [:strong "Part of "] [:code (second parent)]])
+      (when-let [needs (seq (:my.plan.item/needs item))]
+        [:p {:class "my-plan-relation"}
+         [:strong "Waiting for "]
+         (str/join ", " (map (comp pr-str second) needs))])
+      [:p {:class "my-plan-reference"}
+       [:strong "Reference "]
+       [:code (pr-str [:my.plan.item/id (:my.plan.item/id item)])]]]]))
 
 (defn format-ready-items-ai
   "Format a supplied ready authored plan frontier as terminal text."
@@ -1025,24 +1039,23 @@
        (when (seq values)
          (str ":\n" (str/join "\n" (map #(str "- " (line %)) values))))))
 
-(defn- plan-introduction
-  ([] (plan-introduction nil))
-  ([view]
-   (let [item-id (some :my.plan.item/id
-                       (concat (:my.plan/ready view)
-                               (:my.plan/blocked view)
-                               (:my.plan/recent-completions view)))
-         shown-id (or item-id "<item-id>")]
-    (str "Items connect to this agent through :my.plan.item/agent; "
-       ":my.plan.item/parent decomposes work, open :my.plan.item/needs refs "
-       "block work, and :my.plan.item/completed-at presence completes it. "
-       "For example: (seon.db/transact! [{:db/id "
-       (pr-str [:my.plan.item/id shown-id])
-       " :my.plan.item/title \"Updated title\"}]). "
-       (when-not item-id "Replace <item-id> with an existing item id. ")
-       "These are ordinary facts that "
-       "seon.db/q and seon.db/pull read and seon.db/transact! can create or "
-        "update; the sections below are derived current state."))))
+(defn- plan-tips
+  [view]
+  (let [item-id (or (some :my.plan.item/id (:my.plan/ready view))
+                    (some :my.plan.item/id (:my.plan/blocked view))
+                    "<item-id>")
+        agent-id (:seon.cluster.agent/id view)]
+    (str "Read again: (my.plan/plan {}). "
+         "Inspect one step: (my.plan/item {:my.plan.item/id " (pr-str item-id)
+         "}). Rename it: (seon.db/transact! [{:db/id "
+         (pr-str [:my.plan.item/id item-id])
+         " :my.plan.item/title \"Updated title\"}]). "
+         "Focus it: (seon.db/transact! [{:db/id "
+         (pr-str [:seon.cluster.agent/id agent-id])
+         " :my.plan/anchor " (pr-str [:my.plan.item/id item-id]) "}]). "
+         "Complete it: (seon.db/transact! [[:db/add "
+         (pr-str [:my.plan.item/id item-id])
+         " :my.plan.item/completed-at (java.util.Date.)]]).")))
 
 (defn format-plan-ai
   "Format the current plan union as terminal text."
@@ -1055,21 +1068,24 @@
     (str/join
      "\n\n"
      (cond->
-      [(str "Current plan for " (pr-str (:seon.cluster.agent/id view))
+      [(str "Plan for " (:seon.cluster.agent/id view)
             (when-let [anchor (:my.plan/anchor view)]
-              (str " — anchor " (pr-str anchor))))
-       (plan-introduction view)
+              (let [current (some #(when (= anchor [:my.plan.item/id
+                                                    (:my.plan.item/id %)]) %)
+                                  (:my.plan/authored view))]
+                (str "\nCurrent: " (or (:my.plan.item/title current)
+                                        (second anchor))))))
        (section-ai
-        "Derived obligations"
+        "Needs attention"
         (:my.plan/obligations view)
         (fn [obligation]
           (str (name (:my.plan/obligation-source obligation)) " "
                (pr-str (:my.plan/obligation-id obligation)) ": "
                (:my.plan/obligation-title obligation))))
-       (section-ai "Ready authored work" (:my.plan/ready view) item-line)
-       (section-ai "Blocked authored work" (:my.plan/blocked view) item-line)
-       (section-ai "Recent completions"
-                   (:my.plan/recent-completions view) item-line)]
+       (section-ai "Ready now" (:my.plan/ready view) item-line)
+       (section-ai "Waiting" (:my.plan/blocked view) item-line)
+       (section-ai "Recently finished" (:my.plan/recent-completions view) item-line)
+       (plan-tips view)]
        older (conj (print/render-elision-ai older)))))))
 
 (defn render-plan-ai
@@ -1080,16 +1096,27 @@
    (list `format-plan-ai
          (list `plan {}))))
 
-(defn- item-list-html
-  [title items css-class anchor]
-  (into [:section {:class css-class}
-         [:h3 (str title " (" (count items) ")")]]
-        (map (fn [item]
-               (render-item-html
-                (cond-> item
-                  (= [:my.plan.item/id (:my.plan.item/id item)] anchor)
-                  (assoc :my.plan/current? true)))))
-        items))
+(defn- plan-tree-html
+  [view anchor]
+  (let [items (:my.plan/authored view)
+        blocked-ids (into #{} (map :my.plan.item/id) (:my.plan/blocked view))
+        children (group-by #(some-> (:my.plan.item/parent %) second) items)
+        render-node
+        (fn render-node [item]
+          (let [id (:my.plan.item/id item)
+                item (cond-> item
+                       (= anchor [:my.plan.item/id id])
+                       (assoc :my.plan/current? true)
+                       (blocked-ids id) (assoc :my.plan/blocked? true))]
+            [:li
+             (render-item-html item)
+             (when-let [nested (seq (get children id))]
+               (into [:ol {:class "my-plan-children"}]
+                     (map render-node)
+                     (sort-by :my.plan.item/id nested)))]))]
+    (into [:ol {:class "my-plan-tree"}]
+          (map render-node)
+          (sort-by :my.plan.item/id (get children nil)))))
 
 (defn render-plan-html
   "Render the current plan union as bounded Hiccup."
@@ -1097,13 +1124,24 @@
   [view]
   (let [derived-obligations (:my.plan/obligations view)
         older (:my.plan/older-completions view)
-        anchor (:my.plan/anchor view)]
+        anchor (:my.plan/anchor view)
+        authored (:my.plan/authored view)
+        current (some #(when (= anchor [:my.plan.item/id
+                                       (:my.plan.item/id %)]) %)
+                      authored)]
     (cond->
      [:section {:class "seon-family-entry my-plan"}
       [:h2 (str (:seon.cluster.agent/id view) "’s plan")]
-      [:p "This is the agent’s current work plan. It updates these steps as it works, records completed outcomes, and revises what comes next."]
-      (when-let [anchor (:my.plan/anchor view)]
-        [:p {:class "my-plan-anchor"} (str "Current focus: " (pr-str anchor))])
+      [:p {:class "my-plan-progress"}
+       [:strong (str (count (:my.plan/recent-completions view)) " completed")]
+       (str " · " (count (:my.plan/ready view)) " ready · "
+            (count (:my.plan/blocked view)) " blocked")]
+      (when current
+        [:section {:class "my-plan-focus"}
+         [:p {:class "my-plan-kicker"} "Current focus"]
+         [:h3 (:my.plan.item/title current)]
+         (when-let [expected (:my.plan.item/expected-result current)]
+           [:p [:strong "Done when: "] expected])])
       (into [:section {:class "my-plan-obligations"}
              [:h3 (str "Work needing attention (" (count derived-obligations) ")")]]
             (map
@@ -1112,13 +1150,12 @@
                         (pr-str (:my.plan/obligation-id obligation)) ": "
                         (:my.plan/obligation-title obligation))]))
             derived-obligations)
-      (item-list-html "Ready to work on" (:my.plan/ready view)
-                      "my-plan-ready" anchor)
-      (item-list-html "Waiting on other steps" (:my.plan/blocked view)
-                      "my-plan-blocked" anchor)
-      (item-list-html "Recent completions"
-                      (:my.plan/recent-completions view)
-                      "my-plan-completed" anchor)]
+      [:section {:class "my-plan-steps"}
+       [:h3 (str "Plan steps (" (count authored) ")")]
+       (plan-tree-html view anchor)]
+      [:details {:class "my-plan-help"}
+       [:summary "How to inspect or update this plan"]
+       [:pre (plan-tips view)]]]
       older
       (conj [:p {:class "my-plan-elision"}
              (print/render-elision-ai older)]))))

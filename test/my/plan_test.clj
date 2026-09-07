@@ -62,7 +62,11 @@
       (let [view (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"})]
         (is (= [:my.plan.item/id "root"] (:my.plan/anchor view)))
         (is (= ["prepare"] (mapv :my.plan.item/id (:my.plan/ready view))))
-        (is (= ["verify"] (mapv :my.plan.item/id (:my.plan/blocked view)))))
+        (is (= ["verify"] (mapv :my.plan.item/id (:my.plan/blocked view))))
+        (is (= [:my.plan.item/id "root"]
+               (:my.plan.item/parent (first (:my.plan/ready view)))))
+        (is (= #{[:my.plan.item/id "prepare"]}
+               (:my.plan.item/needs (first (:my.plan/blocked view))))))
       (plan/complete! "prepare" (at 1) connection "alice")
       (is (= ["verify"] (mapv :my.plan.item/id
                                (plan/ready @connection "alice"))))
@@ -255,8 +259,11 @@
             (is (seon.schema/valid-candidate-value? :seon.render/ai source))
             (is (seon.schema/valid-candidate-value? :seon.render/hiccup html))
             (is (str/includes? ai "Current work"))
+            (is (str/includes? ai "Read again: (my.plan/plan {})"))
             (is (str/includes? ai "seon.db/transact!"))
             (is (str/includes? (pr-str html) "is-current"))
+            (is (str/includes? (pr-str html) "my-plan-progress"))
+            (is (str/includes? (pr-str html) "How to inspect or update"))
             (is (str/includes? (pr-str html) "Done when:"))
             (is (= :section (first html)))))))))
 

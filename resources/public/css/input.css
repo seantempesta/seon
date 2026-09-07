@@ -999,6 +999,7 @@ details.tool-call-details[open] .tool-preview {
   border-radius: 0.2rem;
 }
 .my-plan-item.is-current { border-left-color: var(--color-signal); }
+.my-plan-item.is-blocked { border-left-color: var(--color-warning); }
 .my-plan-item.is-completed { opacity: 0.78; border-left-color: var(--color-success); }
 .my-plan-item h3 {
   margin: 0;
@@ -1024,6 +1025,7 @@ details.tool-call-details[open] .tool-preview {
   text-transform: uppercase;
 }
 .my-plan-item.is-current .my-plan-state { color: var(--color-signal); }
+.my-plan-item.is-blocked .my-plan-state { color: var(--color-warning); }
 .my-plan-item.is-completed .my-plan-state { color: var(--color-success); }
 .my-plan-item > p:not(.my-plan-id):not(.my-plan-expected) {
   color: var(--color-text-200);
@@ -1044,13 +1046,51 @@ details.tool-call-details[open] .tool-preview {
 .my-plan-relation code { color: var(--color-text-300); }
 .my-plan-item details {
   color: var(--color-text-500);
-  font-size: 0.6rem;
+  font-size: 0.66rem;
+}
+.my-plan-item details > summary,
+.my-plan-help > summary {
+  color: var(--color-text-400);
+  cursor: pointer;
+}
+.my-plan-item details[open] > summary {
+  margin-bottom: 0.35rem;
+}
+.my-plan-reference {
+  color: var(--color-text-500) !important;
+  font-size: 0.6rem !important;
 }
 .my-plan > h2 { margin-bottom: 0.2rem; }
-.my-plan-anchor {
+.my-plan-progress {
+  color: var(--color-text-400);
+  font-size: 0.68rem;
+}
+.my-plan-progress strong { color: var(--color-success); }
+.my-plan-focus {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.55rem;
   padding: 0.35rem 0.5rem;
   border-left: 2px solid var(--color-signal);
   color: var(--color-text-200);
+}
+.my-plan-focus > * { margin: 0; }
+.my-plan-focus h3 { color: var(--color-text-50); font-size: 0.8rem; }
+.my-plan-kicker {
+  color: var(--color-signal);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.my-plan-help {
+  margin-top: 0.7rem;
+  color: var(--color-text-400);
+  font-size: 0.65rem;
+}
+.my-plan-help pre {
+  margin-top: 0.35rem;
+  white-space: pre-wrap;
 }
 .my-plan-ready,
 .my-plan-blocked,
@@ -1059,6 +1099,26 @@ details.tool-call-details[open] .tool-preview {
   display: grid;
   gap: 0.35rem;
   margin-top: 0.55rem;
+}
+.my-plan-steps { margin-top: 0.65rem; }
+.my-plan-steps > h3 {
+  margin: 0 0 0.4rem;
+  color: var(--color-text-400);
+  font-size: 0.66rem;
+  font-weight: 500;
+}
+.my-plan-tree,
+.my-plan-children {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.my-plan-children {
+  margin: 0.5rem 0 0 1.25rem;
+  padding-left: 0.85rem;
+  border-left: 2px solid var(--color-base-800);
 }
 .my-plan-ready > h3,
 .my-plan-blocked > h3,

@@ -207,3 +207,12 @@ entity ids, so the current card said `Part of 34626` and a blocked card said
 `needs 44147`. The renderer must receive or derive stable
 `:my.plan.item/id` refs from the declared pull shape; CSS cannot repair that
 missing identity. Preserve the exact selected entities when correcting it.
+
+The plan renderer now normalizes pulled parent and dependency refs back to
+stable `:my.plan.item/id` lookup refs before rendering. AI output leads with the
+current item, short ready/blocked/completed sections, and executable read,
+inspect, and update forms. HTML leads with progress and current focus; each step
+keeps its description, completion condition, dependencies, and exact lookup ref
+inside an expandable detail. The Juniper fixture continues to describe work in
+progress: durable context selections and automatic changed-result comparison
+remain pending, and it does not claim a live provider turn occurred.

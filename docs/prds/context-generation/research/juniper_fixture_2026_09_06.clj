@@ -49,18 +49,18 @@
                    :my.plan.item/parent [:my.plan.item/id "juniper/understand-context"]
                    :my.plan.item/title "Render this plan clearly"
                    :my.plan.item/description
-                   "Show current focus, ready work, dependencies, completed evidence, and exact item references."
+                   "Replace raw entity numbers and dense prose with a readable current focus, progress summary, stable dependencies, and expandable step evidence."
                    :my.plan.item/expected-result
-                   "The plan reads as a compact hierarchy in both AI text and HTML."}
+                   "The AI plan is concise and actionable; the HTML plan shows progress and stable item references without numeric entity ids."}
                   {:my.plan.item/id "juniper/compare-changed-results"
                    :my.plan.item/agent [:seon.cluster.agent/id "juniper"]
                    :my.plan.item/parent [:my.plan.item/id "juniper/understand-context"]
                    :my.plan.item/needs [[:my.plan.item/id "juniper/render-plan"]]
                    :my.plan.item/title "Compare refreshed results"
                    :my.plan.item/description
-                   "Change one relevant fact and compare the locked evaluation with the refreshed result."
+                   "After context selections move from memory into durable agent-linked facts, change one relevant fact and compare the previous result with its automatically refreshed result."
                    :my.plan.item/expected-result
-                   "The comparison names the changed result while preserving the locked baseline."}
+                   "The comparison shows the previous and refreshed results together, with the relevant changed input."}
                   {:my.plan.item/id "juniper/try-live-turn"
                    :my.plan.item/agent [:seon.cluster.agent/id "juniper"]
                    :my.plan.item/parent [:my.plan.item/id "juniper/understand-context"]
