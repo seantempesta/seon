@@ -70,7 +70,7 @@ attribute schema. Attribute namespaces are owning code namespaces.
 
 ```clojure
 {:seon.agent/id         "juniper"                 ; lookup identity
- :seon.agent/namespace  #ref my.agents.juniper    ; the namespace this agent stewards
+ :seon.agent/namespace  #ref my.agents.juniper    ; assigned working namespace, NOT unique; any agent may in-ns elsewhere
  ;; ── rendered keys ──
  :seon.agent/loop       {:seon.agent.loop/run      #ref run     ; present while a turn is open
                          :seon.agent.loop/process  "pid-start"  ; custody = presence
@@ -86,7 +86,7 @@ attribute schema. Attribute namespaces are owning code namespaces.
 
 | Rendered key | What it is (stored) | Derived at render | AI source | HTML |
 |---|---|---|---|---|
-| identity (`id` + `namespace`, rendered from the entity's own scalars) | name, stewarded namespace | created (tx instant), cluster (the branch) | `(seon.agent/whoami)` | identity card |
+| identity (`id` + `namespace`, rendered from the entity's own scalars) | name, assigned namespace | namespaces it stewards (`:seon.ns/steward` reverse), created (tx instant), cluster (the branch) | `(seon.agent/whoami)` | identity card |
 | `:seon.agent/loop` | current run ref, custody | situation (authorship, not a label), next form, turns left, deferred, what it is waiting on, the `my.run` commands | `(my.run/status {})` | state card |
 | `:seon.agent/inbox` | messages delivered to me | unread = no claim ref | `(my.message/inbox {})` | Inbox (N) |
 | `:seon.agent/faults` | faults for me: my escaped throwables, and faults in functions of the namespace I steward | unhandled = no claim ref; grouped by signature | `(my.faults/list {})` | Faults (N) |
@@ -97,6 +97,16 @@ attribute schema. Attribute namespaces are owning code namespaces.
 
 Ruled names: `loop` (the vocabulary table's own word for the per-agent loop;
 `runtime` means the environment there), `sci` (it is SCI data, owner 09-07).
+
+**Namespace is not identity (owner, 2026-09-07).** Several agents may be
+assigned one namespace (spin one up to handle an error without disturbing
+another doing the user's work), and an agent is not confined to its
+namespace: it may `in-ns` anywhere its REPL reaches. Stewardship is a fact
+on the namespace entity, `:seon.ns/steward` (one agent per namespace): faults
+in that namespace's functions, complaints, and feature requests from other
+agents route to the steward. Agents message each other by `:seon.agent/id`.
+The unique constraint on the agent's namespace attribute is deleted; the
+`agent/owner-of` derivation becomes a read of `:seon.ns/steward`.
 Deleted from the record: `cluster` (the branch), `instructions` (dead),
 `run` pointer (the loop owns it), `:seon.render/units` (the rendered units are
 the component-ref entries of the entity schema in declared order),
@@ -113,7 +123,7 @@ wake the agent (`route!` ignores the added flag), so nothing retracts one.
 `next-agent-work` gains one arm: choose one unhandled item across faults,
 inbox, schedule, background results, under the existing episode gate; a fault
 is not an outside trigger. The steward derivation for a fault is
-`:seon.instrument/fn` → `:seon.fn/ns` → `agent/owner-of`; it lands in two
+`:seon.instrument/fn` → `:seon.fn/ns` → `:seon.ns/steward`; it lands in two
 steps because the fault seam does not yet record the failing function for
 non-contract faults (note 2 §4.4.3 measured 0 of 14).
 

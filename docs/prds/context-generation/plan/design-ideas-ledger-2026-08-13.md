@@ -1056,7 +1056,11 @@ numerically and a bare cross-citation is a defect to fix on sight.
     peer components each routed by its own attribute through the one Datahike
     listener ("I never said one wake queue"); handled = a claim ref from the
     handling run, because retracting a routed edge would wake. Faults reach
-    the steward of the failing function's namespace.
+    the steward of the failing function's namespace. Amended the same day:
+    NAMESPACE IS NOT IDENTITY — several agents may be assigned one namespace
+    and any agent may `in-ns` anywhere; stewardship is `:seon.ns/steward`,
+    one agent per namespace, the routing target for that namespace's faults,
+    complaints, and feature requests; agents message each other by id.
 
 71. **One eval point, one cache** (owner, 2026-09-07): parser → evaluator →
     settlement is the only path; the debug page's private evaluation is a
