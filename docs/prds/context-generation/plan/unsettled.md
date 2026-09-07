@@ -1551,3 +1551,21 @@ source run returned :ready with identical baseline/refreshed refs. The browser
 remains stopped because source runs were being regenerated every 1–2 seconds;
 run count reached 1610 before the stopped web settled. Do not restart the UI
 until that invalidation defect and incomplete dev-source adoption are resolved.
+
+## 2026-09-07 afternoon — audit closure wave
+
+Audit (`research/audit-repl-and-record-2026-09-07.md`) read in full; every
+ranked item assigned. Landed: B1 (page), B2 (`result/e<entity-id>`, bound
+across the agent's evaluations, `57c40fbac`), B3 (prompt through
+`seon.repl/text`, `6f00d3050`), F2/F3/F4/F5/F6/F8, C1–C5,
+`unowned-namespaces` on `:seon.ns/steward`. Dev cluster converged at
+`6a9f336e`. Refuted with evidence: the form→evaluation merge is 791
+references / 74 files and `:seon.cluster.work/situation` is a multi-schema
+dispatch key — running now as its own program-step lane with broad
+ownership (`tmp/lane-specs/evaluation-merge-program-step-0907.md`).
+Running in parallel, file-disjoint: print/admission lane (F1 elision
+identity, `#object[]`, print-length carry, channel spliced into the run
+unit's value). Still queued: PRD step 3 (page evaluator bypass, twin caches,
+config-resolved evaluator), then steps 4–7 (agent record components); the
+six `prompt-test` reds belong to step 4 (a message's `/ai` emits source,
+not content).
