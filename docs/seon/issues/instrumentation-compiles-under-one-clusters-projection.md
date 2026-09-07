@@ -60,7 +60,6 @@ only ever surfaced on the second cluster.
 
 ## 2026-08-08 — this now BLOCKS the schema-environment fix, and the mechanism
 
-
 ## is narrower than "instrumentation is process-wide"
 
 Found by implementing
@@ -112,6 +111,49 @@ must pass.
 
 ## Owner
 
+### 2026-09-06 development reload evidence
+
+The operator applies instrumentation dynamically through
+`script/seon/fresh_operator.clj`'s `instrument-form` and
+`refresh-instrument-form`; literal searches for `instrument/apply!` miss that
+invocation. Source publication explicitly removed ALL wrappers before reloading,
+then restored them in a finally that covered only publication, not the preceding
+reloads. Thus a reload failure could skip restoration; any live call during the
+publication interval was unchecked. Root observed 829 eligible public callable
+Vars and zero wrapped, then 829 wrapped with no missing Vars after the existing
+finally restored them. JVM and fresh SCI `(whoami :invalid)` then both returned
+`contract-violated` / `invalid-input`. First-party SCI Vars forward to the actual
+host Var, so its restored wrapper also protects that route.
+
+The current correction removes global uninstrumenting and extends the existing
+restoration finally around reloads. The opted-in development refresh already
+admits exactly one cluster per JVM; it also reapplies the existing owner with
+that cluster's exact projection before marking adoption complete. The initial
+call refused because effective configuration was read without handing the
+projection; that refusal did not prove the new call succeeded. After removing
+global uninstrumenting, publication exposed a schema-definition validation
+failure in `resolve-malli-form-in` for `:string`. Its `malli-form?` predicate
+caught `missing-projection` from the declaration registry and reported false.
+Handing one declaration projection to the prospective source publication fixes
+that missing input while leaving wrappers installed. The next publication
+succeeded: commit `6a9e063f-bac9-5ba6-b504-83c18c105add`, digest
+`f61ca1a83f10457e62a0284170a89440573457786ff95fc63560a47a25569a7f`.
+Root reran the retained instrumentation probe: 829 eligible / 829 wrapped,
+no missing Vars; JVM and fresh SCI invalid inputs were contract errors, and the
+existing interpreted wrapper refused its bad output.
+
+Per-Var replacement during reload still has a narrower unchecked interval.
+During a subsequent publication root observed 839 eligible / 627 wrapped /
+212 missing (including ten private contracted Vars excluded by the then-current
+selection). Strict atomic replacement is not claimed. The recurring generated
+init regression covers early reload failure, publication failure, and success:
+each runs the same restoration once, retains the handed projection, and never
+calls global `remove!`.
+
+This does not resolve cohosted policy: `:record` globally unstruments, and one
+`:panic` collection compiles process-wide wrappers under one projection. Boot
+retains its existing operator mechanism.
+
 `script/seon/fresh_operator.clj` (`refresh-instrument-form`,
 `instrument-form`) and `seon.instrument/apply!`. The repair belongs to the
 [seon.env PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)'s
@@ -129,3 +171,75 @@ validator.
 - The `:seon.config/on-core-error` dial and admission caps that govern a
   cluster's contract reports are that cluster's own, not the anchor's.
 - No selection of "the first running instance" survives in the operator.
+
+## 2026-09-06 coverage audit: what the wrapper count does and does not prove
+
+A read-only query against the `juniper-context` program graph classified a
+first-party function by its indexed `:seon.fn/ast` fact, rather than by a
+namespace prefix. This is the source indexer's own distinction: `var-row`
+creates source function rows and their contracts from analyzer metadata
+(`src/seon/fn.clj:345-394`), while referenced external functions are admitted
+as identity-only rows (`src/seon/fn.clj:1738-1759`). The current graph contains
+873 first-party function rows:
+
+- 860 public rows, all 860 with `:seon.fn/spec`; zero public rows lack a
+  contract;
+- 13 private rows, all 13 with `:seon.fn/spec`;
+- 3,382 other `:core` function rows without an AST (dependency and external
+  program identities), of which 756 are public rows without a Seon contract;
+- zero `:agent` function rows in this particular database value, so it is not
+  empirical evidence that an authored function was wrapped.
+
+The independent loaded-JVM measurement after the operator's final
+instrumentation pass was 829 loaded public contracted Vars and 829 wrappers;
+the earlier pass had zero wrappers after a global removal. That proves complete
+coverage of the *currently loaded eligible Var set*, not all callable
+functions and not all 860 indexed first-party public functions (31 were not
+loaded as eligible Vars in that measurement).
+
+The interpreted-function path has a separate, narrower guarantee. Acquisition
+selects function assertions by transaction provenance
+(`src/seon/sci/eval.clj:1471-1507`), installs every agent-authored row without
+filtering on privacy (`:1657-1670`), and installs a wrapper exactly when the
+committed row has `:seon.fn/spec` (`:665-675`, `:850-872`). In `:panic` mode,
+`wrap-interpreted` calls Malli's one wrapper with
+`:scope #{:input :output}` (`src/seon/instrument.clj:438-461`). Thus every
+installed, declared, contracted interpreted function gets both input and
+output validation in panic mode; an explicit caller argument still reaches
+the same wrapper. In `:record` mode the function is deliberately returned
+unwrapped (`:463`), so no input or output validation occurs.
+
+The uncovered callable categories are consequently explicit:
+
+- agent-authored `defn`s with no `:malli/schema` are installed and callable but
+  have no wrapper;
+- anonymous `fn` values have no `:seon.fn/sym` declaration row and therefore no
+  independently installed contract wrapper;
+- dependency/core SCI bindings represented only by external identity rows are
+  callable without Seon's contracts unless their dependency itself validates;
+- JVM instrumentation enumerates `ns-publics` (`src/seon/instrument.clj:535-538`),
+  so private JVM Vars are outside that mechanism even when the source graph
+  records a contract;
+- Malli skips primitive function roots (`reference-code/malli/src/malli/instrument.clj:15-26`).
+
+This audit therefore supports “all loaded public contracted eligible Vars were
+wrapped” and “all installed contracted interpreted functions validate input
+and output in panic mode.” It does not support “all functions are wrapped.”
+
+
+After the private-Var enumeration amendment was published, root repeated the
+same live coverage probe: 839 eligible contracted callable Vars, 839 wrapped,
+no missing Vars. The JVM invalid input and existing interpreted wrapper's
+invalid input/output were typed contract errors. Published marker:
+`6a9e07b4-2452-556e-8084-318bbc695134`, digest
+`688303b93f4ead5e2c0e53dcba664dc58427180f165c6803594c6598ac114eb0`.
+This supersedes the audit's then-current private-JVM exclusion; the other
+uncontracted/dependency categories and the reload interval remain unresolved.
+
+
+The combined recurring gate `bin/test seon.instrument-test
+seon.dev.source-instrumentation-test` passed 24 tests / 188 assertions
+(run.NWn8nC). Root also called the actual private filesystem effect handler
+with invalid input and observed `seon.instrument/contract-violated` /
+`invalid-input`. These are post-publication observations; the documented
+per-Var replacement interval remains outside the guarantee.

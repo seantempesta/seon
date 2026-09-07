@@ -1,0 +1,71 @@
+(ns seon.dev.source-instrumentation-test
+  (:require [clojure.test :refer [deftest is]]
+            [seon.cluster :as cluster]
+            [seon.config :as config]
+            [seon.db :as db]
+            [seon.env :as env]
+            [seon.fresh-operator]
+            [seon.instrument :as instrument]
+            [seon.schema :as schema]
+            [seon.test-support :as support]))
+
+(deftest source-publication-restores-contracts-after-early-reload-failure
+  (support/with-database
+   (fn [connection]
+     (let [projection (schema/handed-projection)
+           state (env/environment-state
+                  (env/environment
+                   {:seon.boot/cluster-name "instrumentation-test"
+                    :seon.db/basis-t (db/basis-t @connection)
+                    :seon.schema/projection projection}))
+           instances-var (ns-resolve 'seon.cluster 'running-instances)
+           instances
+           (atom {"instrumentation-test"
+                  {:seon.boot/cluster-connection connection
+                   :seon.boot/advertisement
+                   {:seon.boot/cluster-name "instrumentation-test"}
+                   :seon.sci.eval/ctx
+                   {:seon.sci.eval/projection-state state}}})
+           source ((ns-resolve 'seon.fresh-operator 'init-form)
+                   "tmp/source-instrumentation-test" nil false [] false false
+                   "instrumentation-test")]
+       (doseq [failure-point [:reload :publication :none]]
+         (let [events (atom [])
+               failure (ex-info "intentional source lifecycle failure"
+                                {:seon.test/failure-point failure-point})
+               actual
+               (with-redefs-fn
+                 {instances-var instances
+                  #'clojure.core/require
+                  (fn [& _]
+                    (swap! events conj :reload)
+                    (when (= :reload failure-point) (throw failure)))
+                  #'cluster/refresh-source!
+                  (fn [& _]
+                    (swap! events conj :publication)
+                    (when (= :publication failure-point) (throw failure))
+                    :published)
+                  #'config/effective
+                  (fn [_ _]
+                    (is (identical? projection (schema/handed-projection)))
+                    {:seon.config/on-core-error :panic})
+                  #'instrument/remove!
+                  (fn [] (swap! events conj :unstrument))
+                  #'instrument/apply!
+                  (fn [request]
+                    (is (= :panic (:seon.config/on-core-error request)))
+                    (is (identical? projection (schema/handed-projection)))
+                    (swap! events conj :restore)
+                    {:seon.instrument/registered 1
+                     :seon.instrument/instrumented 1})}
+                 (fn []
+                   (try (eval (read-string source))
+                        (catch Throwable thrown thrown))))]
+           (is (not-any? #{:unstrument} @events)
+               "publication never strips all live contract wrappers")
+           (is (= :restore (last @events))
+               "the same restoration owns both reload and publication failures")
+           (is (= 1 (count (filter #{:restore} @events))))
+           (if (= :none failure-point)
+             (is (= :published actual))
+             (is (identical? failure actual)))))))))

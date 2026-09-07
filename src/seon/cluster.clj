@@ -43,6 +43,7 @@
             [seon.env :as env]
             [seon.flow :as flow]
             [seon.fn :as seon.fn]
+            [seon.instrument :as instrument]
             [seon.operator.runtime :as operator.runtime
              :refer [root-store-holder running-instances]]
             [seon.operator.state :as operator.state]
@@ -150,23 +151,43 @@
   (when (and database (:db/id ref))
     (get (db/pull database [attribute] (:db/id ref)) attribute)))
 
+(defn format-ai
+  "Format the terminal description of one already-read cluster."
+  {:malli/schema [:=> [:cat [:or :seon.render/unit :seon.error/value]]
+                  [:or :nil :string :seon.error/value]]}
+  [unit]
+  (if (:seon.error/kind unit)
+    unit
+    (when-let [name (:seon.cluster/name unit)]
+      (let [database (:seon.db/db unit)
+          config-name (or (get-in unit [:seon.cluster/config
+                                        :seon.config/cluster])
+                          (ref-identity database
+                                        (:seon.cluster/config unit)
+                                        :seon.config/cluster))
+          instructions (count (:seon.cluster/instructions unit))
+          toolkit (count (:seon.cluster/toolkit unit))]
+        (str "Cluster " name ".\n"
+             "Configuration " (or config-name "is connected")
+             "; " instructions " shared instruction"
+             (when-not (= 1 instructions) "s")
+             " and " toolkit " toolkit namespace"
+             (when-not (= 1 toolkit) "s") ".")))))
+
 (defn render-ai
-  "`:seon.render/ai` — one cluster and its load-bearing connections."
+  "`:seon.render/ai` — source reading one exact cluster before formatting it."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/source]]}
   [unit]
   (when-let [name (:seon.cluster/name unit)]
-    (let [database (:seon.db/db unit)
-          config-name (ref-identity database
-                                    (:seon.cluster/config unit)
-                                    :seon.config/cluster)
-          instructions (count (:seon.cluster/instructions unit))
-          toolkit (count (:seon.cluster/toolkit unit))]
-      (str "Cluster " name ".\n"
-           "Configuration " (or config-name "is connected")
-           "; " instructions " shared instruction"
-           (when-not (= 1 instructions) "s")
-           " and " toolkit " toolkit namespace"
-           (when-not (= 1 toolkit) "s") "."))))
+    (pr-str
+     (list `format-ai
+           (list 'seon.db/pull
+                 (list 'quote
+                       [:seon.cluster/name
+                        {:seon.cluster/config [:seon.config/cluster]}
+                        :seon.cluster/instructions
+                        :seon.cluster/toolkit])
+                 [:seon.cluster/name name])))))
 
 (defn render-html
   "`:seon.render/html` — one readable cluster card."
@@ -1816,11 +1837,30 @@
                   result)))
     (env/advance-projection! (get ctx env/state-carrier)
                              (db/basis-t database) projection)
+    (report-source-progress! "development JVM instrumentation")
+    (schema/call-with-projection
+     projection
+     (fn []
+       (let [effective (config/effective database cluster-name)
+             _ (when (:seon.error/kind effective)
+                 (refused! "Development instrumentation configuration is unavailable."
+                           effective))
+             result (instrument/apply!
+                     {:seon.config/on-core-error
+                      (:seon.config/on-core-error effective)
+                      :seon.sci.admit/caps (config/result-caps effective)
+                      :seon.schema/projection projection})]
+         (when (or (:seon.error/kind result)
+                   (and (= :panic (:seon.config/on-core-error effective))
+                        (not (pos? (or (:seon.instrument/instrumented result) 0)))))
+           (refused! "Development JVM instrumentation did not restore contracts."
+                     result)))))
     (when-not (= (:seon.source/digest published)
                  (:seon.source/digest (current-source-snapshot)))
       (refused! "Source changed during development adoption; the next edit must converge it."
                 {:seon.source/commit-id (:seon.source/commit-id published)}))
-    ;; This fact means all three steps succeeded. A reload or acquisition
+    ;; This fact means indexing, reload, SCI acquisition, and instrumentation
+    ;; succeeded. A reload or acquisition
     ;; error leaves the old commit, so the next edit retries reconciliation.
     (require-committed!
      (db/transact! connection
@@ -1867,14 +1907,17 @@
            held-store (acquire-root-store! store-dir)]
        (try
          (report-source-progress! "source build")
-         (let [before-publication (source/current held-store)
-               published (if (seq changed-paths)
-                           (incremental-source-refresh! root held-store changed-paths)
-                           (full-source-refresh! root held-store))]
-           (when instance
-             (development-source-refresh! held-store instance
-                                          before-publication published))
-           (dissoc published :seon.program/rows))
+         (schema/call-with-projection
+          (schema/declaration-projection (schema.edn/packaged-forms))
+          (fn []
+            (let [before-publication (source/current held-store)
+                  published (if (seq changed-paths)
+                              (incremental-source-refresh! root held-store changed-paths)
+                              (full-source-refresh! root held-store))]
+              (when instance
+                (development-source-refresh! held-store instance
+                                             before-publication published))
+              (dissoc published :seon.program/rows))))
          (finally
            (release-root-store! store-dir)))))))
 

@@ -203,7 +203,11 @@ structural changes; ordinary clusters never synchronize. `bin/seon init
 CLUSTER --force` destroys and reforks that branch from the published commit.
 An explicitly selected development cluster in its own JVM instead receives
 `bin/seon init --dev CLUSTER`, which reconciles indexed facts and updates
-loaded definitions and SCI while preserving agent facts. The hook's
+loaded definitions and SCI while preserving agent facts. Development adoption
+reapplies JVM instrumentation with the acquired projection before recording its
+commit; publication restores wrappers even after reload failure, and does not
+globally remove them while computing source. Individual Var replacement during
+reload remains non-atomic. The hook's
 `:current-source` root and cluster select this target
 (`src/seon/cluster.clj`, `development-source-refresh!`; `bin/seon-hook`,
 `current-source-feedback`). A REPL proof names the loaded Var, new fork, or

@@ -141,7 +141,9 @@ ordinary clusters are never synchronized. `bin/seon init --dev NAME` adopts
 the publication on an explicitly selected development cluster in its own
 JVM; the edit hook's `:current-source` root and cluster select that target.
 Its adoption commit is recorded only after schema and program reconciliation,
-loaded definitions, and SCI acquisition succeed. A live proof after file
+loaded definitions, SCI acquisition, and JVM instrumentation succeed. Publication
+retains existing wrappers and restores them even after a reload failure;
+individual Var replacement during reload is not atomic. A live proof after file
 edits must name whether it exercised a hot-reloaded Var, a new fork, or this
 in-place development adoption; browser paint requires its own observation.
 

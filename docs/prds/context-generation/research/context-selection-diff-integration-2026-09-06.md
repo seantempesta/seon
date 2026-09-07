@@ -403,3 +403,11 @@ run.x4ukvB failed on missing fixture profile/form facts and a stale explicit-id
 identity-source expectation; those were corrected. Live preview readiness is
 not established by this gate: publication instrumentation and the previously
 faulted render proc remain separate integration work.
+
+
+The previously protected cluster renderer rewrite was subsequently reviewed by
+root and included with the lifecycle checkpoint: `render-ai` produces the
+ordinary pull source and `format-ai` returns terminal cluster text. Root's
+live pure probe checked generated source plus the pulled configuration,
+instruction, and toolkit description. Namespace producer changes remain
+outside this slice, with its mixed-output defect retained above.

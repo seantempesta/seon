@@ -2350,17 +2350,8 @@
                   :seon.fresh-operator/data (ex-data failure#)}))))
           operation)]
     (pr-str
-     `(do
-        ;; Instrumentation wrappers are process-local compiled artifacts. They
-        ;; may describe the cluster projection that was active before this
-        ;; publication request, so no wrapper may validate the candidate
-        ;; source population. The finally below restores instrumentation from
-        ;; an extant cluster's own projection after publication settles.
-        (when ~publish?
-          (when-let [remove!#
-                     (some-> (find-ns 'seon.instrument)
-                             (ns-resolve (symbol "remove!")))]
-            (remove!#)))
+     `(let [primary-failure# (volatile! nil)]
+       (try
         ;; The live JVM owns the process-root store lock. Reload the
         ;; source-analysis owners before asking that JVM to publish
         ;; `current-src`; the running clusters and their program facts remain
@@ -2426,20 +2417,19 @@
                     (flush))]
               (with-bindings
                 {progress-var# progress!#}
-                (let [primary-failure# (volatile! nil)]
-                  (try
-                    ~emitted-operation
-                    (catch Throwable failure#
-                      (vreset! primary-failure# failure#)
-                      (throw failure#))
-                    (finally
-                      (try
-                        ~(refresh-instrument-form)
-                        (catch Throwable restore-failure#
-                          (if-let [failure# @primary-failure#]
-                            (.addSuppressed failure# restore-failure#)
-                            (throw restore-failure#)))))))))
-           emitted-operation)))))
+                ~emitted-operation))
+           emitted-operation)
+        (catch Throwable failure#
+          (vreset! primary-failure# failure#)
+          (throw failure#))
+        (finally
+          (when ~publish?
+            (try
+              ~(refresh-instrument-form)
+              (catch Throwable restore-failure#
+                (if-let [failure# @primary-failure#]
+                  (.addSuppressed failure# restore-failure#)
+                  (throw restore-failure#)))))))))))
 
 (defn- source-process-value!
   [root form]
