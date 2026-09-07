@@ -115,6 +115,12 @@
            (is (= (get (value/transacted entity database) :my.plan/steps)
                   (argument projection request producer))
                "the producer receives the attribute's value, not the entity")
+           (is (= (get (value/transacted entity database) :my.plan/steps)
+                  (argument projection
+                            (assoc request :seon.render/value
+                                   (:my.plan/steps entity))
+                            producer))
+               "pulled connected entities reach the producer in transaction shape")
            (is (= entity
                   (:seon.render/value
                    (argument projection

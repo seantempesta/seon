@@ -355,10 +355,15 @@
         value (render-value request)]
     (if (contains? declared selected)
       ;; The walk hands the owning entity; the debug page hands the
-      ;; attribute's value directly. Both reach the producer as that value.
-      (if (and (map? value) (contains? value attribute))
-        (get (render.value/transacted value (:seon.db/db request)) attribute)
-        value)
+      ;; attribute's value, possibly as its pulled connected entities. Both
+      ;; reach the producer in the attribute's transaction shape, which is
+      ;; the shape its declared input accepts.
+      (get (render.value/transacted
+            (if (and (map? value) (contains? value attribute))
+              value
+              {attribute value})
+            (:seon.db/db request))
+           attribute)
       (if (floor-producer? selected)
         (render-argument request)
         (producer-argument request)))))
