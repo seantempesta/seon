@@ -6,6 +6,22 @@ tags: [prd, agent, context, architecture]
 
 # The working edge — context-generation program
 
+## Owner confirmations and lane switch — 2026-09-07 04:00Z
+
+Owner: `:seon.render/form` is removed as a concept; `:seon.render/ai` is
+source (comments that teach the agent, then forms executed by the ordinary
+reply reader, results printed usefully for the agent); HTML is the same facts
+structured for a person. Docs updated in `9d80fc5d4`; the code leftovers are
+[an open issue](../../../seon/issues/retired-form-projection-still-declared-and-selected.md)
+for one orchestrator commit after the lanes land. The render owner now selects
+attribute-declared producers for AI and HTML (a cardinality-many component
+attribute renders as one unit); regression written, proof pending on a
+loadable schema population. Codex lanes were stopped at the owner's request
+(credits) and relaunched as Opus agents continuing from the uncommitted tree.
+A lane's hook publication had made the dev root ephemeral; fixed in
+`a0339ce0d`. Live page at 04:14Z shows the page lane's in-progress layout
+stuck at "Loading declared units…".
+
 ## Overnight plan and dev loop — 2026-09-06 late evening
 
 The owner reframed the debug work: every attribute on the agent entity is one
