@@ -232,3 +232,36 @@ presentation's run reference and no additional submission. The focused
 with 25 tests, 217 assertions, zero failures and zero errors
 (`tmp/render-source-reference-gate.log`). Quiet-source browser acceptance is
 still required before closing this issue.
+
+## Classified transaction refusal lost its message — 2026-09-07
+
+The next live reopen reached a `submit-source!` invalid-output fault. Its
+representative diagnostic showed `{:seon.cluster.run/id nil}`. This was not
+the returned value: `instrument/offending-value` reconstructs the first Malli
+problem's path, and the missing run-id key in the success arm of an `:or`
+appears as that synthetic fragment. Root verified the installed original
+callable was the real `seon.cluster.agent$submit_source_BANG_`, not a test mock.
+
+The bounded
+`docs/prds/context-generation/research/source_submission_return_probe_2026_09_07.clj`
+observed the existing instrumentation reporter before opening the existing
+debug feed and restored it afterward. In 972 ms it captured the actual value:
+`:seon.error/kind :seon.cluster.run/refused`, transition `open-call`, rule
+`:seon.cluster.run/agent-already-running`, and a request containing the valid
+string run id `source:3a7709d2-976d-45b5-bf94-458d570bf89a`. The map lacked
+`:seon.error/message`. Thus run admission correctly refused contention, but
+the returned map failed the required error contract before web's transient
+busy handling could consume it.
+
+The shared `seon.error.refusal/refusal` cause-chain reader now retains the
+matching classified exception's message when its data omits the message.
+An explicit data message still wins; classification, rule, and request remain
+unchanged. The existing database contention regression asserts both that
+message and conformance to `:seon.error/value`. No parallel catch or retry was
+added to web or agent submission. The diagnostic's synthetic absent-key
+fragment is still misleading and needs a separate correction at its owner;
+it must not be described as proof that an actual function returned nil.
+
+The focused database and shared transaction/refusal gate completed with
+46 tests, 350 assertions, zero failures and zero errors
+(`tmp/classified-refusal-message-gate.log`).

@@ -175,8 +175,9 @@
                             (ex-info "transaction wrapper"
                                      {:seon.cluster.run/id nil}))]
        (with-redefs [d/transact (fn [& _] (throw wrapped))]
-         (is (= refusal (db/transact! connection []))
-             "a deeper unclassified wrapper cannot replace the refusal")))
+         (is (= (assoc refusal :seon.error/message "classified transition refusal")
+                (db/transact! connection []))
+             "the classified exception supplies its message; a deeper wrapper cannot replace it")))
      (db/transact! connection
                    [{:seon.cluster.agent/id "busy-agent"}])
      (is (map? (db/transact!
@@ -197,7 +198,11 @@
        (is (= :seon.cluster.run/refused (:seon.error/kind result)))
        (is (= :seon.cluster.run/agent-already-running
               (:seon.cluster.run/rule result))
-           "real run contention preserves the rule needed by source preview")))))
+           "real run contention preserves the rule needed by source preview")
+       (is (= "run transition refused: agent-already-running"
+              (:seon.error/message result)))
+       (is (schema/valid-candidate-value? :seon.error/value result)
+           "classified transaction refusals satisfy the same error contract as their callers")))))
 
 (deftest edn-backed-reads-return-distinguishable-logical-values
   (test-support/with-database
