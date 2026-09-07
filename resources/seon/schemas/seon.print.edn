@@ -151,7 +151,18 @@
                               [:map
                                [:seon.print/face
                                 [:= :seon.print/object]]
-                               [:seon.print/class :string]
+                               ;; ADMISSION MINTS `class`; a node read back
+                               ;; from storage may name the same string under
+                               ;; the `name` key the other named faces use.
+                               ;; The emitter reads either and says so when a
+                               ;; node names neither, so the contract admits
+                               ;; every node that emitter is total over.
+                               [:seon.print/class
+                                {:optional true}
+                                :string]
+                               [:seon.print/name
+                                {:optional true}
+                                :string]
                                [:seon.print/rep
                                 {:optional true}
                                 :string]]]

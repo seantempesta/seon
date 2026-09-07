@@ -475,7 +475,8 @@
     ::print/class {::opaque "java.lang.Class" ::name (::print/name print-node)}
     ::print/object (if-let [identity-node (::print/value print-node)]
                      (semantic-value identity-node)
-                     {::opaque (::print/class print-node)})
+                     {::opaque (or (::print/class print-node)
+                                   (::print/name print-node))})
     ::print/truncated-string {::truncated-string (::print/value print-node)
                               ::elided true}
     ::print/failed {::opaque (::print/class print-node)
