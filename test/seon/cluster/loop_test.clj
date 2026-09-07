@@ -502,7 +502,9 @@
                      :seon.cluster.eval/ordinal 1
                      :seon.ns/name resumed-namespace
                      :seon.cluster.reply/sources
-                     [((private-loop-fn 'form-data) @connection run-id 1)]}))
+                     [((private-loop-fn 'fold-source)
+                       (first (filter #(= 1 (:seon.cluster.eval/ordinal %))
+                                      (fold-evaluations @connection run-id))))]}))
                   (finally (async/close! channel)))
                 form (:seon.cluster.loop/admitted-form outcome)
                 evaluation (:seon.sci.eval/evaluation outcome)]
