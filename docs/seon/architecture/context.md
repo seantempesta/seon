@@ -24,11 +24,16 @@ index; stable identity exposes arrivals, changes, and removals without a second
 traversal.
 
 Every unit in that result passes through the same render-selection chain for
-three projections:
+two projections, each structured for its reader:
 
-- `:seon.render/form` is the form that produces the value;
-- `:seon.render/ai` is the value's printed representation for the prompt; and
-- `:seon.render/html` is the same value as Hiccup for the web UI.
+- `:seon.render/ai` is source for the agent: comments that teach what is
+  going on, then forms the ordinary reply reader parses and the turn's SCI
+  fork executes, whose results print in the shape most useful to the agent;
+  the transcript of those forms and results is what the prompt carries; and
+- `:seon.render/html` is the same facts as Hiccup for a person, structured
+  for reading on the page rather than mirroring the AI text.
+
+`:seon.render/form` is retired (ruling 44); forms are the AI source itself.
 
 The history orders a parent listing before a child lookup and preserves
 define-before-use: a form never refers to a symbol that an earlier entry has not
@@ -215,16 +220,18 @@ regex-rewrites model output, invents a result for an unattempted form, or
 treats a model-authored claim as execution evidence. Provider byte streaming
 is transport behavior and does not select a second evaluation mode.
 
-## A render function supplies three projections
+## A render function supplies two projections
 
-A public `defn` whose declared input accepts a render unit and whose declared
-output is one of the three render shapes is a **render function**:
+A public `defn` whose declared input accepts a render unit (or, when declared
+on an attribute, that attribute's value) and whose declared output is one of
+the two render shapes is a **render function**:
 
-- `:seon.render/form` → its Clojure form becomes the history entry's form.
-- `:seon.render/ai` → its string joins the agent's prompt.
+- `:seon.render/ai` → its source (comments, then forms) is executed through
+  the reply reader and the turn's SCI fork; the forms and their printed
+  results become the agent's history entries.
 - `:seon.render/html` → its Hiccup is serialized for the agent's namespace page.
-- the three declared contracts → the agent's history and the human's namespace page show
-  the same value as a form and its two typed representations.
+- the two declared contracts → the agent's history and the human's namespace
+  page show the same facts, each in the structure its reader needs.
 
 All three use the one selection chain. The `/form` structural floor is total:
 a unit reached through an attribute uses the listing query for that attribute,

@@ -110,8 +110,12 @@ rules. AI renderers produce source that runs through the reply reader, call
 preparation, and the SCI fork; the page shows the exact form at the real
 namespace prompt and the exact returned value through the shared transcript
 printer. Thinking comments may precede a form; results are never comment
-prose. Argless calls resolve the calling agent from the scoped environment;
-the named request-map arity is the explicit form.
+prose. Owner intent (2026-09-06 late): the comments exist to teach the agent
+what is going on, the forms produce results printed in the shape most useful
+to the agent, and the HTML projection of the same facts is structured
+differently, for a person reading the page. Argless calls resolve the calling
+agent from the scoped environment; the named request-map arity is the explicit
+form. `:seon.render/form` is retired and nothing here declares it.
 
 Every attribute's `:description` renders above its paired outputs. Undocumented
 attributes are documented in their owning EDN schema, not in prose here.

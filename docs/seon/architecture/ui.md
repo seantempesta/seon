@@ -33,11 +33,14 @@ value admission, and bounded output. No direct Var invocation or
 cheap flow-graph rebuilds protect the process; the UI does not rely on a
 process wall.
 
-There are exactly three render projections. The history asks for
-`:seon.render/form` and `:seon.render/ai`; the browser asks for
-`:seon.render/html`. Logs and other sinks call ordinary sink-specific functions
-rather than extending a generic render kind. The boundary selects one of the
-three projections; the data does not carry a stored request kind.
+There are exactly two render projections. Context asks for `:seon.render/ai`:
+source, comments then forms, that the ordinary reply reader parses and the
+turn's SCI fork executes, so the agent reads executed forms and printed results.
+The browser asks for `:seon.render/html`. Logs and other sinks call ordinary
+sink-specific functions rather than extending a generic render kind. The
+boundary selects one of the two projections; the data does not carry a stored
+request kind. `:seon.render/form` is retired (ruling 44): forms are never
+authored as a projection; they are the AI source itself.
 
 ## Human input becomes a message
 
@@ -60,11 +63,12 @@ capability request through `seon.effect/request!`; it never gains an effectful
 eval helper that mutates web-surface state. Exact constructors and routes remain
 unnamed until their schemas and action contract are settled.
 
-## The projection contract — three outputs, one selection chain
+## The projection contract — two outputs, one selection chain
 
 Rendering is the complete output boundary. Every context unit crosses
-`:seon.render/form` for its producing form and `:seon.render/ai` for its printed
-value. Every semantic web UI value crosses `:seon.render/html`. Other
+`:seon.render/ai` as source whose executed forms and printed results become
+the agent's transcript entries. Every semantic web UI value crosses
+`:seon.render/html`. Other
 consumer-visible text values—MCP or tool results, runner output, logs, faults,
 and terminal or operator faces—cross `:seon.render/ai`. JSON and SSE framing
 plus literal authored static copy are transport bytes after that boundary, not
@@ -92,13 +96,17 @@ message.
 
 ### One resolution chain and one floor
 
-Every acquired value resolves each of `:seon.render/form`, `:seon.render/ai`,
-and `:seon.render/html` through one chain, most specific first:
+Every acquired value resolves each of `:seon.render/ai` and
+`:seon.render/html` through one chain, most specific first:
 
 1. the explicit projection key on the value;
 2. the unique contract-fitting public function in the data's explicitly
    owning namespace, when a data or traversal ref names one;
-3. the schema-attached default render function; and
+3. the schema-attached default render function — declared on the value's
+   entity map schema, or on the attribute the request names
+   (`:seon.render.walk/attribute`), in which case the producer receives that
+   attribute's value and a cardinality-many or component attribute renders
+   as one unit; and
 4. the structural floor.
 
 Function rows carry input and output schemas, so namespace candidate selection
@@ -106,18 +114,19 @@ is one ordinary program-graph query through the query cache. There is no render-
 registry, slot redirect, or second floor. A broken render function yields a flat error
 unit and never promotes a different mechanism silently.
 
-## The block and its three projections
+## The block and its two projections
 
 A **block** is the informal name for one render function call's identified
 output, never a database entity or stored data type. Its identity derives from
 the render function and explicit arguments; the HTML
 projection derives one escaped stable DOM element id from that identity.
 
-- **form** (`:seon.render/form`) → the Clojure form that produces the value.
-- **ai render** (`:seon.render/ai`) → prompt bytes.
+- **ai render** (`:seon.render/ai`) → source: comments then forms, executed
+  through the reply reader and the turn's SCI fork; the transcript of those
+  forms and results is what the prompt carries.
 - **html render** (`:seon.render/html`) → a surface whose output is hiccup.
 
-The same call may provide all three projections. Explicit render keys on a value
+The same call may provide both projections. Explicit render keys on a value
 override the program-graph/schema chain, but their absence never makes the
 system partial. The form floor uses an attribute listing query or an entity
 identity pull; the AI and HTML structural floors render any value. All three
@@ -151,8 +160,7 @@ place on its stable identity.
 
 **Resolution is one chain, most specific first:**
 
-1. the explicit `:seon.render/form`, `:seon.render/ai`, or
-   `:seon.render/html` key on the value;
+1. the explicit `:seon.render/ai` or `:seon.render/html` key on the value;
 2. the unique contract-fitting public function in the data's explicitly
    owning namespace;
 3. the schema-attached default render function;

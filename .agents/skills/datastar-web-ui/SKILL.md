@@ -86,8 +86,11 @@ available explicitly with `?prompt=true`; it is not derived by the initial GET
 render functions, retained-call evidence, revisioned packages, and feed. Do not
 add a parallel renderer, walk, or delivery path.
 
-AI and HTML remain distinct projections: AI returns text and HTML returns
-Hiccup. Recursive render-function selection applies at every admitted value depth,
+AI and HTML remain distinct projections: AI returns source (comments and
+forms that the ordinary reply reader parses and the turn's SCI fork executes;
+the printed results are what an agent reads) and HTML returns Hiccup. There is
+no form projection: `:seon.render/form` is retired (ruling 44) and the debug
+page never asks for it. Recursive render-function selection applies at every admitted value depth,
 and selected render-function output is terminal (`src/seon/render.clj:300-334,344-369`).
 Rendering limits are disabled for experimentation. `seon.print/fit` preserves
 the admitted node (`src/seon/print.cljc:1000-1011`); do not restore size,
