@@ -187,31 +187,68 @@ Named exactly, so nobody has to rediscover it:
   Baseline measured at commit `6a16fb60e` in an isolated worktree so the
   attribution is evidence rather than assertion; see §6.
 
-## 5b. The reds this lane's rewiring leaves open
+## 5b. The reds this lane's rewiring leaves open — READ THIS FIRST
 
-Confirmed reproducible by the runner's own confirmation pass, under
+The runner's own confirmation pass reproduced **23** failures under
 `bin/test seon.repl-test seon.cluster.run-test seon.render.transcript-test
-seon.render-coverage-test seon.cluster.reply-test seon.bootstrap-test`:
+seon.render-coverage-test seon.cluster.reply-test seon.bootstrap-test`.
+**Three are inherited; twenty are this lane's.** That is more than a
+coherent slice should leave, and it is the honest state of commit
+`5ac5bfe34`.
 
-| test | reading |
-|---|---|
-| `seon.render.transcript-test/a-tight-budget-degrades-then-elides-loudly` | asserts the OLD byte grammar |
-| `…/durable-history-entries-never-invent-executions` | asserts the OLD byte grammar |
-| `…/error-receipt-without-triage-has-an-execution-error-face` | asserts the OLD byte grammar |
-| `…/history-unit-derives-both-projections-from-one-bounded-derivation` | asserts the OLD byte grammar |
-| `…/malformed-receipt-bytes-and-any-unique-about-stay-replayable` | asserts the OLD byte grammar |
-| `…/populated-history-restores-the-repl-fidelity-checklist` | asserts the OLD byte grammar |
-| `…/receipt-content-enters-the-shared-capped-floor` | asserts the OLD byte grammar |
-| `…/selected-evaluations-project-only-their-stored-source-and-result` | asserts the OLD byte grammar |
-| `seon.cluster.reply-test/a-fenced-reply-retains-surrounding-prose-as-comments` | this lane's OWN updated expectation is still wrong — check how trailing prose joins a comment |
-| `seon.cluster.run-test/settlement-mints-rows-for-unindexed-call-targets` | **UNATTRIBUTED** |
+**Inherited — red at HEAD `6a16fb60e`, measured in a detached worktree:**
 
-The last row is the one that matters. `seon.cluster.run-test` was never
-baselined at HEAD in this lane, so whether that failure is inherited or
-caused here is unknown. **Do not assume it is a stale expectation.** Either
-baseline `bin/test seon.cluster.run-test` at `6a16fb60e` in a detached
-worktree, or treat commit `5ac5bfe34` as revertable until it is explained.
-An unattributed red is a hypothesis, not a finding.
+- `seon.cluster.reply-test/every-refusal-is-a-value`
+- `seon.cluster.reply-test/every-refusal-matches-its-declared-error-class`
+- `seon.cluster.reply-test/forms-run-and-prose-becomes-source-comments`
+
+**This lane's, asserting the OLD byte grammar** (prompt plus a bare result,
+with no `#:seon.repl{…}` map, and the comment inside the source). By the
+testing law's rule 6 these expectations are stale and the fix is the
+expectation — but they were NOT updated, and until they are the gate is red:
+
+- `seon.render.transcript-test/` — `a-tight-budget-degrades-then-elides-loudly`,
+  `durable-history-entries-never-invent-executions`,
+  `error-receipt-without-triage-has-an-execution-error-face`,
+  `every-generated-history-is-ordered-total-and-token-bounded`,
+  `history-unit-derives-both-projections-from-one-bounded-derivation`,
+  `malformed-receipt-bytes-and-any-unique-about-stay-replayable`,
+  `populated-history-restores-the-repl-fidelity-checklist`,
+  `receipt-content-enters-the-shared-capped-floor`,
+  `same-instant-bootstrap-prefix-and-newest-tail-preserve-plan-order`,
+  `selected-evaluations-project-only-their-stored-source-and-result`,
+  `stored-evaluations-are-terminal-transcript-values`,
+  `supersession-chains-vanish-before-token-accounting` (12)
+- `seon.render-coverage-test/` —
+  `effect-receipts-render-state-from-attribute-presence`,
+  `important-runtime-entities-declare-and-use-readable-faces` (2): these
+  assert which producers a family declares, and the evaluation family now
+  declares `seon.repl/render-ai|html`.
+- `seon.cluster.reply-test/` — `a-fenced-reply-retains-surrounding-prose-as-comments`,
+  `attribution-follows-the-one-reader`,
+  `crlf-events-stay-within-the-original-reply`,
+  `the-source-is-exactly-what-the-agent-wrote`,
+  `tilde-fences-have-the-same-presentation-semantics` (5): these ARE the
+  expectations this lane rewrote, and they are still wrong. The likely
+  culprit is how trailing prose joins a form's comment — verify against
+  `plan-sources` rather than guessing.
+
+**Unattributed, and the one that matters:**
+
+- `seon.cluster.run-test/settlement-mints-rows-for-unindexed-call-targets`
+
+`seon.cluster.run-test` was never baselined at HEAD in this lane, so whether
+this is inherited or caused here is UNKNOWN. **Do not assume it is a stale
+expectation.** Baseline `bin/test seon.cluster.run-test` at `6a16fb60e` in a
+detached worktree before deciding. An unattributed red is a hypothesis.
+
+### If you revert instead of finishing
+
+Reverting `5ac5bfe34` is defensible — but `src/seon/cluster/loop.clj` is
+touched by BOTH `5ac5bfe34` (comment threading, the `entry-source` caller)
+and `741c1d6c3` (the run id into `fork-for-turn`), so a blind revert of the
+commit drops the result rehydration too. Revert the files, keep loop.clj's
+`:seon.cluster.run/id` line, and keep the landing note.
 
 ## 6. Gate tallies
 
