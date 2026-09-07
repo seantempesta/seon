@@ -257,3 +257,42 @@ lane's own landing note §3.2 names the repair and hands it here because
 shipped default while the in-memory one printed under the agent's choice.
 Both halves are done here: the two attributes are in the selector, and the
 two assertions that stated the old defect now state the ruled behaviour.
+
+### 6.2 The platform tier is red at HEAD, and was red before this step
+
+`bin/test --all` **never reaches its bulk tier**:
+`seon.test-support-test/a-canonical-database-is-the-production-source-population`
+fails its last assertion, "clock-free schema reconciliation is idempotent" —
+a second `accrete-schema-population!` on a converged branch commits one more
+transaction. Measured at the baseline `4f8cd788f` in the worktree: **6 tests /
+92 assertions / 1 failure** — the same test, the same assertion. INHERITED.
+
+The reason, probed live: `schema-row-changes` re-emits exactly one row,
+`:seon.cluster.agent/agent`, forever. Its `:seon.render/units` is declared in
+`seon.cluster.agent.edn` in reading order and reads back from Datahike in
+SORTED order, and the comparison is `(= desired (select-keys current …))` over
+the vector. The row therefore never converges. That is the
+unordered-collection-driving-a-tied-decision defect, in the one place that
+gates the whole suite. It is not this step's and is filed as a defect note.
+
+## 7. The development cluster adopted; it did NOT refuse
+
+`bin/seon --root tmp/juniper-context-live init --dev juniper-context` ran
+through `development schema declarations`, `development program
+reconciliation`, `development loaded definitions`, seven `development reload`
+steps, `development SCI acquisition`, `development JVM instrumentation`,
+`development cluster converged`, and recorded
+`:seon.source/commit-id 6a9f46e2-b2b1-50a2-b1aa-f7f8a1696ac5` on the cluster.
+
+The step was expected to be refused, and the reason it is not is worth
+recording: **schema reconciliation ACCRETES.** Undeclaring an attribute does
+not retract it, so the seven `:seon.cluster.run.form/*` attributes and the
+nine form entities this cluster committed before the merge are still
+installed — dead datoms no reader reaches. A fresh store has neither
+(measured §3). The dev cluster therefore serves the merged code correctly and
+should still be reset and reseeded to clear the orphans; that reset is not
+this step's to run.
+
+Read-only after adoption, `/agent/juniper`: four `#:seon.repl{…}` responses,
+**zero** `system=>` lines, zero `"Renderer unavailable."`, zero
+`:seon.render/missing-projection`.
