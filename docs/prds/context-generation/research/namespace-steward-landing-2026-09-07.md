@@ -120,12 +120,26 @@ Database data is disposable by ruling: the fix is a refork, not a migration.
   (`:seon.ns/name`, `:seon.ns/refers`, `:seon.ns/requires`) with no error
   value in the output — the `:seon.error/value` matches in it are the text of
   rendered function contracts.
-- `seon.render.web-test` is UNRUN: five consecutive `bin/test` invocations
+- `bin/test seon.render.web-test` — 60 tests, 441 assertions, 5 failures
+  and 1 error, none of them a namespace-route test. The two tests this lane
+  edited both pass:
+  `namespace-routes-admit-by-reader-and-existing-corpus-row` (no steward for
+  `seon.flow` before the first visit; `"seon.flow"` after, with the existing
+  creation provenance intact) and
+  `canonical-debug-inspects-without-creating-a-namespace-owner`. The
+  failures are `a-fresh-cluster-debug-page-renders-a-prospective-prompt`,
+  `a-never-run-agents-debug-context-is-labeled-prospective`,
+  `an-unavailable-prospective-context-renders-its-diagnostic-data`,
+  `data-caps-a-five-megabyte-attribute-through-the-shared-floor` and
+  `the-message-appears-on-the-page-wire-test` — prospective-context, floor
+  and wire surfaces that this change does not touch.
+- That web-test attribution is NOT baselined, unlike the three above: with
+  this lane's nine files reverted, seven consecutive `bin/test` invocations
   died in the dependency class-cache prepare, filed as
   [the class-cache prepare race](../../../seon/issues/dependency-class-cache-prepare-races-concurrent-jvm-launches.md)
-  (root cause located there: `admit!` catches the wrong exception). The
-  namespace-route assertions in that namespace — steward absent before the
-  first visit, present after — are therefore unproven at HEAD.
+  (root cause located there — `admit!` catches the wrong exception, and both
+  colliding digest directories were pinned by live JVMs, so clearing them by
+  hand was not available either).
 
 ## 6. Out of scope, filed
 
