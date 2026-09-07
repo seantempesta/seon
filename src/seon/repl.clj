@@ -60,6 +60,28 @@
       (catch Throwable _
         {::unreadable? true}))))
 
+(defn- print-options
+  "The print options one stored evaluation's own facts ask for.
+
+  A form's `set!` of `*print-length*` / `*print-level*` is stored as
+  `:seon.print/length` / `:seon.print/level` on the evaluation, so the
+  response prints the value the way the form asked for it rather than the way
+  the shipped defaults would. Before this, `entity-emission` read
+  `:seon.print/options` — a key no stored evaluation carries — so every
+  per-form print setting was recorded and then thrown away.
+
+  A clipped value's requery text is NOT decided here. An admission-minted
+  elision node carries only its face, and `seon.print`'s `emit ::elided`
+  reads the node alone, so no caller can name the source of a cut it did not
+  make: see
+  docs/seon/issues/admission-elision-cannot-name-its-requery-identity.md."
+  [{length :seon.print/length
+    level :seon.print/level
+    options :seon.print/options}]
+  (cond-> (merge (print/default-options) options)
+    (int? length) (assoc :seon.print/length length)
+    (int? level) (assoc :seon.print/level level)))
+
 (defn value-text
   "Render one stored admitted print node as the text the REPL printed.
 
@@ -71,7 +93,7 @@
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
   [{serialized :seon.cluster.eval/result-edn
     supplied :seon.repl/value
-    options :seon.print/options}]
+    :as emission}]
   ;; A CALLER THAT ALREADY BOUNDED THE VALUE HANDS ITS TEXT, NOT A NODE.
   ;; The transcript owns the bound — the render unit's floor, elision root
   ;; and print options — so what it produces is the printed value itself,
@@ -90,7 +112,7 @@
       ;; A string prints quoted, newlines escaped, exactly as `pr` would:
       ;; the response is one readable line of data, never a raw splice.
       (and (map? node) (:seon.print/face node))
-      (print/emit-text node (merge (print/default-options) options))
+      (print/emit-text node (print-options emission))
 
       (string? node) node
 
@@ -102,19 +124,22 @@
 (defn error-text
   "Clojure's own concise REPL error for one failed evaluation.
 
-  The recorded `ex-triage` data is the authority; the stored message is the
-  fallback when triage is absent or unreadable, because a refusal that names
-  nothing is worse than a plainer one that names the throwable."
+  The recorded `ex-triage` data is the authority — it names the throwable's
+  class and, when the evaluation had one, its source location. The stored
+  message is the fallback when triage is absent or unreadable, and it says
+  only what it knows: NO invented `(REPL:1)` location and no empty class
+  parens, because a diagnostic that fabricates where a failure happened is
+  worse than one that omits it (law 2.4)."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
   [{error :seon.cluster.eval/error triage :seon.cluster.eval/triage-edn}]
   (when (string? error)
     (or (when (string? triage)
           (try
-            (-> triage edn/read-string main/ex-str str/trim-newline)
+            (let [triaged (edn/read-string triage)]
+              (when (map? triaged)
+                (-> triaged main/ex-str str/trim-newline)))
             (catch Throwable _ nil)))
-        (-> {:clojure.error/phase :execution :clojure.error/cause error}
-            main/ex-str
-            str/trim-newline))))
+        (str "Execution error.\n" (str/trim-newline error)))))
 
 (defn- response-entries
   "The response's present keys, in declared order, each already text."
@@ -192,15 +217,23 @@
   is what a REPL with no namespace in effect is called."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.repl/emission]}
   [unit]
-  (cond-> (select-keys unit [:seon.cluster.eval/source
+  (cond-> (select-keys unit [:seon.cluster.eval/id
+                             :seon.cluster.eval/source
                              :seon.cluster.eval/comment
                              :seon.cluster.eval/ordinal
                              :seon.cluster.eval/result-edn
+                             :seon.cluster.eval/result-blob
                              :seon.cluster.eval/error
                              :seon.cluster.eval/triage-edn
                              :seon.cluster.eval/output
                              :seon.sci.eval/ending-ns
                              :seon.eval/duration-ms
+                             ;; THE STORED KEYS ARE THE ONES THE FORM SET.
+                             ;; Reading `:seon.print/options` here left every
+                             ;; per-form `set!` of *print-length* / *print-level*
+                             ;; out of the response it was recorded for.
+                             :seon.print/length
+                             :seon.print/level
                              :seon.print/options])
     ;; ONE ENTITY, TWO SPELLINGS DURING THE MERGE. A frozen form and its
     ;; evaluation are becoming one entity per (run, ordinal); until the form

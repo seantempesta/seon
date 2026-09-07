@@ -1,6 +1,7 @@
 (ns seon.repl-test
   "The REPL response grammar: what an agent reads back for one form."
-  (:require [clojure.string :as str]
+  (:require [clojure.main :as main]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.repl :as repl]
             [seon.sci.admit :as admit]))
@@ -113,6 +114,75 @@
                          :seon.print/options {:seon.print/length 1}
                          :seon.cluster.eval/result-edn symbol-vector})
          ":value [my.run/complete ...]"))))
+
+(deftest the-stored-print-keys-are-the-ones-the-emitter-reads
+  ;; THE STORED KEYS REACH THE EMITTER (audit C3). `:seon.print/length` and
+  ;; `/level` are what settlement writes when a form `set!`s *print-length*
+  ;; or *print-level*; the emitter used to read `:seon.print/options`, a key
+  ;; no stored evaluation carries, so every per-form print setting was
+  ;; recorded and then silently discarded.
+  (testing "a stored :seon.print/length bounds the stored node"
+    (is (str/includes?
+         (repl/response {:seon.cluster.eval/source "(dir my.run)"
+                         :seon.ns/name 'my.agents.juniper
+                         :seon.print/length 1
+                         :seon.cluster.eval/result-edn symbol-vector})
+         ":value [my.run/complete ...]")))
+  (testing "a stored :seon.print/level bounds the same node's depth"
+    (is (str/includes?
+         (repl/response
+          {:seon.cluster.eval/source "(dir my.run)"
+           :seon.ns/name 'my.agents.juniper
+           :seon.print/level 0
+           :seon.cluster.eval/result-edn symbol-vector})
+         ":value #")))
+  (testing "no stored key leaves the shipped defaults in effect"
+    (is (str/includes?
+         (repl/response {:seon.cluster.eval/source "(dir my.run)"
+                         :seon.ns/name 'my.agents.juniper
+                         :seon.cluster.eval/result-edn symbol-vector})
+         ":value [my.run/complete my.run/wait]"))))
+
+(deftest an-error-names-its-throwable-and-never-invents-a-location
+  ;; A REFUSAL NAMES WHAT IT KNOWS AND NOTHING MORE (law 2.4, audit F2).
+  ;; The recorded triage is the authority; without it the fallback used to
+  ;; print `Execution error () at (REPL:1).` — an empty class and a source
+  ;; location the evaluation never had.
+  (let [throwable (try (/ 1 0) (catch Throwable failure failure))
+        triage (pr-str (main/ex-triage (Throwable->map throwable)))]
+    (testing "recorded triage names the throwable's own class"
+      (let [text (repl/error-text {:seon.cluster.eval/error "Divide by zero"
+                                   :seon.cluster.eval/triage-edn triage})]
+        (is (str/includes? text "ArithmeticException"))
+        (is (str/includes? text "Divide by zero"))))
+    (testing "without triage the class parens and the location are absent"
+      (let [text (repl/error-text {:seon.cluster.eval/error "Divide by zero"})]
+        (is (= "Execution error.\nDivide by zero" text))
+        (is (not (str/includes? text "()")))
+        (is (not (str/includes? text "REPL:1")))))
+    (testing "unreadable triage degrades to the same honest fallback"
+      (is (= "Execution error.\nDivide by zero"
+             (repl/error-text {:seon.cluster.eval/error "Divide by zero"
+                               :seon.cluster.eval/triage-edn "#unreadable("}))))))
+
+(deftest a-unit-that-is-not-an-evaluation-refuses-instead-of-throwing
+  ;; RENDERS NEVER THROW (law 2.4, audit F5). `entity-emission`'s declared
+  ;; output required the source, so a unit without one raised a contract
+  ;; violation from inside a page derivation — and one throw took the whole
+  ;; page with it — while `render-ai`'s own guard could never run.
+  (testing "an error value arriving where a unit was expected renders nil"
+    (is (nil? (repl/render-ai {:seon.error/kind :seon.render/refused
+                               :seon.error/message "no producer"}))))
+  (testing "so does the HTML projection of the same non-evaluation"
+    (is (nil? (repl/render-html {:seon.error/kind :seon.render/refused
+                                 :seon.error/message "no producer"}))))
+  (testing "an evaluation entity with a source still renders"
+    (is (str/includes?
+         (repl/render-ai
+          {:seon.cluster.eval/source "(+ 1 1)"
+           :seon.cluster.eval/ns {:seon.ns/name 'my.agents.juniper}
+           :seon.cluster.eval/result-edn (number-node 2)})
+         "my.agents.juniper=> (+ 1 1)"))))
 
 (deftest nothing-emitted-is-comment-shaped
   (testing "ruling 45: only the agent's own comment begins with a semicolon"
