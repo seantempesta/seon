@@ -1,8 +1,16 @@
 #:seon.cluster.message{:about
-                       [:and #:seon.db{:index true} :seon.db/ref],
+                       [:and
+                        {:description
+                         "The entity this message concerns when one was named.",
+                         :seon.db/index true}
+                        :seon.db/ref],
                        :at :inst,
                        :caused-by
-                       [:and #:seon.db{:index true} :seon.db/ref],
+                       [:and
+                        {:description
+                         "The earlier message that caused this message.",
+                         :seon.db/index true}
+                        :seon.db/ref],
                        :content
                        [:string
                         {:min 1,
@@ -86,9 +94,52 @@
                          :seon.cluster.message/id]],
                        :to
                        [:and
-                        {:seon.render/form
+                        {:description
+                         "The agent addressed by this message; its reverse is that agent's inbox.",
+                         :seon.render/ai
+                         seon.cluster.message/render-inbox-ai,
+                         :seon.render/html
+                         seon.cluster.message/render-inbox-html,
+                         :seon.render/form
                          seon.render.transcript/inbox-form}
                         :seon.db/ref],
+                       :pulled-reference
+                       [:or
+                        {:description
+                         "One reference as a pull hands it to a renderer: an entity id, a lookup ref, or the referenced entity map the page already acquired."}
+                        :seon.db/ref
+                        [:map [:db/id :int]]],
+                       :pulled
+                       [:map
+                        {:description
+                         "One message as a pull returns it, before its references resolve to agents."}
+                        [:db/id {:optional true} :int]
+                        [:seon.cluster.message/id
+                         :seon.cluster.message/id]
+                        [:seon.cluster.message/content
+                         :seon.cluster.message/content]
+                        [:seon.cluster.message/at
+                         :seon.cluster.message/at]
+                        [:seon.cluster.message/ordinal
+                         {:optional true}
+                         :seon.cluster.message/ordinal]
+                        [:seon.cluster.message/from
+                         {:optional true}
+                         :seon.cluster.message/pulled-reference]
+                        [:seon.cluster.message/to
+                         {:optional true}
+                         :seon.cluster.message/pulled-reference]
+                        [:seon.cluster.message/about
+                         {:optional true}
+                         :seon.cluster.message/pulled-reference]
+                        [:seon.cluster.message/caused-by
+                         {:optional true}
+                         :seon.cluster.message/pulled-reference]],
+                       :inbox-unit
+                       [:sequential
+                        {:description
+                         "Every message addressed to one agent, as the reverse of `to` pulls them."}
+                        :seon.cluster.message/pulled],
                        :size [:int {:min 0}],
                        :limit [:int {:min 0}],
                        :unknown-recipient :seon.cluster.agent/id

@@ -105,11 +105,17 @@
   "List messages addressed to this agent; use `since` after a shown basis."
   {:malli/schema
    [:function
+    [:=> [:cat :my.message/inbox-request]
+     [:or :my.message/inbox :seon.error/value]]
     [:=> [:cat :seon.db/database-value :seon.cluster.agent/id]
      [:or :my.message/inbox :seon.error/value]]
     [:=> [:cat :my.message/inbox-options
           :seon.db/database-value :seon.cluster.agent/id]
      [:or :my.message/inbox :seon.error/value]]]}
+  ([request]
+   (inbox* (:seon.db/db request)
+           (:seon.cluster.agent/id request)
+           (:seon.db/since request)))
   ([database agent-id]
    (inbox* database agent-id nil))
   ([options database agent-id]

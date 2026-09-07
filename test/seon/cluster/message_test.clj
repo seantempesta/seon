@@ -27,6 +27,7 @@
             [seon.cluster.run :as run]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
+            [seon.render.route :as route]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci.eval]
@@ -122,10 +123,153 @@
                (:seon.sci.admit/value evaluated)))
         (is (nil? (:seon.cluster.eval/error evaluated)))))))
 
+(deftest inbox-request-map-arity-is-indexed-and-argless-stays-ambiguous
+  (with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.cluster.message/id "message-older"
+         :seon.cluster.message/from [:seon.cluster.agent/id "alice"]
+         :seon.cluster.message/to [:seon.cluster.agent/id "bob"]
+         :seon.cluster.message/content "older"
+         :seon.cluster.message/at (Date. 1699999999000)}
+        {:seon.cluster.message/id "message-newer"
+         :seon.cluster.message/to [:seon.cluster.agent/id "bob"]
+         :seon.cluster.message/content "newer"
+         :seon.cluster.message/at now}])
+      (let [ctx (test-support/fork-cluster-ctx connection)
+            evaluate-form
+            (fn [source]
+              (sci.eval/evaluate
+               {:seon.cluster.run.form/source source
+                :seon.cluster.run.form/ns [:seon.ns/name 'my.agents.bob]
+                :seon.cluster.agent/id "bob"
+                :seon.sci.eval/ctx ctx
+                :seon.sci.admit/caps
+                (config/result-caps (test-support/effective-config))
+                :seon.sci.eval/time-limit-ms 5000
+                :seon.config/on-core-error :panic}))
+            indexed
+            (db/pull @connection
+                     '[{:seon.fn/arities
+                        [:seon.fn.arity/argument-count
+                         {:seon.fn.arity/input-refs [:seon.schema/key]}]}]
+                     [:seon.fn/sym "my.message/inbox"])
+            argless (evaluate-form "(my.message/inbox)")
+            listing (fn [evaluation]
+                      (mapv #(select-keys %
+                                          [:my.message/id
+                                           :my.message/from
+                                           :my.message/content])
+                            (:seon.sci.admit/value evaluation)))
+            expected [{:my.message/id "message-older"
+                       :my.message/from "alice"
+                       :my.message/content "older"}
+                      {:my.message/id "message-newer"
+                       :my.message/content "newer"}]]
+        (is (= #{1 2 3}
+               (into #{}
+                     (map :seon.fn.arity/argument-count)
+                     (:seon.fn/arities indexed)))
+            "all three source arities are indexed")
+        (is (some #(and (= 1 (:seon.fn.arity/argument-count %))
+                        (= [:my.message/inbox-request]
+                           (mapv :seon.schema/key
+                                 (:seon.fn.arity/input-refs %))))
+                  (:seon.fn/arities indexed))
+            "the request-map arity records its one named request input")
+        (is (= expected
+               (listing {:seon.sci.admit/value
+                         (my.message/inbox
+                          {:seon.db/db @connection
+                           :seon.cluster.agent/id "bob"})}))
+            "the request-map arity reads the same messages as the pair")
+        (is (= expected
+               (listing {:seon.sci.admit/value
+                         (my.message/inbox @connection "bob")}))
+            "the positional arity is unchanged by the request-map accretion")
+        ;; A BARE `(my.message/inbox)` REACHES NO VALUE, and it must not: two
+        ;; declared shapes fit zero supplied arguments — the request map and
+        ;; the positional database-and-agent pair — so nothing can know which
+        ;; positions were named. The live cluster answers with the typed
+        ;; :seon.call-preparation/ambiguous-call refusal; this forked ctx
+        ;; refuses at arity instead, and the difference is recorded in the
+        ;; research note. Either way the wanted behavior is a refusal, never
+        ;; a guessed shape, so THAT is what this asserts.
+        (is (some? (:seon.error/kind (:seon.sci.admit/value argless)))
+            "argless inbox is refused by a typed value, never guessed")
+        (is (some? (:seon.cluster.eval/error argless))
+            "and the refusal names itself rather than returning silence")))))
+
 (deftest message-terminal-formatter-preserves-database-errors
   (let [failure {:seon.error/kind ::read-failed
                  :seon.error/message "message read failed"}]
     (is (= failure (message/format-ai failure)))))
+
+(deftest inbox-unit-renders-both-projections-of-the-same-messages
+  (with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.cluster.message/id "inbox/2"
+         :seon.cluster.message/from [:seon.cluster.agent/id "alice"]
+         :seon.cluster.message/to [:seon.cluster.agent/id "bob"]
+         :seon.cluster.message/content "second"
+         :seon.cluster.message/at (Date. 1700000060000)}
+        {:seon.cluster.message/id "inbox/1"
+         :seon.cluster.message/from [:seon.cluster.agent/id "alice"]
+         :seon.cluster.message/to [:seon.cluster.agent/id "bob"]
+         :seon.cluster.message/content "first"
+         :seon.cluster.message/at now}])
+      (let [database @connection
+            reverse-value
+            (:seon.cluster.message/_to
+             (db/pull database [:seon.cluster.message/_to]
+                      [:seon.cluster.agent/id "bob"]))
+            messages (db/pull-many database '[*]
+                                   (mapv :db/id reverse-value))
+            rendered (message/render-inbox-html messages database)]
+        (is (= (str ";; What have I been sent? Nothing stores an inbox:"
+                    " `my.message/inbox`\n"
+                    ";; joins :seon.cluster.message/to against me and returns"
+                    " the messages\n"
+                    ";; oldest first, so the newest one is the last printed."
+                    " The empty\n"
+                    ";; request map is the whole call — the database and I"
+                    " are supplied.\n"
+                    "(my.message/inbox {})")
+               (message/render-inbox-ai messages))
+            "the AI projection is source, not prose about the messages")
+        (is (= [:section {:class "seon-family-entry seon-message-inbox"}
+                [:h2 "Messages (2)"]]
+               (subvec rendered 0 3)))
+        (is (= ["first" "second"]
+               (mapv #(last (nth % 3)) (subvec rendered 3)))
+            "oldest first, so the newest message is last in both projections")
+        (is (every? some? (flatten rendered))
+            "no absent optional element leaves a nil child behind"))))
+
+  (testing "one message's own recipient reference still renders as a reference"
+    (with-database
+      (fn [connection]
+        (let [database @connection
+              rendered (message/render-inbox-html
+                        [:seon.cluster.agent/id "bob"] database)]
+          (is (= [:p [:a {:href (route/path
+                                 ::route/data {}
+                                 {:entity (pr-str
+                                           [:seon.cluster.agent/id "bob"])})}
+                      "[:seon.cluster.agent/id \"bob\"]"]]
+                 (nth rendered 3)))))))
+
+  (testing "an agent with no messages renders an empty state, not an error"
+    (with-database
+      (fn [connection]
+        (is (= [:section {:class "seon-family-entry seon-message-inbox"}
+                [:h2 "Messages (0)"]
+                [:p {:class "seon-message-inbox-empty"}
+                 "No message is addressed to this agent yet."]]
+               (message/render-inbox-html [] @connection)))))))
 
 (deftest message-html-separates-attribution-time-and-authored-content
   (with-database
@@ -137,7 +281,11 @@
               :seon.cluster.message/content "first line\nsecond line"
               :seon.cluster.message/from [:seon.cluster.agent/id "alice"]
               :seon.cluster.message/to [:seon.cluster.agent/id "bob"]
-              :seon.cluster.message/at now})]
+              :seon.cluster.message/at now
+              :seon.cluster.message/about
+              [:seon.cluster.agent/id "alice"]
+              :seon.cluster.message/caused-by
+              {:seon.cluster.message/id "message-0"}})]
         (is (= [:article {:class "seon-family-entry seon-message-entry"}
                 [:header {:class "seon-message-meta"}
                  [:span {:class "seon-message-direction"}
@@ -149,7 +297,26 @@
                          :datetime "2023-11-14T22:13:20Z"}
                   "2023-11-14T22:13:20Z"]]
                 [:p {:class "seon-message-content"}
-                 "first line\nsecond line"]]
+                 "first line\nsecond line"]
+                [:p {:class "seon-message-links"}
+                 [:span {:class "seon-message-about"}
+                  [:a {:href
+                       (route/path
+                        ::route/data
+                        {}
+                        {:entity
+                         (pr-str [:seon.cluster.agent/id "alice"])})}
+                   "about [:seon.cluster.agent/id \"alice\"]"]]
+                 " · "
+                 [:span {:class "seon-message-caused-by"}
+                  [:a {:href
+                       (route/path
+                        ::route/data
+                        {}
+                        {:entity
+                         (pr-str
+                          [:seon.cluster.message/id "message-0"])})}
+                   "caused-by message-0"]]]]
                rendered)
             "metadata and the authored content occupy distinct elements")
         (is (= "From outside this cluster to bob: first line\nsecond line"

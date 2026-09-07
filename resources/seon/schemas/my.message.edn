@@ -10,6 +10,11 @@
               [:my.message/at :my.message/at]
               [:my.message/content :my.message/content]],
  :my.message/inbox [:vector :my.message/inbox-entry],
+ :my.message/inbox-request
+             [:map
+              [:seon.db/db :seon.db/database-value]
+              [:seon.cluster.agent/id :seon.cluster.agent/id]
+              [:seon.db/since {:optional true} :seon.db/basis-t]],
  :my.message/inbox-options
              [:map
               [:seon.db/since :seon.db/basis-t]],

@@ -55,6 +55,7 @@
   transactions upsert one answer at Datahike's serial commit point."
   (:require [seon.db :as db]
             [clojure.string :as str]
+            [seon.render.route :as route]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -454,6 +455,38 @@
             (when-not (:seon.error/kind result)
               result))))))
 
+(defn- identity-reference
+  [database reference]
+  (when (and database reference)
+    (if (and (vector? reference)
+             (= 2 (count reference))
+             (qualified-keyword? (first reference)))
+      reference
+      (let [entity-id (if (map? reference)
+                        (or (:db/id reference)
+                            (some (fn [attribute]
+                                    (when-let [entry (find reference attribute)]
+                                      [attribute (val entry)]))
+                                  (db/identity-attributes database)))
+                        reference)
+            entity (when entity-id
+                     (db/pull database
+                              (into [:db/id]
+                                    (db/identity-attributes database))
+                              entity-id))]
+        (some (fn [attribute]
+                (when-let [entry (find entity attribute)]
+                  [attribute (val entry)]))
+              (db/identity-attributes database))))))
+
+(defn- data-link
+  [label identity-ref]
+  (when identity-ref
+    [:a {:href (route/path ::route/data
+                           {}
+                           {:entity (pr-str identity-ref)})}
+     label]))
+
 (defn format-ai
   "Format one message as the terminal sentence it was.
 
@@ -517,26 +550,132 @@
         content (get unit ::content)
         from-ref (get unit ::from)
         to-ref (get unit ::to)
-        at (get unit ::at)]
+        at (get unit ::at)
+        about (identity-reference database (get unit ::about))
+        caused-by-id (some-> (get unit ::caused-by)
+                             (get ::id))
+        caused-by-ref (when caused-by-id [::id caused-by-id])]
     (when content
       (let [from (agent-reference-id database from-ref)
             to (agent-reference-id database to-ref)]
-        [:article {:class "seon-family-entry seon-message-entry"}
-         [:header {:class "seon-message-meta"}
-          [:span {:class "seon-message-direction"}
-           [:span {:class "seon-message-from"}
-            (cond
-              from (str "Agent " from)
-              from-ref (str "Unresolved sender " (pr-str from-ref))
-              :else "Outside this cluster")]
-           [:span {:class "seon-message-arrow" :aria-hidden "true"} "→"]
-           [:span {:class "seon-message-to"}
-            (cond
-              to (str "Agent " to)
-              to-ref (str "Unresolved recipient " (pr-str to-ref))
-              :else "No recipient")]]
-          (when at
-            (let [instant (.toString (.toInstant ^java.util.Date at))]
-              [:time {:class "seon-message-at" :datetime instant}
-               instant]))]
-         [:p {:class "seon-message-content"} content]]))))
+        (cond->
+         [:article {:class "seon-family-entry seon-message-entry"}
+          (cond->
+           [:header {:class "seon-message-meta"}
+            [:span {:class "seon-message-direction"}
+             [:span {:class "seon-message-from"}
+              (cond
+                from (str "Agent " from)
+                from-ref (str "Unresolved sender " (pr-str from-ref))
+                :else "Outside this cluster")]
+             [:span {:class "seon-message-arrow" :aria-hidden "true"} "→"]
+             [:span {:class "seon-message-to"}
+              (cond
+                to (str "Agent " to)
+                to-ref (str "Unresolved recipient " (pr-str to-ref))
+                :else "No recipient")]]]
+            at
+            (conj (let [instant (.toString (.toInstant ^java.util.Date at))]
+                    [:time {:class "seon-message-at" :datetime instant}
+                     instant])))
+          [:p {:class "seon-message-content"} content]]
+          (or about caused-by-ref)
+          (conj
+           (cond->
+            [:p {:class "seon-message-links"}]
+             about
+             (conj [:span {:class "seon-message-about"}
+                    (data-link (str "about " (pr-str about)) about)])
+             (and about caused-by-ref) (conj " · ")
+             caused-by-ref
+             (conj [:span {:class "seon-message-caused-by"}
+                    (data-link (str "caused-by " caused-by-id)
+                               caused-by-ref)]))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The inbox unit
+;;;
+;;; `:seon.cluster.message/to` is reached two ways. A walk from one message
+;;; hands the single recipient reference; the agent's declared
+;;; `:seon.cluster.message/_to` unit hands every message addressed to that
+;;; agent. One producer per projection answers both, because both are the same
+;;; question asked from the two ends of one ref.
+;;;
+;;; A DECLARED REVERSE UNIT HAS NO SCHEMA KEY OF ITS OWN. Both the render
+;;; contract coherence check and instrumentation read the FORWARD attribute's
+;;; schema, which describes one ref and not the collection the reverse pulls,
+;;; so the declared producer input is `:seon.schema/value` — the render seam's
+;;; own name for "the value this seam hands me". The honest collection shape
+;;; is `:seon.cluster.message/inbox-unit` and it is enforced one call inward,
+;;; at `inbox-html`, where instrumentation states it. The missing fact is
+;;; recorded in the research note.
+;;; ---------------------------------------------------------------------------
+
+(def ^:private inbox-source
+  (str ";; What have I been sent? Nothing stores an inbox: `my.message/inbox`\n"
+       ";; joins :seon.cluster.message/to against me and returns the messages\n"
+       ";; oldest first, so the newest one is the last printed. The empty\n"
+       ";; request map is the whole call — the database and I are supplied.\n"
+       (pr-str (list 'my.message/inbox {}))))
+
+(defn render-inbox-ai
+  "`:seon.render/ai` — source which lists the messages addressed to an agent.
+
+  Call preparation supplies the database and the calling agent to
+  `my.message/inbox`, so the same source is correct from either end of the
+  `to` reference."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/source]}
+  [_recipient-or-inbox]
+  inbox-source)
+
+(defn- message-order
+  [message]
+  [(if-let [at (get message ::at)] (.getTime ^java.util.Date at) 0)
+   (long (or (get message ::ordinal) 0))
+   (str (get message ::id))])
+
+(defn inbox-html
+  "Render every message addressed to one agent, oldest first.
+
+  Each message reaches the one message renderer, so a message in this list
+  and the same message rendered alone state exactly the same facts."
+  {:malli/schema [:=> [:cat :seon.cluster.message/inbox-unit
+                       :seon.db/database-value]
+                  :seon.render/hiccup]}
+  [messages database]
+  (let [entries (into []
+                      (keep #(render-html (assoc % :seon.db/db database)))
+                      (sort-by message-order messages))]
+    (if (seq entries)
+      (into [:section {:class "seon-family-entry seon-message-inbox"}
+             [:h2 (str "Messages (" (count entries) ")")]]
+            entries)
+      [:section {:class "seon-family-entry seon-message-inbox"}
+       [:h2 "Messages (0)"]
+       [:p {:class "seon-message-inbox-empty"}
+        "No message is addressed to this agent yet."]])))
+
+(defn render-inbox-html
+  "`:seon.render/html` — the same messages as reader-facing entries.
+
+  The reverse unit hands every message it acquired and renders them through
+  [[inbox-html]]; a walk from one message hands that message's single
+  recipient reference and renders it as the reference it is."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
+                  :seon.render/hiccup]}
+  [recipient-or-inbox database]
+  ;; A LOOKUP REF IS ALSO SEQUENTIAL, so the collection branch is the one
+  ;; whose every element is an entity map, never merely a vector.
+  (if (and (sequential? recipient-or-inbox)
+           (every? map? recipient-or-inbox))
+    (inbox-html (vec recipient-or-inbox) database)
+    (let [recipient (identity-reference database recipient-or-inbox)]
+      [:section {:class "seon-family-entry seon-message-inbox"}
+       [:p {:class "seon-kicker"} "Addressed to"]
+       (if recipient
+         [:p (or (data-link (pr-str recipient) recipient)
+                 [:code (pr-str recipient)])]
+         [:p {:class "seon-message-inbox-empty"}
+          (str "The recipient reference "
+               (pr-str recipient-or-inbox)
+               " does not resolve to an entity with an identity attribute.")])])))
