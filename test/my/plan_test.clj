@@ -1,10 +1,7 @@
 (ns my.plan-test
-  "Fact-first plan derivation, transitions, and current-state rendering."
+  "The agent-owned plan component tree, its derivation, and its two projections."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [clojure.test.check :as tc]
-            [clojure.test.check.generators :as gen]
-            [clojure.test.check.properties :as prop]
             [my.plan :as plan]
             [seon.config :as config]
             [seon.db :as db]
@@ -18,13 +15,6 @@
 (defn- at
   [offset]
   (java.util.Date. (long (+ t0-ms offset))))
-
-(deftest plan-terminal-formatters-preserve-database-errors
-  (let [failure {:seon.error/kind ::read-failed
-                 :seon.error/message "plan read failed"}]
-    (is (= failure (plan/format-item-ai failure)))
-    (is (= failure (plan/format-ready-items-ai failure)))
-    (is (= failure (plan/format-plan-ai failure)))))
 
 (defn- with-plan
   [f]
@@ -42,449 +32,308 @@
   ([connection id title]
    (add connection id title {}))
   ([connection id title more]
-   (plan/add! (merge {:my.plan.item/id id
-                      :my.plan.item/title title}
-                     more)
+   (plan/add! (merge {:my.plan.item/id id :my.plan.item/title title} more)
               connection "alice")))
 
-(deftest authored-status-is-derived-from-presence-and-edges
+(defn- plan-of
+  ([connection] (plan-of connection "alice"))
+  ([connection agent-id]
+   (plan/plan {:seon.db/db @connection :seon.cluster.agent/id agent-id})))
+
+(defn- ids
+  [steps]
+  (mapv :my.plan.item/id steps))
+
+(defn- numbers-in
+  [value]
+  (cond
+    (number? value) [value]
+    (map? value) (into [] (mapcat numbers-in) (vals value))
+    (coll? value) (into [] (mapcat numbers-in) value)
+    :else []))
+
+(deftest terminal-formatters-preserve-database-errors
+  (let [failure {:seon.error/kind ::read-failed
+                 :seon.error/message "plan read failed"}]
+    (is (= failure (plan/format-item-ai failure)))
+    (is (= failure (plan/format-ready-items-ai failure)))
+    (is (= failure (plan/format-plan-ai failure)))))
+
+(deftest an-empty-plan-renders-in-both-projections
   (with-plan
     (fn [connection]
-      (add connection "root" "Ship"
-           {:my.plan/anchor? true})
+      (let [current (plan-of connection)
+            ai (plan/format-plan-ai current)
+            html (plan/render-plan-html #{} @connection "alice")]
+        (is (= [] (:my.plan/steps current)))
+        (is (= [] (:my.plan/ready current)))
+        (is (not (contains? current :my.plan/current-step)))
+        (is (str/includes? ai "Steps: none yet."))
+        (is (str/includes? ai "Current step: none selected"))
+        (is (str/includes? (pr-str html) "No current step is selected."))))))
+
+(deftest one-step-is-owned-by-the-agent-through-the-component-edge
+  (with-plan
+    (fn [connection]
+      (let [added (add connection "ship" "Ship the plan unit")
+            current (plan-of connection)]
+        (is (= "ship" (:my.plan.item/id added)))
+        (is (= 0 (:my.plan.item/position added)))
+        (is (= ["ship"] (ids (:my.plan/steps current))))
+        (is (= ["ship"] (ids (:my.plan/ready current))))
+        (is (= 0 (:my.plan/depth (first (:my.plan/steps current)))))
+        (is (= #{["ship"]}
+               (db/q '[:find ?id
+                       :where
+                       [?agent :seon.cluster.agent/id "alice"]
+                       [?agent :my.plan/steps ?step]
+                       [?step :my.plan.item/id ?id]]
+                     @connection))
+            "ownership is the forward component edge, with no stored backlink")))))
+
+(deftest nested-steps-derive-parent-depth-and-order
+  (with-plan
+    (fn [connection]
+      (add connection "root" "Improve the plan")
+      (add connection "second" "Second child"
+           {:my.plan/parent-step [:my.plan.item/id "root"]})
+      (add connection "first" "First child"
+           {:my.plan/parent-step [:my.plan.item/id "root"]})
+      (let [steps (:my.plan/steps (plan-of connection))
+            by-id (into {} (map (juxt :my.plan.item/id identity)) steps)]
+        (is (= ["root" "second" "first"] (ids steps))
+            "siblings order by stored position, not by identity")
+        (is (= 1 (:my.plan/depth (by-id "first"))))
+        (is (= {:my.plan.item/id "root"} (:my.plan/parent (by-id "first")))
+            "a parent derives from the reverse component edge")
+        (is (not (contains? (by-id "root") :my.plan/parent)))))))
+
+(deftest completing-a-dependency-unblocks-the-dependent-step
+  (with-plan
+    (fn [connection]
+      (add connection "root" "Improve the plan")
       (add connection "prepare" "Prepare"
-           {:my.plan.item/parent [:my.plan.item/id "root"]})
+           {:my.plan/parent-step [:my.plan.item/id "root"]})
       (add connection "verify" "Verify"
-           {:my.plan.item/parent [:my.plan.item/id "root"]
+           {:my.plan/parent-step [:my.plan.item/id "root"]
             :my.plan.item/needs #{[:my.plan.item/id "prepare"]}})
-      (is (= ["prepare"] (mapv :my.plan.item/id
-                                (plan/ready @connection "alice"))))
-      (let [view (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"})]
-        (is (= [:my.plan.item/id "root"] (:my.plan/anchor view)))
-        (is (= ["prepare"] (mapv :my.plan.item/id (:my.plan/ready view))))
-        (is (= ["verify"] (mapv :my.plan.item/id (:my.plan/blocked view))))
-        (is (= [:my.plan.item/id "root"]
-               (:my.plan.item/parent (first (:my.plan/ready view)))))
-        (is (= #{[:my.plan.item/id "prepare"]}
-               (:my.plan.item/needs (first (:my.plan/blocked view))))))
-      (plan/complete! "prepare" (at 1) connection "alice")
-      (is (= ["verify"] (mapv :my.plan.item/id
-                               (plan/ready @connection "alice"))))
-      (testing "no status attribute exists or lands on an item"
-        (is (not (contains? (:schema @connection) :my.plan.item/status)))
-        (is (nil? (:my.plan.item/status
-                   (db/pull @connection '[*]
-                            [:my.plan.item/id "verify"]))))))))
+      (is (= ["prepare"] (ids (:my.plan/ready (plan-of connection)))))
+      (is (= ["verify"] (ids (:my.plan/blocked (plan-of connection)))))
+      (plan/complete! "prepare" (at 0) connection "alice")
+      (let [current (plan-of connection)]
+        (is (= ["verify"] (ids (:my.plan/ready current))))
+        (is (= [] (:my.plan/blocked current)))
+        (is (= ["prepare"] (ids (:my.plan/recent-completions current))))))))
 
-(deftest plan-items-are-ordinary-agent-linked-database-facts
+(deftest a-changed-title-is-an-ordinary-fact-update
   (with-plan
     (fn [connection]
-      (let [item-id "ordinary-fact"]
-        (db/transact!
-         connection
-         [{:db/id "new-plan-item"
-           :my.plan.item/id item-id
-           :my.plan.item/title "Inspect the facts"
-           :my.plan.item/agent [:seon.cluster.agent/id "alice"]}])
-        (let [pulled
-              (db/pull
-               @connection
-               [{:my.plan.item/_agent
-                 [:my.plan.item/id :my.plan.item/title]}]
-               [:seon.cluster.agent/id "alice"])]
-          (is (= [{:my.plan.item/id item-id
-                   :my.plan.item/title "Inspect the facts"}]
-                 (:my.plan.item/_agent pulled))))
-        (db/transact!
-         connection
-         [{:db/id [:my.plan.item/id item-id]
-           :my.plan.item/title "Inspect the updated facts"}])
-        (is (= "Inspect the updated facts"
-               (get-in
-                (db/pull
-                 @connection
-                 [{:my.plan.item/_agent
-                   [:my.plan.item/id :my.plan.item/title]}]
-                 [:seon.cluster.agent/id "alice"])
-                [:my.plan.item/_agent 0 :my.plan.item/title])))
-        (is (= [item-id]
-               (mapv :my.plan.item/id
-                     (plan/ready @connection "alice"))))
-        (is (= ["Inspect the updated facts"]
-               (mapv :my.plan.item/title
-                     (plan/ready @connection "alice"))))))))
+      (add connection "ship" "Old title")
+      (db/transact! connection
+                    [{:db/id [:my.plan.item/id "ship"]
+                      :my.plan.item/title "New title"}])
+      (is (= ["New title"]
+             (mapv :my.plan.item/title
+                   (:my.plan/steps (plan-of connection))))))))
 
-(deftest a-drained-parent-becomes-ready-for-verify-and-close
-  (let [check
-        (tc/quick-check
-         12
-         (prop/for-all [child-count (gen/choose 1 4)]
-           (support/with-database
-             (fn [connection]
-               (let [agent-id (str "agent-" child-count)
-                     root-id (str "root-" child-count)]
-                 (db/transact! connection
-                               [{:seon.cluster.agent/id agent-id}])
-                 (plan/add! {:my.plan.item/id root-id
-                             :my.plan.item/title "Verify the whole"}
-                            connection agent-id)
-                 (doseq [index (range child-count)]
-                   (plan/add!
-                    {:my.plan.item/id (str "child-" child-count "-" index)
-                     :my.plan.item/title (str "Child " index)
-                     :my.plan.item/parent [:my.plan.item/id root-id]}
-                    connection agent-id))
-                 (let [before (set (map :my.plan.item/id
-                                        (plan/ready @connection agent-id)))]
-                   (doseq [index (range child-count)]
-                     (plan/complete! (str "child-" child-count "-" index)
-                                     (at index) connection agent-id))
-                   (and (= child-count (count before))
-                        (not (contains? before root-id))
-                        (= [root-id]
-                           (mapv :my.plan.item/id
-                                 (plan/ready @connection agent-id)))))))))
-         :seed 49134711)]
-    (is (:result check) (pr-str check))))
-
-(deftest derived-obligations-remain-native-fact-queries
+(deftest a-plan-without-a-current-step-still-renders
   (with-plan
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.cluster.message/id "question"
-         :seon.cluster.message/to [:seon.cluster.agent/id "alice"]
-         :seon.cluster.message/content "Answer the question."
-         :seon.cluster.message/at (at 1)}
-        {:seon.cluster.run/id "open-run"
-         :seon.cluster.run/agent [:seon.cluster.agent/id "alice"]
-         :seon.cluster.run/opened-at (at 2)}
-        {:seon.test/sym "fixture.plan/failing"
-         :seon.test/ns [:seon.ns/name 'fixture.plan]
-         :seon.test/pass-count 0
-         :seon.test/fail-count 1
-         :seon.test/error-count 0
-         :seon.test/run-basis-t (db/basis-t @connection)
-         :seon.test/run-at (at 3)}])
-      (let [view (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"})
-            sources (mapv :my.plan/obligation-source
-                          (:my.plan/obligations view))]
-        (is (= [:message :run :test] sources))
-        (is (empty? (:my.plan/ready view)))
-        (is (empty? (:my.plan/blocked view))))
-      (db/transact!
-       connection
-       [{:seon.cluster.run/id "answer-run"
-         :seon.cluster.run/agent [:seon.cluster.agent/id "alice"]
-         :seon.cluster.run/trigger [:seon.cluster.message/id "question"]
-         :seon.cluster.run/opened-at (at 4)}])
-      (is (= [:run :run :test]
-             (mapv :my.plan/obligation-source
-                   (:my.plan/obligations
-                    (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"}))))))))
+      (add connection "ship" "Ship the plan unit")
+      (let [current (plan-of connection)]
+        (is (not (contains? current :my.plan/current-step)))
+        (is (= :ready (:my.plan/state (first (:my.plan/steps current)))))
+        (is (str/includes? (plan/format-plan-ai current)
+                           "Current step: none selected"))))))
 
-(deftest rebirth-uses-only-current-facts-and-honest-elision
+(deftest completing-the-current-step-retracts-the-current-step-ref
   (with-plan
     (fn [connection]
-      (let [limit (:seon.config.render.agent/max-children (config/defaults))]
-        (add connection "open" "Current work"
-             {:my.plan/anchor? true
-              :my.plan.item/expected-result "The current work is verified."})
-        (doseq [index (range (+ limit 3))]
-          (let [id (format "done-%02d" index)]
-            (add connection id (str "Completed " index))
-            (plan/complete! id (at index) connection "alice")))
-        (let [current (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"})
-              recent (:my.plan/recent-completions current)
-              older (:my.plan/older-completions current)
-              source (plan/render-plan-ai current)
-              ai (plan/format-plan-ai current)
-              acquired (sci.eval/cluster-ctx @connection connection)
-              environment
-              (env/refuse-incomplete-environment!
-               (env/environment
-                {:seon.boot/cluster-name "plan-render"
-                 :seon.db/connection connection
-                 :seon.schema/projection (:seon.schema/projection acquired)}))
-              base (env/carry-state acquired
-                                    (env/environment-state environment))
-              evaluate-source
-              (fn [rendered-source]
-                (sci.eval/evaluate
-                 {:seon.cluster.run.form/source rendered-source
-                  :seon.cluster.run.form/ns [:seon.ns/name 'fixture.plan]
-                  :seon.cluster.agent/id "alice"
-                  :seon.sci.eval/ctx
-                  (:seon.sci.eval/ctx
-                   (sci.eval/fork-for-turn
-                    {:seon.sci.eval/ctx
-                     base
-                     :seon.db/db @connection
-                     :seon.db/connection connection
-                     :seon.cluster.agent/id "alice"}))
-                  :seon.sci.admit/caps
-                  (config/result-caps (support/effective-config))
-                  :seon.sci.eval/time-limit-ms 5000
-                  :seon.config/on-core-error :panic}))
-              evaluated (evaluate-source source)
-              ready-item (first (:my.plan/ready current))
-              item-source (plan/render-item-ai ready-item)
-              item-evaluated
-              (evaluate-source item-source)
-              ready-source
-              (plan/render-ready-items-ai (:my.plan/ready current))
-              ready-evaluated
-              (evaluate-source ready-source)
-              html (plan/render-plan-html current)]
-          (testing "the view reconstructs from the current database value"
-            (is (= ["open"] (mapv :my.plan.item/id (:my.plan/ready current))))
-            (is (= limit (count recent)))
-            (is (= 3 (:seon.print/omitted older)))
-            (is (= [:seon.cluster.agent/id "alice"]
-                   (:seon.print/requery-id older)))
-            (is (= :children (:seon.print/elision-unit older))))
-          (testing "declared shapes accept the rebuilt values and renders"
-            (is (seon.schema/valid-candidate-value? :my.plan/view current))
-            (is (str/includes? source "my.plan/format-plan-ai"))
-            (is (str/includes? source "my.plan/plan"))
-            (is (= "(my.plan/format-item-ai (my.plan/item #:my.plan.item{:id \"open\"}))"
-                   item-source))
-            (is (= "(my.plan/format-ready-items-ai (my.plan/items #:my.plan{:item-ids [\"open\"]}))"
-                   ready-source))
-            (is (= ai (:seon.sci.admit/value evaluated)))
-            (is (= (plan/format-item-ai ready-item)
-                   (:seon.sci.admit/value item-evaluated)))
-            (is (= (plan/format-ready-items-ai (:my.plan/ready current))
-                   (:seon.sci.admit/value ready-evaluated)))
-            (is (seon.schema/valid-candidate-value? :seon.render/ai source))
-            (is (seon.schema/valid-candidate-value? :seon.render/hiccup html))
-            (is (str/includes? ai "Current work"))
-            (is (str/includes? ai "Read again: (my.plan/plan {})"))
-            (is (str/includes? ai "seon.db/transact!"))
-            (is (str/includes? (pr-str html) "is-current"))
-            (is (str/includes? (pr-str html) "my-plan-progress"))
-            (is (str/includes? (pr-str html) "How to inspect or update"))
-            (is (str/includes? (pr-str html) "Done when:"))
-            (is (= :section (first html)))))))))
+      (add connection "ship" "Ship the plan unit" {:my.plan/current? true})
+      (is (= {:my.plan.item/id "ship"}
+             (:my.plan/current-step (plan-of connection))))
+      (is (= :current
+             (:my.plan/state (first (:my.plan/steps (plan-of connection))))))
+      (plan/complete! "ship" (at 0) connection "alice")
+      (let [current (plan-of connection)]
+        (is (not (contains? current :my.plan/current-step))
+            "completion clears the selected focus")
+        (is (= :completed
+               (:my.plan/state (first (:my.plan/steps current)))))))))
 
-(defn- item-count
-  [database]
-  (or (db/q '[:find (count ?item) .
-              :where [?item :my.plan.item/id]]
-            database)
-      0))
-
-(deftest plan-reconciles-a-complete-authored-tree-in-one-transaction
+(deftest retracting-a-parent-retracts-only-what-it-owns
   (with-plan
     (fn [connection]
-      (let [initial
-            [{:my.plan.item/title "Ship"
-              :my.plan/label "root"
-              :my.plan/children
-              [{:my.plan.item/title "Prepare"
-                :my.plan/label "prepare"}
-               {:my.plan.item/title "Verify"
-                :my.plan/label "verify"
-                :my.plan/after ["prepare"]}]}]
-            before (db/basis-t @connection)
-            created (plan/plan! initial @connection connection "alice")
-            after-create (db/basis-t @connection)
-            root-id (get (:my.plan/ids created) "root")
-            prepare-id (get (:my.plan/ids created) "prepare")
-            verify-id (get (:my.plan/ids created) "verify")]
-        (is (= {:my.plan/added 3
-                :my.plan/changed 0
-                :my.plan/retracted 0}
-               (:my.plan/diff created)))
-        (is (= (inc before) after-create)
-            "the complete tree commits through exactly one transaction")
-        (is (= 3 (item-count @connection)))
-        (is (= [prepare-id]
-               (mapv :my.plan.item/id (plan/ready @connection "alice"))))
-        (let [edited
-              [{:my.plan.item/id root-id
-                :my.plan.item/title "Ship"
-                :my.plan/label "root"
-                :my.plan/children
-                [{:my.plan.item/id prepare-id
-                  :my.plan.item/title "Prepare better"
-                  :my.plan/label "prepare"}
-                 {:my.plan.item/title "Publish"
-                  :my.plan/label "publish"}]}]
-              changed (plan/plan! edited @connection connection "alice")]
-          (is (= {:my.plan/added 1
-                  :my.plan/changed 1
-                  :my.plan/retracted 1}
-                 (:my.plan/diff changed)))
-          (is (= "Prepare better"
-                 (db/q '[:find ?title .
-                         :in $ ?id
-                         :where
-                         [?item :my.plan.item/id ?id]
-                         [?item :my.plan.item/title ?title]]
-                       @connection prepare-id)))
-          (is (nil? (db/pull @connection '[*]
-                             [:my.plan.item/id verify-id])))
-          (is (= 3 (item-count @connection))))))))
+      (add connection "root" "Improve the plan")
+      (add connection "child" "Child"
+           {:my.plan/parent-step [:my.plan.item/id "root"]})
+      (add connection "grandchild" "Grandchild"
+           {:my.plan/parent-step [:my.plan.item/id "child"]})
+      (add connection "sibling" "Independent root")
+      (db/transact! connection
+                    [[:db.fn/retractEntity [:my.plan.item/id "root"]]])
+      (let [current (plan-of connection)]
+        (is (= ["sibling"] (ids (:my.plan/steps current)))
+            "component retraction removes the owned subtree and nothing else")
+        (is (nil? (db/q '[:find ?step .
+                          :where [?step :my.plan.item/id "grandchild"]]
+                        @connection)))))))
 
-(deftest plan-converges-without-a-transaction-and-refuses-ambiguity
+(deftest the-whole-plan-renders-once-in-both-projections
   (with-plan
     (fn [connection]
-      (let [document [{:my.plan.item/title "Root"
-                       :my.plan/label "root"
-                       :my.plan/children
-                       [{:my.plan.item/title "Same"}
-                        {:my.plan.item/title "Same"}]}]
-            created (plan/plan! document @connection connection "alice")
-            root-id (get (:my.plan/ids created) "root")
-            children
-            (db/q '[:find [?id ...]
-                    :in $ ?root-id
-                    :where
-                    [?root :my.plan.item/id ?root-id]
-                    [?child :my.plan.item/parent ?root]
-                    [?child :my.plan.item/id ?id]]
-                  @connection root-id)
-            ambiguous
-            [{:my.plan.item/id root-id
-              :my.plan.item/title "Root"
-              :my.plan/children [{:my.plan.item/title "Same"}]}]
-            basis (db/basis-t @connection)
-            refusal (plan/plan! ambiguous @connection connection "alice")]
-        (is (= 2 (count children)))
-        (is (= :my.plan/ambiguous-identity (:seon.error/kind refusal)))
-        (is (true? (:my.plan/ambiguous-identity refusal)))
-        (is (= basis (db/basis-t @connection)))
-        (let [exact
-              [{:my.plan.item/id root-id
-                :my.plan.item/title "Root"
-                :my.plan/children
-                (mapv (fn [id]
-                        {:my.plan.item/id id :my.plan.item/title "Same"})
-                      (sort children))}]
-              first-round (plan/plan! exact @connection connection "alice")
-              converged-basis (db/basis-t @connection)
-              second-round (plan/plan! exact @connection connection "alice")]
-          (is (zero? (:my.plan/added (:my.plan/diff first-round))))
-          (is (true? (:my.plan/converged? second-round)))
-          (is (= {:my.plan/added 0
-                  :my.plan/changed 0
-                  :my.plan/retracted 0}
-                 (:my.plan/diff second-round)))
-          (is (= converged-basis (db/basis-t @connection))))))))
+      (add connection "root" "Improve the plan" {:my.plan/current? true})
+      (add connection "child" "Inspect the facts"
+           {:my.plan/parent-step [:my.plan.item/id "root"]})
+      (let [current (plan-of connection)
+            ai (plan/format-plan-ai current)
+            html (plan/render-plan-html #{} @connection "alice")
+            printed (pr-str html)]
+        (is (= 1 (count (re-seq #"Plan for alice" ai))))
+        (is (= 1 (count (re-seq #"my-plan-tree" printed))))
+        (is (str/includes? ai "1. Improve the plan"))
+        (is (str/includes? ai "1.1 Inspect the facts"))
+        (is (str/includes? ai "Objective: Improve the plan"))
+        (is (str/includes? ai "Current step: Improve the plan"))
+        (is (str/includes? printed "Inspect the facts"))
+        (is (str/includes? printed "0 of 2 steps completed"))))))
 
-(deftest plan-is-basis-fenced-and-cannot-touch-derived-obligations
+(deftest plan-source-runs-through-the-shared-reader
   (with-plan
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.cluster.message/id "question"
-         :seon.cluster.message/to [:seon.cluster.agent/id "alice"]
-         :seon.cluster.message/content "Answer me."
-         :seon.cluster.message/at (at 10)}])
-      (let [observed @connection
-            _ (db/transact! connection
-                            [{:seon.cluster.message/id "later"
-                              :seon.cluster.message/to
-                              [:seon.cluster.agent/id "alice"]
-                              :seon.cluster.message/content "Also answer me."
-                              :seon.cluster.message/at (at 11)}])
-            stale (plan/plan! [{:my.plan.item/title "Must not commit"}]
-                              observed connection "alice")]
-        (is (= :seon.db/rejected (:seon.error/kind stale)))
-        (is (= :transaction/stale-basis
-               (get-in stale [:seon.error/data :error])))
-        (is (zero? (item-count @connection))))
-      (let [before
-            (set (map :my.plan/obligation-id
-                      (:my.plan/obligations (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"}))))
-            applied
-            (plan/plan! [{:my.plan.item/title "Authored only"}]
-                        @connection connection "alice")
-            after
-            (set (map :my.plan/obligation-id
-                      (:my.plan/obligations (plan/plan {:seon.db/db @connection :seon.cluster.agent/id "alice"}))))]
-        (is (= #{"question" "later"} before))
-        (is (= before after))
-        (is (= 1 (:my.plan/added (:my.plan/diff applied))))))))
+      (add connection "ship" "Ship the plan unit")
+      (is (= "(my.plan/format-plan-ai (my.plan/plan {}))"
+             (plan/render-plan-ai #{}))
+          "the AI projection emits source the agent can run itself"))))
 
-(deftest plan-refuses-unresolved-subjects-before-transacting
+(deftest no-numeric-entity-reference-reaches-either-projection
+  ;; The class this kills: a pulled ref normalized to its entity id and then
+  ;; treated as a lookup vector, which threw
+  ;; "Don't know how to create ISeq from: java.lang.Long".
   (with-plan
     (fn [connection]
-      (let [basis (db/basis-t @connection)
-            result
-            (plan/plan!
-             [{:my.plan.item/title "Investigate the missing subject"
-               :my.plan.item/about ['fixture.plan/does-not-exist]}]
-             @connection connection "alice")]
-        (is (= :my.plan/subject-not-found (:seon.error/kind result)))
-        (is (true? (:my.plan/subject-not-found result)))
-        (is (= {:my.plan.item/about
-                'fixture.plan/does-not-exist}
-               (:seon.error/data result)))
-        (is (= basis (db/basis-t @connection)))
-        (is (zero? (item-count @connection)))))))
+      (add connection "prepare" "Prepare")
+      (add connection "verify" "Verify"
+           {:my.plan.item/needs #{[:my.plan.item/id "prepare"]}})
+      (let [current (plan-of connection)
+            step (first (filter #(= "verify" (:my.plan.item/id %))
+                                (:my.plan/steps current)))
+            entity-ids (set (db/q '[:find [?step ...]
+                                    :where [?step :my.plan.item/id]]
+                                  @connection))
+            html (plan/render-plan-html #{} @connection "alice")
+            ai (plan/format-plan-ai current)]
+        (is (= [{:my.plan.item/id "prepare"}] (:my.plan/needs step))
+            "a dependency travels as its stable identity")
+        (is (empty? (filter entity-ids (numbers-in html))))
+        (is (empty? (filter entity-ids (numbers-in current))))
+        (is (not (str/includes? ai (str (first entity-ids)))))
+        (testing "the contract refuses a bare numeric reference"
+          (is (seon.schema/valid-candidate-value? :my.plan/render-step step))
+          (is (not (seon.schema/valid-candidate-value?
+                    :my.plan/render-step
+                    (assoc step :my.plan/needs [42])))))))))
 
-(deftest ready-subjects-follow-only-ready-items-in-stable-order
+(deftest whole-tree-reconciliation-refuses-incoherent-documents
   (with-plan
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.fn/sym "fixture.plan/alpha"
-         :seon.fn/ns [:seon.ns/name 'fixture.plan]
-         :seon.fn/source "(defn alpha [] :alpha)"
-         :seon.fn/arglists "([])"
-         :seon.fn/private? false}
-        {:seon.fn/sym "fixture.plan/beta"
-         :seon.fn/ns [:seon.ns/name 'fixture.plan]
-         :seon.fn/source "(defn beta [] :beta)"
-         :seon.fn/arglists "([])"
-         :seon.fn/private? false}])
-      (add connection "dependency" "Dependency")
-      (add connection "blocked" "Blocked"
-           {:my.plan.item/needs #{[:my.plan.item/id "dependency"]}
-            :my.plan.item/about ['fixture.plan/beta]})
-      (add connection "ready" "Ready"
-           {:my.plan.item/about
-            ['fixture.plan/beta 'fixture.plan/alpha]})
-      (let [subjects (plan/ready-subjects @connection "alice")]
-        (is (= 2 (count subjects)))
-        (is (= ["fixture.plan/beta" "fixture.plan/alpha"]
-               (mapv #(db/q '[:find ?sym .
-                              :in $ ?entity
-                              :where [?entity :seon.fn/sym ?sym]]
-                            @connection %)
-                     subjects)))))))
+      (let [tree {:my.plan/steps
+                  [{:my.plan.item/id "root"
+                    :my.plan.item/title "Improve the plan"
+                    :my.plan.item/steps
+                    [{:my.plan.item/id "prepare"
+                      :my.plan.item/title "Prepare"}
+                     {:my.plan.item/id "verify"
+                      :my.plan.item/title "Verify"
+                      :my.plan.item/needs #{[:my.plan.item/id "prepare"]}}]}]
+                  :my.plan/current-step {:my.plan.item/id "prepare"}}]
+        (is (= {:my.plan/added 3 :my.plan/changed 0 :my.plan/retracted 0}
+               (:my.plan/diff (plan/plan! tree @connection connection "alice"))))
+        (let [current (plan-of connection)]
+          (is (= ["root" "prepare" "verify"] (ids (:my.plan/steps current))))
+          (is (= {:my.plan.item/id "prepare"} (:my.plan/current-step current))))
+        (testing "two siblings may not claim one position"
+          (is (= :my.plan/duplicate-position
+                 (:seon.error/kind
+                  (plan/plan!
+                   {:my.plan/steps
+                    [{:my.plan.item/id "a" :my.plan.item/title "A"
+                      :my.plan.item/position 0}
+                     {:my.plan.item/id "b" :my.plan.item/title "B"
+                      :my.plan.item/position 0}]}
+                   @connection connection "alice")))))
+        (testing "one step may not be owned by two parents"
+          (is (= :my.plan/duplicate-identity
+                 (:seon.error/kind
+                  (plan/plan!
+                   {:my.plan/steps
+                    [{:my.plan.item/id "one" :my.plan.item/title "One"
+                      :my.plan.item/steps
+                      [{:my.plan.item/id "shared"
+                        :my.plan.item/title "Shared"}]}
+                     {:my.plan.item/id "two" :my.plan.item/title "Two"
+                      :my.plan.item/steps
+                      [{:my.plan.item/id "shared"
+                        :my.plan.item/title "Shared"}]}]}
+                   @connection connection "alice")))))
+        (testing "the current step must be an open step of this plan"
+          (is (= :my.plan/unusable-current-step
+                 (:seon.error/kind
+                  (plan/plan!
+                   {:my.plan/steps [{:my.plan.item/id "root"
+                                     :my.plan.item/title "Improve the plan"}]
+                    :my.plan/current-step {:my.plan.item/id "absent"}}
+                   @connection connection "alice")))))
+        (testing "dependencies may not form a cycle"
+          (is (= :my.plan/dependency-cycle
+                 (:seon.error/kind
+                  (plan/plan!
+                   {:my.plan/steps
+                    [{:my.plan.item/id "prepare" :my.plan.item/title "Prepare"
+                      :my.plan.item/needs #{[:my.plan.item/id "verify"]}}
+                     {:my.plan.item/id "verify" :my.plan.item/title "Verify"
+                      :my.plan.item/needs #{[:my.plan.item/id "prepare"]}}]}
+                   @connection connection "alice")))))))))
 
-(deftest plan-preserves-a-mixed-authored-subject-vector
+(deftest whole-tree-reconciliation-retracts-omitted-steps
   (with-plan
     (fn [connection]
-      (let [about ['my.plan/plan! 'my.plan :my.plan.item/title]
-            result (plan/plan!
-                    [{:my.plan.item/id "mixed-about"
-                      :my.plan.item/title "Use mixed subjects"
-                      :my.plan.item/about about}]
-                    @connection connection "alice")
-            item (first (plan/ready @connection "alice"))]
-        (is (= 1 (:my.plan/added (:my.plan/diff result))))
-        (is (= about (:my.plan.item/about item)))
-        (is (= ["my.plan/plan!" 'my.plan :my.plan.item/title]
-               (mapv (fn [subject]
-                       (or (db/q '[:find ?function .
-                                   :in $ ?subject
-                                   :where [?subject :seon.fn/sym ?function]]
-                                 @connection subject)
-                           (db/q '[:find ?namespace .
-                                   :in $ ?subject
-                                   :where [?subject :seon.ns/name ?namespace]]
-                                 @connection subject)
-                           (db/q '[:find ?key .
-                                   :in $ ?subject
-                                   :where [?subject :seon.schema/key ?key]]
-                                 @connection subject)))
-                     (plan/ready-subjects @connection "alice"))))))))
+      (plan/plan! {:my.plan/steps
+                   [{:my.plan.item/id "root"
+                     :my.plan.item/title "Improve the plan"
+                     :my.plan.item/steps
+                     [{:my.plan.item/id "child" :my.plan.item/title "Child"}]}]}
+                  @connection connection "alice")
+      (let [result (plan/plan!
+                    {:my.plan/steps [{:my.plan.item/id "root"
+                                      :my.plan.item/title "Improve the plan"}]}
+                    @connection connection "alice")]
+        (is (= {:my.plan/added 0 :my.plan/changed 1 :my.plan/retracted 1}
+               (:my.plan/diff result)))
+        (is (= ["root"] (ids (:my.plan/steps (plan-of connection)))))))))
 
-(deftest plan-request-map-receives-the-calling-agents-world
+(deftest ready-subjects-resolve-from-the-component-tree
+  (with-plan
+    (fn [connection]
+      (add connection "ship" "Ship the plan unit"
+           {:my.plan.item/about ['my.plan/plan! 'my.plan :my.plan.item/title]})
+      (is (= ["my.plan/plan!" 'my.plan :my.plan.item/title]
+             (mapv (fn [subject]
+                     (or (db/q '[:find ?function .
+                                 :in $ ?subject
+                                 :where [?subject :seon.fn/sym ?function]]
+                               @connection subject)
+                         (db/q '[:find ?namespace .
+                                 :in $ ?subject
+                                 :where [?subject :seon.ns/name ?namespace]]
+                               @connection subject)
+                         (db/q '[:find ?key .
+                                 :in $ ?subject
+                                 :where [?subject :seon.schema/key ?key]]
+                               @connection subject)))
+                   (plan/ready-subjects @connection "alice")))))))
+
+(deftest a-second-agent-renders-through-the-same-defaults
   (with-plan
     (fn [connection]
       (db/transact! connection
@@ -492,8 +341,7 @@
                              (:seon.config/initialization
                               (config/compile-manifest {}))))
       (add connection "alice-work" "Alice work")
-      (plan/add! {:my.plan.item/id "bob-work"
-                  :my.plan.item/title "Bob work"}
+      (plan/add! {:my.plan.item/id "bob-work" :my.plan.item/title "Bob work"}
                  connection "bob")
       (let [database @connection
             acquired (sci.eval/cluster-ctx database connection)
@@ -526,16 +374,13 @@
                    [:seon.ns/name 'fixture.plan]}))))
             alice (evaluate "alice" "(my.plan/plan {})")
             bob (evaluate "bob" "(my.plan/plan {})")
-            explicit
-            (evaluate "alice"
-                      "(my.plan/plan {:seon.cluster.agent/id \"bob\"})")
-            cross-agent-item
-            (evaluate "alice" "(my.plan/item {:my.plan.item/id \"bob-work\"})")]
-        (is (= ["alice-work"]
-               (mapv :my.plan.item/id (:my.plan/ready alice))))
-        (is (= ["bob-work"]
-               (mapv :my.plan.item/id (:my.plan/ready bob))))
+            explicit (evaluate "alice"
+                               "(my.plan/plan {:seon.cluster.agent/id \"bob\"})")
+            bob-text (evaluate "bob"
+                               "(my.plan/format-plan-ai (my.plan/plan {}))")]
+        (is (= ["alice-work"] (ids (:my.plan/ready alice))))
+        (is (= ["bob-work"] (ids (:my.plan/ready bob))))
         (is (= bob explicit)
             "an explicit map entry wins over the calling agent default")
-        (is (= "bob-work" (:my.plan.item/id cross-agent-item))
-            "a selected plan item remains inspectable across agent ownership")))))
+        (is (str/includes? bob-text "Plan for bob")
+            "the rendered source resolves the calling agent")))))

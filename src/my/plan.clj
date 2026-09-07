@@ -1,16 +1,21 @@
 (ns my.plan
-  "The agent-linked authored plan graph and its derived current view.
+  "One agent-owned plan: a component tree of steps and its derived current view.
 
-  Plan items are ordinary database entities connected to their agent through
-  `:my.plan.item/agent`; parent and needs refs express decomposition and
-  dependencies. Completion is the presence of `:my.plan.item/completed-at`,
-  while ready and blocked are queries over current facts."
-  (:require [clojure.set :as set]
-            [clojure.string :as str]
+  The agent entity owns its root steps through `:my.plan/steps`, a component
+  ref set; a step owns its nested steps the same way through
+  `:my.plan.item/steps`. The component edge IS the ownership fact, so nothing
+  stores an agent backlink or a parent backlink: a parent derives from the
+  reverse component edge and ownership derives by following the edges down.
+  `:my.plan.item/position` orders siblings, because a cardinality-many value is
+  a set. `:my.plan/current-step` is an ordinary ref — currentness neither owns
+  nor copies a step.
+
+  Completion is the presence of `:my.plan.item/completed-at`; ready, blocked,
+  parent, depth, and state are queries over current facts, never stored."
+  (:require [clojure.string :as str]
             [seon.config :as config]
             [seon.db :as db]
             [seon.print :as print]
-            [seon.render.value :as render.value]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -20,52 +25,60 @@
 (schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
-;;; Authored graph derivation
+;;; Derivation over the component tree
 ;;; ---------------------------------------------------------------------------
 
 (def rules
-  "Datalog rules deriving readiness and blockage from current item facts."
+  "Datalog rules deriving ownership, readiness, and blockage from current facts."
   '[[(descendant ?ancestor ?node)
-     [?node :my.plan.item/parent ?ancestor]]
+     [?ancestor :my.plan.item/steps ?node]]
     [(descendant ?ancestor ?node)
-     [?middle :my.plan.item/parent ?ancestor]
+     [?ancestor :my.plan.item/steps ?middle]
      (descendant ?middle ?node)]
-    [(leaf ?item)
-     (not-join [?item] [?child :my.plan.item/parent ?item])]
-    [(open-work ?item)
-     [?item :my.plan.item/id]
-     (not-join [?item] [?item :my.plan.item/completed-at _])
-     (leaf ?item)]
-    [(open-work ?item)
-     (descendant ?item ?leaf)
+    [(owned ?agent ?step)
+     [?agent :my.plan/steps ?step]]
+    [(owned ?agent ?step)
+     [?agent :my.plan/steps ?root]
+     (descendant ?root ?step)]
+    [(leaf ?step)
+     [?step :my.plan.item/id]
+     (not-join [?step] [?step :my.plan.item/steps _])]
+    [(open-work ?step)
+     [?step :my.plan.item/id]
+     (not-join [?step] [?step :my.plan.item/completed-at _])
+     (leaf ?step)]
+    [(open-work ?step)
+     (descendant ?step ?leaf)
      [?leaf :my.plan.item/id]
      (not-join [?leaf] [?leaf :my.plan.item/completed-at _])
      (leaf ?leaf)]
-    [(blocked ?item)
-     [?item :my.plan.item/needs ?dependency]
+    [(blocked ?step)
+     [?step :my.plan.item/needs ?dependency]
      (open-work ?dependency)]
-    [(ready ?item)
-     [?item :my.plan.item/id]
-     (not-join [?item] [?item :my.plan.item/completed-at _])
-     (leaf ?item)
-     (not (blocked ?item))]
-    [(ready ?item)
-     [?item :my.plan.item/id]
-     (not-join [?item] [?item :my.plan.item/completed-at _])
-     (not (leaf ?item))
-     (not (open-work ?item))
-     (not (blocked ?item))]])
+    [(ready ?step)
+     [?step :my.plan.item/id]
+     (not-join [?step] [?step :my.plan.item/completed-at _])
+     (leaf ?step)
+     (not (blocked ?step))]
+    [(ready ?step)
+     [?step :my.plan.item/id]
+     (not-join [?step] [?step :my.plan.item/completed-at _])
+     (not (leaf ?step))
+     (not (open-work ?step))
+     (not (blocked ?step))]])
 
-(def ^:private item-selector
+(def ^:private step-selector
+  ;; The renderers consume this pull. Every reference in it is a stable
+  ;; identity map, so no entity id can reach an output.
   '[:my.plan.item/id
+    :my.plan.item/position
     :my.plan.item/title
     :my.plan.item/description
-    :my.plan.item/completed-at
     :my.plan.item/expected-result
-    {:my.plan.item/agent [:db/id]}
-    {:my.plan.item/parent [:db/id :my.plan.item/id]}
-    {:my.plan.item/needs [:db/id :my.plan.item/id]}
-    :my.plan.item/about])
+    :my.plan.item/completed-at
+    :my.plan.item/about
+    {:my.plan.item/needs [:my.plan.item/id]}
+    {:my.plan.item/steps 8}])
 
 (defn- error-value?
   [value]
@@ -80,6 +93,13 @@
              :seon.error/message message
              :seon.error/data data})))
 
+(defn- flat-refusal
+  [throwable]
+  (let [data (ex-data throwable)]
+    (if (:seon.error/kind data)
+      data
+      (throw throwable))))
+
 (defn- agent-eid
   [database agent-id]
   (db/q '[:find ?agent .
@@ -87,11 +107,11 @@
           :where [?agent :seon.cluster.agent/id ?agent-id]]
         database agent-id))
 
-(defn- item-eid
+(defn- step-eid
   [database item-id]
-  (db/q '[:find ?item .
+  (db/q '[:find ?step .
           :in $ ?item-id
-          :where [?item :my.plan.item/id ?item-id]]
+          :where [?step :my.plan.item/id ?item-id]]
         database item-id))
 
 (defn- ref-eid
@@ -126,671 +146,88 @@
                (str "Plan subject " (pr-str token) " does not exist.")
                {:my.plan.item/about token})))
 
-(defn- item-owner
-  [database item]
-  (db/q '[:find ?agent .
-          :in $ ?item
-          :where [?item :my.plan.item/agent ?agent]]
-        database item))
-
-(defn- owned-item-eid
-  [database agent-entity item-reference member]
-  (let [item (ref-eid database item-reference)]
-    (when-not item
-      (refuse! ::item-reference-not-found
-               (str "Plan item reference " (pr-str item-reference)
-                    " does not exist.")
-               {member item-reference}))
-    (when (not= agent-entity (item-owner database item))
-      (refuse! ::item-reference-not-owned
-               (str "Plan item reference " (pr-str item-reference)
-                    " belongs to another agent.")
-               {member item-reference}))
-    item))
-
-(defn- resolve-item-refs
-  [database agent-entity request]
-  (let [parent
-        (when-some [reference (:my.plan.item/parent request)]
-          (owned-item-eid database agent-entity reference :my.plan.item/parent))
-        needs
-        (into #{}
-              (map #(owned-item-eid database agent-entity % :my.plan.item/needs))
-              (:my.plan.item/needs request))]
-    (doseq [token (:my.plan.item/about request)]
-      (resolve-subject! database token))
-    (cond-> request
-      parent (assoc :my.plan.item/parent parent)
-      (seq needs) (assoc :my.plan.item/needs needs))))
-
-(defn- add-item-call
-  [database request]
-  (let [item-id (:my.plan.item/id request)
-        agent-id (:seon.cluster.agent/id request)
-        agent-entity (agent-eid database agent-id)]
-    (when-not agent-entity
-      (refuse! ::agent-not-found
-               (str "There is no agent named " (pr-str agent-id) ".")
-               {:seon.cluster.agent/id agent-id}))
-    (when (item-eid database item-id)
-      (refuse! ::identity-exists
-               (str "Plan item " (pr-str item-id) " already exists.")
-               {:my.plan.item/id item-id}))
-    (let [resolved (resolve-item-refs database agent-entity request)
-          tempid "new-plan-item"
-          item
-          (-> resolved
-              (dissoc :seon.cluster.agent/id :my.plan/anchor?)
-              (assoc :db/id tempid :my.plan.item/agent agent-entity))]
-      (cond-> [item]
-        (:my.plan/anchor? request)
-        (conj [:db/add agent-entity :my.plan/anchor tempid])))))
-
-(defn- complete-item-call
-  [database request]
-  (let [item-id (:my.plan.item/id request)
-        agent-id (:seon.cluster.agent/id request)
-        agent-entity (agent-eid database agent-id)
-        item (item-eid database item-id)]
-    (when-not item
-      (refuse! ::not-found
-               (str "There is no plan item named " (pr-str item-id) ".")
-               {:my.plan.item/id item-id}))
-    (when (not= agent-entity (item-owner database item))
-      (refuse! ::not-owned
-               (str "Plan item " (pr-str item-id)
-                    " belongs to another agent.")
-               {:my.plan.item/id item-id
-                :seon.cluster.agent/id agent-id}))
-    (if (db/q '[:find ?completed-at .
-                :in $ ?item
-                :where [?item :my.plan.item/completed-at ?completed-at]]
-              database item)
-      []
-      (cond->
-       [[:db/add item :my.plan.item/completed-at
-         (:my.plan.item/completed-at request)]]
-        (= item
-               (db/q '[:find ?anchor .
-                       :in $ ?agent
-                       :where [?agent :my.plan/anchor ?anchor]]
-                     database agent-entity))
-        (conj [:db/retract agent-entity :my.plan/anchor item])))))
-
-(defn- transact-plan!
-  [connection agent-id tx-data]
-  (db/transact!
-   connection
-   {:tx-data tx-data
-    :tx-meta {:seon.db/user [:seon.cluster.agent/id agent-id]}}))
-
-(defn- item-value
-  [value]
-  (let [entity
-        (cond
-          (and (map? value) (map? (:seon.render/value value)))
-          (:seon.render/value value)
-
-          (map? value) value
-
-          :else nil)]
-    (if-not entity
-      value
-      (let [stable-ref (fn [reference]
-                         (cond
-                           (and (vector? reference)
-                                (= :my.plan.item/id (first reference))) reference
-                           (and (map? reference)
-                                (:my.plan.item/id reference))
-                           [:my.plan.item/id (:my.plan.item/id reference)]
-                           :else nil))
-            parent (stable-ref (:my.plan.item/parent entity))
-            needs (into #{} (keep stable-ref) (:my.plan.item/needs entity))]
-       (cond-> (render.value/transacted entity)
-        parent (assoc :my.plan.item/parent parent)
-        (seq needs) (assoc :my.plan.item/needs needs)
-        (find entity :my.plan.item/about)
-        (assoc :my.plan.item/about (:my.plan.item/about entity)))))))
-
-(defn- item-row
-  [database item]
-  (let [row (db/pull database item-selector item)]
-    (if (error-value? row) row (item-value row))))
-
-(defn add!
-  "Add one authored item after validating its agent and item refs."
-  {:malli/schema
-   [:=> [:cat :my.plan.item/add-request
-         :seon.db/connection :seon.cluster.agent/id]
-    [:or :my.plan.item/item :seon.error/value]]}
-  [item connection agent-id]
-  (let [request (assoc item :seon.cluster.agent/id agent-id)
-        result
-        (transact-plan!
-         connection agent-id
-         [[:db.fn/call #'add-item-call request]])]
-    (if (error-value? result)
-      result
-      (item-row (:db-after result)
-                [:my.plan.item/id (:my.plan.item/id item)]))))
-
-(defn complete!
-  "Complete one owned item and clear it when it is the current anchor."
-  {:malli/schema
-   [:=> [:cat :my.plan.item/id :my.plan.item/completed-at
-         :seon.db/connection :seon.cluster.agent/id]
-    [:or :my.plan.item/item :seon.error/value]]}
-  [item-id completed-at connection agent-id]
-  (let [result
-        (transact-plan!
-         connection agent-id
-         [[:db.fn/call #'complete-item-call
-           {:my.plan.item/id item-id
-            :my.plan.item/completed-at completed-at
-            :seon.cluster.agent/id agent-id}]])]
-    (if (error-value? result)
-      result
-      (item-row (:db-after result) [:my.plan.item/id item-id]))))
-
-;;; ---------------------------------------------------------------------------
-;;; Whole-value authored reconciliation
-;;; ---------------------------------------------------------------------------
-
-(def ^:private authored-fields
-  [:my.plan.item/title
-   :my.plan.item/description
-   :my.plan.item/expected-result
-   :my.plan.item/about])
-
-(defn- document-entries
-  [tree]
-  (letfn [(walk [parent-index nodes entries]
-            (reduce
-             (fn [result node]
-               (let [index (count result)
-                     children (:my.plan/children node)
-                     entry (assoc (dissoc node :my.plan/children)
-                                  ::index index
-                                  ::parent-index parent-index)]
-                 (walk index children (conj result entry))))
-             entries
-             nodes))]
-    (walk nil tree [])))
-
-(defn- current-authored-rows
-  [database agent-id]
-  (db/q '[:find [(pull ?item ?selector) ...]
-          :in $ ?selector ?agent-id
-          :where
-          [?agent :seon.cluster.agent/id ?agent-id]
-          [?item :my.plan.item/agent ?agent]]
-        database item-selector agent-id))
-
-(defn- current-by-id
-  [rows]
-  (into {} (map (juxt :my.plan.item/id identity)) rows))
-
-(defn- parent-id
-  [row]
-  (some-> (:my.plan.item/parent row) :my.plan.item/id))
-
-(defn- need-ids
-  [row]
-  (into #{} (map :my.plan.item/id) (:my.plan.item/needs row)))
-
-(defn- candidate-ids
-  [baseline wanted-parent-id title]
-  (into []
-        (comp
-         (filter (fn [[_ row]]
-                   (and (= wanted-parent-id (parent-id row))
-                        (= title (:my.plan.item/title row)))))
-         (map first))
-        baseline))
-
-(defn- resolve-entry-identities
-  [entries baseline]
-  (loop [index 0
-         resolved []
-         claimed #{}]
-    (if (= index (count entries))
-      resolved
-      (let [entry (nth entries index)
-            explicit-id (:my.plan.item/id entry)
-            parent-index (::parent-index entry)
-            resolved-parent (when (some? parent-index)
-                              (:my.plan.item/id (nth resolved parent-index)))
-            roots (when-not parent-index
-                    (into []
-                          (keep (fn [[id row]]
-                                  (when (nil? (parent-id row)) id)))
-                          baseline))
-            candidates
-            (cond
-              explicit-id [explicit-id]
-              (and (nil? parent-index) (= 1 (count roots))) roots
-              parent-index
-              (candidate-ids baseline resolved-parent
-                             (:my.plan.item/title entry))
-              :else [])]
-        (when (and (nil? explicit-id) (> (count candidates) 1))
-          (refuse! ::ambiguous-identity
-                   (str "Plan item " (pr-str (:my.plan.item/title entry))
-                        " is ambiguous; carry one of "
-                        (pr-str (vec (sort candidates))) ".")
-                   {:my.plan/candidates (vec (sort candidates))}))
-        (let [resolved-id
-              (or explicit-id
-                  (when (= 1 (count candidates)) (first candidates))
-                  (::allocated-id entry))]
-          (when (claimed resolved-id)
-            (refuse! ::duplicate-identity
-                     (str "Plan item " (pr-str resolved-id)
-                          " appears more than once.")
-                     {:my.plan.item/id resolved-id}))
-          (recur (inc index)
-                 (conj resolved (assoc entry :my.plan.item/id resolved-id))
-                 (conj claimed resolved-id)))))))
-
-(defn- validate-resolved-entries!
-  [database agent-entity all-by-id baseline entries]
-  (let [labels (keep :my.plan/label entries)
-        duplicate-label
-        (some (fn [[label n]] (when (> n 1) label)) (frequencies labels))]
-    (when duplicate-label
-      (refuse! ::duplicate-label
-               (str "Plan label " (pr-str duplicate-label)
-                    " appears more than once.")
-               {:my.plan/label duplicate-label}))
-    (doseq [entry entries
-            :let [id (:my.plan.item/id entry)
-                  current (get all-by-id id)]]
-      (when (and current (:my.plan.item/completed-at current))
-        (refuse! ::completed-identity
-                 (str "Completed plan item " (pr-str id)
-                      " cannot be rewritten through plan!.")
-                 {:my.plan.item/id id}))
-      (when (and current (not (contains? baseline id)))
-        (refuse! ::foreign-identity
-                 (str "Plan item " (pr-str id)
-                      " belongs to another agent.")
-                 {:my.plan.item/id id}))
-      (doseq [reference (:my.plan.item/needs entry)]
-        (when-not (ref-eid database reference)
-          (refuse! ::dependency-not-found
-                   (str "Plan dependency " (pr-str reference)
-                        " does not exist.")
-                   {:my.plan.item/needs reference})))
-      (doseq [token (:my.plan.item/about entry)]
-        (resolve-subject! database token)))
-    (let [known-labels (set labels)]
-      (doseq [entry entries
-              label (:my.plan/after entry)]
-        (when-not (known-labels label)
-          (refuse! ::unknown-label
-                   (str "Plan dependency label " (pr-str label)
-                        " does not exist in this document.")
-                   {:my.plan/label label}))))
-    agent-entity))
-
-(defn- referenced-item-id
-  [database agent-entity reference]
-  (let [item (owned-item-eid database agent-entity reference
-                             :my.plan.item/needs)]
-    (db/q '[:find ?id .
-            :in $ ?item
-            :where [?item :my.plan.item/id ?id]]
-          database item)))
-
-(defn- desired-entry
-  [database agent-entity entries labels entry]
-  (let [id (:my.plan.item/id entry)
-        parent-index (::parent-index entry)
-        wanted-parent-id (when (some? parent-index)
-                           (:my.plan.item/id (nth entries parent-index)))
-        direct-needs
-        (into #{}
-              (map #(referenced-item-id database agent-entity %))
-              (:my.plan.item/needs entry))
-        labelled-needs (into #{} (map #(get labels %)) (:my.plan/after entry))]
-    (cond-> {:my.plan.item/id id
-             :my.plan.item/title (:my.plan.item/title entry)
-             :my.plan.item/agent agent-entity}
-      (:my.plan.item/description entry)
-      (assoc :my.plan.item/description (:my.plan.item/description entry))
-
-      (:my.plan.item/expected-result entry)
-      (assoc :my.plan.item/expected-result
-             (:my.plan.item/expected-result entry))
-
-      wanted-parent-id (assoc :my.plan.item/parent wanted-parent-id)
-      (seq (into direct-needs labelled-needs))
-      (assoc :my.plan.item/needs (into direct-needs labelled-needs))
-      (find entry :my.plan.item/about)
-      (assoc :my.plan.item/about (:my.plan.item/about entry)))))
-
-(defn- scalar-ops
-  [id current desired]
-  (mapcat
-   (fn [attribute]
-     (let [before (get current attribute)
-           after (get desired attribute)]
-       (cond
-         (= before after) []
-         (nil? after) [[:db/retract [:my.plan.item/id id] attribute]]
-         :else [[:db/add [:my.plan.item/id id] attribute after]])))
-   authored-fields))
-
-(defn- ref-one-ops
-  [target-ref id attribute before after]
-  (if (= before after)
-    []
-    (cond-> []
-      (and before (nil? after))
-      (conj [:db/retract [:my.plan.item/id id] attribute])
-      after
-      (conj [:db/add [:my.plan.item/id id] attribute (target-ref after)]))))
-
-(defn- ref-many-ops
-  [target-ref id attribute before after]
-  (concat
-   (map (fn [value]
-          [:db/retract [:my.plan.item/id id] attribute value])
-        (sort-by pr-str (set/difference before after)))
-   (map (fn [value]
-          [:db/add [:my.plan.item/id id] attribute (target-ref value)])
-        (sort-by pr-str (set/difference after before)))))
-
-(defn- update-ops
-  [target-ref current desired]
-  (let [id (:my.plan.item/id desired)
-        current-parent (parent-id current)
-        desired-parent (:my.plan.item/parent desired)
-        current-needs (need-ids current)
-        desired-needs (into #{} (:my.plan.item/needs desired))]
-    (vec
-     (concat
-      (scalar-ops id current desired)
-      (ref-one-ops target-ref id :my.plan.item/parent
-                   current-parent desired-parent)
-      (ref-many-ops target-ref id :my.plan.item/needs
-                    current-needs desired-needs)))))
-
-(defn- compile-plan
-  [database agent-id tree allocated-ids]
-  (let [agent-entity (agent-eid database agent-id)]
-    (when-not agent-entity
-      (refuse! ::agent-not-found
-               (str "There is no agent named " (pr-str agent-id) ".")
-               {:seon.cluster.agent/id agent-id}))
-    (let [raw (mapv #(assoc %1 ::allocated-id %2)
-                    (document-entries tree) allocated-ids)
-          all-rows
-          (db/q '[:find [(pull ?item ?selector) ...]
-                  :in $ ?selector
-                  :where [?item :my.plan.item/id]]
-                database item-selector)
-          all-by-id (current-by-id all-rows)
-          current-rows (current-authored-rows database agent-id)
-          baseline
-          (into {}
-                (comp
-                 (remove :my.plan.item/completed-at)
-                 (map (juxt :my.plan.item/id identity)))
-                current-rows)
-          entries (resolve-entry-identities raw baseline)
-          _ (validate-resolved-entries! database agent-entity all-by-id
-                                        baseline entries)
-          labels
-          (into {}
-                (keep (fn [entry]
-                        (when-let [label (:my.plan/label entry)]
-                          [label (:my.plan.item/id entry)])))
-                entries)
-          desired
-          (mapv #(desired-entry database agent-entity entries labels %) entries)
-          desired-by-id (current-by-id desired)
-          new-ids (set/difference (set (keys desired-by-id))
-                                  (set (keys baseline)))
-          tempids (into {} (map-indexed (fn [index id]
-                                          [id (str "plan-item-" index)]))
-                        (sort new-ids))
-          target-ref (fn [id]
-                       (or (get tempids id) [:my.plan.item/id id]))
-          additions
-          (into []
-                (map (fn [item]
-                       (cond-> (assoc item :db/id
-                                     (get tempids (:my.plan.item/id item)))
-                         (:my.plan.item/parent item)
-                         (update :my.plan.item/parent target-ref)
-
-                         (:my.plan.item/needs item)
-                         (update :my.plan.item/needs
-                                 #(into #{} (map target-ref) %)))))
-                (filter #(new-ids (:my.plan.item/id %)) desired))
-          updates
-          (into []
-                (keep (fn [item]
-                        (when-let [current (get baseline
-                                                (:my.plan.item/id item))]
-                          (let [operations (update-ops target-ref current item)]
-                            (when (seq operations) operations)))))
-                desired)
-          retractions
-          (into []
-                (map (fn [id]
-                       [:db.fn/retractEntity [:my.plan.item/id id]]))
-                (sort (set/difference (set (keys baseline))
-                                      (set (keys desired-by-id)))))]
-      {::tx-data (vec (concat additions (mapcat identity updates) retractions))
-       ::diff {:my.plan/added (count additions)
-               :my.plan/changed (count updates)
-               :my.plan/retracted (count retractions)}
-       ::ids labels})))
-
-(defn- flat-refusal
-  [throwable]
-  (let [data (ex-data throwable)]
-    (if (:seon.error/kind data)
-      data
-      (throw throwable))))
-
-(defn plan!
-  "Reconcile one complete authored plan tree at an observed basis.
-
-  This convenience compiler validates ownership and subject tokens, preserves
-  completed identities, and commits one basis-fenced diff. Direct
-  `seon.db/transact!` writes operate on the same item and agent attributes but
-  do not run these helper checks."
-  {:malli/schema
-   [:=> [:cat :my.plan/tree :seon.db/database-value
-         :seon.db/connection :seon.cluster.agent/id]
-    [:or :my.plan/plan-result :seon.error/value]]}
-  [tree database connection agent-id]
-  (try
-    (let [entries (document-entries tree)
-          allocated-ids (mapv (fn [_] (str (random-uuid))) entries)
-          compiled (compile-plan database agent-id tree allocated-ids)
-          tx-data (::tx-data compiled)
-          basis (db/basis-t database)]
-      (if (empty? tx-data)
-        {:my.plan/converged? true
-         :my.plan/basis-t basis
-         :my.plan/diff (::diff compiled)
-         :my.plan/ids (::ids compiled)}
-        (let [result
-              (db/transact!
-               connection
-               {:tx-data tx-data
-                :datahike/expected-basis-t basis
-                :tx-meta
-                {:seon.db/user [:seon.cluster.agent/id agent-id]}})]
-          (if (error-value? result)
-            result
-            {:my.plan/converged? false
-             :my.plan/basis-t basis
-             :my.plan/diff (::diff compiled)
-             :my.plan/ids (::ids compiled)}))))
-    (catch clojure.lang.ExceptionInfo failure
-      (flat-refusal failure))))
-
-;;; ---------------------------------------------------------------------------
-;;; Current reads — authored facts plus structurally separate derived arms
-;;; ---------------------------------------------------------------------------
-
-(def ^:private ready-query
-  '[:find [?item ...]
+(def ^:private owned-ids-query
+  '[:find [?id ...]
     :in $ % ?agent-id
     :where
     [?agent :seon.cluster.agent/id ?agent-id]
-    [?item :my.plan.item/agent ?agent]
-    (ready ?item)])
+    (owned ?agent ?step)
+    [?step :my.plan.item/id ?id]])
 
-(def ^:private blocked-query
-  '[:find [?item ...]
+(def ^:private ready-ids-query
+  '[:find [?id ...]
     :in $ % ?agent-id
     :where
     [?agent :seon.cluster.agent/id ?agent-id]
-    [?item :my.plan.item/agent ?agent]
-    [?item :my.plan.item/id]
-    (not-join [?item] [?item :my.plan.item/completed-at _])
-    (blocked ?item)])
+    (owned ?agent ?step)
+    [?step :my.plan.item/id ?id]
+    (ready ?step)])
 
-(defn- item-order
-  [anchor item]
-  [(if (= anchor (:my.plan.item/id item)) 0 1)
-   (:my.plan.item/title item)
-   (:my.plan.item/id item)])
+(def ^:private blocked-ids-query
+  '[:find [?id ...]
+    :in $ % ?agent-id
+    :where
+    [?agent :seon.cluster.agent/id ?agent-id]
+    (owned ?agent ?step)
+    [?step :my.plan.item/id ?id]
+    (not-join [?step] [?step :my.plan.item/completed-at _])
+    (blocked ?step)])
 
-(defn- items-for-eids
-  [database anchor eids]
-  (let [rows (mapv #(item-row database %) eids)]
-    (if-let [error (some #(when (error-value? %) %) rows)]
-      error
-      (vec (sort-by #(item-order anchor %) rows)))))
-
-(defn- anchor-id
+(defn- owned-ids
   [database agent-id]
-  (db/q '[:find ?item-id .
-          :in $ ?agent-id
-          :where
-          [?agent :seon.cluster.agent/id ?agent-id]
-          [?agent :my.plan/anchor ?item]
-          [?item :my.plan.item/id ?item-id]]
-        database agent-id))
+  (let [ids (db/q owned-ids-query database rules agent-id)]
+    (if (error-value? ids) ids (set ids))))
 
-(defn ready
-  "Derive this agent's ready authored items from current facts."
-  {:malli/schema
-   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
-    [:or :my.plan/ready-items :seon.error/value]]}
-  [database agent-id]
-  (let [eids (db/q ready-query database rules agent-id)]
-    (if (error-value? eids)
-      eids
-      (items-for-eids database (anchor-id database agent-id) eids))))
+;;; ---------------------------------------------------------------------------
+;;; Pulled tree to derived render steps
+;;; ---------------------------------------------------------------------------
 
-(defn ready-subjects
-  "List the resolved subject entities named by this agent's ready items.
+(defn- sibling-order
+  [step]
+  [(long (get step :my.plan.item/position 0)) (:my.plan.item/id step)])
 
-  Ready-item order and each authored subject-vector order are retained.
-  Repeated resolved rows collapse at their first occurrence."
-  {:malli/schema
-   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
-    [:or :my.plan/intent-subjects :seon.error/value]]}
-  [database agent-id]
-  (let [items (ready database agent-id)]
-    (if (error-value? items)
-      items
-      (try
-        (into []
-              (comp
-               (mapcat :my.plan.item/about)
-               (map #(resolve-subject! database %))
-               (distinct))
-              items)
-        (catch clojure.lang.ExceptionInfo failure
-          (flat-refusal failure))))))
+(defn- stable-reference
+  [step]
+  {:my.plan.item/id (:my.plan.item/id step)})
 
-(defn- message-obligations
-  [database agent-id]
-  (let [rows
-        (db/q '[:find ?message ?id ?content
-                :in $ ?agent-id
-                :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                [?message :seon.cluster.message/to ?agent]
-                [?message :seon.cluster.message/id ?id]
-                [?message :seon.cluster.message/content ?content]
-                (not-join [?message]
-                  [?run :seon.cluster.run/trigger ?message])]
-              database agent-id)]
-    (if (error-value? rows)
-      rows
-      (mapv
-       (fn [[message id content]]
-         {:my.plan/obligation-source :message
-          :my.plan/obligation-id id
-          :my.plan/obligation-title content
-          :my.plan/obligation-ref message})
-       (sort-by second rows)))))
+(defn- step-state
+  [step current-id ready-ids blocked-ids]
+  (let [id (:my.plan.item/id step)]
+    (cond
+      (:my.plan.item/completed-at step) :completed
+      (= current-id id) :current
+      (contains? blocked-ids id) :blocked
+      (contains? ready-ids id) :ready
+      :else :open)))
 
-(defn- run-obligations
-  [database agent-id]
-  (let [rows
-        (db/q '[:find ?run ?id
-                :in $ ?agent-id
-                :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                [?run :seon.cluster.run/agent ?agent]
-                [?run :seon.cluster.run/id ?id]
-                (not-join [?run] [?run :seon.cluster.run/closed-at _])]
-              database agent-id)]
-    (if (error-value? rows)
-      rows
-      (mapv
-       (fn [[run id]]
-         {:my.plan/obligation-source :run
-          :my.plan/obligation-id id
-          :my.plan/obligation-title (str "Finish open run " (pr-str id) ".")
-          :my.plan/obligation-ref run})
-       (sort-by second rows)))))
-
-(defn- test-obligations
-  [database agent-id]
-  (let [rows
-        (db/q '[:find ?test ?symbol ?failures ?errors
-                :in $ ?agent-id
-                :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                [?agent :seon.cluster.agent/namespace ?namespace]
-                [?test :seon.test/ns ?namespace]
-                [?test :seon.test/sym ?symbol]
-                [?test :seon.test/fail-count ?failures]
-                [?test :seon.test/error-count ?errors]
-                [(+ ?failures ?errors) ?red]
-                [(> ?red 0)]]
-              database agent-id)]
-    (if (error-value? rows)
-      rows
-      (mapv
-       (fn [[test-entity test-symbol failures errors]]
-         {:my.plan/obligation-source :test
-          :my.plan/obligation-id test-symbol
-          :my.plan/obligation-title
-          (str "Fix " test-symbol " (" failures " failures, " errors " errors).")
-          :my.plan/obligation-ref test-entity})
-       (sort-by second rows)))))
-
-(defn- obligations
-  [database agent-id]
-  (let [arms [(message-obligations database agent-id)
-              (run-obligations database agent-id)
-              (test-obligations database agent-id)]]
-    (if-let [error (some #(when (error-value? %) %) arms)]
-      error
-      (into [] cat arms))))
+(defn- derived-steps
+  "Depth-first derived steps for one pulled component tree."
+  [pulled current-id ready-ids blocked-ids]
+  (letfn [(walk [nodes parent depth]
+            (into []
+                  (mapcat
+                   (fn [node]
+                     (let [needs (into []
+                                       (map stable-reference)
+                                       (sort-by :my.plan.item/id
+                                                (:my.plan.item/needs node)))
+                           step
+                           (cond-> (dissoc node
+                                           :my.plan.item/steps
+                                           :my.plan.item/needs
+                                           :db/id)
+                             (seq needs) (assoc :my.plan/needs needs)
+                             parent (assoc :my.plan/parent parent)
+                             true (assoc :my.plan/depth depth
+                                         :my.plan/state
+                                         (step-state node current-id
+                                                     ready-ids blocked-ids)))]
+                       (into [step]
+                             (walk (:my.plan.item/steps node)
+                                   (stable-reference node)
+                                   (inc depth))))))
+                  (sort-by sibling-order nodes)))]
+    (walk pulled nil 0)))
 
 (defn- completion-limit
   [database agent-id]
@@ -810,352 +247,799 @@
         (config/defaults))))))
 
 (defn- completion-view
+  [database agent-id steps]
+  (let [completed
+        (sort-by (fn [step]
+                   [(- (.getTime ^java.util.Date
+                                 (:my.plan.item/completed-at step)))
+                    (:my.plan.item/id step)])
+                 (filterv :my.plan.item/completed-at steps))
+        total (count completed)
+        limit (completion-limit database agent-id)
+        recent (vec (take limit completed))
+        omitted (- total (count recent))]
+    (cond-> {:my.plan/recent-completions recent}
+      (pos? omitted)
+      (assoc
+       :my.plan/older-completions
+       {:seon.print/face :seon.print/elided
+        :seon.print/omitted omitted
+        :seon.print/elision-unit :children
+        :seon.render.data/total total
+        :seon.render.data/path [:my.plan/recent-completions]
+        :seon.render.data/next-offset (count recent)
+        :seon.render.profile/id :seon.render.profile/agent
+        :seon.print/requery-id [:seon.cluster.agent/id agent-id]}))))
+
+;;; ---------------------------------------------------------------------------
+;;; Current reads
+;;; ---------------------------------------------------------------------------
+
+(defn- agent-plan-pull
   [database agent-id]
-  (let [rows
-        (db/q '[:find ?item ?completed-at ?id
-                :in $ ?agent-id
-                :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                [?item :my.plan.item/agent ?agent]
-                [?item :my.plan.item/id ?id]
-                [?item :my.plan.item/completed-at ?completed-at]]
-              database agent-id)]
-    (if (error-value? rows)
-      rows
-      (let [ordered
-            (sort-by
-             (fn [[_ completed-at id]]
-               [(- (.getTime ^java.util.Date completed-at)) id])
-             rows)
-            total (count ordered)
-            limit (completion-limit database agent-id)
-            recent-eids (mapv first (take limit ordered))
-            recent (mapv #(item-row database %) recent-eids)
-            omitted (- total (count recent))]
-        (if-let [error (some #(when (error-value? %) %) recent)]
-          error
-          (cond-> {:my.plan/recent-completions recent}
-            (pos? omitted)
-            (assoc
-             :my.plan/older-completions
-             {:seon.print/face :seon.print/elided
-              :seon.print/omitted omitted
-              :seon.print/elision-unit :children
-              :seon.render.data/total total
-              :seon.render.data/path [:my.plan/recent-completions]
-              :seon.render.data/next-offset (count recent)
-              :seon.render.profile/id :seon.render.profile/agent
-              :seon.print/requery-id [:seon.cluster.agent/id agent-id]})))))))
+  (db/pull database
+           [:seon.cluster.agent/id
+            {:my.plan/current-step [:my.plan.item/id]}
+            {:my.plan/steps step-selector}]
+           [:seon.cluster.agent/id agent-id]))
 
 (defn plan
-  "Read one agent's current obligations and authored plan facts.
+  "Read this agent's whole plan as one derived current value.
 
-  The returned collections are derived values, not attributes stored on the
-  agent. Query or pull `:my.plan.item/agent` and its reverse directly to inspect
-  the graph; `seon.db/transact!` creates and updates those ordinary facts."
+  The returned steps are the agent's component tree in authored order, each
+  carrying its derived parent, dependencies, depth, and state. Ready, blocked,
+  and completion collections are queries over the same facts, not attributes."
   {:malli/schema
    [:=> [:catn [:request :my.plan/request]]
-    [:or :my.plan/view :seon.error/value]]}
+    [:or :my.plan/component-view :seon.error/value]]}
   [{database :seon.db/db agent-id :seon.cluster.agent/id}]
   (let [agent-entity (agent-eid database agent-id)]
-    (if (error-value? agent-entity)
-      agent-entity
-      (if-not agent-entity
-        {::agent-not-found true
-         :seon.error/kind ::agent-not-found
-         :seon.error/message
-         (str "There is no agent named " (pr-str agent-id) ".")
-         :seon.error/data {:seon.cluster.agent/id agent-id}}
-        (let [anchor (anchor-id database agent-id)
-              authored-rows (current-authored-rows database agent-id)
-              authored (if (error-value? authored-rows)
-                         authored-rows
-                         (mapv item-value authored-rows))
-              ready-eids (db/q ready-query database rules agent-id)
-              blocked-eids (db/q blocked-query database rules agent-id)
-              ready-items
-              (if (error-value? ready-eids)
-                ready-eids
-                (items-for-eids database anchor ready-eids))
-              blocked-items
-              (if (error-value? blocked-eids)
-                blocked-eids
-                (items-for-eids database anchor blocked-eids))
-              derived (obligations database agent-id)
-              completions (completion-view database agent-id)
-              values [authored ready-items blocked-items derived completions]]
-          (if-let [error (some #(when (error-value? %) %) values)]
-            error
-            (cond->
-             {:seon.cluster.agent/id agent-id
-              :my.plan/obligations derived
-              :my.plan/authored authored
-              :my.plan/ready ready-items
-              :my.plan/blocked blocked-items
-              :my.plan/recent-completions
-              (:my.plan/recent-completions completions)}
-              anchor (assoc :my.plan/anchor [:my.plan.item/id anchor])
+    (cond
+      (error-value? agent-entity) agent-entity
+
+      (nil? agent-entity)
+      {::agent-not-found true
+       :seon.error/kind ::agent-not-found
+       :seon.error/message (str "There is no agent named " (pr-str agent-id) ".")
+       :seon.error/data {:seon.cluster.agent/id agent-id}}
+
+      :else
+      (let [pulled (agent-plan-pull database agent-id)
+            ready-ids (db/q ready-ids-query database rules agent-id)
+            blocked-ids (db/q blocked-ids-query database rules agent-id)
+            values [pulled ready-ids blocked-ids]]
+        (if-let [error (some #(when (error-value? %) %) values)]
+          error
+          (let [current-id (get-in pulled [:my.plan/current-step
+                                           :my.plan.item/id])
+                steps (derived-steps (:my.plan/steps pulled) current-id
+                                     (set ready-ids) (set blocked-ids))
+                by-id (into {} (map (juxt :my.plan.item/id identity)) steps)
+                completions (completion-view database agent-id steps)]
+            (cond-> {:seon.cluster.agent/id agent-id
+                     :my.plan/steps steps
+                     :my.plan/ready (into [] (keep by-id) (sort ready-ids))
+                     :my.plan/blocked (into [] (keep by-id) (sort blocked-ids))
+                     :my.plan/recent-completions
+                     (:my.plan/recent-completions completions)}
+              current-id (assoc :my.plan/current-step
+                                {:my.plan.item/id current-id})
               (:my.plan/older-completions completions)
               (assoc :my.plan/older-completions
                      (:my.plan/older-completions completions)))))))))
 
 (defn item
-  "Read one authored plan item by its stable identity."
+  "Read one plan step, with its derived dependencies, by its stable identity."
   {:malli/schema
    [:=> [:catn [:request :my.plan/item-request]]
-    [:or :my.plan.item/item :seon.error/value]]}
-  [{database :seon.db/db
-    item-id :my.plan.item/id}]
-  (let [item-entity (item-eid database item-id)]
+    [:or :my.plan/render-step :seon.error/value]]}
+  [{database :seon.db/db item-id :my.plan.item/id}]
+  (let [entity (step-eid database item-id)]
     (cond
-      (error-value? item-entity) item-entity
-      (nil? item-entity)
+      (error-value? entity) entity
+
+      (nil? entity)
       {::not-found true
        :seon.error/kind ::not-found
-       :seon.error/message (str "There is no plan item named "
-                                (pr-str item-id) ".")}
-      :else (item-row database item-entity))))
+       :seon.error/message (str "There is no plan step named "
+                                (pr-str item-id) ".")
+       :seon.error/data {:my.plan.item/id item-id}}
+
+      :else
+      (let [pulled (db/pull database step-selector entity)]
+        (if (error-value? pulled)
+          pulled
+          (first (derived-steps [pulled] nil #{} #{})))))))
 
 (defn items
-  "Read authored plan items in the exact supplied identity order."
+  "Read plan steps in the exact supplied identity order."
   {:malli/schema
    [:=> [:catn [:request :my.plan/items-request]]
-    [:or :my.plan/pulled-items :seon.error/value]]}
+    [:or :my.plan/render-steps :seon.error/value]]}
   [{database :seon.db/db item-ids :my.plan/item-ids}]
-  (db/pull-many database item-selector
-                (mapv (fn [item-id] [:my.plan.item/id item-id]) item-ids)))
+  (let [pulled (db/pull-many database step-selector
+                             (mapv (fn [id] [:my.plan.item/id id]) item-ids))]
+    (if (error-value? pulled)
+      pulled
+      (into [] (map #(first (derived-steps [%] nil #{} #{}))) pulled))))
+
+(defn ready
+  "Derive this agent's ready plan steps from current facts."
+  {:malli/schema
+   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+    [:or :my.plan/ready-items :seon.error/value]]}
+  [database agent-id]
+  (let [view (plan {:seon.db/db database :seon.cluster.agent/id agent-id})]
+    (if (error-value? view) view (:my.plan/ready view))))
+
+(defn ready-subjects
+  "List the resolved subject entities named by this agent's ready steps.
+
+  Ready-step order and each authored subject-vector order are retained.
+  Repeated resolved rows collapse at their first occurrence."
+  {:malli/schema
+   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+    [:or :my.plan/intent-subjects :seon.error/value]]}
+  [database agent-id]
+  (let [steps (ready database agent-id)]
+    (if (error-value? steps)
+      steps
+      (try
+        (into []
+              (comp
+               (mapcat :my.plan.item/about)
+               (map #(resolve-subject! database %))
+               (distinct))
+              steps)
+        (catch clojure.lang.ExceptionInfo failure
+          (flat-refusal failure))))))
+
+;;; ---------------------------------------------------------------------------
+;;; Writers — decisions inside the transaction, against current state
+;;; ---------------------------------------------------------------------------
+
+(defn- transact-plan!
+  [connection agent-id tx-data]
+  (db/transact!
+   connection
+   {:tx-data tx-data
+    :tx-meta {:seon.db/user [:seon.cluster.agent/id agent-id]}}))
+
+(defn- owned-step-eid!
+  [database agent-entity reference member]
+  (let [step (ref-eid database reference)]
+    (when-not step
+      (refuse! ::item-reference-not-found
+               (str "Plan step reference " (pr-str reference)
+                    " does not exist.")
+               {member reference}))
+    (when-not (db/q '[:find ?step .
+                      :in $ % ?agent ?step
+                      :where (owned ?agent ?step)]
+                    database rules agent-entity step)
+      (refuse! ::item-reference-not-owned
+               (str "Plan step reference " (pr-str reference)
+                    " is not in this agent's plan.")
+               {member reference}))
+    step))
+
+(defn- sibling-count
+  [database owner attribute]
+  (long (count (db/q '[:find [?child ...]
+                 :in $ ?owner ?attribute
+                 :where [?owner ?attribute ?child]]
+               database owner attribute))))
+
+(defn- add-step-call
+  [database request]
+  (let [item-id (:my.plan.item/id request)
+        agent-id (:seon.cluster.agent/id request)
+        agent-entity (agent-eid database agent-id)]
+    (when-not agent-entity
+      (refuse! ::agent-not-found
+               (str "There is no agent named " (pr-str agent-id) ".")
+               {:seon.cluster.agent/id agent-id}))
+    (when (step-eid database item-id)
+      (refuse! ::identity-exists
+               (str "Plan step " (pr-str item-id) " already exists.")
+               {:my.plan.item/id item-id}))
+    (let [parent (when-some [reference (:my.plan/parent-step request)]
+                   (owned-step-eid! database agent-entity reference
+                                    :my.plan/parent-step))
+          needs (into #{}
+                      (map (fn [reference]
+                             (or (ref-eid database reference)
+                                 (refuse! ::dependency-not-found
+                                          (str "Plan dependency "
+                                               (pr-str reference)
+                                               " does not exist.")
+                                          {:my.plan.item/needs reference}))))
+                      (:my.plan.item/needs request))
+          _ (doseq [token (:my.plan.item/about request)]
+              (resolve-subject! database token))
+          owner (or parent agent-entity)
+          attribute (if parent :my.plan.item/steps :my.plan/steps)
+          tempid "new-plan-step"
+          step (cond-> (dissoc request
+                               :seon.cluster.agent/id
+                               :my.plan/parent-step
+                               :my.plan/current?)
+                 true (assoc :db/id tempid
+                             :my.plan.item/position
+                             (sibling-count database owner attribute))
+                 (seq needs) (assoc :my.plan.item/needs needs))]
+      (cond-> [step [:db/add owner attribute tempid]]
+        (:my.plan/current? request)
+        (conj [:db/add agent-entity :my.plan/current-step tempid])))))
+
+(defn- complete-step-call
+  [database request]
+  (let [item-id (:my.plan.item/id request)
+        agent-id (:seon.cluster.agent/id request)
+        agent-entity (agent-eid database agent-id)
+        step (step-eid database item-id)]
+    (when-not step
+      (refuse! ::not-found
+               (str "There is no plan step named " (pr-str item-id) ".")
+               {:my.plan.item/id item-id}))
+    (when-not (db/q '[:find ?step .
+                      :in $ % ?agent ?step
+                      :where (owned ?agent ?step)]
+                    database rules agent-entity step)
+      (refuse! ::not-owned
+               (str "Plan step " (pr-str item-id)
+                    " is not in this agent's plan.")
+               {:my.plan.item/id item-id
+                :seon.cluster.agent/id agent-id}))
+    (if (db/q '[:find ?completed-at .
+                :in $ ?step
+                :where [?step :my.plan.item/completed-at ?completed-at]]
+              database step)
+      []
+      (cond->
+       [[:db/add step :my.plan.item/completed-at
+         (:my.plan.item/completed-at request)]]
+        (= step (db/q '[:find ?current .
+                        :in $ ?agent
+                        :where [?agent :my.plan/current-step ?current]]
+                      database agent-entity))
+        (conj [:db/retract agent-entity :my.plan/current-step step])))))
+
+(defn add!
+  "Add one step to this agent's plan, at the root or under a named parent step."
+  {:malli/schema
+   [:=> [:cat :my.plan.item/add-request
+         :seon.db/connection :seon.cluster.agent/id]
+    [:or :my.plan/render-step :seon.error/value]]}
+  [step connection agent-id]
+  (let [request (assoc step :seon.cluster.agent/id agent-id)
+        result (transact-plan! connection agent-id
+                               [[:db.fn/call #'add-step-call request]])]
+    (if (error-value? result)
+      result
+      (item {:seon.db/db (:db-after result)
+             :my.plan.item/id (:my.plan.item/id step)}))))
+
+(defn complete!
+  "Complete one owned step and clear it when it is this agent's current step."
+  {:malli/schema
+   [:=> [:cat :my.plan.item/id :my.plan.item/completed-at
+         :seon.db/connection :seon.cluster.agent/id]
+    [:or :my.plan/render-step :seon.error/value]]}
+  [item-id completed-at connection agent-id]
+  (let [result
+        (transact-plan! connection agent-id
+                        [[:db.fn/call #'complete-step-call
+                          {:my.plan.item/id item-id
+                           :my.plan.item/completed-at completed-at
+                           :seon.cluster.agent/id agent-id}]])]
+    (if (error-value? result)
+      result
+      (item {:seon.db/db (:db-after result) :my.plan.item/id item-id}))))
+
+;;; ---------------------------------------------------------------------------
+;;; Whole-tree reconciliation
+;;; ---------------------------------------------------------------------------
+
+(defn- input-entries
+  "Flatten authored nested transaction data into positioned entries."
+  [nodes]
+  (letfn [(walk [nodes parent-id depth entries]
+            (reduce
+             (fn [result [index node]]
+               (let [entry (-> (dissoc node :my.plan.item/steps)
+                               (assoc ::parent-id parent-id
+                                      ::depth depth
+                                      :my.plan.item/position
+                                      (long (get node :my.plan.item/position
+                                                 index))))]
+                 (walk (:my.plan.item/steps node)
+                       (:my.plan.item/id node)
+                       (inc depth)
+                       (conj result entry))))
+             entries
+             (map-indexed vector nodes)))]
+    (walk nodes nil 0 [])))
+
+(defn- refuse-duplicate-identities!
+  [entries]
+  (doseq [[id occurrences] (frequencies (map :my.plan.item/id entries))]
+    (when (> occurrences 1)
+      (refuse! ::duplicate-identity
+               (str "Plan step " (pr-str id)
+                    " appears more than once in this plan.")
+               {:my.plan.item/id id}))))
+
+(defn- refuse-duplicate-positions!
+  [entries]
+  (doseq [[[parent-id position] occurrences]
+          (frequencies (map (juxt ::parent-id :my.plan.item/position) entries))]
+    (when (> occurrences 1)
+      (refuse! ::duplicate-position
+               (str "Two sibling steps claim position " position
+                    (if parent-id
+                      (str " under " (pr-str parent-id) ".")
+                      " at the plan root."))
+               {:my.plan.item/position position
+                :my.plan/parent-step parent-id}))))
+
+(defn- refuse-dependency-cycle!
+  [needs-by-id]
+  (let [visit
+        (fn visit [id trail seen]
+          (cond
+            (contains? trail id)
+            (refuse! ::dependency-cycle
+                     (str "Plan dependencies form a cycle through "
+                          (pr-str id) ".")
+                     {:my.plan.item/id id})
+
+            (contains? seen id) seen
+
+            :else
+            (let [trail (conj trail id)]
+              (conj (reduce (fn [seen dependency]
+                              (visit dependency trail seen))
+                            seen
+                            (get needs-by-id id))
+                    id))))]
+    (reduce (fn [seen id] (visit id #{} seen)) #{} (keys needs-by-id))))
+
+(defn- entry-tx-map
+  [entry tempid]
+  (cond-> (dissoc entry ::parent-id ::depth :my.plan.item/needs)
+    true (assoc :db/id tempid)))
+
+(defn- scalar-retractions
+  [database entry]
+  (let [id (:my.plan.item/id entry)]
+    (into []
+          (keep (fn [attribute]
+                  (when (and (not (contains? entry attribute))
+                             (db/q '[:find ?value .
+                                     :in $ ?id ?attribute
+                                     :where
+                                     [?step :my.plan.item/id ?id]
+                                     [?step ?attribute ?value]]
+                                   database id attribute))
+                    [:db/retract [:my.plan.item/id id] attribute])))
+          [:my.plan.item/description
+           :my.plan.item/expected-result
+           :my.plan.item/completed-at
+           :my.plan.item/about])))
+
+(defn- document-reference-id
+  "The stable identity a `[:my.plan.item/id \"x\"]` reference names, or nil."
+  [reference]
+  (when (and (vector? reference)
+             (= :my.plan.item/id (first reference)))
+    (second reference)))
+
+(defn- compile-tree
+  [database agent-id input]
+  (let [agent-entity (agent-eid database agent-id)]
+    (when-not agent-entity
+      (refuse! ::agent-not-found
+               (str "There is no agent named " (pr-str agent-id) ".")
+               {:seon.cluster.agent/id agent-id}))
+    (let [entries (input-entries (:my.plan/steps input))
+          _ (refuse-duplicate-identities! entries)
+          _ (refuse-duplicate-positions! entries)
+          wanted-ids (into #{} (map :my.plan.item/id) entries)
+          existing (owned-ids database agent-id)
+          existing (if (error-value? existing) #{} existing)]
+      (doseq [entry entries
+              :let [id (:my.plan.item/id entry)]]
+        (when (and (step-eid database id) (not (contains? existing id)))
+          (refuse! ::foreign-identity
+                   (str "Plan step " (pr-str id)
+                        " belongs to another agent's plan.")
+                   {:my.plan.item/id id}))
+        (doseq [token (:my.plan.item/about entry)]
+          (resolve-subject! database token))
+        (doseq [reference (:my.plan.item/needs entry)]
+          (when-not (or (contains? wanted-ids (document-reference-id reference))
+                        (ref-eid database reference))
+            (refuse! ::dependency-not-found
+                     (str "Plan dependency " (pr-str reference)
+                          " does not exist.")
+                     {:my.plan.item/needs reference}))))
+      (let [needs-by-id
+            (into {}
+                  (map (fn [entry]
+                         [(:my.plan.item/id entry)
+                          (into []
+                                (keep (fn [reference]
+                                        (let [id (document-reference-id
+                                                  reference)]
+                                          (if (contains? wanted-ids id)
+                                            id
+                                            (db/q '[:find ?id .
+                                                    :in $ ?step
+                                                    :where
+                                                    [?step :my.plan.item/id
+                                                     ?id]]
+                                                  database
+                                                  (ref-eid database
+                                                           reference))))))
+                                (:my.plan.item/needs entry))]))
+                  entries)
+            _ (refuse-dependency-cycle! needs-by-id)
+            current (get-in input [:my.plan/current-step :my.plan.item/id])
+            _ (when current
+                (let [entry (some #(when (= current (:my.plan.item/id %)) %)
+                                  entries)]
+                  (when (or (nil? entry) (:my.plan.item/completed-at entry))
+                    (refuse! ::unusable-current-step
+                             (str "Current step " (pr-str current)
+                                  " is not an open step of this plan.")
+                             {:my.plan/current-step current}))))
+            tempids (into {}
+                          (map-indexed (fn [index entry]
+                                         [(:my.plan.item/id entry)
+                                          (str "plan-step-" index)]))
+                          entries)
+            step-ref (fn [id] (get tempids id [:my.plan.item/id id]))
+            children (reduce (fn [result entry]
+                               (update result (::parent-id entry)
+                                       (fnil conj [])
+                                       (step-ref (:my.plan.item/id entry))))
+                             {}
+                             entries)
+            step-maps
+            (into []
+                  (map (fn [entry]
+                         (let [id (:my.plan.item/id entry)
+                               nested (get children id)
+                               needs (get needs-by-id id)]
+                           (cond-> (entry-tx-map entry (step-ref id))
+                             (seq nested)
+                             (assoc :my.plan.item/steps (set nested))
+                             (seq needs)
+                             (assoc :my.plan.item/needs
+                                    (into #{} (map step-ref) needs))))))
+                  entries)
+            retracted-ids (sort (remove wanted-ids existing))
+            retractions (mapv (fn [id]
+                                [:db.fn/retractEntity [:my.plan.item/id id]])
+                              retracted-ids)
+            scalars (into [] (mapcat #(scalar-retractions database %))
+                          (filter #(contains? existing (:my.plan.item/id %))
+                                  entries))
+            agent-map
+            (cond-> {:db/id agent-entity}
+              (seq (get children nil))
+              (assoc :my.plan/steps (set (get children nil)))
+              current (assoc :my.plan/current-step (step-ref current)))
+            clear-current
+            (when (and (not current)
+                       (db/q '[:find ?current .
+                               :in $ ?agent
+                               :where [?agent :my.plan/current-step ?current]]
+                             database agent-entity))
+              [[:db/retract agent-entity :my.plan/current-step]])
+            added (count (remove #(contains? existing (:my.plan.item/id %))
+                                 entries))]
+        {::tx-data (vec (concat step-maps [agent-map] scalars
+                                (or clear-current []) retractions))
+         ::diff {:my.plan/added added
+                 :my.plan/changed (- (count entries) added)
+                 :my.plan/retracted (count retractions)}}))))
+
+(defn plan!
+  "Reconcile one complete authored plan tree at an observed basis.
+
+  The authored input is ordinary nested transaction data using the stored keys;
+  vector order supplies any absent `:my.plan.item/position`. The compiler
+  refuses duplicate identities, duplicate sibling positions, a step owned by
+  another agent's plan, a dependency cycle, and a current step that is not an
+  open step of this plan, then commits one basis-fenced transaction. Steps the
+  document omits are retracted, and Datahike's component retraction removes the
+  steps they own."
+  {:malli/schema
+   [:=> [:cat :my.plan/component-input :seon.db/database-value
+         :seon.db/connection :seon.cluster.agent/id]
+    [:or :my.plan/plan-result :seon.error/value]]}
+  [input database connection agent-id]
+  (try
+    (let [compiled (compile-tree database agent-id input)
+          tx-data (::tx-data compiled)
+          basis (db/basis-t database)
+          result (db/transact!
+                  connection
+                  {:tx-data tx-data
+                   :datahike/expected-basis-t basis
+                   :tx-meta {:seon.db/user [:seon.cluster.agent/id agent-id]}})]
+      (if (error-value? result)
+        result
+        {:my.plan/converged? false
+         :my.plan/basis-t basis
+         :my.plan/diff (::diff compiled)}))
+    (catch clojure.lang.ExceptionInfo failure
+      (flat-refusal failure))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Declared AI and HTML projections
 ;;; ---------------------------------------------------------------------------
 
-(defn- item-line
-  [item]
-  (str (:my.plan.item/title item) " [" (:my.plan.item/id item) "]"
-       (when-let [description (:my.plan.item/description item)]
-         (str "\n  " description))
-       (when-let [expected (:my.plan.item/expected-result item)]
-         (str "\n  Done when: " expected))
-        (when-let [needs (seq (sort-by second (:my.plan.item/needs item)))]
-         (str "\n  Waiting for: "
-              (str/join ", " (map (comp pr-str second) needs))))))
+(defn- outline-numbers
+  "Outline numbers for depth-first steps, e.g. 1, 1.1, 1.2, 2."
+  [steps]
+  (first
+   (reduce
+    (fn [[numbers counters] step]
+      (let [depth (long (get step :my.plan/depth 0))
+            counters (into (vec (take depth counters))
+                           [(inc (long (get counters depth 0)))])]
+        [(conj numbers (cond-> (str/join "." counters)
+                         (zero? depth) (str ".")))
+         counters]))
+    [[] []]
+    steps)))
+
+(defn- state-word
+  [state]
+  (case state
+    :completed "completed"
+    :current "current"
+    :blocked "blocked"
+    :ready "ready"
+    "open"))
+
+(defn- state-label
+  [state]
+  (case state
+    :completed "Completed"
+    :current "Current step"
+    :blocked "Blocked"
+    :ready "Ready"
+    "Open"))
+
+(defn- needs-text
+  [step]
+  (when-let [needs (seq (:my.plan/needs step))]
+    (str " — waiting for "
+         (str/join ", " (map (comp pr-str :my.plan.item/id) needs)))))
+
+(defn- step-line
+  [number step]
+  (str number " " (:my.plan.item/title step)
+       " [" (:my.plan.item/id step) "] — "
+       (state-word (:my.plan/state step))
+       (needs-text step)
+       (when-let [description (:my.plan.item/description step)]
+         (str "\n" (str/join (repeat (count number) " ")) "   " description))
+       (when-let [expected (:my.plan.item/expected-result step)]
+         (str "\n" (str/join (repeat (count number) " "))
+              "   Done when: " expected))))
 
 (defn format-item-ai
-  "Format one authored plan item as terminal text."
-  {:malli/schema [:=> [:cat [:or :my.plan.item/item
-                             :my.plan/pulled-item
-                             :seon.error/value]]
+  "Format one plan step as terminal text."
+  {:malli/schema [:=> [:cat [:or :my.plan/render-step :seon.error/value]]
                   [:or :string :seon.error/value]]}
-  [item]
-  (if (error-value? item)
-    item
-    (str "Plan item " (item-line (item-value item)))))
+  [step]
+  (if (error-value? step)
+    step
+    (str "Plan step " (step-line "1" step))))
 
 (defn render-item-ai
-  "Render source which reads and formats one authored plan item."
-  {:malli/schema [:=> [:cat :my.plan.item/item] :seon.render/source]}
-  [item]
+  "Render source which reads and formats one plan step."
+  {:malli/schema [:=> [:cat :my.plan/render-step] :seon.render/source]}
+  [step]
   (pr-str
    (list `format-item-ai
-         (list `item
-               {:my.plan.item/id
-                (:my.plan.item/id (item-value item))}))))
+         (list `item {:my.plan.item/id (:my.plan.item/id step)}))))
 
 (defn render-item-html
   "Explain one step in an agent's plan and its expected outcome."
-  {:malli/schema [:=> [:cat :my.plan.item/item] :seon.render/hiccup]}
-  [item]
-  (let [current? (:my.plan/current? item)
-        item (item-value item)
-        completed? (some? (:my.plan.item/completed-at item))
-        blocked? (:my.plan/blocked? item)]
-    [:article {:class (str "seon-family-entry my-plan-item "
-                           (cond completed? "is-completed"
-                                 current? "is-current"
-                                 blocked? "is-blocked"
-                                 :else "is-open"))}
+  {:malli/schema [:=> [:cat :my.plan/render-step] :seon.render/hiccup]}
+  [step]
+  (let [state (get step :my.plan/state :open)]
+    [:article {:class (str "seon-family-entry my-plan-item is-"
+                           (state-word state))}
      [:p {:class "my-plan-id"}
-      [:span {:class "my-plan-state"}
-       (cond completed? "Completed"
-             current? "Current focus"
-             blocked? "Blocked"
-             :else "Open")]
-      [:code (:my.plan.item/id item)]]
-     [:h3 (:my.plan.item/title item)]
-     [:details {:open (when current? true)}
+      [:span {:class "my-plan-state"} (state-label state)]
+      [:code (:my.plan.item/id step)]]
+     [:h3 (:my.plan.item/title step)]
+     [:details {:open (when (= :current state) true)}
       [:summary "Details"]
-      (when-let [description (:my.plan.item/description item)]
+      (when-let [description (:my.plan.item/description step)]
         [:p description])
-      (when-let [expected (:my.plan.item/expected-result item)]
+      (when-let [expected (:my.plan.item/expected-result step)]
         [:p {:class "my-plan-expected"}
          [:strong "Done when: "] expected])
-      (when-let [parent (:my.plan.item/parent item)]
+      (when-let [parent (:my.plan/parent step)]
         [:p {:class "my-plan-relation"}
-         [:strong "Part of "] [:code (second parent)]])
-      (when-let [needs (seq (:my.plan.item/needs item))]
+         [:strong "Part of "] [:code (:my.plan.item/id parent)]])
+      (when-let [needs (seq (:my.plan/needs step))]
         [:p {:class "my-plan-relation"}
          [:strong "Waiting for "]
-         (str/join ", " (map (comp pr-str second) needs))])
+         (str/join ", " (map (comp pr-str :my.plan.item/id) needs))])
       [:p {:class "my-plan-reference"}
        [:strong "Reference "]
-       [:code (pr-str [:my.plan.item/id (:my.plan.item/id item)])]]]]))
+       [:code (pr-str [:my.plan.item/id (:my.plan.item/id step)])]]]]))
 
 (defn format-ready-items-ai
-  "Format a supplied ready authored plan frontier as terminal text."
-  {:malli/schema [:=> [:cat [:or :my.plan/ready-items
-                             :my.plan/pulled-items
-                             :seon.error/value]]
+  "Format a supplied ready plan frontier as terminal text."
+  {:malli/schema [:=> [:cat [:or :my.plan/ready-items :seon.error/value]]
                   [:or :string :seon.error/value]]}
-  [items]
-  (if (error-value? items)
-    items
-    (if (seq items)
-      (str "Ready authored work (" (count items) "):\n"
-           (str/join "\n" (map #(str "- " (item-line %)) items)))
-      "No authored work is ready.")))
+  [steps]
+  (if (error-value? steps)
+    steps
+    (if (seq steps)
+      (str "Ready work (" (count steps) "):\n"
+           (str/join "\n" (map #(str "- " (:my.plan.item/title %)
+                                     " [" (:my.plan.item/id %) "]")
+                               steps)))
+      "No plan step is ready.")))
 
 (defn render-ready-items-ai
-  "Render source which reads and formats the supplied ready item selection."
+  "Render source which reads and formats the supplied ready step selection."
   {:malli/schema [:=> [:cat :my.plan/ready-items] :seon.render/source]}
-  [items]
+  [steps]
   (pr-str
    (list `format-ready-items-ai
-         (list `items
-               {:my.plan/item-ids
-                (mapv :my.plan.item/id items)}))))
+         (list `items {:my.plan/item-ids (mapv :my.plan.item/id steps)}))))
 
 (defn render-ready-items-html
-  "Render the ready authored plan frontier as Hiccup."
+  "Render the ready plan frontier as Hiccup."
   {:malli/schema [:=> [:cat :my.plan/ready-items] :seon.render/hiccup]}
-  [items]
+  [steps]
   (into [:section {:class "seon-family-entry my-plan-ready"}
-         [:h3 (str "Ready authored work (" (count items) ")")]]
+         [:h3 (str "Ready work (" (count steps) ")")]]
         (map render-item-html)
-        items))
+        steps))
+
+(defn- update-example
+  "One executable form updating this plan, using real stable identities."
+  [view]
+  (let [agent-id (:seon.cluster.agent/id view)
+        next-step (or (some :my.plan.item/id (:my.plan/ready view))
+                      (some :my.plan.item/id (:my.plan/blocked view))
+                      (some :my.plan.item/id (:my.plan/steps view)))]
+    (if-not next-step
+      (str "(my.plan/add! {:my.plan.item/id \"" agent-id "/first-step\""
+           " :my.plan.item/title \"My first step\"} )")
+      (pr-str
+       (list 'seon.db/transact!
+             [{:db/id [:seon.cluster.agent/id agent-id]
+               :my.plan/current-step [:my.plan.item/id next-step]}])))))
+
+(defn- current-title
+  [view]
+  (when-let [current (get-in view [:my.plan/current-step :my.plan.item/id])]
+    (or (some #(when (= current (:my.plan.item/id %)) (:my.plan.item/title %))
+              (:my.plan/steps view))
+        current)))
 
 (defn- section-ai
-  [title values line]
-  (str title " (" (count values) ")"
-       (when (seq values)
-         (str ":\n" (str/join "\n" (map #(str "- " (line %)) values))))))
-
-(defn- plan-tips
-  [view]
-  (let [item-id (or (some :my.plan.item/id (:my.plan/ready view))
-                    (some :my.plan.item/id (:my.plan/blocked view))
-                    "<item-id>")
-        agent-id (:seon.cluster.agent/id view)]
-    (str "Read again: (my.plan/plan {}). "
-         "Inspect one step: (my.plan/item {:my.plan.item/id " (pr-str item-id)
-         "}). Rename it: (seon.db/transact! [{:db/id "
-         (pr-str [:my.plan.item/id item-id])
-         " :my.plan.item/title \"Updated title\"}]). "
-         "Focus it: (seon.db/transact! [{:db/id "
-         (pr-str [:seon.cluster.agent/id agent-id])
-         " :my.plan/anchor " (pr-str [:my.plan.item/id item-id]) "}]). "
-         "Complete it: (seon.db/transact! [[:db/add "
-         (pr-str [:my.plan.item/id item-id])
-         " :my.plan.item/completed-at (java.util.Date.)]]).")))
+  [title steps]
+  (str title " (" (count steps) ")"
+       (when (seq steps)
+         (str ":\n"
+              (str/join "\n"
+                        (map #(str "- " (:my.plan.item/title %)
+                                   " [" (:my.plan.item/id %) "]"
+                                   (needs-text %))
+                             steps))))))
 
 (defn format-plan-ai
-  "Format the current plan union as terminal text."
-  {:malli/schema [:=> [:cat [:or :my.plan/view :seon.error/value]]
+  "Format this agent's whole plan as terminal text."
+  {:malli/schema [:=> [:cat [:or :my.plan/component-view :seon.error/value]]
                   [:or :string :seon.error/value]]}
   [view]
   (if (error-value? view)
     view
-    (let [older (:my.plan/older-completions view)]
-    (str/join
-     "\n\n"
-     (cond->
-      [(str "Plan for " (:seon.cluster.agent/id view)
-            (when-let [anchor (:my.plan/anchor view)]
-              (let [current (some #(when (= anchor [:my.plan.item/id
-                                                    (:my.plan.item/id %)]) %)
-                                  (:my.plan/authored view))]
-                (str "\nCurrent: " (or (:my.plan.item/title current)
-                                        (second anchor))))))
-       (section-ai
-        "Needs attention"
-        (:my.plan/obligations view)
-        (fn [obligation]
-          (str (name (:my.plan/obligation-source obligation)) " "
-               (pr-str (:my.plan/obligation-id obligation)) ": "
-               (:my.plan/obligation-title obligation))))
-       (section-ai "Ready now" (:my.plan/ready view) item-line)
-       (section-ai "Waiting" (:my.plan/blocked view) item-line)
-       (section-ai "Recently finished" (:my.plan/recent-completions view) item-line)
-       (plan-tips view)]
-       older (conj (print/render-elision-ai older)))))))
+    (let [steps (:my.plan/steps view)
+          older (:my.plan/older-completions view)
+          objective (first steps)]
+      (str/join
+       "\n\n"
+       (cond->
+        [(str "Plan for " (:seon.cluster.agent/id view)
+              (when objective
+                (str "\nObjective: " (:my.plan.item/title objective)))
+              (if-let [current (current-title view)]
+                (str "\nCurrent step: " current)
+                "\nCurrent step: none selected"))
+         (if (seq steps)
+           (str "Steps:\n"
+                (str/join "\n" (map step-line (outline-numbers steps) steps)))
+           "Steps: none yet.")
+         (section-ai "Ready now" (:my.plan/ready view))
+         (section-ai "Waiting" (:my.plan/blocked view))
+         (section-ai "Recently finished" (:my.plan/recent-completions view))
+         (str "Update the current step:\n" (update-example view))]
+         older (conj (print/render-elision-ai older)))))))
 
 (defn render-plan-ai
-  "Render source which derives and formats the current plan union."
-  {:malli/schema [:=> [:cat :my.plan/view] :seon.render/source]}
-  [_view]
-  (pr-str
-   (list `format-plan-ai
-         (list `plan {}))))
+  "Render source which reads and formats this agent's whole plan.
+
+  The plan unit's stored value is the agent's `:my.plan/steps` component set.
+  The source runs through the reply reader and the agent's own fork, where call
+  preparation supplies the database and the calling agent."
+  {:malli/schema [:=> [:cat :my.plan/steps] :seon.render/source]}
+  [_steps]
+  (pr-str (list `format-plan-ai (list `plan {}))))
 
 (defn- plan-tree-html
-  [view anchor]
-  (let [items (:my.plan/authored view)
-        blocked-ids (into #{} (map :my.plan.item/id) (:my.plan/blocked view))
-        children (group-by #(some-> (:my.plan.item/parent %) second) items)
-        render-node
-        (fn render-node [item]
-          (let [id (:my.plan.item/id item)
-                item (cond-> item
-                       (= anchor [:my.plan.item/id id])
-                       (assoc :my.plan/current? true)
-                       (blocked-ids id) (assoc :my.plan/blocked? true))]
-            [:li
-             (render-item-html item)
-             (when-let [nested (seq (get children id))]
-               (into [:ol {:class "my-plan-children"}]
-                     (map render-node)
-                     (sort-by :my.plan.item/id nested)))]))]
-    (into [:ol {:class "my-plan-tree"}]
-          (map render-node)
-          (sort-by :my.plan.item/id (get children nil)))))
+  [view]
+  (let [steps (:my.plan/steps view)]
+    (letfn [(nest [remaining depth]
+              ;; Consume the depth-first sequence into nested lists.
+              (loop [nodes [] remaining remaining]
+                (let [step (first remaining)]
+                  (if (or (nil? step)
+                          (< (long (get step :my.plan/depth 0)) depth))
+                    [nodes remaining]
+                    (let [[children rest-of]
+                          (nest (rest remaining) (inc depth))]
+                      (recur (conj nodes
+                                   (into [:li (render-item-html step)]
+                                         (when (seq children)
+                                           [(into [:ol {:class
+                                                        "my-plan-children"}]
+                                                  children)])))
+                             rest-of))))))]
+      (into [:ol {:class "my-plan-tree"}] (first (nest steps 0))))))
 
 (defn render-plan-html
-  "Render the current plan union as bounded Hiccup."
-  {:malli/schema [:=> [:cat :my.plan/view] :seon.render/hiccup]}
-  [view]
-  (let [derived-obligations (:my.plan/obligations view)
-        older (:my.plan/older-completions view)
-        anchor (:my.plan/anchor view)
-        authored (:my.plan/authored view)
-        current (some #(when (= anchor [:my.plan.item/id
-                                       (:my.plan.item/id %)]) %)
-                      authored)]
-    (cond->
-     [:section {:class "seon-family-entry my-plan"}
-      [:h2 (str (:seon.cluster.agent/id view) "’s plan")]
-      [:p {:class "my-plan-progress"}
-       [:strong (str (count (:my.plan/recent-completions view)) " completed")]
-       (str " · " (count (:my.plan/ready view)) " ready · "
-            (count (:my.plan/blocked view)) " blocked")]
-      (when current
-        [:section {:class "my-plan-focus"}
-         [:p {:class "my-plan-kicker"} "Current focus"]
-         [:h3 (:my.plan.item/title current)]
-         (when-let [expected (:my.plan.item/expected-result current)]
-           [:p [:strong "Done when: "] expected])])
-      (into [:section {:class "my-plan-obligations"}
-             [:h3 (str "Work needing attention (" (count derived-obligations) ")")]]
-            (map
-             (fn [obligation]
-               [:p (str (name (:my.plan/obligation-source obligation)) " "
-                        (pr-str (:my.plan/obligation-id obligation)) ": "
-                        (:my.plan/obligation-title obligation))]))
-            derived-obligations)
-      [:section {:class "my-plan-steps"}
-       [:h3 (str "Plan steps (" (count authored) ")")]
-       (plan-tree-html view anchor)]
-      [:details {:class "my-plan-help"}
-       [:summary "How to inspect or update this plan"]
-       [:pre (plan-tips view)]]]
-      older
-      (conj [:p {:class "my-plan-elision"}
-             (print/render-elision-ai older)]))))
+  "Render this agent's whole plan as bounded Hiccup.
+
+  Call preparation supplies the database and the calling agent, so both
+  projections derive the same value from the same reader."
+  {:malli/schema [:=> [:cat :my.plan/steps :seon.db/database-value
+                       :seon.cluster.agent/id]
+                  :seon.render/hiccup]}
+  [_steps database agent-id]
+  (let [view (plan {:seon.db/db database :seon.cluster.agent/id agent-id})]
+    (if (error-value? view)
+      [:section {:class "seon-family-entry my-plan"}
+       [:p {:class "my-plan-error"} (:seon.error/message view)]]
+      (let [steps (:my.plan/steps view)
+            completed (count (filter :my.plan.item/completed-at steps))
+            older (:my.plan/older-completions view)]
+        (cond->
+         [:section {:class "seon-family-entry my-plan"}
+          [:h2 (str agent-id "’s plan")]
+          (when-let [objective (first steps)]
+            [:p {:class "my-plan-objective"}
+             [:strong "Objective: "] (:my.plan.item/title objective)])
+          [:p {:class "my-plan-progress"}
+           [:strong (str completed " of " (count steps) " steps completed")]
+           (str " · " (count (:my.plan/ready view)) " ready · "
+                (count (:my.plan/blocked view)) " blocked")]
+          (if-let [current (current-title view)]
+            [:section {:class "my-plan-focus"}
+             [:p {:class "my-plan-kicker"} "Current step"]
+             [:h3 current]]
+            [:p {:class "my-plan-focus"} "No current step is selected."])
+          [:section {:class "my-plan-steps"}
+           [:h3 (str "Steps (" (count steps) ")")]
+           (plan-tree-html view)]
+          [:details {:class "my-plan-help"}
+           [:summary "How to update this plan"]
+           [:pre (update-example view)]]]
+          older
+          (conj [:p {:class "my-plan-elision"}
+                 (print/render-elision-ai older)]))))))

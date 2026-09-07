@@ -1,58 +1,148 @@
-#:my.plan{:anchor
+#:my.plan{:steps
+          [:set
+           {:seon.db/component true,
+            :seon.render/ai my.plan/render-plan-ai,
+            :seon.render/html my.plan/render-plan-html,
+            :description
+            "The root steps of this agent's one plan. The component edge is the ownership fact: retracting the agent or a step retracts everything it owns, and nothing stores a backlink."}
+           :seon.db/ref],
+          :current-step
           [:and
            {:description
-            "The optional current-position ref stored on an agent entity."}
+            "The optional open step this agent has selected as its current focus. Currentness neither owns nor copies the step, so this is an ordinary ref; absence means no step is selected and the plan still renders."}
            :seon.db/ref],
-          :anchor? :boolean,
-          :label [:string {:min 1}],
-          :after [:vector :my.plan/label],
-          :children [:vector :my.plan/node],
-          :node
+          :agent-state
+          [:map
+           {:seon.db/attributes true,
+            :description
+            "The plan attributes stored on an agent entity: the root steps it owns and its optional current step."}
+           [:seon.cluster.agent/id :seon.cluster.agent/id]
+           [:my.plan/steps {:optional true} :my.plan/steps]
+           [:my.plan/current-step {:optional true} :my.plan/current-step]],
+          :parent-step
+          [:and
+           {:description
+            "An existing step, named as the component parent a newly added step is nested under."}
+           :seon.db/ref],
+          :current?
+          [:boolean
+           {:description
+            "Whether the added step becomes this agent's current step."}],
+          :needs
+          [:vector
+           {:description
+            "The derived stable references a step is waiting for."}
+           :my.plan/stable-item-reference],
+          :parent
+          [:and
+           {:description
+            "The derived stable reference of the component parent that owns a step."}
+           :my.plan/stable-item-reference],
+          :depth
+          [:int
+           {:min 0,
+            :description
+            "The derived nesting depth of a step, zero for a root step."}],
+          :state
+          [:enum
+           {:description
+            "The derived disposition of one step at the read basis: a closed set of presentation states, never a stored status."}
+           :completed :current :blocked :ready :open],
+          :stable-item-reference
+          [:map
+           {:description
+            "One plan step named by its stable identity. Renderers carry these instead of entity ids, so no numeric reference reaches an output."}
+           [:my.plan.item/id :my.plan.item/id]],
+          :render-step
+          [:map
+           {:description
+            "One derived plan step as both projections consume it: stored content plus the derived parent, dependencies, depth, and state."}
+           [:my.plan.item/id :my.plan.item/id]
+           [:my.plan.item/title :my.plan.item/title]
+           [:my.plan.item/position {:optional true} :my.plan.item/position]
+           [:my.plan.item/description
+            {:optional true}
+            :my.plan.item/description]
+           [:my.plan.item/expected-result
+            {:optional true}
+            :my.plan.item/expected-result]
+           [:my.plan.item/completed-at
+            {:optional true}
+            :my.plan.item/completed-at]
+           [:my.plan.item/about {:optional true} :my.plan.item/about]
+           [:my.plan/needs {:optional true} :my.plan/needs]
+           [:my.plan/parent {:optional true} :my.plan/parent]
+           [:my.plan/depth {:optional true} :my.plan/depth]
+           [:my.plan/state {:optional true} :my.plan/state]],
+          :render-steps
+          [:vector
+           {:description "Derived plan steps in depth-first authored order."}
+           :my.plan/render-step],
+          :component-input
           [:schema
            {:registry
-            {:my.plan/node*
+            {:my.plan/component-input-node
              [:map
-              [:my.plan.item/id {:optional true} :my.plan.item/id]
+              [:my.plan.item/id :my.plan.item/id]
               [:my.plan.item/title :my.plan.item/title]
+              [:my.plan.item/position
+               {:optional true}
+               :my.plan.item/position]
               [:my.plan.item/description
                {:optional true}
                :my.plan.item/description]
               [:my.plan.item/expected-result
                {:optional true}
                :my.plan.item/expected-result]
+              [:my.plan.item/completed-at
+               {:optional true}
+               :my.plan.item/completed-at]
               [:my.plan.item/needs {:optional true} :my.plan.item/needs]
               [:my.plan.item/about {:optional true} :my.plan.item/about]
-              [:my.plan/label {:optional true} :my.plan/label]
-              [:my.plan/after {:optional true} :my.plan/after]
-              [:my.plan/children
+              [:my.plan.item/steps
                {:optional true}
-               [:vector [:ref :my.plan/node*]]]]}}
-           [:ref :my.plan/node*]],
-          :tree [:vector :my.plan/node],
+               [:vector [:ref :my.plan/component-input-node]]]]}}
+           [:map
+            {:description
+             "One complete authored plan tree as ordinary nested transaction data: the same stored keys, ordered by vector position."}
+            [:my.plan/steps
+             {:optional true}
+             [:vector [:ref :my.plan/component-input-node]]]
+            [:my.plan/current-step
+             {:optional true}
+             :my.plan/stable-item-reference]]],
+          :component-view
+          [:map
+           {:description
+            "The derived current projection of one agent-owned plan component tree, read by both projections from the same function."}
+           [:seon.cluster.agent/id :seon.cluster.agent/id]
+           [:my.plan/steps :my.plan/render-steps]
+           [:my.plan/ready :my.plan/ready]
+           [:my.plan/blocked :my.plan/blocked]
+           [:my.plan/recent-completions :my.plan/recent-completions]
+           [:my.plan/current-step
+            {:optional true}
+            :my.plan/stable-item-reference]
+           [:my.plan/older-completions
+            {:optional true}
+            :my.plan/older-completions]],
           :added [:int {:min 0}],
           :changed [:int {:min 0}],
           :retracted [:int {:min 0}],
           :diff
           [:map
+           {:description
+            "What one whole-tree reconciliation added, changed, and retracted."}
            [:my.plan/added :my.plan/added]
            [:my.plan/changed :my.plan/changed]
            [:my.plan/retracted :my.plan/retracted]],
           :converged? :boolean,
           :basis-t :seon.db/basis-t,
-          :ids [:map-of :my.plan/label :my.plan.item/id],
           :plan-result
           [:map
            [:my.plan/converged? :my.plan/converged?]
            [:my.plan/basis-t :my.plan/basis-t]
-           [:my.plan/diff :my.plan/diff]
-           [:my.plan/ids :my.plan/ids]],
-          :agent-state
-          [:map
-           {:seon.db/attributes true,
-            :description
-            "Stored plan state on an agent: identity plus an optional current-position ref. Plan items connect back through :my.plan.item/agent."}
-           [:seon.cluster.agent/id :seon.cluster.agent/id]
-           [:my.plan/anchor {:optional true} :my.plan/anchor]],
+           [:my.plan/diff :my.plan/diff]],
           :request
           [:map
            [:seon.db/db :seon.db/database-value]
@@ -66,106 +156,53 @@
           [:map
            [:seon.db/db :seon.db/database-value]
            [:my.plan/item-ids :my.plan/item-ids]],
-          :pulled-reference [:map [:db/id :seon.db/ref]],
-          :pulled-item
-          [:map
-           {:description
-            "The Datahike pull projection read by plan source renderers before transaction-shape normalization."}
-           [:my.plan.item/id :my.plan.item/id]
-           [:my.plan.item/title :my.plan.item/title]
-           [:my.plan.item/agent :my.plan/pulled-reference]
-           [:my.plan.item/description
-            {:optional true}
-            :my.plan.item/description]
-           [:my.plan.item/parent
-            {:optional true}
-            :my.plan/pulled-reference]
-           [:my.plan.item/needs
-            {:optional true}
-            [:vector :my.plan/pulled-reference]]
-           [:my.plan.item/about {:optional true} :my.plan.item/about]
-           [:my.plan.item/completed-at
-            {:optional true}
-            :my.plan.item/completed-at]
-           [:my.plan.item/expected-result
-            {:optional true}
-            :my.plan.item/expected-result]],
-          :pulled-items [:vector :my.plan/pulled-item],
-          :obligation-source [:enum :message :run :test],
-          :obligation-id [:string {:min 1}],
-          :obligation-title [:string {:min 1}],
-          :obligation-ref :seon.db/ref,
-          :obligation
-          [:map
-           [:my.plan/obligation-source :my.plan/obligation-source]
-           [:my.plan/obligation-id :my.plan/obligation-id]
-           [:my.plan/obligation-title :my.plan/obligation-title]
-           [:my.plan/obligation-ref :my.plan/obligation-ref]],
-          :obligations [:vector :my.plan/obligation],
           :ready
           [:vector
            {:description
-            "Open authored items whose descendants and dependencies do not block them."}
-           :my.plan.item/item],
-          :authored [:vector :my.plan.item/item],
+            "Open steps whose descendants and dependencies do not block them."}
+           :my.plan/render-step],
           :intent-subjects [:vector :seon.db/ref],
           :blocked
           [:vector
            {:description
-            "Open authored items blocked by open work on a needed item."}
-           :my.plan.item/item],
+            "Open steps blocked by open work on a needed step."}
+           :my.plan/render-step],
           :recent-completions
           [:vector
            {:description
-            "The bounded most-recent authored items carrying completed-at."}
-           :my.plan.item/item],
+            "The bounded most-recent steps carrying completed-at."}
+           :my.plan/render-step],
           :older-completions :seon.print/elision,
           :ready-items
           [:vector
            {:seon.render/ai my.plan/render-ready-items-ai,
-            :seon.render/html my.plan/render-ready-items-html}
-           :my.plan.item/item],
-          :view
-          [:map
-           {:seon.render/ai my.plan/render-plan-ai,
-            :seon.render/html my.plan/render-plan-html,
+            :seon.render/html my.plan/render-ready-items-html,
             :description
-            "A derived current view of authored plan facts and structurally separate obligations for one agent."}
-           [:seon.cluster.agent/id :seon.cluster.agent/id]
-           [:my.plan/obligations :my.plan/obligations]
-           [:my.plan/authored :my.plan/authored]
-           [:my.plan/ready :my.plan/ready]
-           [:my.plan/blocked :my.plan/blocked]
-           [:my.plan/recent-completions :my.plan/recent-completions]
-           [:my.plan/anchor {:optional true} :my.plan/anchor]
-           [:my.plan/older-completions
-            {:optional true}
-            :my.plan/older-completions]],
+            "A ready-work selection carried as its own renderable unit."}
+           :my.plan/render-step],
           :agent-not-found [:= true],
           :agent-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan request whose agent does not exist"} [:my.plan/agent-not-found :my.plan/agent-not-found] [:seon.error/message :seon.error/message]],
-          :ambiguous-identity [:= true],
-          :ambiguous-identity-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark an authored plan identity with multiple candidates"} [:my.plan/ambiguous-identity :my.plan/ambiguous-identity] [:seon.error/message :seon.error/message]],
-          :completed-identity [:= true],
-          :completed-identity-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a completed identity that cannot be rewritten"} [:my.plan/completed-identity :my.plan/completed-identity] [:seon.error/message :seon.error/message]],
+          :dependency-cycle [:= true],
+          :dependency-cycle-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark plan dependencies that form a cycle"} [:my.plan/dependency-cycle :my.plan/dependency-cycle] [:seon.error/message :seon.error/message]],
           :dependency-not-found [:= true],
           :dependency-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan dependency that does not exist"} [:my.plan/dependency-not-found :my.plan/dependency-not-found] [:seon.error/message :seon.error/message]],
           :duplicate-identity [:= true],
           :duplicate-identity-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark an identity repeated in one authored plan"} [:my.plan/duplicate-identity :my.plan/duplicate-identity] [:seon.error/message :seon.error/message]],
-          :duplicate-label [:= true],
-          :duplicate-label-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a label repeated in one authored plan"} [:my.plan/duplicate-label :my.plan/duplicate-label] [:seon.error/message :seon.error/message]],
+          :duplicate-position [:= true],
+          :duplicate-position-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark two sibling steps claiming one position"} [:my.plan/duplicate-position :my.plan/duplicate-position] [:seon.error/message :seon.error/message]],
           :foreign-identity [:= true],
           :foreign-identity-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark an authored identity owned by another agent"} [:my.plan/foreign-identity :my.plan/foreign-identity] [:seon.error/message :seon.error/message]],
           :identity-exists [:= true],
-          :identity-exists-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a new plan item identity that already exists"} [:my.plan/identity-exists :my.plan/identity-exists] [:seon.error/message :seon.error/message]],
+          :identity-exists-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a new plan step identity that already exists"} [:my.plan/identity-exists :my.plan/identity-exists] [:seon.error/message :seon.error/message]],
           :item-reference-not-found [:= true],
-          :item-reference-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a referenced plan item that does not exist"} [:my.plan/item-reference-not-found :my.plan/item-reference-not-found] [:seon.error/message :seon.error/message]],
+          :item-reference-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a referenced plan step that does not exist"} [:my.plan/item-reference-not-found :my.plan/item-reference-not-found] [:seon.error/message :seon.error/message]],
           :item-reference-not-owned [:= true],
-          :item-reference-not-owned-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a referenced plan item owned by another agent"} [:my.plan/item-reference-not-owned :my.plan/item-reference-not-owned] [:seon.error/message :seon.error/message]],
+          :item-reference-not-owned-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a referenced plan step outside this agent's plan"} [:my.plan/item-reference-not-owned :my.plan/item-reference-not-owned] [:seon.error/message :seon.error/message]],
           :not-found [:= true],
-          :not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan item that does not exist"} [:my.plan/not-found :my.plan/not-found] [:seon.error/message :seon.error/message]],
+          :not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan step that does not exist"} [:my.plan/not-found :my.plan/not-found] [:seon.error/message :seon.error/message]],
           :not-owned [:= true],
-          :not-owned-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan item owned by another agent"} [:my.plan/not-owned :my.plan/not-owned] [:seon.error/message :seon.error/message]],
+          :not-owned-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan step outside this agent's plan"} [:my.plan/not-owned :my.plan/not-owned] [:seon.error/message :seon.error/message]],
           :subject-not-found [:= true],
           :subject-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan subject that does not exist"} [:my.plan/subject-not-found :my.plan/subject-not-found] [:seon.error/message :seon.error/message]],
-          :unknown-label [:= true],
-          :unknown-label-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan dependency label that does not exist"} [:my.plan/unknown-label :my.plan/unknown-label] [:seon.error/message :seon.error/message]]}
+          :unusable-current-step [:= true],
+          :unusable-current-step-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a current step that is not an open step of this plan"} [:my.plan/unusable-current-step :my.plan/unusable-current-step] [:seon.error/message :seon.error/message]]}
