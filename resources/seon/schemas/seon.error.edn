@@ -1,4 +1,10 @@
-#:seon.error{:agent [:and #:seon.db{:index true} :seon.db/ref],
+#:seon.error{:agent
+             [:and
+              {:description
+               "The agent this fault happened to; its reverse is that agent's fault list.",
+               :seon.render/html seon.error/render-faults-html,
+               :seon.db/index true}
+              :seon.db/ref],
              :at :inst,
              :basis-t [:int {:min 0}],
              :capped? :boolean,

@@ -127,7 +127,11 @@
                      :run
                      [:and
                       {:description
-                       "The run this agent currently holds; absent between episodes."}
+                       "The run this agent currently holds; absent between episodes.",
+                       :seon.render/ai
+                       seon.cluster.run/render-current-ai,
+                       :seon.render/html
+                       seon.cluster.run/render-current-html}
                       :seon.db/ref],
                      ;; The live value returned by `(help)`. These are
                      ;; projections of current facts, never attributes stored

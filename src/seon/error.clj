@@ -1229,6 +1229,68 @@
         [[:p {:class "seon-error-link"}
           [:a {:href (evidence-path id)} "Inspect durable evidence"]]])))))
 
+(defn- fault-order
+  [fault]
+  [(if-let [at (:seon.error/at fault)] (- (.getTime ^java.util.Date at)) 0)
+   (str (:seon.error/id fault))])
+
+(defn- run-identity
+  [database reference]
+  (let [eid (cond
+              (map? reference) (:db/id reference)
+              (integer? reference) reference)]
+    (or (:seon.cluster.run/id reference)
+        (when eid
+          (let [row (db/pull database [:seon.cluster.run/id] eid)]
+            (when-not (:seon.error/kind row)
+              (:seon.cluster.run/id row)))))))
+
+(defn render-faults-html
+  "`:seon.render/html` — the faults recorded against one agent, newest first.
+
+  The unit is the reverse of `:seon.error/agent`. Each fault reaches the one
+  error card renderer, so a fault listed here and the same fault inspected
+  alone state the same facts; the run it happened in is a link, not an id.
+  There is deliberately no `:seon.render/ai` companion: an agent's own faults
+  are not part of its context by default, and a renderer that answers with
+  nothing would be worse than declaring nothing."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
+                  :seon.render/hiccup]}
+  [faults database]
+  (let [faults (if (and (sequential? faults) (every? map? faults))
+                 (sort-by fault-order faults)
+                 [])]
+    (if (seq faults)
+      (into [:section {:class "seon-family-entry seon-error-faults"}
+             [:h2 (str "Faults (" (count faults) ")")]]
+            (map (fn [fault]
+                   (let [run-id (run-identity database
+                                              (:seon.error/run fault))]
+                     (cond-> [:article {:class "seon-error-fault"}
+                              (render-html fault)]
+                       (:seon.error/at fault)
+                       (conj (let [instant (.toString
+                                            (.toInstant
+                                             ^java.util.Date
+                                             (:seon.error/at fault)))]
+                               [:time {:class "seon-error-at"
+                                       :datetime instant}
+                                instant]))
+                       run-id
+                       (conj [:p {:class "seon-error-run"}
+                              [:a {:href (render.route/path
+                                          :seon.render.route/data
+                                          {}
+                                          {:entity
+                                           (pr-str [:seon.cluster.run/id
+                                                    run-id])})}
+                               (str "in run " run-id)]])))))
+            faults)
+      [:section {:class "seon-family-entry seon-error-faults"}
+       [:h2 "Faults (0)"]
+       [:p {:class "seon-error-faults-empty"}
+        "No fault is recorded against this agent."]])))
+
 (defn time-limit-prose
   "`:seon.render/ai` — evaluation time-limit evidence without guessing cause."
   {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}

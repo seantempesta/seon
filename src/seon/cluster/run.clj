@@ -65,6 +65,7 @@
             [seon.effect :as effect]
             [seon.fn :as seon.fn]
             [seon.program :as program]
+            [seon.render.route :as render.route]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -2396,3 +2397,80 @@
   (when-let [text (render-receipt-ai unit)]
     [:article {:class "seon-family-entry seon-receipt-entry"}
      [:p text]]))
+
+;;; ---------------------------------------------------------------------------
+;;; The current-run unit
+;;;
+;;; `:seon.cluster.agent/run` is present exactly while a run is open, so
+;;; absence is the whole answer and neither projection invents a state for it.
+;;; The declared producer input is `:seon.schema/value` because the seam hands
+;;; a reference in whichever shape the pull produced; the identity it resolves
+;;; to is always a stable `[:seon.cluster.run/id …]`, never a numeric id.
+;;; ---------------------------------------------------------------------------
+
+(def ^:private current-run-selector
+  '[:db/id
+    :seon.cluster.run/id
+    :seon.cluster.run/opened-at
+    :seon.cluster.run/closed-at
+    :seon.cluster.run/interrupted-at
+    :seon.cluster.run/error
+    :seon.cluster.run/plan-digest
+    :seon.cluster.run/process])
+
+(defn- current-run-row
+  "The open run an agent's `:seon.cluster.agent/run` reference names."
+  [database reference]
+  (let [id (cond
+             (string? reference) reference
+             (map? reference) (::id reference)
+             :else nil)
+        eid (cond
+              (integer? reference) reference
+              (map? reference) (:db/id reference)
+              :else nil)
+        row (cond
+              id (db/pull database current-run-selector [::id id])
+              eid (db/pull database current-run-selector eid)
+              (and (vector? reference) (= 2 (count reference)))
+              (db/pull database current-run-selector reference))]
+    (when (and (map? row) (::id row) (not (:seon.error/kind row)))
+      row)))
+
+(defn render-current-ai
+  "`:seon.render/ai` — source reading the run this agent holds right now.
+
+  Absent reference, absent source: nothing is rendered when no run is open,
+  rather than a renderer answering with emptiness."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
+                  [:maybe :seon.render/source]]}
+  [reference database]
+  (when-let [row (current-run-row database reference)]
+    (str ";; Am I inside a run? An agent carries :seon.cluster.agent/run\n"
+         ";; exactly while one is open, so its absence is the whole answer.\n"
+         ";; This reads the one it holds now and says what state it is in.\n"
+         (pr-str
+          (list `render-ai
+                (list 'seon.db/pull
+                      (list 'quote current-run-selector)
+                      [::id (::id row)]))))))
+
+(defn render-current-html
+  "`:seon.render/html` — the same open run, with a link to it."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
+                  :seon.render/hiccup]}
+  [reference database]
+  (if-let [row (current-run-row database reference)]
+    [:article {:class "seon-family-entry seon-run-current"}
+     [:p {:class "seon-kicker"} "Current run"]
+     [:p (render-ai (assoc row :seon.db/db database))]
+     [:p {:class "seon-run-current-link"}
+      [:a {:href (render.route/path
+                  :seon.render.route/data
+                  {}
+                  {:entity (pr-str [::id (::id row)])})}
+       (::id row)]]]
+    [:article {:class "seon-family-entry seon-run-current"}
+     [:p {:class "seon-kicker"} "Current run"]
+     [:p {:class "seon-run-current-empty"}
+      "No run is open; this agent is parked between episodes."]]))

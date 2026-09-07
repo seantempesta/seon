@@ -37,6 +37,7 @@
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
             [seon.cluster.run :as run]
+            [seon.error :as error]
             [seon.fn :as seon.fn]
             [seon.schema]
             [seon.test-support :as test-support]))
@@ -1704,3 +1705,89 @@
           "close refuses ::agent-pointer-broken")
       (is (nil? (::run/closed-at (run-entity connection "broken")))
           "the refused close committed nothing"))))
+
+(deftest current-run-unit-renders-presence-and-absence-without-inventing-state
+  (test-support/with-database
+    (fn [connection]
+      (db/transact! connection
+                    [{:seon.cluster.agent/id "juno"}
+                     {:seon.cluster.run/id "run-open"
+                      :seon.cluster.run/agent [:seon.cluster.agent/id "juno"]
+                      :seon.cluster.run/opened-at (java.util.Date. 1700000000000)
+                      :seon.cluster.run/process "1-2"}])
+      (let [database @connection
+            reference (:db/id (db/pull database '[:db/id]
+                                       [:seon.cluster.run/id "run-open"]))]
+        (testing "a held run states what is running and since when"
+          (let [source (run/render-current-ai {:db/id reference} database)]
+            (is (str/starts-with? source ";; Am I inside a run?")
+                "the AI projection is source whose comments teach")
+            (is (str/includes?
+                 source
+                 "(seon.cluster.run/render-ai (seon.db/pull")
+                "and whose form is an ordinary read the agent can rerun")
+            (is (str/includes?
+                 source "[:seon.cluster.run/id \"run-open\"]")
+                "named by a stable identity, never a numeric entity id"))
+          (let [rendered (run/render-current-html {:db/id reference} database)]
+            (is (= [:p "Run run-open, opened #inst \"2023-11-14T22:13:20.000-00:00\". It is running now, held by 1-2."]
+                   (nth rendered 3)))
+            (is (= "run-open" (last (last (nth rendered 4))))
+                "and the run is a link, not an id in prose")))
+        (testing "no open run renders nothing for AI and an empty state for HTML"
+          (is (nil? (run/render-current-ai nil database))
+              "absence declares nothing rather than answering with emptiness")
+          (is (= [:article {:class "seon-family-entry seon-run-current"}
+                  [:p {:class "seon-kicker"} "Current run"]
+                  [:p {:class "seon-run-current-empty"}
+                   "No run is open; this agent is parked between episodes."]]
+                 (run/render-current-html nil database))))))))
+
+;; THE FAULTS UNIT lives on `:seon.error/agent`, whose renderer needs a run to
+;; link to; that is why its regression sits beside the run model rather than in
+;; the pure `seon.error-test`, which opens no database by design.
+(deftest fault-unit-lists-agent-faults-newest-first-with-run-links
+  (test-support/with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       [{:seon.cluster.agent/id "juno"}
+        {:seon.cluster.run/id "run-1"
+         :seon.cluster.run/agent [:seon.cluster.agent/id "juno"]
+         :seon.cluster.run/opened-at (java.util.Date. 1700000000000)}
+        {:seon.error/id "fault-old"
+         :seon.error/kind :seon.instrument/contract-violated
+         :seon.error/message "older fault"
+         :seon.error/at (java.util.Date. 1700000000000)
+         :seon.error/agent [:seon.cluster.agent/id "juno"]
+         :seon.error/run [:seon.cluster.run/id "run-1"]}
+        {:seon.error/id "fault-new"
+         :seon.error/kind :seon.instrument/contract-violated
+         :seon.error/message "newer fault"
+         :seon.error/at (java.util.Date. 1700000060000)
+         :seon.error/agent [:seon.cluster.agent/id "juno"]}])
+      (let [database @connection
+            faults (db/pull-many
+                    database '[*]
+                    (mapv :db/id
+                          (:seon.error/_agent
+                           (db/pull database [:seon.error/_agent]
+                                    [:seon.cluster.agent/id "juno"]))))
+            rendered (error/render-faults-html faults database)]
+        (is (= [:section {:class "seon-family-entry seon-error-faults"}
+                [:h2 "Faults (2)"]]
+               (subvec rendered 0 3)))
+        (is (= ["newer fault" "older fault"]
+               (mapv #(last (nth (nth % 2) 2)) (subvec rendered 3)))
+            "newest first, and each fault keeps the one error card")
+        (is (str/includes? (pr-str (last (nth rendered 4)))
+                           "in run run-1")
+            "a fault that names a run links to it by its stable id")
+        (is (= 4 (count (nth rendered 3)))
+            "and the newest fault, which names no run, has no run line")
+        (is (= [:section {:class "seon-family-entry seon-error-faults"}
+                [:h2 "Faults (0)"]
+                [:p {:class "seon-error-faults-empty"}
+                 "No fault is recorded against this agent."]]
+               (error/render-faults-html [] database))
+            "an agent with no faults renders an empty state, never an error")))))
