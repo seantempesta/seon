@@ -1122,11 +1122,17 @@
                                          previous))))
                     captured (atom [])
                     invocation-reusable? (some? retained-invocation)
+                    ;; Source intent is read against the argument the producer
+                    ;; will actually receive: an attribute-declared producer
+                    ;; takes the attribute's value, not the unit map.
                     source-output?
                     (and (= output :seon.render/ai)
-                         (source-producer?
-                          (sci.kernel/context-projection (:seon.sci.eval/ctx request))
-                          selected [(producer-argument request)]))
+                         (let [projection (sci.kernel/context-projection
+                                           (:seon.sci.eval/ctx request))]
+                           (source-producer?
+                            projection selected
+                            [(render-invocation-argument projection request
+                                                         selected)])))
                     raw (if invocation-reusable?
                           (or (:seon.render.call/source retained-invocation)
                               (:seon.render.call/output retained-invocation))

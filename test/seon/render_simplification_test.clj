@@ -132,7 +132,17 @@
                       (selection (assoc request :seon.render/value
                                         {:db/id 42 :my.plan.item/id "s1"
                                          :my.plan.item/title "A step"}))))
-               "a neighbour reached through the attribute is not its value")))))))
+               "a neighbour reached through the attribute is not its value")
+           (when (= output :seon.render/ai)
+             (let [calls (atom {})
+                   request (assoc request
+                                  :seon.render.call/id [::attribute-source]
+                                  :seon.render/retained-calls {}
+                                  :seon.render/captured-calls calls)]
+               (target-call 'seon.render 'render-call request)
+               (is (string? (get-in @calls [[::attribute-source]
+                                            :seon.render.call/source]))
+                   "an attribute-declared AI producer is read as source, so its forms execute")))))))))
 
 (deftest pulled-entity-selection-and-invocation-share-transaction-shape
   (support/with-database
