@@ -239,8 +239,8 @@
              (and (pos-int? (:max-work bounds))
                   (pos-int? (:max-results bounds)))))))
 
-(defn- stable-read-result
-  [request result]
+(defn- stable-value
+  [result]
   (letfn [(stable [value]
             (cond
               (or (db.utils/db? value)
@@ -284,9 +284,26 @@
               [true value]
 
               :else [false nil]))]
-    (if (bounded-read-request? request)
-      (stable result)
-      [false nil])))
+    (stable result)))
+
+(defn- stable-read-result
+  [request result]
+  (if (bounded-read-request? request)
+    (stable-value result)
+    [false nil]))
+
+(defn- read-result-digest
+  [result]
+  (let [[stable? value] (stable-value result)]
+    (when stable?
+      (try
+        (schema/sha-256
+         [(.getBytes ^String (schema/canonical-data-string value) "UTF-8")])
+        (catch clojure.lang.ExceptionInfo cause
+          (if (= :seon.schema/noncanonical-projection-data
+                 (:seon.schema/error (ex-data cause)))
+            nil
+            (throw cause)))))))
 
 (defn- append-query-evidence!
   [request response result]
@@ -444,7 +461,11 @@
                  (when (and (:seon.db/retain-read-results? options)
                             (find entry :seon.db/read-result))
                    (stable-read-result (:seon.db/read-request entry)
-                                       (:seon.db/read-result entry)))]
+                                       (:seon.db/read-result entry)))
+                 result-digest
+                 (when (and (:seon.db/read-request entry)
+                            (find entry :seon.db/read-result))
+                   (read-result-digest (:seon.db/read-result entry)))]
            (cond->
             {:seon.db/source-argument-position source-position
              :datahike.read/dependency-plan plan
@@ -452,6 +473,9 @@
              (dependency-revision database plan source-position)}
              (:seon.db/read-request entry)
              (assoc :seon.db/read-request (:seon.db/read-request entry))
+
+             result-digest
+             (assoc :seon.db/read-result-digest result-digest)
 
              replayable?
              (assoc :seon.db/read-result stable-result))))
@@ -523,14 +547,23 @@
        (or (and (not (false? (:datahike.read/cache-eligible? revision)))
                 (= revision (dependency-revision database plan source-position)))
            (when (and (find evidence :seon.db/read-request)
-                      (find evidence :seon.db/read-result))
+                      (or (find evidence :seon.db/read-result)
+                          (find evidence :seon.db/read-result-digest)))
              (try
-               (let [[replayable? result]
+               (let [replayed
+                     (replay-read database (:seon.db/read-request evidence))
+                     [replayable? result]
                      (stable-read-result
                       (:seon.db/read-request evidence)
-                      (replay-read database (:seon.db/read-request evidence)))]
-                 (and replayable?
-                      (= (:seon.db/read-result evidence) result)))
+                      replayed)]
+                 (or (and (find evidence :seon.db/read-result)
+                          replayable?
+                          (= (:seon.db/read-result evidence) result))
+                     (when-let [expected
+                                (:seon.db/read-result-digest evidence)]
+                       (when-let [actual
+                                  (read-result-digest replayed)]
+                         (= expected actual)))))
                (catch Throwable _ false)))))
      retained)))
 

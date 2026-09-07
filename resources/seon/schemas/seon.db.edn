@@ -55,6 +55,8 @@
           ;; Durable evaluation evidence omits them and no database attribute
           ;; stores this key.
           :read-result :seon.schema/value,
+          ;; Fixed-size semantic replay evidence for durable pull reads.
+          :read-result-digest :seon.blob/digest,
           ;; A read's source is identified exactly as Datahike identifies its
           ;; own query-cache key (query.cljc:2658-2671): a committed raw DB by
           ;; its cache context, an as-of view by the ORIGIN's context plus its
@@ -95,6 +97,8 @@
            [:datahike.read/dependency-plan :seon.db/read-dependency-plan]
            [:datahike.read/revision :seon.db/dependency-revision]
            [:seon.db/read-request {:optional true} :seon.db/read-request]
+           [:seon.db/read-result-digest {:optional true}
+            :seon.db/read-result-digest]
            [:seon.db/read-result {:optional true} :seon.db/read-result]],
           :entity :boolean,
           :identity :boolean,

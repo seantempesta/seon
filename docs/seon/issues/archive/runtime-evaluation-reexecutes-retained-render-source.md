@@ -160,3 +160,20 @@ assert stale. A component child change should be included because wildcard
 pull automatically expands component refs. The source-execution regression
 then proves this freshness result prevents a second evaluation rather than
 only proving the lower-level digest comparison.
+
+### Implemented evidence
+
+`seon.db/read-evidence` now retains the canonical SHA-256 result digest for
+stable replayable values while continuing to omit the result itself from
+durable evidence. `read-evidence-current?` reuses its existing replay owner to
+compare either the process-local exact result or the durable digest. Old
+evidence without either remains conservative, and unsupported canonical values
+do not acquire a digest. The digest is part of the existing evaluation-owned
+read-evidence component schema and survives a transaction plus pull readback.
+
+The focused `seon.db-test` gate passed 37 tests and 316 assertions. It covers
+an unrelated transaction retaining wildcard evidence, selected and component
+attribute changes and retraction invalidating it, canonical map/set ordering,
+nil and 100,000-character results, fixed evidence size, and durable component
+round-trip. The user-visible retained-source/browser proof remains the final
+integration evidence and is owned by the controlled cluster run.

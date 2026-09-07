@@ -466,7 +466,7 @@
          (is (not (db/read-evidence-current? @connection evidence))
              "a depended attribute revision makes the retained read stale"))))))
 
-(deftest process-local-read-results-replay-without-entering-durable-evidence
+(deftest durable-pull-digests-replay-without-retaining-read-results
   (test-support/with-database
    (fn [connection]
      (let [subject [:seon.ns/name 'seon.flow]
@@ -485,13 +485,15 @@
        (is (map? original))
        (is (not-any? #(find % :seon.db/read-result) durable)
            "default evidence cannot inline read payloads into evaluation facts")
+       (is (every? #(= 64 (count (:seon.db/read-result-digest %))) durable)
+           "durable pull evidence retains only a fixed-size result digest")
        (is (every? #(find % :seon.db/read-result) process-local)
            "the explicit process-local cache retains stable replay values")
        (db/transact! connection
                      [{:seon.cluster.message/id "semantic-replay-unrelated"
                        :seon.cluster.message/content "unrelated"}])
-       (is (false? (db/read-evidence-current? @connection durable))
-           "a wildcard revision alone remains conservative")
+       (is (true? (db/read-evidence-current? @connection durable))
+           "an equal wildcard replay survives an unrelated transaction")
        (is (true? (db/read-evidence-current? @connection process-local))
            "an equal bounded replay keeps the process-local read current")
        (db/transact! connection
@@ -499,6 +501,45 @@
                        :seon.ns/doc "semantic-replay-changed"}])
        (is (false? (db/read-evidence-current? @connection process-local))
            "a changed selected value invalidates the retained read")))))
+
+(deftest wildcard-pull-digests-cover-empty-large-and-canonical-results
+  (test-support/with-database
+   (fn [connection]
+     (let [digest @(ns-resolve 'seon.db 'read-result-digest)]
+       (is (= (digest {:b #{3 2} :a 1})
+              (digest {:a 1 :b #{2 3}}))
+           "canonical map and set ordering does not alter the digest"))
+     (doseq [subject [[:seon.ns/name 'seon.db-test/missing]
+                      [:seon.cluster.message/id "large-digest"]]]
+       (when (= :seon.cluster.message/id (first subject))
+         (db/transact! connection
+                       [{:seon.cluster.message/id (second subject)
+                         :seon.cluster.message/content
+                         (apply str (repeat 100000 "x"))}]))
+       (let [captured (atom [])]
+         (binding [db/*read-evidence-sink* captured]
+           (db/pull @connection '[*] subject))
+         (let [evidence (db/read-evidence @captured)]
+           (is (= 64 (count (:seon.db/read-result-digest (first evidence))))
+               "nil and large pull results both retain a digest")
+           (is (< (count (pr-str evidence)) 2000)
+               "durable evidence size does not scale with the pull result")
+           (when (= :seon.cluster.message/id (first subject))
+             (db/transact!
+              connection
+              [{:seon.cluster.eval/id "digest-persistence"
+                :seon.cluster.eval/read-evidence
+                [(assoc (first evidence) :db/id "digest-persistence/0")]}])
+             (is (= (:seon.db/read-result-digest (first evidence))
+                    (get-in
+                     (db/pull
+                      @connection
+                      '[{:seon.cluster.eval/read-evidence
+                         [:seon.db/read-result-digest]}]
+                      [:seon.cluster.eval/id "digest-persistence"])
+                     [:seon.cluster.eval/read-evidence 0
+                      :seon.db/read-result-digest]))
+                 "the fixed-size digest survives the durable component codec"))))))))
 
 (deftest process-local-replay-declines-unbounded-and-opaque-read-results
   (test-support/with-database
@@ -563,7 +604,18 @@
        (db/transact! connection
                      [[:db/add child-id ::component-value "after"]])
        (is (false? (db/read-evidence-current? @connection evidence))
-           "a component-child-only change makes the retained pull stale")))))
+           "a component-child-only change makes the retained pull stale")
+       (let [changed-captured (atom [])]
+         (binding [db/*read-evidence-sink* changed-captured]
+           (db/pull @connection
+                    [::component-child]
+                    [::component-root-id "root"]))
+         (let [changed-evidence (db/read-evidence @changed-captured)]
+           (db/transact! connection
+                         [[:db/retract child-id ::component-value]])
+           (is (false? (db/read-evidence-current?
+                        @connection changed-evidence))
+               "retracting a component child attribute makes it stale")))))))
 
 ;;; THE class regression for "a database value read through a reader that is
 ;;; not total over its shapes" (2026-08-08 live drive, two instances). Datahike

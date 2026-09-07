@@ -20,7 +20,10 @@
                       :seon.db/dependency-revision]
                      [:seon.db/read-request
                       {:optional true}
-                      :seon.db/read-request]],
+                      :seon.db/read-request]
+                     [:seon.db/read-result-digest
+                      {:optional true}
+                      :seon.db/read-result-digest]],
                     :triage-edn [:string {:min 1}],
                     :receipt
                     [:map
