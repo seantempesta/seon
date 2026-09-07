@@ -1,5 +1,5 @@
 // Inspect the live Juniper context UI; save the actual browser output for review.
-// Usage: node this-file.cjs URL OUTPUT_PREFIX [--plan] [--add] [--await-change] [--append-and-compact]
+// Usage: node this-file.cjs URL OUTPUT_PREFIX [--narrow] [--plan] [--add] [--await-change] [--append-and-compact]
 const {chromium} = require('playwright');
 const fs = require('node:fs/promises');
 
@@ -10,12 +10,15 @@ const fs = require('node:fs/promises');
   });
   let page;
   try {
-    page = await browser.newPage({viewport: {width: 1440, height: 1100}});
+    const narrow = process.argv.includes('--narrow');
+    page = await browser.newPage({viewport: narrow ? {width: 700, height: 1100} : {width: 1440, height: 1100}});
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     const response = await page.goto(process.argv[2], {waitUntil: 'domcontentloaded', timeout: 30000});
+    await page.locator('#debug-units [data-seon-unit]').first().waitFor({timeout: 30000});
     await page.locator('.seon-debug-selected-previews').first().waitFor({timeout: 15000});
-    await page.getByText('Context', {exact: true}).waitFor({timeout: 15000});
+    const units = await page.locator('#debug-units [data-seon-unit]')
+      .evaluateAll(nodes => nodes.map(node => node.dataset.seonUnit));
     let readinessError;
     try {
       await page.getByRole('button', {name: 'Add to context', exact: true})
@@ -73,7 +76,7 @@ const fs = require('node:fs/promises');
     const text = await page.locator('body').innerText();
     await fs.writeFile(`${process.argv[3]}.txt`, text);
     await page.screenshot({path: `${process.argv[3]}.png`, fullPage: false});
-    console.log(JSON.stringify({status: response.status(), url: page.url(), errors,
+    console.log(JSON.stringify({status: response.status(), url: page.url(), errors, units,
       textFile: `${process.argv[3]}.txt`, screenshot: `${process.argv[3]}.png`,
       selectedRun, compactedContribution, forms: await page.locator('form').count(), buttons: await page.getByRole('button').allTextContents(),
       readinessError}));

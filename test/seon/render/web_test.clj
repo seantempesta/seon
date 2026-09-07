@@ -186,6 +186,12 @@
                                      (:seon.config.eval/time-limit-ms
                                       (config/defaults))
                                      :seon.config/on-core-error :record
+                                     ;; the evaluator every source preview
+                                     ;; runs through: production names it on
+                                     ;; the handle, and a fixture that omits
+                                     ;; it turns one page into a proc death.
+                                     :seon.cluster.loop/evaluate
+                                     'seon.sci.eval/evaluate
                                      :seon.cluster.run/process process
                                      ;; the cluster's one stream conn:
                                      ;; production always has it, and
@@ -750,6 +756,7 @@
             ((web-private 'debug-program-identity) @connection ctx)
             projection (sci.kernel/context-projection ctx)
             header ((web-private 'debug-header-html)
+                    @connection
                     {:seon.render.debug/viewer-namespace 'my.viewer
                      :seon.render.debug/subject [:my/id "subject"]
                      :seon.render/output :seon.render/html
@@ -760,6 +767,7 @@
                      :seon.render.data/max-result-weight 4000}
                     {:seon.render.data/snapshot
                      (db/database-value-identity @connection)}
+                    {:my/id "subject"}
                     1.0
                     program-identity)]
         (is (= (apply str (repeat 64 "0"))
@@ -1048,8 +1056,10 @@
         declared-units [:my/name :my/tags :my/parts :my/absent
                         :my.note/_subject]
         reverse-values {:my.note/_subject [{:db/id 9}]}
-        generic {:seon.render.debug/reverse-refs
-                 {:my.mention/subject [{:db/id 11}]}}
+        observation {:seon.render.data/incoming
+                     {:seon.render.data/datoms
+                      [{:e 11 :a :my.mention/subject :v 1 :tx 3}
+                       {:e 9 :a :my.note/subject :v 1 :tx 4}]}}
         render-request {:seon.db/db ::database
                         :seon.render/retained-calls {}
                         :seon.render/captured-calls (atom {})}
@@ -1070,7 +1080,7 @@
       (let [html (hiccup/->string
                   ((web-private 'debug-found-values-html)
                    projection render-request debug-request acquisition
-                   declared-units generic reverse-values nil nil))
+                   declared-units observation reverse-values {} nil nil))
             position (fn [needle] (.indexOf html (str needle)))
             heading (fn [attribute]
                       (str "<h2><code>" attribute "</code></h2>"))]
@@ -1123,6 +1133,50 @@
             "raw data, schema, and render functions stay under disclosure")
         (is (not (str/includes? html "<h2><code>:db/id</code></h2>"))
             "the entity id is the header's, never a unit of its own")))))
+
+(deftest inspecting-the-page-writes-no-run-evaluation-or-fault-facts
+  ;; Ruling 2026-09-06: preview results live in the invocation cache. A person
+  ;; reading the page is not an agent taking a turn, so repeated inspection
+  ;; must leave the durable counts exactly where it found them.
+  (with-server
+    (fn [connection server _context]
+      (let [durable-counts
+            (fn []
+              (let [database @connection
+                    total (fn [attribute]
+                            (or (db/q {:query
+                                       {:find ['(count ?e) '.]
+                                        :in ['$ '?a]
+                                        :where [['?e '?a]]}
+                                       :args [database attribute]})
+                                0))]
+                {:runs (total :seon.cluster.run/id)
+                 :evaluations (total :seon.cluster.eval/id)
+                 :forms (total :seon.cluster.run.form/ordinal)
+                 :faults (total :seon.error/id)}))
+            subject (URLEncoder/encode
+                     (pr-str [:seon.cluster.agent/id agent-id]) "UTF-8")
+            feed-path (str "/feed/" agent-id "?debug=true"
+                           "&viewer=my.agents.root"
+                           "&subject=" subject
+                           "&output=%3Aseon.render%2Fhtml")
+            inspect! (fn []
+                       (let [stream (open-feed server feed-path)]
+                         (try (read-patches! stream 1)
+                              (finally (.close stream)))))]
+        (open-run! connection "inspection-counts")
+        (db/transact! connection
+                      [{:seon.cluster.eval/id "inspection-counts-e0"
+                        :seon.cluster.eval/run
+                        [:seon.cluster.run/id "inspection-counts"]
+                        :seon.cluster.eval/ordinal 0}])
+        (inspect!)
+        (let [before (durable-counts)]
+          (dotimes [_ 3] (inspect!))
+          (is (= before (durable-counts))
+              "repeated inspection creates no run, evaluation, form, or fault")
+          (is (and (pos? (:runs before)) (pos? (:evaluations before)))
+              "the counters see the facts an ordinary turn writes"))))))
 
 (deftest debug-renderer-definition-uses-retained-program-source
   (let [render-definition (web-private 'debug-renderer-definition)
@@ -1248,11 +1302,14 @@
                       (fn [observation-request]
                         (swap! calls inc)
                         (observe observation-request))]
-          (let [first-result ((web-private 'acquire-debug-data)
-                              @connection request {})
+          (let [projection (sci.kernel/context-projection
+                            (support/fork-cluster-ctx connection))
+                first-result ((web-private 'acquire-debug-data)
+                              projection @connection request {})
                 retained {(:seon.render.web/debug-data-call-id first-result)
                           (:seon.render.web/debug-data-entry first-result)}]
-            ((web-private 'acquire-debug-data) @connection request retained)
+            ((web-private 'acquire-debug-data)
+             projection @connection request retained)
             (is (= 1 @calls)
                 "unchanged debug reads reuse the retained observation")))))))
 

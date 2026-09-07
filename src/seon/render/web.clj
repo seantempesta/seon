@@ -176,7 +176,9 @@
      {:seon.render.debug/viewer-namespace viewer-namespace
       :seon.render.debug/subject subject
       :seon.render/output
-      (if (#{:seon.render/ai :seon.render/html :seon.render/form} output)
+      ;; Ruling 44 retired the form projection: the page asks for the two
+      ;; authored projections and nothing else.
+      (if (#{:seon.render/ai :seon.render/html} output)
         output
         :seon.render/html)
       :seon.render.debug/prompt? (= "true" (get query "prompt"))
@@ -1239,6 +1241,21 @@
               :else []))]
     (into [] (distinct) (ids value))))
 
+(defn- connected-value
+  "One unit's value with its acquired referenced entities in place.
+
+  A pull returns a ref as `{:db/id n}`, which no render function can say
+  anything about. The page already acquired the connected entities for this
+  observation, so a unit renders the entity it points at; an entity outside
+  the bounded acquisition keeps its honest `{:db/id n}`."
+  [related value]
+  (cwalk/postwalk
+   (fn [node]
+     (if (and (map? node) (= [:db/id] (keys node)))
+       (get related (:db/id node) node)
+       node))
+   value))
+
 (defn- selected-unit-experiment
   [render-request attribute output value root cursor]
   (let [call-id [::unit-render attribute output]
@@ -1313,7 +1330,7 @@
 (defn- debug-found-value
   "One declared unit: its key, description, references, and paired outputs."
   [projection render-request debug-request attribute value present?
-   context-selection context-source-call]
+   related context-selection context-source-call]
   (let [attribute-schema (projection-form projection
                                           (forward-attribute attribute))
         description (attribute-description projection attribute)
@@ -1322,6 +1339,7 @@
         cursor {:seon.render.data/path
                 (if (reverse-attribute? attribute) [] [attribute])
                 :seon.render.data/offset 0}
+        value (if present? (connected-value related value) value)
         experiments
         (when present?
           {:seon.render/ai
@@ -1385,26 +1403,28 @@
         [:p "No value is available for render-function selection."]])]))
 
 (defn- other-references-html
-  [debug-request declared-units generic]
+  "Incoming references no declared unit covers, grouped by their attribute.
+
+  The rows are the bounded observation the page already acquired, so this
+  costs no second read of the reference index."
+  [debug-request declared-units observation]
   (let [declared (set (filter reverse-attribute? declared-units))
-        groups (->> (:seon.render.debug/reverse-refs generic)
-                    (remove (fn [[attribute _]]
-                              (declared (reverse-attribute attribute))))
+        groups (->> (get-in observation [:seon.render.data/incoming
+                                         :seon.render.data/datoms])
+                    (remove #(declared (reverse-attribute (:a %))))
+                    (group-by :a)
                     (sort-by (comp str key)))]
     [:section {:class "seon-debug-other-references"}
      [:h2 {:class "seon-debug-caption"} "Other references"]
      (if (seq groups)
        (into [:div]
-             (map (fn [[attribute values]]
+             (map (fn [[attribute datoms]]
                     [:section
                      [:h3 [:code (str attribute)]]
                      (into [:ul]
-                           (map (fn [value]
-                                  [:li
-                                   (if-let [eid (:db/id value)]
-                                     (debug-subject-link debug-request eid eid)
-                                     (debug-value-html value))]))
-                           values)]))
+                           (map (fn [{:keys [e]}]
+                                  [:li (debug-subject-link debug-request e e)]))
+                           (distinct datoms))]))
              groups)
        [:p "No undeclared incoming references were found."])]))
 
@@ -1415,8 +1435,8 @@
   declared units first, then any remaining stored attribute. A declared unit
   the entity does not carry is an honest empty section, never an omission and
   never an error."
-  [projection render-request debug-request acquisition declared-units generic
-   reverse-values context-selection context-source-call]
+  [projection render-request debug-request acquisition declared-units
+   observation reverse-values related context-selection context-source-call]
   (let [declared-set (set declared-units)
         actual-direct
         (if (map? acquisition)
@@ -1439,10 +1459,10 @@
                           entry (when (map? source) (find source attribute))]
                       (debug-found-value
                        projection render-request debug-request attribute
-                       (when entry (val entry)) (some? entry)
+                       (when entry (val entry)) (some? entry) related
                        context-selection context-source-call))))
              attributes))
-     (other-references-html debug-request declared-units generic)]))
+     (other-references-html debug-request declared-units observation)]))
 
 (declare refresh-retained-read-evidence)
 
@@ -1514,7 +1534,20 @@
             (or (:seon.render/namespace request)
                 (when agent-id (assigned-agent-namespace database agent-id)))
             preview
-            (if-not (and agent-id namespace-name)
+            (cond
+              (not (qualified-symbol?
+                    (:seon.cluster.loop/evaluate
+                     (:seon.cluster.loop/cluster request))))
+              (debug-diagnostic
+               ::evaluator-absent
+               "This environment names no evaluator, so no source preview can run."
+               'seon.render.web/render-source-call
+               :seon.cluster.loop/evaluate :seon.cluster.loop/evaluate
+               (select-keys (:seon.cluster.loop/cluster request)
+                            [:seon.cluster/name :seon.cluster.loop/evaluate])
+               ::evaluator-absent nil)
+
+              (not (and agent-id namespace-name))
               (debug-diagnostic
                ::owner-not-ensured
                "Evaluating this preview requires an agent assigned to the viewing namespace."
@@ -1522,6 +1555,8 @@
                :seon.cluster.agent/id :seon.cluster.agent/id
                (select-keys request [:seon.render/namespace :seon.render.value/root])
                ::owner-not-ensured nil)
+
+              :else
               (or (reusable-evaluated-preview request call-entry source namespace-name)
                   (binding [db/*read-evidence-sink* observed]
                     (let [cluster (:seon.cluster.loop/cluster request)
@@ -1611,7 +1646,11 @@
            :seon.render.call/output inspection})
         _ (swap! (:seon.render/captured-calls request)
                  assoc selection-call-id selection-entry)
-        selected (:seon.render.selection/selected inspection)
+        ;; A refused or ambiguous selection is not a producer: the request's
+        ;; declared `:seon.render.call/selected-producer` is a qualified
+        ;; symbol, and handing it anything else refuses the whole page.
+        selected (let [decision (:seon.render.selection/selected inspection)]
+                   (when (qualified-symbol? decision) decision))
         call-id (fn [producer]
                   [::inspection-candidate subject output producer])
         ;; ONE render per unit and output: the selected producer's. The
@@ -1777,13 +1816,6 @@
               {::debug-request effective-request
                ::declared-units declared-units
                ::reverse-values reverse-values
-               ::generic-entity
-               (when-let [eid (:seon.render.data/eid observation)]
-                 (generic-entity
-                  database eid
-                  {:seon.config.eval.result/max-collection
-                   (:seon.render.data/limit effective-request)}
-                  true))
                ::context-selection
                (when-let [agent-id (:seon.cluster.agent/id debug-request)]
                  (context/selection database agent-id))
@@ -1823,7 +1855,6 @@
         acquisition-ms (::acquisition-ms debug-data-output)
         declared-units (::declared-units debug-data-output)
         reverse-values (::reverse-values debug-data-output)
-        generic (::generic-entity debug-data-output)
         captured-calls (atom {data-call-id debug-data-entry})
         render-agent-id (:seon.cluster.agent/id debug-request)
         render-request
@@ -1864,7 +1895,10 @@
         (if render-request
           (debug-found-values-html
            projection render-request debug-request acquisition declared-units
-           generic reverse-values (::context-selection debug-data-output)
+           observation reverse-values
+           (let [related (::related-entities debug-data-output)]
+             (if (map? related) related {}))
+           (::context-selection debug-data-output)
            context-source-call)
           [:section {:id "debug-units" :class "seon-debug-found-values"}
            [:h1 {:class "seon-debug-caption"}
