@@ -275,6 +275,43 @@
       (finally
         (test-support/delete-recursively! repository-root)))))
 
+(deftest superseding-a-durable-root-never-makes-it-ephemeral
+  ;; Observed 2026-09-07: a lane's hook publication inherited
+  ;; SEON_OPERATOR_EPHEMERAL_OWNER_PID, superseded the dead short-lived
+  ;; creator of the shared development root, and left that root ephemeral
+  ;; with reap-on-owner-exit — one lane exit away from the reaper.
+  (let [repository-root (owned-root)
+        durable-root (str (io/file repository-root "durable"))
+        dead (.start (ProcessBuilder. ^java.util.List ["/bin/sleep" "60"]))
+        lane (.start (ProcessBuilder. ^java.util.List ["/bin/sleep" "60"]))]
+    (try
+      (let [dead-identity {:seon.boot/pid (.pid dead)
+                           :seon.boot/start-instant
+                           (operator.state/process-start-instant (.pid dead))}
+            lane-identity {:seon.boot/pid (.pid lane)
+                           :seon.boot/start-instant
+                           (operator.state/process-start-instant (.pid lane))}
+            path (str (operator.state/root-claim-path repository-root
+                                                      durable-root))]
+        (operator/claim-root! {:seon.operator/repository-root repository-root
+                               :seon.operator/managed-root durable-root})
+        (.destroyForcibly dead)
+        (.waitFor dead)
+        (spit path (pr-str (assoc (edn/read-string (slurp path))
+                                  :seon.operator.claim/creator dead-identity)))
+        (let [claim (operator/claim-root!
+                     {:seon.operator/repository-root repository-root
+                      :seon.operator/managed-root durable-root
+                      :seon.operator/ephemeral-owner lane-identity})]
+          (is (false? (:seon.operator.claim/ephemeral? claim)))
+          (is (false? (:seon.operator.claim/reap-on-owner-exit? claim)))
+          (is (not= lane-identity (:seon.operator.claim/creator claim))
+              "the lane never becomes the creator of a root it did not create")))
+      (finally
+        (.destroyForcibly lane)
+        (.waitFor lane)
+        (test-support/delete-recursively! repository-root)))))
+
 (deftest root-claim-refuses-a-live-creator-and-supersedes-a-dead-one
   (let [repository-root (owned-root)
         managed-root (str (io/file repository-root "superseded"))

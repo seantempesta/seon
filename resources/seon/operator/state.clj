@@ -660,6 +660,14 @@
                            :seon.operator.claim/footprint
                            :seon.operator.claim/clusters)
                    previous)
+        ;; A declared ephemeral owner applies only to a root its own lifecycle
+        ;; creates. An existing non-ephemeral root never becomes ephemeral:
+        ;; a lane publishing to the shared development root must not hand
+        ;; that root to the reaper when the lane exits.
+        ephemeral-owner (when (or new-lifecycle?
+                                  (nil? (:seon.operator.claim/creator previous))
+                                  (:seon.operator.claim/ephemeral? previous))
+                          ephemeral-owner)
         _ (when (and ephemeral-owner
                      (not (process-identity-alive? ephemeral-owner)))
             (throw
