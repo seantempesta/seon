@@ -2221,3 +2221,30 @@
                       "#:seon.print{:face :seon.print/vector, :items []}"
                       {:seon.cluster.eval/result-size 3}))
               "a size that matches the stored node is a complete result"))))))
+
+(deftest a-set-print-length-survives-to-the-turns-next-form
+  ;; THE SESSION OWNS THE PRINT BINDINGS, NOT THE FORM. At a `clojure.main`
+  ;; REPL a `set!` of `*print-length*` holds for everything typed after it;
+  ;; the turn's fork is that session, so the next form opens with the value
+  ;; the previous form left rather than the process root's
+  ;; (docs/seon/issues/a-set-of-print-length-does-not-survive-the-next-form.md).
+  (test-support/with-database
+    (fn [connection]
+      (let [{ctx :seon.sci.eval/ctx}
+            (eval/fork-for-turn
+             {:seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
+              :seon.db/db @connection
+              :seon.db/connection connection})
+            setting (run-in ctx "(set! *print-length* 2)" 5000)
+            following (run-in ctx "(vec (range 40))" 5000)
+            unrelated (run-in ctx "(+ 1 1)" 5000)]
+        (is (= 2 (get-in setting [:seon.print/options :seon.print/length])))
+        (is (= 2 (get-in following [:seon.print/options :seon.print/length]))
+            "the next form of the same turn prints the way the agent asked")
+        (is (= 2 (get-in unrelated [:seon.print/options :seon.print/length]))
+            "and so does every form after it, until one sets another value")
+        (let [reset (run-in ctx "(set! *print-length* nil)" 5000)]
+          (is (nil? (get-in reset [:seon.print/options :seon.print/length])))
+          (is (nil? (get-in (run-in ctx "(vec (range 40))" 5000)
+                            [:seon.print/options :seon.print/length]))
+              "clearing the bound carries forward exactly as setting one does"))))))

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, repl, sci, render, print, class/p1]
 ---
@@ -76,3 +76,19 @@ re-deriving it from the process root.
 
 Owner: `src/seon/sci/eval.clj` (`evaluate`'s `eval-form!`) together with
 `src/seon/cluster/loop.clj`'s `evaluate-sources` loop.
+
+## Resolution — 2026-09-07
+
+The SESSION owns the print bindings, not the form. `fork-for-turn` gives the
+turn's fork one print carrier seeded by `session-print-options` — derived from
+the agent's own latest evaluation that recorded `:seon.print/length` or
+`/level`, so the carry crosses turns without remembering anything — and
+`evaluate`'s per-form `sci/binding` now seeds from that carrier instead of the
+process root, writing the ending value back in the same `finally` that already
+captured it for storage (`src/seon/sci/eval.clj`). Regression:
+`seon.sci.eval-test/a-set-print-length-survives-to-the-turns-next-form`.
+
+Still open, separately: settlement stores `:seon.print/length` only when the
+value is an `int?`, so `(set! *print-length* nil)` — a deliberate choice of
+unbounded printing — carries within the JVM's live session but is not stored,
+and a later fork seeds without it (`src/seon/cluster/run.clj:192-197`).

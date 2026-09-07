@@ -1764,6 +1764,36 @@
                                     (admit/semantic-value node)))))
             (sort-by first (or rows []))))))
 
+(defn- latest-print-fact
+  "The value of one print attribute on this agent's latest evaluation to set it."
+  [db agent-id attribute]
+  (when-let [rows (seq (db/q '[:find ?evaluation ?value
+                               :in $ ?agent-id ?attribute
+                               :where
+                               [?agent :seon.cluster.agent/id ?agent-id]
+                               [?run :seon.cluster.run/agent ?agent]
+                               [?evaluation :seon.cluster.eval/run ?run]
+                               [?evaluation ?attribute ?value]]
+                             db agent-id attribute))]
+    (second (last (sort-by first rows)))))
+
+(defn- session-print-options
+  "The print options this agent's session is already in effect with.
+
+  A REPL session keeps a form's `set!` of `*print-length*` until another form
+  changes it, and an agent's session spans turns. So the turn's opening value
+  is DERIVED from the agent's own latest evaluation that recorded one — the
+  stored fact settlement already writes — rather than remembered in the fork
+  that happened to run it. An agent that never set one gets no key, and the
+  shipped default stands."
+  [db agent-id]
+  (when agent-id
+    (let [length (latest-print-fact db agent-id :seon.print/length)
+          level (latest-print-fact db agent-id :seon.print/level)]
+      (cond-> {}
+        (int? length) (assoc :seon.print/length length)
+        (int? level) (assoc :seon.print/level level)))))
+
 (defn fork-for-turn
   "Fork the live base, rehydrate the selected agent's defs, and bind its
   stored evaluation handles.
@@ -1782,7 +1812,14 @@
               (env/carry-state
                (env/environment-state (env/of base-ctx)))
               true
-              (assoc ::turn-fork? true))
+              (assoc ::turn-fork? true)
+              ;; THE SESSION OWNS THE PRINT BINDINGS, NOT THE FORM. Every
+              ;; form of this turn reads and updates the one carrier, so a
+              ;; `set!` of `*print-length*` holds for the forms that follow
+              ;; it exactly as it does at a `clojure.main` REPL.
+              true
+              (assoc ::print-session
+                     (atom (or (session-print-options db agent-id) {}))))
         entry-ids
         (db/q '[:find [?entry ...]
                 :in $ ?agent
@@ -2011,7 +2048,7 @@
     live-declaration? :seon.sci.eval/live-declaration?
     namespace-name :seon.sci.eval/namespace-name
     namespace-unmap? :seon.sci.eval/namespace-unmap?
-    source :seon.cluster.run.form/source}]
+    source :seon.cluster.eval/source}]
   (let [removed-identities
         (when namespace-unmap?
           (removed-program-identities
@@ -2152,12 +2189,12 @@
   what happened, which is the one thing a diagnostic may never do.
 
   An arm that does not name the value's keys cannot omit them. The namespace
-  is the form's own `:seon.cluster.run.form/ns` reference, so nothing here has
+  is the form's own `:seon.cluster.eval/ns` reference, so nothing here has
   to guess where the form was going to run."
   {:malli/schema [:=> [:cat :seon.sci.eval/unrun-request]
                   :seon.sci.eval/evaluation]}
   [{value :seon.sci.admit/value
-    namespace-ref :seon.cluster.run.form/ns
+    namespace-ref :seon.cluster.eval/ns
     duration-ms :seon.eval/duration-ms
     interrupted-at :seon.cluster.eval/interrupted-at
     :as request}]
@@ -2206,14 +2243,14 @@
   rides through with `fn-entries` and `allocated-bytes` intact."
   {:malli/schema [:=> [:cat :seon.sci.eval/request]
                   :seon.sci.eval/evaluation]}
-  [{:keys [:seon.cluster.run.form/source :seon.sci.admit/caps]
+  [{:keys [:seon.cluster.eval/source :seon.sci.admit/caps]
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
     run-id :seon.cluster.run/id
-    form-ordinal :seon.cluster.run.form/ordinal
+    form-ordinal :seon.cluster.eval/ordinal
     cluster-name :seon.boot/cluster-name
     work-launcher :seon.flow/work-launcher
-    namespace-ref :seon.cluster.run.form/ns
+    namespace-ref :seon.cluster.eval/ns
     output-prefix :seon.sci.eval/output-prefix
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error
@@ -2231,7 +2268,7 @@
                        run-id
                        (assoc :seon.cluster.run/id run-id)
                        (some? form-ordinal)
-                       (assoc :seon.cluster.run.form/ordinal form-ordinal))
+                       (assoc :seon.cluster.eval/ordinal form-ordinal))
         turn-environment
         (some-> (env/of base-evaluation-ctx)
                 (env/scope turn-members))
@@ -2269,6 +2306,9 @@
                 (when-let [disarm (::kernel/stop! @arm-state)]
                   (disarm)))
         printed (java.io.StringWriter.)
+        ;; A turn's fork carries the session's print options; a host caller
+        ;; that forked nothing gets a carrier of its own for its own forms.
+        print-session (or (::print-session evaluation-ctx) (atom {}))
         connection (get-in evaluation-ctx
                            [::custody :seon.db/connection])
         receipt (when (and run-id (some? form-ordinal))
@@ -2304,10 +2344,10 @@
                                   (env/scope
                                    {:seon.cluster.agent/id agent-id
                                     :seon.cluster.run/id run-id
-                                    :seon.cluster.run.form/ordinal form-ordinal}))
+                                    :seon.cluster.eval/ordinal form-ordinal}))
                           :seon.db/connection connection
                           :seon.cluster.run/id run-id
-                          :seon.cluster.run.form/ordinal form-ordinal
+                          :seon.cluster.eval/ordinal form-ordinal
                           :seon.cluster.agent/id agent-id
                           :seon.flow/work-launcher work-launcher
                           :seon.boot/cluster-name cluster-name
@@ -2348,8 +2388,12 @@
               (sci/binding [sci/ns namespace-object
                             sci/out printed
                             sci/err printed
-                            sci/print-length @sci/print-length
-                            sci/print-level @sci/print-level
+                            sci/print-length (get @print-session
+                                                  :seon.print/length
+                                                  @sci/print-length)
+                            sci/print-level (get @print-session
+                                                 :seon.print/level
+                                                 @sci/print-level)
                             sci/print-namespace-maps true
                             sci/print-readably true]
                 (try
@@ -2360,10 +2404,13 @@
                     ;; `set!` mutates SCI's current dynamic print binding.
                     ;; Capture it while that binding is still installed;
                     ;; after `sci/binding` unwinds only the host/default face
-                    ;; remains and the agent's choice is unrecoverable.
-                    (vreset! print-options
-                             {:seon.print/length @sci/print-length
-                              :seon.print/level @sci/print-level})))))
+                    ;; remains and the agent's choice is unrecoverable. The
+                    ;; session carrier takes the same ending value, which is
+                    ;; what the NEXT form opens with.
+                    (let [ending {:seon.print/length @sci/print-length
+                                  :seon.print/level @sci/print-level}]
+                      (vreset! print-options ending)
+                      (reset! print-session ending))))))
             projection
             (evaluation-projection {:seon.sci.eval/ctx evaluation-ctx})
             {base-declared-row :seon.sci.eval/base-declared-row
@@ -2408,7 +2455,7 @@
               :seon.sci.eval/live-declaration? live-declaration?
               :seon.sci.eval/namespace-name namespace-name
               :seon.sci.eval/namespace-unmap? namespace-unmap?
-              :seon.cluster.run.form/source source})
+              :seon.cluster.eval/source source})
             var-row (definition-row execution-ctx projection
                                     before-intern-values source)
             row (or var-row reader-row)
@@ -2587,8 +2634,8 @@
         (evaluate
          (assoc request
                 :seon.sci.eval/ctx ctx
-                :seon.cluster.run.form/source (:seon.test/source row)
-                :seon.cluster.run.form/ns
+                :seon.cluster.eval/source (:seon.test/source row)
+                :seon.cluster.eval/ns
                 [:seon.ns/name (get-in row [:seon.test/ns :seon.ns/name])]))]
     (if (:seon.cluster.eval/error evaluation)
       (candidate-test-result test-symbol evaluation)
@@ -2612,7 +2659,7 @@
     database :seon.db/db
     connection :seon.db/connection
     agent-id :seon.cluster.agent/id
-    source :seon.cluster.run.form/source
+    source :seon.cluster.eval/source
     test-symbols :seon.test.accretion/gate-set
     analyzed-row :seon.program/row
     :as request}]
@@ -2624,7 +2671,7 @@
         evaluation
         (evaluate (assoc request
                          :seon.sci.eval/ctx ctx
-                         :seon.cluster.run.form/source source))
+                         :seon.cluster.eval/source source))
         row (or analyzed-row (:seon.program/row evaluation))
         evaluation (cond-> evaluation row (assoc :seon.program/row row))]
     (if (or (:seon.cluster.eval/error evaluation)
