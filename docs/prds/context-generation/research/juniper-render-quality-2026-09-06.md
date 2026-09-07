@@ -181,3 +181,22 @@ view rather than presentation text.
 The focused `my.plan-test` gate evaluated both generated source forms through
 SCI and passed 13 tests / 144 assertions. Its cross-agent case also proves an
 explicit selected item remains inspectable regardless of ownership.
+
+## Plan hierarchy fixture and presentation
+
+The Juniper fixture now records one parent objective with four concrete child
+steps: inspected identity/messages (completed by the fixture verification),
+render the plan (current and ready), compare refreshed results (blocked), and
+try the assembled live context (blocked behind the comparison). This describes
+the inspection work performed here; it does not claim Juniper completed a model
+turn. A read after installation returned exactly one ready item, two blocked
+items, and the one completed verification.
+
+Plan HTML now makes state, stable identity, description, expected evidence,
+parent, and dependencies visually distinct. Current, open, and completed cards
+use the existing signal, info, and success colors; aggregate cards omit the old
+repeated generic explanation. AI lines carry the same parent, dependency, and
+expected-result facts, while the plan introduction retains a concrete
+`seon.db/transact!` update form using an actual visible item identity. The
+focused gate passed 13 tests / 147 assertions, and `bin/css` compiled the
+maintained stylesheet successfully.

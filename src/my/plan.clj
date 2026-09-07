@@ -918,7 +918,11 @@
        (when-let [description (:my.plan.item/description item)]
          (str " — " description))
        (when-let [expected (:my.plan.item/expected-result item)]
-         (str " — expect " expected))))
+         (str " — done when " expected))
+       (when-let [parent (:my.plan.item/parent item)]
+         (str " — under " (pr-str parent)))
+       (when-let [needs (seq (:my.plan.item/needs item))]
+         (str " — needs " (str/join ", " (map pr-str needs))))))
 
 (defn format-item-ai
   "Format one authored plan item as terminal text."
@@ -945,32 +949,37 @@
   "Explain one step in an agent's plan and its expected outcome."
   {:malli/schema [:=> [:cat :my.plan.item/item] :seon.render/hiccup]}
   [item]
-  (let [database (:seon.db/db item)
+  (let [current? (:my.plan/current? item)
         item (item-value item)
-        agent-ref (:my.plan.item/agent item)
-        owner-data (when (and database agent-ref)
-                (db/pull database
-                         [:seon.cluster.agent/id
-                          {:my.plan/anchor [:my.plan.item/id]}]
-                         (if (map? agent-ref) (:db/id agent-ref) agent-ref)))
-        owner (:seon.cluster.agent/id owner-data)
-        current? (= (:my.plan.item/id item)
-                    (get-in owner-data [:my.plan/anchor :my.plan.item/id]))
         completed? (some? (:my.plan.item/completed-at item))]
-    (cond-> [:article {:class "seon-family-entry my-plan-item"}
+    (cond-> [:article {:class (str "seon-family-entry my-plan-item "
+                                  (cond completed? "is-completed"
+                                        current? "is-current"
+                                        :else "is-open"))}
              [:p {:class "my-plan-id"}
-              (str (if owner (str owner "’s plan") "Agent plan step")
-                   " · " (cond completed? "Completed"
-                               current? "Current focus"
-                               :else "Open step"))]
+              [:span {:class "my-plan-state"}
+               (cond completed? "Completed"
+                     current? "Current focus"
+                     :else "Open")]
+              [:code (pr-str (:my.plan.item/id item))]]
              [:h3 (:my.plan.item/title item)]
-             [:p "The agent maintains this plan as it works: it can revise the steps, record progress, and mark work complete."]]
+             ]
       (:my.plan.item/description item)
       (conj [:p (:my.plan.item/description item)])
 
       (:my.plan.item/expected-result item)
       (conj [:p {:class "my-plan-expected"}
              [:strong "Done when: "] (:my.plan.item/expected-result item)])
+
+      (:my.plan.item/parent item)
+      (conj [:p {:class "my-plan-relation"}
+             [:strong "Part of "]
+             [:code (pr-str (:my.plan.item/parent item))]])
+
+      (seq (:my.plan.item/needs item))
+      (conj [:p {:class "my-plan-relation"}
+             [:strong "Waiting for "]
+             (str/join ", " (map pr-str (:my.plan.item/needs item)))])
 
       true
       (conj [:details
@@ -1072,10 +1081,14 @@
          (list `plan {}))))
 
 (defn- item-list-html
-  [title items css-class]
+  [title items css-class anchor]
   (into [:section {:class css-class}
          [:h3 (str title " (" (count items) ")")]]
-        (map render-item-html)
+        (map (fn [item]
+               (render-item-html
+                (cond-> item
+                  (= [:my.plan.item/id (:my.plan.item/id item)] anchor)
+                  (assoc :my.plan/current? true)))))
         items))
 
 (defn render-plan-html
@@ -1083,7 +1096,8 @@
   {:malli/schema [:=> [:cat :my.plan/view] :seon.render/hiccup]}
   [view]
   (let [derived-obligations (:my.plan/obligations view)
-        older (:my.plan/older-completions view)]
+        older (:my.plan/older-completions view)
+        anchor (:my.plan/anchor view)]
     (cond->
      [:section {:class "seon-family-entry my-plan"}
       [:h2 (str (:seon.cluster.agent/id view) "’s plan")]
@@ -1099,12 +1113,12 @@
                         (:my.plan/obligation-title obligation))]))
             derived-obligations)
       (item-list-html "Ready to work on" (:my.plan/ready view)
-                      "my-plan-ready")
+                      "my-plan-ready" anchor)
       (item-list-html "Waiting on other steps" (:my.plan/blocked view)
-                      "my-plan-blocked")
+                      "my-plan-blocked" anchor)
       (item-list-html "Recent completions"
                       (:my.plan/recent-completions view)
-                      "my-plan-completed")]
+                      "my-plan-completed" anchor)]
       older
       (conj [:p {:class "my-plan-elision"}
              (print/render-elision-ai older)]))))

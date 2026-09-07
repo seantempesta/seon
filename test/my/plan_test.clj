@@ -183,7 +183,9 @@
   (with-plan
     (fn [connection]
       (let [limit (:seon.config.render.agent/max-children (config/defaults))]
-        (add connection "open" "Current work" {:my.plan/anchor? true})
+        (add connection "open" "Current work"
+             {:my.plan/anchor? true
+              :my.plan.item/expected-result "The current work is verified."})
         (doseq [index (range (+ limit 3))]
           (let [id (format "done-%02d" index)]
             (add connection id (str "Completed " index))
@@ -253,6 +255,9 @@
             (is (seon.schema/valid-candidate-value? :seon.render/ai source))
             (is (seon.schema/valid-candidate-value? :seon.render/hiccup html))
             (is (str/includes? ai "Current work"))
+            (is (str/includes? ai "seon.db/transact!"))
+            (is (str/includes? (pr-str html) "is-current"))
+            (is (str/includes? (pr-str html) "Done when:"))
             (is (= :section (first html)))))))))
 
 (defn- item-count

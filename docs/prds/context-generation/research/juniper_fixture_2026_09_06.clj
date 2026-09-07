@@ -30,19 +30,49 @@
                 {:tx-data
                  [{:my.plan.item/id "juniper/understand-context"
                    :my.plan.item/agent [:seon.cluster.agent/id "juniper"]
-                   :my.plan.item/title "Make my plan and messages useful context"
+                   :my.plan.item/title "Improve Juniper context inspection"
                    :my.plan.item/description
-                   "Inspect the facts connected to my agent entity. Compare the AI and HTML renderings, then improve the functions with Sean."
+                   "Make identity, messages, plans, changed results, and the eventual live agent context easy to inspect together."
                    :my.plan.item/expected-result
-                   "Two clear blocks: the work I am doing and the new messages I should respond to."}
+                   "A clear paired context view whose facts and rendered results can be checked without guessing."}
+                  {:my.plan.item/id "juniper/inspect-identity-messages"
+                   :my.plan.item/agent [:seon.cluster.agent/id "juniper"]
+                   :my.plan.item/parent [:my.plan.item/id "juniper/understand-context"]
+                   :my.plan.item/title "Inspect identity and messages"
+                   :my.plan.item/description
+                   "Verify the fixture identity and the two sample messages in the paired AI and HTML blocks."
+                   :my.plan.item/expected-result
+                   "Juniper identity and both root messages were visible in the context inspection page."
+                   :my.plan.item/completed-at #inst "2026-09-07T01:30:00Z"}
+                  {:my.plan.item/id "juniper/render-plan"
+                   :my.plan.item/agent [:seon.cluster.agent/id "juniper"]
+                   :my.plan.item/parent [:my.plan.item/id "juniper/understand-context"]
+                   :my.plan.item/title "Render this plan clearly"
+                   :my.plan.item/description
+                   "Show current focus, ready work, dependencies, completed evidence, and exact item references."
+                   :my.plan.item/expected-result
+                   "The plan reads as a compact hierarchy in both AI text and HTML."}
+                  {:my.plan.item/id "juniper/compare-changed-results"
+                   :my.plan.item/agent [:seon.cluster.agent/id "juniper"]
+                   :my.plan.item/parent [:my.plan.item/id "juniper/understand-context"]
+                   :my.plan.item/needs [[:my.plan.item/id "juniper/render-plan"]]
+                   :my.plan.item/title "Compare refreshed results"
+                   :my.plan.item/description
+                   "Change one relevant fact and compare the locked evaluation with the refreshed result."
+                   :my.plan.item/expected-result
+                   "The comparison names the changed result while preserving the locked baseline."}
                   {:my.plan.item/id "juniper/try-live-turn"
                    :my.plan.item/agent [:seon.cluster.agent/id "juniper"]
+                   :my.plan.item/parent [:my.plan.item/id "juniper/understand-context"]
+                   :my.plan.item/needs [[:my.plan.item/id "juniper/compare-changed-results"]]
                    :my.plan.item/title "Try the assembled context in a live agent turn"
                    :my.plan.item/description
-                   "After reviewing the blocks, test whether the agent can find its data and update its plan."}
+                   "After the visual and result checks pass, ask Juniper to find the same facts and update its own plan."
+                   :my.plan.item/expected-result
+                   "Juniper identifies the current step and records a truthful plan update from the assembled context."}
                   {:db/id [:seon.cluster.agent/id "juniper"]
                    :my.plan/anchor
-                   [:my.plan.item/id "juniper/understand-context"]}
+                   [:my.plan.item/id "juniper/render-plan"]}
                   {:seon.cluster.message/id "design-lab/root-to-juniper/1"
                    :seon.cluster.message/from [:seon.cluster.agent/id "root"]
                    :seon.cluster.message/to [:seon.cluster.agent/id "juniper"]
