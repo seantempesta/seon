@@ -364,3 +364,27 @@ reload is unsafe because Clojure recompiles `defrecord`: a disposable live
 probe confirmed old instances cease to satisfy a later `instance?` predicate.
 Guarding the constructor's bound Var did not solve that class identity
 problem. No production record workaround has been installed.
+
+## Saving an evaluated preview into assembled context — 2026-09-07
+
+The run owner now accepts the captured immutable database, exact reply text,
+opening/closing instants, and `loop/evaluate-sources` outcomes through
+`run/record-evaluated-tx`. Each evaluation records its actual start instant in
+that shared reduction. Saving stages reply/results through the existing blob
+owners and builds one writer call. It reuses the existing namespace/form
+constructor, evaluation start row, terminal facts and read-evidence projection.
+It does not claim the agent, evaluate source, install definitions or deliver
+returned effects. The context contribution is appended in the same transaction.
+
+The writer compares the immutable run/form/evaluation content when the cached
+run identity already exists. Equal content returns no transaction data; a
+conflict refuses the whole transaction. Thus simultaneous Add requests can
+reference the same saved evaluations without a caller existence pre-read or a
+second saved-state flag. The opening commit comes from the preview database,
+not the connection value at the time of Add. Focused verification is in
+`test/seon/cluster/evaluate_sources_test.clj`. The focused gate passed one test
+and 100 assertions with zero failures/errors (`tmp/saved-evaluations-gate.log`):
+a real SCI batch saves while its agent holds a separate run, two contributions
+reuse one saved evaluation population, and a conflicting reply aborts its
+preceding contribution atomically. The earlier preview phase refuses any blob
+staging. Live web integration remains separate.

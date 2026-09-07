@@ -34,6 +34,7 @@
                     :completion :seon.flow/channel,
                     :evaluation
                     [:map
+                     [:seon.cluster.eval/at {:optional true} :seon.cluster.eval/at]
                      [:seon.sci.admit/value
                       [:any
                        {:seon.schema.admission/exemption

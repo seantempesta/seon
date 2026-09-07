@@ -40,13 +40,47 @@
                    :evaluation-facts-request
                    [:map
                     [:seon.cluster.run/id :seon.cluster.run/id]
-                    [:seon.cluster.run/process :seon.cluster.run/process]
+                    [:seon.cluster.run/process {:optional true} :seon.cluster.run/process]
                     [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
                     [:seon.sci.eval/evaluation :seon.cluster.loop/evaluation]
                     [:seon.cluster.loop/settlement-evaluation :seon.cluster.loop/evaluation]
                     [:seon.problems/form-problem {:optional true} :seon.problems/form-problem]
                     [:seon.def/rows {:optional true} :seon.def/rows]
                     [:my.run/value {:optional true} :my.run/value]],
+                   :record-evaluated-request
+                   [:map
+                    [:seon.cluster.loop/cluster :seon.cluster.loop/cluster]
+                    [:seon.db/db :seon.db/database-value]
+                    [:seon.cluster.run/id :seon.cluster.run/id]
+                    [:seon.cluster.run/agent :seon.cluster.run/agent]
+                    [:seon.cluster.run/starting-ns :seon.cluster.run/starting-ns]
+                    [:seon.cluster.run/reply :seon.cluster.run/reply]
+                    [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]
+                    [:seon.cluster.run/closed-at :seon.cluster.run/closed-at]
+                    [:seon.cluster.loop/evaluated-sources
+                     [:vector
+                      [:and :seon.cluster.loop/evaluated-source
+                       [:map
+                        [:seon.sci.eval/evaluation
+                         [:map [:seon.cluster.eval/at :seon.cluster.eval/at]]]]]]]],
+                   :record-evaluated-call-request
+                   [:map
+                    [:seon.cluster.run/id :seon.cluster.run/id]
+                    [:seon.cluster.run/agent :seon.cluster.run/agent]
+                    [:seon.cluster.run/starting-ns :seon.cluster.run/starting-ns]
+                    [:seon.cluster.run/opening-commit-id :seon.cluster.run/opening-commit-id]
+                    [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]
+                    [:seon.cluster.run/closed-at :seon.cluster.run/closed-at]
+                    [:seon.cluster.run/reply {:optional true} :seon.cluster.run/reply]
+                    [:seon.cluster.run/reply-blob {:optional true} :seon.cluster.run/reply-blob]
+                    [:seon.cluster.run/reply-size :seon.cluster.run/reply-size]
+                    [:seon.cluster.run/sources :seon.cluster.reply/sources]
+                    [:seon.cluster.run/evaluations
+                     [:vector [:and :seon.cluster.eval/settle-request
+                               [:map
+                                [:seon.cluster.eval/at :seon.cluster.eval/at]
+                                [:seon.cluster.eval/source :seon.cluster.eval/source]
+                                [:seon.cluster.eval/ns :seon.cluster.eval/ns]]]]]],
                    :system-run-request
                    [:map
                     [:seon.cluster.agent/id :seon.cluster.agent/id]

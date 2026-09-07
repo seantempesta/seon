@@ -1560,6 +1560,7 @@
                           [:seon.ns/name namespace-name])
               database (or snapshot @connection)
               captured (atom [])
+              at (java.util.Date.)
               request
               (cond-> (evaluation-request
                        {::admitted-form form
@@ -1592,6 +1593,7 @@
                 evaluation)
               evaluation
               (assoc evaluation
+                     :seon.cluster.eval/at at
                      :seon.cluster.eval/read-evidence (db/read-evidence @captured)
                      :seon.cluster.eval/read-basis-transaction (db/basis-t database))]
           (sci.eval/bind-result! ctx ordinal (:seon.sci.admit/value evaluation))
