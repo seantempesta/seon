@@ -6,6 +6,33 @@ tags: [prd, agent, context, architecture]
 
 # The working edge — context-generation program
 
+## Integration rulings by the render owner — 2026-09-07 05:30Z
+
+Three seams surfaced when the lanes' slices met on the live page, each
+settled in `src/seon/render.clj` with a regression in
+`seon.render-simplification-test`:
+
+- An attribute-declared producer is selected for AI and HTML when a request
+  names the attribute (`:seon.render.walk/attribute`) and receives the
+  attribute's value in its TRANSACTION shape, whether the caller handed the
+  owning entity or the pulled connected entities (`b14983546`, `43a80d881`).
+- An entity map lacking the attribute is a neighbour the walk reached
+  through it, never the attribute's value; it renders by its own shape
+  (`4d7bac8fa`).
+- An agent-owned attribute's HTML producer derives the owner from the value
+  through the reverse component edge; only the database is call-prepared.
+  The AI source legitimately resolves to the calling agent because it runs
+  in that agent's turn (`4a14f3058`, `my.plan/render-plan-html`). The
+  page-wide viewer fork stays filed as
+  [an issue](../../../seon/issues/debug-html-render-carries-no-agent-scoped-environment.md).
+
+Lane results: plan component landed (`90dce20b0`, 17 tests / 146
+assertions; fixture rewritten; Juniper migrated in place, 5 old items
+retracted); page as declared units landed (`6a4989c51`…`b9cf09d9d`, ten
+loads write no run/evaluation/fault facts: 609/606/606/5 held); the render
+proc wedge on one render exception is filed as a blocker. The units lane
+(messages, history, faults, namespace, identity) was still running.
+
 ## Owner confirmations and lane switch — 2026-09-07 04:00Z
 
 Owner: `:seon.render/form` is removed as a concept; `:seon.render/ai` is
