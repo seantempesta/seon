@@ -141,12 +141,17 @@ eventually make that admitted-generation transition coherent; reintroducing a
 pre-validation reload would only move the same risk earlier.
 
 The first live publication after removing the reload roster refused an invalid
-incremental manifest before any reload: the retained publisher produced a
-synthetic row with nil `:seon.ns/name`, and the existing
-`seon.fn/manifest-function-symbols` contract rejected it. That refusal is
-evidence that an older live publication implementation may be unable to admit a
-newer filesystem snapshot. It is preferable to mixed loaded code, but means a
-live publisher compatibility check remains part of this issue's acceptance.
+incremental manifest before any reload. The diagnostic showed a nil
+`:seon.ns/name`, but that was the first failing branch of Malli's row union, not
+an actual nil namespace in the manifest. Inspecting the unwrapped
+`build-manifest` result found 246 artifacts and no nil namespace identity. The
+real rows lacked the required `:seon.schema.admission/source` provenance, and
+artifact call edges retained analyzer vectors even though the declared
+cardinality-many `:seon.fn/calls` value is a set. Canonical artifact admission
+now adds `:core` provenance and normalizes call edges at that boundary. The
+focused artifact regression asserts both facts. This was a dishonest producer
+shape exposed by universal output instrumentation, rather than stale schema
+validation.
 
 The cached-manifest admission now validates both the process-local analysis
 cache and the persisted source artifact against

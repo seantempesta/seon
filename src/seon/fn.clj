@@ -370,8 +370,9 @@
         (assoc :seon.test/usage true)
         (seq (get calls-by-caller (str qualified)))
         (assoc :seon.fn/calls
-               (mapv (fn [target] [:seon.fn/sym target])
-                     (sort (get calls-by-caller (str qualified)))))
+               (into #{}
+                     (map (fn [target] [:seon.fn/sym target]))
+                     (get calls-by-caller (str qualified))))
         (keyword-values used-keywords qualified)
         (assoc :seon.fn/keywords (keyword-values used-keywords qualified))
         (test-subject metadata)
@@ -394,8 +395,9 @@
                         {})))
         (seq (get calls-by-caller (str qualified)))
         (assoc :seon.fn/calls
-               (mapv (fn [target] [:seon.fn/sym target])
-                     (sort (get calls-by-caller (str qualified)))))
+               (into #{}
+                     (map (fn [target] [:seon.fn/sym target]))
+                     (get calls-by-caller (str qualified))))
         (keyword-values used-keywords qualified)
         (assoc :seon.fn/keywords (keyword-values used-keywords qualified))
         (test-subject metadata)
@@ -573,8 +575,9 @@
               (::analyzer/macro definition) (assoc :seon.fn/macro? true)
               (seq (get calls-by-caller program-symbol))
               (assoc :seon.fn/calls
-                     (mapv (fn [target] [:seon.fn/sym target])
-                           (sort (get calls-by-caller program-symbol))))
+                     (into #{}
+                           (map (fn [target] [:seon.fn/sym target]))
+                           (get calls-by-caller program-symbol)))
               (keyword-values used-keywords qualified)
               (assoc :seon.fn/keywords
                      (keyword-values used-keywords qualified))
@@ -747,7 +750,12 @@
 (defn- artifact
   [file context rows findings]
   (let [canonical-path (.getCanonicalPath ^java.io.File file)
-        canonical-rows (mapv program/canonical-row rows)]
+        canonical-rows
+        (mapv #(cond-> (assoc (program/canonical-row %)
+                              :seon.schema.admission/source :core)
+                 (:seon.fn/calls %)
+                 (update :seon.fn/calls set))
+              rows)]
     (cond->
      {:seon.fn.file/path canonical-path
       :seon.fn.file/digest (sha-256 (:bytes context))

@@ -180,10 +180,10 @@
       (is (string? (:seon.fn/spec leaf)))
       (is (= :io (:seon.fn/workload leaf))))
     (testing "call edges alone reveal the capability owner"
-      (is (= [[:seon.fn/sym "sample.capability/leaf"]]
+      (is (= #{[:seon.fn/sym "sample.capability/leaf"]}
              (:seon.fn/calls (get by-symbol "sample.capability/pure-caller"))))
-      (is (= [[:seon.fn/sym "sample.capability/compute-leaf"]
-              [:seon.fn/sym "sample.capability/leaf"]]
+      (is (= #{[:seon.fn/sym "sample.capability/compute-leaf"]
+               [:seon.fn/sym "sample.capability/leaf"]}
              (:seon.fn/calls (get by-symbol "sample.capability/mixed-caller")))))
     (testing "a pure blocking helper remains capability-free"
       (is (= :io
@@ -336,10 +336,10 @@
         (is (= :none
                (:seon.fn/projection-boundary
                 (get by-id [:seon.fn/sym "sample.core/contracted"]))))
-        (is (= [[:seon.fn/sym "sample.core/helper"]]
+        (is (= #{[:seon.fn/sym "sample.core/helper"]}
                (:seon.fn/calls
                 (get by-id [:seon.fn/sym "sample.core/contracted"]))))
-        (is (= [[:seon.fn/sym "sample.core/contracted"]]
+        (is (= #{[:seon.fn/sym "sample.core/contracted"]}
                (:seon.fn/calls
                 (get by-id [:seon.test/sym "sample.core/example-test"]))))
         (is (= "Macro doc."
@@ -362,8 +362,8 @@
         (is (nil? (:seon.fn/spec
                    (get by-id [:seon.fn/sym "sample.core/sample-macro"])))
             "macro rows do not claim runtime function contracts")
-        (is (= [[:seon.fn/sym "clojure.string/trim"]
-                [:seon.fn/sym "sample.core/sample-macro"]]
+        (is (= #{[:seon.fn/sym "clojure.string/trim"]
+                 [:seon.fn/sym "sample.core/sample-macro"]}
                (:seon.fn/calls
                 (get by-id [:seon.fn/sym "sample.core/helper"])))
             "macro calls remain first-party graph edges")
@@ -928,6 +928,15 @@
           ["artifact.alpha/target"]})]
     (testing "the complete manifest is stable and partitions every file"
       (is (= manifest repeated))
+      (is (every? #(= :core (:seon.schema.admission/source %))
+                  (mapcat :seon.fn.file/rows
+                          (:seon.fn.manifest/artifacts manifest)))
+          "every analyzed declaration enters the manifest with its provenance")
+      (is (every? set?
+                  (keep :seon.fn/calls
+                        (mapcat :seon.fn.file/rows
+                                (:seon.fn.manifest/artifacts manifest))))
+          "cardinality-many call facts retain their declared transaction shape")
       (is (= #{(.getCanonicalPath alpha) (.getCanonicalPath beta)}
              (set (keys artifacts))))
       (is (re-matches #"[0-9a-f]{64}"
@@ -954,9 +963,9 @@
                (map :seon.fn.file/path
                     (:seon.fn.manifest/artifacts changed))))))
     (testing "one-file analysis records every call target (ruling 42b)"
-      (is (= [[:seon.fn/sym "artifact.alpha/target"]
-              [:seon.fn/sym "clojure.core/str"]
-              [:seon.fn/sym "clojure.string/trim"]]
+      (is (= #{[:seon.fn/sym "artifact.alpha/target"]
+               [:seon.fn/sym "clojure.core/str"]
+               [:seon.fn/sym "clojure.string/trim"]}
              (:seon.fn/calls beta-caller)))
       (is (= beta-artifact incremental)))
     (testing "the file digest covers exact bytes, including CRLF"
