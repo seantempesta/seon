@@ -1720,14 +1720,17 @@
                                  :seon.fn.file/first-party-functions
                                  known-functions}))]
                  (seon.fn/plan-file-change
-                  {:seon.fn.change/status
-                   (cond
-                     (not (.exists file)) :deleted
-                     (not clojure-source?) :schema-resource
-                     current :modified
-                     :else :added)
-                   :seon.fn.change/current-artifact current
-                   :seon.fn.change/desired-artifact desired})))
+                  (cond->
+                   {:seon.fn.change/status
+                    (cond
+                      (not (.exists file)) :deleted
+                      (not clojure-source?) :schema-resource
+                      current :modified
+                      :else :added)}
+                    current
+                    (assoc :seon.fn.change/current-artifact current)
+                    desired
+                    (assoc :seon.fn.change/desired-artifact desired)))))
               paths)
              (catch clojure.lang.ExceptionInfo failure
                (if (= :seon.fn/index-refused (:seon.error/kind (ex-data failure)))

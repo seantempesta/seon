@@ -153,6 +153,11 @@ focused artifact regression asserts both facts. This was a dishonest producer
 shape exposed by universal output instrumentation, rather than stale schema
 validation.
 
+The next incremental adoption exposed the same nil-as-absence defect in its
+change request: absent current and desired artifacts were stored as optional
+keys with nil values. The refresh planner now omits those keys, so the existing
+`plan-file-change` contract receives the exact open-map shape it declares.
+
 The cached-manifest admission now validates both the process-local analysis
 cache and the persisted source artifact against
 `:seon.fn.manifest/manifest`. An invalid cache takes the existing complete
