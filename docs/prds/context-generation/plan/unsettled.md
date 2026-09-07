@@ -6,14 +6,23 @@ tags: [prd, agent, context, architecture]
 
 # The working edge — context-generation program
 
-## Owner vocabulary correction — assembling context, 2026-09-06
+## Owner correction — selected entity and attributes, 2026-09-06 evening
 
-Use “Add to context” and “Assembled context”; “locked” misdescribes the task.
-Manual assembly lets us improve each entity's data and rendering before the
-same process runs automatically to construct real agent context. A saved
-evaluation records the value at that point, so later results can be compared.
-Older references to locking below describe that same operation, not a separate
-state or mechanism.
+The debug page clearly identifies one selected entity, then details each of its
+attributes once. Each section has the exact key, its Malli `:description`, and
+paired AI/HTML renders. Raw data and schema remain expandable. References are
+links to select another entity. Direct attributes come first; incoming
+references belong at the bottom and may gain renderings as we iterate.
+Cardinality-many values belong in one section.
+
+The agent owns one plan component ref; that component owns its plan items.
+The full plan renders once, including its hierarchy, progress and update forms.
+Separate reverse-linked plan-item sections are not the requested presentation.
+Default render functions belong to shared schema/domain owners, never Juniper.
+
+Do not label this surface “Assembled context”, “locked”, or numbered blocks.
+Context selection and evaluation reuse remain required behavior, but do not
+replace the entity/attribute layout. Earlier vocabulary below is superseded.
 
 ## Integration checkpoint — 2026-09-06, provider-bound context
 

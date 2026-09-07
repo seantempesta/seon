@@ -737,16 +737,15 @@
   [ctx db function-symbol]
   (let [{source ::function-source
          namespace-name ::function-namespace}
-        (kernel/program-function ctx function-symbol)
-        namespace-row
-        (kernel/program-namespace ctx namespace-name)]
+        (kernel/program-function ctx function-symbol)]
     (when-not source
       (throw
-       (ex-info "Selected function has no durable program row."
+       (ex-info "Selected function is missing from the acquired SCI program snapshot."
                 {:seon.error/kind ::missing-function-row
                  ::missing-function-row function-symbol
                  :seon.fn/sym (str function-symbol)})))
-    (sci/install-namespace-bindings!
+    (let [namespace-row (kernel/program-namespace ctx namespace-name)]
+      (sci/install-namespace-bindings!
        ctx namespace-name (assoc (row-bindings namespace-row) :refers {}))
       (sci/install-namespace-bindings! ctx namespace-name
                                        (row-bindings namespace-row))
@@ -765,7 +764,7 @@
            ctx (db/pull db '[*] [:seon.fn/sym (str function-symbol)])
            (context-projection ctx) db)))
     (kernel/mark-installed! ctx function-symbol)
-    function-symbol))
+      function-symbol)))
 
 (def ^:private namespace-reference-attributes
   {:seon.fn/sym :seon.fn/ns

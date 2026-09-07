@@ -55,6 +55,25 @@ For contrast, `bootstrap:root` recorded 13 forms and 13 receipts with ordinals
 cluster-wide `:seon.cluster.eval/interrupted-at` count is 0, which rules out an
 interruption being recorded and then lost.
 
+## Recurrence, 2026-09-05 (batch evaluation)
+
+The batch evaluation refactor started every model-authored evaluation in the
+same transaction that froze its forms, but generated opening forms still used
+`append-generated-call`, which stored only the form. `resume-turn` evaluated
+that durable form and attempted to settle the absent evaluation row. The
+transition correctly refused `:seon.cluster.run/no-such-receipt`; its refusal
+path retried the same missing row and raised `Batch refusal settlement was
+refused.` Six writer refusals appeared immediately after fresh boot in
+`data/clusters/default/logs/seon.log` at 22:55:27–22:55:28Z.
+
+The repair makes `append-generated-call` return the generated form and its
+running `:seon.cluster.eval` row in one Datahike transaction. The request now
+carries the loop's existing `now` instant; no transaction function reads a
+clock. The focused regression observes the source, namespace, ordinal and
+instant on that evaluation immediately after append, then settles it through
+the unchanged settle-existing transition. This preserves intent before
+execution and does not make settlement tolerate absent evaluation rows.
+
 ## Owner
 
 The run loop's form-settlement path in `src/seon/cluster/loop.clj`, and the

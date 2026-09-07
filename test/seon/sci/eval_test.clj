@@ -41,6 +41,20 @@
 (def ^:private caps
   (config/result-caps (config/defaults)))
 
+(deftest absent-program-function-is-reported-before-namespace-lookup
+  (let [ctx (eval/build-base-ctx)
+        function-symbol 'missing.program/function
+        failure
+        (with-redefs [kernel/program-namespace
+                      (fn [_ _]
+                        (throw (ex-info "Unexpected namespace lookup" {})))]
+          (try
+            (#'eval/install-function-from-database! ctx nil function-symbol)
+            nil
+            (catch clojure.lang.ExceptionInfo error (ex-data error))))]
+    (is (= :seon.sci.eval/missing-function-row (:seon.error/kind failure)))
+    (is (= (str function-symbol) (:seon.fn/sym failure)))))
+
 (defn- compiled-runtime-victim
   []
   :original)

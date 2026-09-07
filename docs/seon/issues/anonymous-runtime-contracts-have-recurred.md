@@ -18,6 +18,17 @@ The previous audit also combined two different census scopes: all exact
 `:any` tokens in parsed active source, but only `:some` tokens inside
 `:malli/schema` metadata. That produced a non-reproducible `58/22` headline.
 
+The same class is currently observable in the default boot: the instrumented
+`seon.cluster.run/receipt-settle-tx` call rejects its database argument as
+`must be an immutable Datahike database value`. Its one-argument arity at
+`src/seon/cluster/run.clj:1139-1140` delegates to the instrumented two-argument
+arity with `nil`, although that arity's contract requires
+`:seon.db/database-value` at lines 1136-1138. Batch settlement invokes the
+one-argument arity at `src/seon/cluster/run.clj:1162`. Extract the shared
+transaction-data builder into a private helper: the one-argument path should
+skip settlement analysis, while the two-argument path should analyze against
+its supplied immutable database before calling the helper.
+
 ## Evidence
 
 ### Method and dependency ledger

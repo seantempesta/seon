@@ -1,5 +1,5 @@
 // Inspect the live Juniper context UI; save the actual browser output for review.
-// Usage: node this-file.cjs URL OUTPUT_PREFIX [--add] [--await-change] [--append-and-compact]
+// Usage: node this-file.cjs URL OUTPUT_PREFIX [--plan] [--add] [--await-change] [--append-and-compact]
 const {chromium} = require('playwright');
 const fs = require('node:fs/promises');
 
@@ -15,7 +15,7 @@ const fs = require('node:fs/promises');
     page.on('pageerror', error => errors.push(error.message));
     const response = await page.goto(process.argv[2], {waitUntil: 'domcontentloaded', timeout: 30000});
     await page.locator('.seon-debug-selected-previews').first().waitFor({timeout: 15000});
-    await page.getByText('Assemble context', {exact: true}).waitFor({timeout: 15000});
+    await page.getByText('Context', {exact: true}).waitFor({timeout: 15000});
     let readinessError;
     try {
       await page.getByRole('button', {name: 'Add to context', exact: true})
@@ -25,11 +25,11 @@ const fs = require('node:fs/promises');
     if (!readinessError && process.argv.includes('--add')) {
       const button = page.getByRole('button', {name: 'Add to context', exact: true});
       selectedRun = await button.locator('xpath=ancestor::form').locator('input[name="run"]').inputValue();
-      const beforeCount = await page.getByText('Assembled context', {exact: true}).count();
+      const beforeCount = await page.getByText('Selected forms and results', {exact: true}).count();
       await button.click();
-      await page.getByText('Assembled context', {exact: true}).nth(beforeCount).waitFor({timeout: 30000});
+      await page.getByText('Selected forms and results', {exact: true}).nth(beforeCount).waitFor({timeout: 30000});
       await page.getByText('Unchanged', {exact: true}).first().waitFor({timeout: 30000});
-      await page.getByText('Assembled context', {exact: true}).last().scrollIntoViewIfNeeded();
+      await page.getByText('Selected forms and results', {exact: true}).last().scrollIntoViewIfNeeded();
     }
     if (process.argv.includes('--await-change')) {
       console.log(JSON.stringify({readyForDataChange: true, selectedRun}));
@@ -40,16 +40,35 @@ const fs = require('node:fs/promises');
     if (process.argv.includes('--append-and-compact')) {
       const append = page.getByRole('button', {name: 'Append updated context', exact: true}).first();
       await append.waitFor({timeout: 30000});
-      const countBefore = await page.getByText('Assembled context', {exact: true}).count();
+      const countBefore = await page.getByText('Selected forms and results', {exact: true}).count();
       await append.click();
-      await page.getByText('Assembled context', {exact: true}).nth(countBefore).waitFor({timeout: 30000});
+      await page.getByText('Selected forms and results', {exact: true}).nth(countBefore).waitFor({timeout: 30000});
       const compact = page.getByRole('button', {name: 'Compact to current results', exact: true}).first();
       compactedContribution = await compact.locator('xpath=ancestor::form').locator('input[name="contribution"]').inputValue();
       await compact.click();
       await page.getByRole('button', {name: 'Compact to current results', exact: true}).waitFor({state: 'hidden', timeout: 30000});
-      const countAfter = await page.getByText('Assembled context', {exact: true}).count();
+      const countAfter = await page.getByText('Selected forms and results', {exact: true}).count();
       if (countAfter !== countBefore + 1) throw new Error(`Append/compact changed block count unexpectedly: ${countBefore} -> ${countAfter}`);
-      await page.getByText('Assembled context', {exact: true}).last().scrollIntoViewIfNeeded();
+      await page.getByText('Selected forms and results', {exact: true}).last().scrollIntoViewIfNeeded();
+    }
+    if (process.argv.includes('--plan')) {
+      const plan = page.locator('.my-plan').first();
+      await plan.waitFor({timeout: 30000});
+      const planText = await plan.innerText();
+      for (const expected of ['juniper’s plan', 'Current focus',
+        'Improve Juniper context inspection', 'Render this plan clearly',
+        'Inspect identity and messages', 'Compare refreshed results',
+        'Try the assembled context in a live agent turn', 'How to inspect or update this plan']) {
+        if (!planText.includes(expected)) throw new Error(`Live plan is missing: ${expected}`);
+      }
+      if (await plan.locator('.my-plan-children').count() === 0)
+        throw new Error('Live plan does not show the task hierarchy');
+      await plan.getByText('How to inspect or update this plan', {exact: true}).click();
+      const instructions = await plan.innerText();
+      if (!instructions.includes('seon.db/transact!'))
+        throw new Error('Live plan does not show a database update form');
+      await plan.screenshot({path: `${process.argv[3]}-plan.png`});
+      await plan.scrollIntoViewIfNeeded();
     }
     const text = await page.locator('body').innerText();
     await fs.writeFile(`${process.argv[3]}.txt`, text);

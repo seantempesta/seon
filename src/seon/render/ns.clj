@@ -299,6 +299,21 @@
            [target])))
      targets)))
 
+(defn render-alias-ai
+  "Render source returning one namespace alias as compact libspec data."
+  {:malli/schema [:=> [:cat :seon.ns.alias/binding] :string]}
+  [{local :seon.ns.alias/local target :seon.ns.alias/target-ns}]
+  (pr-str (list 'quote [target :as local])))
+
+(defn render-alias-html
+  "Render one namespace alias binding with its local and target roles explicit."
+  {:malli/schema [:=> [:cat :seon.ns.alias/binding] :seon.render/hiccup]}
+  [{local :seon.ns.alias/local target :seon.ns.alias/target-ns}]
+  [:article {:class "seon-family-entry seon-namespace-alias-entry"}
+   [:p {:class "seon-kicker"} "Namespace alias"]
+   [:p [:code (str local)] " → " [:code (str target)]]
+   [:pre [:code (pr-str [target :as local])]]])
+
 (defn- ns-form
   [namespace-name requires]
   (apply list
@@ -597,14 +612,17 @@
 
 (defn- full-html-view
   [{::keys [db schema-row-cache namespace-name namespace-source namespace-doc
-            requires functions own-schemas owner-agent-id] :as data}]
+            requires functions own-schemas owner-agent-id] :as data}
+   included-count include-detail?]
   (let [bounds (::read-bounds data)
+        included (subvec functions 0 included-count)
+        omitted (- (count functions) included-count)
         source (if (str/blank? namespace-source)
                  (pr-str (ns-form namespace-name requires))
                  namespace-source)
-        schema-section
-        (referenced-schema-html db bounds schema-row-cache
-                                functions own-schemas)]
+        schema-section (when include-detail?
+                         (referenced-schema-html db bounds schema-row-cache
+                                                 functions own-schemas))]
     (if (error-value? schema-section)
       schema-section
       (into
@@ -614,25 +632,28 @@
          (first-doc-line namespace-doc)
          (conj [:p {:class "seon-namespace-description"}
                 (first-doc-line namespace-doc)])
-         (seq functions)
+         (seq included)
          (conj (into [:dl {:class "seon-namespace-definitions"}]
-                     (mapcat compact-function-html functions)))
-         (seq requires)
+                     (mapcat compact-function-html included)))
+         (pos? omitted)
+         (conj [:p {:class "seon-namespace-elision"}
+                (omission-text 0 omitted)])
+         (and include-detail? (seq requires))
          (conj [:p {:class "seon-namespace-requires"}
                 "Requires " [:code (pr-str (vec requires))]])
-         (seq own-schemas)
+         (and include-detail? (seq own-schemas))
          (conj [:pre {:class "seon-namespace-own-schemas"}
                 [:code (str/join "\n" (map compact-schema-line own-schemas))]])
-         schema-section (conj schema-section)
+         (and include-detail? schema-section) (conj schema-section)
          (and (empty? functions) (empty? own-schemas))
          (conj [:p {:class "seon-namespace-empty"}
                 (empty-text owner-agent-id)])
-         true
+         include-detail?
          (conj
           [:details {:class "seon-namespace-source"}
            [:summary "namespace source"]
            [:pre [:code source]]])
-         (seq functions)
+         (and include-detail? (seq functions))
          (conj
           (into
            [:details {:class "seon-namespace-member-sources"}
@@ -682,7 +703,7 @@
   (case (::distance data)
     0 [:section {:class "seon-family-entry seon-namespace-entry"}
        [:h2 [:code (str (::namespace-name data))]]]
-    1 (full-html-view data)
+    1 (full-html-view data included-count true)
     (compact-html-view data included-count)))
 
 (defn- minimal-html-view
@@ -702,9 +723,30 @@
 
 (defn- budgeted-html
   [data budget]
-  (let [function-count (count (::functions data))]
-    (if (or (nil? budget) (< (::distance data) 2))
+  (let [function-count (count (::functions data))
+        distance (::distance data)]
+    (cond
+      (or (nil? budget) (zero? distance))
       (html-view data function-count)
+
+      (= 1 distance)
+      (let [render #(full-html-view data % false)
+            initial (render 0)]
+        (if-not (html-within-budget? initial budget)
+          (minimal-html-view data)
+          (loop [included 0]
+            (let [next-count (inc included)
+                  candidate (when (<= next-count function-count)
+                              (render next-count))]
+              (if (and candidate (html-within-budget? candidate budget))
+                (recur next-count)
+                (let [summary (render included)
+                      detailed (full-html-view data included true)]
+                  (if (html-within-budget? detailed budget)
+                    detailed
+                    summary)))))))
+
+      :else
       (let [initial (html-view data 0)]
         (if-not (html-within-budget? initial budget)
           (minimal-html-view data)

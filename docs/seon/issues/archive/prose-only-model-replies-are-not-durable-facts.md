@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, database, class/n10, wave/reply-durability]
 ---
@@ -52,3 +52,12 @@ that refusal and gives the model no correction or fact-driven re-wake. It is
 filed in `no-forms-replies-close-without-correction-or-rewake.md`; this note
 continues to own only raw-reply durability and should be closed/archived by its
 owner after the recurring acceptance proof is confirmed.
+
+## Resolution — 2026-09-05
+
+Every settled provider reply now records its complete raw text on the run in
+the same intent transaction that creates one resultless eval row per parsed
+form. Pure prose therefore leaves a directly queryable reply fact even when it
+creates no eval rows. The turn regression asserts both the prose-only case and
+the stronger malformed/repaired case: eval source may be repaired, while the
+run's raw reply remains byte-for-byte original provenance.

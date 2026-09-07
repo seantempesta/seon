@@ -16,10 +16,12 @@ blank destination. It does not generate this file.
 Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
-## Blocker (49)
+## Blocker (51)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Bound fault evidence and measure store growth](fault-facts-store-megabyte-evidence-inline-and-rewrite-gigabyte-leaves.md) | blocker | live-drive render repair wave |
+| [Keep test publication coherent during shared edits](bin-test-shared-base-compiles-other-lanes-half-edits.md) | blocker | program-index production-subject wave |
 | [Generated model attempt traces diverge from durable facts](generated-model-attempt-traces-diverge-from-durable-facts.md) | blocker | live-drive context repair wave (seed 202607280402 recorded) |
 | [Registered render producers fall through to generic map rendering](registered-render-producers-fall-through-to-generic-map-rendering.md) | blocker | render-data plan S2 (the render unification rebuilds this seam) |
 | [Bulk tier: the coordinator wedges on a worker that never answers](bulk-tier-coordinator-wedges-on-a-worker-that-never-answers.md) | blocker | parallel-stress triage (next session, first item after S1) |
