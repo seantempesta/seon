@@ -223,3 +223,30 @@ no binding, and the host JVM namespace was unchanged. Reproduce with
 `result_binding_isolation_2026_09_06.clj`. Ordinary durable result projections
 are evaluation facts (`:seon.cluster.eval/result-edn` / `:result-blob`), not a
 process-global table of result Vars.
+
+## Live plan installation, September 6 evening
+
+The active example is now `juniper-context` under `tmp/juniper-context-live`,
+served on port 7766. Juniper is entity 34620. The user-selected entity 32367
+is a namespace alias; the debug header now separates the context owner from
+the viewed entity and offers a link back to the agent entity.
+
+The committed five-item fixture was installed through MCP JVM evaluation.
+It includes a parent objective, one completed inspection, the current plan
+rendering task, a dependent result-comparison task, and a dependent live-agent
+task. The latter two remain unfinished. `my.plan` was hot reloaded and JVM
+instrumentation restored (842 of 842 registered functions).
+
+This is not yet a successful live plan-render proof. The browser probe
+`juniper_context_browser_probe_2026_09_06.cjs` returned HTTP 200 and no browser
+JavaScript errors, but its actual text contained `render-item-html` failures:
+“Don't know how to create ISeq from: java.lang.Long”. Actual graph discovery
+supplies database references that the renderer's example tests missed.
+The full-plan renderer is also declared on the derived `:my.plan/view`, not
+the stored agent plan shape, so improving that renderer alone did not make
+the full plan appear on the agent page. Both gaps must be fixed before
+claiming the example has been updated successfully.
+
+Local evidence: `tmp/juniper-plan-updated-live.txt` and its paired PNG.
+Normal indexed source publication is being repaired separately; the reload
+above proves loaded JVM changes only.
