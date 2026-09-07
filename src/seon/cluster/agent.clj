@@ -191,7 +191,7 @@
         (when agent-id
           [:article {:class "seon-family-entry seon-agent-identity-entry"}
            [:header
-            [:p {:class "seon-kicker"} "Agent"]
+            [:p {:class "seon-kicker"} "Agent identity"]
             [:h3 [:code agent-id]]]
            [:p "This is the agent’s identity. Its namespace holds its functions; its cluster holds the shared database. The connected plan and messages describe its work."]
            (into [:dl]

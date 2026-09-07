@@ -11,6 +11,19 @@ Owner direction: use the visualization to change stored attributes, values,
 refs, and render functions together, then test the assembled context with live
 agents. Existing data placement is not a design constraint.
 
+## Source-to-browser proof still open — 2026-09-07
+
+Root opened the existing live-update probe with heading “Agent”, then changed
+the identity heading to “Agent identity”. The first shell file edit did not
+invoke the tool edit hook; root reapplied the edit through apply_patch. The
+browser's 120-second observation expired before the serialized publication
+completed. The hook subsequently reported current-src
+`6a9e1786-72b6-5584-8826-9f804e01e5a2`, digest
+`c71ac2368f1dc80f45366bb880a8132485c842c7013f79635d663b3163f44a36`.
+This attempt does not prove automatic browser paint and does not isolate a
+render-feed defect. Repeat with an actual supported edit and a quiet publication
+window. The heading change is retained as useful presentation text.
+
 ## Message selection checkpoint — 2026-09-07
 
 The real lock button also appended the second root message (entity 34629),
