@@ -144,7 +144,7 @@
       (is (str/includes? (:seon.error/message result) "prose")
           "the refusal names what the reply carried instead of forms")))
 
-  (testing "mixed prose attaches to the next form and trailing prose trails"
+  (testing "mixed prose attaches to the next form and nothing else"
     (let [text (str "First I will add the values.\n"
                     "(+ 1 2)\n"
                     "Then I will finish.\n"
@@ -152,9 +152,9 @@
                     "That is all.")]
       (is (= ["(+ 1 2)" "(my.run/complete \"3\")"] (sources text)))
       (is (= ["; First I will add the values."
-              "; Then I will finish.\n; That is all."]
+              "; Then I will finish."]
              (mapv :seon.cluster.eval/comment (reply/sources text)))
-          "trailing prose still rides the form it follows, as its comment")))
+          "a form's comment is the prose ABOVE it, never prose written after")))
 
   (testing "the live word-salad reply freezes one form, not its 22 prose tokens"
     (let [text (str "I defined a function to sum integers from 1 to n, "
@@ -212,12 +212,11 @@
            (reply/sources
             "(ns my.gen.alpha)\nNow the function.\n(defn f [] 1)"))))
 
-  (testing "trailing prose rides the form it follows, keeping that ns"
+  (testing "prose after the last form belongs to no form, and keeps the ns"
     (is (= {:seon.cluster.run.form/source "(def a 1)"
-            :seon.cluster.eval/comment "; That is all."
             :seon.ns/name 'my.gen.alpha}
            (last (reply/sources "(ns my.gen.alpha)\n(def a 1)\nThat is all.")))
-        "the prose is the form's own comment fact, never glued to its source")))
+        "the prose is neither glued to the source nor made its comment")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Every arity is a call like any other
@@ -247,6 +246,34 @@
            (mapv :seon.cluster.run.form/source (checked text 'my.gen.alpha)))
         "as do the two- and three-argument arities")
     (is (vector? (checked text 'my.gen.alpha (count text))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The class: a comment renders ABOVE the prompt, so it can only be prose
+;;; the agent wrote ABOVE the form
+;;; ---------------------------------------------------------------------------
+
+;;; `seon.repl/text` prints a form's `:seon.cluster.eval/comment` above that
+;;; form's prompt line. Folding prose written AFTER the last form into that
+;;; form's comment therefore inverted the agent's own authorship order in the
+;;; session it reads back: text it wrote last appeared first. The whole reply
+;;; is already durable (`:seon.cluster.run/reply`), so the parser keeps the
+;;; placement honest by attaching only what precedes a form.
+(deftest a-forms-comment-is-only-the-prose-written-above-it
+  (doseq [[text expected]
+          [["Here is the plan.\n(+ 1 2)\nThat is all." ["; Here is the plan."]]
+           ["(+ 1 2)\nThat is all." [nil]]
+           ["Here is the plan.\n(+ 1 2)\n(inc 1)\nThat is all."
+            ["; Here is the plan." nil]]
+           ["Here is the plan:\n```clojure\n(+ 1 2)\n```\nThat is all."
+            ["; Here is the plan:"]]]]
+    (is (= expected (mapv :seon.cluster.eval/comment (reply/sources text)))
+        (str "a comment must be the prose above its form: " (pr-str text))))
+  (testing "and the form sources are untouched by the dropped prose"
+    (is (= ["(+ 1 2)"]
+           (sources "Here is the plan.\n(+ 1 2)\nThat is all."))))
+  (testing "while prose with no form at all is still the loud refusal"
+    (is (= :seon.cluster.reply/no-forms
+           (:seon.error/kind (reply/sources "Only prose here."))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Refusals — flat values, never throws
@@ -302,14 +329,14 @@
                   "```clojure\n(def a 1)\n(my.run/complete \"done\")\n```\n\n"
                   "Let me know if that works.")]
     (is (= ["(def a 1)" "(my.run/complete \"done\")"] (sources text)))
-    (is (= ["; Sure — here is the plan." "; Let me know if that works."]
+    (is (= ["; Sure — here is the plan." nil]
            (mapv :seon.cluster.eval/comment (reply/sources text)))
-        "the prose is retained as each form's own comment, not glued to it")))
+        "prose above a form is its comment; prose after the last form is not")))
 
 (deftest tilde-fences-have-the-same-presentation-semantics
   (let [text "Here:\n~~~clojure\n(+ 1 2)\n~~~\nDone."]
     (is (= ["(+ 1 2)"] (sources text)))
-    (is (= ["; Here:\n; Done."]
+    (is (= ["; Here:"]
            (mapv :seon.cluster.eval/comment (reply/sources text))))))
 
 ;;; ---------------------------------------------------------------------------

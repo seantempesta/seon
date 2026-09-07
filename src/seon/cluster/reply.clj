@@ -27,8 +27,11 @@
   occupies its own source line in a reply that also has structure.
   Everything else is coalesced back into its original prose span,
   prefixed with the agent-facing single-`;` comment grammar, and
-  attached to a form: the one it precedes, or — for a trailing span —
-  the one it follows.
+  attached to THE FORM IT PRECEDES. Prose that follows the last form
+  belongs to no form: a comment renders above the prompt, so attaching
+  it to the form it followed inverted the agent's own authorship order
+  in its rendered session. It stays in the durable reply text
+  (`:seon.cluster.run/reply`) and nowhere else.
 
   EVERY PLAN SOURCE CARRIES A READER EVENT, and that is the invariant
   this namespace exists to keep. A comment-only plan source has no
@@ -230,7 +233,7 @@
        (str/join "\n")))
 
 (defn- plan-sources
-  "Attach prose spans to the form they precede, or trail.
+  "Attach each prose span to the form it precedes, and drop the rest.
   Each plan form carries the reader's namespace-in-effect when the
   reader attributed one; a form the reader could not attribute simply
   has no `:seon.ns/name`, and absence is what routes its red receipt to
@@ -267,19 +270,18 @@
         ;; be concatenated, which put the agent's comment on the prompt line
         ;; and made a prompt hold more than the one form it prompts for.
         ;;
-        ;; TRAILING PROSE STILL RIDES THE FORM IT FOLLOWS, now into that
-        ;; form's comment. Prose alone was once its own plan source, which is
-        ;; the shape that recorded a form row no receipt could ever settle.
-        (let [prose (comment-source (subs source cursor))]
-          (cond-> forms
-            (and (seq forms) (not (str/blank? prose)))
-            (update (dec (count forms))
-                    (fn [form]
-                      (assoc form :seon.cluster.eval/comment
-                             (if-some [existing (:seon.cluster.eval/comment
-                                                 form)]
-                               (str existing "\n" prose)
-                               prose))))))))))
+        ;; PROSE THAT FOLLOWS THE LAST FORM IS NOT THAT FORM'S COMMENT, and
+        ;; nothing here keeps it. A comment renders ABOVE the prompt
+        ;; (`seon.repl/text`), so folding trailing prose into the preceding
+        ;; form's comment made the agent's own rendered session invert what it
+        ;; wrote: text authored after a form appeared above it. The prose is
+        ;; not lost — the whole reply is already a durable fact
+        ;; (`:seon.cluster.run/reply`, staged by `seon.cluster.run/stage-reply!`
+        ;; before any form is frozen), so dropping it here removes a wrong
+        ;; placement, not a record. Prose alone was once its own plan source,
+        ;; which is the shape that recorded a form row no receipt could settle;
+        ;; a reply that is ONLY prose still yields no forms and refuses.
+        forms))))
 
 (defn- no-forms-message
   "Name what the reply carried instead of forms."
@@ -370,8 +372,11 @@
     reader's own position so the agent can see where;
   - `::refused-tag` — `#=` or an unknown reader tag, named;
   - `::no-forms` — the reply carried no code: it was empty, or its
-    whole text read as prose. Prose accompanying a form still rides
-    that form's source as comments; prose ALONE is a refusal, because a
+    whole text read as prose. Prose that PRECEDES a form becomes that
+    form's own `:seon.cluster.eval/comment` fact; prose after the last
+    form is kept only by the durable reply text, because a comment
+    renders above the prompt and would otherwise read as if it had been
+    written before the form it followed. Prose ALONE is a refusal, because a
     plan source with no reader event settles no receipt and would close
     the run with an unsettled form.
 
