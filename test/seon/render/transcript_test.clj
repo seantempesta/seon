@@ -1,5 +1,6 @@
 (ns seon.render.transcript-test
-  (:require [clojure.main :as main]
+  (:require [clojure.core.async :as async]
+            [clojure.main :as main]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -9,6 +10,8 @@
             [seon.ai.tokens :as tokens]
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
+            [seon.cluster.agent :as agent]
+            [seon.cluster.loop :as loop]
             [seon.cluster.run :as run]
             [seon.config :as config]
             [seon.render :as render]
@@ -52,11 +55,11 @@
     ;; newlines into `#:seon.repl{:value …}` breaks the one response map
     ;; the agent reads back into lines it cannot tell from its own forms.
     (is (= "\"Agent: juniper\\nNamespace: my.agents.juniper\""
-           (bounded-result render-unit (pr-str string-node))))
+           (bounded-result render-unit {} (pr-str string-node))))
     (is (= "{:text \"Agent: juniper\\nNamespace: my.agents.juniper\"}"
-           (bounded-result render-unit (pr-str nested-node))))
+           (bounded-result render-unit {} (pr-str nested-node))))
     (is (= "\"Agent: juni…\""
-           (bounded-result render-unit (pr-str truncated-node))))))
+           (bounded-result render-unit {} (pr-str truncated-node))))))
 
 (deftest selected-run-keeps-status-outside-agent-visible-text
   (let [selected-identities
@@ -1249,3 +1252,273 @@
                  (into [] (comp (drop 3) (map #(last (last (nth % 3)))))
                        html))
               "one entry per derived run, in the derivation's order"))))))
+
+;;; ---------------------------------------------------------------------------
+;;; ONE GENERATOR, END TO END
+;;; ---------------------------------------------------------------------------
+
+(deftest one-reply-reads-identically-on-the-page-in-history-and-in-the-prompt
+  ;; THE PROOF PRD §8 ASKS FOR AND THE AUDIT (B3) SAID COULD NOT BE WRITTEN.
+  ;; One reply, evaluated ONCE through the ordinary path, then read three
+  ;; ways: the page's in-memory records, the stored history unit, and the
+  ;; provider prompt. Before this the prompt came from
+  ;; `walk/generic-history-entries`, which paired a `pr-str` of the re-read
+  ;; form with a rendered value — a second grammar the page never showed and
+  ;; the history unit never produced, so the model read something no other
+  ;; surface in the system could reproduce.
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "one-grammar")
+     (config/apply! {:seon.db/connection connection
+                     :seon.boot/cluster-name "one-grammar"})
+     (db/transact! connection
+                   (agent/creation-tx
+                    {:seon.cluster.agent/id "one-grammar-agent"
+                     :seon.ns/name 'my.agents.one-grammar
+                     :seon.cluster/name "one-grammar"}))
+     (db/transact! connection
+                   [{:seon.cluster.run/id "one-grammar-run"
+                     :seon.cluster.run/agent
+                     [:seon.cluster.agent/id "one-grammar-agent"]
+                     :seon.cluster.run/opened-at (java.util.Date.)}])
+     (let [database @connection
+           defaults (config/defaults)
+           channel (async/chan 1)
+           base (support/fork-cluster-ctx connection)
+           forked (sci.eval/fork-for-turn
+                   {:seon.sci.eval/ctx base
+                    :seon.db/db database
+                    :seon.db/connection connection
+                    :seon.cluster.agent/id "one-grammar-agent"})
+           cluster (merge defaults
+                          {:seon.db/connection connection
+                           :seon.cluster/name "one-grammar"
+                           :seon.cluster.run/process "one-grammar-test"
+                           :seon.sci.eval/ctx base
+                           :seon.cluster.wake/channel channel
+                           :seon.render/context-channel channel
+                           :seon.cluster.loop/completion channel
+                           :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
+                           :seon.sci.admit/caps (config/result-caps defaults)
+                           :seon.config.eval/time-limit-ms 5000
+                           :seon.config/on-core-error :record})
+           reply (str ";; a definition worth keeping\n"
+                      "(def x 1)\n"
+                      "(do (println \"hi\") 41)\n"
+                      "(in-ns 'my.agents.probe)\n"
+                      "(set! *print-length* 2)\n"
+                      "(vec (range 40))\n"
+                      "(/ 1 0)")
+           sources (loop/planned-sources
+                    reply
+                    'my.agents.one-grammar
+                    (:seon.config.eval.result/max-source
+                     (config/result-caps defaults)))
+           original-evaluate sci.eval/evaluate
+           evaluations (atom 0)]
+       (try
+         (let [opened-at (java.util.Date.)
+               outcomes
+               (with-redefs
+                 [sci.eval/evaluate (fn [request]
+                                      (swap! evaluations inc)
+                                      (original-evaluate request))]
+                 (loop/evaluate-sources
+                  {:seon.cluster.loop/cluster cluster
+                   :seon.db/db database
+                   :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
+                   :seon.cluster.agent/id "one-grammar-agent"
+                   :seon.cluster.run/id "one-grammar-run"
+                   :seon.cluster.run.form/ordinal 0
+                   :seon.ns/name 'my.agents.one-grammar
+                   :seon.cluster.reply/sources sources}))
+               prepared (run/record-evaluated-tx
+                         {:seon.cluster.loop/cluster cluster
+                          :seon.db/db database
+                          :seon.cluster.run/id "one-grammar-stored"
+                          :seon.cluster.run/agent
+                          [:seon.cluster.agent/id "one-grammar-agent"]
+                          :seon.cluster.run/starting-ns
+                          [:seon.ns/name 'my.agents.one-grammar]
+                          :seon.cluster.run/reply reply
+                          :seon.cluster.run/opened-at opened-at
+                          :seon.cluster.run/closed-at (java.util.Date.)
+                          :seon.cluster.loop/evaluated-sources outcomes})
+               committed (blob/with-publication!
+                           connection (:seon.blob/staged-writes prepared)
+                           #(db/transact! connection
+                                          (:seon.db/tx-data prepared)))
+               stored-db @connection
+               ;; b. THE STORED HISTORY, queried back out of the database.
+               stored-unit (assoc (unit stored-db 1000000)
+                                  :seon.cluster.agent/id "one-grammar-agent")
+               stored-entries (transcript/history-entries stored-unit)
+               stored-bytes (mapv :seon.render.history/bytes stored-entries)
+               ;; a. THE PAGE'S IN-MEMORY RECORDS, the shape the debug page
+               ;;    hands the transcript. The handle is the one fact an
+               ;;    in-memory record cannot derive from itself: production's
+               ;;    `evaluate-sources` resolves the frozen evaluation's
+               ;;    entity id after each form and assoc's `:seon.repl/handle`
+               ;;    when — and only when — the node actually held the value
+               ;;    (ruling 59c). This fixture persists into a second run id
+               ;;    rather than standing up custody, so the handles come from
+               ;;    the evaluations that were actually stored, derived
+               ;;    through the SAME predicate the loop uses. Everything else
+               ;;    must be identical BY DERIVATION.
+               stored-handles
+               (mapv (fn [ordinal]
+                       (let [stored (db/pull
+                                     stored-db
+                                     [:db/id :seon.cluster.eval/result-edn
+                                      :seon.cluster.eval/result-blob
+                                      :seon.cluster.eval/result-size]
+                                     [:seon.cluster.eval/id
+                                      (run/receipt-identity
+                                       "one-grammar-stored" ordinal)])]
+                         (when (and (int? (:db/id stored))
+                                    (admit/restorable-node
+                                     (:seon.cluster.eval/result-edn stored)
+                                     stored))
+                           (admit/result-handle (:db/id stored)))))
+                     (range (count outcomes)))
+               page-unit (assoc (unit database 1000000)
+                                :seon.cluster.agent/id "one-grammar-agent"
+                                :seon.cluster.run/id "one-grammar-stored"
+                                :seon.cluster.loop/evaluated-sources
+                                (mapv (fn [outcome handle]
+                                        (-> outcome
+                                            (update :seon.sci.eval/evaluation
+                                                    dissoc :seon.repl/handle)
+                                            (cond->
+                                             handle
+                                             (assoc-in
+                                              [:seon.sci.eval/evaluation
+                                               :seon.repl/handle]
+                                              handle))))
+                                      outcomes
+                                      stored-handles))
+               page-bytes (mapv :seon.render.history/bytes
+                                (transcript/history-entries page-unit))
+               ;; c. THE PROVIDER PROMPT: what the model actually reads.
+               prompt-entries
+               (walk/history
+                {:seon.db/db stored-db
+                 :seon.cluster.agent/id "one-grammar-agent"
+                 :seon.sci.eval/ctx base
+                 :seon.render.walk/lookup
+                 [:seon.cluster.agent/id "one-grammar-agent"]
+                 :seon.render/distance 2
+                 :seon.sci.admit/caps (config/result-caps defaults)
+                 :seon.sci.eval/time-limit-ms 5000
+                 :seon.config/on-core-error :record
+                 :seon.render/captured-calls (atom {})})
+               prompt-text (str/join "\n\n"
+                                     (map :seon.render.history/bytes
+                                          prompt-entries))
+               responses (keep :seon.render.history/printed-value stored-entries)]
+           (is (nil? (:seon.error/kind committed))
+               (pr-str (select-keys committed [:seon.error/kind
+                                               :seon.error/message])))
+           (is (= 6 (count outcomes)) "six forms, six evaluations")
+           (is (= 6 @evaluations)
+               "EXACTLY ONE EVALUATION PER FORM: the page renders the records
+                the loop produced, it never re-runs the source to show it")
+
+           (testing "the same bytes on the page, in history, and in the prompt"
+             (is (seq stored-bytes))
+             (is (= (count page-bytes) (count stored-bytes)))
+             ;; PER ENTRY, so a difference names itself instead of dumping
+             ;; two vectors a reader has to diff by eye.
+             (doseq [[ordinal page stored] (map vector (range)
+                                                page-bytes stored-bytes)]
+               (is (= page stored)
+                   (str "form " ordinal
+                        " renders differently in memory and from the store"
+                        "\n  page:   " (pr-str page)
+                        "\n  stored: " (pr-str stored))))
+             (doseq [entry-bytes stored-bytes]
+               (is (str/includes? prompt-text entry-bytes)
+                   (str "the prompt must carry these bytes verbatim:\n"
+                        entry-bytes))))
+
+           (testing "a handle names only a value the node actually held"
+             ;; RULING 59c, and the reason page and store agree. `(def x 1)`
+             ;; admits to a Var face and `(in-ns …)` to an object face — names,
+             ;; not values — so neither carries `:result`, in memory or from
+             ;; the store. A handle a later turn cannot resolve is worse than
+             ;; no handle.
+             (is (not (str/includes? (nth stored-bytes 0) ":result"))
+                 (str "a Var face named a handle: " (nth stored-bytes 0)))
+             (is (not (str/includes? (nth stored-bytes 2) ":result"))
+                 (str "an object face named a handle: " (nth stored-bytes 2)))
+             (is (str/includes? (nth stored-bytes 1) ":result result/e")
+                 (str "an ordinary value keeps its handle: "
+                      (nth stored-bytes 1))))
+
+           (testing "the response the agent reads back"
+             (let [joined (str/join "\n" stored-bytes)]
+               (is (str/includes? joined "my.agents.one-grammar=> (def x 1)"))
+               (is (str/includes? joined ";; a definition worth keeping")
+                   "the agent's comment, verbatim, above the prompt it introduces")
+               (is (str/includes? joined ":out \"hi\\n\"")
+                   ":out is its own key, never folded into :value")
+               (is (str/includes? joined ":value 41"))
+               (is (str/includes? joined ":ns my.agents.probe")
+                   "the form that moved the session says where it landed")
+               (is (= "my.agents.probe=> "
+                      (subs (nth stored-bytes 3) 0 18))
+                   "the fourth prompt line is in the namespace in effect")))
+
+           (testing "every response carries the duration settlement measured"
+             (is (seq responses))
+             (is (every? #(str/includes? % ":ms ") responses)
+                 (str "responses without :ms — "
+                      (pr-str (remove #(str/includes? % ":ms ") responses)))))
+
+           (testing "an error carries :error and never a value beside it"
+             (let [failure (last stored-bytes)]
+               (is (str/includes? failure "(/ 1 0)"))
+               (is (str/includes? failure ":error"))
+               (is (str/includes? failure "Divide by zero"))
+               (is (not (str/includes? failure ":value")))))
+
+           (testing "a form's own print options are stored and reach the response"
+             ;; The form that CALLS `set!` records what it left in effect,
+             ;; and the response prints under it. That is the half this range
+             ;; fixed (audit C3): the keys used to be written and then read
+             ;; under a different name, so no per-form print option ever
+             ;; reached a response.
+             (let [setter (db/pull stored-db
+                                   [:seon.print/length :seon.print/level]
+                                   [:seon.cluster.eval/id
+                                    (run/receipt-identity
+                                     "one-grammar-stored" 3)])]
+               (is (= 2 (:seon.print/length setter))
+                   "the evaluation that set *print-length* stores what it set"))
+             ;; AND THE FINDING THIS PROOF TURNED UP, asserted as the truth
+             ;; rather than as the wish: the NEXT form does not inherit it.
+             ;; `seon.sci.eval/evaluate` rebinds `sci/print-length` to its own
+             ;; root value for every form, so a `set!` dies with that form's
+             ;; binding frame — which a REPL session's `set!` must not do.
+             ;; Filed as
+             ;; docs/seon/issues/a-set-of-print-length-does-not-survive-the-next-form.md
+             (let [follower (db/pull stored-db
+                                     [:seon.print/length]
+                                     [:seon.cluster.eval/id
+                                      (run/receipt-identity
+                                       "one-grammar-stored" 4)])
+                   clipped (nth stored-bytes 4)]
+               (is (nil? (:seon.print/length follower))
+                   "the following form inherits nothing from the set!")
+               (is (str/includes? clipped "(vec (range 40))"))
+               (is (str/includes? clipped ":value [0 1 2")
+                   (str "the value is printed under the shipped default, not "
+                        "the agent's choice: " clipped))))
+
+           (testing "ruling 45: nothing emitted is comment-shaped"
+             (doseq [line (str/split-lines (str/join "\n" stored-bytes))]
+               (when (str/starts-with? (str/trim line) ";")
+                 (is (str/includes? line "a definition worth keeping")
+                     (str "a comment-shaped line the agent did not write: "
+                          line))))))
+         (finally (async/close! channel)))))))

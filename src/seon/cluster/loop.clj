@@ -1628,7 +1628,19 @@
                           (evaluation-entity-id
                            @connection
                            (run/receipt-identity run-id ordinal)))
-              handle (when entity-id (admit/result-handle entity-id))
+              ;; AND ONLY WHEN THE NODE ACTUALLY HELD THE VALUE. `(def x 1)`
+              ;; and `(in-ns …)` admit to a Var and an object face — names,
+              ;; not values — so `bind-stored-results!` refuses them on the
+              ;; NEXT turn. Naming one here anyway put `:result result/eN`
+              ;; in the agent's context for a symbol that would resolve to
+              ;; nothing when the agent read it, and made the page's own
+              ;; render differ from the stored one it is supposed to equal.
+              ;; One predicate decides for the binder and both emitters.
+              handle (when (and entity-id
+                                (admit/restorable-node
+                                 (:seon.cluster.eval/result-edn evaluation)
+                                 evaluation))
+                       (admit/result-handle entity-id))
               evaluation (cond-> evaluation
                            handle (assoc :seon.repl/handle handle))]
           (when handle
