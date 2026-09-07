@@ -246,6 +246,10 @@
               "the final output bounds later detail honestly"))))))
 
 (deftest source-less-agent-namespace-routes-to-the-full-stub
+  ;; AN EMPTY AGENT NAMESPACE IS THE ORDINARY FIRST MOMENT OF EVERY AGENT,
+  ;; and this used to render `{:seon.error/message …}` straight into that
+  ;; agent's own context. The wanted shape is an ordinary Clojure comment for
+  ;; AI and ordinary prose for HTML — never an error value.
   (support/with-database
     (fn [connection]
       (db/transact! connection
@@ -258,10 +262,59 @@
             ai (sut/render-ai unit)
             html-text (hiccup/->string (sut/render-html unit))]
         (is (str/includes? ai "(ns my.agents.fresh)"))
-        (is (str/includes? ai "No indexed members are recorded"))
-        (is (str/includes? ai ":seon.cluster.agent/id \"fresh\""))
-        (is (str/includes? html-text "No indexed members are recorded"))
-        (is (str/includes? html-text "owner agent fresh"))))))
+        (is (str/includes? ai ";; No definitions are indexed in this namespace yet"))
+        (is (str/includes? ai "it belongs to agent fresh"))
+        (is (not (str/includes? ai ":seon.error/message"))
+            "the empty state is never an error value in the agent's context")
+        (is (str/includes? html-text
+                           "No definitions are indexed in this namespace yet"))
+        (is (str/includes? html-text "it belongs to agent fresh"))))))
+
+(deftest namespace-bindings-render-in-clojures-own-words
+  (testing "an alias names its target namespace, a refer names its Var"
+    (is (= [:article {:class "seon-family-entry seon-namespace-alias-entry"}
+            [:p {:class "seon-kicker"} "Namespace alias"]
+            [:p [:code "str"] " → " [:code "clojure.string"]]
+            [:details {:class "seon-namespace-binding-data"}
+             [:summary "libspec"]
+             [:pre [:code "[clojure.string :as str]"]]]]
+           (sut/render-alias-html
+            {:seon.ns.alias/local 'str
+             :seon.ns.alias/target-ns 'clojure.string}))
+        "the raw libspec sits under disclosure, not in the sentence")
+    (is (= [:article {:class "seon-family-entry seon-namespace-refer-entry"}
+            [:p {:class "seon-kicker"} "Namespace refer"]
+            [:p [:code "q"] " ← " [:code "seon.db/q"]]
+            [:details {:class "seon-namespace-binding-data"}
+             [:summary "libspec"]
+             [:pre [:code "[seon.db :refer [q]]"]]]]
+           (sut/render-refer-html
+            {:seon.ns.refer/local 'q
+             :seon.ns.refer/target-ns 'seon.db
+             :seon.ns.refer/target-name 'q})))
+    (is (= [:article {:class "seon-family-entry seon-namespace-import-entry"}
+            [:p {:class "seon-kicker"} "Namespace import"]
+            [:p [:code "Date"] " → " [:code "java.util.Date"]]
+            [:details {:class "seon-namespace-binding-data"}
+             [:summary "import"]
+             [:pre [:code "java.util.Date"]]]]
+           (sut/render-import-html
+            {:seon.ns.import/local 'Date
+             :seon.ns.import/target-class 'java.util.Date}))))
+  (testing "each AI projection is source: a teaching comment, then a form"
+    (is (= (str ";; Here `str` is an alias for clojure.string, so `str/name`"
+                " reads a Var\n"
+                ";; in that namespace — the `:as` half of"
+                " [clojure.string :as str].\n"
+                "(dir (quote clojure.string))")
+           (sut/render-alias-ai {:seon.ns.alias/local 'str
+                                 :seon.ns.alias/target-ns 'clojure.string})))
+    (is (= (str ";; Here the bare symbol `q` is seon.db/q —\n"
+                ";; the `:refer` half of [seon.db :refer [q]].\n"
+                "(doc seon.db/q)")
+           (sut/render-refer-ai {:seon.ns.refer/local 'q
+                                 :seon.ns.refer/target-ns 'seon.db
+                                 :seon.ns.refer/target-name 'q})))))
 
 (deftest schema-closure-is-database-derived-cycle-safe-and-budgeted
   (support/with-database
@@ -476,10 +529,13 @@
         same-name {:seon.ns.alias/local 'seon.fn
                    :seon.ns.alias/target-ns 'seon.fn}
         html (sut/render-alias-html alias-row)]
-    (is (= "(quote [clojure.string :as str])"
-           (sut/render-alias-ai alias-row)))
-    (is (= "(quote [seon.fn :as seon.fn])"
-           (sut/render-alias-ai same-name)))
+    ;; THE AI PROJECTION IS SOURCE (owner ruling 2026-09-07): teaching
+    ;; comments, then a form the agent can rerun. It stopped being a bare
+    ;; quoted libspec, which told the agent nothing it could act on.
+    (is (str/includes? (sut/render-alias-ai alias-row)
+                       "(dir (quote clojure.string))"))
+    (is (str/includes? (sut/render-alias-ai same-name)
+                       "(dir (quote seon.fn))"))
     (is (str/includes? (hiccup/->string html) "<code>str</code> → <code>clojure.string</code>"))
     (is (str/includes? (hiccup/->string html)
                        "[clojure.string :as str]"))))

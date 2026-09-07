@@ -300,10 +300,17 @@
      targets)))
 
 (defn render-alias-ai
-  "Render source returning one namespace alias as compact libspec data."
-  {:malli/schema [:=> [:cat :seon.ns.alias/binding] :string]}
+  "Render source that says what one alias resolves to and how to look there.
+
+  Clojure's own words for this binding are the `:as` portion of a require
+  libspec, so that is what the comment states; the form is the ordinary way to
+  see what the aliased namespace publishes."
+  {:malli/schema [:=> [:cat :seon.ns.alias/binding] :seon.render/source]}
   [{local :seon.ns.alias/local target :seon.ns.alias/target-ns}]
-  (pr-str (list 'quote [target :as local])))
+  (str ";; Here `" local "` is an alias for " target ", so `" local
+       "/name` reads a Var\n"
+       ";; in that namespace — the `:as` half of [" target " :as " local "].\n"
+       (pr-str (list 'dir (list 'quote target)))))
 
 (defn render-alias-html
   "Render one namespace alias binding with its local and target roles explicit."
@@ -312,7 +319,56 @@
   [:article {:class "seon-family-entry seon-namespace-alias-entry"}
    [:p {:class "seon-kicker"} "Namespace alias"]
    [:p [:code (str local)] " → " [:code (str target)]]
-   [:pre [:code (pr-str [target :as local])]]])
+   [:details {:class "seon-namespace-binding-data"}
+    [:summary "libspec"]
+    [:pre [:code (pr-str [target :as local])]]]])
+
+(defn render-refer-ai
+  "Render source that says which Var one refer binding names.
+
+  A refer points the other way from an alias: the local symbol is the target
+  Var's name brought into this namespace, so the arrow reads backwards."
+  {:malli/schema [:=> [:cat :seon.ns.refer/binding] :seon.render/source]}
+  [{local :seon.ns.refer/local
+    target-ns :seon.ns.refer/target-ns
+    target-name :seon.ns.refer/target-name}]
+  (str ";; Here the bare symbol `" local "` is " target-ns "/" target-name
+       " —\n"
+       ";; the `:refer` half of [" target-ns " :refer [" target-name "]].\n"
+       (pr-str (list 'doc (symbol (str target-ns) (str target-name))))))
+
+(defn render-refer-html
+  "Render one refer binding with its local and target roles explicit."
+  {:malli/schema [:=> [:cat :seon.ns.refer/binding] :seon.render/hiccup]}
+  [{local :seon.ns.refer/local
+    target-ns :seon.ns.refer/target-ns
+    target-name :seon.ns.refer/target-name}]
+  [:article {:class "seon-family-entry seon-namespace-refer-entry"}
+   [:p {:class "seon-kicker"} "Namespace refer"]
+   [:p [:code (str local)] " ← " [:code (str target-ns "/" target-name)]]
+   [:details {:class "seon-namespace-binding-data"}
+    [:summary "libspec"]
+    [:pre [:code (pr-str [target-ns :refer [target-name]])]]]])
+
+(defn render-import-ai
+  "Render source naming the class one import binding makes available."
+  {:malli/schema [:=> [:cat :seon.ns.import/binding] :seon.render/source]}
+  [{local :seon.ns.import/local target :seon.ns.import/target-class}]
+  (str ";; Here the bare symbol `" local "` is the JVM class "
+       (or target local) " —\n"
+       ";; the `:import` half of the ns form.\n"
+       (pr-str (list 'class (list 'quote (or target local))))))
+
+(defn render-import-html
+  "Render one import binding with its local and target roles explicit."
+  {:malli/schema [:=> [:cat :seon.ns.import/binding] :seon.render/hiccup]}
+  [{local :seon.ns.import/local target :seon.ns.import/target-class}]
+  [:article {:class "seon-family-entry seon-namespace-import-entry"}
+   [:p {:class "seon-kicker"} "Namespace import"]
+   [:p [:code (str local)] " → " [:code (str (or target local))]]
+   [:details {:class "seon-namespace-binding-data"}
+    [:summary "import"]
+    [:pre [:code (pr-str (or target local))]]]])
 
 (defn- ns-form
   [namespace-name requires]
@@ -388,13 +444,18 @@
      :seon.render.profile/id profile-id
      :seon.print/requery-id [:seon.ns/name namespace-name]}))
 
-(defn- empty-value
+(defn- empty-comment
+  "The ordinary state of a fresh agent namespace, said as source.
+
+  AN EMPTY NAMESPACE IS NOT A FAILURE. This used to render
+  `{:seon.error/message \"No indexed members …\"}` into the agent's own
+  context — an error map describing the normal first moment of every agent.
+  A Clojure comment is what a REPL would show, and it is not an error value."
   [owner-agent-id]
-  (cond->
-   {:seon.error/message
-    "No indexed members are recorded for this namespace."}
-    owner-agent-id
-    (assoc :seon.cluster.agent/id owner-agent-id)))
+  (str ";; No definitions are indexed in this namespace yet"
+       (when owner-agent-id (str "; it belongs to agent " owner-agent-id))
+       ".\n"
+       ";; Every `defn` evaluated here with a :malli/schema becomes one."))
 
 (defn- omission-text
   [requires-count definitions-count]
@@ -409,9 +470,9 @@
 
 (defn- empty-text
   [owner-agent-id]
-  (str "No indexed members are recorded for this namespace"
-       (when owner-agent-id (str "; owner agent " owner-agent-id))
-       "."))
+  (str "No definitions are indexed in this namespace yet"
+       (when owner-agent-id (str "; it belongs to agent " owner-agent-id))
+       ". Every contracted `defn` evaluated here becomes one."))
 
 (defn- function-source
   [function]
@@ -498,7 +559,7 @@
          (seq member-parts) (into member-parts)
          schema-section (conj schema-section)
          (and (empty? functions) (empty? own-schemas))
-         (conj (pr-str (empty-value owner-agent-id))))))))
+         (conj (empty-comment owner-agent-id)))))))
 
 (defn- compact-ai-items
   [{::keys [db schema-row-cache functions own-schemas] :as data}]
@@ -523,15 +584,15 @@
             profile-id]}
    items included-count]
   (let [included (subvec items 0 included-count)
-        omitted (- (count items) included-count)]
-    (pr-str
-     (cond-> [(ns-form namespace-name requires)]
-       (seq included) (into included)
-       (and (empty? functions) (empty? own-schemas))
-       (conj (empty-value owner-agent-id))
-       (pos? omitted)
-       (conj (omission-value namespace-name profile-id included-count
-                             0 omitted))))))
+        omitted (- (count items) included-count)
+        no-members? (and (empty? functions) (empty? own-schemas))]
+    (str (when no-members? (str (empty-comment owner-agent-id) "\n"))
+         (pr-str
+          (cond-> [(ns-form namespace-name requires)]
+            (seq included) (into included)
+            (pos? omitted)
+            (conj (omission-value namespace-name profile-id included-count
+                                  0 omitted)))))))
 
 (defn- ai-text
   [data]
@@ -546,14 +607,16 @@
 (defn- minimal-ai-text
   [{::keys [namespace-name requires functions own-schemas owner-agent-id
             profile-id]}]
-  (pr-str
-   (cond-> [namespace-name]
-     (or (seq requires) (seq functions) (seq own-schemas))
-     (conj (omission-value namespace-name profile-id 0
-                           (count requires)
-                           (+ (count functions) (count own-schemas))))
-     (and (empty? requires) (empty? functions) (empty? own-schemas))
-     (conj (empty-value owner-agent-id)))))
+  (let [no-members? (and (empty? requires) (empty? functions)
+                         (empty? own-schemas))]
+    (str (when no-members? (str (empty-comment owner-agent-id) "\n"))
+         (pr-str
+          (cond-> [namespace-name]
+            (or (seq requires) (seq functions) (seq own-schemas))
+            (conj (omission-value namespace-name profile-id 0
+                                  (count requires)
+                                  (+ (count functions)
+                                     (count own-schemas)))))))))
 
 (defn- budgeted-ai
   [data budget]
@@ -610,6 +673,16 @@
            [:h3 "Referenced schemas"]
            (into [:ul] items)])))))
 
+(defn- requires-html
+  "The namespaces this one requires, one entry each, never one raw vector."
+  [requires]
+  [:div {:class "seon-namespace-requires"}
+   [:p "Requires"]
+   (into [:ul]
+         (map (fn [required]
+                [:li [:code (pr-str required)]]))
+         requires)])
+
 (defn- full-html-view
   [{::keys [db schema-row-cache namespace-name namespace-source namespace-doc
             requires functions own-schemas owner-agent-id] :as data}
@@ -639,8 +712,7 @@
          (conj [:p {:class "seon-namespace-elision"}
                 (omission-text 0 omitted)])
          (and include-detail? (seq requires))
-         (conj [:p {:class "seon-namespace-requires"}
-                "Requires " [:code (pr-str (vec requires))]])
+         (conj (requires-html requires))
          (and include-detail? (seq own-schemas))
          (conj [:pre {:class "seon-namespace-own-schemas"}
                 [:code (str/join "\n" (map compact-schema-line own-schemas))]])
@@ -682,8 +754,7 @@
         [:h2 [:code (str namespace-name)]]]
        (cond-> []
          (seq requires)
-         (conj [:p {:class "seon-namespace-requires"}
-                "Requires " [:code (pr-str (vec requires))]])
+         (conj (requires-html requires))
          (seq own-schemas)
          (conj [:pre {:class "seon-namespace-own-schemas"}
                 [:code (str/join "\n" (map compact-schema-line own-schemas))]])
