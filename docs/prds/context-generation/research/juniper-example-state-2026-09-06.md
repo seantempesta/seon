@@ -11,6 +11,26 @@ Owner direction: use the visualization to change stored attributes, values,
 refs, and render functions together, then test the assembled context with live
 agents. Existing data placement is not a design constraint.
 
+## Append, compact, and reuse checkpoint — 2026-09-07
+
+The existing browser probe's `--append-and-compact` mode clicked both real
+buttons. It positively awaited the appended block, then awaited disappearance
+of the changed-result compact action. Root inspected the screenshot
+`tmp/juniper-append-compact.png`: blocks 2 and 3 display Unchanged.
+
+Before the actions, position 1 contribution
+`0893dee6-fa66-486d-a1a7-2236d9e15871` referenced evaluation 39882.
+Afterward its same identity and position reference 40032, and the new position 2
+contribution `1c517e32-6182-460c-a435-05d896eb5d5c` also references 40032.
+Evaluation 39882 and its original source remain queryable. This proves selection
+accretion and in-place compaction using existing evaluations, not copied results.
+
+The subsequent broader reuse check FAILED. With source publication quiet and no
+manual data mutation, reopening the same plan URL changed aggregate counts from
+261 runs/247 evaluations to 264 runs/250 evaluations; error-message entities
+stayed 1651. The execution lane has this reproduction. Do not interpret working
+selection actions as proof of automatic same-input cache reuse.
+
 ## Plan change and comparison proof — 2026-09-07
 
 Root locked the plan preview on subject 34626 through the live button, then
