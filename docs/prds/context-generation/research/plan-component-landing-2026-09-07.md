@@ -69,18 +69,21 @@ database and the calling agent arrive through call preparation
 
 ## Protected-path requests (not implemented here)
 
-1. `src/seon/render.clj` — `render-invocation-argument` hands a producer three
-   different shapes depending on the caller: the attribute's TRANSACTED value
-   (a set of entity ids) when the request value is the owning entity map (the
-   walk and `seon.render-simplification-test`); the raw pulled value (a VECTOR
-   of pulled step maps) when the debug page passes the attribute value directly
-   (`src/seon/render/web.clj:1522-1543`, `debug-found-value` hands
-   `(val entry)` from the agent pull); and one walked child entity map when the
-   walk renders a neighbour reached by that attribute
-   (`src/seon/render/walk.clj:200-300`). Only the first matches the declared
-   `:my.plan/steps` contract. REQUEST: make the debug-page path hand the
-   attribute's transacted value too, so one declared contract covers every
-   caller; otherwise instrumentation refuses the page's vector.
+1. RESOLVED by `43a80d881` while this lane ran. `render-invocation-argument`
+   previously handed a producer two different shapes: the attribute's
+   TRANSACTED value (a set of entity ids) when the request value was the owning
+   entity map, and the raw pulled value (a VECTOR of pulled step maps) when the
+   debug page passed the attribute value directly
+   (`src/seon/render/web.clj`, `debug-found-value` hands `(val entry)` from the
+   agent pull). Both now arrive in the attribute's transaction shape, which is
+   what the landed `:my.plan/steps` contract declares. One case remains: the
+   walk renders a neighbour REACHED BY that attribute
+   (`src/seon/render/walk.clj:200-300`), so the request value is one child step
+   entity, and `{attribute <entity-map>}` does not transact to a ref set. That
+   fails the declared contract as a typed refusal rather than silently, but it
+   is the next thing to decide — either the walk should not select an
+   attribute-declared producer for a child it reached, or it should hand the
+   OWNER.
 2. Keep `:my.plan/intent-subjects` registered with its existing definition and
    preserve `my.plan/ready-subjects`; `src/seon/bootstrap.clj:517`,
    `src/seon/render/walk.clj:679`, and `test/seon/bootstrap_test.clj:293`
