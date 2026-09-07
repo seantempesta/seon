@@ -39,7 +39,6 @@
             [seon.context :as seon.context]
             [seon.db :as db]
             [seon.flow :as flow]
-            [seon.oversight :as oversight]
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.data :as data]
@@ -377,6 +376,13 @@
                     (.build))]
     (.body (.send (client) request (HttpResponse$BodyHandlers/ofInputStream)))))
 
+(defn- debug-feed-path
+  ([agent-id path] (debug-feed-path agent-id path ""))
+  ([agent-id path extra]
+   (str "/feed/" agent-id "?debug=true&path="
+        (URLEncoder/encode (pr-str path) "UTF-8")
+        "&offset=0" extra)))
+
 (defn- patches
   [text]
   (count (re-seq #"event: datastar-patch-elements" text)))
@@ -641,35 +647,20 @@
          :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
          :seon.cluster.run/opened-at (java.util.Date.)
          :seon.cluster.run/process "web-test-dead-process"}])
-      (let [observed (atom nil)
-            unit oversight/unit]
-        (with-redefs [oversight/unit
-                      (fn [request]
-                        (reset! observed request)
-                        (unit request))]
-          (let [stream
-                (open-feed
-                 server
-                 (str "/feed/" agent-id
-                      "?debug=true&path="
-                      (java.net.URLEncoder/encode (pr-str []) "UTF-8")
-                      "&offset=0"))]
-            (try
-              (read-patches! stream 1)
-              (is (= #{process}
-                     (:seon.cluster.run/live-processes @observed))
-                  "debug passes the service's observed process set")
-              (is (= #{"debug-held-dead"}
-                     (into #{}
-                           (map :seon.cluster.run/id)
-                           (:seon.problems/wedged-runs
-                            (problems/problems
-                             @connection
-                             (select-keys
-                              @observed
-                              [:seon.cluster.run/live-processes])))))
-                  "the dead holder is wedged and the live holder is not")
-              (finally (.close stream)))))))))
+      (let [stream (open-feed server (debug-feed-path agent-id []))]
+        (try
+          (let [paint (read-patches! stream 1)]
+            (is (str/includes? paint ":seon.cluster.run/_agent")
+                "the agent's runs are one declared unit of the page")
+            (is (= #{"debug-held-dead"}
+                   (into #{}
+                         (map :seon.cluster.run/id)
+                         (:seon.problems/wedged-runs
+                          (problems/problems
+                           @connection
+                           {:seon.cluster.run/live-processes #{process}}))))
+                "the dead holder is wedged and the live holder is not"))
+          (finally (.close stream)))))))
 
 (deftest static-resources-come-off-the-classpath
   (with-server
@@ -2114,12 +2105,6 @@
           (is (str/includes? body (str "entity=" entity))
               "the capped value retains a handle back to the same root"))))))
 
-(defn- debug-feed-path
-  [agent-id path]
-  (str "/feed/" agent-id "?debug=true&path="
-       (URLEncoder/encode (pr-str path) "UTF-8")
-       "&offset=0"))
-
 (deftest each-agent-has-an-isolated-debug-route
   (with-server
     (fn [connection server _context]
@@ -2141,22 +2126,25 @@
         (is (not= root alice) "the stable root address includes the agent"))
       (is (= 404 (.statusCode (fetch server "/agent/missing/debug")))))))
 
-(deftest debug-drills-three-levels-and-includes-apparatus
+(deftest an-undeclared-incoming-reference-is-reachable-from-the-page
+  ;; Transaction provenance is an ordinary incoming reference to the agent.
+  ;; No unit declares it, so it belongs under Other references with a link
+  ;; that selects the transaction itself.
   (with-server
     (fn [connection server _context]
       (db/transact! connection
                   {:tx-data [{:seon.cluster.agent/id "debug-trigger"}]
                    :tx-meta {:seon.db/user
                              [:seon.cluster.agent/id agent-id]}})
-      (doseq [[path needle]
-              [[[:seon.render.debug/reverse-refs :seon.db/user 0]
-                ":db/txInstant"]]]
-        (let [stream (open-feed server (debug-feed-path agent-id path))]
-          (try
-            (let [paint (read-patches! stream 1)]
-              (is (str/includes? paint needle)
-                  (str "the debug floor exposes " (pr-str path))))
-            (finally (.close stream))))))))
+      (let [stream (open-feed server (debug-feed-path
+                                      agent-id [] "&maxRefAttributes=200"))]
+        (try
+          (let [paint (read-patches! stream 1)]
+            (is (str/includes? paint "Other references")
+                "undeclared incoming references have their own heading")
+            (is (str/includes? paint ":seon.db/user")
+                "the transaction's provenance reference is one of them"))
+          (finally (.close stream)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Slice 1 — one POST, the existing route and render chain

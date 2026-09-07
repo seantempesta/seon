@@ -1416,6 +1416,12 @@
                     (sort-by (comp str key)))]
     [:section {:class "seon-debug-other-references"}
      [:h2 {:class "seon-debug-caption"} "Other references"]
+     (when-not (get-in observation [:seon.render.data/incoming
+                                    :seon.render.data/complete?])
+       [:p {:class "seon-debug-empty"}
+        (str "This is one bounded page of incoming references; "
+             (:seon.render.data/ref-attributes-probed observation 0)
+             " reference attributes were probed, and more remain.")])
      (if (seq groups)
        (into [:div]
              (map (fn [[attribute datoms]]
