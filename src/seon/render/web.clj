@@ -2333,6 +2333,43 @@
            ::invocations {}
            ::ai-entries {})))
 
+(defn- failed-page-result
+  "One page whose derivation threw: a committed fault and a visible section.
+
+  A Throwable escaping one page used to end the cluster's render proc, after
+  which every page returned its shell and no feed ever painted (the silent
+  wedge filed as a blocker on 2026-09-07). The fault still rides the one
+  committer inbox; the page shows the flat diagnostic where its content would
+  have been; and the proc goes on to the next page."
+  [state registration-key failure]
+  (let [fault-channel (:seon.cluster.agent/fault-channel
+                       @(:seon.cluster.agent/routing state))
+        debug? (and (vector? registration-key)
+                    (= ::debug-tab (first registration-key)))
+        diagnostic
+        (debug-diagnostic
+         ::page-derivation-failed
+         (str "Deriving this page threw " (.getName (class failure)) ": "
+              (.getMessage ^Throwable failure))
+         'seon.render.web/render-pass
+         :seon.render.web/page :seon.render.web/page
+         registration-key ::page-derivation-failed
+         {:seon.error/throwable-class (.getName (class failure))})]
+    (when fault-channel
+      (async/offer! fault-channel
+                    {:clojure.core.async.flow/pid :seon.render.web/render
+                     :clojure.core.async.flow/ex
+                     (ex-info "A page derivation threw." diagnostic failure)}))
+    {:seon.render.web/page
+     {(if debug? "debug-units" (str "seon-page-" registration-key))
+      (hiccup/->string
+       [:section {:class "seon-debug-body"}
+        [:h2 {:class "seon-debug-caption"} "This page could not be derived"]
+        (debug-value-html diagnostic)])}
+     :seon.render.web/fragments {}
+     :seon.render/captured-calls {}
+     :seon.render/captured-invocations {}}))
+
 (defn- render-pass
   "Derive every registered page and retain its serialized package.
 
@@ -2364,9 +2401,12 @@
         [results pass-invocations]
         (reduce
          (fn [[results invocations] registration-key]
-           (let [result (page-refresh (assoc state ::invocations invocations)
-                                      database streams profile registration-key
-                                      derive-all? invalidate-calls?)
+           (let [result (try
+                          (page-refresh (assoc state ::invocations invocations)
+                                        database streams profile registration-key
+                                        derive-all? invalidate-calls?)
+                          (catch Throwable failure
+                            (failed-page-result state registration-key failure)))
                  invocations (if (::retained-only? result)
                                invocations
                                (merge invocations

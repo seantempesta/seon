@@ -82,9 +82,8 @@
     (cond
       (nil? node) nil
 
-      (and (map? node) (= :seon.print/string (:seon.print/face node)))
-      (:seon.print/value node)
-
+      ;; A string prints quoted, newlines escaped, exactly as `pr` would:
+      ;; the response is one readable line of data, never a raw splice.
       (and (map? node) (:seon.print/face node))
       (print/emit-text node (merge (print/default-options) options))
 
