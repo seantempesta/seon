@@ -148,3 +148,21 @@ and direction semantics
 (`resources/public/css/input.css:950-1079`). The proposed work should accrete
 information hierarchy there instead of introducing another card or renderer
 path.
+
+## Desktop paired-output layout follow-up
+
+The later `tmp/juniper-context-current.png` capture at 1440 × 1080 exposed a
+layout problem independent of renderer correctness. The graph occupied about
+45% of the experiment width and left its canvas mostly empty, while each AI
+and HTML projection received only half of the remaining column. The agent
+namespace consequently wrapped inside a word and the plan hierarchy became
+hard to scan.
+
+The existing layout now treats the graph as secondary: its desktop column is
+bounded to 17–23 rem (26 viewport-width units between those limits), and its
+canvas is bounded to 14–20 rem high. At 68 rem the graph moves below the
+experiment content; at 52 rem the existing AI/HTML pair becomes one column.
+The two projections retain the existing HTML and render mechanisms, but gain
+separate inspection-blue and information-blue heading and border accents.
+This leaves the warm Phosphor cream for content and the amber signal color for
+actual status or selection rather than using orange as general decoration.

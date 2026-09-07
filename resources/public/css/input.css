@@ -1307,7 +1307,7 @@ details.tool-call-details[open] .tool-preview {
 }
 .seon-debug-experiment:has(> .seon-debug-graph) {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(20rem, 0.9fr);
+  grid-template-columns: minmax(0, 1fr) clamp(17rem, 26vw, 23rem);
   grid-auto-rows: max-content;
   align-content: start;
   align-items: start;
@@ -1324,9 +1324,9 @@ details.tool-call-details[open] .tool-preview {
 }
 .seon-debug-graph {
   min-width: 0;
-  padding: 1rem;
-  border-right: 1px solid var(--color-base-800);
-  background: var(--color-base-900);
+  padding: 0.75rem;
+  border-left: 1px solid color-mix(in srgb, var(--color-inspection) 28%, var(--color-base-800));
+  background: var(--color-base-850);
 }
 .seon-debug-graph-heading {
   margin: 0 0 0.5rem;
@@ -1335,7 +1335,7 @@ details.tool-call-details[open] .tool-preview {
 }
 .seon-debug-graph-canvas {
   width: 100%;
-  height: 400px;
+  height: clamp(14rem, 24vw, 20rem);
 }
 .seon-debug-graph-status,
 .seon-debug-graph [data-graph-detail] {
@@ -1486,10 +1486,22 @@ details.tool-call-details[open] .tool-preview {
 .seon-debug-projection-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.65rem;
+  gap: 0.85rem;
 }
 .seon-debug-projection-column {
   min-width: 0;
+}
+.seon-debug-projection-column > h4 {
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--color-base-800);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.seon-debug-projection-column:first-child > h4 {
+  color: var(--color-inspection);
+}
+.seon-debug-projection-column:last-child > h4 {
+  color: var(--color-info);
 }
 .seon-debug-candidate {
   min-width: 0;
@@ -1578,13 +1590,19 @@ details.tool-call-details[open] .tool-preview {
   color: var(--color-text-200);
 }
 .seon-debug-found-value > .seon-debug-projection-grid {
-  padding: 1rem;
-  gap: 1rem;
+  padding: 0.85rem;
+  gap: 0.85rem;
 }
 .seon-debug-found-value .seon-debug-projection-column {
-  padding: 0.75rem;
+  padding: 0.85rem;
   background: var(--color-base-950);
   border: 1px solid var(--color-base-800);
+}
+.seon-debug-found-value .seon-debug-projection-column:first-child {
+  border-top-color: color-mix(in srgb, var(--color-inspection) 55%, var(--color-base-800));
+}
+.seon-debug-found-value .seon-debug-projection-column:last-child {
+  border-top-color: color-mix(in srgb, var(--color-info) 55%, var(--color-base-800));
 }
 .seon-agent-identity-entry .seon-kicker {
   margin: 0 0 0.2rem;
@@ -1630,6 +1648,7 @@ details.tool-call-details[open] .tool-preview {
   margin-top: 0.5rem;
   overflow: auto;
   overflow-wrap: anywhere;
+  line-height: 1.55;
 }
 .seon-debug-candidate-preview pre {
   max-width: 100%;
@@ -1681,6 +1700,24 @@ details.tool-call-details[open] .tool-preview {
 }
 .seon-debug-observation .seon-data-map {
   grid-template-columns: fit-content(30ch) minmax(0, 1fr);
+}
+
+@media (max-width: 68rem) {
+  .seon-debug-experiment:has(> .seon-debug-graph) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .seon-debug-experiment > .seon-debug-graph {
+    grid-column: 1;
+    grid-row: auto;
+    position: static;
+  }
+  .seon-debug-graph {
+    border-left: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-inspection) 28%, var(--color-base-800));
+  }
+  .seon-debug-graph-canvas {
+    height: 15rem;
+  }
 }
 
 @media (max-width: 52rem) {
