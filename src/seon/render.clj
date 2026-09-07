@@ -1138,19 +1138,16 @@
                                (if reusable?
                                (:seon.render.call/output previous)
                                (present-output request output raw)))
-                    entry (merge
-                           (if reusable?
-                             (if check-read-evidence?
-                               (refresh-read-evidence database previous)
-                               previous)
-                             {:seon.render.call/static-evidence static-evidence
-                              :seon.render.call/read-evidence
-                              (:seon.render.call/read-evidence invocation-entry)
-                              :seon.render.call/basis-transaction
-                              (db/basis-t database)
-                              :seon.render.call/output rendered})
-                           cache-evidence
-                           {:seon.render.call/invocation-key invocation-key})]
+                    entry (assoc
+                           (merge
+                            (when reusable?
+                              (if check-read-evidence?
+                                (refresh-read-evidence database previous)
+                                previous))
+                            invocation-entry)
+                           :seon.render.call/static-evidence static-evidence
+                           :seon.render.call/output rendered
+                           :seon.render.call/invocation-key invocation-key)]
             (when (and call-id captured-calls)
               (swap! captured-calls assoc call-id entry))
             ;; Render cost serves the agent-context consumer. A real prompt

@@ -848,7 +848,26 @@
                            third-calls {}
                            {:seon.ns/name fixture-a
                             :seon.cluster.run/_agent [{:db/id 9001}]}))
-                 retained (some-> @third-invocations vals first peek)]
+                 retained (some-> @third-invocations vals first peek)
+                 invalidated-terminal
+                 (target-call
+                  'seon.render.web 'invalidate-runtime-derived-state
+                  {:seon.render.web/registration (atom {registration-key 1})
+                   :seon.render.web/packages {}
+                   :seon.render.web/fragments {}
+                   :seon.render.web/calls {registration-key @third-calls}
+                   :seon.render.web/ai-calls {}
+                   :seon.render.web/invocations @third-invocations
+                   :seon.render.web/ai-entries {}})
+                 fourth-output
+                 (source-call
+                  (request [:context]
+                           (:seon.render.web/invocations invalidated-terminal)
+                           (atom {}) (atom {})
+                           (get-in invalidated-terminal
+                                   [:seon.render.web/calls registration-key])
+                           {:seon.ns/name fixture-a
+                            :seon.cluster.run/_agent [{:db/id 9001}]}))]
              (is (nil? first-output)
                  "the pending run has no invented synchronous output")
              (is (nil? (get-in retained-after-runtime-eval
@@ -859,13 +878,18 @@
                             [[:debug] :seon.render.call/source-run-id])))
              (is (= second-output third-output))
              (is (str/includes? second-output "2"))
-             (is (= 2 @source-invocations)
-                 "one entity change regenerates source; the second presentation reuses it")
+             (is (= 3 @source-invocations)
+                 "entity and runtime changes regenerate source; the second presentation reuses it")
              (is (= 1 @submissions)
                  "the runtime-evaluation page refresh retains one execution identity")
              (is (= "(+ 1 1)" (:seon.render.call/source retained)))
              (is (= "source-cache-run"
                     (:seon.render.call/source-run-id retained)))
+             (is (= "source-cache-run"
+                    (get-in @third-calls [[:context] :seon.render.call/source-run-id]))
+                 "a terminal invocation carries its execution into each presentation's call entry")
+             (is (= third-output fourth-output)
+                 "a subsequent runtime wake of that same call id reuses the stored execution")
              (is (= third-output
                     (:seon.render.call/output retained))))))))))
 

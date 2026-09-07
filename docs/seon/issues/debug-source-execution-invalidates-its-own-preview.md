@@ -215,3 +215,20 @@ retained call's `:seon.render.call/source-run-id` was absent on every pass.
 The failure precedes execution-read validation: the page loses its execution
 reference. Web was stopped again after this capture. Correcting that loss is
 the next acceptance step; these earlier fixes do not establish a stable UI.
+
+`render-call` reconstructed a presentation entry from a reusable invocation
+using only output, basis, and read evidence. It omitted that invocation's
+execution reference. `render-source-call` then returned its already terminal
+output before enrichment, and the next runtime invalidation had no per-call
+run reference to retain. The correction accretes the valid invocation entry
+into the valid prior call instead of selecting a subset of its fields; an
+invalid prior call contributes nothing, and current invocation facts win.
+
+The existing source-reuse regression now follows the missing order: pending
+execution, runtime wake, terminal execution, cached second presentation, then
+another runtime wake for that same presentation id. It asserts both the
+presentation's run reference and no additional submission. The focused
+`seon.render-simplification-test` plus `seon.render-source-test` gate completed
+with 25 tests, 217 assertions, zero failures and zero errors
+(`tmp/render-source-reference-gate.log`). Quiet-source browser acceptance is
+still required before closing this issue.
