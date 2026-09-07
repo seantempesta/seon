@@ -47,6 +47,8 @@
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
             [seon.render.web :as web]
+            [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as sci.kernel]
@@ -501,11 +503,11 @@
               (is (str/includes? body "id=\"debug-ai-root\""))
               (is (str/includes? body "left&lt;&amp;\n"))
               (is (str/includes? body "\nright"))
-              (is (str/includes? body "id=\"debug-html-root\""))
+              (is (str/includes? body "id=\"debug-units\""))
               (is (str/includes? body "class=\"seon-debug-grid\""))
               (is (str/includes? body
-                                 "Loading the actual selected output")
-                  "the pending pane states what has not derived yet"))))))))
+                                 "Loading the entity&#39;s attributes")
+                  "the pending section states what has not derived yet"))))))))
 
 (deftest a-never-run-agents-debug-context-is-labeled-prospective
   (with-server
@@ -782,7 +784,7 @@
                  (str/includes? header "output=%3Aseon.render%2Fai"))
             "HTML and AI remain ordinary links with the selected output exposed")))))
 
-(deftest debug-datom-links-follow-reference-direction-and-preserve-the-view
+(deftest debug-reference-links-select-another-entity-and-preserve-the-view
   (let [request {:seon.render.debug/viewer-namespace 'my.viewer
                  :seon.render.debug/subject [:my/id "before"]
                  :seon.render/output :seon.render/ai
@@ -791,199 +793,81 @@
                  :seon.render.data/max-ref-attributes 19
                  :seon.render.data/max-result-weight 23
                  :seon.render.web/pull-max-work 29
-                 :seon.render.web/pull-max-results 31
                  :seon.render.data/cursor
                  {:seon.render.data/path [:old]
                   :seon.render.data/offset 7}
                  :seon.render.data/outgoing-cursor {:old :outgoing}
                  :seon.render.data/incoming-cursor {:old :incoming}}
-        page (fn [datoms]
-               {:seon.render.data/datoms datoms
-                :seon.render.data/complete? true})
-        render (web-private 'datom-page-html)
-        outgoing (render request #{:my/ref} :outgoing
-                         (page [{:e 10 :a :my/ref :v 20 :tx 30 :added true}
-                                {:e 10 :a :my/name :v "plain"
-                                 :tx 31 :added true}]))
-        incoming (render request #{:my/ref} :incoming
-                         (page [{:e 90 :a :my/ref :v 10
-                                 :tx 32 :added true}]))
-        anchors (fn [tree]
-                  (filter #(and (vector? %) (= :a (first %)))
-                          (tree-seq coll? seq tree)))
-        hrefs (into {}
-                    (map (fn [anchor]
-                           [(get-in anchor [2 1])
-                            (java.net.URLDecoder/decode
-                             (get-in anchor [1 :href]) "UTF-8")]))
-                    (concat (anchors outgoing) (anchors incoming)))
-        target-href (get hrefs "20")
-        source-href (get hrefs "90")
-        attribute-href (get hrefs ":my/ref")
-        scalar-href (get hrefs "\"plain\"")]
-    (is (str/includes? target-href "subject=20")
-        "an outgoing ref value follows its target")
-    (is (str/includes? source-href "subject=90")
-        "an incoming ref entity follows its source")
-    (is (str/includes? attribute-href
-                       "subject=[:db/ident :my/ref]")
-        "an attribute follows its installed :db/ident entity")
-    (is (and (str/includes? scalar-href "subject=[:my/id \"before\"]")
-             (str/includes? scalar-href "path=[:my/name]"))
-        "an ordinary outgoing value selects its attribute without changing the entity")
-    (doseq [href [target-href source-href attribute-href]]
-      (is (str/starts-with? href "/ns/my.viewer/debug?")
+        link (web-private 'debug-subject-link)
+        href (fn [subject]
+               (java.net.URLDecoder/decode
+                (get-in (link request subject subject) [1 :href]) "UTF-8"))
+        entity-href (href 20)
+        renderer-href (href [:seon.fn/sym "my.render/card"])]
+    (is (str/includes? entity-href "subject=20")
+        "a referenced entity id selects that entity")
+    (is (str/includes? renderer-href "subject=[:seon.fn/sym \"my.render/card\"]")
+        "a render function link selects its program row")
+    (doseq [link-href [entity-href renderer-href]]
+      (is (str/starts-with? link-href "/ns/my.viewer/debug?")
           "navigation keeps the viewing namespace")
-      (is (every? #(str/includes? href %)
+      (is (every? #(str/includes? link-href %)
                   ["output=:seon.render/ai" "prompt=true" "limit=17"
                    "maxRefAttributes=19" "maxResultWeight=23"
-                   "maxWork=29" "maxResults=31" "path=[]" "offset=0"])
+                   "maxWork=29" "path=[]" "offset=0"])
           "navigation preserves output and bounds and resets the value cursor")
-      (is (not (or (str/includes? href "outgoingCursor=")
-                   (str/includes? href "incomingCursor=")))
+      (is (not (or (str/includes? link-href "outgoingCursor=")
+                   (str/includes? link-href "incomingCursor=")))
           "a new subject never carries snapshot-bound page cursors"))))
 
-(deftest debug-selected-path-is-the-renderer-input
-  (with-server
-    (fn [_connection server _context]
-      (let [values (atom [])
-            call-ids (atom [])
-            invoke render/render-call
-            subject (URLEncoder/encode
-                     (pr-str [:seon.ns/name 'seon.flow]) "UTF-8")
-            feed-url (fn [path]
-                       (str "/feed/seon.flow?debug=true&viewer=seon.flow"
-                            "&subject=" subject
-                            "&output=%3Aseon.render%2Fhtml"
-                            "&path=" (URLEncoder/encode (pr-str path) "UTF-8")
-                            "&offset=0"))]
-        (with-redefs [render/render-call
-                      (fn [request]
-                        (swap! values conj (:seon.render/value request))
-                        (swap! call-ids conj (:seon.render.call/id request))
-                        (invoke request))]
-          (let [stream (open-feed server (feed-url [:seon.ns/name]))]
-            (try
-              (let [patch (read-until! stream "selected path")]
-                (is (seq @values)
-                    "the selected value reaches the generic render boundary")
-                (is (every? #(= 'seon.flow %) @values)
-                    "the renderer comparison receives the scalar at the path")
-                (is (every? #(str/includes? (pr-str %) "[:seon.ns/name]") @call-ids)
-                    "retained render identities distinguish the selected path")
-                (is (str/includes? patch "return to entity")))
-              (finally (.close stream))))
-          (reset! values [])
-          (let [stream (open-feed server (feed-url [:seon.ns/missing]))]
-            (try
-              (let [patch (read-until! stream "no-such-path")]
-                (is (empty? @values)
-                    "a missing path never falls back to rendering the entity")
-                (is (str/includes? patch "debug-html-inspection")
-                    "the rendered-result panel exposes the path diagnostic"))
-              (finally (.close stream)))))))))
+(deftest declared-units-are-read-from-the-entitys-own-schema
+  (support/with-database
+   (fn [connection]
+     (let [projection (schema/build-projection (schema.edn/packaged-forms) {})
+           declared (web-private 'declared-entity-units)
+           units (declared projection @connection
+                           {:db/id 1
+                            :seon.cluster.agent/id "juniper"
+                            :seon.cluster.agent/namespace 2})
+           placeholder (hiccup/->string
+                        ((web-private 'debug-experiment-placeholder)
+                         "debug-html-inspection"))]
+       (is (= [:seon.cluster.agent/id
+               :seon.cluster.agent/namespace
+               :seon.cluster.agent/cluster
+               :seon.cluster.agent/run
+               :my.plan/steps
+               :my.plan/current-step
+               :seon.cluster.message/_to
+               :seon.cluster.run/_agent
+               :seon.context.contribution/_agent
+               :seon.error/_agent]
+              units)
+           "the agent schema's declared order is the page's order")
+       (is (= [] (declared projection @connection {:seon.ns/name 'my.probe}))
+           "an entity whose schemas declare no units contributes none")
+       (is (= [] (declared projection @connection "not an entity"))
+           "a value that is not an entity map declares nothing")
+       (is (and (str/includes? placeholder "id=\"debug-units\"")
+                (str/includes? placeholder "id=\"debug-graph\""))
+           "the shell places the units section and the reference graph")))))
 
-(deftest debug-layout-leads-with-renderer-comparison-and-real-description
-  (let [placeholder
-        (hiccup/->string
-         ((web-private 'debug-experiment-placeholder)
-          "debug-html-inspection"))
-        output-position (.indexOf placeholder "id=\"debug-html-inspection\"")
-        selection-position (.indexOf placeholder "id=\"debug-selection\"")
-        observation-position (.indexOf placeholder "id=\"debug-observation\"")
-        selection
-        {:seon.render.selection/selected 'my.render/card
-         :seon.render.selection/stages
-         [{:seon.render.selection.stage/name :namespace
-           :seon.render.selection.stage/status :selected
-           :seon.render.selection.stage/candidates
-           [{:seon.render.selection.candidate/producer 'my.render/card
-             :seon.render.selection.candidate/status :compatible}]}]}
-        debug-request
-        {:seon.render.debug/viewer-namespace 'my.viewer
-         :seon.render.debug/subject [:my/id "subject"]
-         :seon.render/output :seon.render/html
-         :seon.render.data/limit 17
-         :seon.render.data/max-ref-attributes 19
-         :seon.render.data/max-result-weight 23
-         :seon.render.web/pull-max-work 29
-         :seon.render.web/pull-max-results 31}
-        call-entry
-        {:seon.render.call/static-evidence
-         {:seon.render/selection selection
-          :seon.render.call/argument
-          {:seon.render/value {:my/card "actual supplied value"}}
-          :seon.render.call/declaration-row
-          {:seon.fn/doc "Render the actual <card>."}}
-         :seon.render/projection
-         {:seon.schema.projection/function-contracts
-          {'my.render/card
-           [:=> [:cat [:map [:seon.render/value :my/card]]]
-            :seon.render/hiccup]}}}
-        selected-html
-        ((web-private 'debug-selection-html)
-         debug-request call-entry)
-        undocumented-html
-        ((web-private 'debug-selection-html)
-         debug-request
-         (assoc-in call-entry
-                   [:seon.render.call/static-evidence
-                    :seon.render.call/declaration-row]
-                   (dissoc
-                    (get-in call-entry
-                            [:seon.render.call/static-evidence
-                             :seon.render.call/declaration-row])
-                    :seon.fn/doc)))
-        observation-html
-        ((web-private 'debug-observation-html)
-         #{}
-         {:seon.render.debug/viewer-namespace 'my.viewer}
-         {:seon.render.data/eid 42
-          :seon.render.data/ref-attributes-probed 0
-          :seon.render.data/outgoing
-          {:seon.render.data/datoms []
-           :seon.render.data/complete? true}
-          :seon.render.data/incoming
-          {:seon.render.data/datoms []
-           :seon.render.data/complete? true}
-          :seon.render.data/identities []
-          :seon.render.data/identities-complete? true}
-         [:div "structural marker"]
-         false)]
-    (is (< -1 selection-position output-position observation-position)
-        "the comparison precedes the duplicate selected output and structural evidence")
-    (is (str/includes?
-         selected-html
-         "<p class=\"seon-debug-description\"><span>description</span> Render the actual &lt;card&gt;.</p>")
-        "the selected declaration's actual :seon.fn/doc is the description")
-    (is (and (str/includes? selected-html "selection evidence")
-             (str/includes? selected-html "my.render/card")
-             (str/includes? selected-html "compatible"))
-        "ranked candidate evidence remains available in its disclosure")
-    (is (and (str/includes? selected-html "supplied argument")
-             (str/includes? selected-html "actual supplied value")
-             (str/includes? selected-html "declared contract and arities")
-             (str/includes? selected-html ":my/card")
-             (str/includes? selected-html "definition"))
-        "the actual retained argument and contract remain inspectable beside the definition link")
-    (is (and (str/includes? selected-html "/ns/my.viewer/debug?")
-             (str/includes?
-              selected-html
-              "subject=%5B%3Aseon.fn%2Fsym+%22my.render%2Fcard%22%5D")
-             (str/includes? selected-html "output=%3Aseon.render%2Fhtml")
-             (str/includes? selected-html "limit=17"))
-        "renderer navigation preserves the viewer, output, and bounds")
-    (is (not (str/includes? undocumented-html "seon-debug-description"))
-        "an absent declaration doc does not invent a description")
-    (is (and (str/includes?
-              observation-html
-              "<details class=\"seon-debug-structural-detail\">")
-             (str/includes? observation-html "structural marker")
-             (str/includes? observation-html "raw datom evidence")
-             (not (str/includes? observation-html "<details open")))
-        "structural value and raw datoms are present but collapsed")))
+(deftest an-attribute-description-comes-from-the-projection-form
+  (let [projection
+        {:seon.schema.projection/forms
+         {:my/documented [:string {:description "What this attribute means."}]
+          :my/plain :string}}
+        description (web-private 'attribute-description)]
+    (is (= "What this attribute means."
+           (description projection :my/documented))
+        "the authored :description is read from the parsed form")
+    (is (= "What this attribute means."
+           (description projection :my/_documented))
+        "a reverse unit is described by its forward attribute")
+    (is (nil? (description projection :my/plain))
+        "an undeclared description is absent, never invented")))
 
-(deftest debug-experiment-leads-with-paired-selection-and-hides-empty-stages
+(deftest applicable-render-functions-list-alternatives-and-hide-rejections
   (let [candidate (fn [producer status]
                     {:seon.render.selection.candidate/producer producer
                      :seon.render.selection.candidate/status status})
@@ -1004,29 +888,38 @@
              {:seon.render.selection.stage/name :floor
               :seon.render.selection.stage/status :not-consulted
               :seon.render.selection.stage/candidates []}]}
-           :seon.render/previews {selected selected-output
-                                  alternative selected-output}
+           :seon.render/previews {selected selected-output}
            :seon.render/entries {}})
-        rendered
-        ((web-private 'debug-experiments-html)
-         {:seon.render.debug/viewer-namespace 'my.viewer}
-         {:seon.render/ai
-          (experiment 'my.render/ai "selected AI" 'my.render/other-ai)
-          :seon.render/html
-          (experiment 'my.render/html [:p "selected HTML"]
-                      'my.render/other-html)})]
-    (is (< (.indexOf rendered "selected AI")
-           (.indexOf rendered "alternative renderers"))
-        "the paired selected values are visible before any disclosure")
-    (is (and (str/includes? rendered "selected AI")
-             (str/includes? rendered "selected HTML")))
-    (is (and (str/includes? rendered "<details class=\"seon-debug-alternative-renderers\"")
-             (str/includes? rendered "my.render/other-ai")
-             (str/includes? rendered "my.render/other-html")))
-    (is (not (str/includes? rendered "my.render/rejected"))
-        "rejected candidates are absent rather than empty cards")
-    (is (not (str/includes? rendered ":floor"))
-        "an empty stage is absent")))
+        experiments
+        {:seon.render/ai
+         (experiment 'my.render/ai "selected AI" 'my.render/other-ai)
+         :seon.render/html
+         (experiment 'my.render/html [:p "selected HTML"]
+                     'my.render/other-html)}
+        previews
+        (str (hiccup/->string
+              ((web-private 'experiment-preview-html)
+               :seon.render/ai (:seon.render/ai experiments)))
+             (hiccup/->string
+              ((web-private 'experiment-preview-html)
+               :seon.render/html (:seon.render/html experiments))))
+        renderers
+        (hiccup/->string
+         ((web-private 'applicable-renderers-html)
+          {:seon.render.debug/viewer-namespace 'my.viewer} experiments))]
+    (is (and (str/includes? previews "selected AI")
+             (str/includes? previews "selected HTML"))
+        "each projection shows the value its selected render function produced")
+    (is (and (str/includes? renderers "my.render/ai")
+             (str/includes? renderers "my.render/html"))
+        "the disclosure names the selected render function of both projections")
+    (is (and (str/includes? renderers "compatible alternatives")
+             (str/includes? renderers "my.render/other-ai")
+             (str/includes? renderers "my.render/other-html")))
+    (is (not (str/includes? renderers "my.render/rejected"))
+        "rejected candidates are absent rather than empty rows")
+    (is (not (str/includes? previews "my.render/other-ai"))
+        "an alternative is named but never rendered beside the selected value")))
 
 (deftest selected-ai-experiment-reuses-the-canonical-executed-call
   (let [selected 'my.render/selected
@@ -1063,19 +956,17 @@
              {:seon.render.call/producer selected
               :seon.render.call/output "Agent \"juniper\"\nNamespace my.agents.juniper"
               :seon.render.call/entry selected-entry})]
-        (is (= [alternative] @calls)
-            "the selected producer is not invoked a second time")
+        (is (= [] @calls)
+            "the executed call is reused and no other candidate is rendered")
+        (is (not (contains? (:seon.render/previews experiment) alternative))
+            "a named alternative is never rendered for the page")
         (is (= "Agent \"juniper\"\nNamespace my.agents.juniper"
                (get-in experiment [:seon.render/previews selected])))
         (is (= selected-entry
                (get-in experiment [:seon.render/entries selected])))
-        (let [html ((web-private 'debug-experiments-html)
-                    {} {:seon.render/ai experiment
-                        :seon.render/html
-                        {:seon.render/selection
-                         {:seon.render.selection/selected nil}
-                         :seon.render/previews {}
-                         :seon.render/entries {}}})]
+        (let [html (hiccup/->string
+                    ((web-private 'experiment-preview-html)
+                     :seon.render/ai experiment))]
           (is (and (str/includes? html "Agent &quot;juniper&quot;\nNamespace")
                    (not (str/includes? html "&quot;Agent")))
               "the paired AI preview presents multiline terminal text without EDN quotes"))))))
@@ -1101,79 +992,137 @@
             {:seon.sci.eval/function-source "(defn ai [x] x)"}}}}}
         request {:seon.render.debug/viewer-namespace 'my.viewer}
         preview (hiccup/->string
-                 ((web-private 'debug-selected-projection-html)
-                  request :seon.render/ai experiment))
+                 ((web-private 'experiment-preview-html)
+                  :seon.render/ai experiment))
         details (hiccup/->string
                  ((web-private 'debug-selected-renderer-details)
                   request :seon.render/ai experiment))
-        page ((web-private 'debug-experiments-html)
-              request {:seon.render/ai experiment
-                       :seon.render/html
-                       {:seon.render/selection
-                        {:seon.render.selection/stages []}}})]
+        page (hiccup/->string
+              [:div preview
+               ((web-private 'applicable-renderers-html)
+                request {:seon.render/ai experiment
+                         :seon.render/html
+                         {:seon.render/selection
+                          {:seon.render.selection/stages []}}})])]
     (is (= 1 (count (re-seq #"exact agent-visible text" preview)))
         "the AI preview contains the renderer output exactly once")
     (is (not-any? #(str/includes? preview %)
-                  ["renderer details" "my.render/ai" "function definition"
-                   "database read dependencies" "declared contract"])
+                  ["Applicable render functions" "my.render/ai"
+                   "function definition" "database read dependencies"
+                   "declared contract"])
         "renderer metadata is not a child of the AI preview")
     (is (every? #(str/includes? details %)
                 ["my.render/ai" "function definition"
                  "database read dependencies"])
         "the separate renderer disclosure retains its evidence")
     (is (< (.indexOf page "exact agent-visible text")
-           (.indexOf page "renderer details"))
-        "renderer details are a sibling below the paired previews")))
+           (.indexOf page "Applicable render functions"))
+        "render-function evidence is a sibling below the paired previews")))
 
-(deftest debug-found-values-render-scalars-and-connected-entities-in-pairs
-  (let [values (atom [])
-        observation
-        {:seon.render.data/outgoing
-         {:seon.render.data/datoms
-          [{:e 1 :a :seon.cluster.agent/id :v "example" :tx 10}
-           {:e 1 :a :my.plan.item/agent :v 2 :tx 11}]}
-         :seon.render.data/incoming
-         {:seon.render.data/datoms
-          [{:e 3 :a :seon.cluster.message/to :v 1 :tx 12}]}}
-        render-request
-        {:seon.db/db ::database
-         :seon.render/retained-calls {}
-         :seon.render/captured-calls (atom {})}
-        render-found (web-private 'debug-found-values-html)]
-    (with-redefs [db/identity-attributes
-                  (constantly #{:seon.cluster.agent/id})
+(deftest every-declared-unit-is-one-section-in-declared-order
+  (let [rendered (atom [])
+        projection
+        {:seon.schema.projection/forms
+         {:my/name [:string {:description "The person's name."}]
+          :my/tags [:set {:description "Every tag asserted about this entity."}
+                    :string]
+          :my/parts [:vector {:description "The parts this entity owns."} :map]
+          :my/absent [:string {:description "Never asserted here."}]
+          :my.note/subject [:and {:description "The entity a note is about."}
+                            :seon.db/ref]}}
+        inspection
+        {:seon.render.selection/selected 'my.render/unit
+         :seon.render.selection/stages
+         [{:seon.render.selection.stage/name :schema
+           :seon.render.selection.stage/status :selected
+           :seon.render.selection.stage/candidates
+           [{:seon.render.selection.candidate/producer 'my.render/unit
+             :seon.render.selection.candidate/status :compatible}]}]}
+        acquisition
+        {:db/id 1
+         :my/name "Ada"
+         :my/tags #{"one" "two"}
+         :my/parts [{:db/id 5 :my.part/name "left"}
+                    {:db/id 6 :my.part/name "right"}]
+         :my/undeclared "still shown"}
+        declared-units [:my/name :my/tags :my/parts :my/absent
+                        :my.note/_subject]
+        reverse-values {:my.note/_subject [{:db/id 9}]}
+        generic {:seon.render.debug/reverse-refs
+                 {:my.mention/subject [{:db/id 11}]}}
+        render-request {:seon.db/db ::database
+                        :seon.render/retained-calls {}
+                        :seon.render/captured-calls (atom {})}
+        debug-request {:seon.render.debug/viewer-namespace 'my.viewer
+                       :seon.render.debug/subject [:my/id "example"]}]
+    (with-redefs [render/selection-inspection (constantly inspection)
+                  sci.kernel/context-projection (constantly ::projection)
+                  db/basis-t (constantly 1)
                   render/render-call
                   (fn [request]
-                    (swap! values conj
-                           [(:seon.render/value request)
+                    (swap! rendered conj
+                           [(:seon.render.walk/attribute request)
                             (:seon.render/output request)
-                            (:seon.render.call/id request)])
+                            (:seon.render/value request)])
                     (if (= :seon.render/html (:seon.render/output request))
                       [:p "HTML preview"]
                       "AI preview"))]
       (let [html (hiccup/->string
-                  (render-found
-                   render-request
-                   {:seon.render.debug/viewer-namespace 'my.viewer
-                    :seon.render.debug/subject
-                    [:seon.cluster.agent/id "example"]}
-                   observation
-                   #{:my.plan.item/agent :seon.cluster.message/to}
-                   {2 {:my.plan.item/id "plan"}
-                    3 {:seon.cluster.message/id "message"}}))]
-        (is (= 6 (count @values)) "each of three rows renders AI and HTML")
-        (is (= #{{:seon.cluster.agent/id "example"}
-                 {:my.plan.item/id "plan"}
-                 {:seon.cluster.message/id "message"}}
-               (into #{} (map first) @values))
-            "identity scalars are shaped for their schema and refs use entities")
-        (is (every? #(= :seon.render.web/found-value (first (nth % 2)))
-                    @values)
-            "every preview uses the existing retained render-call identity")
-        (is (and (str/includes? html "seon-debug-found-values")
-                 (= 3 (count (re-seq #"seon-debug-found-value\"" html)))
-                 (= 3 (count (re-seq #"AI preview" html)))
-                 (= 3 (count (re-seq #"HTML preview" html)))))))))
+                  ((web-private 'debug-found-values-html)
+                   projection render-request debug-request acquisition
+                   declared-units generic reverse-values nil nil))
+            position (fn [needle] (.indexOf html (str needle)))
+            heading (fn [attribute]
+                      (str "<h2><code>" attribute "</code></h2>"))]
+        (is (= 6 (count (re-seq #"seon-debug-attribute-unit" html)))
+            "five declared units and the one remaining stored attribute")
+        (is (apply < (map (comp position heading)
+                          [:my/name :my/tags :my/parts :my/absent
+                           :my.note/_subject :my/undeclared]))
+            "declared order first, then any attribute the entity still carries")
+        (is (every? #(= 1 (count (re-seq (re-pattern (heading %)) html)))
+                    [:my/name :my/tags :my/parts :my.note/_subject])
+            "a cardinality-many, component, or reverse unit is ONE section")
+        (is (every? #(str/includes? html %)
+                    ["The person&#39;s name."
+                     "Every tag asserted about this entity."
+                     "The parts this entity owns."
+                     "Never asserted here."
+                     "The entity a note is about."])
+            "every section shows the attribute's authored :description")
+        (is (< (position "Never asserted here.")
+               (position "No value is stored or connected"))
+            "an absent declared unit is a visible empty section")
+        (is (not-any? (fn [[attribute _ _]] (= :my/absent attribute))
+                      @rendered)
+            "an absent unit renders nothing rather than rendering nil")
+        (is (= #{"Ada" #{"one" "two"}
+                 [{:db/id 5 :my.part/name "left"}
+                  {:db/id 6 :my.part/name "right"}]
+                 [{:db/id 9}] "still shown"}
+               (into #{} (map (fn [[_ _ value]] value)) @rendered))
+            "each unit renders its own whole value, children included")
+        (is (every? (fn [[attribute _ _]] (not= :my.note/_subject attribute))
+                    (filter (fn [[attribute _ _]]
+                              (= :my.note/_subject attribute))
+                            @rendered))
+            "a reverse unit renders under its forward attribute declaration")
+        (is (= 5 (count (re-seq #"AI preview" html)))
+            "every present unit shows its AI projection")
+        (is (= 5 (count (re-seq #"HTML preview" html)))
+            "every present unit shows its HTML projection")
+        (is (and (str/includes? html "Other references")
+                 (str/includes? html ":my.mention/subject")
+                 (< (position (heading :my/undeclared))
+                    (position "Other references")))
+            "incoming references no unit declares are grouped at the bottom")
+        (is (not (str/includes? html ":my.note/subject</code></h3>"))
+            "a declared reverse unit is not repeated under other references")
+        (is (every? #(str/includes? html %)
+                    ["Raw data and schema" "Applicable render functions"])
+            "raw data, schema, and render functions stay under disclosure")
+        (is (not (str/includes? html "<h2><code>:db/id</code></h2>"))
+            "the entity id is the header's, never a unit of its own")))))
 
 (deftest debug-renderer-definition-uses-retained-program-source
   (let [render-definition (web-private 'debug-renderer-definition)
@@ -1375,8 +1324,8 @@
               (let [before @counts
                     pass-before (derivations context)]
                 (is (= 1 (:observation before)))
-                (is (= 3 (:discovery before))
-                    "the initial page selects its requested result and two projections")
+                (is (pos? (:discovery before))
+                    "the initial page selects a render function for its units")
                 (is (pos? (:invocation before))
                     "the initial comparison executes its applicable render functions")
                 (db/transact!

@@ -1237,7 +1237,7 @@
 
               (coll? node) (into [] (mapcat ids) node)
               :else []))]
-    (into [] distinct (ids value))))
+    (into [] (distinct) (ids value))))
 
 (defn- selected-unit-experiment
   [render-request attribute output value root cursor]
@@ -1611,45 +1611,32 @@
            :seon.render.call/output inspection})
         _ (swap! (:seon.render/captured-calls request)
                  assoc selection-call-id selection-entry)
-        candidates
-        (into []
-              (comp
-               (mapcat :seon.render.selection.stage/candidates)
-               (filter #(= :compatible
-                           (:seon.render.selection.candidate/status %)))
-               (map :seon.render.selection.candidate/producer)
-               (distinct))
-              (:seon.render.selection/stages inspection))
+        selected (:seon.render.selection/selected inspection)
         call-id (fn [producer]
                   [::inspection-candidate subject output producer])
-        previews
-        (into {}
-              (map (fn [producer]
-                     [producer
-                      (if (and selected-call
-                               (= producer
-                                  (:seon.render.selection/selected inspection))
-                               (= producer
-                                  (:seon.render.call/producer selected-call)))
-                        (:seon.render.call/output selected-call)
-                        (render-source-call
-                         (assoc request
-                                :seon.render/selection-inspection inspection
-                                :seon.render.call/selected-producer producer
-                                :seon.render.call/id (call-id producer))))]))
-              candidates)
-        entries (into {}
-                      (map (fn [producer]
-                             [producer
-                              (if (and selected-call
-                                       (= producer
-                                          (:seon.render.selection/selected inspection))
-                                       (= producer
-                                          (:seon.render.call/producer selected-call)))
-                                (:seon.render.call/entry selected-call)
-                                (get @(:seon.render/captured-calls request)
-                                     (call-id producer)))]))
-                      candidates)]
+        ;; ONE render per unit and output: the selected producer's. The
+        ;; compatible alternatives are listed by name, so rendering them
+        ;; would multiply every page load by the candidate count — and for
+        ;; the AI projection each render is an evaluation.
+        reusable-selected?
+        (and selected-call
+             (= selected (:seon.render.call/producer selected-call)))
+        preview
+        (when selected
+          (if reusable-selected?
+            (:seon.render.call/output selected-call)
+            (render-source-call
+             (assoc request
+                    :seon.render/selection-inspection inspection
+                    :seon.render.call/selected-producer selected
+                    :seon.render.call/id (call-id selected)))))
+        entry
+        (when selected
+          (if reusable-selected?
+            (:seon.render.call/entry selected-call)
+            (get @(:seon.render/captured-calls request) (call-id selected))))
+        previews (if selected {selected preview} {})
+        entries (if (and selected entry) {selected entry} {})]
     {:seon.render/selection inspection
      :seon.render/previews previews
      :seon.render/entries entries}))
