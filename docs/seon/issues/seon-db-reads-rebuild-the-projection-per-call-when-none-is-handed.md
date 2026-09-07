@@ -84,3 +84,44 @@ cache-hit floor remains 0.012–0.121 ms raw versus 0.144–0.405 ms through
 ratio is not yet within 2×. Keep this issue open until the owner rules whether
 that ratio requires a second decoded-result cache or the acceptance criterion
 should compare actual query executions rather than Datahike cache hits.
+
+## 2026-09-07: the identity cache misses on every commit, by construction
+
+Measured on the isolated scratch cluster `projection-lane`
+(`tmp/projection-lane-root`), full method and tables in
+[projection-to-writer-landing-2026-09-07.md](../../prds/context-generation/research/projection-to-writer-landing-2026-09-07.md).
+
+The 2026-09-03 identity cache repaired repeated reads of ONE database value.
+It cannot help a caller that reads after a commit: a commit mints a new
+`datahike.db/committed-value-identity`, so the next unbound `seon.db` call on
+that connection rebuilds. Cold rebuild measured 507 / 566 / 579 / 670 ms.
+
+This is what a two-form source turn actually pays. Submitting
+`"(+ 1 1)\n(* 3 4)"` through `seon.cluster.agent/submit-source!` from a thread
+with no projection bound: 728 / 693 / 814 / 756 ms wall, of which 599-697 ms is
+`submit-source!` itself and ONE cold rebuild at `read-declarations`
+(`src/seon/db.clj:630`). The same submission wrapped in
+`schema/call-with-projection-state` with the cluster handle's own
+`:seon.sci.eval/projection-state`: 168 / 187 / 147 / 146 ms wall, 54-73 ms in
+`submit-source!`, zero rebuilds. The run loop itself derived the projection
+**zero** times in all eight trials and costs 76-117 ms — flow procs already run
+under `seon.cluster/projection-executor`.
+
+Two directions, both open:
+
+- **Bind at every entry point that is not a flow proc** — `submit-source!`
+  first, then the web request threads, the MCP tools, and `bin/seon`. One
+  `schema/call-with-projection-state` each; measured 5× on the turn.
+- **Reuse on a cache miss** — offer the previously derived projection to
+  `derive-projection-from-database` as its reusable projection when the
+  identity cache misses. Measured 507-670 ms → 43-62 ms for every unbound
+  caller, no second cache. The guard: a reusable projection may carry
+  process-local predicate functions absent from its pure fingerprint
+  (`src/seon/schema.clj:2496-2500`), so the reused value must come from the
+  database-derived cache itself and never from a caller.
+
+`seon.cluster.loop/turn` now binds the handle's projection state explicitly, so
+the turn no longer depends on which executor ran the proc; regression
+`a-turn-hands-its-clusters-projection-to-every-database-call`
+(`test/seon/cluster/turn_test.clj`) runs the pass on a bare thread and asserts
+zero derivations.
