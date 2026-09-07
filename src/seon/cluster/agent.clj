@@ -332,6 +332,24 @@
       [:div [:dt "Bootstrap run"]
        [:dd [:code (:seon.cluster.run/id unit)]]]]]))
 
+(defn assigned-to
+  "Agent ids assigned to work in `namespace-name`, sorted; empty when none.
+
+  Assignment is not stewardship: any assigned agent evaluates in the
+  namespace, and stewardship only decides where that namespace's faults and
+  requests are routed. Surfaces that need one evaluating agent take the first."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name]
+                  [:vector :seon.cluster.agent/id]]}
+  [db namespace-name]
+  (let [ids (db/q '[:find [?agent-id ...]
+                    :in $ ?namespace-name
+                    :where
+                    [?namespace :seon.ns/name ?namespace-name]
+                    [?agent :seon.cluster.agent/namespace ?namespace]
+                    [?agent :seon.cluster.agent/id ?agent-id]]
+                  db namespace-name)]
+    (if (:seon.error/kind ids) [] (vec (sort ids)))))
+
 (defn steward-of
   "The agent id stewarding `namespace-name`, or nil.
 
