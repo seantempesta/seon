@@ -49,12 +49,18 @@
               [:map
                [:seon.source/digest :seon.source/digest]
                [:seon.source/file-digests :seon.source/file-digests]],
+              :upsert-row
+              [:map-of
+               {:description
+                "One safe same-identity upsert: one program identity attribute plus the scalar attributes whose values changed. The writer refuses cardinality-many and component attributes; Datahike resolves the identity."}
+               :qualified-keyword :seon.schema/value],
+              :upsert-rows [:vector :seon.source/upsert-row],
               :upsert-request
               [:map
                [:seon.store/store :seon.store/store]
                [:seon.source/expected-commit-id
                 :seon.source/expected-commit-id]
                [:seon.source/digest :seon.source/digest]
-               [:seon.program/rows :seon.program/rows]
+               [:seon.source/upsert-rows :seon.source/upsert-rows]
                [:seon.source/activation :seon.source/activation]
                [:seon.db/process {:optional true} :seon.db/ref]]}

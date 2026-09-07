@@ -1002,6 +1002,23 @@
         (cluster/stop! old-world)
         (delete-recursively! root)))))
 
+(deftest development-reload-follows-declared-requires
+  ;; The observed failure: alphabetical reload put seon.cluster.loop before
+  ;; seon.cluster.run, and the reloaded loop failed on run's new Var.
+  (testing "a changed callee reloads before every changed caller, ties by name"
+    (is (= '[my.plan seon.cluster.run seon.cluster.loop seon.cluster]
+           (cluster/reload-order
+            '#{seon.cluster.loop seon.cluster my.plan seon.cluster.run}
+            '{seon.cluster.loop #{seon.cluster.run}
+              seon.cluster #{seon.cluster.loop seon.cluster.run seon.db}}))))
+  (testing "requires outside the changed set do not block reload"
+    (is (= '[seon.cluster.loop]
+           (cluster/reload-order '#{seon.cluster.loop}
+                                 '{seon.cluster.loop #{seon.cluster.run}}))))
+  (testing "no edges is plain name order and an empty set is empty"
+    (is (= '[a.b a.c] (cluster/reload-order '#{a.c a.b} {})))
+    (is (= [] (cluster/reload-order #{} {})))))
+
 (deftest unchanged-complete-source-refresh-reuses-the-published-head
   (let [digest (apply str (repeat 64 "a"))
         commit-id (random-uuid)

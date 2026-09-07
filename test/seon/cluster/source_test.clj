@@ -99,7 +99,7 @@
   (source/upsert! {:seon.store/store opened
                    :seon.source/expected-commit-id expected-commit
                    :seon.source/digest digest
-                   :seon.program/rows rows
+                   :seon.source/upsert-rows rows
                    :seon.source/activation
                    'seon.cluster.source-test/activation}))
 

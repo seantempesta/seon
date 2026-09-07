@@ -1769,7 +1769,7 @@
                      {:seon.store/store store
                       :seon.source/expected-commit-id expected-commit
                       :seon.source/digest digest-after
-                      :seon.program/rows rows
+                      :seon.source/upsert-rows rows
                       :seon.source/activation `derive-activation
                       :seon.db/process
                       [:seon.db.process/id boot-process-identity]}))]
@@ -1777,7 +1777,49 @@
               (write-source-artifact! root
                                       (source-artifact result next-manifest
                                                        snapshot-after)))
-            (assoc result :seon.program/rows rows)))))))
+            (assoc result :seon.source/upsert-rows rows)))))))
+
+(defn reload-order
+  "Namespaces ordered so each one's required namespaces reload first.
+
+  `requires` maps a namespace name to the set of namespace names it requires.
+  Only members of `namespaces` are ordered; edges leaving that set are
+  ignored. Ties break by name, so the order is stable across boots. Clojure
+  namespaces cannot require each other cyclically; the name order is the total
+  fallback if the facts ever disagree."
+  {:malli/schema
+   [:=> [:cat [:set :seon.ns/name] [:map-of :seon.ns/name [:set :seon.ns/name]]]
+    [:vector :seon.ns/name]]}
+  [namespaces requires]
+  (loop [remaining (into (sorted-set-by #(compare (str %1) (str %2))) namespaces)
+         ordered []]
+    (if (empty? remaining)
+      ordered
+      (let [ready (or (some (fn [namespace-name]
+                              (when (empty? (set/intersection
+                                             (get requires namespace-name #{})
+                                             (disj remaining namespace-name)))
+                                namespace-name))
+                            remaining)
+                      (first remaining))]
+        (recur (disj remaining ready) (conj ordered ready))))))
+
+(defn- namespace-requires
+  "The declared `:seon.ns/requires` edges among `namespaces`, by name."
+  [database namespaces]
+  (let [edges (db/q '[:find ?name ?required-name
+                      :in $ [?name ...]
+                      :where
+                      [?namespace :seon.ns/name ?name]
+                      [?namespace :seon.ns/requires ?required]
+                      [?required :seon.ns/name ?required-name]]
+                    database (vec namespaces))]
+    (when (:seon.error/kind edges)
+      (refused! "Development reload could not read namespace requires." edges))
+    (reduce (fn [result [namespace-name required-name]]
+              (update result namespace-name (fnil conj #{}) required-name))
+            {}
+            edges)))
 
 (defn- development-source-refresh!
   [held-store instance before-publication published]
@@ -1804,7 +1846,7 @@
                  (fn [database]
                    (declaration-changes database forms cluster-name))]]})
              {:seon.boot/population :seon.schema/declarations}))
-        scalar-rows (:seon.program/rows published)
+        scalar-rows (:seon.source/upsert-rows published)
         scalar? (and scalar-rows
                      (= prior-commit (:seon.source/commit-id before-publication)))
         _ (report-source-progress! "development program reconciliation")
@@ -1867,7 +1909,10 @@
            :seon.program/source
            (pr-str (list 'ns-unmap (list 'quote namespace-name)
                          (list 'quote local-name)))}})))))
-    (doseq [namespace-name (sort-by str namespaces)
+    ;; A changed caller reloaded before its changed callee fails on the
+    ;; callee's new Var, so the order follows the declared requires facts.
+    (doseq [namespace-name (reload-order namespaces
+                                         (namespace-requires database namespaces))
             :when (and (find-ns namespace-name)
                        (:seon.ns/source
                         (db/pull database [:seon.ns/source]
@@ -1963,7 +2008,7 @@
               (when instance
                 (development-source-refresh! held-store instance
                                              before-publication published))
-              (dissoc published :seon.program/rows))))
+              (dissoc published :seon.source/upsert-rows))))
          (finally
            (release-root-store! store-dir)))))))
 
