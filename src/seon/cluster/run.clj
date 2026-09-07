@@ -179,6 +179,23 @@
       (:seon.sci.eval/ending-ns evaluation)
       (assoc :seon.sci.eval/ending-ns
              (:seon.sci.eval/ending-ns evaluation))
+      ;; HOW LONG THE FORM TOOK IS A FACT THE KERNEL ALREADY MEASURED.
+      ;; The record carried it through every arm and unarmed path and then
+      ;; stopped here, so `:seon.repl/ms` was in the grammar and in no
+      ;; response ever emitted (audit F3).
+      (int? (get-in evaluation [:seon.sci.admit/record :seon.eval/duration-ms]))
+      (assoc :seon.eval/duration-ms
+             (get-in evaluation
+                     [:seon.sci.admit/record :seon.eval/duration-ms]))
+      ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
+      ;; while sci's binding is still installed (`sci/eval.clj` print-options
+      ;; volatile), it is what the response must print the value under.
+      (int? (get-in evaluation [:seon.print/options :seon.print/length]))
+      (assoc :seon.print/length
+             (get-in evaluation [:seon.print/options :seon.print/length]))
+      (int? (get-in evaluation [:seon.print/options :seon.print/level]))
+      (assoc :seon.print/level
+             (get-in evaluation [:seon.print/options :seon.print/level]))
       (:seon.test.accretion/gate-tests settlement-evaluation)
       (assoc :seon.test.accretion/gate-tests
              (mapv (fn [test-symbol] [:seon.test/sym test-symbol])
@@ -903,6 +920,7 @@
                (cond-> {::id run-id
                         :seon.cluster.eval/ordinal (long ordinal)
                         :seon.cluster.eval/at opened-at
+                        :seon.cluster.eval/author :system
                         :seon.cluster.eval/source
                         (:seon.cluster.run.form/source source)
                         :seon.cluster.eval/ns
@@ -980,6 +998,7 @@
         (cond-> {::id id
                   :seon.cluster.eval/ordinal ordinal
                   :seon.cluster.eval/at receipt-at
+                  :seon.cluster.eval/author :system
                   :seon.cluster.eval/source source
                   :seon.cluster.eval/ns [:seon.ns/name namespace-name]}
            comment (assoc :seon.cluster.eval/comment comment)))))))
@@ -1189,6 +1208,8 @@
                 :seon.cluster.eval/source]
                [:seon.cluster.eval/comment {:optional true}
                 :seon.cluster.eval/comment]
+               [:seon.cluster.eval/author {:optional true}
+                :seon.cluster.eval/author]
                [:seon.cluster.eval/ns {:optional true}
                 :seon.cluster.eval/ns]]]
     [:vector :some]]}
@@ -1198,7 +1219,7 @@
 (defn- receipt-row
   [run-eid request]
   (let [{::keys [id]
-         :seon.cluster.eval/keys [ordinal at source ns comment]} request
+         :seon.cluster.eval/keys [ordinal at source ns comment author]} request
         receipt-id (receipt-identity id ordinal)]
     (cond-> {:db/id receipt-id
              :seon.cluster.eval/id receipt-id
@@ -1209,6 +1230,11 @@
       ;; The agent's prose is its own fact beside the source it introduces,
       ;; so a prompt line holds exactly the one form it prompts for.
       comment (assoc :seon.cluster.eval/comment comment)
+      ;; WHO WROTE THIS FORM. Every site that starts an evaluation already
+      ;; knows — a model reply freeze is `:agent`, a system run and a
+      ;; generated append are `:system` — and each one dropped the fact on
+      ;; the floor, so the attribute was declared and never written.
+      author (assoc :seon.cluster.eval/author author)
       ns (assoc :seon.cluster.eval/ns ns))))
 
 (defn receipt-start-call
@@ -1226,6 +1252,8 @@
            :seon.cluster.eval/source]
           [:seon.cluster.eval/comment {:optional true}
            :seon.cluster.eval/comment]
+          [:seon.cluster.eval/author {:optional true}
+           :seon.cluster.eval/author]
           [:seon.cluster.eval/ns {:optional true}
            :seon.cluster.eval/ns]]]
     [:vector :some]]}
@@ -1768,6 +1796,9 @@
    :seon.cluster.eval/read-basis-transaction
    :seon.cluster.eval/ns
    :seon.sci.eval/ending-ns
+   :seon.eval/duration-ms
+   :seon.print/length
+   :seon.print/level
    :seon.test.accretion/gate-test-count
    :seon.test.accretion/gate-pass-count
    :seon.test.accretion/gate-fail-count

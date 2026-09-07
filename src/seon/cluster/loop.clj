@@ -1350,6 +1350,11 @@
                             (cond-> {:seon.cluster.run/id run-id
                                      :seon.cluster.eval/ordinal (long ordinal)
                                      :seon.cluster.eval/at now
+                                     ;; This freeze is the model reply's own
+                                     ;; forms; `plan-tx` says `:agent` for the
+                                     ;; twin form row and the evaluation says
+                                     ;; the same thing about itself.
+                                     :seon.cluster.eval/author :agent
                                      :seon.cluster.eval/source
                                      (:seon.cluster.run.form/source source)
                                      :seon.cluster.eval/ns
