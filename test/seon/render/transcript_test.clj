@@ -45,7 +45,12 @@
                        string-node]]}
         truncated-node {:seon.print/face :seon.print/truncated-string
                         :seon.print/value "Agent: juni"}]
-    (is (= "Agent: juniper\nNamespace: my.agents.juniper"
+    ;; TERMINAL, AND STILL ONE LINE OF DATA. The node is taken as-is — no
+    ;; renderer, no floor — but it prints quoted like every other face
+    ;; (see the truncated case below), because splicing a string's own
+    ;; newlines into `#:seon.repl{:value …}` breaks the one response map
+    ;; the agent reads back into lines it cannot tell from its own forms.
+    (is (= "\"Agent: juniper\\nNamespace: my.agents.juniper\""
            (bounded-result render-unit (pr-str string-node))))
     (is (= "{:text \"Agent: juniper\\nNamespace: my.agents.juniper\"}"
            (bounded-result render-unit (pr-str nested-node))))
