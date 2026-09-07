@@ -46,16 +46,16 @@
         :seon.cluster.run/plan-digest "resume-artifact-digest"}])
      (db/transact!
       connection
-      [{:seon.cluster.run.form/id "resume-form-0"
-        :seon.cluster.run.form/run [:seon.cluster.run/id run-id]
-        :seon.cluster.run.form/ordinal 0
-        :seon.cluster.run.form/source "(def prefix-def 1)"
-        :seon.cluster.run.form/ns [:seon.ns/name 'my.gen.alpha]}
-       {:seon.cluster.run.form/id "resume-form-1"
-        :seon.cluster.run.form/run [:seon.cluster.run/id run-id]
-        :seon.cluster.run.form/ordinal 1
-        :seon.cluster.run.form/source "prefix-def"
-        :seon.cluster.run.form/ns [:seon.ns/name 'my.gen.alpha]}
+      [{:seon.cluster.eval/id "resume-form-0"
+        :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+        :seon.cluster.eval/ordinal 0
+        :seon.cluster.eval/source "(def prefix-def 1)"
+        :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]}
+       {:seon.cluster.eval/id "resume-form-1"
+        :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+        :seon.cluster.eval/ordinal 1
+        :seon.cluster.eval/source "prefix-def"
+        :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]}
        {:seon.cluster.eval/id "resume-receipt-0"
         :seon.problems/id "resume-problem-0"
         :seon.cluster.eval/run [:seon.cluster.run/id run-id]
@@ -71,7 +71,7 @@
           (problems/form-problem
            @connection
            {:seon.cluster.run/id run-id
-            :seon.cluster.run.form/ordinal 1
+            :seon.cluster.eval/ordinal 1
             :seon.sci.eval/evaluation failed}))
          "one X2 clause prevents process-history breakage becoming owner blame")
      (db/transact! connection
@@ -91,7 +91,7 @@
              (my.message/send "alpha" "stale assignment" "resume-problem-1")
              :seon.cluster.agent/id "planner"
              :seon.cluster.run/id "stale-assignment-run"
-             :seon.cluster.run.form/ordinal 0
+             :seon.cluster.eval/ordinal 0
              :seon.cluster.message/at now
              :seon.config.message/max-chain 16})]
        (db/transact! connection (:seon.cluster.message/rows delivery)))

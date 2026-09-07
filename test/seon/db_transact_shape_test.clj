@@ -35,7 +35,7 @@
            :seon.schema/projection (:seon.schema/projection base-ctx)}))
         ctx (env/carry-state base-ctx (env/environment-state environment))]
     (sci.eval/evaluate
-     {:seon.cluster.run.form/source
+     {:seon.cluster.eval/source
       "(seon.db-transact-shape-test/transaction-result-shape)"
       :seon.sci.eval/ctx ctx
       :seon.sci.admit/caps caps

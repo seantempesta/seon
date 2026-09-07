@@ -25,8 +25,8 @@
 (defn- production-request
   [db ctx namespace-name source]
   (let [effective (config/effective db)]
-    {:seon.cluster.run.form/source source
-     :seon.cluster.run.form/ns [:seon.ns/name namespace-name]
+    {:seon.cluster.eval/source source
+     :seon.cluster.eval/ns [:seon.ns/name namespace-name]
      :seon.sci.admit/caps (config/result-caps effective)
      :seon.sci.eval/ctx ctx
      :seon.sci.eval/time-limit-ms
@@ -517,7 +517,7 @@
 
 (defparity "C7" :passing
   (let [plan (reply/sources "[] [] [999]" 'user)
-        sources (mapv :seon.cluster.run.form/source plan)
+        sources (mapv :seon.cluster.eval/source plan)
         results (repl-session sources)]
     (compared ["[]" "[]" "[999]"]
               (mapv :semantic-printed results))))

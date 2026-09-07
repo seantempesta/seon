@@ -23,11 +23,6 @@
                    :seon.cluster.run/agent
                    [:seon.cluster.agent/id "alice"]
                    :seon.cluster.run/opened-at now}
-                  {:seon.cluster.run.form/id "red-run:0"
-                   :seon.cluster.run.form/run
-                   [:seon.cluster.run/id "red-run"]
-                   :seon.cluster.run.form/ordinal 0
-                   :seon.cluster.run.form/source "(missing-dependency)"}
                   {:seon.cluster.eval/id "receipt-17"
                    :seon.cluster.eval/run
                    [:seon.cluster.run/id "red-run"]
@@ -35,7 +30,8 @@
                    :seon.cluster.eval/at now
                    :seon.error/kind :seon.sci.eval/evaluation-failed
                    :seon.cluster.eval/error
-                   "Unable to resolve symbol: missing-dependency"}])
+                   "Unable to resolve symbol: missing-dependency"
+                   :seon.cluster.eval/source "(missing-dependency)"}])
      (body connection))))
 
 (defn- request
@@ -44,7 +40,7 @@
    (my.message/send "bob" content "failure-17")
    :seon.cluster.agent/id "alice"
    :seon.cluster.run/id run-id
-   :seon.cluster.run.form/ordinal 0
+   :seon.cluster.eval/ordinal 0
    :seon.cluster.message/at now
    :seon.config.message/max-chain 16})
 
@@ -102,7 +98,7 @@
              (my.message/decline "alice" "receipt-17" reason)
              :seon.cluster.agent/id "bob"
              :seon.cluster.run/id "declination-run"
-             :seon.cluster.run.form/ordinal 0
+             :seon.cluster.eval/ordinal 0
              :seon.cluster.message/at now
              :seon.config.message/max-chain 16})
            rows (:seon.cluster.message/rows declination)]

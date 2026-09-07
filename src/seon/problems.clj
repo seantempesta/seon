@@ -171,16 +171,16 @@
               [?receipt :seon.cluster.eval/error ?error]
               [?receipt :seon.cluster.eval/run ?run]
               [?run :seon.cluster.run/id ?run-id]
-              [?form :seon.cluster.run.form/run ?run]
-              [?form :seon.cluster.run.form/ordinal ?ordinal]
-              [?form :seon.cluster.run.form/source ?source]]
+              [?form :seon.cluster.eval/run ?run]
+              [?form :seon.cluster.eval/ordinal ?ordinal]
+              [?form :seon.cluster.eval/source ?source]]
             db)
        (sort)
        (mapv (fn [[id run-id ordinal source kind error]]
                {:seon.cluster.eval/id id
                 :seon.cluster.run/id run-id
                 :seon.cluster.eval/ordinal ordinal
-                :seon.cluster.run.form/source source
+                :seon.cluster.eval/source source
                 :seon.error/kind kind
                 :seon.cluster.eval/error error}))))
 
@@ -191,15 +191,15 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.problems/form-problem-request]
                   [:maybe :seon.problems/form-problem]]}
-  [db {:keys [:seon.cluster.run/id :seon.cluster.run.form/ordinal
+  [db {:keys [:seon.cluster.run/id :seon.cluster.eval/ordinal
               :seon.sci.eval/evaluation]}]
   (let [form
         (db/q '[:find (pull ?form [*]) .
                :in $ ?run-id ?ordinal
                :where
                [?run :seon.cluster.run/id ?run-id]
-               [?form :seon.cluster.run.form/run ?run]
-               [?form :seon.cluster.run.form/ordinal ?ordinal]]
+               [?form :seon.cluster.eval/run ?run]
+               [?form :seon.cluster.eval/ordinal ?ordinal]]
              db id ordinal)
         admitted (:seon.sci.admit/value evaluation)
         ordinary-error (:seon.cluster.eval/error evaluation)
@@ -215,7 +215,7 @@
             (db/q '[:find ?author-id .
                    :in $ ?form
                    :where
-                   [?form :seon.cluster.run.form/run ?run]
+                   [?form :seon.cluster.eval/run ?run]
                    [?run :seon.cluster.run/agent ?author]
                    [?author :seon.cluster.agent/id ?author-id]]
                  db (:db/id form))
@@ -229,9 +229,9 @@
         {:seon.problems/id (work/problem-id id ordinal)
          :seon.cluster.eval/id (work/problem-id id ordinal)
          :seon.cluster.run/id id
-         :seon.cluster.run.form/ordinal ordinal
-         :seon.cluster.run.form/source
-         (:seon.cluster.run.form/source form)
+         :seon.cluster.eval/ordinal ordinal
+         :seon.cluster.eval/source
+         (:seon.cluster.eval/source form)
          :seon.cluster.agent/id owner-id
          :seon.problems/author author-id
          :seon.error/kind kind
@@ -253,7 +253,7 @@
      :my.message/content
      (str "Repair problem " (:seon.problems/id problem)
           " from run " (:seon.cluster.run/id problem)
-          ", form " (:seon.cluster.run.form/ordinal problem)
+          ", form " (:seon.cluster.eval/ordinal problem)
           ": " (:seon.cluster.eval/error problem))}))
 
 (defn- deferred-agents
@@ -513,7 +513,7 @@
       (row "run" (:seon.cluster.run/id entry)
            "form" (:seon.cluster.eval/ordinal entry)
            "kind" (:seon.error/kind entry)
-           "source" (:seon.cluster.run.form/source entry)
+           "source" (:seon.cluster.eval/source entry)
            "error" (:seon.cluster.eval/error entry))))
    (family-section
     "deferred agents"
@@ -624,7 +624,7 @@
                (:seon.cluster.eval/id entry)
                " run=" (:seon.cluster.run/id entry)
                " ordinal=" (:seon.cluster.eval/ordinal entry)
-               " source=" (pr-str (:seon.cluster.run.form/source entry))
+               " source=" (pr-str (:seon.cluster.eval/source entry))
                " kind=" (:seon.error/kind entry)
                (when-let [message (:seon.cluster.eval/error entry)]
                  (str " error=" (pr-str message)))))

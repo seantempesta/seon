@@ -235,24 +235,11 @@
                              :seon.print/length
                              :seon.print/level
                              :seon.print/options])
-    ;; ONE ENTITY, TWO SPELLINGS DURING THE MERGE. A frozen form and its
-    ;; evaluation are becoming one entity per (run, ordinal); until the form
-    ;; family is gone, either attribute names the same source, and neither
-    ;; renders through a second grammar.
-    (and (nil? (:seon.cluster.eval/source unit))
-         (:seon.cluster.run.form/source unit))
-    (assoc :seon.cluster.eval/source (:seon.cluster.run.form/source unit))
-
-    (and (nil? (:seon.cluster.eval/ordinal unit))
-         (:seon.cluster.run.form/ordinal unit))
-    (assoc :seon.cluster.eval/ordinal (:seon.cluster.run.form/ordinal unit))
-
+    ;; ONE ENTITY PER (run, ordinal), ONE SPELLING. The frozen form family
+    ;; is gone; the source, the ordinal and the namespace are this
+    ;; evaluation's own attributes, so there is nothing to reconcile here.
     (get-in unit [:seon.cluster.eval/ns :seon.ns/name])
     (assoc :seon.ns/name (get-in unit [:seon.cluster.eval/ns :seon.ns/name]))
-
-    (get-in unit [:seon.cluster.run.form/ns :seon.ns/name])
-    (assoc :seon.ns/name
-           (get-in unit [:seon.cluster.run.form/ns :seon.ns/name]))
 
     ;; THE HANDLE COMES FROM THE EVALUATION'S OWN IDENTITY, so two runs of one
     ;; agent never name two values alike. An evaluation with no entity id never

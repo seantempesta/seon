@@ -389,10 +389,13 @@ branch, branch head, transaction report.
 Use the actual operation or value when speaking and writing: SCI context,
 SCI evaluation, JVM REPL, agent turn, effect execution, Datahike branch,
 database value, and boot sequence. Do not use a metaphor as their common name.
-Use **evaluation** and **result** in prose, not "receipt". Existing identifiers
-containing that spelling remain literal code references until the form and
-evaluation storage refactor replaces them; their existence does not justify
-separate entities or duplicated attributes.
+Use **evaluation** and **result** in prose, not "receipt". The storage merge
+landed: ONE `:seon.cluster.eval` entity per (run, ordinal) carries the frozen
+source, comment, namespace, author and ordinal AND its terminal facts, and the
+`:seon.cluster.run.form/*` family, `:seon.cluster.run/forms` and the second
+`:db.unique/identity` it minted are DELETED. Identifiers still spelled
+`receipt` inside `seon.cluster.run` are literal code references awaiting a
+rename; they never justify a second entity or a duplicated attribute.
 In particular, the legacy MCP mode string `door` is an API spelling, not a
 concept: explain it as **SCI evaluation mode**. Preserve literal tool arguments,
 identifiers and historical quotations where accuracy requires them, but do not
@@ -482,7 +485,8 @@ writing.
 | **[TARGET] root maintenance portfolio** | root's declared scheduled reclamation/inspection/repair tasks ([design](docs/prds/sci-execution-runtime/research/scheduler-mining-and-gc-design-2026-08-04.md)); update this row when the owners land | maintenance daemon |
 | **[TARGET] `my.branch`** | agent-facing branch/history verbs over database branches — git vocabulary without claiming to be git ([PRD](docs/prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)); update this row when it lands | my.git, my.repo |
 | the agent's defs, `:seon.def/*` | the agent's temporary defs + atoms, committed as agent-scoped facts at turn settlement | the desk, session image |
-| the agent's history; a form + value entry | the ordered derivation of an agent's REPL session from message/run-form/result facts ([PRD](docs/prds/sci-execution-runtime/plan/repl-transcript-context-prd-2026-08-10.md)) | session units, transcript entries |
+| evaluation entity | ONE `:seon.cluster.eval` entity per (run, ordinal): the frozen source, comment, namespace, author and ordinal, plus the terminal facts settlement accretes onto the same entity; absence of a terminal fact IS running (`resources/seon/schemas/seon.cluster.eval.edn` ↔ `src/seon/cluster/run.clj`) | `:seon.cluster.run.form/*`, frozen form entity, the form/receipt twin, `:seon.cluster.run/forms`, `form-identity` |
+| the agent's history; a form + value entry | the ordered derivation of an agent's REPL session from message/evaluation facts ([PRD](docs/prds/sci-execution-runtime/plan/repl-transcript-context-prd-2026-08-10.md)) | session units, transcript entries, run-form facts |
 | `doc`, `dir` (bare, injected); printed value | the injected REPL documentation functions over public program rows. **[TARGET]** the bulk `docs` plural is ruled, not yet installed | faces tool, print face |
 | candidates (per-render selection) | the contract-fitting render producer selection consulted per render call (`src/seon/render.clj`) | roster, acquired index |
 

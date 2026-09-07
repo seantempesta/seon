@@ -610,7 +610,7 @@
                 {:seon.fn/sym (str owner-sym)})
                (let [effect-id
                      (pr-str [(:seon.cluster.run/id *request-context*)
-                              (:seon.cluster.run.form/ordinal *request-context*)
+                              (:seon.cluster.eval/ordinal *request-context*)
                               effect-ordinal])
                      result-ref [:seon.effect/id effect-id]
                      opened-at (Date.)
@@ -622,7 +622,7 @@
                         (:seon.cluster.run/id *request-context*)]
                        :seon.effect/owner [:seon.fn/sym (str owner-sym)]
                        :seon.effect/form-ordinal
-                       (:seon.cluster.run.form/ordinal *request-context*)
+                       (:seon.cluster.eval/ordinal *request-context*)
                        :seon.effect/ordinal effect-ordinal
                        :seon.effect/request-edn
                        (admit/canonical-edn

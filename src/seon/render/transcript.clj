@@ -2,7 +2,7 @@
   "One agent's messages and eval receipts as a bounded REPL transcript.
 
   The renderer is the schema-declared agent-session projection. Messages are
-  reverse connections while form input and receipts are reached through the
+  reverse connections while evaluations are reached through the
   agent's runs. Raw facts never acquire a detail level; every full, summary,
   and elided decision is derived for this call."
   (:require [clojure.edn :as edn]
@@ -23,8 +23,7 @@
             [seon.render.value :as value]
             [seon.render.walk :as walk]
             [seon.repl :as repl]
-            [seon.sci.admit :as admit]
-            [seon.sci.reader :as reader])
+            [seon.sci.admit :as admit])
   (:import [java.io PushbackReader StringReader]))
 
 (def ^:private recent-entry-count
@@ -49,6 +48,7 @@
    :seon.cluster.eval/id
    :seon.cluster.eval/ordinal
    :seon.cluster.eval/at
+   :seon.cluster.eval/source
    :seon.cluster.eval/read-basis-transaction
    :seon.cluster.eval/result-edn
    :seon.cluster.eval/result-blob
@@ -64,19 +64,7 @@
    :seon.error/kind
    {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
    {:seon.cluster.eval/run
-    [:db/id :seon.cluster.run/id :seon.cluster.run/opened-at]}])
-
-(def ^:private form-selector
-  [:db/id
-   :seon.cluster.run.form/id
-   :seon.cluster.run.form/ordinal
-   :seon.cluster.run.form/source
-   :seon.cluster.eval/comment
-   {:seon.cluster.run.form/ns [:db/id :seon.ns/name]}
-   {:seon.cluster.run.form/run
-    [:db/id
-     :seon.cluster.run/id
-     :seon.cluster.run/opened-at
+    [:db/id :seon.cluster.run/id :seon.cluster.run/opened-at
      {:seon.cluster.run/agent
       [:db/id
        :seon.cluster.agent/id
@@ -132,40 +120,11 @@
         db active-runs-rules agent-id (bootstrap/run-id agent-id))
    0))
 
-(defn- comment-only-source?
-  [source]
-  (let [events (reader/read {:seon.sci.reader/text source
-                             :seon.config.eval.result/max-source (count source)
-                             :seon.sci.reader/defer-auto-resolve? true})]
-    (and (vector? events) (empty? events))))
-
-(defn- comment-form-rows
-  [db agent-id]
-  (->> (db/q {:query
-              '[:find ?form ?at ?id ?source
-                :in $ % ?agent-id ?bootstrap-run-id
-                :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                (active-run ?run ?agent ?bootstrap-run-id ?pinned?)
-                [?run :seon.cluster.run/opened-at ?at]
-                [?form :seon.cluster.run.form/run ?run]
-                [?form :seon.cluster.run.form/id ?id]
-                [?form :seon.cluster.run.form/source ?source]
-                [?form :seon.cluster.run.form/ordinal ?ordinal]
-                (not-join [?run ?ordinal]
-                          [?receipt :seon.cluster.eval/run ?run]
-                          [?receipt :seon.cluster.eval/ordinal ?ordinal])]
-              :args [db active-runs-rules agent-id
-                     (bootstrap/run-id agent-id)]
-              :order-by '[?at :desc ?id :desc]})
-       (filter (fn [[_ _ _ source]] (comment-only-source? source)))))
-
 (defn- history-count
   [db agent-id]
   (if (and db agent-id)
     (+ (message-count db agent-id)
        (receipt-count db agent-id)
-       (count (comment-form-rows db agent-id))
        (or (db/q '[:find (count ?run) .
                    :in $ ?agent-id
                    :where
@@ -209,10 +168,6 @@
         :order-by '[?at :desc ?id :desc]
         :limit limit}))
 
-(defn- recent-comment-rows
-  [db agent-id limit]
-  (take limit (comment-form-rows db agent-id)))
-
 (defn- recent-undisposed-run-rows
   [db agent-id limit]
   (db/q {:query
@@ -254,13 +209,11 @@
                    (recent-message-rows db agent-id limit))
               (map #(into [:eval] %)
                    (recent-receipt-rows db agent-id limit))
-              (map (fn [[form at id _source]] [:input form at id])
-                   (recent-comment-rows db agent-id limit))
               (map #(into [:run] %)
                    (recent-undisposed-run-rows db agent-id limit)))
              (sort-by (fn [[kind _ at id]]
                         [(.getTime ^java.util.Date at)
-                         (case kind :message 0 :input 1 :eval 2 :run 3)
+                         (case kind :message 0 :eval 2 :run 3)
                          id])
                       #(compare %2 %1))
              (take limit)
@@ -284,28 +237,13 @@
                                  receipt-ids))))))))
 
 (defn- selected-run-entity-ids
-  "Select a bounded prefix of forms and evaluations for one run.
+  "Select a bounded prefix of one run's evaluations.
 
    The extra row is an omission sentinel; it avoids materializing an
    unbounded run merely to calculate an elision count."
   [db run-id limit]
   (let [bounded-limit (inc (max 0 (int limit)))]
-    {:input
-     (mapv first
-           (db/q {:query
-                  '[:find ?form ?ordinal
-                    :in $ ?run-id
-                    :where
-                    [?run :seon.cluster.run/id ?run-id]
-                    [?form :seon.cluster.run.form/run ?run]
-                    [?form :seon.cluster.run.form/ordinal ?ordinal]
-                    (not-join [?run ?ordinal]
-                              [?receipt :seon.cluster.eval/run ?run]
-                              [?receipt :seon.cluster.eval/ordinal ?ordinal])]
-                  :args [db run-id]
-                  :order-by '[?ordinal :asc]
-                  :limit bounded-limit}))
-     :eval
+    {:eval
      (mapv first
            (db/q {:query
                   '[:find ?receipt ?ordinal
@@ -320,24 +258,7 @@
 
 (defn- selected-run-count
   [db run-id limit]
-  (let [{:keys [input eval]} (selected-run-entity-ids db run-id limit)]
-    (+ (count input) (count eval))))
-
-(defn- form-sources
-  [db receipt-ids]
-  (if (seq receipt-ids)
-    (into
-     {}
-     (db/q '[:find ?receipt ?source
-            :in $ [?receipt ...]
-            :where
-            [?receipt :seon.cluster.eval/run ?run]
-            [?receipt :seon.cluster.eval/ordinal ?ordinal]
-            [?form :seon.cluster.run.form/run ?run]
-            [?form :seon.cluster.run.form/ordinal ?ordinal]
-            [?form :seon.cluster.run.form/source ?source]]
-          db receipt-ids))
-    {}))
+  (count (:eval (selected-run-entity-ids db run-id limit))))
 
 (defn- pulled-many
   [db selector entity-ids]
@@ -452,9 +373,8 @@
          (> result-size (count result-edn)))))
 
 (defn- receipt-entry
-  [sources receipt]
-  (let [receipt-eid (:db/id receipt)
-        ordinal (:seon.cluster.eval/ordinal receipt)]
+  [receipt]
+  (let [ordinal (:seon.cluster.eval/ordinal receipt)]
     {::kind :eval
      ::entity receipt
      ::id (:seon.cluster.eval/id receipt)
@@ -464,8 +384,16 @@
                                :seon.cluster.run/id])
      ::run-opened-at (get-in receipt [:seon.cluster.eval/run
                                       :seon.cluster.run/opened-at])
-     ::source (get sources receipt-eid)
-     ::namespace (get-in receipt [:seon.cluster.eval/ns :seon.ns/name])
+     ;; ONE ENTITY PER (run, ordinal): the frozen source is this evaluation's
+     ;; own attribute, not a twin form entity joined by ordinal.
+     ::source (:seon.cluster.eval/source receipt)
+     ::namespace
+     (or (get-in receipt [:seon.cluster.eval/ns :seon.ns/name])
+         (get-in receipt [:seon.cluster.eval/run
+                          :seon.cluster.run/agent
+                          :seon.cluster.agent/namespace
+                          :seon.ns/name])
+         'user)
      ::read-basis (:seon.cluster.eval/read-basis-transaction receipt)
      ::result (:seon.cluster.eval/result-edn receipt)
      ::result-blob (:seon.cluster.eval/result-blob receipt)
@@ -482,28 +410,6 @@
      ::print-level (:seon.print/level receipt)
      ::ending-ns (:seon.sci.eval/ending-ns receipt)
      ::output (:seon.cluster.eval/output receipt)}))
-
-(defn- input-entry
-  [form]
-  {::kind :input
-   ::entity form
-   ::id (:seon.cluster.run.form/id form)
-   ::at (get-in form [:seon.cluster.run.form/run
-                      :seon.cluster.run/opened-at])
-   ::ordinal (:seon.cluster.run.form/ordinal form)
-   ::run-id (get-in form [:seon.cluster.run.form/run
-                          :seon.cluster.run/id])
-   ::run-opened-at (get-in form [:seon.cluster.run.form/run
-                                 :seon.cluster.run/opened-at])
-   ::source (:seon.cluster.run.form/source form)
-   ::comment (:seon.cluster.eval/comment form)
-   ::namespace
-   (or (get-in form [:seon.cluster.run.form/ns :seon.ns/name])
-       (get-in form [:seon.cluster.run.form/run
-                     :seon.cluster.run/agent
-                     :seon.cluster.agent/namespace
-                     :seon.ns/name])
-       'user)})
 
 (defn- undisposed-run-entry
   [run]
@@ -531,10 +437,6 @@
                   (::ordinal entry)
                   (get-in entry [::entity :db/id])]
         :attempt [1 at 1 nil nil (::id entry)]
-        :input [1 at 2
-                (.getTime ^java.util.Date (::run-opened-at entry))
-                (::ordinal entry)
-                (::id entry)]
         :eval [1 at 3
                (.getTime ^java.util.Date (::run-opened-at entry))
                (::ordinal entry)
@@ -570,25 +472,22 @@
                :else (candidate-entity-ids db agent-id limit))
         messages (pulled-many db message-selector (:message ids))
         receipts (pulled-many db receipt-selector (:eval ids))
-        inputs (pulled-many db form-selector (:input ids))
         undisposed-runs
         (pulled-many db undisposed-run-selector (:run ids))
         identities (about-identities db messages)
         identity-attrs (identity-attributes db)
-        message-orders (message-order-facts db (:message ids))
-        sources (form-sources db (:eval ids))]
+        message-orders (message-order-facts db (:message ids))]
     (->> (concat (map (partial message-entry db run-id agent-id
                                identities message-orders)
                       messages)
-                 (map input-entry inputs)
-                 (map (partial receipt-entry sources) receipts)
+                 (map receipt-entry receipts)
                  (map undisposed-run-entry undisposed-runs))
          (map (fn [entry]
                 (assoc entry
                        ::root (entry-root identity-attrs entry)
                        ::pinned?
                        (or (::bootstrap-trigger? entry)
-                           (and (contains? #{:eval :input} (::kind entry))
+                           (and (= :eval (::kind entry))
                                 (= (bootstrap/run-id agent-id)
                                    (::run-id entry)))))))
          (sort-by entry-order)
@@ -762,13 +661,14 @@
   (repl/text (emission unit entry)))
 
 (defn- undisposed-run-text
+  "The run's own `:seon.render/ai`, with no grammar of its own.
+
+  This used to build `\"system=> \" (pr-str form)` — a third prompt grammar
+  for a subject that is not a form anyone evaluated. An undisposed run's
+  evaluations are ordinary transcript entries rendered by `seon.repl/text`;
+  the run entry says only what the run itself says."
   [_unit entry _detail]
-  (let [form (list 'db/pull 'db
-                   [:seon.cluster.run/undisposed-at]
-                   [:seon.cluster.run/id (::id entry)])
-        result (run/render-ai (::entity entry))]
-    (str "system=> " (pr-str form)
-         (when (seq result) (str "\n" result)))))
+  (or (run/render-ai (::entity entry)) ""))
 
 (defn- entry-name
   [entry]
@@ -791,7 +691,6 @@
      ::execution-error? (some? (::error entry))
      ::text (case (::kind entry)
               :message (message-text unit entry detail)
-              :input (evaluation-text unit entry detail)
               :eval (evaluation-text unit entry detail)
               :run (undisposed-run-text unit entry detail))}))
 
@@ -926,17 +825,18 @@
           (mapv
            (fn [{form :seon.cluster.loop/admitted-form
                  evaluation :seon.sci.eval/evaluation
-                 ordinal :seon.cluster.run.form/ordinal}]
+                 ordinal :seon.cluster.eval/ordinal}]
              (receipt-entry
-              {nil (:seon.cluster.run.form/source form)}
               (cond-> (assoc evaluation
+                             :seon.cluster.eval/source
+                             (:seon.cluster.eval/source form)
                              :seon.cluster.eval/id
                              (run/receipt-identity
                               (:seon.cluster.run/id unit) ordinal)
                              :seon.cluster.eval/ordinal ordinal
                              :seon.cluster.eval/ns
                              {:seon.ns/name
-                              (second (:seon.cluster.run.form/ns form))}
+                              (second (:seon.cluster.eval/ns form))}
                              :seon.cluster.eval/read-basis-transaction
                              (or (:seon.cluster.eval/read-basis-transaction
                                   evaluation)
@@ -1120,12 +1020,9 @@
               :seon.render.history/basis-transaction
               (or (::read-basis entry) (entry-basis db entry))
               :seon.render.history/form (::source entry)
-              :seon.render.history/printed-value
-              (case (::kind entry)
-                :input nil
-                :eval (repl/response emitted))
+              :seon.render.history/printed-value (repl/response emitted)
               :seon.render.history/bytes (repl/text emitted)}))
-         (filterv #(contains? #{:input :eval} (::kind %)) candidates))]
+         (filterv #(= :eval (::kind %)) candidates))]
     entries))
 
 (defn render-html

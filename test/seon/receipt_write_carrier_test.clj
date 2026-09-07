@@ -42,7 +42,7 @@
           :seon.cluster.eval/at now}))
        (let [evaluation
              (sci.eval/evaluate
-              {:seon.cluster.run.form/source
+              {:seon.cluster.eval/source
                (str
                 "(seon.db/transact! "
                 (pr-str
@@ -62,7 +62,7 @@
                :seon.boot/cluster-name "receipt-write-carrier-test"
                :seon.cluster.agent/id agent-id
                :seon.cluster.run/id run-id
-               :seon.cluster.run.form/ordinal ordinal})]
+               :seon.cluster.eval/ordinal ordinal})]
          (testing "every write during evaluation names its receipt on the transaction"
            (is (nil? (:seon.cluster.eval/error evaluation)))
            (is (= [receipt-id agent-id]

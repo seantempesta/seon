@@ -142,27 +142,21 @@
                 [:seon.cluster.agent/id "compact-agent"]
                 :seon.cluster.run/closed-at closed-at}
                {:seon.ns/name 'compact.context}
-               {:seon.cluster.run.form/id "compact-before-form"
-                :seon.cluster.run.form/run
-                [:seon.cluster.run/id "compact-before"]
-                :seon.cluster.run.form/ordinal 0
-                :seon.cluster.run.form/author :system
-                :seon.cluster.run.form/source "(identity 1)"
-                :seon.cluster.run.form/ns [:seon.ns/name 'compact.context]}
-               {:seon.cluster.run.form/id "compact-after-form"
-                :seon.cluster.run.form/run
-                [:seon.cluster.run/id "compact-after"]
-                :seon.cluster.run.form/ordinal 0
-                :seon.cluster.run.form/author :system
-                :seon.cluster.run.form/source "(identity 1)"
-                :seon.cluster.run.form/ns [:seon.ns/name 'compact.context]}
                {:seon.cluster.eval/id "compact-before-0"
-                :seon.cluster.eval/run [:seon.cluster.run/id "compact-before"]
+                :seon.cluster.eval/run
+                [:seon.cluster.run/id "compact-before"]
                 :seon.cluster.eval/ordinal 0
+                :seon.cluster.eval/author :system
+                :seon.cluster.eval/source "(identity 1)"
+                :seon.cluster.eval/ns [:seon.ns/name 'compact.context]
                 :seon.cluster.eval/result-edn "1"}
                {:seon.cluster.eval/id "compact-after-0"
-                :seon.cluster.eval/run [:seon.cluster.run/id "compact-after"]
+                :seon.cluster.eval/run
+                [:seon.cluster.run/id "compact-after"]
                 :seon.cluster.eval/ordinal 0
+                :seon.cluster.eval/author :system
+                :seon.cluster.eval/source "(identity 1)"
+                :seon.cluster.eval/ns [:seon.ns/name 'compact.context]
                 :seon.cluster.eval/result-edn "2"}])
            _ (db/transact!
               connection
@@ -177,10 +171,10 @@
            memory-request
            (assoc (request "compact-agent" "not-persisted" "compact-choice")
                   :seon.cluster.loop/evaluated-sources
-                  [{:seon.cluster.run.form/ordinal 0
+                  [{:seon.cluster.eval/ordinal 0
                     :seon.cluster.loop/admitted-form
-                    {:seon.cluster.run.form/source "(identity 1)"
-                     :seon.cluster.run.form/ns [:seon.ns/name 'compact.context]}
+                    {:seon.cluster.eval/source "(identity 1)"
+                     :seon.cluster.eval/ns [:seon.ns/name 'compact.context]}
                     :seon.sci.eval/evaluation
                     {:seon.sci.admit/value 2 :seon.cluster.eval/result-edn "2"}}])
            memory-comparison (context/comparison @connection memory-request)
@@ -204,7 +198,7 @@
                       @connection
                       (assoc-in memory-request
                                 [:seon.cluster.loop/evaluated-sources 0
-                                 :seon.cluster.loop/admitted-form :seon.cluster.run.form/ns]
+                                 :seon.cluster.loop/admitted-form :seon.cluster.eval/ns]
                                 [:seon.ns/name 'another.context])))))
            committed
            (db/transact!

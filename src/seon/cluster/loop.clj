@@ -136,7 +136,7 @@
   [sources namespace-name max-source]
   (mapv
    (fn [source]
-     (update source :seon.cluster.run.form/source
+     (update source :seon.cluster.eval/source
              repair-source
              (or (:seon.ns/name source) namespace-name)
              max-source))
@@ -159,7 +159,7 @@
     (cond
       (vector? parsed) (repair-sources parsed namespace-name max-source)
       (= ::reply/no-forms (:seon.error/kind parsed)) parsed
-      :else [{:seon.cluster.run.form/source text
+      :else [{:seon.cluster.eval/source text
               :seon.ns/name namespace-name}])))
 
 ;;; ---------------------------------------------------------------------------
@@ -207,7 +207,6 @@
               (filter vector?)
               (map first))
         [:seon.cluster.run/run
-         :seon.cluster.run.form/form
          :seon.cluster.eval/receipt
          ;; every model attempt is a durable row this loop writes, so it
          ;; belongs in the declared write set — and the class-killer
@@ -270,9 +269,9 @@
             :seon.db/db database
             :seon.db/connection (:seon.db/connection cluster)
             :seon.cluster.agent/id agent-id
-            :seon.cluster.run.form/source
-            (:seon.cluster.run.form/source form)
-            :seon.cluster.run.form/ns (:seon.cluster.run.form/ns form)
+            :seon.cluster.eval/source
+            (:seon.cluster.eval/source form)
+            :seon.cluster.eval/ns (:seon.cluster.eval/ns form)
             :seon.program/row analyzed-row
             :seon.test.accretion/gate-set test-symbols
             :seon.config.test/auto-check-cases
@@ -399,7 +398,7 @@
        :seon.flow/time-limit ::turn
        :seon.error/message message
        :seon.error/data {:seon.flow/submission-wait-ms submission-wait-ms}}
-      :seon.cluster.run.form/ns (:seon.cluster.run.form/ns request)
+      :seon.cluster.eval/ns (:seon.cluster.eval/ns request)
       :seon.eval/duration-ms (long submission-wait-ms)
       :seon.cluster.eval/interrupted-at (Date.)})))
 
@@ -473,7 +472,7 @@
     asked ::asked
     agent-id :seon.cluster.agent/id
     run-id :seon.cluster.run/id
-    ordinal :seon.cluster.run.form/ordinal
+    ordinal :seon.cluster.eval/ordinal
     now ::now
     problem :seon.problems/form-problem
     trigger :seon.cluster.message/trigger}]
@@ -496,7 +495,7 @@
                       asked)
                     :seon.cluster.agent/id agent-id
                     :seon.cluster.run/id run-id
-                    :seon.cluster.run.form/ordinal ordinal
+                    :seon.cluster.eval/ordinal ordinal
                     :seon.cluster.message/at now
                     :seon.config.message/max-chain
                     (:seon.config.message/max-chain cluster)}
@@ -530,7 +529,7 @@
     agent-id :seon.cluster.agent/id
     run-id :seon.cluster.run/id
     process :seon.cluster.run/process
-    ordinal :seon.cluster.run.form/ordinal
+    ordinal :seon.cluster.eval/ordinal
     evaluation :seon.sci.eval/evaluation
     problem :seon.problems/form-problem
     trigger :seon.cluster.message/trigger
@@ -559,8 +558,8 @@
                 :in $ ?run-id
                 :where
                 [?run :seon.cluster.run/id ?run-id]
-                [?form :seon.cluster.run.form/run ?run]
-                [?form :seon.cluster.run.form/ordinal ?ordinal]]
+                [?form :seon.cluster.eval/run ?run]
+                [?form :seon.cluster.eval/ordinal ?ordinal]]
               database run-id)
         triggered-agent-form?
         (boolean
@@ -569,9 +568,9 @@
                  :where
                  [?run :seon.cluster.run/id ?run-id]
                  [?run :seon.cluster.run/trigger _]
-                 [?form :seon.cluster.run.form/run ?run]
-                 [?form :seon.cluster.run.form/ordinal ?ordinal]
-                 [?form :seon.cluster.run.form/author :agent]]
+                 [?form :seon.cluster.eval/run ?run]
+                 [?form :seon.cluster.eval/ordinal ?ordinal]
+                 [?form :seon.cluster.eval/author :agent]]
                database run-id ordinal))
         undisposed?
         (and (nil? settled)
@@ -593,7 +592,7 @@
                   ::asked asked
                   :seon.cluster.agent/id agent-id
                   :seon.cluster.run/id run-id
-                  :seon.cluster.run.form/ordinal ordinal
+                  :seon.cluster.eval/ordinal ordinal
                   ::now now}
            problem (assoc :seon.problems/form-problem problem)
            trigger (assoc :seon.cluster.message/trigger trigger)))
@@ -604,7 +603,7 @@
         (run/evaluation-facts
          (cond-> {:seon.cluster.run/id run-id
                   :seon.cluster.run/process process
-                  :seon.cluster.run.form/ordinal ordinal
+                  :seon.cluster.eval/ordinal ordinal
                   :seon.sci.eval/evaluation evaluation
                   :seon.def/rows rows
                   ::settlement-evaluation settlement-evaluation}
@@ -794,7 +793,7 @@
     now ::now
     agent-id :seon.cluster.agent/id
     run-id :seon.cluster.run/id
-    ordinal :seon.cluster.run.form/ordinal
+    ordinal :seon.cluster.eval/ordinal
     evaluation :seon.sci.eval/evaluation
     failure :seon.error/value
     :as request}]
@@ -1054,52 +1053,50 @@
     (when-not (:seon.error/kind outcome)
       (some-> failure-recording first (dissoc :db/id)))))
 
-(defn- form-data
-  "The source and parse-time namespace of one form of a run, by ordinal."
-  [db run-id ordinal]
-  (when-let [form-eid
-             (db/q '[:find ?form .
-                    :in $ ?run-id ?ordinal
-                    :where
-                    [?run :seon.cluster.run/id ?run-id]
-                    [?form :seon.cluster.run.form/run ?run]
-                    [?form :seon.cluster.run.form/ordinal ?ordinal]]
-                  db run-id ordinal)]
-    (let [form (db/pull db
-                       [:seon.cluster.run.form/source
-                        {:seon.cluster.run.form/ns [:seon.ns/name]}]
-                       form-eid)]
-      (cond-> {:seon.cluster.run.form/source
-               (:seon.cluster.run.form/source form)}
-        (:seon.cluster.run.form/ns form)
-        (assoc :seon.cluster.run.form/ns
-               [:seon.ns/name
-                (get-in form [:seon.cluster.run.form/ns :seon.ns/name])])))))
+(defn- fold-evaluations
+  "One run's evaluation entities, ordinal order, in ONE query.
+
+  ONE ENTITY PER (run, ordinal) carries the frozen source, its parse-time
+  namespace, and — once settled — the namespace its evaluation ended in.
+  The resumed fold therefore reads the entities it is about to settle
+  instead of joining a twin family per ordinal."
+  [db run-id]
+  (->> (db/q '[:find [(pull ?evaluation
+                            [:seon.cluster.eval/ordinal
+                             :seon.cluster.eval/source
+                             :seon.sci.eval/ending-ns
+                             {:seon.cluster.eval/ns [:seon.ns/name]}]) ...]
+               :in $ ?run-id
+               :where
+               [?run :seon.cluster.run/id ?run-id]
+               [?evaluation :seon.cluster.eval/run ?run]]
+             db run-id)
+       (sort-by :seon.cluster.eval/ordinal)
+       vec))
+
+(defn- fold-source
+  "One evaluation row projected back into the source the evaluator takes."
+  [evaluation]
+  (cond-> {:seon.cluster.eval/source (:seon.cluster.eval/source evaluation)}
+    (get-in evaluation [:seon.cluster.eval/ns :seon.ns/name])
+    (assoc :seon.cluster.eval/ns
+           [:seon.ns/name
+            (get-in evaluation [:seon.cluster.eval/ns :seon.ns/name])])))
 
 (defn- fold-namespace
   "The committed namespace in effect immediately before `ordinal`."
-  [db run-id ordinal]
-  (or
-   (ffirst
-    (db/q {:query
-           '[:find ?ending-ns ?previous
-             :in $ ?run-id ?ordinal
-             :where
-             [?run :seon.cluster.run/id ?run-id]
-             [?receipt :seon.cluster.eval/run ?run]
-             [?receipt :seon.cluster.eval/ordinal ?previous]
-             [(< ?previous ?ordinal)]
-             [?receipt :seon.sci.eval/ending-ns ?ending-ns]]
-           :args [db run-id ordinal]
-           :order-by '[?previous :desc]
-           :limit 1}))
-   (db/q '[:find ?starting-ns .
-           :in $ ?run-id
-           :where
-           [?run :seon.cluster.run/id ?run-id]
-           [?run :seon.cluster.run/starting-ns ?namespace]
-           [?namespace :seon.ns/name ?starting-ns]]
-         db run-id)))
+  [db run-id evaluations ordinal]
+  (or (->> evaluations
+           (filter #(< (:seon.cluster.eval/ordinal %) ordinal))
+           (keep :seon.sci.eval/ending-ns)
+           last)
+      (db/q '[:find ?starting-ns .
+              :in $ ?run-id
+              :where
+              [?run :seon.cluster.run/id ?run-id]
+              [?run :seon.cluster.run/starting-ns ?namespace]
+              [?namespace :seon.ns/name ?starting-ns]]
+            db run-id)))
 
 (defn- evaluation-request
   "One admitted form projected into the guarded evaluation request."
@@ -1109,14 +1106,14 @@
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
     run-id :seon.cluster.run/id
-    form-ordinal :seon.cluster.run.form/ordinal}]
+    form-ordinal :seon.cluster.eval/ordinal}]
   (merge form
          (cond->
-          {:seon.cluster.run.form/ns [:seon.ns/name evaluation-namespace]
+          {:seon.cluster.eval/ns [:seon.ns/name evaluation-namespace]
            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
            :seon.sci.eval/ctx ctx
            :seon.cluster.agent/id agent-id
-           :seon.cluster.run.form/ordinal form-ordinal
+           :seon.cluster.eval/ordinal form-ordinal
            :seon.boot/cluster-name (:seon.cluster/name cluster)
            :seon.sci.eval/time-limit-ms
            (:seon.config.eval/time-limit-ms cluster)
@@ -1341,30 +1338,15 @@
                           :seon.cluster.run/process process
                           :seon.cluster.run/plan-digest
                           (run/plan-digest sources)
+                          ;; ONE ENTITY PER (run, ordinal): freezing the plan
+                          ;; IS minting the evaluations, source and author and
+                          ;; comment and all, with no terminal fact. There is
+                          ;; no twin form row for the ordinals to disagree
+                          ;; about, and the first ordinal is derived inside
+                          ;; the transaction rather than assumed out here.
+                          :seon.cluster.eval/at now
                           :seon.cluster.run/sources sources})
-                  intent-tx
-                  (into (run/plan-tx plan-request)
-                        (mapcat
-                         (fn [ordinal source]
-                           (run/receipt-start-tx
-                            (cond-> {:seon.cluster.run/id run-id
-                                     :seon.cluster.eval/ordinal (long ordinal)
-                                     :seon.cluster.eval/at now
-                                     ;; This freeze is the model reply's own
-                                     ;; forms; `plan-tx` says `:agent` for the
-                                     ;; twin form row and the evaluation says
-                                     ;; the same thing about itself.
-                                     :seon.cluster.eval/author :agent
-                                     :seon.cluster.eval/source
-                                     (:seon.cluster.run.form/source source)
-                                     :seon.cluster.eval/ns
-                                     [:seon.ns/name
-                                      (or (:seon.ns/name source)
-                                          namespace-name)]}
-                              (:seon.cluster.eval/comment source)
-                              (assoc :seon.cluster.eval/comment
-                                     (:seon.cluster.eval/comment source)))))
-                         (range) sources))
+                  intent-tx (run/plan-tx plan-request)
                   outcome
                   (blob/with-publication!
                    connection (:seon.blob/staged-writes staged-reply)
@@ -1377,7 +1359,7 @@
                  {::cluster cluster
                   ::work (assoc work
                                 :seon.cluster.work/situation :resume
-                                :seon.cluster.run.form/ordinal 0)
+                                :seon.cluster.eval/ordinal 0)
                   ::now now
                   ::report report}))))
           ;; THE PROMPT REQUEST NAMES THE HELD RUN — `prompt` derives
@@ -1566,7 +1548,7 @@
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
     run-id :seon.cluster.run/id
-    first-ordinal :seon.cluster.run.form/ordinal
+    first-ordinal :seon.cluster.eval/ordinal
     sources :seon.cluster.reply/sources
     starting-namespace :seon.ns/name
     defs-notices :seon.sci.eval/defs-notices}]
@@ -1577,7 +1559,7 @@
            namespace-name starting-namespace
            results []]
       (if-let [source (first remaining)]
-        (let [form (assoc source :seon.cluster.run.form/ns
+        (let [form (assoc source :seon.cluster.eval/ns
                           [:seon.ns/name namespace-name])
               database (or snapshot @connection)
               captured (atom [])
@@ -1589,7 +1571,7 @@
                         ::cluster cluster
                         :seon.sci.eval/ctx ctx
                         :seon.cluster.agent/id agent-id
-                        :seon.cluster.run.form/ordinal ordinal
+                        :seon.cluster.eval/ordinal ordinal
                         :seon.cluster.run/id run-id})
                 snapshot (assoc :seon.db/db snapshot)
                 (and (empty? results) (seq defs-notices))
@@ -1648,7 +1630,7 @@
           (recur (next remaining) (inc ordinal)
                  (or (:seon.sci.eval/ending-ns evaluation) namespace-name)
                  (conj results
-                       {:seon.cluster.run.form/ordinal ordinal
+                       {:seon.cluster.eval/ordinal ordinal
                         ::admitted-form form
                         :seon.sci.eval/evaluation evaluation})))
         results))))
@@ -1680,18 +1662,8 @@
       (let [{ctx :seon.sci.eval/ctx
              defs-notices :seon.sci.eval/defs-notices} forked
             database @connection
-            first-ordinal (:seon.cluster.run.form/ordinal work)
-            ordinals
-            (->> (db/q '[:find [?ordinal ...]
-                         :in $ ?run-id ?first
-                         :where
-                         [?run :seon.cluster.run/id ?run-id]
-                         [?form :seon.cluster.run.form/run ?run]
-                         [?form :seon.cluster.run.form/ordinal ?ordinal]
-                         [(<= ?first ?ordinal)]]
-                       database run-id first-ordinal)
-                 sort
-                 vec)
+            first-ordinal (:seon.cluster.eval/ordinal work)
+            evaluations (fold-evaluations database run-id)
             evaluated
             (phase
              #(evaluate-sources
@@ -1699,22 +1671,29 @@
                 :seon.sci.eval/ctx ctx
                 :seon.cluster.agent/id agent-id
                 :seon.cluster.run/id run-id
-                :seon.cluster.run.form/ordinal first-ordinal
-                :seon.ns/name (or (fold-namespace database run-id first-ordinal)
+                :seon.cluster.eval/ordinal first-ordinal
+                :seon.ns/name (or (fold-namespace database run-id evaluations
+                                                 first-ordinal)
                                   (sci.eval/agent-namespace database agent-id))
                 :seon.sci.eval/defs-notices defs-notices
                 :seon.cluster.reply/sources
-                (mapv (fn [ordinal] (form-data database run-id ordinal)) ordinals)}))
+                (into []
+                      (comp (filter (fn [evaluation]
+                                      (<= first-ordinal
+                                          (:seon.cluster.eval/ordinal
+                                           evaluation))))
+                            (map fold-source))
+                      evaluations)}))
             defining
             (into []
                   (keep-indexed
                    (fn [index {form ::admitted-form evaluation :seon.sci.eval/evaluation}]
                      (when (:seon.program/row evaluation)
                        [index
-                        {:seon.cluster.run.form/source
-                         (:seon.cluster.run.form/source form)
-                         :seon.cluster.run.form/ns
-                         (:seon.cluster.run.form/ns form)
+                        {:seon.cluster.eval/source
+                         (:seon.cluster.eval/source form)
+                         :seon.cluster.eval/ns
+                         (:seon.cluster.eval/ns form)
                          :seon.program/row
                          (:seon.program/row evaluation)}])))
                   evaluated)
@@ -1739,14 +1718,14 @@
                         [index :seon.sci.eval/evaluation ::run/form-facts]
                         (assoc form-facts
                                :db/id
-                               [:seon.cluster.run.form/id
-                                (run/form-identity
-                                 run-id (:seon.cluster.run.form/ordinal (nth all index)))]))))
+                               [:seon.cluster.eval/id
+                                (run/receipt-identity
+                                 run-id (:seon.cluster.eval/ordinal (nth all index)))]))))
                  evaluated
                  (map vector defining analyzed))
                 gated
                 (mapv
-                 (fn [{ordinal :seon.cluster.run.form/ordinal form ::admitted-form
+                 (fn [{ordinal :seon.cluster.eval/ordinal form ::admitted-form
                        evaluation :seon.sci.eval/evaluation :as item}]
                    (assoc item :seon.sci.eval/evaluation
                           (gate-function-install
@@ -1756,20 +1735,20 @@
                  evaluated)
                 requests
                 (mapv
-                 (fn [{ordinal :seon.cluster.run.form/ordinal evaluation :seon.sci.eval/evaluation}]
+                 (fn [{ordinal :seon.cluster.eval/ordinal evaluation :seon.sci.eval/evaluation}]
                    (let [problem
                          (phase
                           #(problems/form-problem
                             database
                             {:seon.cluster.run/id run-id
-                             :seon.cluster.run.form/ordinal ordinal
+                             :seon.cluster.eval/ordinal ordinal
                              :seon.sci.eval/evaluation evaluation}))]
                      (cond->
                       {::cluster cluster
                        ::now now
                        :seon.cluster.agent/id agent-id
                        :seon.cluster.run/id run-id
-                       :seon.cluster.run.form/ordinal ordinal
+                       :seon.cluster.eval/ordinal ordinal
                        :seon.sci.eval/evaluation evaluation
                        :seon.cluster.message/trigger trigger}
                        (and problem (not (:seon.error/kind problem)))
@@ -1867,7 +1846,7 @@
                     :in $ ?run-id
                     :where
                     [?run :seon.cluster.run/id ?run-id]
-                    [?form :seon.cluster.run.form/run ?run]]
+                    [?form :seon.cluster.eval/run ?run]]
                   @connection run-id)
              0))
         entry
@@ -1901,19 +1880,21 @@
                   :seon.error/value entry})
         (report :error 0))
 
+      ;; A GENERATED RUN THAT HAS NOTHING LEFT TO GENERATE IS FINISHED.
+      ;; The other arm — advancing a generated run to a model call — wrote
+      ;; the one `:generate` → `:call` edge that existed, and no production
+      ;; path ever reached it: `generated-run-tx`'s only caller is
+      ;; `seon.bootstrap/seed-tx`, whose run id is always
+      ;; `(bootstrap/run-id agent-id)`. The dead branch and its transition
+      ;; are deleted rather than kept as a shape nothing can produce.
       (nil? entry)
-      (let [bootstrap? (= run-id (bootstrap/run-id agent-id))
-            terminal
+      (let [terminal
             (db/transact!
              connection
-             (if bootstrap?
-               (run/close-tx
-                {:seon.cluster.run/id run-id
-                 :seon.cluster.run/process process
-                 :seon.cluster.run/closed-at now})
-               (run/generation-complete-tx
-                {:seon.cluster.run/id run-id
-                 :seon.cluster.run/process process})))]
+             (run/close-tx
+              {:seon.cluster.run/id run-id
+               :seon.cluster.run/process process
+               :seon.cluster.run/closed-at now}))]
         (if (:seon.error/kind terminal)
           (do
             (settle! {::cluster cluster
@@ -1922,7 +1903,7 @@
                       :seon.cluster.run/id run-id
                       :seon.error/value terminal})
             (report :error 0))
-          (report (if bootstrap? :closed :released) 0)))
+          (report :closed 0)))
 
       :else
       (let [appended
@@ -1932,12 +1913,12 @@
               (cond-> {:seon.cluster.run/id run-id
                        :seon.cluster.run/process process
                        :seon.cluster.eval/at now
-                       :seon.cluster.run.form/ordinal ordinal
+                       :seon.cluster.eval/ordinal ordinal
                        ;; THE COMMENT AND THE FORM ARE TWO FIELDS. A generated
                        ;; opening reads back through the one REPL grammar, so
                        ;; its prose sits above the prompt exactly like an
                        ;; agent's own.
-                       :seon.cluster.run.form/source
+                       :seon.cluster.eval/source
                        (pr-str (:seon.repl/form entry))
                        :seon.ns/name
                        (sci.eval/agent-namespace @connection agent-id)}
@@ -1956,7 +1937,7 @@
            (assoc request ::work
                   (assoc work
                          :seon.cluster.work/situation :resume
-                         :seon.cluster.run.form/ordinal ordinal))))))))
+                         :seon.cluster.eval/ordinal ordinal))))))))
 
 (defn turn
   "Run one turn to its next durable boundary; returns the turn report.

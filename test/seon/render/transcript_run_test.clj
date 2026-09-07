@@ -28,29 +28,26 @@
        {:seon.cluster.run/id "run-b"
         :seon.cluster.run/agent [:seon.cluster.agent/id "run-render-agent"]
         :seon.cluster.run/opened-at #inst "2026-09-06T00:01:00.000-00:00"}
-       {:seon.cluster.run.form/id "form-a"
-        :seon.cluster.run.form/run [:seon.cluster.run/id "run-a"]
-        :seon.cluster.run.form/ordinal 0
-        :seon.cluster.run.form/author :agent
-        :seon.cluster.run.form/source "(+ 1 1)"}
-       {:seon.cluster.run.form/id "form-a-pending"
-        :seon.cluster.run.form/run [:seon.cluster.run/id "run-a"]
-        :seon.cluster.run.form/ordinal 1
-        :seon.cluster.run.form/author :agent
-        :seon.cluster.run.form/source "pending-form"}
-       {:seon.cluster.run.form/id "form-b"
-        :seon.cluster.run.form/run [:seon.cluster.run/id "run-b"]
-        :seon.cluster.run.form/ordinal 0
-        :seon.cluster.run.form/author :agent
-        :seon.cluster.run.form/source "(* 9 9)"}
+       ;; ONE ENTITY PER (run, ordinal): the frozen source and the settled
+       ;; result are attributes of the same evaluation. Ordinal 1 of run-a
+       ;; is frozen and never started, which is exactly "pending".
        {:seon.cluster.eval/id "eval-a"
         :seon.cluster.eval/run [:seon.cluster.run/id "run-a"]
         :seon.cluster.eval/ordinal 0
+        :seon.cluster.eval/author :agent
+        :seon.cluster.eval/source "(+ 1 1)"
         :seon.cluster.eval/at #inst "2026-09-06T00:00:01.000-00:00"
         :seon.cluster.eval/result-edn "2"}
+       {:seon.cluster.eval/id "form-a-pending"
+        :seon.cluster.eval/run [:seon.cluster.run/id "run-a"]
+        :seon.cluster.eval/ordinal 1
+        :seon.cluster.eval/author :agent
+        :seon.cluster.eval/source "pending-form"}
        {:seon.cluster.eval/id "eval-b"
         :seon.cluster.eval/run [:seon.cluster.run/id "run-b"]
         :seon.cluster.eval/ordinal 0
+        :seon.cluster.eval/author :agent
+        :seon.cluster.eval/source "(* 9 9)"
         :seon.cluster.eval/at #inst "2026-09-06T00:01:01.000-00:00"
         :seon.cluster.eval/result-edn "81"}])
      (let [database (db/db connection)

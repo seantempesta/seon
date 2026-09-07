@@ -93,7 +93,7 @@
 (defn- run-in
   [ctx source time-limit-ms]
   (eval/evaluate
-   (cond-> {:seon.cluster.run.form/source source
+   (cond-> {:seon.cluster.eval/source source
             :seon.sci.admit/caps caps
             :seon.sci.eval/time-limit-ms time-limit-ms
             ;; development disposition: a codec hole must be loud
@@ -148,13 +148,13 @@
   ;; the dial is REQUIRED, so a caller cannot forget to decide
   (is (seon.schema/valid-candidate-value?
        :seon.sci.eval/request
-       {:seon.cluster.run.form/source "(+ 1 1)"
+       {:seon.cluster.eval/source "(+ 1 1)"
         :seon.sci.admit/caps caps
         :seon.sci.eval/time-limit-ms 1000
         :seon.config/on-core-error :panic}))
   (is (not (seon.schema/valid-candidate-value?
             :seon.sci.eval/request
-            {:seon.cluster.run.form/source "(+ 1 1)"
+            {:seon.cluster.eval/source "(+ 1 1)"
              :seon.sci.admit/caps caps
              :seon.sci.eval/time-limit-ms 1000}))
       "no dial, no evaluation"))
@@ -182,7 +182,7 @@
                   :seon.db/db @connection
                   :seon.db/connection connection
                   :seon.cluster.agent/id "root"
-                  :seon.cluster.run.form/source
+                  :seon.cluster.eval/source
                   "; generated opening non-declaration\n:opening-probe"
                   :seon.sci.admit/caps caps
                   :seon.sci.eval/time-limit-ms 2000
@@ -251,7 +251,7 @@
            (:seon.print/options evaluation)))))
 
 (deftest the-evaluator-remains-live-after-its-namespace-reloads
-  (let [request {:seon.cluster.run.form/source "(+ 1 2)"
+  (let [request {:seon.cluster.eval/source "(+ 1 2)"
                  :seon.sci.admit/caps caps
                  :seon.sci.eval/time-limit-ms 10000
                  :seon.config/on-core-error :panic}
@@ -332,8 +332,8 @@
                 evaluate
                 (fn [ctx]
                   (eval/evaluate
-                   {:seon.cluster.run.form/source query
-                    :seon.cluster.run.form/ns [:seon.ns/name 'user]
+                   {:seon.cluster.eval/source query
+                    :seon.cluster.eval/ns [:seon.ns/name 'user]
                     :seon.sci.eval/ctx ctx
                     :seon.sci.admit/caps caps
                     :seon.sci.eval/time-limit-ms 5000
@@ -596,8 +596,8 @@
             (:seon.program/row
              (eval/evaluate
               {:seon.sci.eval/ctx ctx
-               :seon.cluster.run.form/ns [:seon.ns/name 'parity]
-               :seon.cluster.run.form/source source
+               :seon.cluster.eval/ns [:seon.ns/name 'parity]
+               :seon.cluster.eval/source source
                :seon.sci.admit/caps caps
                :seon.sci.eval/time-limit-ms 2000
                :seon.config/on-core-error :panic}))
@@ -899,7 +899,7 @@
           :seon.sci.eval/live-declaration? false
           :seon.sci.eval/namespace-name 'user
           :seon.sci.eval/namespace-unmap? true
-          :seon.cluster.run.form/source source})
+          :seon.cluster.eval/source source})
         row (:seon.program/row result)]
     (is (true? (:seon.sci.eval/namespace-changed? result)))
     (is (= #{[:seon.fn/sym "user/discarded"]
@@ -1134,8 +1134,8 @@
             (eval/evaluate
              {:seon.sci.eval/ctx turn-ctx
               :seon.cluster.agent/id agent-id
-              :seon.cluster.run.form/ns [:seon.ns/name namespace-name]
-              :seon.cluster.run.form/source "(dir fixture.empty-agent)"
+              :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+              :seon.cluster.eval/source "(dir fixture.empty-agent)"
               :seon.sci.admit/caps caps
               :seon.sci.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic})]
@@ -1455,7 +1455,7 @@
             (eval/evaluate
              {:seon.sci.eval/ctx ctx
               :seon.cluster.agent/id agent-id
-              :seon.cluster.run.form/source "(ns-name *ns*)"
+              :seon.cluster.eval/source "(ns-name *ns*)"
               :seon.sci.admit/caps caps
               :seon.sci.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic})
@@ -1491,8 +1491,8 @@
              {:seon.sci.eval/ctx ctx
               :seon.cluster.agent/id "scoped-agent"
               :seon.cluster.run/id "scoped-run"
-              :seon.cluster.run.form/ordinal 7
-              :seon.cluster.run.form/source "(my.run/complete \"done\")"
+              :seon.cluster.eval/ordinal 7
+              :seon.cluster.eval/source "(my.run/complete \"done\")"
               :seon.sci.admit/caps caps
               :seon.sci.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic})]
@@ -1501,11 +1501,11 @@
                (:seon.sci.admit/value evaluation)))
         (is (some #(= {:seon.cluster.agent/id "scoped-agent"
                        :seon.cluster.run/id "scoped-run"
-                       :seon.cluster.run.form/ordinal 7}
+                       :seon.cluster.eval/ordinal 7}
                       (select-keys %
                                    [:seon.cluster.agent/id
                                     :seon.cluster.run/id
-                                    :seon.cluster.run.form/ordinal]))
+                                    :seon.cluster.eval/ordinal]))
                   @seen)
             "SCI's actual call-preparation hook sees this form's turn members")))))
 
@@ -1524,8 +1524,8 @@
                 evaluate
                 (fn [ctx source]
                   (eval/evaluate
-                   {:seon.cluster.run.form/source source
-                    :seon.cluster.run.form/ns [:seon.ns/name 'user]
+                   {:seon.cluster.eval/source source
+                    :seon.cluster.eval/ns [:seon.ns/name 'user]
                     :seon.sci.eval/ctx ctx
                     :seon.sci.admit/caps caps
                     :seon.sci.eval/time-limit-ms 5000

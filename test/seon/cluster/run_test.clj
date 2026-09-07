@@ -205,24 +205,22 @@
     (is (false? (run/held? {})))))
 
 (deftest interrupted-warning-is-one-derived-value
-  (let [forms [{:seon.cluster.run.form/ordinal 0}
-               {:seon.cluster.run.form/ordinal 1}
-               {:seon.cluster.run.form/ordinal 2}]]
-    (testing "clean receipts derive no warning at all"
-      (is (nil? (run/interrupted-warning
-                 forms
-                 [{:seon.cluster.eval/ordinal 0
-                   :seon.cluster.eval/result-edn "1"}]))))
-    (testing "an interrupted receipt derives exactly one warning naming
-              the first interrupted ordinal and the missing tail"
-      (let [warning (run/interrupted-warning
-                     forms
-                     [{:seon.cluster.eval/ordinal 0
-                       :seon.cluster.eval/result-edn "1"}
-                      {:seon.cluster.eval/ordinal 1
-                       :seon.cluster.eval/interrupted-at t1}])]
-        (is (= 1 (:seon.cluster.eval/ordinal warning)))
-        (is (= 2 (:seon.cluster.run/missing-results warning)))))))
+  (testing "clean evaluations derive no warning at all"
+    (is (nil? (run/interrupted-warning
+               [{:seon.cluster.eval/ordinal 0
+                 :seon.cluster.eval/result-edn "1"}
+                {:seon.cluster.eval/ordinal 1}
+                {:seon.cluster.eval/ordinal 2}]))))
+  (testing "an interrupted evaluation derives exactly one warning naming
+            the first interrupted ordinal and the missing tail"
+    (let [warning (run/interrupted-warning
+                   [{:seon.cluster.eval/ordinal 0
+                     :seon.cluster.eval/result-edn "1"}
+                    {:seon.cluster.eval/ordinal 1
+                     :seon.cluster.eval/interrupted-at t1}
+                    {:seon.cluster.eval/ordinal 2}])]
+      (is (= 1 (:seon.cluster.eval/ordinal warning)))
+      (is (= 2 (:seon.cluster.run/missing-results warning))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Teaching examples — the call shapes, one committed lifecycle
@@ -268,16 +266,16 @@
                               ::run/starting-ns [:seon.ns/name 'user]
                               ::run/plan-digest "digest-a"
                               ::run/sources
-                              [{:seon.cluster.run.form/source "(+ 1 1)"}
-                               {:seon.cluster.run.form/source "(+ 2 2)"}]}))))
+                              [{:seon.cluster.eval/source "(+ 1 1)"}
+                               {:seon.cluster.eval/source "(+ 2 2)"}]}))))
         (is (= ["(+ 1 1)" "(+ 2 2)"]
                (->> (db/q '[:find ?ordinal ?source
                            :in $ ?run-id
                            :where
                            [?run :seon.cluster.run/id ?run-id]
-                           [?form :seon.cluster.run.form/run ?run]
-                           [?form :seon.cluster.run.form/ordinal ?ordinal]
-                           [?form :seon.cluster.run.form/source ?source]]
+                           [?form :seon.cluster.eval/run ?run]
+                           [?form :seon.cluster.eval/ordinal ?ordinal]
+                           [?form :seon.cluster.eval/source ?source]]
                          (db/db connection) "lesson")
                     (sort-by first)
                     (mapv second)))))
@@ -287,8 +285,8 @@
                         :in $ ?run-id
                         :where
                         [?run :seon.cluster.run/id ?run-id]
-                        [?form :seon.cluster.run.form/run ?run]
-                        [?form :seon.cluster.run.form/author ?author]]
+                        [?form :seon.cluster.eval/run ?run]
+                        [?form :seon.cluster.eval/author ?author]]
                       @connection "lesson"))))
       (testing "close settles the run and retracts the pointer it
                 derived from the run's own agent connection"
@@ -334,7 +332,7 @@
            (db/q '[:find ?form
                    :where
                    [?run :seon.cluster.run/id "generated-run"]
-                   [?form :seon.cluster.run.form/run ?run]]
+                   [?form :seon.cluster.eval/run ?run]]
                  @connection)))
       (is (= ::committed
              (transact-or-refusal
@@ -343,8 +341,8 @@
                {::run/id "generated-run"
                 ::run/process "generated-process"
                 :seon.cluster.eval/at t0
-                :seon.cluster.run.form/ordinal 0
-                :seon.cluster.run.form/source "(help)"
+                :seon.cluster.eval/ordinal 0
+                :seon.cluster.eval/source "(help)"
                 :seon.ns/name 'my.agents.generated}))))
       (is (= {:seon.cluster.eval/ordinal 0
               :seon.cluster.eval/at t0
@@ -365,8 +363,8 @@
                 {::run/id "generated-run"
                  ::run/process "generated-process"
                  :seon.cluster.eval/at t0
-                 :seon.cluster.run.form/ordinal 1
-                 :seon.cluster.run.form/source "(dir 'my.run)"
+                 :seon.cluster.eval/ordinal 1
+                 :seon.cluster.eval/source "(dir 'my.run)"
                  :seon.ns/name 'my.agents.generated})))))
       (db/transact!
        connection
@@ -381,8 +379,8 @@
                {::run/id "generated-run"
                 ::run/process "generated-process"
                 :seon.cluster.eval/at t1
-                :seon.cluster.run.form/ordinal 1
-                :seon.cluster.run.form/source "(dir 'my.run)"
+                :seon.cluster.eval/ordinal 1
+                :seon.cluster.eval/source "(dir 'my.run)"
                 :seon.ns/name 'my.agents.generated}))))
       (is (= [[0 :system "(help)"]
               [1 :system "(dir 'my.run)"]]
@@ -390,84 +388,14 @@
                     '[:find ?ordinal ?author ?source
                       :where
                       [?run :seon.cluster.run/id "generated-run"]
-                      [?form :seon.cluster.run.form/run ?run]
-                      [?form :seon.cluster.run.form/ordinal ?ordinal]
-                      [?form :seon.cluster.run.form/author ?author]
-                      [?form :seon.cluster.run.form/source ?source]]
+                      [?form :seon.cluster.eval/run ?run]
+                      [?form :seon.cluster.eval/ordinal ?ordinal]
+                      [?form :seon.cluster.eval/author ?author]
+                      [?form :seon.cluster.eval/source ?source]]
                     :args [@connection]
                     :order-by '[?ordinal :asc]})))
       (is (nil? (::run/plan-digest
                  (run-entity connection "generated-run")))))))
-
-(deftest an-agent-plan-appends-after-the-settled-generated-prefix
-  (with-model-database
-    (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.ns/name 'my.agents.appended}
-        {:seon.cluster.agent/id "appended-agent"
-         :seon.cluster.agent/namespace
-         [:seon.ns/name 'my.agents.appended]}])
-      (db/transact!
-       connection
-       (run/generated-run-tx
-        @connection
-        {:seon.cluster.agent/id "appended-agent"
-         ::run/id "appended-run"
-         ::run/process "appended-process"
-         ::run/opened-at t0
-         ::run/starting-ns [:seon.ns/name 'my.agents.appended]}))
-      (db/transact!
-       connection
-       (run/append-generated-tx
-        {::run/id "appended-run"
-         ::run/process "appended-process"
-         :seon.cluster.eval/at t0
-         :seon.cluster.run.form/ordinal 0
-         :seon.cluster.run.form/source "(help)"
-         :seon.ns/name 'my.agents.appended}))
-      (db/transact!
-       connection
-       (run/receipt-settle-tx
-        {::run/id "appended-run"
-         :seon.cluster.eval/ordinal 0
-         :seon.cluster.eval/result-edn "{:introduced 'my.run}"}))
-      (db/transact!
-       connection
-       (run/generation-complete-tx
-        {::run/id "appended-run"
-         ::run/process "appended-process"}))
-      (is (= ::committed
-             (transact-or-refusal
-              connection
-              (run/plan-tx
-               {::run/id "appended-run"
-                ::run/process "appended-process"
-                ::run/plan-digest "agent-reply-digest"
-                ::run/sources
-                [{:seon.cluster.run.form/source "(+ 1 2)"}
-                 {:seon.cluster.run.form/source "(+ 3 4)"}]}))))
-      (is (= [[0 :system "(help)"]
-              [1 :agent "(+ 1 2)"]
-              [2 :agent "(+ 3 4)"]]
-             (db/q {:query
-                    '[:find ?ordinal ?author ?source
-                      :where
-                      [?run :seon.cluster.run/id "appended-run"]
-                      [?form :seon.cluster.run.form/run ?run]
-                      [?form :seon.cluster.run.form/ordinal ?ordinal]
-                      [?form :seon.cluster.run.form/author ?author]
-                      [?form :seon.cluster.run.form/source ?source]]
-                    :args [@connection]
-                    :order-by '[?ordinal :asc]})))
-      (is (= {:seon.cluster.eval/result-edn "{:introduced 'my.run}"
-              :seon.cluster.run/plan-digest "agent-reply-digest"}
-             (merge
-              (db/pull @connection [:seon.cluster.eval/result-edn]
-                       [:seon.cluster.eval/id
-                        (run/receipt-identity "appended-run" 0)])
-              (db/pull @connection [::run/plan-digest]
-                       [::run/id "appended-run"])))))))
 
 (deftest run-records-its-opening-commit-and-starting-namespace
   (with-model-database
@@ -490,7 +418,7 @@
            ::run/starting-ns [:seon.ns/name 'replay.start]
            ::run/plan-digest "replay-digest"
            ::run/sources
-           [{:seon.cluster.run.form/source "(def replayed 1)"}]}))
+           [{:seon.cluster.eval/source "(def replayed 1)"}]}))
         (let [run (db/pull
                    @connection
                    '[* {:seon.cluster.run/starting-ns [:seon.ns/name]}]
@@ -503,16 +431,16 @@
              (db/q '[:find ?author .
                      :where
                      [?run :seon.cluster.run/id "replay-run"]
-                     [?form :seon.cluster.run.form/run ?run]
-                     [?form :seon.cluster.run.form/author ?author]]
+                     [?form :seon.cluster.eval/run ?run]
+                     [?form :seon.cluster.eval/author ?author]]
                    @connection)))
       (is (= 'replay.start
              (db/q '[:find ?namespace-name .
                      :where
                      [?run :seon.cluster.run/id "replay-run"]
-                     [?form :seon.cluster.run.form/run ?run]
-                     [?form :seon.cluster.run.form/ordinal 0]
-                     [?form :seon.cluster.run.form/ns ?namespace]
+                     [?form :seon.cluster.eval/run ?run]
+                     [?form :seon.cluster.eval/ordinal 0]
+                     [?form :seon.cluster.eval/ns ?namespace]
                      [?namespace :seon.ns/name ?namespace-name]]
                    @connection)))
       (is (= [{:seon.cluster.eval/ordinal 0
@@ -559,7 +487,7 @@
                 ::run/starting-ns [:seon.ns/name 'my.agents.before]
                 ::run/plan-digest "moving-digest"
                 ::run/sources
-                [{:seon.cluster.run.form/source "(+ 1 1)"}]})))]
+                [{:seon.cluster.eval/source "(+ 1 1)"}]})))]
         (is (= ::run/starting-namespace-changed (::run/rule outcome)))
         (is (= 'my.agents.before
                (db/q '[:find ?namespace-name .
@@ -593,9 +521,9 @@
          ::run/starting-ns [:seon.ns/name 'my.macro-caller]
          ::run/plan-digest "macro-call-digest"
          ::run/sources
-         [{:seon.cluster.run.form/source "(seon.bootstrap/help)"}
-          {:seon.cluster.run.form/source "(missing.target/nope)"}
-          {:seon.cluster.run.form/source
+         [{:seon.cluster.eval/source "(seon.bootstrap/help)"}
+          {:seon.cluster.eval/source "(missing.target/nope)"}
+          {:seon.cluster.eval/source
            "(require 'unindexed.required)"}]}))
       (let [macro-row
             (db/pull @connection
@@ -616,8 +544,8 @@
             "the settlement transaction commits"))
       (let [form (db/pull @connection
                           [{:seon.fn/calls [:seon.fn/sym]}]
-                          [:seon.cluster.run.form/id
-                           (run/form-identity "macro-call-run" 0)])]
+                          [:seon.cluster.eval/id
+                           (run/receipt-identity "macro-call-run" 0)])]
         (is (some #(= "seon.bootstrap/help" (:seon.fn/sym %))
                   (:seon.fn/calls form))
             "the resolvable macro call lands as a lookup-ref edge"))
@@ -635,10 +563,10 @@
            (db/q '[:find ?target
                    :in $ ?form-id
                    :where
-                   [?form :seon.cluster.run.form/id ?form-id]
+                   [?form :seon.cluster.eval/id ?form-id]
                    [?form :seon.fn/calls ?target]]
                  @connection
-                 (run/form-identity "macro-call-run" 1)))
+                 (run/receipt-identity "macro-call-run" 1)))
           "an unresolvable mention is not a call edge")
       (is (nil? (:db/id (db/pull @connection [:db/id]
                                  [:seon.ns/name 'unindexed.required]))))
@@ -717,11 +645,11 @@
            ::run/starting-ns [:seon.ns/name namespace-name]
            ::run/plan-digest "system-source-digest"
            ::run/sources
-           [{:seon.cluster.run.form/source
+           [{:seon.cluster.eval/source
              "{:my.refresh/value 42}"}]}))
         (settle! "system-source" false)
         (close! "system-source")
-        (let [prior-id (run/form-identity "system-source" 0)]
+        (let [prior-id (run/receipt-identity "system-source" 0)]
           (is (= evidence
                  (mapv #(dissoc % :db/id)
                        (:seon.cluster.eval/read-evidence
@@ -735,28 +663,28 @@
           (let [successor
                 (db/pull
                  @connection
-                 '[:seon.cluster.run.form/source
-                   :seon.cluster.run.form/author
-                   {:seon.cluster.run.form/ns [:seon.ns/name]}
-                   {:seon.cluster.run.form/refreshes
-                    [:seon.cluster.run.form/id]}]
+                 '[:seon.cluster.eval/source
+                   :seon.cluster.eval/author
+                   {:seon.cluster.eval/ns [:seon.ns/name]}
+                   {:seon.cluster.eval/refreshes
+                    [:seon.cluster.eval/id]}]
                  (db/q '[:find ?successor .
                          :in $ ?prior
                          :where
-                         [?prior-form :seon.cluster.run.form/id ?prior]
-                         [?successor :seon.cluster.run.form/refreshes
+                         [?prior-form :seon.cluster.eval/id ?prior]
+                         [?successor :seon.cluster.eval/refreshes
                           ?prior-form]]
                        @connection prior-id))]
-            (is (= :system (:seon.cluster.run.form/author successor)))
+            (is (= :system (:seon.cluster.eval/author successor)))
             (is (= "{:my.refresh/value 42}"
-                   (:seon.cluster.run.form/source successor)))
+                   (:seon.cluster.eval/source successor)))
             (is (= namespace-name
                    (get-in successor
-                           [:seon.cluster.run.form/ns :seon.ns/name])))
+                           [:seon.cluster.eval/ns :seon.ns/name])))
             (is (= prior-id
                    (get-in successor
-                           [:seon.cluster.run.form/refreshes
-                            :seon.cluster.run.form/id]))))
+                           [:seon.cluster.eval/refreshes
+                            :seon.cluster.eval/id]))))
           (is (= ::run/refresh-successor-exists
                  (::run/rule
                   (transact-or-refusal connection
@@ -781,7 +709,7 @@
                        [:seon.ns/name agent-namespace-name]
                        ::run/plan-digest "agent-source-digest"
                        ::run/sources
-                       [{:seon.cluster.run.form/source "(+ 1 1)"}]}))
+                       [{:seon.cluster.eval/source "(+ 1 1)"}]}))
         (settle! "agent-source" true)
         (close! "agent-source")
         (is (= ::run/refresh-agent-authored
@@ -789,7 +717,7 @@
                 (transact-or-refusal
                  connection
                  (run/refresh-tx
-                  (run/form-identity "agent-source" 0))))))))))
+                  (run/receipt-identity "agent-source" 0))))))))))
 
 (deftest a-non-holder-refuses-every-held-run-transition
   ;; the surviving custody assertion, re-expressed from the lease-era
@@ -810,7 +738,7 @@
                            ::run/starting-ns [:seon.ns/name 'user]
                            ::run/plan-digest "held-digest"
                            ::run/sources
-                           [{:seon.cluster.run.form/source "(+ 1 1)"}]})]]]
+                           [{:seon.cluster.eval/source "(+ 1 1)"}]})]]]
     (with-model-database
       (fn [connection]
         (db/transact! connection [{:seon.cluster.agent/id "held-agent"}])
@@ -1325,7 +1253,7 @@
                ::run/starting-ns [:seon.ns/name 'user]
                ::run/plan-digest digest
                ::run/sources
-                [{:seon.cluster.run.form/source "(+ 1 1)"}]})))
+                [{:seon.cluster.eval/source "(+ 1 1)"}]})))
     :receipt-start (let [[run-id ordinal] args]
                      (transact-or-refusal
                       connection

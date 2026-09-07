@@ -1040,9 +1040,9 @@
           (is (empty?
                (db/q '[:find ?form
                       :where
-                      [?form :seon.cluster.run.form/run ?run]
-                      [?form :seon.cluster.run.form/ordinal ?ordinal]
-                      [?form :seon.cluster.run.form/ns ?parsed-ns]
+                      [?form :seon.cluster.eval/run ?run]
+                      [?form :seon.cluster.eval/ordinal ?ordinal]
+                      [?form :seon.cluster.eval/ns ?parsed-ns]
                       [?receipt :seon.cluster.eval/run ?run]
                       [?receipt :seon.cluster.eval/ordinal ?ordinal]
                       [?receipt :seon.cluster.eval/ns ?evaluated-ns]
@@ -1926,16 +1926,16 @@
          (into
           [{:seon.cluster.agent/id "agent-a"
             :seon.cluster.agent/run [:seon.cluster.run/id route-run]}
-           {:seon.cluster.run.form/id "route-form-0"
-            :seon.cluster.run.form/run [:seon.cluster.run/id route-run]
-            :seon.cluster.run.form/ordinal 0
-            :seon.cluster.run.form/source unbound-source
-            :seon.cluster.run.form/ns [:seon.ns/name 'my.gen.alpha]}
-           {:seon.cluster.run.form/id "route-form-1"
-            :seon.cluster.run.form/run [:seon.cluster.run/id route-run]
-            :seon.cluster.run.form/ordinal 1
-            :seon.cluster.run.form/source "42"
-            :seon.cluster.run.form/ns [:seon.ns/name 'my.gen.alpha]}]
+           {:seon.cluster.eval/id "route-form-0"
+            :seon.cluster.eval/run [:seon.cluster.run/id route-run]
+            :seon.cluster.eval/ordinal 0
+            :seon.cluster.eval/source unbound-source
+            :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]}
+           {:seon.cluster.eval/id "route-form-1"
+            :seon.cluster.eval/run [:seon.cluster.run/id route-run]
+            :seon.cluster.eval/ordinal 1
+            :seon.cluster.eval/source "42"
+            :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]}]
           cat
           [(run/receipt-start-tx
             {:seon.cluster.run/id route-run
@@ -1956,7 +1956,7 @@
                 {:seon.cluster.work/situation :resume
                  :seon.cluster.run/id route-run
                  :seon.cluster.agent/id "agent-a"
-                 :seon.cluster.run.form/ordinal 0}}
+                 :seon.cluster.eval/ordinal 0}}
                now)
               receipts
               (->> (db/q '[:find [(pull ?receipt [*]) ...]
@@ -2038,15 +2038,15 @@
                       :where
                       [?agent :seon.cluster.agent/id "agent-a"]
                       [?run :seon.cluster.run/agent ?agent]
-                      [?form :seon.cluster.run.form/run ?run]
-                      [?form :seon.cluster.run.form/source ?source]]
+                      [?form :seon.cluster.eval/run ?run]
+                      [?form :seon.cluster.eval/source ?source]]
                      @connection))
               "prose alone never becomes a recorded form")
           (is (= (count (db/q '[:find [?form ...]
                                :where
                                [?agent :seon.cluster.agent/id "agent-a"]
                                [?run :seon.cluster.run/agent ?agent]
-                               [?form :seon.cluster.run.form/run ?run]]
+                               [?form :seon.cluster.eval/run ?run]]
                              @connection))
                  (count (db/q '[:find [?receipt ...]
                                :where
@@ -2116,8 +2116,8 @@
             (db/q '[:find ?run-id .
                     :in $ ?source
                     :where
-                    [?form :seon.cluster.run.form/source ?source]
-                    [?form :seon.cluster.run.form/run ?run]
+                    [?form :seon.cluster.eval/source ?source]
+                    [?form :seon.cluster.eval/run ?run]
                     [?run :seon.cluster.run/id ?run-id]]
                   @connection reply-text)
             receipt
@@ -2147,7 +2147,7 @@
                          :in $ ?run-id
                          :where
                          [?run :seon.cluster.run/id ?run-id]
-                         [?form :seon.cluster.run.form/run ?run]]
+                         [?form :seon.cluster.eval/run ?run]]
                        @connection run-id)))
           (is (= 1
                  (db/q '[:find (count ?receipt) .
@@ -2178,7 +2178,7 @@
                          :in $ ?run-id
                          :where
                          [?run :seon.cluster.run/id ?run-id]
-                         [?form :seon.cluster.run.form/run ?run]
+                         [?form :seon.cluster.eval/run ?run]
                          [?receipt :seon.cluster.eval/run ?run]
                          [?receipt :seon.error/kind ?kind]]
                        @connection run-id))
@@ -3444,7 +3444,7 @@
                           :where [?entity :seon.db/read-result _]]
                         database)))
               "the removed attribute cannot admit a read-result datom")
-          (is (not (contains? function-row :seon.cluster.run.form/source))
+          (is (not (contains? function-row :seon.cluster.eval/source))
               "program facts and eval facts remain separate row families"))))))
 
 (deftest singleton-enum-uses-are-members-of-their-declared-enums
@@ -3497,8 +3497,8 @@
           {:seon.cluster.run/id run-id
            :seon.cluster.run/process process
            :seon.cluster.eval/at now
-           :seon.cluster.run.form/ordinal 0
-           :seon.cluster.run.form/source "(help)"
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/source "(help)"
            :seon.ns/name 'my.agents.agent-a}))
         (db/transact!
          connection
@@ -3529,9 +3529,9 @@
                          :in $ ?run-id
                          :where
                          [?run :seon.cluster.run/id ?run-id]
-                         [?form :seon.cluster.run.form/run ?run]
-                         [?form :seon.cluster.run.form/ordinal 0]
-                         [?form :seon.cluster.run.form/author ?author]]
+                         [?form :seon.cluster.eval/run ?run]
+                         [?form :seon.cluster.eval/ordinal 0]
+                         [?form :seon.cluster.eval/author ?author]]
                        @connection run-id))))))))
 
 (deftest generated-membership-failure-never-advances-the-run-to-call
@@ -3555,8 +3555,8 @@
           {:seon.cluster.run/id run-id
            :seon.cluster.run/process process
            :seon.cluster.eval/at now
-           :seon.cluster.run.form/ordinal 0
-           :seon.cluster.run.form/source "(help)"
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/source "(help)"
            :seon.ns/name 'my.agents.agent-a}))
         (db/transact!
          connection
@@ -3638,7 +3638,7 @@
                               :seon.cluster.run/id run-id
                               :seon.error/value failure}
                        evaluation?
-                       (assoc :seon.cluster.run.form/ordinal 0)))
+                       (assoc :seon.cluster.eval/ordinal 0)))
                     receipt-count
                     (or
                      (db/q '[:find (count ?receipt) .
@@ -4043,8 +4043,8 @@
                              :where
                              [?agent :seon.cluster.agent/id ?agent-id]
                              [?run :seon.cluster.run/agent ?agent]
-                             [?form :seon.cluster.run.form/run ?run]
-                             [?form :seon.cluster.run.form/source ?source]]
+                             [?form :seon.cluster.eval/run ?run]
+                             [?form :seon.cluster.eval/source ?source]]
                            @connection agent-id)
                       receipts
                       (db/q '[:find [?edn ...]

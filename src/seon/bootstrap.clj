@@ -551,9 +551,9 @@
                  :in $ ?run-id
                  :where
                  [?run :seon.cluster.run/id ?run-id]
-                 [?form :seon.cluster.run.form/run ?run]
-                 [?form :seon.cluster.run.form/ordinal ?ordinal]
-                 [?form :seon.cluster.run.form/source ?source]
+                 [?form :seon.cluster.eval/run ?run]
+                 [?form :seon.cluster.eval/ordinal ?ordinal]
+                 [?form :seon.cluster.eval/source ?source]
                  [?receipt :seon.cluster.eval/run ?run]
                  [?receipt :seon.cluster.eval/ordinal ?ordinal]
                  [?receipt :seon.cluster.eval/result-edn ?result]]
@@ -591,7 +591,7 @@
                                      :seon.error/kind ::prefix-drift
                                      :seon.error/message message
                                      :seon.cluster.run/id run-id
-                                     :seon.cluster.run.form/source source}))))
+                                     :seon.cluster.eval/source source}))))
                       {:seon.repl/key (:seon.repl/key candidate)
                        :seon.sci.admit/print-node (edn/read-string result)}))
                   rows)
@@ -645,9 +645,9 @@
           :where
           [?agent :seon.cluster.agent/id ?agent-id]
           [?run :seon.cluster.run/agent ?agent]
-          [?form :seon.cluster.run.form/run ?run]
-          [?form :seon.cluster.run.form/ordinal ?ordinal]
-          [?form :seon.cluster.run.form/source ?source]
+          [?form :seon.cluster.eval/run ?run]
+          [?form :seon.cluster.eval/ordinal ?ordinal]
+          [?form :seon.cluster.eval/source ?source]
           [?receipt :seon.cluster.eval/run ?run]
           [?receipt :seon.cluster.eval/ordinal ?ordinal]]
         database agent-id))
@@ -666,7 +666,7 @@
   (try
     (let [elements (set (tree-seq coll? seq (edn/read-string source)))]
       (and (contains? elements :seon.cluster.eval/run)
-           (contains? elements :seon.cluster.run.form/run)))
+           (contains? elements :seon.cluster.eval/run)))
     (catch Throwable _
       false)))
 
@@ -708,9 +708,9 @@
              ":in $ ?agent-id :where "
              "[?agent :seon.cluster.agent/id ?agent-id] "
              "[?run :seon.cluster.run/agent ?agent] "
-             "[?form :seon.cluster.run.form/run ?run] "
-             "[?form :seon.cluster.run.form/ordinal ?ordinal] "
-             "[?form :seon.cluster.run.form/source ?source] "
+             "[?form :seon.cluster.eval/run ?run] "
+             "[?form :seon.cluster.eval/ordinal ?ordinal] "
+             "[?form :seon.cluster.eval/source ?source] "
              "[?receipt :seon.cluster.eval/run ?run] "
              "[?receipt :seon.cluster.eval/ordinal ?ordinal] "
              "[?receipt :seon.cluster.eval/at ?at] "
@@ -733,10 +733,10 @@
         sources
         (cond-> []
           read?
-          (conj {:seon.cluster.run.form/source read-source
+          (conj {:seon.cluster.eval/source read-source
                  :seon.ns/name 'my.agents.root})
           send?
-          (conj {:seon.cluster.run.form/source send-source
+          (conj {:seon.cluster.eval/source send-source
                  :seon.ns/name 'my.agents.root}))]
     (if (or already-open? (empty? sources))
       []

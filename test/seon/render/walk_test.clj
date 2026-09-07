@@ -40,17 +40,13 @@
     {:seon.cluster.run/id "render-walk-run"
      :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
      :seon.cluster.run/opened-at (at 0)}
-    {:seon.cluster.run.form/id "render-walk-form"
-     :seon.cluster.run.form/run [:seon.cluster.run/id "render-walk-run"]
-     :seon.cluster.run.form/ordinal 0
-     :seon.cluster.run.form/source "(+ 20 22)"
-     :seon.cluster.run.form/ns [:seon.ns/name agent-namespace]}
     {:seon.cluster.eval/id "render-walk-eval"
      :seon.cluster.eval/run [:seon.cluster.run/id "render-walk-run"]
      :seon.cluster.eval/ordinal 0
      :seon.cluster.eval/at (at 1)
      :seon.cluster.eval/ns [:seon.ns/name agent-namespace]
-     :seon.cluster.eval/result-edn "42"}]))
+     :seon.cluster.eval/result-edn "42"
+     :seon.cluster.eval/source "(+ 20 22)"}]))
 
 (deftest every-identifiable-neighbour-uses-its-declared-lookup-ref
   (support/with-database

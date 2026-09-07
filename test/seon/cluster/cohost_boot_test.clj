@@ -81,8 +81,8 @@
 (defn- evaluate-in
   [instance source]
   (sci.eval/evaluate
-   {:seon.cluster.run.form/source source
-    :seon.cluster.run.form/ns [:seon.ns/name 'user]
+   {:seon.cluster.eval/source source
+    :seon.cluster.eval/ns [:seon.ns/name 'user]
     :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
     :seon.sci.admit/caps caps
     :seon.sci.eval/time-limit-ms 5000

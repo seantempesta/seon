@@ -36,7 +36,7 @@
   EVERY PLAN SOURCE CARRIES A READER EVENT, and that is the invariant
   this namespace exists to keep. A comment-only plan source has no
   event, so nothing evaluates it and nothing settles a receipt for it:
-  the run recorded a `:seon.cluster.run.form` row and closed with that
+  the run recorded a `:seon.cluster.eval` row and closed with that
   row unsettled, silently, detectable only by counting forms against
   receipts. The 2026-08-08 arc drive read 105 forms / 102 receipts, and
   all three gaps were comment-only sources produced by deepseek-v4-flash
@@ -261,7 +261,7 @@
               prose (comment-source (subs source cursor start))]
           (recur end (next remaining)
                  (conj forms
-                       (cond-> {:seon.cluster.run.form/source
+                       (cond-> {:seon.cluster.eval/source
                                 (subs source start end)}
                          (not (str/blank? prose))
                          (assoc :seon.cluster.eval/comment prose)

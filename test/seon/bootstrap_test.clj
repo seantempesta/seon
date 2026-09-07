@@ -53,9 +53,9 @@
                            :seon.cluster.work/situation
                            :seon.cluster.run/plan-digest
                            {:seon.cluster.run/forms
-                            [:seon.cluster.run.form/ordinal
-                             :seon.cluster.run.form/author
-                             :seon.cluster.run.form/source]}
+                            [:seon.cluster.eval/ordinal
+                             :seon.cluster.eval/author
+                             :seon.cluster.eval/source]}
                            {:seon.cluster.run/trigger
                             [:seon.cluster.message/id
                              :seon.cluster.message/content]}]
@@ -118,8 +118,8 @@
             {:seon.cluster.run/id (bootstrap/run-id agent-id)
              :seon.cluster.run/process cluster/boot-process-identity
              :seon.cluster.eval/at (java.util.Date.)
-             :seon.cluster.run.form/ordinal 0
-             :seon.cluster.run.form/source opening-source
+             :seon.cluster.eval/ordinal 0
+             :seon.cluster.eval/source opening-source
              :seon.ns/name namespace-name}))
           (db/transact!
            connection
@@ -141,9 +141,9 @@
                            :in $ ?run-id
                            :where
                            [?run :seon.cluster.run/id ?run-id]
-                           [?form :seon.cluster.run.form/run ?run]
-                           [?form :seon.cluster.run.form/ordinal 0]
-                           [?form :seon.cluster.run.form/source ?source]]
+                           [?form :seon.cluster.eval/run ?run]
+                           [?form :seon.cluster.eval/ordinal 0]
+                           [?form :seon.cluster.eval/source ?source]]
                          @connection (bootstrap/run-id agent-id)))
                 "the first derived entry remains byte-identical in history")
             (is (every? #(= (first (:seon.repl/key %))
@@ -383,8 +383,8 @@
                       :in $ ?run-id
                       :where
                       [?run :seon.cluster.run/id ?run-id]
-                      [?form :seon.cluster.run.form/run ?run]
-                      [?form :seon.cluster.run.form/source ?source]]
+                      [?form :seon.cluster.eval/run ?run]
+                      [?form :seon.cluster.eval/source ?source]]
                     @connection (bootstrap/supervision-run-id))]
           (is (= 2 (count sources)))
           (is (some #(str/includes? % "my.message/send") sources))

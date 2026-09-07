@@ -96,43 +96,37 @@
     (or (map? events) (seq events))))
 
 (defn- next-ordinal
-  "The first evaluable form with no terminal receipt, or nil.
-  Resume is a QUERY, never a cursor: a receipt is terminal when it
+  "The first evaluable form with no terminal fact, or nil.
+  Resume is a QUERY, never a cursor: an evaluation is terminal when it
   carries a terminal fact — `result-edn`, `error`, or `interrupted-at`
   (the query twin of `run/terminal?`; there is no status to read) —
   and `recover-tx` has already stamped a dead process's dangling
-  receipts with `interrupted-at`, so an interrupted form is DONE being
+  evaluations with `interrupted-at`, so an interrupted form is DONE being
   attempted and the fold moves past it. A comment-only source produces
   zero reader events, so it is durable input but never work. Nothing
-  re-executes."
+  re-executes.
+
+  ONE ENTITY PER (run, ordinal) makes this ONE query: the frozen source
+  and the terminal facts are attributes of the same evaluation, so there
+  is no second result set to join in Clojure."
   [db run-id]
-  (let [forms (db/q '[:find ?ordinal ?source
-                     :in $ ?run-id
-                     :where
-                     [?run :seon.cluster.run/id ?run-id]
-                     [?form :seon.cluster.run.form/run ?run]
-                     [?form :seon.cluster.run.form/ordinal ?ordinal]
-                     [?form :seon.cluster.run.form/source ?source]]
-                   db run-id)
-        settled (into #{}
-                      (db/q '[:find [?ordinal ...]
-                             :in $ ?run-id
-                             :where
-                             [?run :seon.cluster.run/id ?run-id]
-                             [?receipt :seon.cluster.eval/run ?run]
-                             [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                             (or [?receipt :seon.cluster.eval/result-edn _]
-                                 [?receipt :seon.cluster.eval/error _]
-                                 [?receipt
-                                  :seon.cluster.eval/interrupted-at _])]
-                           db run-id))]
-    (->> forms
-         (keep (fn [[ordinal source]]
-                 (when (and (not (contains? settled ordinal))
-                            (evaluable-source? source))
-                   ordinal)))
-         sort
-         first)))
+  (->> (db/q '[:find ?ordinal ?source
+               :in $ ?run-id
+               :where
+               [?run :seon.cluster.run/id ?run-id]
+               [?evaluation :seon.cluster.eval/run ?run]
+               [?evaluation :seon.cluster.eval/ordinal ?ordinal]
+               [?evaluation :seon.cluster.eval/source ?source]
+               (not-join [?evaluation]
+                         (or [?evaluation :seon.cluster.eval/result-edn _]
+                             [?evaluation :seon.cluster.eval/error _]
+                             [?evaluation
+                              :seon.cluster.eval/interrupted-at _]))]
+             db run-id)
+       (keep (fn [[ordinal source]]
+               (when (evaluable-source? source) ordinal)))
+       sort
+       first))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Routed-problem settlement — derived, never stored
@@ -155,7 +149,7 @@
 (defn problem-id
   "The receipt identity naming one form's derived problem."
   {:malli/schema [:=> [:cat :seon.cluster.run/id
-                       :seon.cluster.run.form/ordinal]
+                       :seon.cluster.eval/ordinal]
                   :seon.problems/id]}
   [run-id ordinal]
   (run/receipt-identity run-id ordinal))
@@ -195,7 +189,7 @@
   prefix are excluded from owner routing; neither says owner code is wrong."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.run/id
-                       :seon.cluster.run.form/ordinal :boolean]
+                       :seon.cluster.eval/ordinal :boolean]
                   :boolean]}
   [db run-id ordinal interrupted?]
   (boolean
@@ -217,11 +211,11 @@
   [db form]
   (let [form-eid (:db/id form)
         namespace-owner
-        (when (contains? (:schema db) :seon.cluster.run.form/ns)
+        (when (contains? (:schema db) :seon.cluster.eval/ns)
           (db/q '[:find ?owner-id .
                  :in $ ?form
                  :where
-                 [?form :seon.cluster.run.form/ns ?namespace]
+                 [?form :seon.cluster.eval/ns ?namespace]
                  [?owner :seon.cluster.agent/namespace ?namespace]
                  [?owner :seon.cluster.agent/id ?owner-id]]
                db form-eid))]
@@ -229,7 +223,7 @@
         (db/q '[:find ?author-id .
                :in $ ?form
                :where
-               [?form :seon.cluster.run.form/run ?run]
+               [?form :seon.cluster.eval/run ?run]
                [?run :seon.cluster.run/agent ?author]
                [?author :seon.cluster.agent/id ?author-id]]
              db form-eid))))
@@ -242,37 +236,25 @@
             (:seon.cluster.eval/error receipt)
             (:seon.cluster.eval/interrupted-at receipt)))))
 
-(defn- form-receipt
-  [db form]
-  (db/q '[:find (pull ?receipt [*]) .
-         :in $ ?run ?ordinal
-         :where
-         [?receipt :seon.cluster.eval/run ?run]
-         [?receipt :seon.cluster.eval/ordinal ?ordinal]]
-       db
-       (:db/id (:seon.cluster.run.form/run form))
-       (:seon.cluster.run.form/ordinal form)))
-
 (defn- form-run-id
   [db form]
   (db/q '[:find ?run-id .
          :in $ ?form
          :where
-         [?form :seon.cluster.run.form/run ?run]
+         [?form :seon.cluster.eval/run ?run]
          [?run :seon.cluster.run/id ?run-id]]
        db (:db/id form)))
 
 (defn- assignment-facts
-  [db form receipt owner-id]
-  (let [form-eid (:db/id form)
-        receipt-eid (:db/id receipt)
+  [db evaluation owner-id]
+  (let [evaluation-eid (:db/id evaluation)
         author-eid
         (db/q '[:find ?author .
                :in $ ?form
                :where
-               [?form :seon.cluster.run.form/run ?run]
+               [?form :seon.cluster.eval/run ?run]
                [?run :seon.cluster.run/agent ?author]]
-             db form-eid)
+             db evaluation-eid)
         owner-eid
         (db/q '[:find ?owner .
                :in $ ?owner-id
@@ -280,14 +262,14 @@
              db owner-id)
         assignment?
         (boolean
-         (and receipt-eid owner-eid author-eid
+         (and evaluation-eid owner-eid author-eid
               (db/q '[:find ?assignment .
                      :in $ ?problem ?author ?owner
                      :where
                      [?assignment :seon.cluster.message/about ?problem]
                      [?assignment :seon.cluster.message/from ?author]
                      [?assignment :seon.cluster.message/to ?owner]]
-                   db receipt-eid author-eid owner-eid)))
+                   db evaluation-eid author-eid owner-eid)))
         declination?
         (boolean
          (and assignment?
@@ -298,49 +280,52 @@
                      [?declination :seon.cluster.message/from ?owner]
                      [?declination :seon.cluster.message/to ?author]
                      [?declination :my.message/reason _]]
-                   db receipt-eid author-eid owner-eid)))]
+                   db evaluation-eid author-eid owner-eid)))]
     {:seon.cluster.work/assignment? assignment?
      :seon.cluster.work/declination? declination?}))
 
 (defn form-settlement
-  "One frozen form's exactly-one derived state at this database value."
+  "One evaluation's exactly-one derived state at this database value.
+
+  ONE ENTITY PER (run, ordinal): the frozen source and the terminal facts
+  are the same entity, so `:unevaluated` is the absence of a start instant
+  and `:running` is a started evaluation with no terminal fact. There is no
+  twin to join and no pair that can disagree."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.run.form/id]
+                       :seon.cluster.eval/id]
                   :seon.cluster.work/form-settlement]}
   [db form-id]
-  (let [form (db/pull db '[*] [:seon.cluster.run.form/id form-id])
-        receipt (form-receipt db form)
-        owner-id (form-owner db form)
+  (let [evaluation (db/pull db '[*] [:seon.cluster.eval/id form-id])
+        owner-id (form-owner db evaluation)
         {:seon.cluster.work/keys [assignment? declination?]}
-        (assignment-facts db form receipt owner-id)
-        red? (and (terminal-receipt? receipt) (red-receipt? receipt))
+        (assignment-facts db evaluation owner-id)
+        started? (some? (:seon.cluster.eval/at evaluation))
+        red? (and (terminal-receipt? evaluation) (red-receipt? evaluation))
         artifact? (and red?
                        (resume-artifact?
                         db
-                        (form-run-id db form)
-                        (:seon.cluster.run.form/ordinal form)
-                        (boolean (:seon.cluster.eval/interrupted-at receipt))))
+                        (form-run-id db evaluation)
+                        (:seon.cluster.eval/ordinal evaluation)
+                        (boolean (:seon.cluster.eval/interrupted-at
+                                  evaluation))))
         [state settled?]
         (cond
-          (nil? receipt) [:unevaluated false]
-          (not (terminal-receipt? receipt)) [:running false]
+          (not started?) [:unevaluated false]
+          (not (terminal-receipt? evaluation)) [:running false]
           declination? [:owner-declared-cant true]
           artifact? [:unrouted-red false]
           (and red? assignment?) [:routed false]
           red? [:unrouted-red false]
           assignment? [:owner-fixed true]
           :else [:succeeded true])]
-    (cond-> {:seon.cluster.run.form/id
-             (:seon.cluster.run.form/id form)
-             :seon.cluster.run.form/ordinal
-             (:seon.cluster.run.form/ordinal form)
+    (cond-> {:seon.cluster.eval/id (:seon.cluster.eval/id evaluation)
+             :seon.cluster.eval/ordinal
+             (:seon.cluster.eval/ordinal evaluation)
              :seon.cluster.agent/id owner-id
              :seon.cluster.work/form-state state
              :seon.cluster.work/settled? settled?}
-      receipt
-      (assoc :seon.cluster.eval/id (:seon.cluster.eval/id receipt))
-      (:seon.problems/id receipt)
-      (assoc :seon.problems/id (:seon.problems/id receipt)))))
+      (:seon.problems/id evaluation)
+      (assoc :seon.problems/id (:seon.problems/id evaluation)))))
 
 (defn plan-settlement
   "Every form state and whether all forms of `run-id` are settled."
@@ -353,9 +338,9 @@
                :in $ ?run-id
                :where
                [?run :seon.cluster.run/id ?run-id]
-               [?form :seon.cluster.run.form/run ?run]
-               [?form :seon.cluster.run.form/id ?form-id]
-               [?form :seon.cluster.run.form/ordinal ?ordinal]]
+               [?form :seon.cluster.eval/run ?run]
+               [?form :seon.cluster.eval/id ?form-id]
+               [?form :seon.cluster.eval/ordinal ?ordinal]]
              db run-id)
         forms (mapv (fn [[form-id _]] (form-settlement db form-id))
                     (sort-by second form-ids))]
@@ -496,7 +481,7 @@
       {:seon.cluster.work/situation :resume
        :seon.cluster.run/id run-id
        :seon.cluster.agent/id agent-id
-       :seon.cluster.run.form/ordinal ordinal}
+       :seon.cluster.eval/ordinal ordinal}
       {:seon.cluster.work/situation :close
        :seon.cluster.run/id run-id
        :seon.cluster.agent/id agent-id})))
@@ -508,7 +493,7 @@
       {:seon.cluster.work/situation :resume
        :seon.cluster.run/id run-id
        :seon.cluster.agent/id agent-id
-       :seon.cluster.run.form/ordinal ordinal}
+       :seon.cluster.eval/ordinal ordinal}
       {:seon.cluster.work/situation :generate
        :seon.cluster.run/id run-id
        :seon.cluster.agent/id agent-id})))

@@ -115,7 +115,7 @@
              :seon.db/connection connection
              :seon.cluster.agent/id "binary-agent"
              :seon.cluster.run/id "binary-run"
-             :seon.cluster.run.form/ordinal 0
+             :seon.cluster.eval/ordinal 0
              :seon.boot/cluster-name "default"
              :seon.flow/work-launcher launcher
              :seon.sci.admit/caps (config/result-caps (config/defaults))

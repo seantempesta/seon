@@ -110,9 +110,9 @@
             planned (cluster.loop/planned-sources source 'my.agents.alice 4096)
             evaluated
             (sci.eval/evaluate
-             {:seon.cluster.run.form/source
-              (:seon.cluster.run.form/source (first planned))
-              :seon.cluster.run.form/ns [:seon.ns/name 'my.agents.alice]
+             {:seon.cluster.eval/source
+              (:seon.cluster.eval/source (first planned))
+              :seon.cluster.eval/ns [:seon.ns/name 'my.agents.alice]
               :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
               :seon.sci.admit/caps
               (config/result-caps (test-support/effective-config))
@@ -141,8 +141,8 @@
             evaluate-form
             (fn [source]
               (sci.eval/evaluate
-               {:seon.cluster.run.form/source source
-                :seon.cluster.run.form/ns [:seon.ns/name 'my.agents.bob]
+               {:seon.cluster.eval/source source
+                :seon.cluster.eval/ns [:seon.ns/name 'my.agents.bob]
                 :seon.cluster.agent/id "bob"
                 :seon.sci.eval/ctx ctx
                 :seon.sci.admit/caps
@@ -357,7 +357,7 @@
                   (cond-> {:my.message/value value
                            :seon.cluster.agent/id sender
                            :seon.cluster.run/id run
-                           :seon.cluster.run.form/ordinal ordinal
+                           :seon.cluster.eval/ordinal ordinal
                            :seon.cluster.message/at now
                            :seon.config.message/max-chain chain}
                     trigger (assoc :seon.cluster.message/trigger trigger)))
@@ -535,7 +535,7 @@
             request (cond-> {:my.message/value value
                              :seon.cluster.agent/id sender
                              :seon.cluster.run/id run-id
-                             :seon.cluster.run.form/ordinal ordinal
+                             :seon.cluster.eval/ordinal ordinal
                              :seon.cluster.message/at now
                              :seon.config.message/max-chain chain-limit}
                       trigger

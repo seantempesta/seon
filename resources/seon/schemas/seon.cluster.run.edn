@@ -10,31 +10,25 @@
                    :background-results [:set :seon.db/ref],
                    :closed-at :inst,
                    :error [:string {:min 1}],
-                   :forms
-                   [:set #:seon.db{:component true} :seon.db/ref],
                    :id [:string {:min 1, :seon.db/identity true}],
                    :generated-form-request
                    [:map
                     [:seon.cluster.run/id :seon.cluster.run/id]
                     [:seon.cluster.run/process :seon.cluster.run/process]
                     [:seon.cluster.eval/at :seon.cluster.eval/at]
-                    [:seon.cluster.run.form/ordinal
-                     :seon.cluster.run.form/ordinal]
-                    [:seon.cluster.run.form/source
-                     :seon.cluster.run.form/source]
+                    [:seon.cluster.eval/ordinal
+                     :seon.cluster.eval/ordinal]
+                    [:seon.cluster.eval/source
+                     :seon.cluster.eval/source]
                     [:seon.cluster.eval/comment
                      {:optional true}
                      :seon.cluster.eval/comment]
                     [:seon.ns/name :seon.ns/name]],
-                   :generation-complete-request
-                   [:map
-                    [:seon.cluster.run/id :seon.cluster.run/id]
-                    [:seon.cluster.run/process :seon.cluster.run/process]],
                    ;; PRESENCE IS THE STATE: a run carries this exactly
                    ;; when a dead process's custody of it was recovered.
-                   ;; The receipt-level twin says which FORM was cut; a
-                   ;; run whose dead process left no receipt row has no
-                   ;; form-level evidence at all, and this is the only
+                   ;; The evaluation-level twin says which ordinal was cut;
+                   ;; a run whose dead process left no evaluation row has no
+                   ;; ordinal-level evidence at all, and this is the only
                    ;; fact separating it from a normal close.
                    :interrupted-at :inst,
                    :live-processes [:set :seon.cluster.run/process],
@@ -52,7 +46,7 @@
                    [:map
                     [:seon.cluster.run/id :seon.cluster.run/id]
                     [:seon.cluster.run/process {:optional true} :seon.cluster.run/process]
-                    [:seon.cluster.run.form/ordinal :seon.cluster.run.form/ordinal]
+                    [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
                     [:seon.sci.eval/evaluation :seon.cluster.loop/evaluation]
                     [:seon.cluster.loop/settlement-evaluation :seon.cluster.loop/evaluation]
                     [:seon.problems/form-problem {:optional true} :seon.problems/form-problem]

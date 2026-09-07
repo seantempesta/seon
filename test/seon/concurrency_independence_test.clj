@@ -143,7 +143,7 @@
               (pr-str (str "complete|" agent-id "|")) ")")]]
     (mapv (fn [source]
             {:seon.ns/name namespace-name
-             :seon.cluster.run.form/source source})
+             :seon.cluster.eval/source source})
           sources)))
 
 (defn- scenario-specs
@@ -424,7 +424,7 @@
   [database specs]
   (doseq [spec specs]
     (let [definition-source
-          (:seon.cluster.run.form/source (nth (::sources spec) 2))
+          (:seon.cluster.eval/source (nth (::sources spec) 2))
           row
           (db/pull database
                    [:seon.fn/sym
@@ -518,7 +518,7 @@
       (is (= expected-message-ids
              (agent-message-ids database (::agent-id spec)))
           "the transcript message input is exactly the incoming/outgoing ring pair")
-      (doseq [source (map :seon.cluster.run.form/source (::sources spec))]
+      (doseq [source (map :seon.cluster.eval/source (::sources spec))]
         (is (str/includes? rendered source)
             "the transcript includes every form belonging to its own run"))
       (is (str/includes? rendered (::payload spec)))

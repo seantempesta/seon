@@ -207,7 +207,7 @@
   {:seon.db/connection connection
    :seon.cluster.agent/id "web-agent"
    :seon.cluster.run/id "web-receipt-run"
-   :seon.cluster.run.form/ordinal 0
+   :seon.cluster.eval/ordinal 0
    :seon.boot/cluster-name "default"
    :seon.sci.admit/caps
    (seon-config/result-caps (seon-config/defaults))

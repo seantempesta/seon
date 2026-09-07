@@ -56,7 +56,7 @@
                 :unrun-request
                 [:map
                  [:seon.sci.admit/value :seon.error/value]
-                 [:seon.cluster.run.form/ns :seon.db/ref]
+                 [:seon.cluster.eval/ns :seon.db/ref]
                  [:seon.eval/duration-ms {:optional true} :int]
                  [:seon.cluster.eval/interrupted-at
                   {:optional true}
@@ -92,11 +92,11 @@
                 :referenced-vars [:set :symbol],
                 :request
                 [:map
-                 [:seon.cluster.run.form/source
-                  :seon.cluster.run.form/source]
-                 [:seon.cluster.run.form/ns
+                 [:seon.cluster.eval/source
+                  :seon.cluster.eval/source]
+                 [:seon.cluster.eval/ns
                   {:optional true}
-                  :seon.cluster.run.form/ns]
+                  :seon.cluster.eval/ns]
                  [:seon.sci.admit/caps :seon.sci.admit/caps]
                  [:seon.sci.eval/time-limit-ms
                   :seon.sci.eval/time-limit-ms]
@@ -114,9 +114,9 @@
                  [:seon.cluster.run/id
                   {:optional true}
                   :seon.cluster.run/id]
-                 [:seon.cluster.run.form/ordinal
+                 [:seon.cluster.eval/ordinal
                   {:optional true}
-                  :seon.cluster.run.form/ordinal]
+                  :seon.cluster.eval/ordinal]
                  [:seon.sci.eval/output-prefix
                   {:optional true}
                   :string]

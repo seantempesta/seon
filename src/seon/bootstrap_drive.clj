@@ -48,7 +48,7 @@
     :seon.bootstrap-drive/objective
     (str
      "Your bootstrap run's ordered forms are rows already committed as facts. "
-     "Query their :seon.cluster.run.form/ordinal and namespace; map the one "
+     "Query their :seon.cluster.eval/ordinal and namespace; map the one "
      "user-namespace form to label \"user\" and the agent-namespace forms to "
      "label \"agent\", with each ordinal as amount. The resulting rows are "
      (pr-str o1-rows) ". Define a permanent contracted function in your "
@@ -146,9 +146,9 @@
         evaluation
         (sci.eval/evaluate
          {:seon.sci.eval/ctx (sci.eval/cluster-ctx db connection)
-          :seon.cluster.run.form/source
+          :seon.cluster.eval/source
           (str "(" function-symbol " " (pr-str argument) ")")
-          :seon.cluster.run.form/ns
+          :seon.cluster.eval/ns
           [:seon.ns/name (agent-namespace db agent-id)]
           :seon.cluster.agent/id agent-id
           :seon.sci.admit/caps caps
@@ -184,7 +184,7 @@
   {:p2a
    (boolean
     (some #(re-find #":seon\.fn(?:\.arity/input-refs|/spec)"
-                    (:seon.cluster.run.form/source %))
+                    (:seon.cluster.eval/source %))
           receipts))
    :p2b (= "discovered-by-contract" completed-result)})
 
@@ -241,7 +241,7 @@
         (some (fn [function-symbol]
                 (some #(when (and
                               (str/includes?
-                               (:seon.cluster.run.form/source %)
+                               (:seon.cluster.eval/source %)
                                function-symbol)
                               (str/blank? (:seon.cluster.eval/error %)))
                          function-symbol)
@@ -268,7 +268,7 @@
                                :seon.error/data
                                :seon.sci.eval/data
                                :seon.schema/error])))
-               (keep #(defined-name (:seon.cluster.run.form/source %))))
+               (keep #(defined-name (:seon.cluster.eval/source %))))
               receipts)
         repaired
         (into #{}

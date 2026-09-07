@@ -104,8 +104,8 @@
                 (config/result-caps (test-support/effective-config))
                 :seon.sci.eval/time-limit-ms 5000
                 :seon.config/on-core-error :panic
-                :seon.cluster.run.form/source source
-                :seon.cluster.run.form/ns [:seon.ns/name namespace-name]}))]
+                :seon.cluster.eval/source source
+                :seon.cluster.eval/ns [:seon.ns/name namespace-name]}))]
         (is (= [1] (mapv :seon.fn.arity/argument-count arities))
             "the argumentless SCI call uses the one declared request-map arity")
         (is (every? :seon.fn.arity/output arities))

@@ -50,7 +50,7 @@
                        :in $ ?run-id
                        :where
                        [?run :seon.cluster.run/id ?run-id]
-                       [?form :seon.cluster.run.form/run ?run]]
+                       [?form :seon.cluster.eval/run ?run]]
                      db run-id)
                 0)]
         (when (= form-count receipt-count)
@@ -149,9 +149,9 @@
                 :in $ [?run-id ...]
                 :where
                 [?run :seon.cluster.run/id ?run-id]
-                [?form :seon.cluster.run.form/run ?run]
-                [?form :seon.cluster.run.form/ordinal ?ordinal]
-                [?form :seon.cluster.run.form/source ?source]
+                [?form :seon.cluster.eval/run ?run]
+                [?form :seon.cluster.eval/ordinal ?ordinal]
+                [?form :seon.cluster.eval/source ?source]
                 [?receipt :seon.cluster.eval/run ?run]
                 [?receipt :seon.cluster.eval/ordinal ?ordinal]
                 [?receipt :seon.cluster.eval/at ?at]
@@ -164,7 +164,7 @@
          (mapv (fn [[run-id ordinal source result error error-kind at]]
                  {:seon.cluster.run/id run-id
                   :seon.cluster.eval/ordinal ordinal
-                  :seon.cluster.run.form/source source
+                  :seon.cluster.eval/source source
                   :seon.cluster.eval/result-edn result
                   :seon.eval.drive/value (read-result result)
                   :seon.cluster.eval/error error

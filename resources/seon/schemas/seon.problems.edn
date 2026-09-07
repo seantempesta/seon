@@ -18,8 +18,8 @@
                  [:seon.cluster.run/id :seon.cluster.run/id]
                  [:seon.cluster.eval/ordinal
                   :seon.cluster.eval/ordinal]
-                 [:seon.cluster.run.form/source
-                  :seon.cluster.run.form/source]
+                 [:seon.cluster.eval/source
+                  :seon.cluster.eval/source]
                  [:seon.error/kind :seon.error/kind]
                  [:seon.cluster.eval/error :seon.cluster.eval/error]],
                 :failed-run
@@ -32,10 +32,10 @@
                  [:seon.problems/id :seon.problems/id]
                  [:seon.cluster.eval/id :seon.cluster.eval/id]
                  [:seon.cluster.run/id :seon.cluster.run/id]
-                 [:seon.cluster.run.form/ordinal
-                  :seon.cluster.run.form/ordinal]
-                 [:seon.cluster.run.form/source
-                  :seon.cluster.run.form/source]
+                 [:seon.cluster.eval/ordinal
+                  :seon.cluster.eval/ordinal]
+                 [:seon.cluster.eval/source
+                  :seon.cluster.eval/source]
                  [:seon.cluster.agent/id :seon.cluster.agent/id]
                  [:seon.problems/author :seon.cluster.agent/id]
                  [:seon.error/kind :seon.error/kind]
@@ -43,8 +43,8 @@
                 :form-problem-request
                 [:map
                  [:seon.cluster.run/id :seon.cluster.run/id]
-                 [:seon.cluster.run.form/ordinal
-                  :seon.cluster.run.form/ordinal]
+                 [:seon.cluster.eval/ordinal
+                  :seon.cluster.eval/ordinal]
                  [:seon.sci.eval/evaluation
                   :seon.sci.eval/evaluation]],
                 :id [:string {:min 1, :seon.db/identity true}],

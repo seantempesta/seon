@@ -1287,7 +1287,7 @@
                              :in $ ?run-id
                              :where
                              [?run :seon.cluster.run/id ?run-id]
-                             [?form :seon.cluster.run.form/run ?run]]
+                             [?form :seon.cluster.eval/run ?run]]
                            database run-id)
                      (db/q '[:find (count ?receipt) .
                              :in $ ?run-id
@@ -1598,8 +1598,8 @@
                          :in $ ?run-id
                          :where
                          [?run :seon.cluster.run/id ?run-id]
-                         [?form :seon.cluster.run.form/run ?run]
-                         [?form :seon.cluster.run.form/ordinal ?ordinal]]
+                         [?form :seon.cluster.eval/run ?run]
+                         [?form :seon.cluster.eval/ordinal ?ordinal]]
                        :args [database run-id]
                        :order-by '[?ordinal :asc]})
                 error-kinds
@@ -1676,10 +1676,10 @@
                       :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))}
                      {:seon.cluster.agent/id "alice"
                       :seon.cluster.agent/run [:seon.cluster.run/id "run-crashed"]}
-                     {:seon.cluster.run.form/id "f-0"
-                      :seon.cluster.run.form/run [:seon.cluster.run/id "run-crashed"]
-                      :seon.cluster.run.form/ordinal 0
-                      :seon.cluster.run.form/source "(+ 1 1)"}
+                     {:seon.cluster.eval/id "f-0"
+                      :seon.cluster.eval/run [:seon.cluster.run/id "run-crashed"]
+                      :seon.cluster.eval/ordinal 0
+                      :seon.cluster.eval/source "(+ 1 1)"}
                      ;; dangling = started with no terminal fact —
                      ;; running IS that absence, there is no status
                      {:seon.cluster.eval/id "e-0"

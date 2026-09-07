@@ -209,7 +209,7 @@
                database run-id))]
     {:seon.gen.loop/run-id run-id
      :seon.gen.loop/form-count
-     (count-run-members :seon.cluster.run.form/run)
+     (count-run-members :seon.cluster.eval/run)
      :seon.gen.loop/receipt-count
      (count-run-members :seon.cluster.eval/run)
      :seon.gen.loop/terminal-receipt-count terminal-receipt-count}))
@@ -356,9 +356,9 @@
                :in $ ?run-id
                :where
                [?run :seon.cluster.run/id ?run-id]
-               [?form :seon.cluster.run.form/run ?run]
-               [?form :seon.cluster.run.form/ordinal ?ordinal]
-               [?form :seon.cluster.run.form/ns ?namespace]
+               [?form :seon.cluster.eval/run ?run]
+               [?form :seon.cluster.eval/ordinal ?ordinal]
+               [?form :seon.cluster.eval/ns ?namespace]
                [?namespace :seon.ns/name ?namespace-name]]
              db run-id)))
 
@@ -380,7 +380,7 @@
   "The derived state of every form of the planner's plan, by ordinal."
   [db run-id]
   (into {}
-        (map (juxt :seon.cluster.run.form/ordinal
+        (map (juxt :seon.cluster.eval/ordinal
                    :seon.cluster.work/form-state))
         (:seon.cluster.work/forms (work/plan-settlement db run-id))))
 
@@ -432,8 +432,8 @@
                :where
                [?run :seon.cluster.run/id ?run-id]
                (or-join [?run ?value]
-                        (and [?form :seon.cluster.run.form/run ?run]
-                             [?form :seon.cluster.run.form/id ?value])
+                        (and [?form :seon.cluster.eval/run ?run]
+                             [?form :seon.cluster.eval/id ?value])
                         (and [?receipt :seon.cluster.eval/run ?run]
                              [?receipt :seon.cluster.eval/id ?value]))]
              db run-id)]
@@ -486,7 +486,7 @@
                                   :in $ ?run-id
                                   :where
                                   [?run :seon.cluster.run/id ?run-id]
-                                  [?f :seon.cluster.run.form/run ?run]]
+                                  [?f :seon.cluster.eval/run ?run]]
                                 db run-id)))
                "seven forms froze and every form has evaluation truth"))
 

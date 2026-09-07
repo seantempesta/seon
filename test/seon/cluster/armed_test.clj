@@ -209,7 +209,7 @@
               request
               (fn [handle agent-id source]
                 (sci.eval/evaluate
-                 {:seon.cluster.run.form/source source
+                 {:seon.cluster.eval/source source
                   :seon.sci.admit/caps (:seon.sci.admit/caps handle)
                   :seon.sci.eval/time-limit-ms
                   (:seon.config.eval/time-limit-ms handle)

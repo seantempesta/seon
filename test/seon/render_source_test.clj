@@ -257,7 +257,7 @@
            evaluate (fn [source]
                       (:seon.sci.admit/value
                        (eval/evaluate
-                        {:seon.cluster.run.form/source source
+                        {:seon.cluster.eval/source source
                          :seon.sci.eval/ctx ctx
                          :seon.sci.admit/caps caps
                          :seon.sci.eval/time-limit-ms 2000
@@ -336,11 +336,7 @@
           :seon.cluster.eval/at #inst "2026-09-06T20:00:00Z"
           :seon.cluster.eval/source source
           :seon.cluster.eval/ns [:seon.ns/name 'my.agents.source-contract]
-          :seon.cluster.eval/result-edn result}
-         {:seon.cluster.run.form/id (str run-id "/form/0")
-          :seon.cluster.run.form/run [:seon.cluster.run/id run-id]
-          :seon.cluster.run.form/ordinal 0
-          :seon.cluster.run.form/source source}]))
+          :seon.cluster.eval/result-edn result}]))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            source-call (ns-resolve 'seon.render.web 'render-source-call)

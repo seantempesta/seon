@@ -60,6 +60,9 @@
                      [:seon.cluster.eval/author
                       {:optional true}
                       :seon.cluster.eval/author]
+                     [:seon.cluster.eval/refreshes
+                      {:optional true}
+                      :seon.cluster.eval/refreshes]
                      [:seon.eval/duration-ms
                       {:optional true}
                       :seon.eval/duration-ms]
@@ -128,6 +131,8 @@
                     :result-blob :seon.blob/digest,
                     :result-edn [:string #:seon.db{:no-history? true}],
                     :result-size [:int {:min 0}],
+                    :refreshes
+                    [:and {:seon.db/unique true} :seon.db/ref],
                     :run :seon.db/ref,
                     :settle-request
                     [:map

@@ -325,7 +325,7 @@
                        :seon.cluster.message/delivery-request]
                   :seon.cluster.message/delivery]}
   [db {:keys [:my.message/value :seon.cluster.agent/id
-              :seon.cluster.run/id :seon.cluster.run.form/ordinal
+              :seon.cluster.run/id :seon.cluster.eval/ordinal
               :seon.cluster.message/at :seon.cluster.message/trigger
               :seon.config.message/max-chain]
        :as request}]

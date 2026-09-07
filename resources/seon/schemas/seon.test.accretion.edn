@@ -196,8 +196,8 @@
                          [:seon.db/db :seon.db/database-value]
                          [:seon.db/connection :seon.db/connection]
                          [:seon.cluster.agent/id :seon.cluster.agent/id]
-                         [:seon.cluster.run.form/source
-                          :seon.cluster.run.form/source]
+                         [:seon.cluster.eval/source
+                          :seon.cluster.eval/source]
                          [:seon.test.accretion/gate-set
                           :seon.test.accretion/gate-set]
                          [:seon.program/row {:optional true}

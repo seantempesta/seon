@@ -297,7 +297,7 @@
                 context
                 {:seon.db/connection connection
                  :seon.cluster.run/id "shell-time-limit"
-                 :seon.cluster.run.form/ordinal 0
+                 :seon.cluster.eval/ordinal 0
                  :seon.boot/cluster-name "default"
                  :seon.sci.admit/caps (config/result-caps effective-map)
                  :seon.config/on-core-error :record

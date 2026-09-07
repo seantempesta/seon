@@ -606,11 +606,11 @@
                                  "<script>raw-agent-bytes</script>"))))
        (let [evaluation
              (eval/evaluate
-              {:seon.cluster.run.form/source
+              {:seon.cluster.eval/source
                (str "(defn live-html "
                     "{:malli/schema [:=> [:cat :map] :seon.render/hiccup]} "
                     "[_value] [:article {:class \"live-html\"} \"live\"])")
-               :seon.cluster.run.form/ns [:seon.ns/name fixture-a]
+               :seon.cluster.eval/ns [:seon.ns/name fixture-a]
                :seon.sci.eval/ctx ctx
                :seon.sci.admit/caps caps
                :seon.sci.eval/time-limit-ms 2000

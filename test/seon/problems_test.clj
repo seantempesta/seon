@@ -113,18 +113,14 @@
                 :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
                :seon.cluster.run/opened-at now
                 :seon.cluster.run/closed-at now}
-               {:seon.cluster.run.form/id "run-with-receipt:0"
-                :seon.cluster.run.form/run
-                [:seon.cluster.run/id "run-with-receipt"]
-                :seon.cluster.run.form/ordinal 0
-                :seon.cluster.run.form/source "(widgets)"}
                {:seon.cluster.eval/id "receipt-1"
                 :seon.cluster.eval/run [:seon.cluster.run/id "run-with-receipt"]
                 :seon.cluster.eval/ordinal 0
                 :seon.cluster.eval/at now
                 ;; the error's presence IS the errored state
                 :seon.error/kind :seon.sci.eval/evaluation-failed
-                :seon.cluster.eval/error "Unable to resolve symbol: widgets"}]))
+                :seon.cluster.eval/error "Unable to resolve symbol: widgets"
+                :seon.cluster.eval/source "(widgets)"}]))
 
 (defn- commit-missing-model!
   [connection]
@@ -422,7 +418,7 @@
         (is (= "run-with-receipt" (:seon.cluster.run/id entry)))
         (is (= 0 (:seon.cluster.eval/ordinal entry)))
         (is (str/includes? (:seon.cluster.eval/error entry) "widgets"))
-        (is (= "(widgets)" (:seon.cluster.run.form/source entry)))
+        (is (= "(widgets)" (:seon.cluster.eval/source entry)))
         (is (= :seon.sci.eval/evaluation-failed (:seon.error/kind entry)))
         (is (str/includes?
              (problems/ai-prose value)

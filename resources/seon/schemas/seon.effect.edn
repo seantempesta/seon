@@ -61,8 +61,8 @@
                [:seon.db/connection
                 :seon.db/connection]
                [:seon.cluster.run/id :seon.cluster.run/id]
-               [:seon.cluster.run.form/ordinal
-                :seon.cluster.run.form/ordinal]
+               [:seon.cluster.eval/ordinal
+                :seon.cluster.eval/ordinal]
                [:seon.boot/cluster-name :seon.boot/cluster-name]
                [:seon.sci.admit/caps :seon.sci.admit/caps]
                [:seon.config/on-core-error

@@ -20,11 +20,11 @@
           :seon.cluster.run/agent
           [:seon.cluster.agent/id "projection-proof"]
           :seon.cluster.run/opened-at (java.util.Date.)}
-         {:seon.cluster.run.form/id "projection-proof-form"
-          :seon.cluster.run.form/run
+         {:seon.cluster.eval/id "projection-proof-form"
+          :seon.cluster.eval/run
           [:seon.cluster.run/id "projection-proof-run"]
-          :seon.cluster.run.form/ordinal 0
-          :seon.cluster.run.form/source "42"}
+          :seon.cluster.eval/ordinal 0
+          :seon.cluster.eval/source "42"}
          ;; `result-size` is intentionally absent. Receipt rendering derives
          ;; from the declared content and must not require that numeric fact.
          {:seon.cluster.eval/id "projection-proof-receipt"

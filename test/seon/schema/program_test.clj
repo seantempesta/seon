@@ -80,7 +80,7 @@
   (let [run-id "proof:sample"
         receipt {:seon.cluster.run/id run-id
                  :seon.cluster.eval/ordinal 0
-                 :seon.cluster.run.form/source "(+ 1 1)"
+                 :seon.cluster.eval/source "(+ 1 1)"
                  :seon.cluster.eval/result-edn "2"
                  :seon.eval.drive/value 2
                  :seon.cluster.eval/error ""

@@ -138,7 +138,7 @@
   {:malli/schema [:=> [:cat :seon.cluster.run/evaluation-facts-request]
                   :seon.cluster.eval/settle-request]}
   [{:keys [:seon.cluster.run/id :seon.cluster.run/process
-           :seon.cluster.run.form/ordinal :seon.sci.eval/evaluation
+           :seon.cluster.eval/ordinal :seon.sci.eval/evaluation
            :seon.problems/form-problem :seon.def/rows :my.run/value]
     settlement-evaluation :seon.cluster.loop/settlement-evaluation}]
   (let [error (or (:seon.cluster.eval/error evaluation)
@@ -340,18 +340,15 @@
 
 (defn interrupted-warning
   "Derive the ONE interrupted warning for a run, or nil when clean.
-  Non-nil exactly when a receipt carrying
+  Non-nil exactly when an evaluation carrying
   `:seon.cluster.eval/interrupted-at` exists among the supplied
-  receipts:
+  evaluations:
   {:seon.cluster.eval/ordinal first-interrupted-ordinal
-   :seon.cluster.run/missing-results count-of-forms-at-or-after-it}.
-  The caller supplies one run's forms and receipts and knows which run
-  they belong to. This is the whole resume presentation — never
-  per-eval markers."
+   :seon.cluster.run/missing-results count-at-or-after-it}.
+  The caller supplies one run's evaluations and knows which run they
+  belong to. This is the whole resume presentation — never per-eval
+  markers."
   {:malli/schema [:=> [:cat
-                       [:sequential
-                        [:map [:seon.cluster.run.form/ordinal
-                               :seon.cluster.run.form/ordinal]]]
                        [:sequential
                         [:map
                          [:seon.cluster.eval/ordinal
@@ -363,9 +360,9 @@
                            [:seon.cluster.eval/ordinal
                             :seon.cluster.eval/ordinal]
                            [::missing-results ::missing-results]]]]}
-  [forms receipts]
+  [evaluations]
   (when-let [ordinal
-             (->> receipts
+             (->> evaluations
                   (filter :seon.cluster.eval/interrupted-at)
                   (map :seon.cluster.eval/ordinal)
                   sort
@@ -373,8 +370,8 @@
     {:seon.cluster.eval/ordinal ordinal
      ::missing-results
      (count
-      (filter #(>= (:seon.cluster.run.form/ordinal %) ordinal)
-              forms))}))
+      (filter #(>= (:seon.cluster.eval/ordinal %) ordinal)
+              evaluations))}))
 
 (defn opening-db
   "The database value this run opened on.
@@ -495,7 +492,7 @@
 ;; behavior immediately — the flow-dynamics live-update pattern.
 (declare claim-call release-call close-call plan-call refresh-call
          open-call receipt-start-call receipt-settle-call
-         recover-call clear-defs-call generation-complete-call)
+         recover-call clear-defs-call)
 
 (defn- unanswered-background-results
   [db agent-eid]
@@ -682,7 +679,7 @@
 (defn- plan-tx-for-author
   [author request]
   [[:db.fn/call #'plan-call
-    (assoc request :seon.cluster.run.form/author author)]])
+    (assoc request :seon.cluster.eval/author author)]])
 
 (defn plan-tx
   "Transaction data freezing one agent-authored form plan on the held run."
@@ -694,6 +691,8 @@
                              [::reply-blob {:optional true} ::reply-blob]
                              [::reply-size {:optional true} ::reply-size]
                              [::starting-ns {:optional true} ::starting-ns]
+                             [:seon.cluster.eval/at {:optional true}
+                              :seon.cluster.eval/at]
                              [::sources :seon.cluster.reply/sources]]]
                   [:vector :some]]}
   [request]
@@ -705,43 +704,28 @@
   (plan-tx-for-author :system request))
 
 ;;; ---------------------------------------------------------------------------
-;;; The two identities a (run, ordinal) pair mints
+;;; The one identity a (run, ordinal) pair mints
 ;;; ---------------------------------------------------------------------------
 
-;;; ONE (run, ordinal) PAIR NAMES TWO ENTITIES — the frozen form and its
-;;; receipt — AND BOTH IDENTITY ATTRIBUTES ARE `:db.unique/identity`. An
-;;; agent holds only the ordinary string, so
+;;; ONE (run, ordinal) PAIR NAMES ONE ENTITY. It used to name two — the
+;;; frozen form and its receipt — with two `:db.unique/identity`
+;;; attributes, and an agent holds only the ordinary string, so
 ;;; `seon.cluster.message/resolve-about` resolves it against EVERY
 ;;; installed identity attribute and makes a tie a refusal rather than a
-;;; guess. Minting the same string for both families therefore made
+;;; guess. Minting a string for both families therefore made
 ;;; `my.message/decline` (and any `my.message/send` naming a problem)
 ;;; refuse `:seon.cluster.message/ambiguous-about` for every problem that
-;;; ever existed — the form freeze always commits the twin.
-;;;
-;;; The receipt's bare pair is the AGENT-FACING name: it is what
-;;; `seon.cluster.work/problem-id` returns and what the assignment
-;;; message asks an owner to repair. The form entity is internal, so the
-;;; form is the one that qualifies its string with its own attribute.
-;;; The law both derivations keep: a derived identity string names at
-;;; most one entity across all identity attributes.
+;;; ever existed. The families are merged; the ambiguity class is
+;;; unwritable, not qualified away.
 
 (defn receipt-identity
-  "The `:seon.cluster.eval/id` of the attempt at one run's ordinal.
+  "The `:seon.cluster.eval/id` of one run's ordinal.
   Agent-facing: this is the problem identity an owner is asked to repair,
   and the one `seon.cluster.work/problem-id` returns."
   {:malli/schema [:=> [:cat ::id :seon.cluster.eval/ordinal]
                   :seon.cluster.eval/id]}
   [run-id ordinal]
   (pr-str [run-id ordinal]))
-
-(defn form-identity
-  "The `:seon.cluster.run.form/id` of one run's frozen ordinal.
-  Qualified by its own attribute so it can never collide with the
-  receipt identity the same pair mints."
-  {:malli/schema [:=> [:cat ::id :seon.cluster.run.form/ordinal]
-                  :seon.cluster.run.form/id]}
-  [run-id ordinal]
-  (pr-str [:seon.cluster.run.form/id run-id ordinal]))
 
 (defn plan-digest
   "The SHA-256 identity of one ordered source plan."
@@ -758,9 +742,23 @@
     namespace-ref (:seon.ns/name
                    (db/pull db [:seon.ns/name] namespace-ref))))
 
+(declare receipt-row current-receipt)
+
+(defn- current-transaction-instant
+  "The transaction instant already allocated before a transaction call runs."
+  [db]
+  (:db/txInstant (db/pull db [:db/txInstant] (inc (db/basis-t db)))))
+
+
 (defn- source-rows
-  "The shared namespace, ordered form, and run component assertions."
-  [id run-eid first-ordinal starting-namespace author sources]
+  "The shared namespace rows and the ordered evaluation entities of one plan.
+
+  ONE ENTITY PER (run, ordinal): the frozen source, its author, its
+  namespace and its comment are asserted here with NO terminal fact, and
+  settlement accretes the terminal facts onto the same entity. The
+  identity fence is the one `receipt-start-call` keeps — an ordinal that
+  ever had an evaluation refuses forever, so nothing re-executes."
+  [db id run-eid first-ordinal starting-namespace author at sources]
   (let [namespaces (into []
                            (comp (map #(or (:seon.ns/name %)
                                           starting-namespace))
@@ -771,28 +769,33 @@
                                                      namespace-name)
                                          :seon.ns/name namespace-name})))
                            (cons {:seon.ns/name starting-namespace} sources))
-          forms (into []
-                      (map-indexed
-                       (fn [reply-ordinal form]
-                         (let [ordinal (long (+ first-ordinal
-                                                reply-ordinal))
-                               form-id (form-identity id ordinal)
-                               namespace-name (or (:seon.ns/name form)
-                                                  starting-namespace)]
-                           (cond-> {:db/id form-id
-                                    :seon.cluster.run.form/id form-id
-                                    :seon.cluster.run.form/run run-eid
-                                    :seon.cluster.run.form/ordinal ordinal
-                                    :seon.cluster.run.form/author author
-                                    :seon.cluster.run.form/source
-                                    (:seon.cluster.run.form/source form)}
-                             namespace-name
-                             (assoc :seon.cluster.run.form/ns
-                                    (str "namespace:" namespace-name))))))
-                      sources)]
-    (into namespaces cat
-          [forms (map (fn [form] [:db/add run-eid ::forms (:db/id form)])
-                      forms)])))
+          evaluations
+          (into []
+                (map-indexed
+                 (fn [reply-ordinal form]
+                   (let [ordinal (long (+ first-ordinal reply-ordinal))
+                         namespace-name (or (:seon.ns/name form)
+                                            starting-namespace)]
+                     (when (some? (current-receipt db id ordinal))
+                       (refuse! `plan-call ::receipt-exists
+                                {::id id
+                                 :seon.cluster.eval/ordinal ordinal}))
+                     (receipt-row
+                      run-eid
+                      (cond-> {::id id
+                               :seon.cluster.eval/ordinal ordinal
+                               :seon.cluster.eval/at at
+                               :seon.cluster.eval/author author
+                               :seon.cluster.eval/source
+                               (:seon.cluster.eval/source form)}
+                        namespace-name
+                        (assoc :seon.cluster.eval/ns
+                               (str "namespace:" namespace-name))
+                        (:seon.cluster.eval/comment form)
+                        (assoc :seon.cluster.eval/comment
+                               (:seon.cluster.eval/comment form)))))))
+                sources)]
+    (into namespaces evaluations)))
 
 (defn plan-call
   "Freeze the plan, inside the transaction.
@@ -810,13 +813,19 @@
                         [::reply-blob {:optional true} ::reply-blob]
                         [::reply-size {:optional true} ::reply-size]
                         [::starting-ns {:optional true} ::starting-ns]
-                        [:seon.cluster.run.form/author
-                         :seon.cluster.run.form/author]
+                        [:seon.cluster.eval/author
+                         :seon.cluster.eval/author]
+                        [:seon.cluster.eval/at {:optional true}
+                         :seon.cluster.eval/at]
                         [::sources :seon.cluster.reply/sources]]]
                   [:vector :some]]}
   [db request]
   (let [{::keys [id plan-digest reply reply-blob reply-size sources starting-ns]
-         author :seon.cluster.run.form/author} request
+         author :seon.cluster.eval/author} request
+        ;; DERIVE AT THE AUTHORITY: the freeze instant is the instant this
+        ;; transaction is committing at, which only the transaction knows.
+        at (or (:seon.cluster.eval/at request)
+               (current-transaction-instant db))
         run (held-run db `plan-call request)
         run-eid (:db/id run)
         agent-namespace
@@ -834,7 +843,7 @@
          (or (db/q '[:find (count ?form) .
                     :in $ ?run
                     :where
-                    [?form :seon.cluster.run.form/run ?run]]
+                    [?form :seon.cluster.eval/run ?run]]
                   db run-eid)
              0))]
     (when (some? (::plan-digest run))
@@ -853,8 +862,8 @@
             reply (conj [:db/add run-eid ::reply reply])
             reply-blob (conj [:db/add run-eid ::reply-blob reply-blob])
             reply-size (conj [:db/add run-eid ::reply-size reply-size]))
-          (source-rows id run-eid existing-form-count starting-namespace
-                       author sources))))
+          (source-rows db id run-eid existing-form-count starting-namespace
+                       author at sources))))
 
 (defn open-tx
   "Transaction data opening one run for an agent."
@@ -892,8 +901,7 @@
          starting-ns ::starting-ns
          plan-digest ::plan-digest
          sources ::sources
-         trigger ::trigger} request
-        starting-namespace (resolve-namespace-name database starting-ns)]
+         trigger ::trigger} request]
     (into []
           (concat
            (open-tx
@@ -912,23 +920,8 @@
                     ::process process
                     ::starting-ns starting-ns
                     ::plan-digest plan-digest
-                    ::sources sources}))
-           (mapcat
-            (fn [ordinal source]
-              (receipt-start-tx
-               (cond-> {::id run-id
-                        :seon.cluster.eval/ordinal (long ordinal)
-                        :seon.cluster.eval/at opened-at
-                        :seon.cluster.eval/author :system
-                        :seon.cluster.eval/source
-                        (:seon.cluster.run.form/source source)
-                        :seon.cluster.eval/ns
-                        [:seon.ns/name
-                         (or (:seon.ns/name source) starting-namespace)]}
-                 (:seon.cluster.eval/comment source)
-                 (assoc :seon.cluster.eval/comment
-                        (:seon.cluster.eval/comment source)))))
-            (range) sources)))))
+                    :seon.cluster.eval/at opened-at
+                    ::sources sources}))))))
 
 (defn append-generated-call
   "Append exactly one system-authored form to a held generated run.
@@ -944,22 +937,18 @@
   [db request]
   (let [{::keys [id]
          receipt-at :seon.cluster.eval/at
-         ordinal :seon.cluster.run.form/ordinal
-         source :seon.cluster.run.form/source
+         ordinal :seon.cluster.eval/ordinal
+         source :seon.cluster.eval/source
          comment :seon.cluster.eval/comment
          namespace-name :seon.ns/name} request
         held (held-run db `append-generated-call request)
         run-eid (:db/id held)
-        forms (db/q '[:find ?ordinal ?source ?namespace-name
-                     :in $ ?run
-                     :where
-                     [?form :seon.cluster.run.form/run ?run]
-                     [?form :seon.cluster.run.form/ordinal ?ordinal]
-                     [?form :seon.cluster.run.form/source ?source]
-                     [?form :seon.cluster.run.form/ns ?namespace]
-                     [?namespace :seon.ns/name ?namespace-name]]
-                   db run-eid)
-        expected (long (count forms))
+        expected
+        (long (or (db/q '[:find (count ?form) .
+                          :in $ ?run
+                          :where [?form :seon.cluster.eval/run ?run]]
+                        db run-eid)
+                  0))
         prior-terminal?
         (or (zero? ordinal)
             (some?
@@ -980,27 +969,17 @@
       (refuse! `append-generated-call ::generated-ordinal request))
     (when-not prior-terminal?
       (refuse! `append-generated-call ::generated-prefix-unsettled request))
-    (let [form-id (form-identity id ordinal)
-          namespace-id (str "namespace:" namespace-name)]
-      (into
-       [{:db/id namespace-id :seon.ns/name namespace-name}
-        {:db/id form-id
-         :seon.cluster.run.form/id form-id
-         :seon.cluster.run.form/run run-eid
-         :seon.cluster.run.form/ordinal ordinal
-         :seon.cluster.run.form/author :system
-         :seon.cluster.run.form/source source
-         :seon.cluster.run.form/ns namespace-id}
-        [:db/add run-eid ::forms form-id]]
-       (receipt-start-call
-        db
-        (cond-> {::id id
-                  :seon.cluster.eval/ordinal ordinal
-                  :seon.cluster.eval/at receipt-at
-                  :seon.cluster.eval/author :system
-                  :seon.cluster.eval/source source
-                  :seon.cluster.eval/ns [:seon.ns/name namespace-name]}
-           comment (assoc :seon.cluster.eval/comment comment)))))))
+    (into
+     [{:db/id (str "namespace:" namespace-name) :seon.ns/name namespace-name}]
+     (receipt-start-call
+      db
+      (cond-> {::id id
+               :seon.cluster.eval/ordinal ordinal
+               :seon.cluster.eval/at receipt-at
+               :seon.cluster.eval/author :system
+               :seon.cluster.eval/source source
+               :seon.cluster.eval/ns [:seon.ns/name namespace-name]}
+        comment (assoc :seon.cluster.eval/comment comment))))))
 
 (defn append-generated-tx
   "Transaction data appending one dependency-ready generated form."
@@ -1008,54 +987,6 @@
                   :seon.store/transaction-data]}
   [request]
   [[:db.fn/call #'append-generated-call request]])
-
-(defn generation-complete-call
-  "Advance a held generated run to its model-call situation.
-
-  The generated prefix must be non-empty and terminal through its final
-  ordinal. The dedicated transition has no caller-supplied from/to values, so
-  no other situation edge can be requested or accidentally constructed."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.run/generation-complete-request]
-                  [:vector :some]]}
-  [db request]
-  (let [run (held-run db `generation-complete-call request)
-        run-eid (:db/id run)
-        form-count
-        (long
-         (or (db/q '[:find (count ?form) .
-                    :in $ ?run
-                    :where
-                    [?form :seon.cluster.run.form/run ?run]]
-                  db run-eid)
-             0))
-        final-ordinal (dec form-count)
-        final-terminal?
-        (and (pos? form-count)
-             (some?
-              (db/q '[:find ?receipt .
-                     :in $ ?run ?ordinal
-                     :where
-                     [?receipt :seon.cluster.eval/run ?run]
-                     [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                     (or [?receipt :seon.cluster.eval/result-edn _]
-                         [?receipt :seon.cluster.eval/error _]
-                         [?receipt :seon.cluster.eval/interrupted-at _])]
-                   db run-eid final-ordinal)))]
-    (when-not (= :generate (:seon.cluster.work/situation run))
-      (refuse! `generation-complete-call ::not-generate-situation request))
-    (when-not final-terminal?
-      (refuse! `generation-complete-call ::generated-prefix-unsettled request))
-    [[:db/retract run-eid :seon.cluster.work/situation :generate]
-     [:db/add run-eid :seon.cluster.work/situation :call]]))
-
-(defn generation-complete-tx
-  "Transaction data advancing a generated run to its model call."
-  {:malli/schema
-   [:=> [:cat :seon.cluster.run/generation-complete-request]
-    :seon.store/transaction-data]}
-  [request]
-  [[:db.fn/call #'generation-complete-call request]])
 
 (defn generated-run-tx
   "Open and claim one zero-form generated system run."
@@ -1091,14 +1022,9 @@
 (defn refresh-tx
   "Transaction data refreshing one prior system-authored form."
   {:malli/schema
-   [:=> [:cat :seon.cluster.run.form/id] [:vector :some]]}
+   [:=> [:cat :seon.cluster.eval/id] [:vector :some]]}
   [prior-form-id]
   [[:db.fn/call #'refresh-call prior-form-id]])
-
-(defn- current-transaction-instant
-  "The transaction instant already allocated before a transaction call runs."
-  [db]
-  (:db/txInstant (db/pull db [:db/txInstant] (inc (db/basis-t db)))))
 
 (defn- refresh-run-id
   [db prior-form-id]
@@ -1108,49 +1034,45 @@
                     StandardCharsets/UTF_8)])))
 
 (defn refresh-call
-  "Append one ordinary system run from a prior refreshable form."
+  "Append one ordinary system run from a prior refreshable evaluation."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.cluster.run.form/id]
+   [:=> [:cat :seon.db/database-value :seon.cluster.eval/id]
     [:vector :some]]}
   [db prior-form-id]
-  (let [request {:seon.cluster.run.form/id prior-form-id}
+  (let [request {:seon.cluster.eval/id prior-form-id}
+        ;; ONE ENTITY: the frozen source and its terminal facts are the same
+        ;; evaluation, so this reads it once instead of joining a twin.
         prior
         (db/pull db
-                 '[* {:seon.cluster.run.form/run
+                 '[* {:seon.cluster.eval/run
                       [:db/id :seon.cluster.run/id
                        {:seon.cluster.run/agent
                         [:db/id :seon.cluster.agent/id]}]}
-                   {:seon.cluster.run.form/ns [:db/id :seon.ns/name]}]
-                 [:seon.cluster.run.form/id prior-form-id])]
+                   {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
+                   {:seon.cluster.eval/read-evidence [*]}]
+                 [:seon.cluster.eval/id prior-form-id])]
     (when-not (:db/id prior)
       (refuse! `refresh-call ::no-such-form request))
-    (when-not (= :system (:seon.cluster.run.form/author prior))
+    (when-not (= :system (:seon.cluster.eval/author prior))
       (refuse! `refresh-call ::refresh-agent-authored request))
-    (let [prior-run (:seon.cluster.run.form/run prior)
-          prior-run-id (::id prior-run)
-          ordinal (:seon.cluster.run.form/ordinal prior)
-          receipt
-          (db/pull db
-                   '[* {:seon.cluster.eval/read-evidence [*]}]
-                   [:seon.cluster.eval/id
-                    (receipt-identity prior-run-id ordinal)])
+    (let [prior-run (:seon.cluster.eval/run prior)
           successor
           (db/q '[:find ?successor .
                   :in $ ?prior
                   :where
-                  [?successor :seon.cluster.run.form/refreshes ?prior]]
+                  [?successor :seon.cluster.eval/refreshes ?prior]]
                 db (:db/id prior))]
-      (when-not (and receipt (terminal? receipt))
+      (when-not (terminal? prior)
         (refuse! `refresh-call ::refresh-receipt-not-terminal request))
-      (when-not (seq (:seon.cluster.eval/read-evidence receipt))
+      (when-not (seq (:seon.cluster.eval/read-evidence prior))
         (refuse! `refresh-call ::refresh-read-evidence-missing request))
       (when successor
         (refuse! `refresh-call ::refresh-successor-exists request))
       (let [run-id (refresh-run-id db prior-form-id)
             run-tempid (str "seon.cluster.run/" run-id)
-            form-id (form-identity run-id 0)
-            namespace (:seon.cluster.run.form/ns prior)
-            source (:seon.cluster.run.form/source prior)
+            evaluation-id (receipt-identity run-id 0)
+            namespace (:seon.cluster.eval/ns prior)
+            source (:seon.cluster.eval/source prior)
             opened-at (current-transaction-instant db)
             plan-digest
             (schema/sha-256
@@ -1162,19 +1084,19 @@
                         ::agent (:db/id (::agent prior-run))
                         ::opening-commit-id (db/commit-id db)
                         ::opened-at opened-at})
-            form {:db/id form-id
-                  :seon.cluster.run.form/id form-id
-                  :seon.cluster.run.form/run run-tempid
-                  :seon.cluster.run.form/ordinal 0
-                  :seon.cluster.run.form/author :system
-                  :seon.cluster.run.form/source source
-                  :seon.cluster.run.form/ns (:db/id namespace)
-                  :seon.cluster.run.form/refreshes (:db/id prior)}]
+            evaluation {:db/id evaluation-id
+                        :seon.cluster.eval/id evaluation-id
+                        :seon.cluster.eval/run run-tempid
+                        :seon.cluster.eval/ordinal 0
+                        :seon.cluster.eval/at opened-at
+                        :seon.cluster.eval/author :system
+                        :seon.cluster.eval/source source
+                        :seon.cluster.eval/ns (:db/id namespace)
+                        :seon.cluster.eval/refreshes (:db/id prior)}]
         (into open-rows
               [[:db/add run-tempid ::plan-digest plan-digest]
                [:db/add run-tempid ::starting-ns (:db/id namespace)]
-               form
-               [:db/add run-tempid ::forms form-id]])))))
+               evaluation])))))
 
 (defn- current-receipt
   "The receipt identified by run and ordinal, or nil.
@@ -1265,21 +1187,13 @@
 
 (defn- settlement-form
   [database request]
-  (when-let [form-eid
-             (db/q '[:find ?form .
-                     :in $ ?run-id ?ordinal
-                     :where
-                     [?run :seon.cluster.run/id ?run-id]
-                     [?form :seon.cluster.run.form/run ?run]
-                     [?form :seon.cluster.run.form/ordinal ?ordinal]]
-                   database (::id request)
-                   (:seon.cluster.eval/ordinal request))]
-    (let [form
-          (db/pull database
-                   [:db/id :seon.cluster.run.form/source
-                    :seon.cluster.run.form/ns]
-                   form-eid)]
-      (update form :seon.cluster.run.form/ns :db/id))))
+  (let [form (db/pull database
+                      [:db/id :seon.cluster.eval/source :seon.cluster.eval/ns]
+                      [:seon.cluster.eval/id
+                       (receipt-identity (::id request)
+                                         (:seon.cluster.eval/ordinal request))])]
+    (when (:db/id form)
+      (update form :seon.cluster.eval/ns :db/id))))
 
 (defn- analyze-settlement
   [database request]
@@ -1288,8 +1202,8 @@
     (let [[form-facts program-row]
           (seon.fn/analyze-form
            database
-           (:seon.cluster.run.form/source form)
-           (:seon.cluster.run.form/ns form)
+           (:seon.cluster.eval/source form)
+           (:seon.cluster.eval/ns form)
            (:seon.program/row request))
           subject (:seon.test/subject program-row)
           subject-present?
@@ -1844,11 +1758,16 @@
             evidence)}]))
 
 (defn- recorded-evaluation
-  "The immutable evaluation fields shared by saving and duplicate comparison."
+  "The immutable evaluation fields shared by saving and duplicate comparison.
+
+  ONE ENTITY: the frozen source and author are compared here too, because
+  the twin form entity that used to carry them is gone."
   [request]
   (cond-> (select-keys request
                        (into [:seon.cluster.eval/id :seon.cluster.eval/ordinal
-                              :seon.cluster.eval/at :seon.cluster.eval/source]
+                              :seon.cluster.eval/at :seon.cluster.eval/source
+                              :seon.cluster.eval/author
+                              :seon.cluster.eval/comment]
                              receipt-terminal-attributes))
     (seq (:seon.cluster.eval/read-evidence request))
     (assoc :seon.cluster.eval/read-evidence
@@ -1858,11 +1777,6 @@
 (defn- stored-record-content
   [database id]
   (let [run (current-run database id)
-        forms (db/q '[:find [(pull ?form [* {:seon.cluster.run.form/ns
-                                           [:seon.ns/name]}]) ...]
-                      :in $ ?run
-                      :where [?form :seon.cluster.run.form/run ?run]]
-                    database (:db/id run))
         evaluations
         (db/q '[:find [(pull ?evaluation
                             [* {:seon.cluster.eval/ns [:seon.ns/name]}
@@ -1876,15 +1790,6 @@
                            ::plan-digest ::process])
          (update ::agent :db/id)
          (update ::starting-ns #(resolve-namespace-name database (:db/id %))))
-     ::sources
-     (mapv (fn [form]
-             (-> (select-keys form [:seon.cluster.run.form/id
-                                   :seon.cluster.run.form/ordinal
-                                   :seon.cluster.run.form/author
-                                   :seon.cluster.run.form/source])
-                 (assoc :seon.ns/name
-                        (get-in form [:seon.cluster.run.form/ns :seon.ns/name]))))
-           (sort-by :seon.cluster.run.form/ordinal forms))
      ::evaluations
      (mapv (fn [evaluation]
              (cond-> (recorded-evaluation evaluation)
@@ -1913,18 +1818,27 @@
                    ::agent agent-eid
                    ::starting-ns starting-namespace
                    ::plan-digest (plan-digest sources))
-        expected
-        {::recorded-run run
-         ::sources (mapv (fn [ordinal source]
-                           (assoc source
-                                  :seon.cluster.run.form/id (form-identity id ordinal)
-                                  :seon.cluster.run.form/ordinal ordinal
-                                  :seon.cluster.run.form/author :system))
-                         (range) sources)
-         ::evaluations (mapv #(recorded-evaluation
-                              (assoc % :seon.cluster.eval/id
-                                     (receipt-identity id (:seon.cluster.eval/ordinal %))))
-                             evaluations)}]
+        prepared-evaluations
+        (mapv (fn [ordinal source evaluation]
+                (cond-> (assoc evaluation
+                               :seon.cluster.eval/id
+                               (receipt-identity id ordinal)
+                               :seon.cluster.eval/author :system)
+                  (nil? (:seon.cluster.eval/source evaluation))
+                  (assoc :seon.cluster.eval/source
+                         (:seon.cluster.eval/source source))))
+              (range) sources evaluations)
+        expected {::recorded-run run
+                  ::evaluations (mapv recorded-evaluation prepared-evaluations)}
+        namespace-rows
+        (into []
+              (comp (map #(or (:seon.ns/name %) starting-namespace))
+                    (keep identity)
+                    (distinct)
+                    (map (fn [namespace-name]
+                           {:db/id (str "namespace:" namespace-name)
+                            :seon.ns/name namespace-name})))
+              (cons {:seon.ns/name starting-namespace} sources))]
     (when-not agent-eid
       (refuse! `record-evaluated-call ::no-such-agent request))
     (when-not starting-namespace
@@ -1943,14 +1857,14 @@
       (into [(assoc run :db/id run-eid
                     ::starting-ns (str "namespace:" starting-namespace))]
             cat
-            [(source-rows id run-eid 0 starting-namespace :system sources)
+            [namespace-rows
              (mapcat
               (fn [evaluation]
                 (let [receipt (receipt-row run-eid evaluation)]
                   (into [receipt] cat
                         [(receipt-terminal-assertions receipt evaluation)
                          (receipt-read-evidence-tx receipt evaluation)])))
-              evaluations)]))))
+              prepared-evaluations)]))))
 
 (defn record-evaluated-tx
   "Stage cached source/results and build their one completed recording call.
@@ -1971,23 +1885,23 @@
   (let [id (::id request)
         staged-reply (stage-reply! (:seon.db/connection cluster) (::reply request))
         staged-evaluations
-        (mapv (fn [{:keys [:seon.cluster.run.form/ordinal
+        (mapv (fn [{:keys [:seon.cluster.eval/ordinal
                           :seon.cluster.loop/admitted-form
                           :seon.sci.eval/evaluation]}]
                 (let [settled (settlement-result cluster evaluation)]
                   {:seon.cluster.eval/receipt
                    (cond-> (assoc (evaluation-facts
                                    {::id id
-                                    :seon.cluster.run.form/ordinal ordinal
+                                    :seon.cluster.eval/ordinal ordinal
                                     :seon.sci.eval/evaluation evaluation
                                     :seon.cluster.loop/settlement-evaluation
                                     settled})
                                   :seon.cluster.eval/at
                                   (:seon.cluster.eval/at evaluation)
                                   :seon.cluster.eval/source
-                                  (:seon.cluster.run.form/source admitted-form)
+                                  (:seon.cluster.eval/source admitted-form)
                                   :seon.cluster.eval/ns
-                                  (:seon.cluster.run.form/ns admitted-form))
+                                  (:seon.cluster.eval/ns admitted-form))
                      ;; THE COMMENT RIDES THE ADMITTED FORM, and this path
                      ;; dropped it, so an evaluation saved from the page lost
                      ;; the agent's own prose that a settled one keeps.
@@ -2002,9 +1916,9 @@
                {::opening-commit-id (db/commit-id database)
                 ::sources (mapv (fn [item]
                                   (let [form (:seon.cluster.loop/admitted-form item)]
-                                    {:seon.cluster.run.form/source (:seon.cluster.run.form/source form)
+                                    {:seon.cluster.eval/source (:seon.cluster.eval/source form)
                                      :seon.ns/name (resolve-namespace-name
-                                                    database (:seon.cluster.run.form/ns form))}))
+                                                    database (:seon.cluster.eval/ns form))}))
                                 evaluated)
                 ::evaluations (mapv :seon.cluster.eval/receipt staged-evaluations)})]
     {:seon.db/tx-data [[:db.fn/call #'record-evaluated-call prepared]]
@@ -2239,13 +2153,6 @@
 ;;; neighbourhood — is told the same true thing by the same function.
 ;;; ---------------------------------------------------------------------------
 
-(defn- run-forms
-  [db run-eid]
-  (db/q '[:find [(pull ?form [*]) ...]
-         :in $ ?run
-         :where [?form :seon.cluster.run.form/run ?run]]
-       db run-eid))
-
 (defn- run-receipts
   [db run-eid]
   (db/q '[:find [(pull ?receipt [*]) ...]
@@ -2262,7 +2169,7 @@
 
 (defn- unfinished-warning
   "The first form recovery closed before it started, and the missing count."
-  [forms receipts]
+  [receipts]
   (let [terminal-ordinals
         (into #{}
               (comp (filter terminal?)
@@ -2275,7 +2182,7 @@
         missing
         (sort
          (remove terminal-ordinals
-                 (map :seon.cluster.run.form/ordinal forms)))]
+                 (map :seon.cluster.eval/ordinal receipts)))]
     ;; A completed/wait disposition deliberately closes the run and
     ;; leaves any later authored forms unstarted. That is not recovery.
     (when-let [ordinal (when-not (contains? #{:completed :wait}
@@ -2306,14 +2213,13 @@
     (when id
       (let [opened (get unit ::opened-at)
             receipts (when db (run-receipts db (:db/id unit)))
-            forms (when db (run-forms db (:db/id unit)))
-            cut (when db (interrupted-warning forms receipts))
+            cut (when db (interrupted-warning receipts))
             never-started
             (when (and db
                        (::closed-at unit)
                        (::plan-digest unit)
                        (nil? cut))
-              (unfinished-warning forms receipts))
+              (unfinished-warning receipts))
             ;; THE PAUSE NOTE IS A CONDITION OF THE RUN, which is why it
             ;; is read here and not only on the receipt: a run is one hop
             ;; from its agent and a receipt is two, so an agent asking

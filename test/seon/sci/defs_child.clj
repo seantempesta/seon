@@ -29,8 +29,8 @@
 (defn- evaluation
   [ctx source]
   (eval/evaluate
-   {:seon.cluster.run.form/source source
-    :seon.cluster.run.form/ns [:seon.ns/name namespace-name]
+   {:seon.cluster.eval/source source
+    :seon.cluster.eval/ns [:seon.ns/name namespace-name]
     :seon.sci.eval/ctx ctx
     :seon.sci.admit/caps (config/result-caps (config/defaults))
     :seon.sci.eval/time-limit-ms 30000

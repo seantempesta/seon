@@ -73,7 +73,7 @@
   dynamic binding, because a real graph evaluates on its proc's own
   virtual thread where a test-thread binding cannot reach."
   [request]
-  (let [source (:seon.cluster.run.form/source request)]
+  (let [source (:seon.cluster.eval/source request)]
     (cond
       (re-find #"my\.run/complete" source)
       (let [value (my.run/complete "done")]
@@ -417,14 +417,14 @@
                                    [:seon.cluster.run/id run-id]))))
                       sources
                       (db/q '[:find ?ordinal ?source
-                              :keys seon.cluster.run.form/ordinal
-                                    seon.cluster.run.form/source
+                              :keys seon.cluster.eval/ordinal
+                                    seon.cluster.eval/source
                               :in $ ?run-id
                               :where
                               [?run :seon.cluster.run/id ?run-id]
-                              [?form :seon.cluster.run.form/run ?run]
-                              [?form :seon.cluster.run.form/ordinal ?ordinal]
-                              [?form :seon.cluster.run.form/source ?source]]
+                              [?form :seon.cluster.eval/run ?run]
+                              [?form :seon.cluster.eval/ordinal ?ordinal]
+                              [?form :seon.cluster.eval/source ?source]]
                             terminal-db run-id)
                       results
                       (db/q '[:find ?ordinal ?result
@@ -445,11 +445,11 @@
                       "the existing armer owns unarmed delivery")
                   ;; THE COMMENT IS ITS OWN FACT beside the form it
                   ;; introduces, so a prompt line holds exactly one form.
-                  (is (= [{:seon.cluster.run.form/ordinal 0
-                           :seon.cluster.run.form/source "(+ 1 1)"}
-                          {:seon.cluster.run.form/ordinal 1
-                           :seon.cluster.run.form/source "(identity (+ 1 1))"}]
-                         (sort-by :seon.cluster.run.form/ordinal sources))
+                  (is (= [{:seon.cluster.eval/ordinal 0
+                           :seon.cluster.eval/source "(+ 1 1)"}
+                          {:seon.cluster.eval/ordinal 1
+                           :seon.cluster.eval/source "(identity (+ 1 1))"}]
+                         (sort-by :seon.cluster.eval/ordinal sources))
                       "exact forms pass through the ordinary parser")
                   (is (= ["; Read one value." "; Read a second value."]
                          (mapv second
@@ -1188,7 +1188,7 @@
            :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
            :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))
            :seon.cluster.run/sources
-           [{:seon.cluster.run.form/source
+           [{:seon.cluster.eval/source
              "(defn ^{:malli/schema [:=> [:cat] :int]} gate-chain [] 1)"
              :seon.ns/name namespace-name}]}))
         (try
@@ -1628,10 +1628,10 @@
                                   :seon.cluster.run/plan-digest
                                   (apply str (repeat 64 "d"))
                                   :seon.cluster.run/sources
-                                  [{:seon.cluster.run.form/source "(+ 1 2)"}
-                                   {:seon.cluster.run.form/source
+                                  [{:seon.cluster.eval/source "(+ 1 2)"}
+                                   {:seon.cluster.eval/source
                                     "(+ 3 4)"}
-                                   {:seon.cluster.run.form/source
+                                   {:seon.cluster.eval/source
                                     "(my.message/send \"waiting\" \"must not run\")"}]}))
         (db/transact! connection
                     (run/receipt-start-tx {:seon.cluster.run/id "run-dead"
@@ -1659,7 +1659,7 @@
                         fake-evaluate
                         (fn [request]
                           (swap! evaluation-sources conj
-                                 (:seon.cluster.run.form/source request))
+                                 (:seon.cluster.eval/source request))
                           (evaluate request))]
             (let [events (database-events connection)
                   ;; BOOT-SHAPE RE-ARM: recover, then re-stamp + prime. The
@@ -1745,19 +1745,8 @@
                 (is (= 1 (get answers "m-unanswered")))
                 (is (= 1 (get answers "m-waiting"))))
               (testing "the recovered facts derive one interruption value"
-                (let [forms
-                      (mapv (fn [ordinal]
-                              {:seon.cluster.run.form/ordinal ordinal})
-                            (db/q '[:find [?ordinal ...]
-                                   :where
-                                   [?run :seon.cluster.run/id "run-dead"]
-                                   [?form
-                                    :seon.cluster.run.form/run ?run]
-                                   [?form
-                                    :seon.cluster.run.form/ordinal ?ordinal]]
-                                 db))
-                      receipts (mapv #(db/pull db '[*] %) run-receipts)
-                      warning (run/interrupted-warning forms receipts)
+                (let [receipts (mapv #(db/pull db '[*] %) run-receipts)
+                      warning (run/interrupted-warning receipts)
                       rendered
                       (run/render-ai
                        (assoc (db/pull db '[*]

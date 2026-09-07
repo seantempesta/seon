@@ -89,17 +89,17 @@
             store-value (:seon.store/store instance)
             _ (await-run! connection "bootstrap:root")
             original-run (str "messy:" suffix)
-            messy [{:seon.cluster.run.form/source "(+ 20 22)"}
-                   {:seon.cluster.run.form/source "missing-symbol"}
-                   {:seon.cluster.run.form/source "(my.run/complete \"42\")"}]
-            revision [{:seon.cluster.run.form/source "(+ 20 22)"}
-                      {:seon.cluster.run.form/source "(my.run/complete \"42\")"}]
+            messy [{:seon.cluster.eval/source "(+ 20 22)"}
+                   {:seon.cluster.eval/source "missing-symbol"}
+                   {:seon.cluster.eval/source "(my.run/complete \"42\")"}]
+            revision [{:seon.cluster.eval/source "(+ 20 22)"}
+                      {:seon.cluster.eval/source "(my.run/complete \"42\")"}]
             _ (seed-system-run! instance original-run messy)
             failed (curate/prove!
                     {:seon.boot/instance instance
                      :seon.cluster.curate/run-ids [original-run]
                      :seon.cluster.curate/revision
-                     [{:seon.cluster.run.form/source
+                     [{:seon.cluster.eval/source
                        "(my.run/complete \"43\")"}]})]
         (testing "a failed proof names its predicate and leaves the original"
           (is (= :seon.cluster.curate/completed-result-equivalent
@@ -162,8 +162,8 @@
                              :in $ ?run-id
                              :where
                              [?run :seon.cluster.run/id ?run-id]
-                             [?form :seon.cluster.run.form/run ?run]
-                             [?form :seon.cluster.run.form/ordinal ?form-ordinal]
+                             [?form :seon.cluster.eval/run ?run]
+                             [?form :seon.cluster.eval/ordinal ?form-ordinal]
                              [?receipt :seon.cluster.eval/run ?run]
                              [?receipt :seon.cluster.eval/ordinal ?receipt-ordinal]
                              [(= ?form-ordinal ?receipt-ordinal)]]

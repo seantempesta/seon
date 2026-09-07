@@ -152,7 +152,7 @@
     :seon.db/connection connection
     :seon.cluster.agent/id "effect-agent"
     :seon.cluster.run/id "effect-run"
-    :seon.cluster.run.form/ordinal 3
+    :seon.cluster.eval/ordinal 3
     :seon.boot/cluster-name "default"
     :seon.flow/work-launcher launcher
     :seon.sci.admit/caps (config/result-caps (config/defaults))
@@ -657,11 +657,11 @@
             effective (config/defaults)
             evaluation
             (sci.eval/evaluate
-             {:seon.cluster.run.form/source
+             {:seon.cluster.eval/source
               (str "(seon.effect/request! "
                    "#'seon.effect-test/capability-owner "
                    "{:seon.effect-test/value 9})")
-              :seon.cluster.run.form/ns [:seon.ns/name 'user]
+              :seon.cluster.eval/ns [:seon.ns/name 'user]
               :seon.sci.admit/caps (config/result-caps effective)
               :seon.sci.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms effective)
@@ -669,7 +669,7 @@
               :seon.sci.eval/ctx ctx
               :seon.cluster.agent/id "root"
               :seon.cluster.run/id "effect-run"
-              :seon.cluster.run.form/ordinal 3
+              :seon.cluster.eval/ordinal 3
               :seon.boot/cluster-name "default"})
             receipt
             (db/pull @connection '[*]

@@ -101,7 +101,7 @@
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
                    :seon.cluster.agent/id "preview-batch-agent"
                    :seon.cluster.run/id "preview-run"
-                   :seon.cluster.run.form/ordinal 0
+                   :seon.cluster.eval/ordinal 0
                    :seon.ns/name 'my.agents.preview-batch
                    :seon.cluster.reply/sources sources}))
                closed-at (java.util.Date.)
@@ -111,9 +111,9 @@
            (is (= [3 4 nil] (subvec values 2 5)))
            (is (= (apply str (repeat 50000 "x")) (nth values 5)))
            (is (string? (get-in (last outcomes) [:seon.sci.eval/evaluation :seon.cluster.eval/error])))
-           (is (= (range 7) (map :seon.cluster.run.form/ordinal outcomes)))
+           (is (= (range 7) (map :seon.cluster.eval/ordinal outcomes)))
            (is (= [:seon.ns/name 'preview.batch-next]
-                  (get-in (nth outcomes 2) [:seon.cluster.loop/admitted-form :seon.cluster.run.form/ns])))
+                  (get-in (nth outcomes 2) [:seon.cluster.loop/admitted-form :seon.cluster.eval/ns])))
            (is (every? #(= (db/basis-t database)
                            (get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/read-basis-transaction])) outcomes))
            (is (seq (get-in (first outcomes) [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence])))

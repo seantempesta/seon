@@ -739,7 +739,7 @@
             :seon.flow/work-launcher @test-work-launcher}
            sci.eval/evaluate
            "turn-boundary-0"
-           {:seon.cluster.run.form/source
+           {:seon.cluster.eval/source
             "(reduce + (map inc (range 500)))"
             :seon.sci.admit/caps
             (config/result-caps (config/defaults))

@@ -80,11 +80,11 @@
                       :seon.cluster.agent/run [:seon.cluster.run/id run-id]}]
               planned?
               (into (map (fn [ordinal]
-                           {:seon.cluster.run.form/id (str run-id "-" ordinal)
-                            :seon.cluster.run.form/run
+                           {:seon.cluster.eval/id (str run-id "-" ordinal)
+                            :seon.cluster.eval/run
                             [:seon.cluster.run/id run-id]
-                            :seon.cluster.run.form/ordinal ordinal
-                            :seon.cluster.run.form/source (str "(+ " ordinal " 1)")})
+                            :seon.cluster.eval/ordinal ordinal
+                            :seon.cluster.eval/source (str "(+ " ordinal " 1)")})
                          (range 2))))})))
 
 (defn- terminal-receipt!
@@ -137,16 +137,18 @@
             :seon.cluster.agent/run [:seon.cluster.run/id id]}]
           (map-indexed
            (fn [ordinal _]
-             {:seon.cluster.run.form/id (str id "-form-" ordinal)
-              :seon.cluster.run.form/run [:seon.cluster.run/id id]
-              :seon.cluster.run.form/ordinal ordinal
-              :seon.cluster.run.form/source (str "(+ " ordinal " 1)")})
+             {:seon.cluster.eval/id (str id "-" ordinal)
+              :seon.cluster.eval/run [:seon.cluster.run/id id]
+              :seon.cluster.eval/ordinal ordinal
+              :seon.cluster.eval/source (str "(+ " ordinal " 1)")})
            result-values))})
+  ;; ONE ENTITY PER (run, ordinal): the terminal fact accretes onto the
+  ;; evaluation the freeze minted, under the same identity.
   (db/transact!
    connection
    (map-indexed
     (fn [ordinal value]
-      {:seon.cluster.eval/id (str id "-receipt-" ordinal)
+      {:seon.cluster.eval/id (str id "-" ordinal)
        :seon.cluster.eval/run [:seon.cluster.run/id id]
        :seon.cluster.eval/ordinal ordinal
        :seon.cluster.eval/at at
@@ -197,7 +199,7 @@
     ::expect {:seon.cluster.work/situation :resume
               :seon.cluster.run/id run-id
               :seon.cluster.agent/id agent-id
-              :seon.cluster.run.form/ordinal 0}}
+              :seon.cluster.eval/ordinal 0}}
 
    {::label "row 8 — one terminal receipt: fold from ordinal 1"
     ::build (fn [connection]
@@ -208,7 +210,7 @@
     ::expect {:seon.cluster.work/situation :resume
               :seon.cluster.run/id run-id
               :seon.cluster.agent/id agent-id
-              :seon.cluster.run.form/ordinal 1}}
+              :seon.cluster.eval/ordinal 1}}
 
    {::label "row 9 — every receipt terminal, run still open: the fold is
              done, and that is its OWN instruction (seal revision)"
@@ -277,7 +279,7 @@
     ::expect {:seon.cluster.work/situation :resume
               :seon.cluster.run/id run-id
               :seon.cluster.agent/id agent-id
-              :seon.cluster.run.form/ordinal 0}}])
+              :seon.cluster.eval/ordinal 0}}])
 
 (deftest the-request-declares-exactly-the-dependencies-the-derivation-reads
   ;; The class: a required argument no code reads. It cannot be passed
@@ -331,15 +333,15 @@
          :seon.cluster.work/situation :call]
         [:db/add [:seon.cluster.run/id run-id]
          :seon.cluster.work/situation :generate]
-        {:seon.cluster.run.form/id "generated-form-0"
-         :seon.cluster.run.form/run [:seon.cluster.run/id run-id]
-         :seon.cluster.run.form/ordinal 0
-         :seon.cluster.run.form/author :system
-         :seon.cluster.run.form/source "(help)"}])
+        {:seon.cluster.eval/id (str run-id "-0")
+         :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/author :system
+         :seon.cluster.eval/source "(help)"}])
       (is (= {:seon.cluster.work/situation :resume
               :seon.cluster.run/id run-id
               :seon.cluster.agent/id agent-id
-              :seon.cluster.run.form/ordinal 0}
+              :seon.cluster.eval/ordinal 0}
              (work/next-agent-work @connection request)))
       (terminal-receipt! connection 0 "{:introduced 'my.run}")
       (let [derived (work/next-agent-work @connection request)]
@@ -358,25 +360,31 @@
                              :triggered? true})
       (db/transact!
        connection
-       [[:db/add [:seon.cluster.run.form/id (str run-id "-0")]
-         :seon.cluster.run.form/source "; pure prose"]])
+       [[:db/add [:seon.cluster.eval/id (str run-id "-0")]
+         :seon.cluster.eval/source "; pure prose"]])
       (is (= {:seon.cluster.work/situation :resume
               :seon.cluster.run/id run-id
               :seon.cluster.agent/id agent-id
-              :seon.cluster.run.form/ordinal 1}
+              :seon.cluster.eval/ordinal 1}
              (work/next-agent-work @connection request)))
       (terminal-receipt! connection 1)
       (is (= {:seon.cluster.work/situation :close
               :seon.cluster.run/id run-id
               :seon.cluster.agent/id agent-id}
              (work/next-agent-work @connection request)))
+      ;; ONE ENTITY PER (run, ordinal): the comment-only ordinal HAS an
+      ;; evaluation entity — that is the durable input — and it never
+      ;; acquires a terminal fact, which is what "never becomes work" means.
       (is (empty?
-           (db/q '[:find [?receipt ...]
+           (db/q '[:find [?evaluation ...]
                   :in $ ?run-id
                   :where
                   [?run :seon.cluster.run/id ?run-id]
-                  [?receipt :seon.cluster.eval/run ?run]
-                  [?receipt :seon.cluster.eval/ordinal 0]]
+                  [?evaluation :seon.cluster.eval/run ?run]
+                  [?evaluation :seon.cluster.eval/ordinal 0]
+                  (or [?evaluation :seon.cluster.eval/result-edn _]
+                      [?evaluation :seon.cluster.eval/error _]
+                      [?evaluation :seon.cluster.eval/interrupted-at _])]
                 @connection run-id))))))
 
 (deftest a-lint-refusal-is-terminal-until-a-new-trigger-arrives
@@ -477,7 +485,7 @@
                  ;; receipt — never one already settled, which is what
                  ;; "nothing re-executes" means in the derivation
                  (or (not= :resume situation)
-                     (let [ordinal (:seon.cluster.run.form/ordinal derived)]
+                     (let [ordinal (:seon.cluster.eval/ordinal derived)]
                        (and (not (contains? (set receipts) ordinal))
                             (= ordinal
                                (first (remove (set receipts)

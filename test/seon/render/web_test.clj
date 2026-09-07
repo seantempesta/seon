@@ -1150,7 +1150,7 @@
                                 0))]
                 {:runs (total :seon.cluster.run/id)
                  :evaluations (total :seon.cluster.eval/id)
-                 :forms (total :seon.cluster.run.form/ordinal)
+                 :forms (total :seon.cluster.eval/ordinal)
                  :faults (total :seon.error/id)}))
             subject (URLEncoder/encode
                      (pr-str [:seon.cluster.agent/id agent-id]) "UTF-8")

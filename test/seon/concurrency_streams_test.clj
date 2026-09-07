@@ -110,7 +110,7 @@
               {:my.message/value value
                :seon.cluster.agent/id sender
                :seon.cluster.run/id "streams-test-message-run"
-               :seon.cluster.run.form/ordinal 1
+               :seon.cluster.eval/ordinal 1
                :seon.cluster.message/at at
                :seon.config.message/max-chain 64})
              rows (:seon.cluster.message/rows delivery)

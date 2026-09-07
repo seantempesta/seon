@@ -60,8 +60,8 @@
             qualified-source
             "(defn qualified [] (seon.fn/tests-reaching nil \"x\"))"
             requests
-            [{:seon.cluster.run.form/source shadow-source
-              :seon.cluster.run.form/ns namespace-ref
+            [{:seon.cluster.eval/source shadow-source
+              :seon.cluster.eval/ns namespace-ref
               :seon.program/row
               {:seon.fn/sym "sample.runtime-batch/shadowed"
                :seon.fn/ns namespace-ref
@@ -69,8 +69,8 @@
                :seon.fn/arglists "([x])"
                :seon.fn/private? false
                :seon.schema.admission/source :agent}}
-             {:seon.cluster.run.form/source qualified-source
-              :seon.cluster.run.form/ns namespace-ref
+             {:seon.cluster.eval/source qualified-source
+              :seon.cluster.eval/ns namespace-ref
               :seon.program/row
               {:seon.fn/sym "sample.runtime-batch/qualified"
                :seon.fn/ns namespace-ref
@@ -451,7 +451,7 @@
            :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
            :seon.cluster.run/plan-digest "call-edges-digest"
            :seon.cluster.run/sources
-           [{:seon.cluster.run.form/source source}]}))
+           [{:seon.cluster.eval/source source}]}))
         (db/transact!
          connection
          (run/receipt-start-tx
@@ -469,14 +469,14 @@
              (db/q '[:find [?attribute ...]
                      :in $ ?form-id
                      :where
-                     [?form :seon.cluster.run.form/id ?form-id]
+                     [?form :seon.cluster.eval/id ?form-id]
                      [?form ?attribute]
                      [(contains? #{:seon.fn/calls
                                    :seon.fn/keywords
                                    :seon.test/subject}
                                  ?attribute)]]
                    @connection
-                   (run/form-identity run-id 0)))
+                   (run/receipt-identity run-id 0)))
             "ordinary eval rows carry no duplicate program-graph facts")))))
 
 (deftest settled-agent-form-has-static-index-edge-parity
@@ -539,7 +539,7 @@
              [:seon.ns/name namespace-name]
              :seon.cluster.run/plan-digest "settlement-parity-digest"
              :seon.cluster.run/sources
-             [{:seon.cluster.run.form/source source}]}))
+             [{:seon.cluster.eval/source source}]}))
           (db/transact!
            connection
            (run/receipt-start-tx
@@ -595,8 +595,8 @@
                 (edge-facts :seon.fn/sym
                             "sample.settlement-parity/contracted")
                 form-facts
-                (edge-facts :seon.cluster.run.form/id
-                            (run/form-identity "settlement-parity-run" 0))]
+                (edge-facts :seon.cluster.eval/id
+                            (run/receipt-identity "settlement-parity-run" 0))]
             (is (= expected program-facts))
             (is (nil? form-facts)
                 "the definition row is the sole owner of graph facts")
@@ -604,10 +604,10 @@
                    (db/q '[:find ?author .
                            :in $ ?form-id
                            :where
-                           [?form :seon.cluster.run.form/id ?form-id]
-                           [?form :seon.cluster.run.form/author ?author]]
+                           [?form :seon.cluster.eval/id ?form-id]
+                           [?form :seon.cluster.eval/author ?author]]
                          @connection
-                         (run/form-identity
+                         (run/receipt-identity
                           "settlement-parity-run" 0)))
                 "the authored form and its queryable edges settle together")))))))
 

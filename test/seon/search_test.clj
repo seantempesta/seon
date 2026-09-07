@@ -207,7 +207,7 @@
             evaluation
             (eval/evaluate
              {:seon.sci.eval/ctx ctx
-              :seon.cluster.run.form/source
+              :seon.cluster.eval/source
               (str "(seon.search/search "
                    (pr-str (list 'quote request)) ")")
               :seon.sci.admit/caps

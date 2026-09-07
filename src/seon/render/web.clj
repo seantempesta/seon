@@ -1585,7 +1585,7 @@
                                 :seon.db/db database
                                 :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
                                 :seon.cluster.agent/id agent-id
-                                :seon.cluster.run.form/ordinal 0
+                                :seon.cluster.eval/ordinal 0
                                 :seon.ns/name namespace-name
                                 :seon.cluster.reply/sources sources
                                 :seon.sci.eval/defs-notices (vec (:seon.sci.eval/defs-notices forked))})]

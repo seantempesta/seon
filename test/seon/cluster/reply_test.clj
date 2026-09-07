@@ -41,7 +41,7 @@
   [text]
   (let [forms (reply/sources text)]
     (if (vector? forms)
-      (mapv :seon.cluster.run.form/source forms)
+      (mapv :seon.cluster.eval/source forms)
       forms)))
 
 ;;; ---------------------------------------------------------------------------
@@ -183,13 +183,13 @@
 
 (deftest attribution-follows-the-one-reader
   (testing "REPL semantics: each form carries the ns it was written under"
-    (is (= [{:seon.cluster.run.form/source "(ns my.gen.alpha)"
+    (is (= [{:seon.cluster.eval/source "(ns my.gen.alpha)"
              :seon.ns/name 'user}
-            {:seon.cluster.run.form/source "(defn f [x] (inc x))"
+            {:seon.cluster.eval/source "(defn f [x] (inc x))"
              :seon.ns/name 'my.gen.alpha}
-            {:seon.cluster.run.form/source "(ns my.gen.beta)"
+            {:seon.cluster.eval/source "(ns my.gen.beta)"
              :seon.ns/name 'my.gen.alpha}
-            {:seon.cluster.run.form/source "(defn g [x] (* 2 x))"
+            {:seon.cluster.eval/source "(defn g [x] (* 2 x))"
              :seon.ns/name 'my.gen.beta}]
            (reply/sources
             (str "(ns my.gen.alpha)\n(defn f [x] (inc x))\n"
@@ -204,16 +204,16 @@
            to the author rather than to a guessed owner")))
 
   (testing "prose carried into a form does not disturb attribution"
-    (is (= [{:seon.cluster.run.form/source "(ns my.gen.alpha)"
+    (is (= [{:seon.cluster.eval/source "(ns my.gen.alpha)"
              :seon.ns/name 'user}
-            {:seon.cluster.run.form/source "(defn f [] 1)"
+            {:seon.cluster.eval/source "(defn f [] 1)"
              :seon.cluster.eval/comment "; Now the function."
              :seon.ns/name 'my.gen.alpha}]
            (reply/sources
             "(ns my.gen.alpha)\nNow the function.\n(defn f [] 1)"))))
 
   (testing "prose after the last form belongs to no form, and keeps the ns"
-    (is (= {:seon.cluster.run.form/source "(def a 1)"
+    (is (= {:seon.cluster.eval/source "(def a 1)"
             :seon.ns/name 'my.gen.alpha}
            (last (reply/sources "(ns my.gen.alpha)\n(def a 1)\nThat is all.")))
         "the prose is neither glued to the source nor made its comment")))
@@ -238,12 +238,12 @@
                  {:registry (:seon.schema.projection/registry projection)})
         text ";; a note\n(def a 1)\n(inc a)"]
     (is (= ["(def a 1)" "(inc a)"]
-           (mapv :seon.cluster.run.form/source (checked text)))
+           (mapv :seon.cluster.eval/source (checked text)))
         "the one-argument arity passes its own input contract")
     (is (= (reply/sources text 'user) (checked text))
         "and names the namespace the reader would have defaulted to anyway")
     (is (= ["(def a 1)" "(inc a)"]
-           (mapv :seon.cluster.run.form/source (checked text 'my.gen.alpha)))
+           (mapv :seon.cluster.eval/source (checked text 'my.gen.alpha)))
         "as do the two- and three-argument arities")
     (is (vector? (checked text 'my.gen.alpha (count text))))))
 
@@ -378,7 +378,7 @@
                   "(ns my.gen.alpha)\n(def a 1)\nThat is all."]]
       (let [forms (reply/sources text)]
         (is (vector? forms) (str "expected forms for: " text))
-        (doseq [{source :seon.cluster.run.form/source} forms]
+        (doseq [{source :seon.cluster.eval/source} forms]
           (is (seq (reader/read
                     {:seon.sci.reader/text source
                      :seon.config.eval.result/max-source (count source)

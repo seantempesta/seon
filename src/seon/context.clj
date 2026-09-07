@@ -283,17 +283,17 @@
 (defn- ordered-run-source
   [database run-eid]
   (mapv (fn [[ordinal source namespace-name]]
-          {:seon.cluster.run.form/ordinal ordinal
-           :seon.cluster.run.form/source source
+          {:seon.cluster.eval/ordinal ordinal
+           :seon.cluster.eval/source source
            :seon.ns/name namespace-name})
         (sort-by first
                  (db/q '[:find ?ordinal ?source ?namespace-name
                          :in $ ?run
                          :where
-                         [?form :seon.cluster.run.form/run ?run]
-                         [?form :seon.cluster.run.form/ordinal ?ordinal]
-                         [?form :seon.cluster.run.form/source ?source]
-                         [?form :seon.cluster.run.form/ns ?namespace]
+                         [?form :seon.cluster.eval/run ?run]
+                         [?form :seon.cluster.eval/ordinal ?ordinal]
+                         [?form :seon.cluster.eval/source ?source]
+                         [?form :seon.cluster.eval/ns ?namespace]
                          [?namespace :seon.ns/name ?namespace-name]]
                        database run-eid))))
 
@@ -362,11 +362,11 @@
       (let [baseline-run (first baseline-runs)
             current-source
             (if in-memory?
-              (mapv (fn [{ordinal :seon.cluster.run.form/ordinal
+              (mapv (fn [{ordinal :seon.cluster.eval/ordinal
                           form :seon.cluster.loop/admitted-form}]
-                      {:seon.cluster.run.form/ordinal ordinal
-                       :seon.cluster.run.form/source (:seon.cluster.run.form/source form)
-                       :seon.ns/name (second (:seon.cluster.run.form/ns form))})
+                      {:seon.cluster.eval/ordinal ordinal
+                       :seon.cluster.eval/source (:seon.cluster.eval/source form)
+                       :seon.ns/name (second (:seon.cluster.eval/ns form))})
                     evaluated-sources)
               (ordered-run-source database (:db/id refreshed)))
             same-source? (= (ordered-run-source database baseline-run) current-source)]

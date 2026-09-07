@@ -50,19 +50,21 @@
 
 (defn- form-row
   [ordinal]
-  {:seon.cluster.run.form/id (str "form-" ordinal)
-   :seon.cluster.run.form/run [:seon.cluster.run/id run-id]
-   :seon.cluster.run.form/ordinal ordinal
-   :seon.cluster.run.form/source (str "(form-" ordinal ")")
-   :seon.cluster.run.form/ns [:seon.ns/name 'my.gen.alpha]})
+  {:seon.cluster.eval/id (str "form-" ordinal)
+   :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+   :seon.cluster.eval/ordinal ordinal
+   :seon.cluster.eval/source (str "(form-" ordinal ")")
+   :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]})
 
 (defn- receipt-row
+  "The started/settled facts of the SAME evaluation entity `form-row` freezes.
+
+  One entity per (run, ordinal): a started evaluation carries
+  `:seon.cluster.eval/at`, and its terminal facts accrete onto it."
   [ordinal terminal]
   (merge
-   {:seon.cluster.eval/id (str "receipt-" ordinal)
-    :seon.problems/id (str "problem-" ordinal)
-    :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-    :seon.cluster.eval/ordinal ordinal
+   (form-row ordinal)
+   {:seon.problems/id (str "problem-" ordinal)
     :seon.cluster.eval/at now}
    terminal))
 
@@ -74,7 +76,7 @@
          {:my.message/value value
           :seon.cluster.agent/id sender
           :seon.cluster.run/id run-id
-          :seon.cluster.run.form/ordinal 0
+          :seon.cluster.eval/ordinal 0
           :seon.cluster.message/at now
           :seon.config.message/max-chain 16})]
     (is (empty? (:seon.error/values delivery)))
@@ -112,22 +114,20 @@
    (fn [connection]
      (db/transact!
       connection
-      [(form-row 0)
-       (dissoc (form-row 1) :seon.cluster.run.form/ns)
-       (receipt-row 0 {})
-       (receipt-row 1 {})])
+      [(receipt-row 0 {})
+       (dissoc (receipt-row 1 {}) :seon.cluster.eval/ns)])
      (let [failed (evaluation-error "boom")
            attributed
            (problems/form-problem
             @connection
             {:seon.cluster.run/id run-id
-             :seon.cluster.run.form/ordinal 0
+             :seon.cluster.eval/ordinal 0
              :seon.sci.eval/evaluation failed})
            fallback
            (problems/form-problem
             @connection
             {:seon.cluster.run/id run-id
-             :seon.cluster.run.form/ordinal 1
+             :seon.cluster.eval/ordinal 1
              :seon.sci.eval/evaluation failed})]
        (is (= "alpha" (:seon.cluster.agent/id attributed))
            "the reader-projected namespace owns the red form")
@@ -142,18 +142,19 @@
    (fn [connection]
      (db/transact!
       connection
-      [(dissoc (form-row 0) :seon.cluster.run.form/ns)
-       (receipt-row
-        0
-        {:seon.cluster.eval/result-edn
-         (pr-str {:seon.error/kind :probe/self-owned-red})
-         :seon.cluster.eval/error "self-owned red"
-         :seon.error/kind :probe/self-owned-red})])
+      [(dissoc
+        (receipt-row
+         0
+         {:seon.cluster.eval/result-edn
+          (pr-str {:seon.error/kind :probe/self-owned-red})
+          :seon.cluster.eval/error "self-owned red"
+          :seon.error/kind :probe/self-owned-red})
+        :seon.cluster.eval/ns)])
      (let [problem
            (problems/form-problem
             @connection
             {:seon.cluster.run/id run-id
-             :seon.cluster.run.form/ordinal 0
+             :seon.cluster.eval/ordinal 0
              :seon.sci.eval/evaluation
              (evaluation-error "self-owned red")})]
        (is (= "planner" (:seon.cluster.agent/id problem)))
@@ -186,16 +187,16 @@
         :seon.cluster.run/agent [:seon.cluster.agent/id "planner"]
         :seon.cluster.run/opened-at now
         :seon.cluster.run/plan-digest "historical-digest"}
-       {:seon.cluster.run.form/id "historical-form"
-        :seon.cluster.run.form/run [:seon.cluster.run/id "historical-run"]
-        :seon.cluster.run.form/ordinal 0
-        :seon.cluster.run.form/source "(my.store/get :obsolete)"
-        :seon.cluster.run.form/ns [:seon.ns/name 'my.gen.alpha]}])
+       {:seon.cluster.eval/id "historical-form"
+        :seon.cluster.eval/run [:seon.cluster.run/id "historical-run"]
+        :seon.cluster.eval/ordinal 0
+        :seon.cluster.eval/source "(my.store/get :obsolete)"
+        :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]}])
      (is (nil?
           (problems/form-problem
            @connection
            {:seon.cluster.run/id "historical-run"
-            :seon.cluster.run.form/ordinal 0
+            :seon.cluster.eval/ordinal 0
             :seon.sci.eval/evaluation (evaluation-error "Unable to resolve")})))
      (is (empty?
           (db/q '[:find ?assignment
@@ -210,7 +211,7 @@
      (db/transact!
       connection
       (into
-       (mapv form-row (range 7))
+       [(form-row 0)]
        [(receipt-row 1 {})
         (receipt-row 2 {:seon.cluster.eval/result-edn "2"})
         (receipt-row 3 {:seon.cluster.eval/result-edn
