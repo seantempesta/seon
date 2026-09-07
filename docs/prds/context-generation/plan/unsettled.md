@@ -6,6 +6,59 @@ tags: [prd, agent, context, architecture]
 
 # The working edge — context-generation program
 
+## Morning handoff — 2026-09-07 07:10Z
+
+**Live example:** `http://127.0.0.1:7766/ns/my.agents.juniper/debug?subject=33770`
+(cluster `juniper-context` under `tmp/juniper-context-live`, reset and
+reseeded at 06:38Z; Juniper is entity 33770). The page paints on the initial
+GET in about 0.5 s and shows the ten declared units in declared order, each
+with its description, an executed AI source (namespace prompt, teaching
+comment, form, printed result) and an HTML panel; undeclared incoming refs
+sit under "Other references". Ten loads move no run count (3 → 3).
+
+**Proven on the page:** identity (`whoami`), namespace (empty state as a
+comment, bindings in Clojure's words), cluster, plan (one component tree:
+objective, current step, 1 of 5 completed, tree with states and an update
+form), current step, messages (`(my.message/inbox {})`, three messages),
+history (three runs newest first, real run-loop bytes), selected context
+(empty, with actions), faults (six credential refusals as cards).
+Screenshots: `tmp/debug-units-shots/desktop-1440.png`, `narrow-700.png`.
+Exact AI text per unit: the three landing notes under
+`docs/prds/context-generation/research/` (`plan-component-landing…`,
+`debug-units-landing…`, `agent-units-landing…`).
+
+**Proven by tests only:** plan writers' refusals (17/146), reverse-unit
+regressions (web-test 60/441 with five pre-existing stale reds enumerated),
+unit renderers (message 19/126, run 22/231 with one pre-existing red).
+
+**Not proven / open, by owner:**
+- reverse units are pulled unbounded before rendering: at 609 runs the
+  history unit refused on the query-work budget (page owner; needs a
+  bounded acquisition, newest-first);
+- a declared reverse relationship has no schema key of its own, so its
+  producers declare `:seon.schema/value` (render + schema owners; the units
+  lane's note has the exact request);
+- one render exception ends the render proc and every page hangs (blocker
+  issue filed);
+- the debug HTML render has no viewer-scoped fork (issue filed; the plan
+  renderer now derives its owner from the value instead);
+- retired `:seon.render/form` leftovers in code (issue filed);
+- root's turns on a fresh cluster hit the 30 s context-acquisition backstop
+  (issue filed);
+- `render-run-html` re-parses every form per call (units lane note);
+- adding a request-map arity beside a positional one removes the argless
+  call (`my.message/inbox` now needs `{}`; general lesson recorded).
+
+**Next design questions (two to four options each in the morning):**
+1. Should a reverse unit be its own registered schema key (e.g.
+   `:seon.cluster.message/_to` as a collection form) so coherence and
+   instrumentation check what is handed over?
+2. Should the debug page fork once per derivation for the viewer so both
+   projections share one environment, or keep HTML producers value-derived
+   only?
+3. Which units go into the real provider prompt first, and in what order —
+   the declared-units vector is already the candidate ordering.
+
 ## Integration rulings by the render owner — 2026-09-07 05:30Z
 
 Three seams surfaced when the lanes' slices met on the live page, each
