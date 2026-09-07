@@ -1778,13 +1778,19 @@
                 [:h2 "Faults (2)"]]
                (subvec rendered 0 3)))
         (is (= ["newer fault" "older fault"]
-               (mapv #(last (nth (nth % 2) 2)) (subvec rendered 3)))
+               (mapv #(last (nth (nth % 3) 2)) (subvec rendered 3)))
             "newest first, and each fault keeps the one error card")
+        (is (= [":seon.instrument/contract-violated"
+                ":seon.instrument/contract-violated"]
+               (mapv #(last (nth % 2)) (subvec rendered 3)))
+            "each card names the fault's kind")
         (is (str/includes? (pr-str (last (nth rendered 4)))
                            "in run run-1")
             "a fault that names a run links to it by its stable id")
-        (is (= 4 (count (nth rendered 3)))
+        (is (= 5 (count (nth rendered 3)))
             "and the newest fault, which names no run, has no run line")
+        (is (not (str/includes? (pr-str rendered) "seon.error/signature"))
+            "a card states the fault, not every stored attribute of it")
         (is (= [:section {:class "seon-family-entry seon-error-faults"}
                 [:h2 "Faults (0)"]
                 [:p {:class "seon-error-faults-empty"}

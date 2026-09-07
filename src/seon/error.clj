@@ -1252,8 +1252,8 @@
   error card renderer, so a fault listed here and the same fault inspected
   alone state the same facts; the run it happened in is a link, not an id.
   There is deliberately no `:seon.render/ai` companion: an agent's own faults
-  are not part of its context by default, and a renderer that answers with
-  nothing would be worse than declaring nothing."
+  are not in its context by default, and a renderer that answers with nothing
+  would be worse than declaring nothing."
   {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
                   :seon.render/hiccup]}
   [faults database]
@@ -1267,7 +1267,17 @@
                    (let [run-id (run-identity database
                                               (:seon.error/run fault))]
                      (cond-> [:article {:class "seon-error-fault"}
-                              (render-html fault)]
+                              [:p {:class "seon-kicker"}
+                               (str (:seon.error/kind fault))]
+                              ;; ONLY THE FACTS THE CARD STATES. A pulled fault
+                              ;; carries its printed data blob, digest, basis,
+                              ;; and process; handing the whole entity to the
+                              ;; card dumped every one of them as evidence.
+                              (render-html
+                               (select-keys fault
+                                            [:seon.error/id
+                                             :seon.error/kind
+                                             :seon.error/message]))]
                        (:seon.error/at fault)
                        (conj (let [instant (.toString
                                             (.toInstant
