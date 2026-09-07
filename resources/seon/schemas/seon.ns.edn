@@ -19,7 +19,13 @@
            [:seon.ns/requires {:optional true} :seon.ns/requires]
            [:seon.ns/aliases {:optional true} :seon.ns/aliases]
            [:seon.ns/imports {:optional true} :seon.ns/imports]
-           [:seon.ns/refers {:optional true} :seon.ns/refers]],
+           [:seon.ns/refers {:optional true} :seon.ns/refers]
+           [:seon.ns/steward {:optional true} :seon.ns/steward]],
           :refers [:set #:seon.db{:component true} :seon.db/ref],
           :requires [:set :seon.db/ref],
-          :source [:string {:min 1}]}
+          :source [:string {:min 1}],
+          :steward
+          [:and
+           {:description
+            "The one agent that stewards this namespace: faults in its functions, complaints, and feature requests from other agents route here. Assignment is not stewardship; several agents may work a namespace."}
+           :seon.db/ref]}

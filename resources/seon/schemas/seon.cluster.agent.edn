@@ -77,7 +77,7 @@
                       [:seon.ns/name :seon.ns/name]
                       [:seon.cluster/name :seon.cluster/name]
                       [:seon.cluster.run/id :seon.cluster.run/id]],
-                     :creation-tx [:vector :map],
+                     :creation-tx :seon.store/transaction-data,
                      :disarm-request
                      [:map
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
@@ -101,9 +101,8 @@
                      :instructions [:set :seon.db/ref],
                      :namespace
                      [:and
-                      {:seon.db/unique true,
-                       :description
-                       "The namespace this agent owns and evaluates in; at most one agent is assigned to a namespace."}
+                      {:description
+                       "The namespace this agent is assigned to work in by default; not unique — several agents may share one, and an agent may `in-ns` anywhere its REPL reaches."}
                       :seon.db/ref],
                      :routing
                      [:fn

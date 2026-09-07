@@ -1,5 +1,6 @@
 (ns seon.cluster.agent-namespace-test
-  "Namespace assignment is a ref: creation, reassignment, and oversight."
+  "Namespace assignment is a non-unique ref; stewardship is the namespace's
+  own `:seon.ns/steward` fact: creation, sharing, reassignment, oversight."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
@@ -11,7 +12,7 @@
   (problems/problems @connection
                      {:seon.cluster.run/live-processes #{}}))
 
-(deftest creation-assigns-one-queryable-namespace-owner
+(deftest creation-assigns-a-namespace-and-stewards-it
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "test")
@@ -21,8 +22,8 @@
         {:seon.cluster.agent/id "alice"
          :seon.cluster/name "test"
          :seon.ns/name 'my.agents.alice}))
-      (is (= "alice" (agent/owner-of @connection 'my.agents.alice)))
-      (is (nil? (agent/owner-of @connection 'my.agents.nobody)))
+      (is (= "alice" (agent/steward-of @connection 'my.agents.alice)))
+      (is (nil? (agent/steward-of @connection 'my.agents.nobody)))
       (is (= 'my.agents.alice
              (db/q '[:find ?name .
                     :where
@@ -46,11 +47,21 @@
                    {:seon.cluster.agent/id "alice"
                     :seon.cluster.agent/namespace
                     [:seon.ns/name 'my.agents.reassigned]}])
-      (is (nil? (agent/owner-of @connection 'my.agents.alice)))
-      (is (= "alice"
-             (agent/owner-of @connection 'my.agents.reassigned))))))
+      (is (= 'my.agents.reassigned
+             (db/q '[:find ?name .
+                    :where
+                    [?agent :seon.cluster.agent/id "alice"]
+                    [?agent :seon.cluster.agent/namespace ?namespace]
+                    [?namespace :seon.ns/name ?name]]
+                  @connection))
+          "assignment moved")
+      (is (= "alice" (agent/steward-of @connection 'my.agents.alice))
+          "stewardship is the namespace's fact and does not follow the
+          agent's assignment")
+      (is (nil? (agent/steward-of @connection 'my.agents.reassigned))
+          "a namespace created by an ordinary transaction has no steward"))))
 
-(deftest one-namespace-cannot-be-assigned-to-two-agents
+(deftest one-namespace-may-be-assigned-to-two-agents
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "test")
@@ -60,15 +71,27 @@
         {:seon.cluster.agent/id "alice"
          :seon.cluster/name "test"
          :seon.ns/name 'my.agents.shared}))
-      (let [refusal
+      (let [result
             (db/transact!
              connection
-             [{:seon.cluster.agent/id "bob"
-               :seon.cluster.agent/namespace
-               [:seon.ns/name 'my.agents.shared]}])]
-        (is (= :transact/unique
-               (:error (:seon.error/data refusal))))
-        (is (= "alice" (agent/owner-of @connection 'my.agents.shared)))))))
+             (agent/creation-tx
+              {:seon.cluster.agent/id "bob"
+               :seon.cluster/name "test"
+               :seon.ns/name 'my.agents.shared}))]
+        (is (nil? (:seon.error/kind result))
+            "a second agent on one namespace is admitted")
+        (is (= #{"alice" "bob"}
+               (set (db/q '[:find [?agent-id ...]
+                           :in $ ?namespace-name
+                           :where
+                           [?namespace :seon.ns/name ?namespace-name]
+                           [?agent :seon.cluster.agent/namespace ?namespace]
+                           [?agent :seon.cluster.agent/id ?agent-id]]
+                         @connection 'my.agents.shared)))
+            "both agents are assigned the one namespace")
+        (is (= "alice" (agent/steward-of @connection 'my.agents.shared))
+            "the first creator remains the steward; the second does not
+            displace it")))))
 
 (deftest source-bearing-namespaces-without-owners-derive-one-problem-line
   (test-support/with-database

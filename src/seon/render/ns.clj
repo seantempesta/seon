@@ -414,7 +414,7 @@
                ::owner-agent-id (when (and db
                                           (empty? functions)
                                           (empty? own-schemas))
-                                  (agent/owner-of db namespace-name))})))))))
+                                  (agent/steward-of db namespace-name))})))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Bounded, whole-section assembly

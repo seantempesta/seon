@@ -252,9 +252,11 @@
 (defn agent-namespace
   "The namespace name assigned to `agent-id`, or nil when it is absent.
 
-  This is the forward read of `seon.cluster.agent/owner-of`: evaluation
-  reads the committed assignment fact and never reconstructs it from an
-  agent id naming convention."
+  This reads the agent's own assignment fact — the namespace it works in
+  by default — and never reconstructs it from an agent id naming
+  convention. It is not the inverse of `seon.cluster.agent/steward-of`:
+  assignment is not unique, so several agents may answer with the same
+  namespace, and the namespace's one steward is a separate fact."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.agent/id]
                   [:maybe :seon.ns/name]]}

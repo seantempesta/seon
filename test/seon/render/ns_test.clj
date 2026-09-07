@@ -254,8 +254,10 @@
     (fn [connection]
       (db/transact! connection
                   [{:db/id "fresh-namespace"
-                    :seon.ns/name 'my.agents.fresh}
-                   {:seon.cluster.agent/id "fresh"
+                    :seon.ns/name 'my.agents.fresh
+                    :seon.ns/steward "fresh-agent"}
+                   {:db/id "fresh-agent"
+                    :seon.cluster.agent/id "fresh"
                     :seon.cluster.agent/namespace "fresh-namespace"}])
       (let [db @connection
             unit (namespace-unit db 'my.agents.fresh 1 256)

@@ -92,11 +92,40 @@
 ;;; Namespace assignment
 ;;; ---------------------------------------------------------------------------
 
+(defn steward-call
+  "Make `agent-id` the steward of `namespace-name` only when it has none.
+
+  Invoked as `[:db.fn/call #'steward-call agent-id namespace-name]`, so
+  Datahike supplies the mid-transaction database and the decision is made
+  where the fact is — no caller pre-read that the writer would re-decide.
+  Assignment is not stewardship: a second agent assigned the same namespace
+  leaves the first agent's stewardship standing."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id :seon.ns/name]
+                  :seon.store/transaction-data]}
+  [database agent-id namespace-name]
+  (let [steward (db/q '[:find ?steward .
+                        :in $ ?namespace-name
+                        :where
+                        [?namespace :seon.ns/name ?namespace-name]
+                        [?namespace :seon.ns/steward ?steward]]
+                      database namespace-name)]
+    (when (:seon.error/kind steward)
+      (throw (ex-info (:seon.error/message steward) steward)))
+    (if steward
+      []
+      [[:db/add [:seon.ns/name namespace-name] :seon.ns/steward
+        [:seon.cluster.agent/id agent-id]]])))
+
 (defn creation-tx
   "Create one agent with its namespace and cluster connection.
 
-  Pure transaction data. Context is derived from the entity graph, so agent
-  creation stores no blocks or other presentation state."
+  Transaction data. Context is derived from the entity graph, so agent
+  creation stores no blocks or other presentation state. The namespace
+  assignment is not unique — several agents may share one namespace — so
+  stewardship is decided inside the transaction by `steward-call`: the
+  creating agent stewards a namespace that has none yet, and never
+  displaces an existing steward."
   {:malli/schema [:=> [:cat :seon.cluster.agent/creation-request]
                   :seon.cluster.agent/creation-tx]}
   [{agent-id :seon.cluster.agent/id
@@ -111,7 +140,8 @@
        [:seon.ns/name 'seon.db]]}
      {:seon.cluster.agent/id agent-id
       :seon.cluster.agent/namespace namespace-tempid
-      :seon.cluster.agent/cluster [:seon.cluster/name cluster-name]}]))
+      :seon.cluster.agent/cluster [:seon.cluster/name cluster-name]}
+     [:db.fn/call #'steward-call agent-id namespace-name]]))
 
 (defn situation-form
   "Return the opening question and bare root form for an agent situation."
@@ -301,8 +331,12 @@
       [:div [:dt "Bootstrap run"]
        [:dd [:code (:seon.cluster.run/id unit)]]]]]))
 
-(defn owner-of
-  "The agent id assigned to `namespace-name`, or nil."
+(defn steward-of
+  "The agent id stewarding `namespace-name`, or nil.
+
+  Stewardship is the declared `:seon.ns/steward` fact on the namespace, not
+  an inversion of assignment: several agents may be assigned one namespace,
+  and exactly one of them stewards it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name]
                   [:maybe :seon.cluster.agent/id]]}
   [db namespace-name]
@@ -310,7 +344,7 @@
          :in $ ?namespace-name
          :where
          [?namespace :seon.ns/name ?namespace-name]
-         [?agent :seon.cluster.agent/namespace ?namespace]
+         [?namespace :seon.ns/steward ?agent]
          [?agent :seon.cluster.agent/id ?agent-id]]
        db namespace-name))
 

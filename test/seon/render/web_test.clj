@@ -691,9 +691,9 @@
 (deftest namespace-routes-admit-by-reader-and-existing-corpus-row
   (with-server
     (fn [connection server context]
-      (is (nil? (cluster.agent/owner-of @connection 'seon.flow)))
+      (is (nil? (cluster.agent/steward-of @connection 'seon.flow)))
       (let [known (fetch server "/ns/seon.flow")
-            owner (cluster.agent/owner-of @connection 'seon.flow)
+            owner (cluster.agent/steward-of @connection 'seon.flow)
             basis-after-known (:max-tx @connection)]
         (is (= 200 (.statusCode known)))
         (is (str/includes? (.body known) "data-walk-path=\"[]\"")
@@ -734,11 +734,11 @@
                                   "UTF-8")
                                  "&output=%3Aseon.render%2Fhtml"))
             body (.body response)]
-        (is (nil? (cluster.agent/owner-of @connection namespace-name)))
+        (is (nil? (cluster.agent/steward-of @connection namespace-name)))
         (is (= 200 (.statusCode response)))
         (is (= basis-before (:max-tx @connection))
             "inspection commits no transaction")
-        (is (nil? (cluster.agent/owner-of @connection namespace-name))
+        (is (nil? (cluster.agent/steward-of @connection namespace-name))
             "inspection does not create an agent")
         (is (str/includes? body "id=\"debug-inspection-header\""))
         (is (str/includes? body "viewer</span><code>seon.flow"))

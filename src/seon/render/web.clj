@@ -3204,7 +3204,7 @@
   [{connection :seon.store/connection-object
     process :seon.cluster.run/process}
    namespace-name]
-  (or (cluster.agent/owner-of @connection namespace-name)
+  (or (cluster.agent/steward-of @connection namespace-name)
       (let [ensure! (requiring-resolve 'seon.cluster/ensure-entity!)
             result (ensure!
                     connection process
@@ -3213,7 +3213,7 @@
                      :seon.ns/name namespace-name})]
         (if (:seon.error/kind result)
           result
-          (or (cluster.agent/owner-of @connection namespace-name)
+          (or (cluster.agent/steward-of @connection namespace-name)
               {:seon.error/kind ::owner-not-ensured
                :seon.error/message
                (str "The namespace owner for " namespace-name
@@ -3347,7 +3347,7 @@
       (not-found request)
       (if debug?
         (debug-response service namespace-name
-                        (cluster.agent/owner-of @connection namespace-name)
+                        (cluster.agent/steward-of @connection namespace-name)
                         request)
         (let [owner (ensure-namespace-owner! service namespace-name)]
           (if (string? owner)
