@@ -1,6 +1,13 @@
 ; Evaluate this file through MCP JVM evaluation on the owned Juniper cluster.
 ; Read actual Var wrappers rather than trusting the registered schema count.
 ; The deliberately invalid function is a local value, never installed or stored.
+(ns instrumentation-live-probe-2026-09-06
+  (:require [clojure.set]
+            [seon.cluster.agent]
+            [seon.instrument]
+            [seon.operator.runtime]
+            [seon.sci.kernel]))
+
 (let [instance (get @seon.operator.runtime/running-instances "juniper-context")
       ctx (:seon.sci.eval/ctx instance)
       projection (seon.sci.kernel/context-projection ctx)
