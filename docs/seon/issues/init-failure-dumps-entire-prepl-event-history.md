@@ -33,3 +33,20 @@ cause; full event history remains reachable explicitly.
 Still open in the operator publication leaf. Retain the complete prepl event
 history by report identity and make `bin/seon init` print a declared bounded
 failure face whose first fields are phase, cause, and source path.
+
+## Edit-hook correction — 2026-09-06
+
+The edit hook previously clipped the start of the entire event vector, removing
+the cause and retaining only progress chatter. `publication-failure-message` in
+`bin/seon-hook` now extracts the terminal exception's cause and data using EDN,
+and names `logs/current-source-failure.log` before that summary. The log retains
+the latest failed publication only, bounded by the existing hook log cap, with
+an explicit omitted-character count if needed. It does not accumulate a file
+per failure.
+
+Root replayed the actual failed publication captured in
+`tmp/identity-publication.log`. The resulting short advisory names
+`:malli.core/invalid-schema` and
+`:seon.cluster.loop/evaluate-sources-request`; both were previously hidden by
+the clipped progress events. The operator's direct terminal failure face is
+still outstanding, so this issue remains open.

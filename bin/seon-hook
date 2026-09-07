@@ -1154,6 +1154,31 @@
            (absolute-file-path file-path))
         (schema-resource-path? file-path))))
 
+(defn- publication-failure-message
+  [result]
+  (let [output (str (:out result) "\n" (:err result))
+        evidence (root-file "logs/current-source-failure.log")
+        omitted (max 0 (- (count output) hook-log-cap))
+        failure
+        (try
+          (let [envelope (edn/read-string
+                          (last (remove str/blank? (str/split-lines output))))
+                event (last (:seon.fresh-operator/events envelope))]
+            (when (:exception event)
+              (edn/read-string (:val event))))
+          (catch Exception _ nil))]
+    (io/make-parents evidence)
+    (spit evidence
+          (str (when (pos? omitted)
+                 (str "Earlier output omitted: " omitted " characters.\n"))
+               (subs output omitted)))
+    (str "ADVISORY — current-src publication failed. Diagnostic: "
+         (.getPath evidence) ". "
+         (if failure
+           (str (:cause failure) " " (pr-str (:data failure)))
+           (str "Operator exit " (:exit result) "."))
+         " Inspect the published head before relying on it.")))
+
 (defn- current-source-feedback
   "Publish edited source and update the explicitly selected development cluster."
   [event config]
@@ -1186,9 +1211,7 @@
             (last (remove str/blank? (str/split-lines (:out result))))
             (clip-feedback
              config
-             (str "ADVISORY — current-src publication failed; inspect the "
-                  "published head before relying on it. "
-                  (str/trim (str (:out result) "\n" (:err result)))))))
+             (publication-failure-message result))))
         (catch Exception error
           (clip-feedback
            config
