@@ -1139,3 +1139,66 @@
            "projection neither evaluates the source nor persists a duplicate")
        (is (= "" (transcript/render-ai
                    (assoc selected :seon.context.contribution/evaluations #{}))))))))
+
+(deftest history-unit-derives-both-projections-from-one-bounded-derivation
+  (support/with-database
+    (fn [connection]
+      (db/transact!
+       connection
+       (into
+        [{:seon.cluster.agent/id agent-id}]
+        (mapcat
+         (fn [ordinal]
+           (let [run-id (str "history-run-" ordinal)]
+             [{:seon.cluster.run/id run-id
+               :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+               :seon.cluster.run/opened-at (java.util.Date. (* 1000 ordinal))
+               :seon.cluster.run/closed-at
+               (java.util.Date. (+ 500 (* 1000 ordinal)))}
+              {:seon.cluster.run.form/id (str "history-form-" ordinal)
+               :seon.cluster.run.form/run [:seon.cluster.run/id run-id]
+               :seon.cluster.run.form/ordinal 0
+               :seon.cluster.run.form/source (str "(+ " ordinal " 1)")}
+              {:seon.cluster.eval/id (str "history-eval-" ordinal)
+               :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+               :seon.cluster.eval/ordinal 0
+               :seon.cluster.eval/at (java.util.Date. (+ 100 (* 1000 ordinal)))
+               :seon.cluster.eval/result-edn (str (inc ordinal))}]))
+         (range 3))))
+      (let [database @connection
+            derived (transcript/agent-history
+                     {:seon.db/db database :seon.cluster.agent/id agent-id})
+            runs (:seon.render.transcript/runs derived)
+            ai (transcript/format-history-ai derived)
+            rows (db/pull-many
+                  database
+                  '[:db/id :seon.cluster.run/id :seon.cluster.run/opened-at
+                    :seon.cluster.run/closed-at :seon.cluster.run/agent]
+                  (mapv :db/id
+                        (:seon.cluster.run/_agent
+                         (db/pull database [:seon.cluster.run/_agent]
+                                  [:seon.cluster.agent/id agent-id]))))
+            html (transcript/render-history-html rows database)]
+        (testing "runs come back newest first"
+          (is (= ["history-run-2" "history-run-1" "history-run-0"]
+                 (mapv :seon.cluster.run/id runs))))
+        (testing "the AI projection is the run loop's own bytes"
+          (is (str/includes? ai "Run history-run-2, opened "))
+          (is (str/includes? ai "=> (+ 2 1)\n3")
+              "the actual namespace prompt and the stored result")
+          (is (< (.indexOf ai "history-run-2") (.indexOf ai "history-run-0"))
+              "newest first in the text as well"))
+        (testing "the source producer hands the agent that same derivation"
+          (is (str/includes?
+               (transcript/render-history-ai rows)
+               (str "(seon.render.transcript/format-history-ai"
+                    " (seon.render.transcript/agent-history {}))"))))
+        (testing "the HTML projection states the same runs, labeled historical"
+          (is (= [:h2 "History (3 runs)"] (nth html 2)))
+          (is (= "Historical run — its results are stored, not fresh"
+                 (last (nth (nth html 3) 2))))
+          (is (str/includes? (hiccup/->string html) "(+ 2 1)"))
+          (is (= (mapv :seon.cluster.run/id runs)
+                 (into [] (comp (drop 3) (map #(last (last (nth % 3)))))
+                       html))
+              "one entry per derived run, in the derivation's order"))))))

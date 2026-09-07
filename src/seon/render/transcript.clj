@@ -14,6 +14,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.context :as context]
             [seon.cluster.run :as run]
+            [seon.config :as config]
             [seon.error :as error]
             [seon.print :as print]
             [seon.render :as render]
@@ -1121,3 +1122,229 @@
     (if (and (:seon.db/db unit) (:seon.sci.admit/caps unit))
       (conj status (render-html (transcript-unit unit)))
       status)))
+
+;;; ---------------------------------------------------------------------------
+;;; The history unit
+;;;
+;;; `:seon.cluster.run/_agent` is the agent's own REPL past. It reaches both
+;;; projections through ONE derivation — `history-entries`, the same function
+;;; and the same result printer the run loop itself uses — so what a person
+;;; reads on the page and what an agent reads in its context are the same
+;;; bytes. The bound is the render profile's child count, and what it leaves
+;;; out is an ordinary elision value and not a truncation.
+;;; ---------------------------------------------------------------------------
+
+(defn- agent-config
+  "The effective configuration of the cluster this agent belongs to."
+  [database agent-id]
+  (let [cluster-name
+        (db/q '[:find ?cluster-name .
+                :in $ ?agent-id
+                :where
+                [?agent :seon.cluster.agent/id ?agent-id]
+                [?agent :seon.cluster.agent/cluster ?cluster]
+                [?cluster :seon.cluster/name ?cluster-name]]
+              database agent-id)
+        effective (when (and cluster-name
+                             (not (:seon.error/kind cluster-name)))
+                    (config/effective database cluster-name))]
+    (if (and (map? effective) (nil? (:seon.error/kind effective)))
+      effective
+      (config/defaults))))
+
+(def ^:private history-run-selector
+  [:seon.cluster.run/id
+   :seon.cluster.run/opened-at
+   :seon.cluster.run/closed-at
+   :seon.cluster.run/error])
+
+(defn agent-history
+  "This agent's own submitted forms and their stored results, newest run first.
+
+  The runs are bounded by the cluster's declared agent child count; the runs
+  beyond it are an ordinary elision value carrying their count and a requery
+  identity, so nothing is silently dropped."
+  {:malli/schema [:=> [:cat :seon.render.transcript/history-request]
+                  [:or :seon.render.transcript/history :seon.error/value]]}
+  [{database :seon.db/db agent-id :seon.cluster.agent/id}]
+  (let [effective (agent-config database agent-id)
+        limit (long (:seon.config.render.agent/max-children effective))
+        caps (config/result-caps effective)
+        rows (db/q {:query '[:find ?run ?opened
+                             :in $ ?agent-id
+                             :where
+                             [?agent :seon.cluster.agent/id ?agent-id]
+                             [?run :seon.cluster.run/agent ?agent]
+                             [?run :seon.cluster.run/id _]
+                             [?run :seon.cluster.run/opened-at ?opened]]
+                    :args [database agent-id]
+                    :order-by '[?opened :desc ?run :desc]})]
+    (if (:seon.error/kind rows)
+      rows
+      (let [total (count rows)
+            newest (into [] (take limit) rows)
+            runs
+            (into []
+                  (keep
+                   (fn [[eid _opened]]
+                     (let [row (db/pull database history-run-selector eid)]
+                       (when-not (:seon.error/kind row)
+                         (assoc row
+                                :seon.render.transcript/entries
+                                (history-entries
+                                 {:seon.db/db database
+                                  :seon.cluster.agent/id agent-id
+                                  :seon.sci.admit/caps caps
+                                  ::selected-run-id
+                                  (:seon.cluster.run/id row)}))))))
+                  newest)
+            omitted (- total (count runs))]
+        (cond-> {:seon.cluster.agent/id agent-id
+                 :seon.render.transcript/runs runs}
+          (pos? omitted)
+          (assoc :seon.render.transcript/older-runs
+                 {:seon.print/face :seon.print/elided
+                  :seon.print/omitted omitted
+                  :seon.print/elision-unit :children
+                  :seon.render.data/total total
+                  :seon.render.data/path [:seon.render.transcript/runs]
+                  :seon.render.data/next-offset (count runs)
+                  :seon.render.profile/id :seon.render.profile/agent
+                  :seon.print/requery-id
+                  [:seon.cluster.agent/id agent-id]}))))))
+
+(defn- run-heading
+  [run]
+  (str "Run " (:seon.cluster.run/id run)
+       (when-let [opened (:seon.cluster.run/opened-at run)]
+         (str ", opened " (pr-str opened)))
+       (if-let [closed (:seon.cluster.run/closed-at run)]
+         (str ", closed " (pr-str closed))
+         ", still open")
+       "."))
+
+(defn format-history-ai
+  "Format this agent's own history as the REPL session it was.
+
+  The bytes per entry are the run loop's own, so an error appears exactly as
+  the loop printed it rather than in a second error shape invented here."
+  {:malli/schema [:=> [:cat [:or :seon.render.transcript/history
+                             :seon.error/value]]
+                  [:or :string :seon.error/value]]}
+  [derived]
+  (if (:seon.error/kind derived)
+    derived
+    (let [runs (:seon.render.transcript/runs derived)
+          older (:seon.render.transcript/older-runs derived)]
+      (str/join
+       "\n\n"
+       (cond->
+        (if (seq runs)
+          (mapv (fn [run]
+                  (str/join
+                   "\n"
+                   (cond-> [(run-heading run)]
+                     (:seon.cluster.run/error run)
+                     (conj (str "It did not run: "
+                                (:seon.cluster.run/error run)))
+                     :always
+                     (into (map :seon.render.history/bytes)
+                           (:seon.render.transcript/entries run)))))
+                runs)
+          ["No run of mine is recorded yet; this is my first episode."])
+         older (conj (print/render-elision-ai older)))))))
+
+(def ^:private history-source
+  (str ";; What have I already done? These are my own submitted forms and the\n"
+       ";; values they returned, newest run first, printed exactly as the run\n"
+       ";; loop printed them at the time.\n"
+       (pr-str (list `format-history-ai (list `agent-history {})))))
+
+(defn render-history-ai
+  "`:seon.render/ai` — source reading this agent's own evaluation history."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/source]}
+  [_runs]
+  history-source)
+
+(defn- runs-agent-id
+  "The agent these runs belong to, read from the runs themselves."
+  [database runs]
+  (or (some :seon.cluster.agent/id
+            (keep :seon.cluster.run/agent runs))
+      (when-let [eid (some #(get-in % [:seon.cluster.run/agent :db/id]) runs)]
+        (let [found (db/q '[:find ?id .
+                            :in $ ?agent
+                            :where [?agent :seon.cluster.agent/id ?id]]
+                          database eid)]
+          (when-not (:seon.error/kind found) found)))))
+
+(defn render-history-html
+  "`:seon.render/html` — one transcript per run, newest first.
+
+  BOTH PROJECTIONS COME FROM ONE DERIVATION. This renders exactly what
+  [[agent-history]] returned, so the page and the agent's context cannot
+  disagree; the per-run `render-run-html` path was measured at more than ten
+  seconds for three runs, because each call re-counts the agent's whole
+  history, and it is not on this path.
+
+  A closed run's results are labeled historical, because a reader must not
+  mistake a stored value for a value the agent just produced."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
+                  :seon.render/hiccup]}
+  [runs database]
+  (let [rows (if (and (sequential? runs) (every? map? runs)) (vec runs) [])
+        agent-id (runs-agent-id database rows)
+        derived (when agent-id
+                  (agent-history {:seon.db/db database
+                                  :seon.cluster.agent/id agent-id}))]
+    (cond
+      (nil? agent-id)
+      [:section {:class "seon-family-entry seon-run-history"}
+       [:h2 "History (0 runs)"]
+       [:p {:class "seon-run-history-empty"}
+        "No run of this agent is recorded yet."]]
+
+      (:seon.error/kind derived)
+      [:section {:class "seon-family-entry seon-run-history"}
+       [:h2 "History"]
+       [:p {:class "seon-run-history-unavailable"}
+        (:seon.error/message derived)]]
+
+      :else
+      (let [shown (:seon.render.transcript/runs derived)
+            older (:seon.render.transcript/older-runs derived)
+            total (or (:seon.render.data/total older) (count shown))]
+        (cond->
+         (into [:section {:class "seon-family-entry seon-run-history"}
+                [:h2 (str "History (" total " run"
+                          (when (not= 1 total) "s") ")")]]
+               (map
+                (fn [run]
+                  (let [closed? (some? (:seon.cluster.run/closed-at run))
+                        entries (:seon.render.transcript/entries run)]
+                    (cond->
+                     [:article {:class "seon-run-history-entry"}
+                      [:p {:class "seon-kicker"}
+                       (if closed?
+                         "Historical run — its results are stored, not fresh"
+                         "Open run")]
+                      [:h3 [:code (:seon.cluster.run/id run)]]
+                      [:p {:class "seon-run-history-window"}
+                       (run-heading run)]]
+                      (:seon.cluster.run/error run)
+                      (conj [:p {:class "seon-run-history-error"}
+                             (str "It did not run: "
+                                  (:seon.cluster.run/error run))])
+                      (seq entries)
+                      (conj [:pre {:class "seon-run-history-transcript"}
+                             [:code
+                              (str/join
+                               "\n"
+                               (map :seon.render.history/bytes entries))]])
+                      (empty? entries)
+                      (conj [:p {:class "seon-run-history-empty"}
+                             "This run evaluated no form."]))))
+                shown))
+          older
+          (conj [:p {:class "seon-run-history-elision"}
+                 (print/render-elision-ai older)]))))))

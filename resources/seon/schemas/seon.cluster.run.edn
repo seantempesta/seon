@@ -1,4 +1,12 @@
-#:seon.cluster.run{:agent :seon.db/ref,
+#:seon.cluster.run{:agent
+                   [:and
+                    {:description
+                     "The agent whose run this is; its reverse is that agent's own evaluation history.",
+                     :seon.render/ai
+                     seon.render.transcript/render-history-ai,
+                     :seon.render/html
+                     seon.render.transcript/render-history-html}
+                    :seon.db/ref],
                    :background-results [:set :seon.db/ref],
                    :closed-at :inst,
                    :error [:string {:min 1}],
