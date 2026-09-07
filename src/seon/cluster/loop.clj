@@ -1536,6 +1536,18 @@
               ;; delivery machinery does the rest
               :else (fail! failure))))))))
 
+(defn- evaluation-entity-id
+  "The entity id of one already-transacted evaluation, or nil.
+
+  Absence is the whole answer: an in-memory preview never froze an evaluation
+  entity, and asking for one that is not there must say so rather than mint
+  an identity nothing else can resolve."
+  [database evaluation-id]
+  (db/q '[:find ?evaluation .
+          :in $ ?evaluation-id
+          :where [?evaluation :seon.cluster.eval/id ?evaluation-id]]
+        database evaluation-id))
+
 (defn evaluate-sources
   "Evaluate ordered sources in one fork without settling or staging them.
 
@@ -1599,8 +1611,23 @@
               (assoc evaluation
                      :seon.cluster.eval/at at
                      :seon.cluster.eval/read-evidence (db/read-evidence @captured)
-                     :seon.cluster.eval/read-basis-transaction (db/basis-t database))]
-          (sci.eval/bind-result! ctx ordinal (:seon.sci.admit/value evaluation))
+                     :seon.cluster.eval/read-basis-transaction (db/basis-t database))
+              ;; THE HANDLE IS THE EVALUATION'S OWN IDENTITY. The freeze
+              ;; already transacted this ordinal's evaluation entity, so its
+              ;; entity id is resolvable against the connection's CURRENT
+              ;; value — and an evaluation that never persisted (the page's
+              ;; in-memory preview) has no identity, so it gets no handle and
+              ;; binds nothing rather than a name a later turn cannot reach
+              ;; (ruling 59c).
+              entity-id (when run-id
+                          (evaluation-entity-id
+                           @connection
+                           (run/receipt-identity run-id ordinal)))
+              handle (when entity-id (admit/result-handle entity-id))
+              evaluation (cond-> evaluation
+                           handle (assoc :seon.repl/handle handle))]
+          (when handle
+            (sci.eval/bind-result! ctx handle (:seon.sci.admit/value evaluation)))
           (recur (next remaining) (inc ordinal)
                  (or (:seon.sci.eval/ending-ns evaluation) namespace-name)
                  (conj results
@@ -1622,8 +1649,6 @@
                   :seon.db/db @connection
                   :seon.db/connection connection
                   :seon.cluster.agent/id agent-id
-                  ;; The turn's fork rebinds this run's settled results, so a
-                  ;; later form can name a value an earlier one produced.
                   :seon.cluster.run/id run-id}))
         trigger (phase #(message/trigger @connection run-id))]
     (if-let [failure (some #(when (:seon.error/kind %) %)

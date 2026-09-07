@@ -21,7 +21,8 @@
   SCI interrupts propagate. Other projection failures panic or degrade to
   markers according to `:seon.config/on-core-error`. Admission opens no
   resources and writes no durable state."
-  (:require [clojure.test.check.generators :as gen]
+  (:require [clojure.edn :as edn]
+            [clojure.test.check.generators :as gen]
             ;; sci.lang and sci.impl.types are loaded for their deftypes:
             ;; the class literals below do not exist until their defining
             ;; namespace has loaded, and a require is how that is stated.
@@ -433,6 +434,42 @@
                     ::projection-error (::print/message print-node)}
     ::print/throwable (semantic-value (::print/value print-node))
     (::print/elided ::print/pruned) ::elided))
+
+(def ^:private opaque-result-faces
+  ;; A node whose face kept only a name or a class NEVER held the value.
+  ;; Ruling 59c: a handle that resolves to a description of a value the agent
+  ;; cannot use is worse than no handle, because it answers `(count result/e7)`
+  ;; with a lie instead of an unresolved symbol.
+  #{::print/var ::print/type ::print/class ::print/object
+    ::print/failed ::print/throwable ::print/truncated-string
+    ::print/elided ::print/projected ::print/pruned})
+
+(defn restorable-node
+  "One settled evaluation's print node, when its value survives the node.
+
+  Nil for a node that kept only a name, for an unreadable node, and for an
+  evaluation that stored none. The question `is this value reachable again?`
+  is asked HERE, of the node itself, so nobody has to remember the answer in
+  a flag beside it."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :map]]}
+  [serialized]
+  (when (string? serialized)
+    (let [node (try (edn/read-string serialized) (catch Throwable _ nil))]
+      (when (and (map? node)
+                 (::print/face node)
+                 (not (contains? opaque-result-faces (::print/face node))))
+        node))))
+
+(defn result-handle
+  "The symbol naming one stored evaluation's value: `result/e<entity id>`.
+
+  The handle is derived from the evaluation's OWN identity, so two runs of one
+  agent can never mint the same name for two values (ruling 69 as amended
+  2026-09-07). An evaluation that never persisted has no entity id and
+  therefore no handle at all."
+  {:malli/schema [:=> [:cat :int] :qualified-symbol]}
+  [entity-id]
+  (symbol "result" (str "e" entity-id)))
 
 (defn canonical-edn
   "Return canonical readable EDN independent of ambient print bindings."

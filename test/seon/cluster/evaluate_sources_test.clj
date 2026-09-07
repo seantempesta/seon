@@ -8,6 +8,7 @@
             [seon.context :as context]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
 
@@ -20,7 +21,31 @@
                     {:seon.cluster.agent/id "preview-batch-agent"
                      :seon.ns/name 'my.agents.preview-batch
                      :seon.cluster/name "preview-batch"}))
+     ;; THE RUN AND ITS EVALUATION ROWS EXIST BEFORE ANY FORM RUNS, exactly
+     ;; as the turn's one intent commit makes them: a handle is the stored
+     ;; evaluation's own entity id, so a form can only name an earlier value
+     ;; when that value's evaluation actually persisted.
+     (db/transact! connection
+                   [{:seon.cluster.run/id "preview-run"
+                     :seon.cluster.run/agent
+                     [:seon.cluster.agent/id "preview-batch-agent"]
+                     :seon.cluster.run/opened-at (java.util.Date.)}])
+     (db/transact! connection
+                   (into []
+                         (map (fn [ordinal]
+                                {:seon.cluster.eval/id
+                                 (run/receipt-identity "preview-run" ordinal)
+                                 :seon.cluster.eval/run
+                                 [:seon.cluster.run/id "preview-run"]
+                                 :seon.cluster.eval/ordinal ordinal
+                                 :seon.cluster.eval/at (java.util.Date.)}))
+                         (range 7)))
      (let [database @connection
+           earlier-handle
+           (admit/result-handle
+            (:db/id (db/pull database [:db/id]
+                             [:seon.cluster.eval/id
+                              (run/receipt-identity "preview-run" 2)])))
            base (support/fork-cluster-ctx connection)
            forked (sci.eval/fork-for-turn
                    {:seon.sci.eval/ctx base
@@ -44,7 +69,7 @@
            raw-source (str "(seon.db/pull [:seon.cluster.agent/id] [:seon.cluster.agent/id \"later-agent\"])\n"
                          "(in-ns 'preview.batch-next)\n"
                          "(+ 1 2)\n"
-                         "(inc result/e2)\n"
+                         "(inc " earlier-handle ")\n"
                          "(seon.db/pull [:seon.cluster.agent/id] [:seon.cluster.agent/id \"later-agent\"])\n"
                          "(apply str (repeat 50000 \"x\"))\n"
                          "(throw (ex-info \"preview failure\" {}))")
@@ -75,6 +100,7 @@
                    :seon.db/db database
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
                    :seon.cluster.agent/id "preview-batch-agent"
+                   :seon.cluster.run/id "preview-run"
                    :seon.cluster.run.form/ordinal 0
                    :seon.ns/name 'my.agents.preview-batch
                    :seon.cluster.reply/sources sources}))

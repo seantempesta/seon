@@ -44,13 +44,26 @@
             [seon.test-support :as test-support]))
 
 (deftest evaluation-ai-is-only-the-repl-session
-  (is (= "my.probe=> (+ 40 2)\n#:seon.repl{:value 42, :result result/e0}"
-         (repl/render-ai
-          {:seon.cluster.eval/source "(+ 40 2)"
-           :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/ns {:seon.ns/name 'my.probe}
-           :seon.cluster.eval/result-edn
-           "#:seon.print{:face :seon.print/number, :value 42}"})))
+  (let [rendered
+        (repl/render-ai
+         {:db/id 7042
+          :seon.cluster.eval/source "(+ 40 2)"
+          :seon.cluster.eval/ordinal 0
+          :seon.cluster.eval/ns {:seon.ns/name 'my.probe}
+          :seon.cluster.eval/result-edn
+          "#:seon.print{:face :seon.print/number, :value 42}"})
+        lines (str/split-lines rendered)]
+    (is (= "my.probe=> (+ 40 2)\n#:seon.repl{:value 42, :result result/e7042}"
+           rendered)
+        "the handle is the evaluation's own entity id, never its ordinal")
+    ;; THE RESPONSE IS ONE DATUM. It may wrap when a value is wide, but the
+    ;; prompt line is followed by the map and by nothing else: a second
+    ;; line that is not a continuation of that map would be a second grammar,
+    ;; and a comment-shaped one would be something the agent should write.
+    (is (= 2 (count lines)))
+    (is (str/starts-with? (second lines) "#:seon.repl{"))
+    (is (str/ends-with? (last lines) "}"))
+    (is (not-any? #(str/starts-with? (str/trim %) ";") (rest lines))))
   (is (nil? (repl/render-ai {}))
       "an evaluation with no source is not a REPL entry")
   (is (= "user=> (side-effect)"

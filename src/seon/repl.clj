@@ -12,7 +12,7 @@
 
       ; the agent's comment, verbatim, above the prompt
       my.agents.juniper=> (+ 1 1)
-      #:seon.repl{:value 2, :result result/e0, :ms 3}
+      #:seon.repl{:value 2, :result result/e41, :ms 3}
 
   Comments sit ABOVE the prompt so a prompt line holds exactly one form and
   HTML can label the comment separately. Key order is enforced by walking an
@@ -24,7 +24,8 @@
             [clojure.string :as str]
             [seon.print :as print]
             [seon.render.value :as value]
-            [seon.schema.edn :as schema.edn])
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.admit :as admit])
   (:import [java.io PushbackReader StringReader]))
 
 (schema.edn/load! {})
@@ -117,8 +118,8 @@
 
 (defn- response-entries
   "The response's present keys, in declared order, each already text."
-  [{ordinal :seon.cluster.eval/ordinal
-    output :seon.cluster.eval/output
+  [{output :seon.cluster.eval/output
+    handle :seon.repl/handle
     ending-ns :seon.sci.eval/ending-ns
     prompt-ns :seon.ns/name
     duration :seon.eval/duration-ms
@@ -127,15 +128,11 @@
         error (error-text emission)
         by-key {:seon.repl/value (when (and (nil? error) (some? value)) value)
                 :seon.repl/error (some-> error pr-str)
-                ;; A handle names a value a later turn can reach. Ruling 59c:
-                ;; a caller that could not bind one says so with an explicit
-                ;; false, and the response then simply has no `:result` key.
-                :seon.repl/result (when (and (not (false?
-                                              (:seon.repl/result-handle?
-                                               emission)))
-                                             (int? ordinal)
-                                             (or (some? value) (some? error)))
-                                    (str "result/e" ordinal))
+                ;; A HANDLE IS A FACT, NOT A FLAG. The caller that could bind
+                ;; one hands the symbol it bound; ruling 59c's "no handle" is
+                ;; simply its absence, so nothing here re-decides what the
+                ;; binding already settled.
+                :seon.repl/result (some-> handle str)
                 :seon.repl/out (when (seq output) (pr-str output))
                 :seon.repl/ns (when (and ending-ns (not= ending-ns prompt-ns))
                                 (str ending-ns))
@@ -222,7 +219,15 @@
 
     (get-in unit [:seon.cluster.run.form/ns :seon.ns/name])
     (assoc :seon.ns/name
-           (get-in unit [:seon.cluster.run.form/ns :seon.ns/name]))))
+           (get-in unit [:seon.cluster.run.form/ns :seon.ns/name]))
+
+    ;; THE HANDLE COMES FROM THE EVALUATION'S OWN IDENTITY, so two runs of one
+    ;; agent never name two values alike. An evaluation with no entity id never
+    ;; persisted, and a node that kept only a name never held the value: both
+    ;; have no handle, and the response then carries no `:result` key.
+    (and (int? (:db/id unit))
+         (admit/restorable-node (:seon.cluster.eval/result-edn unit)))
+    (assoc :seon.repl/handle (admit/result-handle (:db/id unit)))))
 
 (defn render-ai
   "`:seon.render/ai` — one evaluation, as the REPL session it was."

@@ -10,7 +10,11 @@
             [:string
              {:min 1,
               :description
-              "The symbol naming the bound handle for this evaluation's value, result/e<ordinal>, so a later turn in the same agent's session can reach the value it already produced."}],
+              "The bound handle for this evaluation's value as text, result/e<entity-id>, so a later turn in the same agent's session can reach the value it already produced. Present exactly when :seon.repl/handle is."}],
+            :handle
+            [:qualified-symbol
+             {:description
+              "The symbol one evaluation's value is bound under in the agent's fork, derived from the evaluation entity's own id as result/e<entity-id>. Handles therefore never collide across an agent's runs, and an evaluation that never persisted — or whose stored node kept only a name — simply has none."}],
             :out
             [:string
              {:description
@@ -50,11 +54,7 @@
              [:seon.eval/duration-ms {:optional true} :seon.eval/duration-ms]
              [:seon.repl/value {:optional true} :seon.repl/value]
              [:seon.print/options {:optional true} :seon.print/options]
-             [:seon.repl/result-handle? {:optional true} :seon.repl/result-handle?]],
-            :result-handle?
-            [:boolean
-             {:description
-              "False when no handle could be bound for this evaluation's value — ruling 59c: a value that does not survive serialization simply has no handle, and the response then carries no :seon.repl/result key."}],
+             [:seon.repl/handle {:optional true} :seon.repl/handle]],
 :comment [:string {:min 1}],
             :expression
             [:or

@@ -2,7 +2,8 @@
   "The REPL response grammar: what an agent reads back for one form."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [seon.repl :as repl]))
+            [seon.repl :as repl]
+            [seon.sci.admit :as admit]))
 
 (def ^:private symbol-vector
   (str "#:seon.print{:face :seon.print/vector, :items ["
@@ -20,21 +21,21 @@
                   "; the agent's comment, verbatim, above the prompt"
                   :seon.cluster.eval/source "(+ 1 1)"
                   :seon.ns/name 'my.agents.juniper
-                  :seon.cluster.eval/ordinal 0
+                  :seon.repl/handle (admit/result-handle 41)
                   :seon.cluster.eval/result-edn (number-node 2)
                   :seon.eval/duration-ms 3})]
       (is (= (str "; the agent's comment, verbatim, above the prompt\n"
                   "my.agents.juniper=> (+ 1 1)\n"
-                  "#:seon.repl{:value 2, :result result/e0, :ms 3}")
+                  "#:seon.repl{:value 2, :result result/e41, :ms 3}")
              emitted))
       (is (= 3 (count (str/split-lines emitted)))
           "comment, prompt, response — never a comment glued into the prompt")))
   (testing "no comment means no blank line before the prompt"
     (is (= (str "my.agents.juniper=> (+ 1 1)\n"
-                "#:seon.repl{:value 2, :result result/e0, :ms 3}")
+                "#:seon.repl{:value 2, :result result/e41, :ms 3}")
            (repl/text {:seon.cluster.eval/source "(+ 1 1)"
                        :seon.ns/name 'my.agents.juniper
-                       :seon.cluster.eval/ordinal 0
+                       :seon.repl/handle (admit/result-handle 41)
                        :seon.cluster.eval/result-edn (number-node 2)
                        :seon.eval/duration-ms 3})))))
 
@@ -43,7 +44,7 @@
     (let [emission {:seon.eval/duration-ms 1
                     :seon.sci.eval/ending-ns 'my.agents.probe
                     :seon.cluster.eval/output "hi\n"
-                    :seon.cluster.eval/ordinal 2
+                    :seon.repl/handle (admit/result-handle 2)
                     :seon.cluster.eval/result-edn (number-node 41)
                     :seon.cluster.eval/source "(do (println \"hi\") 41)"
                     :seon.ns/name 'my.agents.juniper}
@@ -134,12 +135,39 @@
                        :seon.cluster.eval/ordinal 3}))
         "an empty response map would claim the form had answered")))
 
-(deftest a-value-that-could-not-be-bound-carries-no-handle
+(deftest the-handle-is-the-evaluations-own-identity
+  (testing "a stored evaluation names its value by its entity id, not its ordinal"
+    (let [handle (admit/result-handle 8143)]
+      (is (qualified-symbol? handle))
+      (is (= 'result (symbol (namespace handle)))
+          "the handle is interned in the one `result` namespace")
+      (is (str/includes?
+           (repl/render-ai {:db/id 8143
+                            :seon.cluster.eval/source "(+ 1 1)"
+                            :seon.cluster.eval/ordinal 0
+                            :seon.cluster.eval/result-edn (number-node 2)})
+           (str ":result " handle)))))
+  (testing "two evaluations at the same ordinal never share a handle"
+    (let [emitted (fn [entity-id]
+                    (repl/render-ai {:db/id entity-id
+                                     :seon.cluster.eval/source "(+ 1 1)"
+                                     :seon.cluster.eval/ordinal 0
+                                     :seon.cluster.eval/result-edn
+                                     (number-node 2)}))]
+      (is (not= (emitted 11) (emitted 12)))))
   (testing "ruling 59c: no handle rather than a handle naming nothing"
     (is (not (str/includes?
-              (repl/response {:seon.cluster.eval/source "(atom 1)"
-                              :seon.ns/name 'my.agents.juniper
-                              :seon.cluster.eval/ordinal 6
-                              :seon.repl/result-handle? false
-                              :seon.cluster.eval/result-edn (number-node 1)})
-              ":result")))))
+              (repl/render-ai
+               {:db/id 8144
+                :seon.cluster.eval/source "(atom 1)"
+                :seon.ns/name 'my.agents.juniper
+                :seon.cluster.eval/result-edn
+                "#:seon.print{:face :seon.print/object, :name \"clojure.lang.Atom\"}"})
+              ":result"))
+        "a node that kept only a class name never held the value")
+    (is (not (str/includes?
+              (repl/render-ai {:seon.cluster.eval/source "(+ 1 1)"
+                               :seon.cluster.eval/ordinal 0
+                               :seon.cluster.eval/result-edn (number-node 2)})
+              ":result"))
+        "an evaluation that never persisted has no identity to name")))

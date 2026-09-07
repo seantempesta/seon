@@ -23,6 +23,7 @@
             [seon.render.value :as value]
             [seon.render.walk :as walk]
             [seon.repl :as repl]
+            [seon.sci.admit :as admit]
             [seon.sci.reader :as reader])
   (:import [java.io PushbackReader StringReader]))
 
@@ -689,6 +690,20 @@
 
         :else (floor-text unit read-value)))))
 
+(defn- entry-handle
+  "The handle naming one entry's value, or nil.
+
+  A stored evaluation derives it from its own entity id; an in-memory one
+  carries the handle the fork actually bound. Either way the name comes from
+  the identity the value is reachable under, never from an ordinal that
+  restarts in every run."
+  [entry]
+  (let [entity (::entity entry)]
+    (or (:seon.repl/handle entity)
+        (when (and (int? (:db/id entity))
+                   (admit/restorable-node (::result entry)))
+          (admit/result-handle (:db/id entity))))))
+
 (defn- emission
   "One transcript entry as the REPL emission `seon.repl` renders.
 
@@ -699,21 +714,23 @@
   already decided, and the page, the history unit and the prompt read the
   same bytes because they read the same function."
   [unit entry]
-  (cond-> {:seon.cluster.eval/source (::source entry)
-           :seon.ns/name (or (::namespace entry) 'user)}
-    (::comment entry) (assoc :seon.cluster.eval/comment (::comment entry))
-    (::ordinal entry) (assoc :seon.cluster.eval/ordinal (::ordinal entry))
-    (::result entry) (assoc :seon.repl/value
-                            (bounded-result unit (::result entry)))
-    (::error entry) (assoc :seon.cluster.eval/error
-                           (bounded-scalar unit (::error entry)))
-    (::triage-edn entry) (assoc :seon.cluster.eval/triage-edn
-                                (::triage-edn entry))
-    (::output entry) (assoc :seon.cluster.eval/output
-                            (bounded-scalar unit (::output entry)))
-    (::ending-ns entry) (assoc :seon.sci.eval/ending-ns (::ending-ns entry))
-    (::duration-ms entry) (assoc :seon.eval/duration-ms
-                                 (::duration-ms entry))))
+  (let [handle (entry-handle entry)]
+    (cond-> {:seon.cluster.eval/source (::source entry)
+             :seon.ns/name (or (::namespace entry) 'user)}
+      (::comment entry) (assoc :seon.cluster.eval/comment (::comment entry))
+      (::ordinal entry) (assoc :seon.cluster.eval/ordinal (::ordinal entry))
+      handle (assoc :seon.repl/handle handle)
+      (::result entry) (assoc :seon.repl/value
+                              (bounded-result unit (::result entry)))
+      (::error entry) (assoc :seon.cluster.eval/error
+                             (bounded-scalar unit (::error entry)))
+      (::triage-edn entry) (assoc :seon.cluster.eval/triage-edn
+                                  (::triage-edn entry))
+      (::output entry) (assoc :seon.cluster.eval/output
+                              (bounded-scalar unit (::output entry)))
+      (::ending-ns entry) (assoc :seon.sci.eval/ending-ns (::ending-ns entry))
+      (::duration-ms entry) (assoc :seon.eval/duration-ms
+                                   (::duration-ms entry)))))
 
 (defn- input-text
   [unit entry _detail]

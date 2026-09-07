@@ -17,6 +17,7 @@
             [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
             [seon.repl :as repl]
+            [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
 
@@ -358,7 +359,12 @@
      :seon.cluster.eval/ns [:seon.ns/name 'my.agents.transcript]
      :seon.cluster.eval/output "side effect\n"
      :seon.cluster.eval/read-basis-transaction 41
-     :seon.cluster.eval/result-edn "42"}
+     ;; THE STORED NODE IS THE ADMITTED PRINT NODE production writes, not a
+     ;; bare datum: the handle is derived from the node's face (a face that
+     ;; kept only a name never held the value), so a fixture that stores raw
+     ;; EDN is asserting a shape the writer never produces.
+     :seon.cluster.eval/result-edn
+     "#:seon.print{:face :seon.print/number, :value 42}"}
     {:seon.cluster.message/id "send-2"
      :seon.cluster.message/from [:seon.cluster.agent/id agent-id]
      :seon.cluster.message/to [:seon.cluster.agent/id peer-id]
@@ -414,6 +420,8 @@
     (fn [connection]
       (seed-populated-history! connection)
       (let [request (unit @connection 100000)
+            result-eid (:db/id (db/pull @connection [:db/id]
+                                        [:seon.cluster.eval/id "eval-result"]))
             ai (transcript/render-ai request)
             html-value (transcript/render-html request)
             html (hiccup/->string html-value)
@@ -441,7 +449,8 @@
                (str ";; calculate the answer\n"
                     "my.agents.transcript=> (do (println \"side effect\") "
                     "(+ 20 22))\n"
-                    "#:seon.repl{:value 42, :result result/e0, "
+                    "#:seon.repl{:value 42, :result "
+                    (admit/result-handle result-eid) ", "
                     ":out \"side effect\\n\"}"))
               "comment above, one form on the prompt line, one response map")
           (is (str/includes? ai "waiting for the peer review"))
@@ -1133,7 +1142,8 @@
          (is (= "(do (println \"side effect\") (+ 20 22))"
                 (:seon.render.history/form (first entries)))
              "the form is the form; its comment is a fact beside it")
-         (is (= (str "#:seon.repl{:value 42, :result result/e0, "
+         (is (= (str "#:seon.repl{:value 42, :result "
+                     (admit/result-handle evaluation) ", "
                      ":out \"side effect\\n\"}")
                 (:seon.render.history/printed-value (first entries)))
              "the printed value is the one REPL response, output as its own key")
@@ -1156,9 +1166,15 @@
                          :seon.cluster.run.form/ns
                          [:seon.ns/name (get-in facts [:seon.cluster.eval/ns :seon.ns/name])]}
                         :seon.sci.eval/evaluation
-                        (select-keys facts [:seon.cluster.eval/result-edn
-                                            :seon.cluster.eval/comment
-                                            :seon.cluster.eval/output])}])]
+                        ;; An in-memory evaluation carries the handle the fork
+                        ;; bound, exactly as `evaluate-sources` assoc's it; a
+                        ;; stored one derives the same handle from its entity
+                        ;; id, so the two projections are the same bytes.
+                        (assoc (select-keys facts [:seon.cluster.eval/result-edn
+                                                   :seon.cluster.eval/comment
+                                                   :seon.cluster.eval/output])
+                               :seon.repl/handle
+                               (admit/result-handle evaluation))}])]
            (is (= (mapv :seon.render.history/bytes entries)
                   (mapv :seon.render.history/bytes
                         (transcript/history-entries in-memory))))

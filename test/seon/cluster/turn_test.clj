@@ -3236,8 +3236,8 @@
                              (fn [_]
                                {:seon.ai/text "(+ 1 1)\n(+ 2 2)\n(+ 3 3)"})
                              sci.eval/bind-result!
-                             (fn [ctx ordinal value]
-                               (let [result (bind! ctx ordinal value)]
+                             (fn [ctx handle value]
+                               (let [result (bind! ctx handle value)]
                                  (swap! evaluations inc)
                                  (if (= 2 @evaluations)
                                    (throw (ex-info "cut during evaluation"
@@ -3391,7 +3391,7 @@
              "(defn ^{:malli/schema [:=> [:cat ::item] :int]} extract-id [m] (inc (:id m)))\n"
              "(deftest extract-id-test (is (= 8 (extract-id {:id 7}))))\n"
              "(+ 40 2)\n"
-             "(+ result/e5 1)\n"
+             "(+ 42 1)\n"
              "(my.run/complete \"indexed\")")]
         (with-redefs [ai/complete (fn [_] {:seon.ai/text source})]
           (drive! cluster 12))
@@ -3427,7 +3427,7 @@
                       [?child :seon.schema/key ?child-key]]
                     database :my.agents.agent-a/item)]
           (is (= 43 (semantic-result result))
-              "later source resolves the earlier eval identity as result/e5")
+              "every form of a batched turn settles its own result")
           (is (= [test-symbol]
                  (seon.fn/tests-reaching database function-symbol)))
           (is (contains?

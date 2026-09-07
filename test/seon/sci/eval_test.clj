@@ -34,6 +34,7 @@
             [seon.render.walk :as render.walk]
             [seon.render.web :as render.web]
             [seon.schema :as schema]
+            [seon.sci.admit :as admit]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support]))
@@ -2101,7 +2102,7 @@
            "a preserved refusal still gains the boundary's own evidence")))))
 
 (deftest a-later-turn-reaches-the-values-its-earlier-forms-produced
-  (testing "ruling 59c: settled evaluations rebind as result/eN handles"
+  (testing "ruling 59c: every stored evaluation of the agent rebinds under its own handle"
     (test-support/with-database
       (fn [connection]
         (test-support/seed-cluster! connection "result-rehydration")
@@ -2112,6 +2113,11 @@
         (db/transact!
          connection
          [{:seon.cluster.run/id "rehydration-run"
+           :seon.cluster.run/agent [:seon.cluster.agent/id "rehydrator"]
+           :seon.cluster.run/opened-at (java.util.Date.)}
+          ;; TWO RUNS OF ONE AGENT, both at ordinal 0. Under the ordinal
+          ;; spelling this replaced they were one name for two values.
+          {:seon.cluster.run/id "rehydration-run-2"
            :seon.cluster.run/agent [:seon.cluster.agent/id "rehydrator"]
            :seon.cluster.run/opened-at (java.util.Date.)}
           {:seon.cluster.eval/id "[\"rehydration-run\" 0]"
@@ -2131,17 +2137,40 @@
            :seon.cluster.eval/at (java.util.Date.)
            :seon.cluster.eval/source "(atom 1)"
            :seon.cluster.eval/result-edn
-           "#:seon.print{:face :seon.print/object, :name \"clojure.lang.Atom\"}"}])
-        (let [ctx (:seon.sci.eval/ctx
+           "#:seon.print{:face :seon.print/object, :name \"clojure.lang.Atom\"}"}
+          {:seon.cluster.eval/id "[\"rehydration-run-2\" 0]"
+           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run-2"]
+           :seon.cluster.eval/ordinal 0
+           :seon.cluster.eval/at (java.util.Date.)
+           :seon.cluster.eval/source "[4 5]"
+           :seon.cluster.eval/result-edn
+           (str "#:seon.print{:face :seon.print/vector, :items ["
+                "#:seon.print{:face :seon.print/number, :value 4} "
+                "#:seon.print{:face :seon.print/number, :value 5}]}")}])
+        (let [database @connection
+              eid (fn [evaluation-id]
+                    (:db/id (db/pull database [:db/id]
+                                     [:seon.cluster.eval/id evaluation-id])))
+              first-handle (admit/result-handle (eid "[\"rehydration-run\" 0]"))
+              second-handle (admit/result-handle (eid "[\"rehydration-run-2\" 0]"))
+              opaque-handle (admit/result-handle (eid "[\"rehydration-run\" 1]"))
+              ctx (:seon.sci.eval/ctx
                    (eval/fork-for-turn
                     {:seon.sci.eval/ctx (test-support/fork-cluster-ctx
                                          connection)
-                     :seon.db/db @connection
+                     :seon.db/db database
                      :seon.db/connection connection
                      :seon.cluster.agent/id "rehydrator"
-                     :seon.cluster.run/id "rehydration-run"}))]
-          (is (= 3 (sci/eval-string* ctx "(count result/e0)"))
-              "a later turn counts the value an earlier form produced")
-          (is (= [1 2 3] (sci/eval-string* ctx "result/e0")))
-          (is (thrown? Throwable (sci/eval-string* ctx "result/e1"))
+                     :seon.cluster.run/id "rehydration-run-2"}))]
+          (is (not= first-handle second-handle)
+              "two runs at ordinal 0 mint two handles, never one")
+          (is (every? #(= 'result (symbol (namespace %)))
+                      [first-handle second-handle])
+              "a handle is a qualified symbol in the one `result` namespace")
+          (is (= 3 (sci/eval-string* ctx (str "(count " first-handle ")")))
+              "a value from an EARLIER run is still reachable by its handle")
+          (is (= [1 2 3] (sci/eval-string* ctx (str first-handle))))
+          (is (= [4 5] (sci/eval-string* ctx (str second-handle)))
+              "and this run's own value under its own name")
+          (is (thrown? Throwable (sci/eval-string* ctx (str opaque-handle)))
               "an opaque node binds no handle rather than a lie about one"))))))

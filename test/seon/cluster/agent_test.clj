@@ -347,8 +347,12 @@
       (let [routing (armory)
             armer-channel (async/chan (async/sliding-buffer 1))
             armer-completion (async/promise-chan)
+            ;; A HANDLE IS THE STORED EVALUATION'S OWN ENTITY ID, which does
+            ;; not exist when this source is authored: an agent names an
+            ;; earlier value from the handle its context showed it, never from
+            ;; an ordinal it can predict. This run proves the durable path.
             text (str "; Read one value.\n(+ 1 1)\n"
-                      "; Consume the preceding result.\n(identity result/e0)")]
+                      "; Read a second value.\n(identity (+ 1 1))")]
         (db/transact!
          connection
          [(agent-row "source-agent")
@@ -444,7 +448,7 @@
                            "; Read one value.\n(+ 1 1)"}
                           {:seon.cluster.run.form/ordinal 1
                            :seon.cluster.run.form/source
-                           "; Consume the preceding result.\n(identity result/e0)"}]
+                           "; Read a second value.\n(identity (+ 1 1))"}]
                          (sort-by :seon.cluster.run.form/ordinal sources))
                       "comments and exact forms pass through the ordinary parser")
                   (is (= [[0 {:seon.print/face :seon.print/number

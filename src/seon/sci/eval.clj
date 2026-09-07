@@ -533,20 +533,22 @@
                        :seon.sci.reader/event-count (count events)})))))
 
 (defn bind-result!
-  "Bind one turn-local eval result as its stable `result/eN` symbol.
+  "Bind one evaluation's value in the fork under its own handle.
 
-  The turn fork supplies the agent/run portion of eval identity; the ordinal is
-  therefore the complete distinguishing projection inside that fork and is the
-  part later source can name before the intent transaction assigns database
-  entity ids."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :int :any] :symbol]}
-  [ctx ordinal value]
+  The handle is the evaluation's identity as a symbol (`admit/result-handle`),
+  never its ordinal: ordinals restart at 0 in every run, so an ordinal handle
+  named two different values in one agent's context and a later turn could
+  read the wrong one. Any valid symbol is admissible; this binds the name in
+  the `result` namespace the handle qualifies."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol :any]
+                  :qualified-symbol]}
+  [ctx handle value]
   (let [namespace-name 'result
-        intern-name (symbol (str "e" ordinal))]
+        intern-name (symbol (name handle))]
     (when-not (sci/find-ns ctx namespace-name)
       (sci/add-namespace! ctx namespace-name {}))
     (sci/intern ctx namespace-name intern-name value)
-    (symbol (str namespace-name) (str intern-name))))
+    handle))
 
 (defn- binding-rows
   "Project SCI's effective resolver inputs into namespace components."
@@ -1720,64 +1722,52 @@
     [(:sci.root/ns value) (:sci.root/name value)]
     [(:seon.ns/name namespace-ref) intern-name]))
 
-(def ^:private opaque-result-faces
-  ;; A node whose face kept only a name or a class NEVER held the value.
-  ;; Ruling 59c: a handle that resolves to a description of a value the agent
-  ;; cannot use is worse than no handle, because it answers `(count result/e0)`
-  ;; with a lie instead of an unresolved symbol.
-  #{:seon.print/var :seon.print/type :seon.print/class :seon.print/object
-    :seon.print/failed :seon.print/throwable :seon.print/truncated-string
-    :seon.print/elided :seon.print/projected :seon.print/pruned})
-
-(defn- restorable-result-node
-  "One settled evaluation's print node, when its value survives the node."
-  [serialized]
-  (when (string? serialized)
-    (let [node (try (edn/read-string serialized) (catch Throwable _ nil))]
-      (when (and (map? node)
-                 (:seon.print/face node)
-                 (not (contains? opaque-result-faces
-                                 (:seon.print/face node))))
-        node))))
-
 (defn- bind-stored-results!
-  "Bind `result/eN` for one run's already settled evaluations.
+  "Bind every stored evaluation of ONE AGENT under its own handle.
 
   An evaluation is shareable data, not a turn-local accident: a later turn's
   fork rebuilds the handles from the stored admitted node, so an agent that
-  wrote `(range 100)` last turn can still ask `(count result/e0)` this one
-  (ruling 59c). A node that kept only a name — a Var, an object, a failure,
-  anything past the caps — binds NOTHING, because the value it describes was
-  never in it, and an unresolved symbol is the honest answer.
+  wrote `(range 100)` in one run can still ask `(count result/e41)` in the
+  next (ruling 59c). The scope is the agent, not the run in effect, because
+  the agent's context renders every run's evaluations: a handle bound only
+  for the current run would resolve to nothing — or, under the ordinal
+  spelling this replaced, to a different run's value.
 
-  Returns the ordinals it bound."
-  [ctx db run-id]
-  (when run-id
-    (let [rows (db/q '[:find ?ordinal ?result-edn
-                       :in $ ?run-id
+  A node that kept only a name — a Var, an object, a failure, anything past
+  the caps — binds NOTHING, because the value it describes was never in it,
+  and an unresolved symbol is the honest answer.
+
+  Returns the handles it bound."
+  [ctx db agent-id]
+  (when agent-id
+    (let [rows (db/q '[:find ?evaluation ?result-edn
+                       :in $ ?agent-id
                        :where
-                       [?run :seon.cluster.run/id ?run-id]
+                       [?agent :seon.cluster.agent/id ?agent-id]
+                       [?run :seon.cluster.run/agent ?agent]
                        [?evaluation :seon.cluster.eval/run ?run]
-                       [?evaluation :seon.cluster.eval/ordinal ?ordinal]
                        [?evaluation :seon.cluster.eval/result-edn ?result-edn]]
-                     db run-id)]
+                     db agent-id)]
       (into []
-            (keep (fn [[ordinal serialized]]
-                    (when-let [node (restorable-result-node serialized)]
-                      (bind-result! ctx (long ordinal)
-                                    (admit/semantic-value node))
-                      (long ordinal))))
+            (keep (fn [[entity-id serialized]]
+                    (when-let [node (admit/restorable-node serialized)]
+                      (bind-result! ctx (admit/result-handle (long entity-id))
+                                    (admit/semantic-value node)))))
             (sort-by first (or rows []))))))
 
 (defn fork-for-turn
-  "Fork the live base and rehydrate only the selected agent's defs."
+  "Fork the live base, rehydrate the selected agent's defs, and bind its
+  stored evaluation handles.
+
+  The handles are the AGENT's, not the run's: an agent's context renders
+  every run's evaluations, so a fork that bound only the run in effect would
+  leave the names it just showed the agent unresolved."
   {:malli/schema [:=> [:cat :seon.sci.eval/defs-fork-request]
                   :seon.sci.eval/defs-fork-result]}
   [{base-ctx :seon.sci.eval/ctx
     db :seon.db/db
     connection :seon.db/connection
-    agent-id :seon.cluster.agent/id
-    :as request}]
+    agent-id :seon.cluster.agent/id}]
   (let [ctx (cond-> (sci/fork base-ctx)
               (env/environment? (env/of base-ctx))
               (env/carry-state
@@ -1803,7 +1793,7 @@
     (when (and assigned-namespace
                (not (sci/find-ns ctx assigned-namespace)))
       (sci/add-namespace! ctx assigned-namespace {}))
-    (bind-stored-results! ctx db (:seon.cluster.run/id request))
+    (bind-stored-results! ctx db agent-id)
     (doseq [[row value] entries]
       (let [[namespace-name intern-name] (def-target row value)]
         (when-not (sci/find-ns ctx namespace-name)
