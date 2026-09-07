@@ -404,10 +404,76 @@ identity-source expectation; those were corrected. Live preview readiness is
 not established by this gate: publication instrumentation and the previously
 faulted render proc remain separate integration work.
 
-
 The previously protected cluster renderer rewrite was subsequently reviewed by
 root and included with the lifecycle checkpoint: `render-ai` produces the
 ordinary pull source and `format-ai` returns terminal cluster text. Root's
 live pure probe checked generated source plus the pulled configuration,
 instruction, and toolkit description. Namespace producer changes remain
 outside this slice, with its mixed-output defect retained above.
+
+## Provider-boundary trace after selection and comparison landed
+
+The locked selection is currently a debug-only value. The debug database read
+calls `context/selection` (`src/seon/render/web.clj:1919-1923`) and
+`debug-context-html` renders each contribution by handing its exact evaluation
+refs to `transcript/render-ai` (`src/seon/render/web.clj:1333-1389`). This is a
+faithful stored transcript: `transcript/projection` passes those refs to the
+six-argument `history` query (`src/seon/render/transcript.clj:866-881`).
+
+The provider path never performs that read. `cluster.prompt/prompt` delegates
+to `render/acquire-context!` and then forwards the returned text and segments
+unchanged (`src/seon/cluster/prompt.clj:174-191`). The render proc's
+`context-pass` serves its retained `::ai-entries` immediately when no render
+read dependency is stale; on refresh it obtains only
+`render.walk/history` (`src/seon/render/web.clj:2661-2713`). That walk builds
+paired generic form/value entries from the current neighborhood
+(`src/seon/render/walk.clj:796-829`). Neither branch calls
+`context/selection`, so append and compact affect the debug comparison but not
+the actual provider prompt.
+
+The smallest one-path correction belongs at `context-pass`, the existing
+provider acquisition owner:
+
+1. Extend `transcript/history-entries` to honor an optional
+   `:seon.context.contribution/evaluations` exactly as `render-ai` already
+   does: pass the supplied refs to the existing `history` query and return its
+   immutable form/result entries. This exposes structured entries rather than
+   pre-rendered text and invokes no evaluator.
+2. At every `context-pass`, derive `context/selection` from the request's one
+   database value. In contribution position order, call that transcript entry
+   function with each contribution's evaluation refs. Concatenate those
+   entries with the existing generated-walk entries before the one existing
+   `history-segments`/`history-text` assembly. Do this in both the retained
+   fast branch and refresh branch; otherwise a selection-only transaction can
+   leave the cached prompt unchanged even though the database wake arrived.
+3. Keep the generated walk cache unchanged. Selection rows are already the
+   durable authority and the transcript query orders each selected set by its
+   stored run/ordinal facts. No selected text, cache entry, synthetic form,
+   evaluator, or second prompt assembler is needed.
+
+The focused acceptance is provider-boundary evidence: append a system preview
+run, acquire the provider prompt, and assert that its stored source and actual
+result appear once; compact to refreshed evaluation refs and assert the old
+result disappears and the refreshed stored result appears, with the execution
+counter unchanged during both prompt acquisitions. The debug and provider
+bytes for the selected contribution should come from the same transcript
+entries.
+
+One adjacent query risk needs an explicit regression. The default transcript
+receipt query currently selects active runs by agent without inspecting
+`:seon.cluster.run.form/author` (`src/seon/render/transcript.clj:170-183` and
+`:242-278`). Therefore a system-authored preview can enter an unfiltered
+ordinary transcript independently of selection. Selected-evaluation mode must
+continue to admit those exact system evaluations, while ordinary agent history
+must filter on the stored `:agent` form author. Otherwise the new explicit
+selection path can duplicate a preview that leaked through ordinary history.
+
+## Plan source live proof
+
+After the named Datahike pull projection correction in `54e0d5b3d`, root
+evaluated the previously failing generated item source in the owned
+`tmp/juniper-context-live` root, cluster `juniper-context`, SCI namespace
+`my.agents.juniper`. It returned the formatted plan string with outcome `ok`
+in 60 ms. This verifies the pulled `{:db/id ...}` reference contract on the
+actual source execution path; it does not rely on the unrelated default
+cluster probe.
