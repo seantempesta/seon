@@ -163,6 +163,39 @@ conveys no dynamic binding, and asserts zero
 honest: any projection the turn saw came from the handle. The test fails if
 `turn` stops carrying it.
 
+## Gate tallies
+
+`bin/test seon.cluster.turn-test` at this commit: **59 tests, 426 assertions,
+3 failures, 1 error**. The new regression passes. The same namespace at the
+commit immediately before the `loop.clj` change ran in an isolated worktree:
+**58 tests, 3 failures, 1 error** — the identical three tests, so all four
+reds are pre-existing and none is caused by the binding:
+
+- `a-run-prompts-from-its-opening-database-value` — the prompt renders
+  `Renderer unavailable.` and echoes `(seon.db/pull …)` where the test expects
+  `(my.message/read "m-1")`;
+- `a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end` — an ordinal-0
+  evaluation carries `:seon.cluster.eval/read-basis-transaction` where the
+  test expects none;
+- `turn-intent-is-the-complete-crash-falsifier` — the deliberate cut surfaces
+  as `IllegalArgumentException: Key must be integer` instead of the expected
+  `cut during evaluation`.
+
+All three sit in the prompt/evaluation-entity surface this PRD's steps 2-5
+rewrite. They are reported, not fixed: they are outside this lane's paths.
+
+`bin/test seon.db-test seon.cluster.loop-test`: **61 tests, 422 assertions,
+7 failures, 2 errors**, all nine inside
+`seon.db-test/unique-rejection-names-the-existing-owner-as-data`, which still
+asserts a unique `:seon.cluster.agent/namespace` that `daf551e6c` deleted
+([issue](../../../seon/issues/db-test-still-expects-a-unique-agent-namespace.md)).
+`seon.cluster.loop-test` is green.
+
+Live re-measurement after hot-reloading the changed `seon.cluster.loop` into
+the running `projection-lane` JVM, submission bound, five trials: 229 / 179 /
+171 / 170 / 198 ms wall (submit 96 / 64 / 65 / 59 / 82, loop 133 / 114 / 107 /
+110 / 115), three commits each, zero projection rebuilds.
+
 ## What did NOT land, and why
 
 **`transact-call` does not refuse when no projection is handed.** PRD §6 and
