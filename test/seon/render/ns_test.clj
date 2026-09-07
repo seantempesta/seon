@@ -469,3 +469,17 @@
 ;; docs/seon/issues/registered-render-producers-fall-through-to-generic-map-rendering.md
 ;; and the S2 (render data) rebuild's seam — the wave restores designed
 ;; regressions; the doomed pins are parked, not polished.
+
+(deftest namespace-alias-renders-local-and-target-roles
+  (let [alias-row {:seon.ns.alias/local 'str
+                   :seon.ns.alias/target-ns 'clojure.string}
+        same-name {:seon.ns.alias/local 'seon.fn
+                   :seon.ns.alias/target-ns 'seon.fn}
+        html (sut/render-alias-html alias-row)]
+    (is (= "(quote [clojure.string :as str])"
+           (sut/render-alias-ai alias-row)))
+    (is (= "(quote [seon.fn :as seon.fn])"
+           (sut/render-alias-ai same-name)))
+    (is (str/includes? (hiccup/->string html) "<code>str</code> → <code>clojure.string</code>"))
+    (is (str/includes? (hiccup/->string html)
+                       "[clojure.string :as str]"))))

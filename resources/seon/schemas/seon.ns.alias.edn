@@ -1,7 +1,17 @@
 #:seon.ns.alias{:binding
                 [:map
-                 #:seon.db{:attributes true}
+                 {:seon.db/attributes true,
+                  :description
+                  "One namespace alias binding, equivalent to the :as portion of a Clojure require libspec.",
+                  :seon.render/ai seon.render.ns/render-alias-ai,
+                  :seon.render/html seon.render.ns/render-alias-html}
                  [:seon.ns.alias/local :seon.ns.alias/local]
                  [:seon.ns.alias/target-ns :seon.ns.alias/target-ns]],
-                :local :symbol,
-                :target-ns :symbol}
+                :local
+                [:symbol
+                 {:description
+                  "The short symbol used before `/` in source in the namespace that owns this binding; in `[clojure.string :as str]`, this is `str`. It may equal the target namespace symbol."}],
+                :target-ns
+                [:symbol
+                 {:description
+                  "The fully qualified namespace to which the local alias resolves; in `[clojure.string :as str]`, this is `clojure.string`."}]}

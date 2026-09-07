@@ -5,5 +5,11 @@
                   [:seon.ns.import/target-class
                    {:optional true}
                    :seon.ns.import/target-class]],
-                 :local :symbol,
-                 :target-class :symbol}
+                 :local
+                 [:symbol
+                  {:description
+                   "The unqualified class symbol available in the importing namespace."}],
+                 :target-class
+                 [:symbol
+                  {:description
+                   "The fully qualified JVM class symbol named by the import binding."}]}

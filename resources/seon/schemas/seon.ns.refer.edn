@@ -5,6 +5,15 @@
                  [:seon.ns.refer/target-ns :seon.ns.refer/target-ns]
                  [:seon.ns.refer/target-name
                   :seon.ns.refer/target-name]],
-                :local :symbol,
-                :target-name :symbol,
-                :target-ns :symbol}
+                :local
+                [:symbol
+                 {:description
+                  "The unqualified symbol available in the referring namespace, after any :rename option."}],
+                :target-name
+                [:symbol
+                 {:description
+                  "The original public Var name in the target namespace."}],
+                :target-ns
+                [:symbol
+                 {:description
+                  "The namespace that owns the referred public Var."}]}
