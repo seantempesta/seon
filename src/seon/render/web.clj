@@ -1778,18 +1778,31 @@
                   declared-units
                   (declared-entity-units projection database acquisition)
                   reverse-units (filterv reverse-attribute? declared-units)
+                  ;; ONE pull per declared reverse relationship, each asking
+                  ;; for the connected entities themselves: a relationship
+                  ;; too large for the declared work bound refuses as that
+                  ;; unit's own typed value instead of poisoning the others
+                  ;; or painting a wall of bare entity ids.
                   reverse-values
-                  (if (and (seq reverse-units)
-                           (not (:seon.error/kind acquisition)))
-                    (db/pull database
-                             {:selector reverse-units
-                              :eid (:seon.render.debug/subject effective-request)
-                              :max-work (::pull-max-work effective-request)})
-                    {})
-                  acquisition
-                  (if (:seon.error/kind reverse-values)
-                    acquisition
-                    (merge acquisition reverse-values))
+                  (if (:seon.error/kind acquisition)
+                    {}
+                    (into {}
+                          (map (fn [unit]
+                                 (let [pulled
+                                       (db/pull
+                                        database
+                                        {:selector [{unit '[*]}]
+                                         :eid (:seon.render.debug/subject
+                                               effective-request)
+                                         :max-work
+                                         (::pull-max-work effective-request)})]
+                                   [unit (if (:seon.error/kind pulled)
+                                           pulled
+                                           (get pulled unit))])))
+                          reverse-units))
+                  reverse-values
+                  (into {} (remove (comp nil? val)) reverse-values)
+                  acquisition (merge acquisition reverse-values)
                   ref-attributes (installed-ref-attributes database)
                   outgoing (get-in observation
                                    [:seon.render.data/outgoing
