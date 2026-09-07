@@ -193,14 +193,13 @@
            [:header
             [:p {:class "seon-kicker"} "Identity"]
             [:h3 [:code agent-id]]]
-           [:p "This is the agent’s identity. Its namespace holds its functions; its cluster holds the shared database. The connected plan and messages describe its work."]
            (into [:dl]
                  (cond-> []
                    namespace-name
-                   (conj [:div [:dt "Namespace · its functions and definitions"]
+                   (conj [:div [:dt "Namespace"]
                           [:dd [:code (str namespace-name)]]])
                    cluster-name
-                   (conj [:div [:dt "Cluster · its shared database"]
+                   (conj [:div [:dt "Cluster"]
                           [:dd [:code cluster-name]]])))])))))
 
 (defn render-situation-ai
