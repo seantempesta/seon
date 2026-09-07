@@ -162,9 +162,19 @@ Named exactly, so nobody has to rediscover it:
    object, failed, throwable, truncated, elided, projected, pruned) binds
    NOTHING: ruling 59c's no-handle, because an unresolved symbol is honest
    and a handle onto a description of a value is not. The regression is
-   `seon.sci.eval-test/a-later-turn-reaches-the-values-its-earlier-forms-produced`;
-   it was written and lints clean but `bin/test seon.sci.eval-test` had not
-   finished when this lane ended. **Run it before trusting it.**
+   `seon.sci.eval-test/a-later-turn-reaches-the-values-its-earlier-forms-produced`,
+   and it **passes**: `bin/test seon.sci.eval-test` = 66 tests / 377
+   assertions / 6 failures, 0 errors, with the rehydration test green. The
+   six failures are two tests,
+   `runtime-function-rows-carry-parsed-contract-facts` and
+   `static-and-runtime-contracted-definitions-publish-identical-facts`, both
+   failing because a runtime-defined function mints NO program row at all
+   (`(:seon.fn/sym row)` is nil for `user/parsed-at-runtime` and
+   `parity/same-facts`). That is program-graph indexing, not results,
+   comments or forks — but `seon.sci.eval-test` was not baselined at HEAD
+   either, so treat it as UNATTRIBUTED, likely inherited, and baseline it
+   before blaming this lane. Note the shape: a row that is absent rather
+   than wrong is the population invariant's own failure mode.
 4. **The one end-to-end regression is not written.** `seon.repl-test` proves
    the grammar over emissions (9 tests, 18 assertions, green); the spec's
    proof — one reply evaluated once through `evaluate-sources`, asserting
@@ -257,6 +267,8 @@ Recorded so the next lane can separate its reds from the inherited ones.
 | selection | tree | result |
 |---|---|---|
 | `seon.repl-test` | this lane | 9 tests / 18 assertions / **0 failures, 0 errors** |
+| `seon.sci.eval-test` | this lane | 66 tests / 377 assertions / 6 failures, 0 errors — the rehydration regression GREEN; the two failures are unattributed program-row absences (§4.3) |
+| the six-namespace selection | this lane | 74 tests / 623 assertions / 58 failures, 1 error — 24 distinct tests, 3 inherited, 21 this lane's (§5b) |
 | `seon.cluster.reply-test seon.bootstrap-test` | HEAD `6a16fb60e`, isolated worktree | 20 tests / 181 assertions / **6 failures, 1 error** |
 | `seon.cluster.reply-test seon.bootstrap-test` | this lane, before the expectations were updated | 20 tests / 182 assertions / 14 failures, 1 error |
 
