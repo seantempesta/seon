@@ -11,6 +11,17 @@ Owner direction: use the visualization to change stored attributes, values,
 refs, and render functions together, then test the assembled context with live
 agents. Existing data placement is not a design constraint.
 
+## Message selection checkpoint — 2026-09-07
+
+The real lock button also appended the second root message (entity 34629),
+run `source:9b07da15-dc09-486d-9e3b-ab82b38de1c1`. Browser capture
+`tmp/juniper-message-lock.txt` shows the executed message form and root-to-Juniper
+content; HTML identifies both agents and the timestamp. Identity, plan and message
+now coexist as ordered selections. The generated message form has the same
+excessively verbose inline pull as the plan; concise agent-facing forms remain
+an outstanding quality improvement. This is still debug selection, not proof
+that the provider prompt consumes those selections.
+
 ## Append, compact, and reuse checkpoint — 2026-09-07
 
 The existing browser probe's `--append-and-compact` mode clicked both real

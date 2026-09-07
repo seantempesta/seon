@@ -29,7 +29,7 @@ const fs = require('node:fs/promises');
       await button.click();
       await page.getByText('Locked context', {exact: true}).nth(beforeCount).waitFor({timeout: 30000});
       await page.getByText('Unchanged', {exact: true}).first().waitFor({timeout: 30000});
-      await page.getByText('Locked context', {exact: true}).first().scrollIntoViewIfNeeded();
+      await page.getByText('Locked context', {exact: true}).last().scrollIntoViewIfNeeded();
     }
     if (process.argv.includes('--await-change')) {
       console.log(JSON.stringify({readyForDataChange: true, lockedRun}));
