@@ -202,6 +202,26 @@
           :seon.context.contribution/position (inc (or position -1))
           :seon.context.contribution/evaluations evaluation-refs}]))))
 
+(defn remove-tx
+  "Remove a contribution from context while preserving its evaluations."
+  {:malli/schema [:=> [:catn [:database :seon.db/database-value]
+                             [:request :seon.context/remove-request]]
+                  :seon.store/transaction-data]}
+  [database request]
+  (let [contribution (transaction-read
+                      (db/pull database
+                               [:db/id {:seon.context.contribution/agent
+                                        [:seon.cluster.agent/id]}]
+                               [:seon.context.contribution/id
+                                (:seon.context.contribution/id request)]))]
+    (cond
+      (nil? contribution) []
+      (not= (:seon.cluster.agent/id request)
+            (get-in contribution [:seon.context.contribution/agent
+                                  :seon.cluster.agent/id]))
+      (refuse-selection! ::foreign-contribution request)
+      :else [[:db/retractEntity (:db/id contribution)]])))
+
 (defn compact-tx
   "Replace one contribution's evaluation refs with a refreshed closed run.
 

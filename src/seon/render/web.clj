@@ -1279,9 +1279,9 @@
   (hiccup/->string
    [:section {:id "debug-selection"
               :class "seon-debug-body seon-debug-selection"}
-    [:h2 {:class "seon-debug-caption"} "renderer experiment"]
+    [:h2 {:class "seon-debug-caption"} "Selected entity"]
     [:p {:class "seon-debug-description"}
-     "The selected value is shown in both projections. Alternative applicable renderers remain in priority order."]
+     "Two views of the same data: the context an agent reads and the presentation a person sees."]
     [:div {:class "seon-debug-projection-grid seon-debug-selected-previews"}
      (debug-selected-projection-html
       debug-request :seon.render/ai (:seon.render/ai experiments))
@@ -1314,13 +1314,13 @@
     found-values])))
 
 (defn- context-action-form
-  [agent-id run-id contribution label]
+  [agent-id run-id contribution action label]
   [:form {(keyword "data-on:submit")
           (str "@post('" (route/path ::route/agent-context {:id agent-id})
                "', {contentType:'form'})")}
    [:input {:type "hidden" :name "run" :value run-id}]
    [:input {:type "hidden" :name "action"
-            :value (if contribution "compact" "append")}]
+            :value (name action)}]
    (when contribution
      [:input {:type "hidden" :name "contribution"
               :value (:seon.context.contribution/id contribution)}])
@@ -1338,7 +1338,7 @@
      [:p {:class "seon-debug-description"}
       "Build the context this agent will receive, one form and result at a time. Compare it with current data, append changes, or compact a block to its latest result."]
      (when (and agent-id run-id (:seon.render.call/output source-call))
-       (context-action-form agent-id run-id nil "Add to context"))
+       (context-action-form agent-id run-id nil :append "Add to context"))
      (cond
        (:seon.error/kind selection) (debug-value-html selection)
        (empty? selection) [:p "No forms added yet."]
@@ -1366,7 +1366,8 @@
                       changed? (and (= :ready status) (not= baseline current))]
                   [:article {:class "seon-debug-found-value"}
                    [:header {:class "seon-debug-value-header"}
-                    [:h3 (str "Block " (inc (:seon.context.contribution/position contribution)))]]
+                    [:h3 (str "Block " (inc (:seon.context.contribution/position contribution)))]
+                    (context-action-form agent-id nil contribution :remove "Remove from context")]
                    [:div {:class "seon-debug-projection-grid"}
                     [:section {:class "seon-debug-projection-column"}
                      [:h4 "Assembled context"]
@@ -1383,8 +1384,8 @@
                         [:pre {:class "seon-debug-candidate-preview"} current]
                         (when changed?
                           [:div
-                           (context-action-form agent-id run-id nil "Append updated context")
-                           (context-action-form agent-id run-id contribution "Compact to current results")])]
+                           (context-action-form agent-id run-id nil :append "Append updated context")
+                           (context-action-form agent-id run-id contribution :compact "Compact to current results")])]
                        :else [:p "Select a renderer preview to compare."])]]])))
              selection))]))
 
@@ -1426,12 +1427,23 @@
       [:div {:class "seon-debug-stored-value"}
        [:span (if reference? "Referenced entity " "Stored value ")]
        (if reference? selected-link [:code (pr-str v)])]]
+     [:details {:class "seon-debug-data-details"}
+      [:summary "Schema and raw data"]
+      [:h4 "Stored value"]
+      (debug-value-html v)
+      (when reference?
+        [:div [:h4 "Referenced entity"] (debug-value-html value)])
+      [:h4 "Attribute schema"]
+      (debug-value-html
+       (db/pull (:seon.db/db render-request)
+                [:seon.schema/key :seon.schema/form]
+                [:seon.schema/key a]))]
      [:div {:class "seon-debug-projection-grid"}
       [:section {:class "seon-debug-projection-column"}
-       [:h4 "AI"]
+       [:h4 "AI context"]
        (debug-preview-html :seon.render/ai (render-one :seon.render/ai))]
       [:section {:class "seon-debug-projection-column"}
-       [:h4 "HTML"]
+       [:h4 "HTML view"]
        (debug-preview-html :seon.render/html (render-one :seon.render/html))]]]))
 
 (defn- debug-found-values-html
@@ -3483,13 +3495,15 @@
                 connection
                 {:tx-data
                  [[:db.fn/call
-                   (if (= "compact" (get params "action"))
-                     #'context/compact-tx #'context/append-tx)
+                   (case (get params "action")
+                     "remove" #'context/remove-tx
+                     "compact" #'context/compact-tx
+                     #'context/append-tx)
                    (cond->
                     {:seon.cluster.agent/id (get-in request [:path-params :id])
                      :seon.cluster.run/id (get params "run")
                      :seon.context.contribution/id
-                     (if (= "compact" (get params "action"))
+                     (if (contains? #{"compact" "remove"} (get params "action"))
                        (get params "contribution") (str (random-uuid)))}
                      (= "compact" (get params "action"))
                      (assoc :seon.context.contribution/evaluations

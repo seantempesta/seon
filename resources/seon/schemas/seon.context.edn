@@ -44,6 +44,10 @@
                 [:seon.context.contribution/id :seon.context.contribution/id]
                 [:seon.context.contribution/evaluations
                  :seon.context.contribution/evaluations]],
+               :remove-request
+               [:map
+                [:seon.cluster.agent/id :seon.cluster.agent/id]
+                [:seon.context.contribution/id :seon.context.contribution/id]],
                :comparison-request
                [:map
                 [:seon.cluster.agent/id :seon.cluster.agent/id]

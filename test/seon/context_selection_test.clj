@@ -107,7 +107,24 @@
              (is (= selected (context/selection @connection "selection-a"))))))
        (is (= :seon.context/no-such-agent
               (:seon.context/selection-refused
-               (context/selection @connection "missing"))))))))
+               (context/selection @connection "missing")))))
+     (let [before-evaluations (db/q '[:find (count ?e) .
+                                      :where [?e :seon.cluster.eval/id]] @connection)
+           remove-request {:seon.cluster.agent/id "selection-a"
+                           :seon.context.contribution/id "chosen-1"}
+           foreign (db/transact!
+                    connection
+                    [[:db.fn/call context/remove-tx
+                      (assoc remove-request :seon.cluster.agent/id "selection-b")]])]
+       (is (= :seon.context/foreign-contribution (:seon.context/selection-refused foreign)))
+       (is (nil? (:seon.error/kind
+                  (db/transact! connection [[:db.fn/call context/remove-tx remove-request]]))))
+       (is (nil? (:seon.error/kind
+                  (db/transact! connection [[:db.fn/call context/remove-tx remove-request]]))))
+       (is (= ["chosen-2"] (mapv :seon.context.contribution/id
+                                 (context/selection @connection "selection-a"))))
+       (is (= before-evaluations
+              (db/q '[:find (count ?e) . :where [?e :seon.cluster.eval/id]] @connection)))))))
 
 (deftest compact-replaces-only-observed-evaluation-refs
   (test-support/with-database

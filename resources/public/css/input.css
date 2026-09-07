@@ -1650,7 +1650,7 @@ details.tool-call-details[open] .tool-preview {
 .seon-debug-found-value {
   min-width: 0;
   margin-top: 1rem;
-  border: 1px solid var(--color-base-700);
+  border: 1px solid var(--color-text-400);
   border-radius: 0.4rem;
   background: var(--color-base-900);
   overflow: hidden;
@@ -1668,9 +1668,17 @@ details.tool-call-details[open] .tool-preview {
 .seon-debug-value-header h3 {
   margin: 0;
   font-family: var(--font-mono);
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: var(--color-text-100);
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--color-inspection);
+}
+.seon-debug-data-details {
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--color-base-700);
+}
+.seon-debug-data-details > summary {
+  color: var(--color-text-300);
+  cursor: pointer;
 }
 .seon-debug-value-label,
 .seon-debug-stored-value {
