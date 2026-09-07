@@ -5,7 +5,8 @@
             [clojure.string :as str]
             [clojure.tools.build.api :as b])
   (:import [java.io RandomAccessFile]
-           [java.nio.file AtomicMoveNotSupportedException FileAlreadyExistsException
+           [java.nio.file AtomicMoveNotSupportedException DirectoryNotEmptyException
+            FileAlreadyExistsException
             Files StandardCopyOption]
            [java.security MessageDigest]))
 
@@ -362,7 +363,13 @@
                               [StandardCopyOption/ATOMIC_MOVE]))
       (catch AtomicMoveNotSupportedException _
         (Files/move source target (make-array StandardCopyOption 0)))
+      ;; An existing destination is the cache this run wants: the digest
+      ;; already names the project, and prepare! validates it next. APFS
+      ;; reports a populated destination as DirectoryNotEmpty, not
+      ;; FileAlreadyExists.
       (catch FileAlreadyExistsException _
+        nil)
+      (catch DirectoryNotEmptyException _
         nil))))
 
 (defn- cache-result
