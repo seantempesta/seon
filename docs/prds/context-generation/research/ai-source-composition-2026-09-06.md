@@ -412,16 +412,14 @@ that id resolves the exact stored block (`src/seon/render/web.clj:1500-1557`).
 It is sufficient while the retained invocation exists; the database alone
 cannot reconstruct “preview” after that association is lost.
 
-The smallest safe rule is that execution follows explicit intent. A terminal
-invocation with `source-run-id` is immutable stored evaluation history for that
-invocation and redraw reuses it even when its recorded reads are no longer
-current. A fresh agent generation or an explicit lab rerun is a new execution
-intent and may open a new run against the then-current database. This preserves
-ordinary REPL semantics, including a write followed by a read seeing the new
-database, and prevents a database transaction caused by an evaluation from
-implicitly requesting another evaluation. Read evidence remains useful to
-explain the historical result and to invalidate unevaluated selection/source
-derivation; it must not itself manufacture execution intent.
+This execution-policy conclusion is superseded by the owner's later ruling:
+pure render forms automatically re-execute when their retained input evidence
+changes. A terminal invocation remains immutable history, but it is the
+baseline of an automatically appended successor evaluation rather than a reason
+to suppress execution. The refresh must use the existing read-evidence and
+system-run path and must retain both results for a derived diff. Ordinary REPL
+evaluation still reads the current database; no implicit as-of default is
+introduced.
 
 An authored source may instead request a database snapshot grounded by the
 run's existing `:seon.cluster.run/opening-commit-id` when stable pre-run
@@ -446,12 +444,13 @@ The context owner must request those selected run/span entries explicitly and
 concatenate them with independently queried ordinary history; it must not infer
 inclusion from system authorship or enumerate all runs for the agent.
 
-## Durable context lock and derived diff — 2026-09-06
+## Durable context lock and derived diff — 2026-09-06 (revised)
 
-The existing capture and evaluation facts already own nearly all of this
-model. A capture identifies `(run-id, basis-t)`, points to its run, stores the
-exact provider prompt, and owns contribution components whose `position`
-orders the blocks (`resources/seon/schemas/seon.context.capture.edn:1-36`,
+The existing capture and evaluation facts already own nearly all snapshot
+evidence, but a provider capture is not the editable context composition. A
+capture identifies `(run-id, basis-t)`, points to its run, stores the exact
+provider prompt, and owns contribution evidence whose `position` orders the
+blocks (`resources/seon/schemas/seon.context.capture.edn:1-36`,
 `resources/seon/schemas/seon.context.contribution.edn:1-19`,
 `src/seon/context.clj:136-200`). Each contribution already records block name,
 hash, token estimate, and an honest failure. An evaluation has a stable id,
@@ -462,9 +461,16 @@ Run forms likewise have stable `(run-id, ordinal)` identity and source
 content and provenance authorities; a context record must reference them, not
 copy their source/result text.
 
-The missing fact is which exact stored evaluations produced one selected
-contribution. Add one cardinality-many ref attribute,
-`:seon.context.contribution/evaluations`, to the existing contribution entity.
+The editable owner must be attached to the agent, before any provider capture.
+Use one agent context-assembly ref whose ordered entry components carry stable
+identity, position, and refs to the selected evaluations. This is distinct from
+capture contributions: those remain immutable evidence of one exact provider
+prompt. A capture contribution may reference the assembly entry/evaluations it
+snapshotted, but it must not own or edit the assembly entry.
+
+The missing snapshot fact is which exact stored evaluations produced one
+captured contribution. Add one cardinality-many ref attribute,
+`:seon.context.contribution/evaluations`, to the existing capture contribution.
 Its value is a set because Datahike cardinality-many is unordered; presentation
 order derives by joining each evaluation's run and ordinal. For a cached
 candidate, populate it from the retained invocation's `source-run-id` and all
@@ -475,42 +481,52 @@ results, without a parallel serialization. A pending or failed execution must
 remain an explicit failed contribution and cannot claim evaluation refs that do
 not exist.
 
-No additional stored baseline is needed. The capture's `basis-t` and ordered
-contributions are the locked baseline. Currentness derives by replaying the
-referenced evaluations' existing read evidence against the current database;
-the diff derives by comparing their stored terminal values with the terminal
-evaluations created by a later **explicit** execution intent. The contribution
+The assembly entry's first terminal evaluation is its locked baseline; its
+position preserves the user's chosen order. Currentness derives by replaying
+the referenced evaluation's existing read evidence against the current
+database. When evidence changes, the existing system source-run/refresh path
+automatically evaluates the same pure form against the current database and
+appends its evaluation ref to that entry. The diff derives by comparing stored
+terminal values in this provenance chain. The contribution
 hash remains a quick equality projection over exact rendered text, never the
 diff authority. Source/result differences come from evaluation facts, and
-selection/order differences come from contribution position plus evaluation
-ordinal. The prior self-observation ruling still applies: invalid read evidence
-may mark a lock changed, but must not itself submit another run.
+selection/order differences come from assembly position plus evaluation
+ordinal. Self-observing forms require the refresh owner to ignore only the
+transactions produced by settling that same execution, using its exact run/form
+provenance rather than names; later domain-data changes still re-execute.
 
-Appending a changed block means creating the next positioned contribution in a
-new capture (or the next context owner revision) and referring to its terminal
-evaluations. Compact display is a query over the latest contribution per block
-while the older capture/evaluation facts remain available for expansion or
-requery. Do not mutate a locked contribution, store a textual patch, or erase
-related results. Capture identity already separates changed database bases;
+Appending a changed block means adding the successor evaluation ref to the same
+ordered assembly entry, preserving every earlier result. Compact display is a
+query over the latest terminal evaluation per entry while expansion shows the
+baseline and intervening results/diffs. Requery uses the same stored form and
+existing execution owner. A provider call creates a capture snapshot of the
+then-current ordered assembly; it does not become the editable authority. Do
+not store a textual patch or erase related results. Capture identity separates
+provider database bases;
 transaction provenance supplies who/process/when and should not be copied onto
 the contribution.
 
 ### Smallest scoped patch
 
-1. Extend `resources/seon/schemas/seon.context.contribution.edn` with the one
+1. Declare one context assembly identity, an agent-to-assembly ref, and ordered
+   assembly entry components with stable id, position, and evaluation refs.
+   This is the editable selection/order owner. Extend
+   `resources/seon/schemas/seon.context.contribution.edn` with the one
    optional component-independent set of evaluation refs and include it in the
    contribution map. Extend the in-memory contribution request schema in
    `resources/seon/schemas/seon.context.edn` with the same optional refs.
 2. Extend `src/seon/context.clj`'s `contribution-row` to retain those refs from
    an already-settled rendered-context record. It remains a pure transaction
    projection; it performs no evaluation or lookup.
-3. At the existing prompt/context composition owner, hand each selected block
+3. At the existing agent projection/context composition owner, hand each
+   selected block
    its exact evaluation refs from `source-run-id` or the held-run ordinal span.
    Refuse a lock when a claimed evaluation is absent or nonterminal. Do not add
    a cache or source runner.
 4. Derive lock status and UI diff by querying those refs, their read evidence,
-   and their stored results. Keep automatic redraw read-only; a user/agent
-   rerun is the only event that supplies comparison evaluations.
+   and stored results. A relevant evidence change automatically submits the
+   pure stored form through the existing execution/refresh path and appends the
+   resulting evaluation ref. Rendering remains read-only over those facts.
 
 One unresolved boundary remains: a retained debug invocation association is
 process-local. If a context lock must be reconstructible after that cache is
