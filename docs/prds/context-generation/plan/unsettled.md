@@ -6,6 +6,20 @@ tags: [prd, agent, context, architecture]
 
 # The working edge — context-generation program
 
+## Morning review and the one design document — 2026-09-07
+
+The owner reviewed the overnight page and reframed the target: the REPL reply
+becomes data the agent never writes; the agent's record becomes deliberate
+one-hop components; wake sources are separate components; history and context
+are derived; one eval point and one cache; keep the hard-won runtime and fix
+its measured cost first. Three research notes were written before designing
+([eval points and caches](../research/eval-points-and-caches-census-2026-09-07.md),
+[cluster, branch, SCI, wake](../research/cluster-branch-sci-wake-model-2026-09-07.md),
+[run loop unpacked](../research/run-loop-unpacked-2026-09-07.md)) and the
+design is
+[agent-record-and-repl-response-prd-2026-09-07.md](agent-record-and-repl-response-prd-2026-09-07.md),
+rulings 69–72 in the ledger. Nothing is deleted until the owner accepts it.
+
 ## Morning handoff — 2026-09-07 07:10Z
 
 **Live example:** `http://127.0.0.1:7766/ns/my.agents.juniper/debug?subject=33770`

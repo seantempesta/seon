@@ -1038,6 +1038,41 @@ numerically and a bare cross-citation is a defect to fix on sight.
     Same design as the old `seon.repl.parse.repair` and as clojure-mcp's
     `evaluate-with-repair`, minus the flag.
 
+69. **The REPL reply is data the agent never writes** (owner, 2026-09-07
+    morning): each form is answered by one fully-namespaced map
+    (`#:seon.repl{:value … :result result/eN :out … :ns … :ms …}`), value
+    first, key order controlled by the emitter; a multi-form reply echoes per
+    form in the namespace in effect; comments stay attached above the form.
+    Root cause named: the agent's reply and the echo shared one text grammar,
+    so agents completed the pattern by writing results. Supersedes the text
+    spelling of B2/B12/B13; ruling 45 (never comment-shaped) and 59c (real
+    result handles) stand. Design: `agent-record-and-repl-response-prd-2026-09-07.md`.
+
+70. **Agent-centric record; separate wake components; claim refs, never
+    retraction** (owner, 2026-09-07): every rendered key on the agent's
+    record points at data that IS the thing (one hop); keys drop the
+    `cluster` segment; identity is the entity's own scalars; history and
+    context are derived; messages, faults, and schedule firings are three
+    peer components each routed by its own attribute through the one Datahike
+    listener ("I never said one wake queue"); handled = a claim ref from the
+    handling run, because retracting a routed edge would wake. Faults reach
+    the steward of the failing function's namespace.
+
+71. **One eval point, one cache** (owner, 2026-09-07): parser → evaluator →
+    settlement is the only path; the debug page's private evaluation is a
+    bypass to delete; cache identity is code + input, validity is read
+    evidence (db identity never in the key, basis-t alone insufficient for
+    attribute-scoped queries). Measured: record pull 331 µs, evals query
+    104 µs — the database is not what caches protect against.
+
+72. **Keep the hard-won runtime; fix the measured cost first** (owner,
+    2026-09-07): the run loop is unpacked, not discarded — fourteen behaviours
+    with their proofs stay; the projection rebuild on every write (977 of
+    1050 ms per turn) is fixed by handing the environment's projection to the
+    writer before any structural change; form + receipt merge into one
+    evaluation entity; `situation`, `generation-complete`, the forms family,
+    and `live-processes` are deleted; no `:db.fn/cas` exists or is needed.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 15. **R3**: `data/clusters/store` path + operator noun cleanup — priced
