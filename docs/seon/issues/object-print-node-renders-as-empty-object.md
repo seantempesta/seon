@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, print, repl, ugly-output]
 ---
@@ -52,3 +52,13 @@ the print emitter, where every consumer of the node benefits, never in
 ## Not in scope of the lane that found it
 
 The `result-handles` lane owned the handle derivation, not the print grammar.
+
+## Resolution — 2026-09-07
+
+`seon.print`'s `emit ::object` now prints the class the node carries, under
+either the `:seon.print/class` admission mints or the `:seon.print/name` a
+stored node may hold, and a node that names NO class emits the flat
+`:seon.print/object-without-class` diagnostic instead of empty brackets — the
+absent signal reports itself rather than reading as content
+(`src/seon/print.cljc`, `emit ::object`). Regression:
+`seon.print-test/an-object-node-never-renders-as-empty-brackets`.

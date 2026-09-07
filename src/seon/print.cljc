@@ -520,11 +520,34 @@
   [node sink _ _ _]
   (-token sink ::symbol (::name node)))
 
+(defn- object-class-text
+  "The class an object node names, under either key it may carry.
+
+  Admission mints `:seon.print/class`; nodes stored before that spelling — and
+  the other named faces this grammar shares brackets with — carry the same
+  string under `:seon.print/name`. Reading both is what stops a node that
+  KNOWS its class from printing as `#object[]`."
+  [node]
+  (let [named (or (::class node) (::name node))]
+    (when (and (string? named) (not (str/blank? named)))
+      named)))
+
 (defmethod emit ::object
   [node sink _ _ _]
   (-token sink ::object
-          (str "#object[" (::class node)
-               (when-some [rep (::rep node)] (str " " rep)) "]")))
+          (if-some [class-text (object-class-text node)]
+            (str "#object[" class-text
+                 (when-some [rep (::rep node)] (str " " rep)) "]")
+            ;; AN EMPTY `#object[]` IS THE ABSENCE-READS-AS-CONTENT CLASS: the
+            ;; reader cannot tell an unrenderable value from an empty one. A
+            ;; node that names no class says so, in the same flat diagnostic
+            ;; shape the unknown face uses.
+            (pr-str
+             {:seon.error/kind ::object-without-class
+              :seon.error/message "The object print node names no class."
+              :seon.error/data
+              {::face (::face node)
+               ::node-keys (vec (sort-by str (keys node)))}}))))
 
 (defmethod emit ::truncated-string
   [node sink _ _ _]

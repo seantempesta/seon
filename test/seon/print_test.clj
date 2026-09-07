@@ -532,3 +532,28 @@
            (:seon.print/bound-by fitted)))
     (is (= [:my.message/id "message-1"]
            (:seon.print/requery-id fitted)))))
+
+(deftest an-object-node-never-renders-as-empty-brackets
+  ;; THE CLASS THE NODE CARRIES IS THE ONLY CONTENT AN OBJECT FACE HAS. An
+  ;; emitter that drops it renders `#object[]`, and absence then reads as
+  ;; content: nothing distinguishes an unrenderable value from an empty one
+  ;; (docs/seon/issues/object-print-node-renders-as-empty-object.md).
+  (is (= "#object[clojure.lang.Atom]"
+         (print/emit-text {:seon.print/face :seon.print/object
+                           :seon.print/class "clojure.lang.Atom"}
+                          no-cuts)))
+  (is (= "#object[clojure.lang.Atom]"
+         (print/emit-text {:seon.print/face :seon.print/object
+                           :seon.print/name "clojure.lang.Atom"}
+                          no-cuts))
+      "a stored node naming its class under the shared name key still prints it")
+  (is (= "#object[sci.lang.Namespace \"face.ns\"]"
+         (print/emit-text {:seon.print/face :seon.print/object
+                           :seon.print/class "sci.lang.Namespace"
+                           :seon.print/rep "\"face.ns\""}
+                          no-cuts))
+      "a node carrying a stable representation keeps it beside the class")
+  (let [nameless (print/emit-text {:seon.print/face :seon.print/object} no-cuts)]
+    (is (not= "#object[]" nameless))
+    (is (str/includes? nameless ":seon.print/object-without-class")
+        "a node that names no class says so instead of printing nothing")))
