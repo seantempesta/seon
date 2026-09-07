@@ -11,6 +11,22 @@ Owner direction: use the visualization to change stored attributes, values,
 refs, and render functions together, then test the assembled context with live
 agents. Existing data placement is not a design constraint.
 
+## Live context lock proof — 2026-09-07
+
+Root drove the actual lock button with the existing browser probe's `--lock`
+option. The page updated through its feed to show Block 1, the locked identity
+transcript and an identical current preview labelled Unchanged. HTTP 200 and no
+browser errors; root personally inspected `tmp/juniper-lock-proof.png`.
+
+The submitted run was `source:e395ba9d-edc2-4d47-9ba3-7f1ac73bb531`.
+The resulting position-zero contribution references evaluation 39745, whose
+source/identity transaction is 536874603 and result transaction is 536874604.
+The selection was created later at transaction 536874618. Thus the locked
+selection refers to the previously evaluated result, with no copied source or
+result fields. This proves the lock action, not unchanged-input reuse across
+all page acquisitions: total runs rose from 241 to 243 during navigation and
+locking, and that broader reuse behavior remains under investigation.
+
 ## Server recovery checkpoint — 2026-09-07
 
 The same development server reopened at 01:30:23 UTC. Root personally inspected
