@@ -98,6 +98,11 @@
         ":seon.config.operator/event-silence-backstop-ms"))
   (flush))
 
+(defn- source-publication-silence-backstop-ms
+  "Bound one atomic source population by the existing lifecycle deadline."
+  []
+  operator.state/lifecycle-lock-timeout-ms)
+
 (defn- parse-root
   [arguments]
   (let [[root remaining]
@@ -2456,7 +2461,10 @@
              (:seon.fresh-operator/transport-advertisement anchor)
              (init-form root name force? changed-paths false
                         publish-before-fork? development-cluster)
-             (operator-silence-backstop-ms {})
+             ;; Source publication contains one atomic Datahike population
+             ;; transaction. It cannot emit intermediate events, so the
+             ;; lifecycle operation deadline is its honest bound.
+             (source-publication-silence-backstop-ms)
              (fn [event]
                (when (= :out (:tag event))
                  (print (:val event))

@@ -459,6 +459,9 @@
    :seon.dev.fresh-operator-test/output @output-future})
 
 (deftest init-changed-paths-are-an-explicit-source-publication-mode
+  (is (= operator.state/lifecycle-lock-timeout-ms
+         (operator-private-value 'source-publication-silence-backstop-ms))
+      "an atomic source population uses the existing overall lifecycle bound")
   (is (= {:seon.fresh-operator/development-cluster "development"
           :seon.fresh-operator/changed-paths ["src/seon/fn.clj"]
           :seon.fresh-operator/force? false}
