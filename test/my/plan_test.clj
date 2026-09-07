@@ -384,3 +384,65 @@
             "an explicit map entry wins over the calling agent default")
         (is (str/includes? bob-text "Plan for bob")
             "the rendered source resolves the calling agent")))))
+
+(def ^:private juniper-fixture-steps
+  ;; The shape installed by
+  ;; docs/prds/context-generation/research/juniper_fixture_2026_09_06.clj.
+  #{{:db/id "step-objective"
+     :my.plan.item/id "juniper/understand-context"
+     :my.plan.item/position 0
+     :my.plan.item/title "Improve Juniper context inspection"
+     :my.plan.item/steps
+     #{{:db/id "step-inspect"
+        :my.plan.item/id "juniper/inspect-identity-messages"
+        :my.plan.item/position 0
+        :my.plan.item/title "Inspect identity and messages"
+        :my.plan.item/completed-at #inst "2026-09-07T01:30:00Z"}
+       {:db/id "step-render-plan"
+        :my.plan.item/id "juniper/render-plan"
+        :my.plan.item/position 1
+        :my.plan.item/title "Render this plan clearly"}
+       {:db/id "step-compare"
+        :my.plan.item/id "juniper/compare-changed-results"
+        :my.plan.item/position 2
+        :my.plan.item/title "Compare refreshed results"
+        :my.plan.item/needs #{"step-render-plan"}}
+       {:db/id "step-live-turn"
+        :my.plan.item/id "juniper/try-live-turn"
+        :my.plan.item/position 3
+        :my.plan.item/title "Try the assembled context in a live agent turn"
+        :my.plan.item/needs #{"step-compare"}}}}})
+
+(deftest the-example-fixture-shape-installs-and-renders
+  (support/with-database
+    (fn [connection]
+      (db/transact! connection
+                    [{:seon.cluster.agent/id "juniper"}
+                     {:db/id [:seon.cluster.agent/id "juniper"]
+                      :my.plan/current-step "step-render-plan"
+                      :my.plan/steps juniper-fixture-steps}])
+      (let [current (plan/plan {:seon.db/db @connection
+                                :seon.cluster.agent/id "juniper"})
+            ai (plan/format-plan-ai current)
+            printed (pr-str (plan/render-plan-html #{} @connection "juniper"))]
+        (is (= ["juniper/understand-context"
+                "juniper/inspect-identity-messages"
+                "juniper/render-plan"
+                "juniper/compare-changed-results"
+                "juniper/try-live-turn"]
+               (ids (:my.plan/steps current)))
+            "nested transaction data installs one ordered component tree")
+        (is (= ["juniper/render-plan"] (ids (:my.plan/ready current))))
+        (is (= ["juniper/compare-changed-results" "juniper/try-live-turn"]
+               (ids (:my.plan/blocked current))))
+        (is (= ["juniper/inspect-identity-messages"]
+               (ids (:my.plan/recent-completions current))))
+        (is (str/includes? ai "Objective: Improve Juniper context inspection"))
+        (is (str/includes? ai "Current step: Render this plan clearly"))
+        (is (str/includes?
+             ai
+             "1.3 Compare refreshed results [juniper/compare-changed-results] — blocked — waiting for \"juniper/render-plan\""))
+        (is (str/includes? printed "1 of 5 steps completed"))
+        (is (str/includes? printed "my-plan-item is-current"))
+        (is (not (str/includes? printed ":open nil"))
+            "no nil attribute reaches the rendered panel")))))

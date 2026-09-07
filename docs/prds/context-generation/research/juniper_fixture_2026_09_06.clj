@@ -1,11 +1,16 @@
 (ns juniper-fixture-2026-09-06
-  (:require [seon.cluster]
+  (:require [my.plan]
+            [seon.cluster]
             [seon.db]
             [seon.operator.runtime]
             [seon.schema]))
 
-; Load this file through MCP JVM evaluation on the selected scratch cluster.
-; These are sample messages requested by Sean, not model-generated replies.
+; Load this file through MCP JVM evaluation on the explicitly selected scratch
+; cluster. These are sample messages requested by Sean, not model-generated
+; replies. The plan is one agent-owned component tree: the agent owns the
+; objective through :my.plan/steps, the objective owns its four steps through
+; :my.plan.item/steps, :my.plan.item/position orders them, and
+; :my.plan/current-step names the open step Juniper is working on.
 (defn install!
   "Install the Juniper example in the explicitly selected running cluster."
   [cluster-name]
@@ -28,51 +33,54 @@
                (seon.db/transact!
                 connection
                 {:tx-data
-                 [{:my.plan.item/id "juniper/understand-context"
-                   :my.plan.item/agent [:seon.cluster.agent/id "juniper"]
-                   :my.plan.item/title "Improve Juniper context inspection"
-                   :my.plan.item/description
-                   "Make identity, messages, plans, changed results, and the eventual live agent context easy to inspect together."
-                   :my.plan.item/expected-result
-                   "A clear paired context view whose facts and rendered results can be checked without guessing."}
-                  {:my.plan.item/id "juniper/inspect-identity-messages"
-                   :my.plan.item/agent [:seon.cluster.agent/id "juniper"]
-                   :my.plan.item/parent [:my.plan.item/id "juniper/understand-context"]
-                   :my.plan.item/title "Inspect identity and messages"
-                   :my.plan.item/description
-                   "Verify the fixture identity and the two sample messages in the paired AI and HTML blocks."
-                   :my.plan.item/expected-result
-                   "Juniper identity and both root messages were visible in the context inspection page."
-                   :my.plan.item/completed-at #inst "2026-09-07T01:30:00Z"}
-                  {:my.plan.item/id "juniper/render-plan"
-                   :my.plan.item/agent [:seon.cluster.agent/id "juniper"]
-                   :my.plan.item/parent [:my.plan.item/id "juniper/understand-context"]
-                   :my.plan.item/title "Render this plan clearly"
-                   :my.plan.item/description
-                   "Replace raw entity numbers and dense prose with a readable current focus, progress summary, stable dependencies, and expandable step evidence."
-                   :my.plan.item/expected-result
-                   "The AI plan is concise and actionable; the HTML plan shows progress and stable item references without numeric entity ids."}
-                  {:my.plan.item/id "juniper/compare-changed-results"
-                   :my.plan.item/agent [:seon.cluster.agent/id "juniper"]
-                   :my.plan.item/parent [:my.plan.item/id "juniper/understand-context"]
-                   :my.plan.item/needs [[:my.plan.item/id "juniper/render-plan"]]
-                   :my.plan.item/title "Compare refreshed results"
-                   :my.plan.item/description
-                   "After context selections move from memory into durable agent-linked facts, change one relevant fact and compare the previous result with its automatically refreshed result."
-                   :my.plan.item/expected-result
-                   "The comparison shows the previous and refreshed results together, with the relevant changed input."}
-                  {:my.plan.item/id "juniper/try-live-turn"
-                   :my.plan.item/agent [:seon.cluster.agent/id "juniper"]
-                   :my.plan.item/parent [:my.plan.item/id "juniper/understand-context"]
-                   :my.plan.item/needs [[:my.plan.item/id "juniper/compare-changed-results"]]
-                   :my.plan.item/title "Try the assembled context in a live agent turn"
-                   :my.plan.item/description
-                   "After the visual and result checks pass, ask Juniper to find the same facts and update its own plan."
-                   :my.plan.item/expected-result
-                   "Juniper identifies the current step and records a truthful plan update from the assembled context."}
-                  {:db/id [:seon.cluster.agent/id "juniper"]
-                   :my.plan/anchor
-                   [:my.plan.item/id "juniper/render-plan"]}
+                 [{:db/id [:seon.cluster.agent/id "juniper"]
+                   :my.plan/current-step "step-render-plan"
+                   :my.plan/steps
+                   #{{:db/id "step-objective"
+                      :my.plan.item/id "juniper/understand-context"
+                      :my.plan.item/position 0
+                      :my.plan.item/title "Improve Juniper context inspection"
+                      :my.plan.item/description
+                      "Make identity, messages, plans, changed results, and the eventual live agent context easy to inspect together."
+                      :my.plan.item/expected-result
+                      "A clear paired context view whose facts and rendered results can be checked without guessing."
+                      :my.plan.item/steps
+                      #{{:db/id "step-inspect"
+                         :my.plan.item/id "juniper/inspect-identity-messages"
+                         :my.plan.item/position 0
+                         :my.plan.item/title "Inspect identity and messages"
+                         :my.plan.item/description
+                         "Verify the fixture identity and the two sample messages in the paired AI and HTML blocks."
+                         :my.plan.item/expected-result
+                         "The identity unit and both root messages were read on the context inspection page."
+                         :my.plan.item/completed-at #inst "2026-09-07T01:30:00Z"}
+                        {:db/id "step-render-plan"
+                         :my.plan.item/id "juniper/render-plan"
+                         :my.plan.item/position 1
+                         :my.plan.item/title "Render this plan clearly"
+                         :my.plan.item/description
+                         "Replace raw entity numbers and dense prose with a readable current focus, progress summary, stable dependencies, and expandable step evidence."
+                         :my.plan.item/expected-result
+                         "The AI plan is concise and actionable; the HTML plan shows progress and stable step references without numeric entity ids."}
+                        {:db/id "step-compare"
+                         :my.plan.item/id "juniper/compare-changed-results"
+                         :my.plan.item/position 2
+                         :my.plan.item/title "Compare refreshed results"
+                         :my.plan.item/description
+                         "After context selections move from memory into durable agent-linked facts, change one relevant fact and compare the previous result with its automatically refreshed result."
+                         :my.plan.item/expected-result
+                         "The comparison shows the previous and refreshed results together, with the relevant changed input."
+                         :my.plan.item/needs #{"step-render-plan"}}
+                        {:db/id "step-live-turn"
+                         :my.plan.item/id "juniper/try-live-turn"
+                         :my.plan.item/position 3
+                         :my.plan.item/title
+                         "Try the assembled context in a live agent turn"
+                         :my.plan.item/description
+                         "After the visual and result checks pass, ask Juniper to find the same facts and update its own plan."
+                         :my.plan.item/expected-result
+                         "Juniper identifies the current step and records a truthful plan update from the assembled context."
+                         :my.plan.item/needs #{"step-compare"}}}}}}
                   {:seon.cluster.message/id "design-lab/root-to-juniper/1"
                    :seon.cluster.message/from [:seon.cluster.agent/id "root"]
                    :seon.cluster.message/to [:seon.cluster.agent/id "juniper"]
@@ -90,11 +98,6 @@
                   :seon.db/process [:seon.db.process/id process]}})]
            (if (:seon.error/kind written)
              written
-             (seon.db/pull
-              (seon.db/db connection)
-              '[:db/id :seon.cluster.agent/id
-                {:seon.cluster.agent/namespace [:seon.ns/name]}
-                {:my.plan/anchor [:my.plan.item/id]}
-                {:my.plan.item/_agent [:my.plan.item/id]}
-                {:seon.cluster.message/_to [:seon.cluster.message/id]}]
-              [:seon.cluster.agent/id "juniper"])))))))))
+             (my.plan/plan
+              {:seon.db/db (seon.db/db connection)
+               :seon.cluster.agent/id "juniper"})))))))))

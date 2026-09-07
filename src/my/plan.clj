@@ -861,23 +861,25 @@
       [:span {:class "my-plan-state"} (state-label state)]
       [:code (:my.plan.item/id step)]]
      [:h3 (:my.plan.item/title step)]
-     [:details {:open (when (= :current state) true)}
-      [:summary "Details"]
-      (when-let [description (:my.plan.item/description step)]
-        [:p description])
-      (when-let [expected (:my.plan.item/expected-result step)]
-        [:p {:class "my-plan-expected"}
-         [:strong "Done when: "] expected])
-      (when-let [parent (:my.plan/parent step)]
-        [:p {:class "my-plan-relation"}
-         [:strong "Part of "] [:code (:my.plan.item/id parent)]])
-      (when-let [needs (seq (:my.plan/needs step))]
-        [:p {:class "my-plan-relation"}
-         [:strong "Waiting for "]
-         (str/join ", " (map (comp pr-str :my.plan.item/id) needs))])
-      [:p {:class "my-plan-reference"}
-       [:strong "Reference "]
-       [:code (pr-str [:my.plan.item/id (:my.plan.item/id step)])]]]]))
+     (into (if (= :current state)
+             [:details {:open true} [:summary "Details"]]
+             [:details [:summary "Details"]])
+           (remove nil?)
+           [(when-let [description (:my.plan.item/description step)]
+              [:p description])
+            (when-let [expected (:my.plan.item/expected-result step)]
+              [:p {:class "my-plan-expected"}
+               [:strong "Done when: "] expected])
+            (when-let [parent (:my.plan/parent step)]
+              [:p {:class "my-plan-relation"}
+               [:strong "Part of "] [:code (:my.plan.item/id parent)]])
+            (when-let [needs (seq (:my.plan/needs step))]
+              [:p {:class "my-plan-relation"}
+               [:strong "Waiting for "]
+               (str/join ", " (map :my.plan.item/id needs))])
+            [:p {:class "my-plan-reference"}
+             [:strong "Reference "]
+             [:code (pr-str [:my.plan.item/id (:my.plan.item/id step)])]]])]))
 
 (defn format-ready-items-ai
   "Format a supplied ready plan frontier as terminal text."
@@ -914,8 +916,14 @@
   "One executable form updating this plan, using real stable identities."
   [view]
   (let [agent-id (:seon.cluster.agent/id view)
-        next-step (or (some :my.plan.item/id (:my.plan/ready view))
-                      (some :my.plan.item/id (:my.plan/blocked view))
+        current (get-in view [:my.plan/current-step :my.plan.item/id])
+        other? #(not= current (:my.plan.item/id %))
+        next-step (or (some :my.plan.item/id
+                            (filter other? (:my.plan/ready view)))
+                      (some :my.plan.item/id
+                            (filter other? (:my.plan/blocked view)))
+                      (some :my.plan.item/id
+                            (filter other? (:my.plan/steps view)))
                       (some :my.plan.item/id (:my.plan/steps view)))]
     (if-not next-step
       (str "(my.plan/add! {:my.plan.item/id \"" agent-id "/first-step\""
@@ -1020,9 +1028,10 @@
             completed (count (filter :my.plan.item/completed-at steps))
             older (:my.plan/older-completions view)]
         (cond->
-         [:section {:class "seon-family-entry my-plan"}
-          [:h2 (str agent-id "’s plan")]
-          (when-let [objective (first steps)]
+         (into [:section {:class "seon-family-entry my-plan"}
+                [:h2 (str agent-id "’s plan")]]
+               (remove nil?)
+         [(when-let [objective (first steps)]
             [:p {:class "my-plan-objective"}
              [:strong "Objective: "] (:my.plan.item/title objective)])
           [:p {:class "my-plan-progress"}
@@ -1039,7 +1048,7 @@
            (plan-tree-html view)]
           [:details {:class "my-plan-help"}
            [:summary "How to update this plan"]
-           [:pre (update-example view)]]]
+           [:pre (update-example view)]]])
           older
           (conj [:p {:class "my-plan-elision"}
                  (print/render-elision-ai older)]))))))
