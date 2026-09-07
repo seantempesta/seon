@@ -6,6 +6,15 @@ tags: [prd, agent, context, architecture]
 
 # The working edge — context-generation program
 
+## Owner vocabulary correction — assembling context, 2026-09-06
+
+Use “Add to context” and “Assembled context”; “locked” misdescribes the task.
+Manual assembly lets us improve each entity's data and rendering before the
+same process runs automatically to construct real agent context. A saved
+evaluation records the value at that point, so later results can be compared.
+Older references to locking below describe that same operation, not a separate
+state or mechanism.
+
 ## Integration checkpoint — 2026-09-06, provider-bound context
 
 The owner reiterated that the debug UI is an iteration surface for the actual

@@ -1334,14 +1334,14 @@
   (let [agent-id (:seon.cluster.agent/id render-request)
         run-id (:seon.render.call/source-run-id source-call)]
     [:section {:class "seon-debug-found-values"}
-     [:h2 {:class "seon-debug-caption"} "Context selection"]
+     [:h2 {:class "seon-debug-caption"} "Assemble context"]
      [:p {:class "seon-debug-description"}
-      "Lock evaluated forms and results into this agent’s context. Changes appear beside the locked results; appending adds a block, while compacting replaces its selected evaluations. Earlier evaluations remain stored."]
+      "Build the context this agent will receive, one form and result at a time. Compare it with current data, append changes, or compact a block to its latest result."]
      (when (and agent-id run-id (:seon.render.call/output source-call))
-       (context-action-form agent-id run-id nil "Lock preview into context"))
+       (context-action-form agent-id run-id nil "Add to context"))
      (cond
        (:seon.error/kind selection) (debug-value-html selection)
-       (empty? selection) [:p "No previews locked yet."]
+       (empty? selection) [:p "No forms added yet."]
        :else
        (into [:div]
              (map
@@ -1369,7 +1369,7 @@
                     [:h3 (str "Block " (inc (:seon.context.contribution/position contribution)))]]
                    [:div {:class "seon-debug-projection-grid"}
                     [:section {:class "seon-debug-projection-column"}
-                     [:h4 "Locked context"]
+                     [:h4 "Assembled context"]
                      [:pre {:class "seon-debug-candidate-preview"} baseline]]
                     [:section {:class "seon-debug-projection-column"}
                      [:h4 "Current preview"]
@@ -1379,7 +1379,7 @@
                        (= :different-source status) [:p "Select the same forms to compare their current results."]
                        (= :ready status)
                        [:div
-                        [:p (if changed? "Changed since locking" "Unchanged")]
+                        [:p (if changed? "Changed since adding" "Unchanged")]
                         [:pre {:class "seon-debug-candidate-preview"} current]
                         (when changed?
                           [:div
