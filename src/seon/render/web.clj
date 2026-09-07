@@ -76,7 +76,8 @@
             [starfederation.datastar.clojure.adapter.http-kit :as datastar.http-kit]
             [starfederation.datastar.clojure.api :as datastar]
             [starfederation.datastar.clojure.api.elements :as datastar.elements]
-            [starfederation.datastar.clojure.consts :as datastar.consts])
+            [starfederation.datastar.clojure.consts :as datastar.consts]
+            [taoensso.timbre :as log])
   (:import [java.net URI URLDecoder]
            [java.nio.charset StandardCharsets]
            [java.util Date]
@@ -2340,35 +2341,78 @@
   which every page returned its shell and no feed ever painted (the silent
   wedge filed as a blocker on 2026-09-07). The fault still rides the one
   committer inbox; the page shows the flat diagnostic where its content would
-  have been; and the proc goes on to the next page."
-  [state registration-key failure]
-  (let [fault-channel (:seon.cluster.agent/fault-channel
-                       @(:seon.cluster.agent/routing state))
-        debug? (and (vector? registration-key)
-                    (= ::debug-tab (first registration-key)))
-        diagnostic
-        (debug-diagnostic
-         ::page-derivation-failed
-         (str "Deriving this page threw " (.getName (class failure)) ": "
-              (.getMessage ^Throwable failure))
-         'seon.render.web/render-pass
-         :seon.render.web/page :seon.render.web/page
-         registration-key ::page-derivation-failed
-         {:seon.error/throwable-class (.getName (class failure))})]
-    (when fault-channel
-      (async/offer! fault-channel
-                    {:clojure.core.async.flow/pid :seon.render.web/render
-                     :clojure.core.async.flow/ex
-                     (ex-info "A page derivation threw." diagnostic failure)}))
-    {:seon.render.web/page
-     {(if debug? "debug-units" (str "seon-page-" registration-key))
-      (hiccup/->string
-       [:section {:class "seon-debug-body"}
-        [:h2 {:class "seon-debug-caption"} "This page could not be derived"]
-        (debug-value-html diagnostic)])}
-     :seon.render.web/fragments {}
-     :seon.render/captured-calls {}
-     :seon.render/captured-invocations {}}))
+  have been; and the proc goes on to the next page.
+
+  ONE FAULT PER FAILURE, NOT ONE PER PASS. A page that throws every pass used
+  to commit an identical fault every pass — six in ninety seconds, observed
+  live on 2026-09-07 — which is the overloaded-queue shape, not information.
+  `last-signature` is what this proc offered for THIS page on the previous
+  pass, carried in the proc's own state map; an unchanged signature offers
+  nothing. The returned `::fault-signature` is what the pass folds back.
+
+  A REFUSED `offer!` IS AN EVENT, NOT SILENCE. The fault channel is bounded,
+  and a drop inside the machinery that exists to make failures visible is the
+  absence-reads-as-health class; it says so through the logging owner, naming
+  the page and the diagnostic that will otherwise reach no database fact."
+  ([state registration-key failure last-signature]
+   (let [fault-channel (:seon.cluster.agent/fault-channel
+                        @(:seon.cluster.agent/routing state))
+         debug? (and (vector? registration-key)
+                     (= ::debug-tab (first registration-key)))
+         message (str "Deriving this page threw " (.getName (class failure))
+                      ": " (.getMessage ^Throwable failure))
+         signature [registration-key message]
+         diagnostic
+         (debug-diagnostic
+          ::page-derivation-failed
+          message
+          'seon.render.web/render-pass
+          :seon.render.web/page :seon.render.web/page
+          registration-key ::page-derivation-failed
+          {:seon.error/throwable-class (.getName (class failure))})]
+     (when (and fault-channel (not= signature last-signature))
+       (when-not (async/offer!
+                  fault-channel
+                  {:clojure.core.async.flow/pid :seon.render.web/render
+                   :clojure.core.async.flow/ex
+                   (ex-info "A page derivation threw." diagnostic failure)})
+         (log/warn (str "seon.render.web: the fault channel refused a page "
+                        "derivation failure, so it reaches no database fact"
+                        " — page " (pr-str registration-key) ": " message))))
+     {:seon.render.web/page
+      {(if debug? "debug-units" (str "seon-page-" registration-key))
+       (hiccup/->string
+        [:section {:class "seon-debug-body"}
+         [:h2 {:class "seon-debug-caption"} "This page could not be derived"]
+         (debug-value-html diagnostic)])}
+      :seon.render.web/fragments {}
+      :seon.render/captured-calls {}
+      :seon.render/captured-invocations {}
+      ::fault-signature signature})))
+
+(defn- unreportable-page-result
+  "The floor when building a failed page's own diagnostic also threw.
+
+  `failed-page-result` derefs routing, renders Hiccup and builds a
+  diagnostic — every one of those can throw, and it used to sit OUTSIDE the
+  pass's protection, so a throw there ended the proc exactly as the failure it
+  was reporting would have. This floor allocates nothing but strings, so the
+  proc always has a result to carry on to the next page."
+  [registration-key failure diagnostic-failure]
+  (log/warn (str "seon.render.web: a page derivation threw "
+                 (.getName (class ^Throwable failure))
+                 " and reporting it threw "
+                 (.getName (class ^Throwable diagnostic-failure))
+                 " — page " (pr-str registration-key)))
+  {:seon.render.web/page
+   {(str "seon-page-" registration-key)
+    (str "<section class=\"seon-debug-body\">"
+         "<h2 class=\"seon-debug-caption\">"
+         "This page could not be derived, and the failure could not be"
+         " reported</h2></section>")}
+   :seon.render.web/fragments {}
+   :seon.render/captured-calls {}
+   :seon.render/captured-invocations {}})
 
 (defn- render-pass
   "Derive every registered page and retain its serialized package.
@@ -2398,22 +2442,38 @@
                       (filter (fn [[_agent-id stream]]
                                 (unsettled-stream? database stream)))
                       (::streams state))
-        [results pass-invocations]
+        ;; THE WHOLE FAILURE PATH IS INSIDE THE PROTECTION. Building a failed
+        ;; page's diagnostic derefs routing and renders Hiccup, so it can
+        ;; throw too; when it does, the string-only floor keeps the proc alive
+        ;; instead of ending it with the failure it was reporting.
+        previous-signatures (::fault-signatures state)
+        [results pass-invocations pass-signatures]
         (reduce
-         (fn [[results invocations] registration-key]
+         (fn [[results invocations signatures] registration-key]
            (let [result (try
                           (page-refresh (assoc state ::invocations invocations)
                                         database streams profile registration-key
                                         derive-all? invalidate-calls?)
                           (catch Throwable failure
-                            (failed-page-result state registration-key failure)))
+                            (try
+                              (failed-page-result
+                               state registration-key failure
+                               (get previous-signatures registration-key))
+                              (catch Throwable diagnostic-failure
+                                (unreportable-page-result
+                                 registration-key failure
+                                 diagnostic-failure)))))
                  invocations (if (::retained-only? result)
                                invocations
                                (merge invocations
                                       (:seon.render/captured-invocations
                                        result)))]
-             [(assoc results registration-key result) invocations]))
-         [{} (::invocations state)]
+             [(assoc results registration-key result)
+              invocations
+              (if-let [signature (::fault-signature result)]
+                (assoc signatures registration-key signature)
+                signatures)]))
+         [{} (::invocations state) {}]
          watched)
         paint-results (into {}
                             (remove (comp ::retained-only? val))
@@ -2478,7 +2538,11 @@
             ::packages packages
             ::fragments fragments
             ::calls calls
-            ::invocations invocations)
+            ::invocations invocations
+            ;; DERIVED, NOT ACCUMULATED: only the pages that failed THIS pass
+            ;; carry a signature, so a page that starts rendering again drops
+            ;; out and its next failure is offered afresh.
+            ::fault-signatures pass-signatures)
      (when changed? packages)])))
 
 (defn append-history

@@ -2350,3 +2350,96 @@
     (with-server
       (fn [_connection server _context]
         (is (nil? (:seon.render.web/wanted-port server)))))))
+
+;;; ---------------------------------------------------------------------------
+;;; A page that throws every pass is ONE fault, not one per pass
+;;; ---------------------------------------------------------------------------
+
+;;; The proc surviving a throwing page was the repair that made the rest of
+;;; 2026-09-07 diagnosable; what it left behind was a fault committed on every
+;;; pass — six identical rows in ninety seconds, live — plus an `offer!` whose
+;;; refusal nobody could observe, and a `failed-page-result` sitting outside
+;;; the pass's own protection, so a throw while REPORTING a failure ended the
+;;; proc exactly as the failure would have.
+(defn- throwing-render-state
+  "One render-pass state whose pages all throw, with a real fault channel."
+  [connection fault-channel]
+  {:seon.cluster.loop/cluster
+   {:seon.cluster/name "web-fault-test"
+    :seon.db/connection connection
+    :seon.sci.admit/caps caps
+    :seon.sci.eval/ctx nil
+    :seon.config.eval/time-limit-ms 1000
+    :seon.config/on-core-error :panic
+    :seon.cluster.run/process "web-fault-test"}
+   :seon.cluster.agent/routing
+   (atom {:seon.cluster.agent/fault-channel fault-channel})
+   :seon.render.web/registration (atom {"agent-a" 1})
+   :seon.render.web/latest-packages (atom {})
+   :seon.render.web/root-agent-id "root"
+   ::web/streams {}
+   ::web/packages {}
+   ::web/fragments {}
+   ::web/calls {}
+   ::web/passes 0})
+
+(deftest a-page-failing-every-pass-offers-one-fault-and-the-proc-survives
+  (support/with-database
+    (fn [connection]
+      (let [fault-channel (async/chan 10)
+            state (throwing-render-state connection fault-channel)
+            failure (atom (ex-info "the page threw" {}))
+            three-passes
+            (fn [state]
+              (with-redefs-fn
+                {#'web/page-refresh (fn [& _] (throw @failure))}
+                (fn []
+                  (reduce (fn [state _]
+                            (first (#'web/render-pass state @connection true)))
+                          state
+                          (range 3)))))
+            after (three-passes state)]
+        (testing "three failing passes commit ONE fault"
+          (is (some? (async/poll! fault-channel))
+              "the first failure reaches the committer")
+          (is (nil? (async/poll! fault-channel))
+              "the two identical repeats do not"))
+        (testing "and the proc kept going: every pass produced a page"
+          (is (= 3 (::web/passes after)))
+          (is (str/includes?
+               (str (vals (get (::web/packages after) "agent-a")))
+               "This page could not be derived")))
+        (testing "a DIFFERENT failure on the same page is offered again"
+          (reset! failure (ex-info "the page threw something else" {}))
+          (three-passes after)
+          (is (some? (async/poll! fault-channel)))
+          (is (nil? (async/poll! fault-channel))))
+        (testing "a page that recovers has its next failure offered afresh"
+          (reset! failure (ex-info "the page threw" {}))
+          (let [recovered (first (#'web/render-pass
+                                  (three-passes after) @connection true))]
+            (async/poll! fault-channel)
+            (is (empty? (::web/fault-signatures recovered))
+                "a rendering page holds no retained signature")
+            (three-passes recovered)
+            (is (some? (async/poll! fault-channel)))))
+        (async/close! fault-channel)))))
+
+(deftest a-throw-while-reporting-a-failed-page-does-not-end-the-proc
+  (support/with-database
+    (fn [connection]
+      ;; Routing with no fault channel value at all: `failed-page-result`
+      ;; derefs it, and a nil deref target throws inside the reporting path.
+      (let [state (assoc (throwing-render-state connection nil)
+                         :seon.cluster.agent/routing nil)
+            after (with-redefs-fn
+                    {#'web/page-refresh
+                     (fn [& _] (throw (ex-info "the page threw" {})))}
+                    (fn []
+                      (first (#'web/render-pass state @connection true))))]
+        (is (= 1 (::web/passes after))
+            "the pass completed rather than ending the proc")
+        (is (str/includes?
+             (str (vals (get (::web/packages after) "agent-a")))
+             "could not be derived")
+            "and the page still says so where its content would have been")))))
