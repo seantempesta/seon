@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: friction
+severity: blocker
 tags: [issue, runtime, test, class/n4, wave/operator-launch-concurrency]
 ---
 
@@ -74,3 +74,72 @@ not be prepared.` plus a `/var/folders/**` temp path, so the real cause
 takes two extra hops to reach. Whatever fix lands should also surface the
 child's stderr on the operator's own output — a launch blocked by another
 lane's build should say so in one line.
+
+## The catch is for the wrong exception (namespace-steward lane, 2026-09-07)
+
+Root cause located, and today it is a total block on `bin/test`, not
+friction. `dev_cache.clj:353-366` (`admit!`) moves the staging directory
+onto the destination and catches exactly `FileAlreadyExistsException`:
+
+```clojure
+(catch FileAlreadyExistsException _
+  nil)
+```
+
+On APFS the JVM raises `DirectoryNotEmptyException` for a non-empty
+destination instead, which that catch does not cover, so the intended
+"destination already exists = success" path never runs and the launch dies
+with the `Directory not empty` message quoted above.
+
+Observed 2026-09-07 12:0x–12:4x: five consecutive `bin/test
+seon.render.web-test` invocations failed identically on
+`dev-dependency-classes/325a05bec52908404bd81b3e32284826e9bbeac99cac9206a5b52a8236da1158`.
+That destination is pinned by three live cluster JVMs (`ps aux | grep java`
+matches pids 93646/93653/93654), so deleting it by hand is not available
+either — the fix has to be the catch. Three `bin/test` runs earlier in the
+same session succeeded against a different cache digest, so the wedge
+begins the moment a live JVM holds the digest directory that the next
+prepare recomputes.
+
+Why a rebuild recomputes a digest that already exists: the cache digest
+is `[cache-version dependency-digest project-source-digest]`
+(`dev_cache.clj:286-288`), so a colliding destination is BY CONSTRUCTION
+the cache this run wants. The freshness check does not scan for it — it
+reads the single selection/result file, which `b/delete` removes at the
+start of every prepare (`dev_cache.clj:398`), so a concurrent run's prepare
+makes the next one report "inputs changed" for a cache that is on disk and
+valid.
+
+Suggested fix, in the shape this note already asks for: catch
+`DirectoryNotEmptyException` (a `FileSystemException`) alongside
+`FileAlreadyExistsException` in `admit!` and fall through. Nothing stale is
+served by doing so — `prepare!` already validates the destination with
+`valid-cache` against the current project digest immediately after
+`admit!`, and raises when it does not match.
+
+## 2026-09-07 recurrence: a git worktree alone reproduces it, no concurrency
+
+A short-lived `git worktree` used for a baseline `bin/test` run resolved
+`reference-code/` through a symlink, so the dependency closure hashed to a
+different digest. Every `bin/test` in that worktree wrote
+`target/dev-dependency-cache-current.edn` in the SHARED tree (the worktree's
+`target/` is not private). Back in the main checkout the closure hashed to its
+own digest again, whose directory already existed and was complete — and the
+prepare failed exactly as this note describes:
+
+```
+Execution error (FileSystemException)
+target/dev-dependency-classes.next/<uuid> ->
+target/dev-dependency-classes/325a05be…: Directory not empty
+bin/test: dependency cache freshness check failed
+```
+
+Two `bin/test` invocations in a row died there with no live JVM holding
+anything. Manual repair: delete the staging directory and rewrite
+`dev-dependency-cache-current.edn` to the existing complete digest. So the
+failure needs neither concurrent launches nor a pinned digest — an existing
+valid destination is enough, which is the catch this note already asks for.
+
+Second, smaller finding: `dev-dependency-cache-current.edn` is a single
+shared file that any checkout sharing this `target/` overwrites, so one
+worktree's dependency layout silently invalidates the main tree's cache.
