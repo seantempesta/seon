@@ -714,35 +714,67 @@
      (or (::requery-refusal profile)
          "the source has no stable requery identity")}))
 
+(defn elision
+  "One complete elision node: what was omitted, where, and how to ask again.
+
+  THE ONE CONSTRUCTOR FOR A CUT. Refitting and admission both mint their cuts
+  here, so an elision is ordinary data carrying count, path, and requery
+  identity wherever it was made (ruling 63c). A cut minted anywhere else was
+  the defect this replaces: a bare `{:seon.print/face :seon.print/elided}`
+  renders a refusal sentence naming no source, because `emit ::elided` reads
+  the NODE and nothing else.
+
+  An absent field is absent, never a stored nil: `render-elision-ai` already
+  says what it does not know. A cut handed no `::requery-id` carries the
+  refusal instead, so the reason travels with the node."
+  {:malli/schema [:=> [:cat :seon.print/elision-request] :seon.print/node]}
+  [{::keys [requery-id requery-refusal omitted elision-unit prefix bound-by]
+    profile-id :seon.render.profile/id
+    path :seon.render.data/path
+    next-offset :seon.render.data/next-offset
+    total :seon.render.data/total}]
+  (cond-> {::face ::elided}
+    (some? omitted) (assoc ::omitted (max 1 (long omitted)))
+    (some? elision-unit) (assoc ::elision-unit elision-unit)
+    (some? path) (assoc :seon.render.data/path (vec path))
+    (some? next-offset)
+    (assoc :seon.render.data/next-offset (long next-offset))
+    (some? profile-id) (assoc :seon.render.profile/id profile-id)
+    (some? total) (assoc :seon.render.data/total (long total))
+    (some? prefix) (assoc ::prefix prefix)
+    (some? bound-by) (assoc ::bound-by bound-by)
+    (some? requery-id) (assoc ::requery-id requery-id)
+    (and (nil? requery-id) (some? requery-refusal))
+    (assoc ::requery-refusal requery-refusal)
+    (and (nil? requery-id) (nil? requery-refusal))
+    (assoc ::requery-refusal "the source has no stable requery identity")))
+
 (defn- elision-node
   [profile path next-offset omitted total unit prefix]
-  (merge
-   {::face ::elided
-    ::omitted (max 1 (long omitted))
-    ::elision-unit unit
-    :seon.render.data/path (vec path)
-    :seon.render.data/next-offset (long next-offset)
-    :seon.render.profile/id (:seon.render.profile/id profile)}
-   (when (some? total) {:seon.render.data/total (long total)})
-   (when (some? prefix) {::prefix prefix})
-   (when-some [bound-by (::bound-by profile)]
-     {::bound-by bound-by})
-   (requery-fields profile)))
+  (elision (merge {::omitted omitted
+                   ::elision-unit unit
+                   :seon.render.data/path path
+                   :seon.render.data/next-offset next-offset
+                   :seon.render.data/total total
+                   :seon.render.profile/id (:seon.render.profile/id profile)
+                   ::prefix prefix
+                   ::bound-by (::bound-by profile)}
+                  (requery-fields profile))))
 
 (defn- preserve-requery
-  [elision carried]
+  [cut carried]
   (cond
     (::requery-id carried)
-    (-> elision
+    (-> cut
         (dissoc ::requery-refusal)
         (assoc ::requery-id (::requery-id carried)))
 
     (::requery-refusal carried)
-    (-> elision
+    (-> cut
         (dissoc ::requery-id)
         (assoc ::requery-refusal (::requery-refusal carried)))
 
-    :else elision))
+    :else cut))
 
 (declare enrich-node)
 

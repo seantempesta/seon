@@ -178,7 +178,43 @@
                              [:seon.print/elided
                               [:map
                                [:seon.print/face
-                                [:= :seon.print/elided]]]]
+                                [:= :seon.print/elided]]
+                               ;; A CUT CARRIES ITS OWN EVIDENCE. Admission
+                               ;; and refitting both mint one through
+                               ;; `seon.print/elision`; a field the cut
+                               ;; genuinely could not observe is absent, and
+                               ;; `render-elision-ai` says so rather than
+                               ;; inventing it.
+                               [:seon.print/omitted
+                                {:optional true}
+                                :seon.print/omitted]
+                               [:seon.print/elision-unit
+                                {:optional true}
+                                :seon.print/elision-unit]
+                               [:seon.print/prefix
+                                {:optional true}
+                                :seon.print/prefix]
+                               [:seon.print/bound-by
+                                {:optional true}
+                                :seon.print/bound-by]
+                               [:seon.print/requery-id
+                                {:optional true}
+                                :seon.print/requery-id]
+                               [:seon.print/requery-refusal
+                                {:optional true}
+                                :seon.print/requery-refusal]
+                               [:seon.render.data/path
+                                {:optional true}
+                                :seon.render.data/path]
+                               [:seon.render.data/next-offset
+                                {:optional true}
+                                :seon.render.data/next-offset]
+                               [:seon.render.data/total
+                                {:optional true}
+                                :seon.render.data/total]
+                               [:seon.render.profile/id
+                                {:optional true}
+                                :seon.render.profile/id]]]
                              [:seon.print/projected
                               [:map
                                {:gen/gen seon.print/projected-node-generator}
@@ -229,6 +265,32 @@
               [:seon.config.eval.result/max-string
                :seon.config.eval.result/max-string]],
              :prefix :string,
+             :elision-request
+             [:map
+              [:seon.print/omitted {:optional true} :seon.print/omitted]
+              [:seon.print/elision-unit
+               {:optional true}
+               :seon.print/elision-unit]
+              [:seon.print/prefix {:optional true} :seon.print/prefix]
+              [:seon.print/bound-by {:optional true} :seon.print/bound-by]
+              [:seon.print/requery-id
+               {:optional true}
+               :seon.print/requery-id]
+              [:seon.print/requery-refusal
+               {:optional true}
+               :seon.print/requery-refusal]
+              [:seon.render.data/path
+               {:optional true}
+               :seon.render.data/path]
+              [:seon.render.data/next-offset
+               {:optional true}
+               :seon.render.data/next-offset]
+              [:seon.render.data/total
+               {:optional true}
+               :seon.render.data/total]
+              [:seon.render.profile/id
+               {:optional true}
+               :seon.render.profile/id]],
              :elision-base
              [:map
               [:seon.print/face [:= :seon.print/elided]]

@@ -2448,15 +2448,23 @@
               (defs execution-ctx namespace-name before-intern-values
                          source form (built-in-calls))
               admitted (admit/admit
-                        {:seon.sci.admit/value value
-                         :seon.sci.admit/interrupt-fn interrupt-fn
-                         :seon.sci.admit/caps caps
-                         :seon.schema/projection projection
-                         ;; R41 travels WITH the request: admission does
-                         ;; not read a dial of its own, and this
-                         ;; evaluator does not default one
-                         :seon.config/on-core-error on-core-error
-                         :seon.sci.admit/record evaluation-record})]
+                        (cond->
+                         {:seon.sci.admit/value value
+                          :seon.sci.admit/interrupt-fn interrupt-fn
+                          :seon.sci.admit/caps caps
+                          :seon.schema/projection projection
+                          ;; R41 travels WITH the request: admission does
+                          ;; not read a dial of its own, and this
+                          ;; evaluator does not default one
+                          :seon.config/on-core-error on-core-error
+                          :seon.sci.admit/record evaluation-record}
+                          ;; THE CUT NAMES ITS SOURCE. This evaluation's own
+                          ;; identity is already derived here, so an elision
+                          ;; admission makes can say where to ask for the
+                          ;; rest instead of refusing for want of a name. An
+                          ;; evaluation nobody is storing supplies none.
+                          receipt
+                          (assoc :seon.print/requery-id receipt)))]
           (success-evaluation
            {:seon.sci.eval/admitted admitted
             :seon.sci.admit/caps caps
@@ -2497,14 +2505,17 @@
                         (assoc :seon.error/message arity-message))
                 admitted
                 (admit/admit
-                 {:seon.sci.admit/value value
-                  :seon.sci.admit/interrupt-fn (constantly nil)
-                  :seon.sci.admit/caps caps
-                  :seon.schema/projection
-                  (evaluation-projection
-                   {:seon.sci.eval/ctx evaluation-ctx})
-                  :seon.config/on-core-error :record
-                  :seon.sci.admit/record record})]
+                 (cond->
+                  {:seon.sci.admit/value value
+                   :seon.sci.admit/interrupt-fn (constantly nil)
+                   :seon.sci.admit/caps caps
+                   :seon.schema/projection
+                   (evaluation-projection
+                    {:seon.sci.eval/ctx evaluation-ctx})
+                   :seon.config/on-core-error :record
+                   :seon.sci.admit/record record}
+                   receipt
+                   (assoc :seon.print/requery-id receipt)))]
           (failed-evaluation
            (cond-> {:seon.sci.eval/admitted admitted
                     :seon.sci.admit/caps caps

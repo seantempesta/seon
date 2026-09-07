@@ -13,6 +13,12 @@
   or its enclosing operation, never reached process-sideways and never once
   per node.
 
+  A cut this walk makes is a COMPLETE elision: it carries the path it stands
+  at, the offset and count of what follows, and — when the request supplies
+  `:seon.print/requery-id`, the identity of the evaluation being stored — the
+  name to ask for the rest. Nothing downstream can repair a cut it did not
+  make, so nothing downstream has to.
+
   `admit-value` returns the one bounded print node and its derived semantic
   value without constructing a print sink. `admit` adds
   `:seon.cluster.eval/result-edn` from that same node for receipt callers.
@@ -107,13 +113,44 @@
   (vreset! (:capped? state) true)
   nil)
 
-(defn- elide!
-  "Mark this node elided. A scalar, deliberately: an elision must never
-  be a structure, or the thing that replaces an over-deep value would
-  itself be over-deep."
-  [state]
+(declare semantic-value)
+
+(defn- cut!
+  "Mark one cut and mint the elision that names it.
+
+  A scalar, deliberately: an elision must never be a structure, or the thing
+  that replaces an over-deep value would itself be over-deep. It is a scalar
+  that carries its own evidence — where in the value the cut is, how many
+  items follow it, and the identity to ask for the rest (ruling 63c). The
+  identity is the one this admission was HANDED; an admission nobody is
+  storing carries the refusal instead of a name that resolves to nothing."
+  [state path next-offset omitted total unit]
   (vreset! (:capped? state) true)
-  (node ::print/elided))
+  (print/elision
+   (cond-> {:seon.render.data/path (vec path)
+            :seon.render.data/next-offset (long next-offset)
+            :seon.print/elision-unit unit}
+     (some? omitted) (assoc :seon.print/omitted omitted)
+     (some? total) (assoc :seon.render.data/total total)
+     (some? (:requery-id state))
+     (assoc :seon.print/requery-id (:requery-id state))
+     (nil? (:requery-id state))
+     (assoc :seon.print/requery-refusal
+            "this admission was handed no requery identity"))))
+
+(defn- elide!
+  "Replace this node itself with the cut standing at its own path."
+  [state path]
+  (cut! state path 0 1 nil :subtree))
+
+(defn- remaining-count
+  "How many items follow the cut, when the source can say without walking it.
+
+  An infinite or lazy source is never counted — that is the whole reason this
+  walk is bounded — so the cut simply does not claim a number it cannot know."
+  [values taken]
+  (when (counted? values)
+    (max 1 (- (count values) taken))))
 
 (defn- prune!
   [state]
@@ -123,37 +160,39 @@
 (declare project)
 
 (defn- identity-only-node
-  [value child-depth state]
+  [value child-depth state path]
   (when-let [projection (some-> (:projection state)
                                 (schema/identity-only-projection-in value))]
     (if (take-node! state)
       (assoc (object-node value)
              ::print/value
              (project (:seon.schema/identity-value projection)
-                      child-depth state))
-      (elide! state))))
+                      child-depth state path))
+      (elide! state path))))
 
 (defn- append-elision!
   "Append the scalar cut marker, charging its one node."
-  [state accumulated emit]
+  [state accumulated emit path taken values]
   (flag! state)
   (if (take-node! state)
-    (emit accumulated (node ::print/elided))
+    (emit accumulated
+          (cut! state path taken (remaining-count values taken)
+                (when (counted? values) (count values)) :children))
     ;; No child can fit. Replacing this collection node with the scalar
     ;; is the only honest projection that still obeys the node cap.
-    (elide! state)))
+    (elide! state path)))
 
 (defn- project-entries
   "Project up to `width` children, stopping when the node budget runs out.
   `emit` receives each child's projection. Truncation — by width or by
   budget — is capping, and says so."
-  [values width depth state emit]
+  [values width depth state path emit]
   (loop [remaining (seq values)
          taken 0
          accumulated (emit)]
     (cond
       (nil? remaining) accumulated
-      (and (not (:unbounded? state)) (zero? @(:nodes state))) (elide! state)
+      (and (not (:unbounded? state)) (zero? @(:nodes state))) (elide! state path)
       :else
       (let [after (next remaining)
             ;; width means WIDTH: cut only once `width` items are shown and
@@ -162,7 +201,7 @@
             cut-for-width? (and (not (:unbounded? state)) after (>= taken width))
             cut-for-nodes? (and (not (:unbounded? state)) after (= 1 @(:nodes state)))]
         (if (or cut-for-width? cut-for-nodes?)
-          (append-elision! state accumulated emit)
+          (append-elision! state accumulated emit path taken values)
           ;; When siblings remain, hold one node aside for their cut marker.
           ;; A nested child may consume everything else, but it can never
           ;; silently erase the parent's remaining siblings.
@@ -170,7 +209,8 @@
             (when (and reserved? (not (:unbounded? state)))
               (vswap! (:nodes state) dec))
             (take-node! state)
-            (let [child (project (first remaining) depth state)]
+            (let [child (project (first remaining) depth state
+                                 (conj path taken))]
               (when (and reserved? (not (:unbounded? state)))
                 (vswap! (:nodes state) inc))
               (recur after
@@ -178,27 +218,29 @@
                      (emit accumulated child)))))))))
 
 (defn- mark-map-cut!
-  [state accumulated]
+  [state accumulated path taken entries]
   (flag! state)
   (if (take-node! state)
-    (conj accumulated (node ::print/elided))
-    (elide! state)))
+    (conj accumulated
+          (cut! state path taken (remaining-count entries taken)
+                (when (counted? entries) (count entries)) :children))
+    (elide! state path)))
 
 (defn- project-map
-  [entries width depth state]
+  [entries width depth state path]
   (loop [remaining (seq entries)
          taken 0
          accumulated []]
     (cond
       (nil? remaining) accumulated
-      (and (not (:unbounded? state)) (< @(:nodes state) 2)) (elide! state)
+      (and (not (:unbounded? state)) (< @(:nodes state) 2)) (elide! state path)
       :else
       (let [after (next remaining)
             ;; same width-means-width rule as project-entries above
             cut-for-width? (and (not (:unbounded? state)) after (>= taken width))
             cut-for-nodes? (and (not (:unbounded? state)) after (< @(:nodes state) 3))]
         (if (or cut-for-width? cut-for-nodes?)
-          (mark-map-cut! state accumulated)
+          (mark-map-cut! state accumulated path taken entries)
           (let [[entry-key entry-value] (first remaining)
                 reserved? (some? after)]
             (when (and reserved? (not (:unbounded? state)))
@@ -207,8 +249,13 @@
             ;; entry: take both or neither
             (take-node! state)
             (take-node! state)
-            (let [projected-key (project entry-key depth state)
-                  projected-value (project entry-value depth state)]
+            (let [projected-key (project entry-key depth state
+                                         (conj path taken))
+                  ;; THE VALUE'S PATH IS ITS KEY, because that is how a
+                  ;; requery navigates back into the value (`get-in`).
+                  projected-value (project entry-value depth state
+                                           (conj path
+                                                 (semantic-value projected-key)))]
               (when (and reserved? (not (:unbounded? state)))
                 (vswap! (:nodes state) inc))
               (recur after
@@ -216,14 +263,14 @@
                      (conj accumulated [projected-key projected-value])))))))))
 
 (defn- project-node
-  [value depth state]
+  [value depth state path]
   (let [{:keys [:seon.config.eval.result/max-depth
                 :seon.config.eval.result/max-collection
                 :seon.config.eval.result/max-string]}
         (:caps state)
         deep? (and (not (:unbounded? state)) (>= depth max-depth))
         child-depth (inc depth)
-        identity-node (delay (identity-only-node value child-depth state))]
+        identity-node (delay (identity-only-node value child-depth state path))]
     (cond
       (nil? value) (value-node ::print/nil nil)
       (boolean? value) (value-node ::print/boolean value)
@@ -267,8 +314,9 @@
       (instance? Throwable value)
       (if (take-node! state)
         {::print/face ::print/throwable
-         ::print/value (project (Throwable->map value) child-depth state)}
-        (elide! state))
+         ::print/value (project (Throwable->map value) child-depth state
+                                (conj path ::print/throwable))}
+        (elide! state path))
 
       (instance? sci.lang.Var value)
       {::print/face ::print/var
@@ -292,7 +340,7 @@
       ;; projection's depth is a record's own depth, and the field width
       ;; leaves room for it.
       (record? value)
-      (let [fields (project-map value max-collection child-depth state)]
+      (let [fields (project-map value max-collection child-depth state path)]
         (if (vector? fields)
           {::print/face ::print/record
            ::print/name (or (sci-named value) (.getName (class value)))
@@ -300,13 +348,13 @@
           fields))
 
       (or (map? value) (instance? java.util.Map value))
-      (let [entries (project-map value max-collection child-depth state)]
+      (let [entries (project-map value max-collection child-depth state path)]
         (if (vector? entries)
           {::print/face ::print/map ::print/entries entries}
           entries))
 
       (or (set? value) (instance? java.util.Set value))
-      (let [items (project-entries value max-collection child-depth state
+      (let [items (project-entries value max-collection child-depth state path
                                    (fn ([] []) ([acc child] (conj acc child))))]
         (if (vector? items)
           {::print/face ::print/set ::print/items items}
@@ -315,7 +363,7 @@
       (or (vector? value)
           (instance? java.util.RandomAccess value)
           (instance? clojure.lang.MapEntry value))
-      (let [items (project-entries value max-collection child-depth state
+      (let [items (project-entries value max-collection child-depth state path
                                    (fn ([] []) ([acc child] (conj acc child))))]
         (if (vector? items)
           {::print/face ::print/vector ::print/items items}
@@ -327,7 +375,7 @@
       ;; counts the source — `count` on an infinite sequence never
       ;; returns.
       (or (coll? value) (seq? value) (instance? java.util.Collection value))
-      (let [items (project-entries value max-collection child-depth state
+      (let [items (project-entries value max-collection child-depth state path
                                    (fn ([] []) ([acc child] (conj acc child))))]
         (if (vector? items)
           {::print/face ::print/list ::print/items items}
@@ -346,13 +394,13 @@
 
 (defn- project
   "One node: call the interrupt-fn, then project — or mark and move on."
-  [value depth state]
+  [value depth state path]
   ;; EVERY node, because a native lazy sequence enters no interpreted fn
   ;; body and would otherwise realize forever (probed: 200k elements, zero
   ;; interrupt-fn calls)
   ((:interrupt-fn state))
   (try
-    (project-node value depth state)
+    (project-node value depth state path)
     (catch Throwable failure
       ;; the interrupt is the one throwable admission must not swallow
       ;; resolved at call time because the guarded kernel requires this
@@ -375,7 +423,7 @@
       ;; follows, applied to the failure path
       (if (and (not (:unbounded? state))
                (>= depth (:seon.config.eval.result/max-depth (:caps state))))
-        (elide! state)
+        (elide! state path)
         (do
           (vreset! (:capped? state) true)
           {::print/face ::print/failed
@@ -517,6 +565,7 @@
 (defn- admit*
   [{::keys [value interrupt-fn caps record unbounded?]
     supplied-projection :seon.schema/projection
+    requery-id :seon.print/requery-id
     on-core-error :seon.config/on-core-error}]
   (let [projection (or supplied-projection (schema/handed-projection))
         state {:interrupt-fn interrupt-fn
@@ -525,12 +574,17 @@
                ;; Identity projection is handed by the operation boundary.
                ;; Ordinary scalar/collection admissions never require it.
                :projection projection
+               ;; THE IDENTITY THE CALLER ALREADY HAS. A cut this walk makes
+               ;; is the only place that knows both the path and the source,
+               ;; so the evaluation being stored hands its own identity in
+               ;; and every elision names it (ruling 63c).
+               :requery-id requery-id
                :unbounded? (true? unbounded?)
                ;; the root is a node like any other
                :nodes (volatile! (dec (long (:seon.config.eval.result/max-nodes
                                              caps))))
                :capped? (volatile! false)}
-        print-node (project value 0 state)]
+        print-node (project value 0 state [])]
     (cond-> {::print-node print-node
              ::value (semantic-value print-node)
              ::capped? @(:capped? state)}
@@ -543,7 +597,11 @@
   This is the shared admission operation for guarded invocations and literal
   render declarations. It walks the source exactly once and returns the same
   print node, semantic value, cap signal, and optional diagnostics as
-  `admit`."
+  `admit`.
+
+  An optional `:seon.print/requery-id` is the identity every cut of this walk
+  names as its source. A caller that is not storing the value supplies none,
+  and the cuts carry the refusal instead."
   {:malli/schema
    [:=> [:cat :seon.sci.admit/request]
     [:map

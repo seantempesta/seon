@@ -421,3 +421,47 @@
     (is (false? (:seon.sci.admit/capped? admitted)))
     (is (pos? (calls))
         "complete render admission still consults the armed interrupt")))
+
+(deftest every-admission-cut-names-its-path-count-and-source
+  ;; RULING 63c: AN ELISION IS ORDINARY DATA carrying count, path, and requery
+  ;; identity. Admission is where the cut is MADE, so it is the only place
+  ;; that knows all three; a bare `{:seon.print/face :seon.print/elided}`
+  ;; forced every later reader to render a refusal sentence naming no source
+  ;; (docs/seon/issues/admission-elision-cannot-name-its-requery-identity.md).
+  (let [narrow (assoc caps
+                      :seon.config.eval.result/max-collection 2
+                      :seon.config.eval.result/max-depth 4
+                      :seon.config.eval.result/max-nodes 64)
+        identity-supplied [:seon.cluster.eval/id "[\"a-run\" 3]"]
+        admitted (admit/admit-value
+                  (assoc (request {:rows (vec (range 10))}
+                                  (:interrupt-fn (armed))
+                                  narrow)
+                         :seon.print/requery-id identity-supplied))
+        node (:seon.sci.admit/print-node admitted)
+        cut (->> (tree-seq coll? seq node)
+                 (filter #(and (map? %)
+                               (= :seon.print/elided (:seon.print/face %))))
+                 first)]
+    (is (:seon.sci.admit/capped? admitted))
+    (is (some? cut) "a value past the collection cap is cut")
+    (is (= [:rows] (:seon.render.data/path cut))
+        "the cut stands at the path of the collection it cut")
+    (is (= 2 (:seon.render.data/next-offset cut)))
+    (is (= 8 (:seon.print/omitted cut)))
+    (is (= 10 (:seon.render.data/total cut)))
+    (is (= identity-supplied (:seon.print/requery-id cut)))
+    (is (not (contains? cut :seon.print/requery-refusal)))
+    (is (str/includes? (print/emit-text node (print/default-options))
+                       (str "requery by " (pr-str identity-supplied)))
+        "the emitted bytes name the source to ask again"))
+  (testing "an admission nobody is storing refuses honestly instead of lying"
+    (let [narrow (assoc caps :seon.config.eval.result/max-collection 2)
+          node (:seon.sci.admit/print-node
+                (admit/admit-value
+                 (request (vec (range 10)) (:interrupt-fn (armed)) narrow)))
+          cut (last (:seon.print/items node))]
+      (is (= :seon.print/elided (:seon.print/face cut)))
+      (is (not (contains? cut :seon.print/requery-id)))
+      (is (string? (:seon.print/requery-refusal cut))
+          "the reason travels with the cut rather than being invented later"))))

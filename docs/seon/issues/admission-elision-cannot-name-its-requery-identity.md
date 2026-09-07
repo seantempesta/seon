@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, print, repl, ugly-output, class/p1]
 ---
@@ -77,3 +77,23 @@ to repair anything, and `render-elision-ai` tells the truth by construction.
 
 Owned by neither `seon.repl` nor `seon.render`: `src/seon/sci/admit.clj` and
 `src/seon/print.cljc`.
+
+## Resolution — 2026-09-07
+
+The cut now carries its own evidence, minted where the cut is MADE.
+`seon.print/elision` is the ONE public constructor for an elision node
+(`seon.print/fit`'s private `elision-node` delegates to it), and
+`seon.sci.admit`'s walk threads a path so every cut records
+`:seon.render.data/path`, `/next-offset`, `:seon.print/omitted` and
+`/elision-unit`, plus `:seon.render.data/total` when the source is `counted?`
+— an infinite or lazy source is still never counted.
+
+The identity is HANDED IN: an admission request may carry
+`:seon.print/requery-id`, and `seon.sci.eval/evaluate` supplies the
+evaluation's own `[:seon.cluster.eval/id …]` for both the settled and the
+failed admission, because that identity is already derived there. An
+admission nobody is storing supplies none and its cuts carry the honest
+refusal instead. `seon.repl/value-text` therefore emits
+`requery by [:seon.cluster.eval/id "…"] at path […] offset N` with no change
+of its own. Regression:
+`seon.sci.admit-test/every-admission-cut-names-its-path-count-and-source`.
