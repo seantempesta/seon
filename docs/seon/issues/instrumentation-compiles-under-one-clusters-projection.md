@@ -243,3 +243,17 @@ seon.dev.source-instrumentation-test` passed 24 tests / 188 assertions
 with invalid input and observed `seon.instrument/contract-violated` /
 `invalid-input`. These are post-publication observations; the documented
 per-Var replacement interval remains outside the guarantee.
+
+
+Cold-start correction: moving the restoration around the complete init body
+changed its compilation boundary. A fresh JVM compiled qualified Seon calls
+inside the new `let`/`try` before the runtime `require`, producing
+`ClassNotFoundException seon.cluster`; a preloaded test worker hid this.
+Generated init and named-init now use the existing `ns-resolve` calling
+convention for every runtime owner. A fresh child JVM compiles six publish,
+non-publish, named, forced, and development init variants while asserting
+`seon.cluster` is absent both before and after compilation. The focused gate
+passed 2 tests / 95 assertions (run.DSrXLa). Root's normal cold publication and
+named non-publish init both succeeded, with publication commit
+`6a9e0964-b1c2-51fe-9f6d-94228e188eb5`, digest
+`2101a3e72457465d942d1b2eea3f8c090c8bf761c977528bde7cc4dd843aa6ee`.

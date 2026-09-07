@@ -2257,7 +2257,8 @@
                    :seon.operator/repository-root
                    ~(str (repository-root))
                    :seon.operator/managed-root ~root))
-          `(seon.cluster.registry/ensure-cluster! ~request))]
+          `((ns-resolve 'seon.cluster.registry (symbol "ensure-cluster!"))
+            ~request))]
     `(fn [~store ~source ~instance]
        (when-not ~source
          (throw
@@ -2265,13 +2266,15 @@
            "No `current-src` branch is published; run `bin/seon init` first."
            {:seon.fresh-operator/root ~root
             :seon.fresh-operator/name ~name})))
-       (let [~branch (seon.cluster.registry/cluster-branch ~name)
+       (let [~branch ((ns-resolve 'seon.cluster.registry (symbol "cluster-branch"))
+                      ~name)
              ~request {:seon.store/store ~store
                        :seon.boot/cluster-name ~name
                        :seon.source/commit-id
                        (:seon.source/commit-id ~source)}]
          (when (and (not ~force?)
-                    (contains? (seon.cluster.registry/roster ~store) ~branch))
+                    (contains? ((ns-resolve 'seon.cluster.registry (symbol "roster"))
+                                ~store) ~branch))
            (throw
             (ex-info
              (str "Cluster `" ~name
@@ -2301,31 +2304,32 @@
         operation
         (cond
           development-cluster
-          `(seon.cluster/refresh-source! ~cluster-root ~changed-paths
-                                        ~development-cluster)
+          `((ns-resolve 'seon.cluster (symbol "refresh-source!"))
+            ~cluster-root ~changed-paths ~development-cluster)
 
           (seq changed-paths)
-          `(seon.cluster/refresh-source! ~cluster-root ~changed-paths)
+          `((ns-resolve 'seon.cluster (symbol "refresh-source!"))
+            ~cluster-root ~changed-paths)
 
           (not name)
-          `(seon.cluster/refresh-source! ~cluster-root)
+          `((ns-resolve 'seon.cluster (symbol "refresh-source!")) ~cluster-root)
 
           source-process?
           `(let [~cold-source
                  ~(when publish-before-fork?
-                    `(seon.cluster/refresh-source! ~cluster-root))
+                    `((ns-resolve 'seon.cluster (symbol "refresh-source!")) ~cluster-root))
                  ~cold-store
-                 (seon.cluster.store/open-store!
+                 ((ns-resolve 'seon.cluster.store (symbol "open-store!"))
                   {:seon.store/dir ~(str (store-directory root))})]
              (try
                (~(named-init-form root name force?)
                 ~cold-store
                 ~(if publish-before-fork?
                    cold-source
-                   `(seon.cluster.source/current ~cold-store))
+                   `((ns-resolve 'seon.cluster.source (symbol "current")) ~cold-store))
                 nil)
                (finally
-                 (seon.cluster.store/release-store! ~cold-store))))
+                 ((ns-resolve 'seon.cluster.store (symbol "release-store!")) ~cold-store))))
 
           :else
           `(let [instances#
@@ -2336,7 +2340,7 @@
                 (ex-info "The live JVM has no process-root store." {})))
              (~(named-init-form root name force?)
               store#
-              (seon.cluster.source/current store#)
+              ((ns-resolve 'seon.cluster.source (symbol "current")) store#)
               (get instances# ~name))))
         emitted-operation
         (if source-process?

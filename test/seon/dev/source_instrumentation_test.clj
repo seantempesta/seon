@@ -1,11 +1,13 @@
 (ns seon.dev.source-instrumentation-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
             [seon.fresh-operator]
             [seon.instrument :as instrument]
+            [seon.operator.state :as operator.state]
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
@@ -69,3 +71,37 @@
            (if (= :none failure-point)
              (is (= :published actual))
              (is (identical? failure actual)))))))))
+
+
+(deftest generated-init-compiles-before-runtime-owners-are-loaded
+  (let [init-form (ns-resolve 'seon.fresh-operator 'init-form)
+        forms (mapv (fn [arguments]
+                      (apply init-form "tmp/source-instrumentation-test" arguments))
+                    [[nil false [] true false nil]
+                     ["scratch" false [] true false nil]
+                     ["scratch" true [] true false nil]
+                     ["scratch" false [] true true nil]
+                     [nil false ["src/seon/cluster.clj"] false false "development"]
+                     ["scratch" false [] false false nil]])
+        code
+        (pr-str
+         `(do
+            (assert (nil? (find-ns 'seon.cluster))
+                    "cold compilation must not inherit the worker's loaded cluster")
+            (doseq [source# ~forms]
+              (eval (list 'fn [] (read-string source#))))
+            (assert (nil? (find-ns 'seon.cluster))
+                    "compilation must not need the runtime require to have happened")
+            (println "cold-init-compilation-passed")))
+        outcome
+        (operator.state/run-process!
+         {:seon.operator.subprocess/argv
+          [(str (io/file (System/getProperty "java.home") "bin" "java"))
+           "-cp" (System/getProperty "java.class.path")
+           "clojure.main" "-e" code]
+          :seon.operator.subprocess/deadline-ms
+          (* 1000 support/event-backstop-seconds)
+          :seon.operator.subprocess/merge-error? true})]
+    (is (= 0 (:seon.operator.subprocess/exit outcome)) (pr-str outcome))
+    (is (= "cold-init-compilation-passed\n"
+           (:seon.operator.subprocess/output outcome)))))
