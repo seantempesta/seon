@@ -966,10 +966,11 @@
             (edn/read-string (slurp (cluster/source-artifact-file root)))
             roster
             (registry/roster (:seon.store/store old-world))]
-        (testing "the one published source branch advances from its artifact"
+        (testing "the one published source branch agrees with its artifact"
           (is (= source/current-branch (:seon.source/branch refreshed)))
           (is (= current-digest (:seon.source/digest refreshed)))
-          (is (true? (:seon.source/built? refreshed)))
+          (is (false? (:seon.source/built? refreshed))
+              "an unchanged reported file reuses the published source head")
           (is (uuid? (:seon.source/commit-id refreshed)))
           (is (= (:seon.source/commit-id refreshed)
                  (:seon.source/commit-id artifact)))
@@ -1000,6 +1001,40 @@
       (finally
         (cluster/stop! old-world)
         (delete-recursively! root)))))
+
+(deftest unchanged-complete-source-refresh-reuses-the-published-head
+  (let [digest (apply str (repeat 64 "a"))
+        commit-id (random-uuid)
+        snapshot {:seon.source/digest digest
+                  :seon.source/file-digests {"src/example.clj" digest}}
+        manifest {:seon.fn.manifest/roots ["src"]
+                  :seon.fn.manifest/digest digest
+                  :seon.fn.manifest/artifacts []
+                  :seon.fn.manifest/identities []}
+        artifact (assoc snapshot
+                        :seon.source/commit-id commit-id
+                        :seon.fn/manifest manifest)
+        expected {:seon.source/branch source/current-branch
+                  :seon.source/commit-id commit-id
+                  :seon.source/digest digest
+                  :seon.source/built? false}
+        publications (atom 0)]
+    (with-redefs-fn
+      {#'cluster/stable-manifest
+       (fn [] {:seon.source/digest digest
+               :seon.source/snapshot snapshot
+               :seon.fn/manifest manifest})
+       #'cluster/read-source-artifact (fn [_] artifact)
+       #'source/current
+       (fn [_] {:seon.source/branch source/current-branch
+                :seon.source/commit-id commit-id})
+       #'cluster/current-publication (fn [_ _] expected)
+       #'cluster/publish-current-source!
+       (fn [& _] (swap! publications inc) expected)}
+      (fn []
+        (is (= expected (#'cluster/full-source-refresh! "root" ::store)))
+        (is (zero? @publications)
+            "matching artifact, file digests, live head, and database digest do not publish")))))
 
 (deftest ^{:seon.test/long
            "53.139 s pool: real boot, locked-state config repair, restart, and pre-arm fact proof."}

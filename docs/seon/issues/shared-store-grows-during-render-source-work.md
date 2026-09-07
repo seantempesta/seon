@@ -148,3 +148,24 @@ branch or transaction. The incremental owner should likewise return the
 existing head when its proven snapshot digest is unchanged and its planned row
 delta is empty. This preserves actual-edit publication and removes no history;
 it merely declines to mint a database value for identical source.
+
+### Identical complete publication measured and fixed
+
+The isolated fresh-root measurement confirmed the amplification. Immediately
+before the second identical complete publication the store was 57,476 KiB;
+afterward it was 114,808 KiB, an increase of 57,332 KiB. The source digest
+remained
+`2101a3e72457465d942d1b2eea3f8c090c8bf761c977528bde7cc4dd843aa6ee`,
+while the `:current-src` head changed from
+`6a9e0964-b1c2-51fe-9f6d-94228e188eb5` to
+`6a9e09e3-7301-513e-81e4-1441ded5a3ac`.
+
+The refresh planner now returns the existing published head with
+`:seon.source/built? false` only when the stable digest, exact per-file digest
+map, cached artifact commit, live branch commit, and digest stored in that
+commit all agree. This location preserves `source/publish!`'s intentional
+equal-digest repair: a branch changed behind the artifact has a different head
+and still rebuilds. The unchanged incremental path additionally requires an
+empty planned row delta. Development adoption still runs after either no-op,
+so reload reconciliation, SCI acquisition, instrumentation, and its wake are
+not skipped.

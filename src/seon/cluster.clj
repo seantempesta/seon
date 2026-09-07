@@ -1604,6 +1604,24 @@
    :seon.source/file-digests (:seon.source/file-digests snapshot)
    :seon.fn/manifest manifest})
 
+(defn- current-publication
+  [store expected-digest]
+  (when-let [{branch :seon.source/branch
+              commit-id :seon.source/commit-id}
+             (source/current store)]
+    (let [database (source/database store commit-id)]
+      (try
+        (when (= expected-digest
+                 (db/q '[:find ?digest .
+                         :where [_ :seon.source/digest ?digest]]
+                       database))
+          {:seon.source/branch branch
+           :seon.source/commit-id commit-id
+           :seon.source/digest expected-digest
+           :seon.source/built? false})
+        (finally
+          (d/release-materialized-db database))))))
+
 (defn- stable-manifest
   []
   (report-source-progress! "source snapshot")
@@ -1639,11 +1657,22 @@
   (let [{source-digest :seon.source/digest
          snapshot :seon.source/snapshot
          manifest :seon.fn/manifest} (stable-manifest)
-        _ (report-source-progress! "branch publication started")
-        published (publish-current-source! store source-digest manifest)
-        _ (report-source-progress! "branch publication complete")]
-    (write-source-artifact! root (source-artifact published manifest snapshot))
-    published))
+        cached (read-source-artifact root)
+        unchanged
+        (when (and (= source-digest (:seon.source/digest cached))
+                   (= (:seon.source/file-digests snapshot)
+                      (:seon.source/file-digests cached))
+                   (= (:seon.source/commit-id cached)
+                      (:seon.source/commit-id (source/current store))))
+          (current-publication store source-digest))]
+    (if unchanged
+      unchanged
+      (let [_ (report-source-progress! "branch publication started")
+            published (publish-current-source! store source-digest manifest)
+            _ (report-source-progress! "branch publication complete")]
+        (write-source-artifact! root
+                                (source-artifact published manifest snapshot))
+        published))))
 
 (defn- canonical-path
   [path]
@@ -1719,18 +1748,24 @@
                 (seon.fn/replace-manifest-artifacts manifest desired-artifacts)
                 _ (report-analysis-warnings! next-manifest)
                 rows (into [] (mapcat :seon.fn.change/rows) changes)
+                unchanged
+                (when (and (empty? rows)
+                           (= digest-after (:seon.source/digest cached)))
+                  (current-publication store digest-after))
                 result
-                (source/upsert!
-                 {:seon.store/store store
-                  :seon.source/expected-commit-id expected-commit
-                  :seon.source/digest digest-after
-                  :seon.program/rows rows
-                  :seon.source/activation `derive-activation
-                  :seon.db/process
-                  [:seon.db.process/id boot-process-identity]})]
-            (write-source-artifact! root
-                                    (source-artifact result next-manifest
-                                                     snapshot-after))
+                (or unchanged
+                    (source/upsert!
+                     {:seon.store/store store
+                      :seon.source/expected-commit-id expected-commit
+                      :seon.source/digest digest-after
+                      :seon.program/rows rows
+                      :seon.source/activation `derive-activation
+                      :seon.db/process
+                      [:seon.db.process/id boot-process-identity]}))]
+            (when-not unchanged
+              (write-source-artifact! root
+                                      (source-artifact result next-manifest
+                                                       snapshot-after)))
             (assoc result :seon.program/rows rows)))))))
 
 (defn- development-source-refresh!
