@@ -1,4 +1,15 @@
 #:seon.cluster.eval{:at :inst,
+                    :comment
+                    [:string
+                     {:min 1,
+                      :seon.db/no-history? true,
+                      :description
+                      "The agent's own prose above this form, verbatim and stored apart from the source it introduces, so a prompt line holds exactly one form and HTML can label the comment separately."}],
+                    :author
+                    [:enum
+                     {:description
+                      "Who wrote this form: :agent when the agent's reply carried it, :system when the platform generated it. Authorship is the fact a stored situation label used to stand in for."}
+                     :agent :system],
                     :error :string,
                     :id [:string {:min 1, :seon.db/identity true}],
                     :interrupted-at :inst,
@@ -43,6 +54,21 @@
                      [:seon.cluster.eval/ns
                       {:optional true}
                       :seon.cluster.eval/ns]
+                     [:seon.cluster.eval/comment
+                      {:optional true}
+                      :seon.cluster.eval/comment]
+                     [:seon.cluster.eval/author
+                      {:optional true}
+                      :seon.cluster.eval/author]
+                     [:seon.eval/duration-ms
+                      {:optional true}
+                      :seon.eval/duration-ms]
+                     [:seon.print/length
+                      {:optional true}
+                      :seon.print/length]
+                     [:seon.print/level
+                      {:optional true}
+                      :seon.print/level]
                      [:seon.sci.eval/ending-ns
                       {:optional true}
                       :seon.sci.eval/ending-ns]
@@ -144,6 +170,15 @@
                      [:seon.sci.eval/ending-ns
                       {:optional true}
                       :seon.sci.eval/ending-ns]
+                     [:seon.eval/duration-ms
+                      {:optional true}
+                      :seon.eval/duration-ms]
+                     [:seon.print/length
+                      {:optional true}
+                      :seon.print/length]
+                     [:seon.print/level
+                      {:optional true}
+                      :seon.print/level]
                      [:seon.test.accretion/gate-tests {:optional true}
                       :seon.test.accretion/gate-tests]
                      [:seon.test.accretion/gate-test-count {:optional true}
