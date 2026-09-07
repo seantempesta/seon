@@ -145,7 +145,10 @@ my.tools=> (println "hi")
 ```
 
 - Keys in this order, absent when empty: `:seon.repl/value` or
-  `:seon.repl/error` (exactly one), `:seon.repl/result` (the bound symbol),
+  `:seon.repl/error` (exactly one), `:seon.repl/result` (the bound symbol —
+  derived from the evaluation entity's identity, `result/e<entity-id>`, so
+  handles never collide across runs; a valid symbol is the only constraint,
+  owner 2026-09-07; an evaluation that never persisted has no handle),
   `:seon.repl/out`, `:seon.repl/ns` (only when the form changed it),
   `:seon.repl/ms`. Registered as `:seon.repl/response` in `seon.repl.edn`,
   the family that already holds `:seon.repl/comment` and `/form`. Order is
