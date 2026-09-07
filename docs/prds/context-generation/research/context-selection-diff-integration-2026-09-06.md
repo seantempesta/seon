@@ -479,16 +479,33 @@ directly to `:call` (`src/seon/cluster/agent.clj:633-706` and
 history query for the run's prior `:generate` datom is exact durable provenance
 even after the current value becomes `:call`.
 
-Ordinary transcript selection should therefore admit agent-authored forms OR
-forms whose run has a historical `:generate` situation. Exact selected-
-evaluation mode continues to admit the contribution's referenced system
-preview evaluations. A focused proof needs three rows: an agent reply and a
-generated opening both appear without selection; a debug-submitted system run
-does not appear until its evaluation ref is selected. This avoids a new origin
-attribute. If Datahike history is ever disabled for runs, that configuration
-must refuse this classification rather than silently treating absence as a
-preview; only then would a declared run-source origin at `open-call`/
-`generated-run-tx` become necessary.
+Ordinary transcript selection needs to admit agent-authored forms OR forms
+whose run was generated, while exact selected-evaluation mode admits the
+contribution's referenced system preview evaluations. A focused proof needs
+three rows: an agent reply and a generated opening both appear without
+selection; a debug-submitted system run does not appear until its evaluation
+ref is selected.
+
+The historical datom cannot be the universal implementation. The database's
+`:keep-history?` setting is creation-fixed but explicitly supports `false`
+(`src/seon/cluster/store.clj:145-166,271-354`; configuration coverage at
+`test/seon/config_test.clj:218-245`). Datahike refuses `history` without a
+temporal index (`reference-code/datahike/src/datahike/api/impl.cljc:185-195`).
+Once generation completion retracts `:generate`, a nonhistorical current
+database has no fact distinguishing that opening from another system-authored
+run. Absence therefore cannot classify a preview without silently deleting the
+primer on supported databases.
+
+The transcript prerequisite is blocked on one declared provenance fact at the
+run admission seam. It should describe source purpose, not duplicate form
+authorship: generated opening, ordinary agent reply, and context preview are
+the currently required values. `generated-run-tx`, ordinary reply planning,
+and `submit-source!`/`system-run-tx` must assert it in the same transaction that
+opens the run. Other `system-run-tx` callers such as curation must declare their
+purpose rather than inherit a default. Then the ordinary transcript query can
+use the current indexed fact in one query, independent of database history,
+while exact contribution refs remain the only route for preview evaluations.
+No transcript filter should land before that admission fact exists.
 
 ## Plan source live proof
 
