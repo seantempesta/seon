@@ -1478,11 +1478,10 @@
   [captured invocation-key evidence f]
   (swap! captured update invocation-key
          (fn [bucket]
-           (mapv (fn [entry]
-                   (if (render/same-invocation-evidence? entry evidence)
-                     (f entry)
-                     entry))
-                 bucket))))
+           (let [same? #(render/same-invocation-evidence? % evidence)
+                 previous (some #(when (same? %) %) bucket)]
+             (conj (into [] (remove same?) bucket)
+                   (f (merge previous evidence)))))))
 
 (defn- held-agent-run
   [database agent-id]
@@ -1585,13 +1584,9 @@
         call-id (:seon.render.call/id request)
         call-entry (get @(:seon.render/captured-calls request) call-id)
         invocation-key (:seon.render.call/invocation-key call-entry)
-        invocation (some #(when (render/same-invocation-evidence?
-                                 % call-entry)
-                            %)
-                         (get @captured-invocations invocation-key))
-        source (:seon.render.call/source invocation)]
+        source (:seon.render.call/source call-entry)]
     (cond
-      (or (not source) (:seon.render.call/output invocation)) rendered
+      (or (not source) (:seon.render.call/output call-entry)) rendered
 
       (nil? (:seon.cluster.agent/id request))
       (let [failure
@@ -1609,11 +1604,11 @@
 
       :else
       (let [previous-run-id (reusable-source-run-id request call-entry source)
-            held (when-not (:seon.render.call/source-run-id invocation)
+            held (when-not (:seon.render.call/source-run-id call-entry)
                    (held-agent-run (:seon.db/db request)
                                    (:seon.cluster.agent/id request)))
             held-run-id (:seon.cluster.run/id held)
-            run-id (or (:seon.render.call/source-run-id invocation)
+            run-id (or (:seon.render.call/source-run-id call-entry)
                        previous-run-id
                        (:seon.render.call/source-run-id request))
             submission
@@ -1632,9 +1627,7 @@
                         [:seon.ns/name (:seon.render/namespace request)]))))
             submission-error (when (:seon.error/kind submission) submission)
             transient-submission-error?
-            (contains? #{::run/agent-already-running
-                         ::run/starting-namespace-changed}
-                       (::run/rule submission-error))
+            (= ::run/agent-already-running (::run/rule submission-error))
             run-id (or run-id (:seon.cluster.run/id submission))
             run (when run-id (source-run (:seon.db/db request) run-id))
             terminal? (and run
@@ -1642,7 +1635,8 @@
                                (contains? run :seon.cluster.run/error)))
             output
             (cond
-              submission-error submission-error
+              (and submission-error (not transient-submission-error?))
+              submission-error
               terminal?
               (transcript/render-run-ai
                (-> request
@@ -1656,7 +1650,7 @@
                              (:seon.db/db request) run-id))
             enrich
             (fn [entry]
-              (cond-> entry
+              (cond-> (dissoc entry :seon.render.call/source-blocked-run-id)
                 source (assoc :seon.render.call/source source)
                 run-id (assoc :seon.render.call/source-run-id run-id)
                 (and submission-error (not transient-submission-error?))
@@ -1676,10 +1670,9 @@
                          (remove #(render/same-invocation-evidence?
                                    % call-entry))
                          bucket)))
-          (do
-            (replace-current-invocation! captured-invocations invocation-key
-                                         call-entry enrich)
-            (swap! (:seon.render/captured-calls request) update call-id enrich)))
+          (replace-current-invocation! captured-invocations invocation-key
+                                      call-entry enrich))
+        (swap! (:seon.render/captured-calls request) update call-id enrich)
         output))))
 
 (defn- debug-render-experiment
@@ -2271,8 +2264,10 @@
   [calls database]
   (into #{}
         (keep (fn [[call-id call]]
-                (when (not= (retained-revisions call)
-                            (evidence-revisions database call))
+                (when (or (and (:seon.render.call/source call)
+                               (nil? (:seon.render.call/output call)))
+                          (not= (retained-revisions call)
+                                (evidence-revisions database call)))
                   call-id)))
         calls))
 

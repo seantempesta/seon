@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.agent :as agent]
+            [seon.cluster.run :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
@@ -18,6 +19,91 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [_unit]
   "(+ 1 1)")
+
+(deftest busy-source-preview-retries-after-coalesced-settlement
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "busy-preview")
+     (db/transact!
+      connection
+      (agent/creation-tx
+       {:seon.cluster.agent/id "busy-preview-agent"
+        :seon.ns/name 'my.agents.busy-preview
+        :seon.cluster/name "busy-preview"}))
+     (let [database @connection
+           ctx (support/fork-cluster-ctx connection)
+           source-call (ns-resolve 'seon.render.web 'render-source-call)
+           candidates (ns-resolve 'seon.render.web 'candidate-call-ids)
+           captured-calls (atom {})
+           captured-invocations (atom {})
+           submissions (atom 0)
+           request {:seon.db/db database
+                    :seon.sci.eval/ctx ctx
+                    :seon.render/value {}
+                    :seon.render/namespace 'my.agents.busy-preview
+                    :seon.render/ai 'seon.render-source-test/authored-source
+                    :seon.render/output :seon.render/ai
+                    :seon.render/profile (render/agent-render-profile (config/defaults))
+                    :seon.render.call/id [:busy-preview]
+                    :seon.render/captured-calls captured-calls
+                    :seon.render/captured-invocations captured-invocations
+                    :seon.sci.admit/caps caps
+                    :seon.sci.eval/time-limit-ms 2000
+                    :seon.config/on-core-error :panic
+                    :seon.cluster.agent/id "busy-preview-agent"
+                    :seon.cluster.loop/cluster {}
+                    :seon.cluster.agent/routing (atom {})}
+           open (fn [id]
+                  (run/open-tx
+                   {:seon.cluster.run/id id
+                    :seon.cluster.run/agent [:seon.cluster.agent/id "busy-preview-agent"]
+                    :seon.cluster.run/opened-at #inst "2026-09-07T01:00:00Z"}))]
+       (with-redefs
+         [agent/submit-source!
+          (fn [_]
+            (if (= 1 (swap! submissions inc))
+              (do
+                (db/transact!
+                 connection
+                 (into (open "competing-preview")
+                       (run/claim-tx
+                        {:seon.cluster.run/id "competing-preview"
+                         :seon.cluster.run/process "preview-process"
+                         :seon.cluster.run/live-processes #{"preview-process"}
+                         :seon.cluster.run/now #inst "2026-09-07T01:00:00Z"})))
+                (let [refusal (db/transact! connection (open "refused-preview"))]
+                  (is (= :seon.cluster.run/agent-already-running
+                         (:seon.cluster.run/rule refusal)))
+                  (db/transact!
+                   connection
+                   (run/close-tx
+                    {:seon.cluster.run/id "competing-preview"
+                     :seon.cluster.run/process "preview-process"
+                     :seon.cluster.run/closed-at #inst "2026-09-07T01:00:01Z"}))
+                  refusal))
+              (do
+                (db/transact! connection (open "admitted-preview"))
+                {:seon.cluster.run/id "admitted-preview"})))]
+         (is (nil? (source-call request))
+             "transactional contention leaves the preview pending, not a terminal refusal")
+         (let [calls @captured-calls
+               evidence (get-in calls [[:busy-preview] :seon.render.call/read-evidence])]
+           (is (db/read-evidence-current? @connection evidence)
+               "the competing run opened and closed before the next pass; read values are equal again")
+           (is (seq evidence) "the call retains its agent/run dependency observation")
+           (is (= #{[:busy-preview]} (candidates calls @connection))
+               "pending source remains eligible on a settlement wake even with equal read revisions")
+           (let [next-calls (atom {})
+                 next-invocations (atom {})]
+             (is (nil? (source-call
+                        (assoc request :seon.db/db @connection
+                               :seon.render/retained-calls calls
+                               :seon.render/invocations @captured-invocations
+                               :seon.render/captured-calls next-calls
+                               :seon.render/captured-invocations next-invocations))))
+             (is (= 2 @submissions))
+             (is (= "admitted-preview"
+                    (get-in @next-calls [[:busy-preview] :seon.render.call/source-run-id]))))))))))
 
 (deftest found-value-source-uses-the-datoms-own-provenance
   (let [found-value (ns-resolve 'seon.render.web 'debug-found-value)
@@ -230,6 +316,30 @@
                 "2")
                "entity attributes cannot make absent and present execution custody identical")
            (is (= ["(+ 1 1)" "(+ 1 1)"] @submissions)))
+         (let [refusal {:seon.error/kind :seon.cluster.run/refused
+                        :seon.error/message "The viewing namespace changed."
+                        :seon.cluster.run/rule :seon.cluster.run/starting-namespace-changed}
+               attempts (atom 0)
+               calls (atom {})
+               invocations (atom {})
+               stale-request
+               (assoc (request :stale-namespace 'seon.render-source-test/authored-source {})
+                      :seon.render/captured-calls calls
+                      :seon.render/captured-invocations invocations)]
+           (with-redefs [agent/submit-source!
+                         (fn [_] (swap! attempts inc) refusal)]
+             (is (= refusal (source-call stale-request)))
+             (is (empty? ((ns-resolve 'seon.render.web 'candidate-call-ids)
+                          @calls database))
+                 "a permanently invalid namespace is not pending work on every wake")
+             (is (= refusal
+                    (source-call
+                     (assoc stale-request
+                            :seon.render/retained-calls @calls
+                            :seon.render/invocations @invocations
+                            :seon.render/captured-calls (atom {})
+                            :seon.render/captured-invocations (atom {})))))
+             (is (= 1 @attempts) "a retained namespace refusal is not resubmitted")))
          (let [terminal-request (request :terminal 'seon.render.transcript/render-run-ai stored-run)
                terminal (source-call terminal-request)
                original-output (transcript/render-run-ai

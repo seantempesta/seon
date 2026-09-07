@@ -265,3 +265,59 @@ it must not be described as proof that an actual function returned nil.
 The focused database and shared transaction/refusal gate completed with
 46 tests, 350 assertions, zero failures and zero errors
 (`tmp/classified-refusal-message-gate.log`).
+
+## A transient busy refusal became permanent paint — 2026-09-07
+
+Root personally verified HTTP 200 and the identity lock button after the
+refusal-message correction, but plan, cluster, id, and message cards retained
+raw `agent-already-running` maps (`tmp/juniper-refusal-fixed.png` and `.txt`).
+The recorded counts were 241 runs and 1,651 faults, with latest fault 39719
+unchanged. This was not a full UI pass.
+
+The transient-refusal branch removed its invocation but skipped the existing
+captured-call enrichment, losing the observation of the agent's current-run
+pointer. The render candidate selector only checked read revisions. A minimal
+live immutable probe confirmed that a call with source, no output, and equal
+read evidence produced no candidate. Moreover, simply retaining the old
+pointer observation is insufficient: another run can open and close before
+the next pass, leaving the observed pointer absent again.
+
+The correction retains the existing call evidence on refusal and represents
+contention as pending source work. A source call with no output is eligible
+on the next ordinary render wake even when its read result is unchanged.
+There is no timer, queue, extra cache, or process restart. The existing
+agent/run read dependency remains in render interest so settlement can wake
+the preview. The regression forces actual run open, transactional busy
+refusal, and close before the next pass; it checks equal read results and a
+successful subsequent submission. The server remains open during validation.
+
+The first focused gate falsified that correction by itself: 26 tests,
+225 assertions, two failures and no errors
+(`tmp/busy-preview-readiness-gate.log`). The next pass retained the valid
+call through `render-call`'s fast path, which does not repopulate the
+invocation bucket. `render-source-call` then looked the same call up again
+in that empty bucket, lost the carried source, and made no second submission.
+It now consumes the validated captured call directly; enriching an invocation
+accretes that carried evidence into the existing bucket, including when the
+fast path supplied it. This removes the redundant lookup rather than adding
+a retry mechanism.
+
+Only `agent-already-running` is transient. A refused starting namespace
+remains a visible error with an output, so ordinary wakes do not repeatedly
+submit a permanently invalid request. The focused regression also checks
+that retained namespace refusal, unchanged-read candidate selection, and
+one submission across repeated calls.
+
+The corrected focused gate passed: 26 tests, 229 assertions, zero failures
+and zero errors (`tmp/busy-preview-readiness-green-gate.log`). A bounded live
+probe also observed the unchanged alias preview reuse its existing run:
+every source/code/schema/custody predicate matched and all 12 reads were
+current. This is a scoped reuse observation, not proof that all navigation
+is settled.
+
+The owner subsequently ruled that previews remain only in the existing
+in-memory cache; locking persists their exact forms, results, namespace, and
+basis without reexecution. This supersedes durable preview submission as
+the intended design. The completed correction above remains a verified
+checkpoint; further work must remove preview submission from the run path,
+reusing the existing parser, SCI evaluation, and settlement owners.
