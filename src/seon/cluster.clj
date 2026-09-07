@@ -1622,12 +1622,20 @@
         (finally
           (d/release-materialized-db database))))))
 
+(defn- valid-source-manifest?
+  [manifest]
+  (and (map? manifest)
+       (try
+         (schema/valid-candidate-value? :seon.fn.manifest/manifest manifest)
+         (catch Throwable _ false))))
+
 (defn- stable-manifest
   []
   (report-source-progress! "source snapshot")
   (let [snapshot-before (current-source-snapshot)
         cached @source-analysis-cache
-        cached? (= snapshot-before (:seon.source/snapshot cached))
+        cached? (and (= snapshot-before (:seon.source/snapshot cached))
+                     (valid-source-manifest? (:seon.fn/manifest cached)))
         _ (report-source-progress!
            (str "analysis started: "
                 (count (:seon.source/file-digests snapshot-before))
@@ -1689,7 +1697,7 @@
         published (source/current store)
         manifest (:seon.fn/manifest cached)
         expected-commit (:seon.source/commit-id published)]
-    (if-not (and manifest
+    (if-not (and (valid-source-manifest? manifest)
                  expected-commit
                  (= expected-commit (:seon.source/commit-id cached))
                  (map? (:seon.source/file-digests cached)))

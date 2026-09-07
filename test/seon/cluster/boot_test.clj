@@ -1036,6 +1036,30 @@
         (is (zero? @publications)
             "matching artifact, file digests, live head, and database digest do not publish")))))
 
+(deftest invalid-cached-manifest-falls-back-before-incremental-analysis
+  (let [commit-id (random-uuid)
+        malformed {:seon.source/commit-id commit-id
+                   :seon.source/file-digests {"src/example.clj" "digest"}
+                   :seon.fn/manifest
+                   #:seon.fn.manifest{:artifacts
+                                      {0 #:seon.fn.file{:rows
+                                                       {1 #:seon.ns{:name nil}}}}}}
+        rebuilt {:seon.source/branch source/current-branch
+                 :seon.source/commit-id commit-id
+                 :seon.source/digest (apply str (repeat 64 "b"))}
+        full-builds (atom 0)]
+    (with-redefs-fn
+      {#'cluster/read-source-artifact (fn [_] malformed)
+       #'source/current (fn [_] {:seon.source/commit-id commit-id})
+       #'cluster/full-source-refresh!
+       (fn [_ _] (swap! full-builds inc) rebuilt)}
+      (fn []
+        (is (= rebuilt
+               (#'cluster/incremental-source-refresh!
+                "root" ::store ["src/example.clj"])))
+        (is (= 1 @full-builds)
+            "a malformed cache never reaches manifest-function-symbols")))))
+
 (deftest ^{:seon.test/long
            "53.139 s pool: real boot, locked-state config repair, restart, and pre-arm fact proof."}
   selected-config-repairs-locked-state-before-consumers-arm

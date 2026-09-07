@@ -147,3 +147,12 @@ synthetic row with nil `:seon.ns/name`, and the existing
 evidence that an older live publication implementation may be unable to admit a
 newer filesystem snapshot. It is preferable to mixed loaded code, but means a
 live publisher compatibility check remains part of this issue's acceptance.
+
+The cached-manifest admission now validates both the process-local analysis
+cache and the persisted source artifact against
+`:seon.fn.manifest/manifest`. An invalid cache takes the existing complete
+scratch-build path before any incremental function-symbol query. The focused
+regression uses the observed malformed artifact shape and proves
+`manifest-function-symbols` is never reached. This keeps instrumentation strict
+and makes an older or corrupt incremental cache disposable rather than an
+authority.
