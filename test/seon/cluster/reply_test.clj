@@ -212,9 +212,11 @@
             "(ns my.gen.alpha)\nNow the function.\n(defn f [] 1)"))))
 
   (testing "trailing prose rides the form it follows, keeping that ns"
-    (is (= {:seon.cluster.run.form/source "(def a 1)\n; That is all."
+    (is (= {:seon.cluster.run.form/source "(def a 1)"
+            :seon.cluster.eval/comment "; That is all."
             :seon.ns/name 'my.gen.alpha}
-           (last (reply/sources "(ns my.gen.alpha)\n(def a 1)\nThat is all."))))))
+           (last (reply/sources "(ns my.gen.alpha)\n(def a 1)\nThat is all.")))
+        "the prose is the form's own comment fact, never glued to its source")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Refusals — flat values, never throws

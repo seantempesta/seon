@@ -248,11 +248,18 @@
     (loop [cursor 0
            remaining (seq code-events)
            forms []]
-      (if-let [{::keys [start end ns] form-source ::source} (first remaining)]
-        (let [prose (comment-source (subs source cursor start))]
+      (if-let [{::keys [end ns] :as event} (first remaining)]
+        ;; THE FORM STARTS WHERE THE READER SAYS THE FORM STARTS. A reader
+        ;; event's span opens at the first comment above the form, so the
+        ;; span's own text is comment-plus-form; `form-start` is the offset
+        ;; the reader gave the form itself. Everything before it — the
+        ;; agent's `;` lines and its prose alike — is the comment fact.
+        (let [start (form-start source event)
+              prose (comment-source (subs source cursor start))]
           (recur end (next remaining)
                  (conj forms
-                       (cond-> {:seon.cluster.run.form/source form-source}
+                       (cond-> {:seon.cluster.run.form/source
+                                (subs source start end)}
                          (not (str/blank? prose))
                          (assoc :seon.cluster.eval/comment prose)
                          ns (assoc :seon.ns/name ns)))))

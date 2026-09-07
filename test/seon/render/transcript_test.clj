@@ -125,8 +125,10 @@
                   [:seon.render.transcript/entry :eval "stored-evaluation"]]
                  (mapv :seon.render.history/call-id entries)))
           (is (= ["my.agents.test=> (future-work)"
-                  "my.agents.test=> (+ 1 2)\n3"]
-                 bytes))
+                  "my.agents.test=> (+ 1 2)\n#:seon.repl{:value 3}"]
+                 bytes)
+              "a submitted form has a prompt and no response; a settled one
+               answers with the one REPL response map")
           (is (not-any? #(or (str/includes? % "hello")
                              (str/includes? % "db/pull")
                              (str/includes? % "undisposed-run"))
@@ -204,15 +206,20 @@
                       :seon.cluster.run/agent
                       {:seon.cluster.agent/id agent-id})))]
         (is (= 4 @receipt-calls))
-        (is (str/includes? rendered
-                           "user=> (swap! executions inc)\nonce\n1"))
+        ;; ONE FORM PER PROMPT LINE, one response map under it. Printed
+        ;; output is its own key rather than bytes spliced ahead of the
+        ;; value, which is exactly what made the old grammar unreadable.
+        (is (str/includes? rendered "user=> (swap! executions inc)\n#:seon.repl{"))
+        (is (str/includes? rendered ":out \"once\\n\""))
         (is (str/includes? rendered
                            "user=> (throw (Exception. \"source error\"))"))
         (is (str/includes? rendered "stored error"))
+        (is (str/includes? rendered ":error "))
+        (is (str/includes? rendered "user=> (identity \"alpha\\nbeta\")\n#:seon.repl{"))
         (is (str/includes? rendered
-                           "user=> (identity \"alpha\\nbeta\")\nalpha\nbeta"))
-        (is (str/includes? rendered
-                           "user=> (identity {:text \"alpha\\nbeta\"})\n{:text \"alpha\\nbeta\"}"))
+                           "user=> (identity {:text \"alpha\\nbeta\"})\n#:seon.repl{"))
+        (is (str/includes? rendered ":value {:text \"alpha\\nbeta\"}")
+            "the stored node is what the value reads back as")
         (is (not (str/includes? rendered "t=17")))))))
 
 (defn- at
@@ -333,13 +340,16 @@
     {:seon.cluster.run.form/id "form-result"
      :seon.cluster.run.form/run [:seon.cluster.run/id "run-result"]
      :seon.cluster.run.form/ordinal 0
-     :seon.cluster.run.form/source
-     ";; calculate the answer\n(do (println \"side effect\") (+ 20 22))"
+     ;; THE COMMENT IS ITS OWN FACT. A stored source that still glued the
+     ;; prose onto the form is what put a comment on the prompt line.
+     :seon.cluster.run.form/source "(do (println \"side effect\") (+ 20 22))"
+     :seon.cluster.eval/comment ";; calculate the answer"
      :seon.cluster.run.form/ns [:seon.ns/name 'my.agents.transcript]}
     {:seon.cluster.eval/id "eval-result"
      :seon.cluster.eval/run [:seon.cluster.run/id "run-result"]
      :seon.cluster.eval/ordinal 0
      :seon.cluster.eval/at (at 2000)
+     :seon.cluster.eval/comment ";; calculate the answer"
      :seon.cluster.eval/ns [:seon.ns/name 'my.agents.transcript]
      :seon.cluster.eval/output "side effect\n"
      :seon.cluster.eval/read-basis-transaction 41
@@ -423,9 +433,12 @@
                                   "Agent transcript-agent said to transcript-agent: Start with")))
           (is (str/includes?
                ai
-               (str "my.agents.transcript=> ;; calculate the answer\n"
-                    "(do (println \"side effect\") (+ 20 22))\n"
-                    "side effect\n42")))
+               (str ";; calculate the answer\n"
+                    "my.agents.transcript=> (do (println \"side effect\") "
+                    "(+ 20 22))\n"
+                    "#:seon.repl{:value 42, :result result/e0, "
+                    ":out \"side effect\\n\"}"))
+              "comment above, one form on the prompt line, one response map")
           (is (str/includes? ai "waiting for the peer review"))
           (is (str/includes? ai "Execution error (ArithmeticException) at"))
           (is (str/includes? ai "Divide by zero"))
@@ -467,18 +480,20 @@
             html-entry (html-entry-node html-value
                                         "eval-error-without-triage")
             html-text (get-in html-entry [2 1 1])]
+        ;; THE ERROR IS A KEY, NOT A LOOSE LINE. Clojure's own concise
+        ;; execution-error face rides `:error` inside the one response map,
+        ;; so it can never be mistaken for a form the agent wrote.
         (testing "the AI projection presents the form and an execution error"
           (is (str/includes? ai "user=> (missing.function/call)"))
-          (is (some #(str/starts-with? % "Execution error")
-                    (str/split-lines ai)))
-          (is (some #{"No such namespace: missing.function"}
-                    (str/split-lines ai))))
+          (is (str/includes? ai ":error \"Execution error"))
+          (is (str/includes? ai "No such namespace: missing.function"))
+          (is (not (str/includes? ai ":value "))
+              "exactly one of :value and :error answers a form"))
         (testing "the HTML entry structurally identifies the same error face"
           (is (= "true" (get-in html-entry [1 :data-transcript-error])))
-          (is (some #(str/starts-with? % "Execution error")
-                    (str/split-lines html-text)))
-          (is (some #{"No such namespace: missing.function"}
-                    (str/split-lines html-text))))))))
+          (is (str/includes? html-text ":error \"Execution error"))
+          (is (str/includes? html-text
+                             "No such namespace: missing.function")))))))
 
 (deftest a-tight-budget-degrades-then-elides-loudly
   (support/with-database
@@ -571,14 +586,18 @@
             bootstrap-task-id (bootstrap/task-message-id agent-id)
             newest-ids (mapv #(str "newest-" %) (range 6))
             visible-ids (mapv :id html-rows)
+            ;; Each pinned entry is located by its own prompt line AND the
+            ;; response that answers it, so the ordering property is proven
+            ;; over the one grammar rather than over a bare printed value.
+            prompted (fn [ordinal]
+                       (str "user=> (identity " ordinal
+                            ")\n#:seon.repl{:value " ordinal))
             ai-positions
-            (mapv #(.indexOf ai (str "user=> (identity " % ")\n" %))
-                  (range bootstrap-count))
+            (mapv #(.indexOf ai (prompted %)) (range bootstrap-count))
             task-position
             (.indexOf ai (bootstrap/task-message))
             pinned-end
-            (.indexOf ai (str "user=> (identity " (dec bootstrap-count)
-                              ")\n" (dec bootstrap-count)))
+            (.indexOf ai (prompted (dec bootstrap-count)))
             marker-start (.indexOf ai "middle transcript entries elided")
             newest-start (.indexOf ai "newest history 0")]
         (is (pos? (html-elided html-value)))
@@ -1106,12 +1125,17 @@
        (is (= rendered (transcript/render-ai selected)))
        (let [entries (transcript/history-entries selected)]
          (is (= 1 (count entries)))
-         (is (= ";; calculate the answer\n(do (println \"side effect\") (+ 20 22))"
-                (:seon.render.history/form (first entries))))
-         (is (= "side effect\n42" (:seon.render.history/printed-value (first entries))))
+         (is (= "(do (println \"side effect\") (+ 20 22))"
+                (:seon.render.history/form (first entries)))
+             "the form is the form; its comment is a fact beside it")
+         (is (= (str "#:seon.repl{:value 42, :result result/e0, "
+                     ":out \"side effect\\n\"}")
+                (:seon.render.history/printed-value (first entries)))
+             "the printed value is the one REPL response, output as its own key")
          (let [facts (db/pull database
                               [:seon.cluster.eval/ordinal
                                :seon.cluster.eval/result-edn
+                               :seon.cluster.eval/comment
                                :seon.cluster.eval/output
                                {:seon.cluster.eval/ns [:seon.ns/name]}
                                {:seon.cluster.eval/run [:seon.cluster.run/id]}]
@@ -1128,6 +1152,7 @@
                          [:seon.ns/name (get-in facts [:seon.cluster.eval/ns :seon.ns/name])]}
                         :seon.sci.eval/evaluation
                         (select-keys facts [:seon.cluster.eval/result-edn
+                                            :seon.cluster.eval/comment
                                             :seon.cluster.eval/output])}])]
            (is (= (mapv :seon.render.history/bytes entries)
                   (mapv :seon.render.history/bytes
@@ -1185,7 +1210,7 @@
                  (mapv :seon.cluster.run/id runs))))
         (testing "the AI projection is the run loop's own bytes"
           (is (str/includes? ai "Run history-run-2, opened "))
-          (is (str/includes? ai "=> (+ 2 1)\n3")
+          (is (str/includes? ai "=> (+ 2 1)\n#:seon.repl{:value 3")
               "the actual namespace prompt and the stored result")
           (is (< (.indexOf ai "history-run-2") (.indexOf ai "history-run-0"))
               "newest first in the text as well"))

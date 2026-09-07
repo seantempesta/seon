@@ -285,10 +285,13 @@
                           (candidate-sources after))]
           (is (= ["(seon.db/pull (quote [*]) [:seon.fn/sym \"fixture.intent/target\"])"
                   "(dir fixture.intent)"
-                  (str "; First real use — the indexed call-edge demonstration.\n"
-                       "(clojure.test/test-var (var fixture.intent/target-usage))")]
+                  "(clojure.test/test-var (var fixture.intent/target-usage))"]
                  delta)
               "the subject doc and owning namespace join membership")
+          (is (some #{"; First real use — the indexed call-edge demonstration."}
+                    (map (comp :seon.repl/comment :seon.repl/entry)
+                         (:seon.repl/candidates after)))
+              "the prose that introduces a generated form is its own fact")
           (is (some #(str/includes? % "target-usage") delta)
               "first real use carries its call-edge usage demonstration")
           (is (= [[:seon.fn/sym "fixture.intent/target"]]

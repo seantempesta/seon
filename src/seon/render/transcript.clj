@@ -676,10 +676,10 @@
         (floor-text unit {:seon.cluster.eval/result-edn serialized
                           :seon.render.transcript/unreadable? true})
 
-        (and (map? read-value)
-             (= ::print/string (:seon.print/face read-value)))
-        (:seon.print/value read-value)
-
+        ;; ONE GRAMMAR FOR A STRING RESULT. Splicing the string's own bytes
+        ;; in raw put newlines inside a response that is one line by
+        ;; construction; `emit-text` prints it quoted, exactly as `pr` would,
+        ;; which is also what `seon.repl` does with the same stored node.
         (and (map? read-value) (:seon.print/face read-value))
         (print/emit-text read-value
                          (merge (print/default-options)
@@ -703,7 +703,7 @@
            :seon.ns/name (or (::namespace entry) 'user)}
     (::comment entry) (assoc :seon.cluster.eval/comment (::comment entry))
     (::ordinal entry) (assoc :seon.cluster.eval/ordinal (::ordinal entry))
-    (::result entry) (assoc :seon.print/node
+    (::result entry) (assoc :seon.repl/value
                             (bounded-result unit (::result entry)))
     (::error entry) (assoc :seon.cluster.eval/error
                            (bounded-scalar unit (::error entry)))

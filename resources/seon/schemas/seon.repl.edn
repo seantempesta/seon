@@ -37,7 +37,7 @@
             :emission
             [:map
              {:description
-              "One evaluation as seon.repl/text renders it: the agent's comment and the fixed source it wrote, the namespace the prompt line names, and whatever terminal facts the evaluation has settled. The stored evaluation entity satisfies this directly; an in-memory evaluation supplies :seon.print/node instead of the stored :seon.cluster.eval/result-edn."}
+              "One evaluation as seon.repl/text renders it: the agent's comment and the fixed source it wrote, the namespace the prompt line names, and whatever terminal facts the evaluation has settled. The stored evaluation entity satisfies this directly; a caller that already bounded the value supplies its printed text as :seon.repl/value instead of the stored :seon.cluster.eval/result-edn."}
              [:seon.cluster.eval/source :seon.cluster.eval/source]
              [:seon.ns/name {:optional true} :seon.ns/name]
              [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]
@@ -48,7 +48,7 @@
              [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]
              [:seon.sci.eval/ending-ns {:optional true} :seon.sci.eval/ending-ns]
              [:seon.eval/duration-ms {:optional true} :seon.eval/duration-ms]
-             [:seon.print/node {:optional true} :seon.print/node]
+             [:seon.repl/value {:optional true} :seon.repl/value]
              [:seon.print/options {:optional true} :seon.print/options]
              [:seon.repl/result-handle? {:optional true} :seon.repl/result-handle?]],
             :result-handle?

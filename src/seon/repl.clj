@@ -69,17 +69,21 @@
   silence."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
   [{serialized :seon.cluster.eval/result-edn
-    node :seon.print/node
+    supplied :seon.repl/value
     options :seon.print/options}]
-  (let [node (if (some? node)
-               node
-               (when (string? serialized)
-                 (let [{::keys [node unreadable?]} (read-node serialized)]
-                   (if unreadable?
-                     {:seon.cluster.eval/result-edn serialized
-                      :seon.render.transcript/unreadable? true}
-                     node))))]
+  ;; A CALLER THAT ALREADY BOUNDED THE VALUE HANDS ITS TEXT, NOT A NODE.
+  ;; The transcript owns the bound — the render unit's floor, elision root
+  ;; and print options — so what it produces is the printed value itself,
+  ;; and calling that a print node was a contract this could not honour.
+  (let [node (when (and (nil? supplied) (string? serialized))
+               (let [{::keys [node unreadable?]} (read-node serialized)]
+                 (if unreadable?
+                   {:seon.cluster.eval/result-edn serialized
+                    :seon.render.transcript/unreadable? true}
+                   node)))]
     (cond
+      (some? supplied) supplied
+
       (nil? node) nil
 
       ;; A string prints quoted, newlines escaped, exactly as `pr` would:
