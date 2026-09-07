@@ -6,6 +6,21 @@ tags: [prd, agent, context, architecture]
 
 # The working edge — context-generation program
 
+## Overnight plan and dev loop — 2026-09-06 late evening
+
+The owner reframed the debug work: every attribute on the agent entity is one
+self-contained unit rendered into context (AI) and into an HTML panel; data
+from messages, the run loop, and evaluation results moves onto agent-owned
+relationships. The PRD was rewritten as the plan
+([entity-debug-curation-prd-2026-09-06.md](entity-debug-curation-prd-2026-09-06.md)):
+database-derived inventory, target units, four stated assumptions, six
+migration steps, three file-disjoint lanes. The dev loop is proven end to end
+after two fixes (reload order by `:seon.ns/requires`; sparse
+`:seon.source/upsert-rows` contract): an edit published, the cluster adopted
+the same commit, the open page repainted without navigation. Juniper's run
+count rose 548 → 609 during page inspection, confirming previews still
+persist runs; that is migration step 3.
+
 ## Owner correction — selected entity and attributes, 2026-09-06 evening
 
 The debug page clearly identifies one selected entity, then details each of its

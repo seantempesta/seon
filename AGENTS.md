@@ -644,6 +644,32 @@ operator's internals separately or kill its children blindly; use
 SECOND DEPLOYMENTS USE `--root`. `bin/acme` is a thin root-scoped wrapper
 selecting cluster `acme`.
 
+**The development cluster (standing order, 2026-09-06).** Development work
+happens on the one cluster the edit hook publishes to: `.claude/seon-hook.edn`
+names it under `:current-source` (a `:root` relative to the repository and a
+`:cluster`); read that file, never assume `default`. Boot it with
+`bin/seon --root ROOT start CLUSTER`; its advertisement prints the web URL.
+How an edit reaches the open browser, in order: the `Edit`/`Write`/
+`apply_patch` hook runs `bin/seon --root ROOT init --dev CLUSTER --changed
+PATH`; the live JVM analyzes the changed files and publishes safe
+same-identity upserts onto `:current-src` (any deletion, new identity, schema
+resource, or contract change falls back to a complete publication); the
+development cluster then adopts in place — schema declarations, program rows,
+`require :reload` of every changed namespace in `:seon.ns/requires` order
+(callees first), SCI acquisition, JVM instrumentation — and records
+`:seon.source/commit-id` on the cluster only after all of it succeeded; the
+adoption offers one render wake, so the open page repaints through the
+ordinary feed with no reload. Convergence is a query, not a feeling: the
+cluster's `:seon.source/commit-id` equals `(seon.cluster.source/current
+store)`. A hook line `ADVISORY — current-src publication failed` means the
+page is still showing the previous commit; read
+`logs/current-source-failure.log`, fix, and re-run the `init --dev` by hand.
+Shell writes bypass the hook: follow them with the same `init --dev
+--changed`. A JVM started before a change to the adoption path itself cannot
+adopt with the new path — stop and start it, then `init --dev`. MCP: every
+`eval_clj` call against this cluster passes `root` and `cluster`; `jvm` mode
+has no agent custody, so agent-elided calls need explicit arguments.
+
 **Session-start hygiene (standing order).** A fresh session begins by
 verifying the system it inherited, not by trusting it: check `bin/seon
 status` and that the MCP tools answer (a stale long-lived JVM serves old
