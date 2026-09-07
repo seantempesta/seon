@@ -388,3 +388,47 @@ a real SCI batch saves while its agent holds a separate run, two contributions
 reuse one saved evaluation population, and a conflicting reply aborts its
 preceding contribution atomically. The earlier preview phase refuses any blob
 staging. Live web integration remains separate.
+
+
+## Existing preview cache becomes memory-only — 2026-09-07
+
+`render-source-call` now uses the shared parser, fresh SCI fork, and
+`loop/evaluate-sources` against one immutable database. The invocation entry
+retains the exact source, evaluated forms/results, namespace, timestamps and
+future run identity. The held-agent/run queries and durable preview submission
+are removed. Runtime observation wakes retain the complete dependency evidence
+needed to recover an unchanged evaluation; code/projection identity, custody
+and read evidence still decide reuse.
+
+The existing `acquire-context!` request channel now also carries Add, compact,
+and remove. The render proc resolves the requested identity in its own existing
+invocation state. Missing or foreign cached identities return a typed
+`preview-unavailable`; they never cause hidden evaluation. Add/compact stage
+cached results and save the closed run plus the selected evaluation refs in one
+transaction. Remove only removes the contribution. Provider prompt composition
+remains a separate integration task.
+
+The first web gate found a wrong integration call: `transcript/render-ai`
+still read database history even when the unit supplied memory evaluations.
+An unsaved preview was empty, and a later preview showed its old saved value.
+The gate reported six tests, 116 assertions, three failures and one error
+(`tmp/memory-preview-gate.log`). The error was a provenance fixture omitting
+the database newly required by schema-description rendering. The correction
+moves memory-versus-stored candidate selection into one private transcript
+helper shared by the normal projection and `history-entries`, retaining pinned
+messages and existing transcript formatting. The fixture now receives the
+canonical database.
+
+The corrected web gate passed six tests and 123 assertions with zero failures
+or errors (`tmp/memory-preview-green-gate.log`). The production source-call
+path runs under test guards forbidding database writes, blob staging and run
+submission. A repeated page call and a runtime observation reuse its evaluation.
+After the underlying fact changes, Add saves the earlier displayed bytes and
+captured basis without running source again; the agent's separate active run
+is unchanged. Repeated Add reuses evaluation identities, an evicted token
+refuses without writes, and a relevant change refreshes the memory result.
+Actual render-step dispatch also verifies compact and remove, retaining saved
+evaluations. Root-owned presentation changes are included with this checkpoint;
+the final declared-cardinality grouping edit postdates the gate and remains a
+separate browser/fixture verification. Live adoption and provider composition
+are not established by this gate.

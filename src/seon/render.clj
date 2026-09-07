@@ -1167,12 +1167,13 @@
                 rendered))))))))
 
 (defn acquire-context!
-  "Acquire an agent's exact retained AI bytes and database value.
+  "Request exact context bytes or a context change from the owning render proc.
 
-  The cluster render proc supplies the bytes and database value; prompt
-  assembly adds its capture contribution."
-  {:malli/schema [:=> [:cat :seon.flow/channel :seon.cluster.prompt/request]
-                  [:or :seon.render/acquired-context :seon.error/value]]}
+  One reliable request/reply channel hands retained previews to Add operations
+  and retained AI bytes to prompt assembly."
+  {:malli/schema [:=> [:cat :seon.flow/channel :seon.render/context-request]
+                  [:or :seon.render/acquired-context
+                   :seon.render/context-change-result :seon.error/value]]}
   [context-channel request]
   (let [reply (async/promise-chan)
         agent-id (:seon.cluster.agent/id request)

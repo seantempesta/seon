@@ -863,6 +863,35 @@
     (when (fits? budget pinned (into [candidate] newer) older-count)
       candidate)))
 
+(defn- candidate-history
+  "The shared source of transcript entries, supplied evaluations or stored history."
+  [unit]
+  (let [db (:seon.db/db unit)
+        agent-id (:seon.cluster.agent/id unit)
+        candidate-count (long (get-in unit [:seon.sci.admit/caps
+                                            :seon.config.eval.result/max-nodes]))
+        evaluated-sources (:seon.cluster.loop/evaluated-sources unit)]
+    (if (some? evaluated-sources)
+          (mapv
+           (fn [{form :seon.cluster.loop/admitted-form
+                 evaluation :seon.sci.eval/evaluation
+                 ordinal :seon.cluster.run.form/ordinal}]
+             (receipt-entry
+              {nil (:seon.cluster.run.form/source form)}
+              (assoc evaluation
+                     :seon.cluster.eval/id
+                     (run/receipt-identity (:seon.cluster.run/id unit) ordinal)
+                     :seon.cluster.eval/ordinal ordinal
+                     :seon.cluster.eval/ns
+                     {:seon.ns/name (second (:seon.cluster.run.form/ns form))}
+                     :seon.cluster.eval/read-basis-transaction
+                     (or (:seon.cluster.eval/read-basis-transaction evaluation)
+                         (db/basis-t db)))))
+           evaluated-sources)
+          (history db (:seon.cluster.run/id unit) agent-id
+                   candidate-count (::selected-run-id unit)
+                   (:seon.context.contribution/evaluations unit)))))
+
 (defn- projection
   [unit]
   (let [db (:seon.db/db unit)
@@ -872,12 +901,14 @@
         selected-run-id (::selected-run-id unit)
         selected-evaluations (:seon.context.contribution/evaluations unit)
         total (cond
+                (some? (:seon.cluster.loop/evaluated-sources unit))
+                (count (:seon.cluster.loop/evaluated-sources unit))
                 (some? selected-evaluations) (count selected-evaluations)
                 selected-run-id (selected-run-count db selected-run-id candidate-limit)
                 :else (history-count db agent-id))
-        entries (if (and db agent-id)
-                  (history db (:seon.cluster.run/id unit)
-                           agent-id candidate-limit selected-run-id selected-evaluations)
+        entries (if (or (some? (:seon.cluster.loop/evaluated-sources unit))
+                        (and db agent-id))
+                  (candidate-history unit)
                   [])
         pinned (into []
                      (comp (filter ::pinned?)
@@ -1010,30 +1041,7 @@
                 [?agent :seon.cluster.agent/namespace ?namespace]
                 [?namespace :seon.ns/name ?name]]
               db agent-id)
-        candidate-count (long (get-in unit [:seon.sci.admit/caps
-                                             :seon.config.eval.result/max-nodes]))
-        evaluated-sources (:seon.cluster.loop/evaluated-sources unit)
-        candidates
-        (if (some? evaluated-sources)
-          (mapv
-           (fn [{form :seon.cluster.loop/admitted-form
-                 evaluation :seon.sci.eval/evaluation
-                 ordinal :seon.cluster.run.form/ordinal}]
-             (receipt-entry
-              {nil (:seon.cluster.run.form/source form)}
-              (assoc evaluation
-                     :seon.cluster.eval/id
-                     (run/receipt-identity (:seon.cluster.run/id unit) ordinal)
-                     :seon.cluster.eval/ordinal ordinal
-                     :seon.cluster.eval/ns
-                     {:seon.ns/name (second (:seon.cluster.run.form/ns form))}
-                     :seon.cluster.eval/read-basis-transaction
-                     (or (:seon.cluster.eval/read-basis-transaction evaluation)
-                         (db/basis-t db)))))
-           evaluated-sources)
-          (history db (:seon.cluster.run/id unit) agent-id
-                   candidate-count (::selected-run-id unit)
-                   (:seon.context.contribution/evaluations unit)))
+        candidates (candidate-history unit)
         entries
         (mapv
          (fn [entry]

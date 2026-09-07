@@ -35,11 +35,11 @@ not database facts.
 |---|---|
 | `GET /` | alias to the configured root agent's namespace page |
 | `GET /ns/{namespace}` | canonical namespace page |
-| `GET /ns/{namespace}/debug` | entity/render inspection in that viewing namespace; source previews use the existing run execution path, and it does not create a namespace owner |
+| `GET /ns/{namespace}/debug` | entity/render inspection in that viewing namespace; source previews use the shared evaluator and remain in the invocation cache; it does not create a namespace owner |
 | `GET /agent/{id}` | alias to that agent's namespace page |
 | `GET /agent/{id}/debug` | alias to that agent's debug surface |
 | `POST /agent/{id}/message` | same-origin inbound-message commit |
-| `POST /agent/{id}/context` | same-origin append of references to an evaluated preview through `seon.context/append-tx` |
+| `POST /agent/{id}/context` | same-origin Add, compact, or remove through the existing render request channel; Add saves cached evaluations and changes context in one transaction |
 | `GET /feed/{id}` | the existing Datastar SSE feed; debug requests carry `?debug=true`, viewer, subject, output, bounds, and cursors |
 | `GET /data` | schema/entity `get-in` surface |
 | `GET /css/{*path}`, `GET /js/{*path}` | packaged public resources |
@@ -71,7 +71,14 @@ appear side by side; applicable alternatives appear in a collapsed list in
 priority order. Found datom values also have paired previews, and refs preview
 their connected entities. One evidence-captured `pull-many` acquires these
 entities; previews use the existing render-call and invocation caches
-(`src/seon/render/web.clj:1199-1375`, `:1490-1740`). Absent renderer slots are
+(`src/seon/render/web.clj`, `render-source-call`). Source previews use
+`seon.cluster.loop/evaluate-sources` with one captured immutable database,
+without run submission, blob staging, or saved facts. The existing invocation
+cache retains exact source, results, namespace, timestamps, and basis. Add and
+compact resolve that cached identity on the render proc's reliable context
+channel, then combine `run/record-evaluated-tx` and the context transaction in
+one `blob/with-publication!`. An evicted preview refuses instead of rerunning.
+Absent renderer slots are
 omitted; actual renderer and acquisition errors stay visible. Structural floor
 HTML and raw datoms remain available as evidence. An agent prompt comparison is
 available explicitly with `?prompt=true`; it is not derived by the initial GET

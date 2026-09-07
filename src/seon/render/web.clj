@@ -53,6 +53,7 @@
             [seon.blob :as blob]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.message :as message]
+            [seon.cluster.loop :as loop]
             [seon.cluster.run :as run]
             [seon.config :as config]
             [seon.context :as context]
@@ -68,7 +69,9 @@
             [seon.render.walk :as render.walk]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]
             [seon.sci.kernel :as sci.kernel]
+            [seon.sci.eval :as sci.eval]
             [starfederation.datastar.clojure.adapter.common :as datastar.common]
             [starfederation.datastar.clojure.adapter.http-kit :as datastar.http-kit]
             [starfederation.datastar.clojure.api :as datastar]
@@ -865,18 +868,19 @@
     (hiccup/->string
    [:header {:id "debug-inspection-header" :class "seon-debug-header"}
     [:div
-     [:span "Context for"]
-     [:code (or (:seon.cluster.agent/id debug-request)
-                (str (:seon.render.debug/viewer-namespace debug-request)))]]
-    [:div
-     [:span "Viewing entity"]
+     [:h1 "Selected entity"]
      [:code (pr-str (:seon.render.debug/subject debug-request))]
+     [:span "Database ID"]
+     [:code (str (:seon.render.data/eid observation))]
      (when-let [agent-id (:seon.cluster.agent/id debug-request)]
        [:a {:href (debug-page-url
                     debug-request
                     {:seon.render.debug/subject [:seon.cluster.agent/id agent-id]
                      :seon.render.data/cursor (data/parse-cursor nil nil)})}
         "View agent entity"])]
+    [:div
+     [:span "Rendering from namespace"]
+     [:code (str (:seon.render.debug/viewer-namespace debug-request))]]
     (when (seq path)
       [:div
        [:span "selected path"]
@@ -1341,9 +1345,9 @@
   (let [agent-id (:seon.cluster.agent/id render-request)
         run-id (:seon.render.call/source-run-id source-call)]
     [:section {:class "seon-debug-found-values"}
-     [:h2 {:class "seon-debug-caption"} "Assemble context"]
+     [:h2 {:class "seon-debug-caption"} "Context"]
      [:p {:class "seon-debug-description"}
-      "Build the context this agent will receive, one form and result at a time. Compare it with current data, append changes, or compact a block to its latest result."]
+      "Inspect the forms and results selected for this agent, or compare them with current data."]
      (when (and agent-id run-id (:seon.render.call/output source-call))
        (context-action-form agent-id run-id nil :append "Add to context"))
      (cond
@@ -1361,23 +1365,26 @@
                          (:seon.db/db render-request)
                          {:seon.cluster.agent/id agent-id
                           :seon.cluster.run/id run-id
+                          :seon.cluster.loop/evaluated-sources
+                          (:seon.cluster.loop/evaluated-sources source-call)
                           :seon.context.contribution/id
                           (:seon.context.contribution/id contribution)}))
                       status (:seon.context.comparison/status comparison)
                       current
                       (when (= :ready status)
                         (transcript/render-ai
-                         (assoc unit :seon.context.contribution/evaluations
-                                (set (:seon.context.comparison/refreshed-evaluations
-                                      comparison)))))
+                         (-> unit
+                             (dissoc :seon.context.contribution/evaluations)
+                             (assoc :seon.cluster.run/id run-id
+                                    :seon.cluster.loop/evaluated-sources
+                                    (:seon.cluster.loop/evaluated-sources comparison)))))
                       changed? (and (= :ready status) (not= baseline current))]
                   [:article {:class "seon-debug-found-value"}
                    [:header {:class "seon-debug-value-header"}
-                    [:h3 (str "Block " (inc (:seon.context.contribution/position contribution)))]
                     (context-action-form agent-id nil contribution :remove "Remove from context")]
                    [:div {:class "seon-debug-projection-grid"}
                     [:section {:class "seon-debug-projection-column"}
-                     [:h4 "Assembled context"]
+                     [:h4 "Selected forms and results"]
                      [:pre {:class "seon-debug-candidate-preview"} baseline]]
                     [:section {:class "seon-debug-projection-column"}
                      [:h4 "Current preview"]
@@ -1400,12 +1407,21 @@
   [render-request debug-request ref-attributes identity-attributes
    direction datom value]
   (let [{:keys [e a v]} datom
+        many? (::many? datom)
+        attribute-schema (db/pull (:seon.db/db render-request)
+                                  [:seon.schema/key :seon.schema/form]
+                                  [:seon.schema/key a])
+        description (some-> (:seon.schema/form attribute-schema)
+                            schema.form/attr-form-properties
+                            :description)
         path (if (= :outgoing direction) [a] [])
         destination (if (= :outgoing direction) v e)
         reference? (or (= :incoming direction) (ref-attributes a))
         label (if reference? destination a)
         selected-link
         (cond
+          many? nil
+
           (and (= :outgoing direction) (identity-attributes a))
           (debug-subject-link debug-request e label)
 
@@ -1418,9 +1434,9 @@
           (render-source-call
            (assoc render-request
                   :seon.render/value value
-                  :seon.render.value/root (if reference? destination e)
+                  :seon.render.value/root (if (and reference? (not many?)) destination e)
                   :seon.render.data/cursor
-                  {:seon.render.data/path (if reference? [] [a])
+                  {:seon.render.data/path (if (and reference? (not many?)) [] [a])
                    :seon.render.data/offset 0}
                   :seon.render/output output
                   :seon.render.call/id
@@ -1428,12 +1444,17 @@
     [:article {:class "seon-debug-found-value"}
      [:header {:class "seon-debug-value-header"}
       [:div
-       [:p {:class "seon-debug-value-label"}
-        (if (= :outgoing direction) "Attribute on this entity" "Reference from another entity")]
-       [:h3 [:code (str a)]]]
+       [:h3 [:code (str a)]]
+       [:p {:class "seon-debug-description"}
+        (or description "This attribute has no schema description yet.")]]
       [:div {:class "seon-debug-stored-value"}
        [:span (if reference? "Referenced entity " "Stored value ")]
-       (if reference? selected-link [:code (pr-str v)])]]
+       (cond
+         (and reference? many?)
+         (into [:span] (interpose " ")
+               (map #(debug-subject-link debug-request % %) v))
+         reference? selected-link
+         :else [:code (pr-str v)])]]
      [:details {:class "seon-debug-data-details"}
       [:summary "Schema and raw data"]
       [:h4 "Stored value"]
@@ -1441,10 +1462,7 @@
       (when reference?
         [:div [:h4 "Referenced entity"] (debug-value-html value)])
       [:h4 "Attribute schema"]
-      (debug-value-html
-       (db/pull (:seon.db/db render-request)
-                [:seon.schema/key :seon.schema/form]
-                [:seon.schema/key a]))]
+      (debug-value-html attribute-schema)]
      [:div {:class "seon-debug-projection-grid"}
       [:section {:class "seon-debug-projection-column"}
        [:h4 "AI context"]
@@ -1459,21 +1477,31 @@
         (set (db/identity-attributes (:seon.db/db render-request)))
         outgoing
         (keep
-         (fn [{:keys [a v] :as datom}]
-           (let [value (if (ref-attributes a)
-                         (get related-entities v)
-                         (if (identity-attributes a) {a v} v))]
+         (fn [[a datoms]]
+           (let [many? (= :db.cardinality/many
+                          (:db/cardinality
+                           (db/pull (:seon.db/db render-request)
+                                    [:db/cardinality] [:db/ident a])))
+                 {:keys [e v] :as first-datom} (first datoms)
+                 stored (if many? (mapv :v datoms) v)
+                 datom (if many? {:e e :a a :v stored ::many? true} first-datom)
+                 value (if (ref-attributes a)
+                         (if many? (mapv #(get related-entities % %) stored)
+                             (get related-entities v v))
+                         (if (identity-attributes a) {a stored} stored))]
              (when (some? value)
                [:outgoing datom value])))
-         (get-in observation [:seon.render.data/outgoing
-                              :seon.render.data/datoms]))
+         (sort-by (comp str key)
+                  (group-by :a
+                            (get-in observation [:seon.render.data/outgoing
+                                                 :seon.render.data/datoms]))))
         incoming
         (keep (fn [{:keys [e] :as datom}]
                 (when-let [value (get related-entities e)]
                   [:incoming datom value]))
               (get-in observation [:seon.render.data/incoming
                                    :seon.render.data/datoms]))
-        rows (concat outgoing incoming)]
+        rows outgoing]
     (cond
       (:seon.error/kind related-entities)
       [:section {:class "seon-debug-found-values"}
@@ -1481,15 +1509,22 @@
        (debug-value-html related-entities)]
 
       (seq rows)
-      (into [:section {:class "seon-debug-found-values"}
-             [:h2 {:class "seon-debug-caption"} "Attributes and values"]
-             [:p {:class "seon-debug-description"}
-              "Each card shows one stored attribute and value, with its AI and HTML renderings. Reference values preview the connected entity."]]
+      [:section
+       (into [:section {:class "seon-debug-found-values"}
+             [:h2 {:class "seon-debug-caption"} "Attributes and values"]]
             (map (fn [[direction datom value]]
                    (debug-found-value render-request debug-request
                                       ref-attributes identity-attributes
                                       direction datom value)))
-            rows))))
+            rows)
+       (when (seq incoming)
+         [:details {:class "seon-debug-data-details"}
+          [:summary "References to this entity"]
+          (into [:ul]
+                (map (fn [[_ {:keys [e a]} _]]
+                       [:li [:code (str a)] " from "
+                        (debug-subject-link debug-request e e)]))
+                incoming)])])))
 
 (declare refresh-retained-read-evidence)
 
@@ -1502,45 +1537,6 @@
              (conj (into [] (remove same?) bucket)
                    (f (merge previous evidence)))))))
 
-(defn- held-agent-run
-  [database agent-id]
-  (let [captured (atom [])
-        agent (binding [db/*read-evidence-sink* captured]
-                (db/pull database
-                         [{:seon.cluster.agent/run
-                           [:seon.cluster.run/id]}]
-                         [:seon.cluster.agent/id agent-id]))]
-    {:seon.cluster.run/id
-     (get-in agent [:seon.cluster.agent/run :seon.cluster.run/id])
-     :seon.render.call/read-evidence
-     (db/read-evidence @captured {:seon.db/retain-read-results? true})}))
-
-(defn- evaluation-read-evidence
-  [database run-id]
-  (let [evaluations
-        (db/q '[:find [(pull ?evaluation
-                             [{:seon.cluster.eval/read-evidence [*]}]) ...]
-                :in $ ?run-id
-                :where
-                [?run :seon.cluster.run/id ?run-id]
-                [?evaluation :seon.cluster.eval/run ?run]]
-              database run-id)]
-    (if (:seon.error/kind evaluations)
-      evaluations
-      (into []
-            (mapcat :seon.cluster.eval/read-evidence)
-            evaluations))))
-
-(defn- source-run
-  [database run-id]
-  (db/pull database
-           [:seon.cluster.run/id
-            :seon.cluster.run/closed-at
-            :seon.cluster.run/error
-            {:seon.cluster.run/starting-ns [:seon.ns/name]}
-            {:seon.cluster.run/agent [:db/id :seon.cluster.agent/id]}]
-           [:seon.cluster.run/id run-id]))
-
 (defn- assigned-agent-namespace
   [database agent-id]
   (get-in (db/pull database
@@ -1548,149 +1544,115 @@
                    [:seon.cluster.agent/id agent-id])
           [:seon.cluster.agent/namespace :seon.ns/name]))
 
-(defn- reusable-source-run-id
-  "Return the exact call's stored run when regenerated source still denotes it."
-  [request current source]
+(defn- reusable-evaluated-preview
+  "Recover evaluated data from the retained call after a code observation wake."
+  [request current source namespace-name]
   (let [previous (get (:seon.render/retained-calls request)
                       (:seon.render.call/id request))
-        run-id (:seon.render.call/source-run-id previous)
-        database (:seon.db/db request)
-        run (when run-id (source-run database run-id))
-        current-namespace
-        (assigned-agent-namespace database (:seon.cluster.agent/id request))
-        starting-namespace
-        (get-in run [:seon.cluster.run/starting-ns :seon.ns/name])
-        read-evidence (when run-id
-                        (evaluation-read-evidence database run-id))]
-    (when (and (= source (:seon.render.call/source previous))
-               (= (get-in current [:seon.render.call/static-evidence
-                                   :seon.render.call/producer])
-                  (get-in previous [:seon.render.call/static-evidence
-                                    :seon.render.call/producer]))
+        evaluated (:seon.cluster.loop/evaluated-sources previous)
+        evidence (:seon.render.call/read-evidence previous)]
+    (when (and (some? evaluated)
+               (= source (:seon.render.call/source previous))
+               (= (:seon.cluster.agent/id request) (:seon.cluster.agent/id previous))
+               (= [:seon.ns/name namespace-name] (:seon.cluster.run/starting-ns previous))
+               (= (get-in current [:seon.render.call/static-evidence :seon.render.call/producer])
+                  (get-in previous [:seon.render.call/static-evidence :seon.render.call/producer]))
                (some? (:seon.render/program-snapshot current))
                (some? (:seon.render/projection current))
                (identical? (:seon.render/program-snapshot current)
                            (:seon.render/program-snapshot previous))
                (identical? (:seon.render/projection current)
                            (:seon.render/projection previous))
-               (= (:seon.cluster.agent/id request)
-                  (get-in run [:seon.cluster.run/agent
-                               :seon.cluster.agent/id]))
-               (some? current-namespace)
-               (= current-namespace starting-namespace)
-               (vector? read-evidence)
-               (db/read-evidence-current? database read-evidence))
-      run-id)))
+               (vector? evidence)
+               (db/read-evidence-current? (:seon.db/db request) evidence))
+      (select-keys previous
+                   [:seon.render.call/source-run-id :seon.cluster.loop/evaluated-sources
+                    :seon.cluster.agent/id :seon.cluster.run/starting-ns
+                    :seon.cluster.run/opened-at :seon.cluster.run/closed-at :seon.db/db]))))
 
 (defn- render-source-call
-  "Submit one explicitly authored AI candidate, then derive its stored result.
+  "Evaluate authored source once in memory and retain its exact forms and results.
 
-  The invocation atom is the existing cache. A database wake re-enters this
-  function with the retained run identity; this function never waits for the
-  run and never evaluates source itself."
+  The existing invocation cache owns the preview. Only Add to context persists
+  it; execution, parsing, admission and transcript formatting keep their owners."
   [request]
   (let [captured-invocations (:seon.render/captured-invocations request)
         request (cond-> request
-                  ;; This chooses the authored query floor only. The selected
-                  ;; producer's indexed return contract determines execution.
                   (= :seon.render/ai (:seon.render/output request))
                   (assoc :seon.render.call/source-output? true)
-
                   captured-invocations
-                  (update :seon.render/invocations merge
-                          @captured-invocations))
+                  (update :seon.render/invocations merge @captured-invocations))
         rendered (render/render-call request)
         call-id (:seon.render.call/id request)
         call-entry (get @(:seon.render/captured-calls request) call-id)
         invocation-key (:seon.render.call/invocation-key call-entry)
         source (:seon.render.call/source call-entry)]
-    (cond
-      (or (not source) (:seon.render.call/output call-entry)) rendered
-
-      (nil? (:seon.cluster.agent/id request))
-      (let [failure
-            (debug-diagnostic
-             ::owner-not-ensured
-             "Evaluating this preview requires an agent assigned to the viewing namespace."
-             'seon.render.web/render-source-call
-             :seon.cluster.agent/id :seon.cluster.agent/id
-             (select-keys request [:seon.render/namespace :seon.render.value/root])
-             ::owner-not-ensured nil)
-            enrich #(assoc % :seon.render.call/output failure)]
-        (replace-current-invocation! captured-invocations invocation-key call-entry enrich)
-        (swap! (:seon.render/captured-calls request) update call-id enrich)
-        failure)
-
-      :else
-      (let [previous-run-id (reusable-source-run-id request call-entry source)
-            held (when-not (:seon.render.call/source-run-id call-entry)
-                   (held-agent-run (:seon.db/db request)
-                                   (:seon.cluster.agent/id request)))
-            held-run-id (:seon.cluster.run/id held)
-            run-id (or (:seon.render.call/source-run-id call-entry)
-                       previous-run-id
-                       (:seon.render.call/source-run-id request))
-            submission
-            (when (and (not run-id) (not held-run-id))
-              (cluster.agent/submit-source!
-               (cond->
-                {:seon.cluster.loop/cluster
-                 (:seon.cluster.loop/cluster request)
-                 :seon.cluster.agent/routing
-                 (:seon.cluster.agent/routing request)
-                 :seon.cluster.agent/id
-                 (:seon.cluster.agent/id request)
-                 :seon.cluster.reply/text source}
-                 (:seon.render/namespace request)
-                 (assoc :seon.cluster.run/starting-ns
-                        [:seon.ns/name (:seon.render/namespace request)]))))
-            submission-error (when (:seon.error/kind submission) submission)
-            transient-submission-error?
-            (= ::run/agent-already-running (::run/rule submission-error))
-            run-id (or run-id (:seon.cluster.run/id submission))
-            run (when run-id (source-run (:seon.db/db request) run-id))
-            terminal? (and run
-                           (or (contains? run :seon.cluster.run/closed-at)
-                               (contains? run :seon.cluster.run/error)))
+    (if (or (not source) (:seon.render.call/output call-entry))
+      rendered
+      (let [database (:seon.db/db request)
+            agent-id (:seon.cluster.agent/id request)
+            observed (atom [])
+            namespace-name
+            (or (:seon.render/namespace request)
+                (when agent-id (assigned-agent-namespace database agent-id)))
+            preview
+            (if-not (and agent-id namespace-name)
+              (debug-diagnostic
+               ::owner-not-ensured
+               "Evaluating this preview requires an agent assigned to the viewing namespace."
+               'seon.render.web/render-source-call
+               :seon.cluster.agent/id :seon.cluster.agent/id
+               (select-keys request [:seon.render/namespace :seon.render.value/root])
+               ::owner-not-ensured nil)
+              (or (reusable-evaluated-preview request call-entry source namespace-name)
+                  (binding [db/*read-evidence-sink* observed]
+                    (let [cluster (:seon.cluster.loop/cluster request)
+                          opened-at (Date.)
+                          forked (sci.eval/fork-for-turn
+                                  {:seon.sci.eval/ctx (:seon.sci.eval/ctx request)
+                                   :seon.db/db database
+                                   :seon.db/connection (:seon.db/connection cluster)
+                                   :seon.cluster.agent/id agent-id})]
+                      (if (:seon.error/kind forked)
+                        forked
+                        (let [sources
+                              (loop/planned-sources
+                               source namespace-name
+                               (:seon.config.eval.result/max-source (:seon.sci.admit/caps request)))
+                              evaluated
+                              (loop/evaluate-sources
+                               {:seon.cluster.loop/cluster cluster
+                                :seon.db/db database
+                                :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
+                                :seon.cluster.agent/id agent-id
+                                :seon.cluster.run.form/ordinal 0
+                                :seon.ns/name namespace-name
+                                :seon.cluster.reply/sources sources
+                                :seon.sci.eval/defs-notices (vec (:seon.sci.eval/defs-notices forked))})]
+                          {:seon.render.call/source-run-id (str (random-uuid))
+                           :seon.cluster.loop/evaluated-sources evaluated
+                           :seon.cluster.agent/id agent-id
+                           :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
+                           :seon.cluster.run/opened-at opened-at
+                           :seon.cluster.run/closed-at (Date.)
+                           :seon.db/db database}))))))
             output
-            (cond
-              (and submission-error (not transient-submission-error?))
-              submission-error
-              terminal?
-              (transcript/render-run-ai
-               (-> request
-                   (dissoc :seon.render.call/source-output?)
-                   (assoc :seon.cluster.run/id run-id
-                          :seon.cluster.run/agent
-                          (:seon.cluster.run/agent run))))
-              :else nil)
-            read-evidence (when terminal?
-                            (evaluation-read-evidence
-                             (:seon.db/db request) run-id))
-            enrich
-            (fn [entry]
-              (cond-> (dissoc entry :seon.render.call/source-blocked-run-id)
-                source (assoc :seon.render.call/source source)
-                run-id (assoc :seon.render.call/source-run-id run-id)
-                (and submission-error (not transient-submission-error?))
-                (assoc :seon.render.call/output submission-error)
-                terminal? (assoc :seon.render.call/output output)
-                held-run-id
-                (assoc :seon.render.call/source-blocked-run-id held-run-id)
-                (seq (:seon.render.call/read-evidence held))
-                (update :seon.render.call/read-evidence into
-                        (:seon.render.call/read-evidence held))
-                (seq read-evidence)
-                (update :seon.render.call/read-evidence into read-evidence)))]
-        (if transient-submission-error?
-          (swap! captured-invocations update invocation-key
-                 (fn [bucket]
-                   (into []
-                         (remove #(render/same-invocation-evidence?
-                                   % call-entry))
-                         bucket)))
-          (replace-current-invocation! captured-invocations invocation-key
-                                      call-entry enrich))
+            (if (:seon.error/kind preview)
+              preview
+              (binding [db/*read-evidence-sink* observed]
+                (transcript/render-ai
+                 (-> request
+                     (merge preview)
+                     (assoc :seon.cluster.run/id (:seon.render.call/source-run-id preview))))))
+            evidence
+            (into (db/read-evidence @observed {:seon.db/retain-read-results? true})
+                  (mapcat #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
+                  (:seon.cluster.loop/evaluated-sources preview))
+            enrich (fn [entry]
+                     (cond-> (assoc entry :seon.render.call/output output)
+                       (not (:seon.error/kind preview)) (merge preview)
+                       (seq evidence) (update :seon.render.call/read-evidence into evidence)))]
+        (replace-current-invocation! captured-invocations invocation-key call-entry enrich)
         (swap! (:seon.render/captured-calls request) update call-id enrich)
         output))))
 
@@ -2488,8 +2450,7 @@
                                   [call-id
                                    (dissoc entry
                                            :seon.render/selection-input
-                                           :seon.render.call/output
-                                           :seon.render.call/read-evidence)])))
+                                           :seon.render.call/output)])))
                           calls)]
                 (cond-> registrations
                   (seq source-calls) (assoc registration-key source-calls))))
@@ -2672,6 +2633,54 @@
   [entries]
   (apply str (history-segments entries)))
 
+(defn- context-change-pass
+  "Resolve Add against this render proc's cache and persist without reexecution."
+  [state request]
+  (let [cluster (:seon.cluster.loop/cluster state)
+        connection (:seon.db/connection cluster)
+        action (:seon.render/context-action request)
+        run-id (:seon.cluster.run/id request)
+        agent-id (:seon.cluster.agent/id request)
+        cached (when-not (= :remove action)
+                 (some (fn [entry]
+                         (when (and (= run-id (:seon.render.call/source-run-id entry))
+                                    (= agent-id (:seon.cluster.agent/id entry)))
+                           entry))
+                       (mapcat val (::invocations state))))
+        result
+        (if (and (not= :remove action) (nil? cached))
+          (debug-diagnostic
+           ::preview-unavailable
+           "This evaluated preview is no longer cached. Select the preview again before adding it."
+           'seon.render.web/context-change-pass
+           :seon.cluster.run/id :seon.cluster.loop/evaluated-sources
+           run-id ::preview-unavailable
+           {:seon.cluster.agent/id agent-id})
+          (let [prepared
+                (when cached
+                  (run/record-evaluated-tx
+                   (merge
+                    (select-keys cached
+                                 [:seon.db/db :seon.cluster.run/starting-ns
+                                  :seon.cluster.run/opened-at :seon.cluster.run/closed-at
+                                  :seon.cluster.loop/evaluated-sources])
+                    {:seon.cluster.loop/cluster cluster
+                     :seon.cluster.run/id run-id
+                     :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+                     :seon.cluster.run/reply (:seon.render.call/source cached)})))
+                operation (case action
+                            :remove #'context/remove-tx
+                            :compact #'context/compact-tx
+                            :append #'context/append-tx)]
+            (blob/with-publication!
+              connection (vec (:seon.blob/staged-writes prepared))
+              #(db/transact!
+                connection
+                {:tx-data (conj (vec (:seon.db/tx-data prepared))
+                                [:db.fn/call operation request])
+                 :tx-meta (select-keys request [:seon.db/user :seon.db/process])}))))]
+    [state (if (:seon.error/kind result) result {:seon.db/db @connection})]))
+
 (defn- context-pass
   [state message]
   (let [request (:seon.render.context/request message)
@@ -2825,9 +2834,14 @@
    state)
   ([state input message]
    (if (= ::context input)
-     (let [[state response] (context-pass state message)]
+     (let [request (:seon.render.context/request message)
+           [state response] (if (:seon.render/context-action request)
+                              (context-change-pass state request)
+                              (context-pass state message))]
        (async/put! (:seon.render.context/reply message) response)
-       [(publish-interest! state (:seon.db/db response)) nil])
+       [(if-let [database (:seon.db/db response)]
+          (publish-interest! state database)
+          state) nil])
      (let [runtime-eval? (= ::runtime-eval input)
            settlement
          (when (and (= ::interest input) (map? message))
@@ -3498,27 +3512,24 @@
   [service request]
   (let [params (decode-form request)
         connection (:seon.store/connection-object service)
-        result (db/transact!
-                connection
-                {:tx-data
-                 [[:db.fn/call
-                   (case (get params "action")
-                     "remove" #'context/remove-tx
-                     "compact" #'context/compact-tx
-                     #'context/append-tx)
-                   (cond->
-                    {:seon.cluster.agent/id (get-in request [:path-params :id])
-                     :seon.cluster.run/id (get params "run")
-                     :seon.context.contribution/id
-                     (if (contains? #{"compact" "remove"} (get params "action"))
-                       (get params "contribution") (str (random-uuid)))}
-                     (= "compact" (get params "action"))
-                     (assoc :seon.context.contribution/evaluations
-                            (edn/read-string (get params "evaluations"))))]]
-                 :tx-meta
-                 (inbound-tx-meta @connection
-                                  (:seon.cluster.run/process service)
-                                  (:seon.cluster.agent/id service))})]
+        action (case (get params "action") "remove" :remove "compact" :compact :append)
+        context-request
+        (merge
+         (inbound-tx-meta @connection
+                          (:seon.cluster.run/process service)
+                          (:seon.cluster.agent/id service))
+         (cond->
+          {:seon.render/context-action action
+           :seon.cluster.agent/id (get-in request [:path-params :id])
+           :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms service)
+           :seon.context.contribution/id
+           (if (= :append action) (str (random-uuid)) (get params "contribution"))}
+           (not= :remove action) (assoc :seon.cluster.run/id (get params "run"))
+           (= :compact action)
+           (assoc :seon.context.contribution/evaluations
+                  (edn/read-string (get params "evaluations")))))
+        result (render/acquire-context! (:seon.render/context-channel service)
+                                        context-request)]
     (if (:seon.error/kind result)
       {:status 422 :headers {"content-type" "text/plain; charset=utf-8"}
        :body (pr-str result)}

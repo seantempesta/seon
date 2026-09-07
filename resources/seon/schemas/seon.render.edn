@@ -4,6 +4,23 @@
                [:seon.render.history/segments
                 [:vector {:min 1} :seon.cluster.prompt/text]]
                [:seon.db/db :seon.db/database-value]],
+              :context-action [:enum :append :compact :remove],
+              :context-change-request
+              [:and
+               [:map
+                [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
+                [:seon.db/user {:optional true} :seon.db/user]
+                [:seon.db/process {:optional true} :seon.db/process]]
+               [:or
+                [:and :seon.context/append-request
+                 [:map [:seon.render/context-action [:= :append]]]]
+                [:and :seon.context/compact-request
+                 [:map [:seon.render/context-action [:= :compact]]]]
+                [:and :seon.context/remove-request
+                 [:map [:seon.render/context-action [:= :remove]]]]]],
+              :context-request [:or :seon.cluster.prompt/request
+                                :seon.render/context-change-request],
+              :context-change-result [:map [:seon.db/db :seon.db/database-value]],
               :ai [:or :qualified-symbol :string],
               :call-request
               [:map
@@ -53,7 +70,6 @@
                 {:optional true}
                 :seon.cluster.run/id]],
               :source [:string {:min 1}],
-              :source-blocked-run-id :seon.cluster.run/id,
               :candidate-request
               [:map
                [:seon.db/db :seon.db/database-value]
