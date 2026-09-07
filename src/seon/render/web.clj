@@ -1410,6 +1410,10 @@
           (render-source-call
            (assoc render-request
                   :seon.render/value value
+                  :seon.render.value/root (if reference? destination e)
+                  :seon.render.data/cursor
+                  {:seon.render.data/path (if reference? [] [a])
+                   :seon.render.data/offset 0}
                   :seon.render/output output
                   :seon.render.call/id
                   [::found-value direction e a v path output])))]
@@ -1585,12 +1589,27 @@
                                  % call-entry)
                             %)
                          (get @captured-invocations invocation-key))
-        source (:seon.render.call/source invocation)
-        previous-run-id (when source
-                          (reusable-source-run-id request call-entry source))]
-    (if (or (not source) (:seon.render.call/output invocation))
-      rendered
-      (let [held (when-not (:seon.render.call/source-run-id invocation)
+        source (:seon.render.call/source invocation)]
+    (cond
+      (or (not source) (:seon.render.call/output invocation)) rendered
+
+      (nil? (:seon.cluster.agent/id request))
+      (let [failure
+            (debug-diagnostic
+             ::owner-not-ensured
+             "Evaluating this preview requires an agent assigned to the viewing namespace."
+             'seon.render.web/render-source-call
+             :seon.cluster.agent/id :seon.cluster.agent/id
+             (select-keys request [:seon.render/namespace :seon.render.value/root])
+             ::owner-not-ensured nil)
+            enrich #(assoc % :seon.render.call/output failure)]
+        (replace-current-invocation! captured-invocations invocation-key call-entry enrich)
+        (swap! (:seon.render/captured-calls request) update call-id enrich)
+        failure)
+
+      :else
+      (let [previous-run-id (reusable-source-run-id request call-entry source)
+            held (when-not (:seon.render.call/source-run-id invocation)
                    (held-agent-run (:seon.db/db request)
                                    (:seon.cluster.agent/id request)))
             held-run-id (:seon.cluster.run/id held)
@@ -1600,13 +1619,17 @@
             submission
             (when (and (not run-id) (not held-run-id))
               (cluster.agent/submit-source!
-               {:seon.cluster.loop/cluster
-                (:seon.cluster.loop/cluster request)
-                :seon.cluster.agent/routing
-                (:seon.cluster.agent/routing request)
-                :seon.cluster.agent/id
-                (:seon.cluster.agent/id request)
-                :seon.cluster.reply/text source}))
+               (cond->
+                {:seon.cluster.loop/cluster
+                 (:seon.cluster.loop/cluster request)
+                 :seon.cluster.agent/routing
+                 (:seon.cluster.agent/routing request)
+                 :seon.cluster.agent/id
+                 (:seon.cluster.agent/id request)
+                 :seon.cluster.reply/text source}
+                 (:seon.render/namespace request)
+                 (assoc :seon.cluster.run/starting-ns
+                        [:seon.ns/name (:seon.render/namespace request)]))))
             submission-error (when (:seon.error/kind submission) submission)
             transient-submission-error?
             (contains? #{::run/agent-already-running
@@ -1946,9 +1969,7 @@
           :else (data/at acquisition cursor))
         selected? (contains? selected-result :seon.render.data/value)
         selected-value (:seon.render.data/value selected-result)
-        render-agent-id
-        (or (:seon.cluster.agent/id debug-request)
-            (:seon.cluster.agent/id handle))
+        render-agent-id (:seon.cluster.agent/id debug-request)
         render-custody
         (cond->
          {:seon.db/db db

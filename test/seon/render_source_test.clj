@@ -19,6 +19,43 @@
   [_unit]
   "(+ 1 1)")
 
+(deftest found-value-source-uses-the-datoms-own-provenance
+  (let [found-value (ns-resolve 'seon.render.web 'debug-found-value)
+        source-call-var (ns-resolve 'seon.render.web 'render-source-call)
+        request {:seon.render.value/root 101
+                 :seon.render.data/cursor
+                 {:seon.render.data/path [:seon.cluster.agent/run]
+                  :seon.render.data/offset 17}}
+        debug-request {:seon.render.debug/viewer-namespace 'my.agents.provenance
+                       :seon.render.debug/subject 101}
+        sources (atom [])]
+    (with-redefs-fn
+      {source-call-var
+       (fn [request]
+         (if (= :seon.render/ai (:seon.render/output request))
+           (let [source (render/render-default-ai-source request)]
+             (swap! sources conj (read-string source))
+             source)
+           [:span "HTML"]))}
+      (fn []
+        (found-value request debug-request #{:seon.context.contribution/agent} #{}
+                     :incoming {:e 202 :a :seon.context.contribution/agent :v 101}
+                     {:db/id 202 :seon.context.contribution/id "locked"})
+        (found-value request debug-request #{:seon.cluster.agent/namespace} #{}
+                     :outgoing {:e 101 :a :seon.cluster.agent/namespace :v 303}
+                     {:db/id 303 :seon.ns/name 'my.agents.provenance})
+        (found-value request debug-request #{} #{}
+                     :outgoing {:e 404 :a :my.plan.item/title :v "Exact title"}
+                     "Exact title")))
+    (is (= '[(seon.db/pull (quote [*]) 202)
+             (seon.db/pull (quote [*]) 303)
+             (seon.render.data/pull-at
+              (quote [*]) 404
+              {:seon.render.data/path [:my.plan.item/title]
+               :seon.render.data/offset 0})]
+           @sources)
+        "incoming/outgoing refs target their entity; scalar reads reset to the owning datom path")))
+
 (deftest default-source-reproduces-the-exact-reached-value
   (support/with-database
    (fn [connection]
@@ -174,6 +211,25 @@
                        {:seon.cluster.run/id "declared-source"})]
          (is (str/includes? (source-call (request :source 'seon.render-source-test/authored-source {}))
                             "2"))
+         (let [unowned-request
+               (-> (request :unowned 'seon.render-source-test/authored-source
+                            {:seon.cluster.agent/id "source-contract-agent"})
+                   (dissoc :seon.cluster.agent/id)
+                   (assoc :seon.render/namespace 'my.agents.source-contract
+                          :seon.render/captured-calls (atom {})
+                          :seon.render/captured-invocations (atom {})))
+               refusal (source-call unowned-request)]
+           (is (= :seon.render.web/owner-not-ensured (:seon.error/kind refusal)))
+           (is (= refusal (source-call unowned-request))
+               "a repeated unowned interest remains a retained preview refusal")
+           (is (= ["(+ 1 1)"] @submissions)
+               "no source is submitted without its viewing agent")
+           (is (str/includes?
+                (source-call (assoc unowned-request
+                                    :seon.cluster.agent/id "source-contract-agent"))
+                "2")
+               "entity attributes cannot make absent and present execution custody identical")
+           (is (= ["(+ 1 1)" "(+ 1 1)"] @submissions)))
          (let [terminal-request (request :terminal 'seon.render.transcript/render-run-ai stored-run)
                terminal (source-call terminal-request)
                original-output (transcript/render-run-ai
@@ -181,7 +237,7 @@
                retained (get @captured-calls [:terminal])]
            (is (= original-output terminal))
            (is (str/includes? terminal "already ran"))
-           (is (= ["(+ 1 1)"] @submissions)
+           (is (= ["(+ 1 1)" "(+ 1 1)"] @submissions)
                "stored transcript source is never submitted again")
            (is (nil? (:seon.cluster.run/id retained))
                "a run-valued input does not prove what evaluations a renderer displayed")

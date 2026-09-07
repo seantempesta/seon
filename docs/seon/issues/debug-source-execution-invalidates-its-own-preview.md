@@ -116,3 +116,102 @@ wake, repeated refresh, and second presentation reuse one stored execution.
 Then change an actual source dependency and verify the existing invalidation
 mechanism produces the appropriate new result. A mocked execution count with
 an immutable acquired argument did not cover this failure.
+
+## Missing viewing owner and per-value provenance — 2026-09-07
+
+After the owned `tmp/juniper-context-live` reset, only the root agent existed.
+Old Juniper debug registrations reconnected before Juniper was seeded. The
+render proc repeatedly called `submit-source!` with an absent agent id. Fault
+32895 records `:seon.instrument/args "[#:seon.cluster.agent{:id nil}]"` and
+signature `b27a6a361b15520ca59e9745aae7f2cd7d5c72e74c723f7b0f24bbea76a9eb6f`.
+Fault transactions woke the same invalid interest again: root stopped web at
+1,396 identical faults, four runs, and 5,772,632 KiB of store. Counts remained
+stable after stopping. The source itself was not nil; source capture admits
+only strings.
+
+`render-source-call` now retains an ordinary `owner-not-ensured` preview
+refusal when its carried request has no viewing agent id, before querying
+execution reuse or submitting a run. `debug-page-result` no longer substitutes
+the handle's agent for an unowned viewing namespace. This checks required
+request data, not an existence pre-read. The source-contract regression calls
+the same unowned request twice and asserts equal refusals and no additional
+submission. Root's first live reopen returned HTTP 404 for the absent namespace
+and retained the four-run, 1,396-fault baseline. That proves the absent route,
+not fresh browser paint: the existing browser still showed its old DOM.
+
+The found-value regression passes a page root of 101 with a stale
+`[:seon.cluster.agent/run]` cursor and offset 17. Before correction, all three
+preview sources reused that exact root and cursor: incoming contribution 202,
+outgoing namespace 303, and scalar title on entity 404. The focused gate
+reproduced this failure in an independent confirmation worker (five tests,
+97 assertions, one failure, no errors). The correction derives provenance
+at `debug-found-value`: reference previews use the referenced entity and an
+empty cursor; scalar previews use the datom's entity and attribute path with
+offset zero. No history-name exclusion or separate cache is introduced.
+This matters for execution as well as display: accidentally pulling the
+viewing agent observes its temporary current-run pointer, whose removal at
+settlement is a real change to the query result. The next gate passed all
+render-source assertions and the namespace race regression; its sole failure
+was `settlement-mints-rows-for-unindexed-call-targets`, whose expected
+`seon.bootstrap/help` call edge was absent (25 tests, 242 assertions).
+That failure is retained at `tmp/test-runs/run.9YhxTH`; its cause is not yet
+attributed.
+
+Root's next browser inspection of seeded Juniper 34620 found an
+`owner-not-ensured` refusal on its id attribute despite valid viewing custody.
+Producer arguments merge entity attributes with render custody: an entity's
+agent-id attribute can make an unowned request's producer argument identical
+to a later owned request's argument. The same invocation then reused the
+execution refusal. Existing invocation evidence now also carries the request's
+agent id and render namespace, independently of producer arguments. The
+regression exercises absent then present custody with the identical entity
+value and retained invocation cache. This is also required to prevent source
+execution reuse across distinct viewing namespaces.
+
+The race audit separates admission from reuse. Datahike's transaction executes
+`run/open-call`, which resolves the agent and refuses an existing current run.
+`run/plan-call` compares the requested system starting namespace with the
+agent's current namespace inside that same transaction. Existing regressions
+cover busy admission (`seon.db-test/transaction-wrappers-cannot-hide-a-classified-refusal`)
+and stale namespace refusal
+(`seon.cluster.run-test/system-run-refuses-a-concurrent-namespace-reassignment`).
+The render proc serially reduces all watched registrations and carries the
+same `::invocations` value across them and subsequent passes. There is no
+second per-feed execution cache. Distinct submissions after a prior run has
+closed are still distinct intents at run admission; avoiding unnecessary
+preview submissions relies on retained source and read evidence.
+
+Web previously rendered against a carried database and namespace, while
+`submit-source!` derived its parse-time namespace from a later database value.
+The transactional namespace fence covered changes after that later read but
+missed reassignment between rendering and submission. The submission request
+now optionally accepts the existing `:seon.cluster.run/starting-ns`, which web
+passes from its rendering namespace. Supplied namespace decisions win; callers
+omitting the field retain the ordinary agent default. The existing transaction
+fence decides whether the assignment still matches, without another lock or
+pre-read check. The submission regression changes assignment before the call
+and checks refusal, no run, and no wake; its ordinary default call still runs.
+
+The issue remains open. During subsequent source publications root observed
+roughly 20 repeated identity runs and stopped web again at 34 total runs;
+the original nil-id fault count stayed at 1,396. A quiet-source live proof is
+still required after these corrections, including terminal paint and locking.
+
+The custody/submission gate completed with 27 tests, 230 assertions, no
+failures and one error in
+`install-gate-failure-settles-commits-and-cancels-the-turn-backstop`; the
+render-source and ordinary source submission tests passed. The retained root
+is `tmp/test-runs/run.wjDMHy`; no broader gate was rerun for this separate
+error.
+
+The quiet-source browser falsifier still grew from 34 to 49 runs. All 12
+stored read-evidence entries of the inspected latest floor evaluation were
+current. The bounded live probe in
+`docs/prds/context-generation/research/preview_reuse_predicates_2026_09_07.clj`
+temporarily observed the existing reuse function and restored it after ten
+seconds. Across repeated floor calls for alias entity 32367, source,
+producer, program identity, and projection identity compared equal, but the
+retained call's `:seon.render.call/source-run-id` was absent on every pass.
+The failure precedes execution-read validation: the page loses its execution
+reference. Web was stopped again after this capture. Correcting that loss is
+the next acceptance step; these earlier fixes do not establish a stable UI.

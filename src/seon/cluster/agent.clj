@@ -636,24 +636,28 @@
   Parsing, delimiter repair, evaluation, result bindings, and settlement are
   the same owners used for a model reply. The run transaction decides whether
   the agent is busy; after it commits, one payload-free wake starts or arms the
-  agent graph."
+  agent graph. A supplied starting namespace is the caller's parse-time
+  decision; the run transaction refuses if the agent's assignment changed."
   {:malli/schema
    [:=> [:catn [:request :seon.cluster.agent/source-submission-request]]
     [:or :seon.cluster.agent/source-submission-result :seon.error/value]]}
   [{handle :seon.cluster.loop/cluster
     routing :seon.cluster.agent/routing
     agent-id :seon.cluster.agent/id
+    starting-ns :seon.cluster.run/starting-ns
     text :seon.cluster.reply/text}]
   (let [connection (:seon.db/connection handle)
         database @connection
         namespace-name
-        (db/q '[:find ?namespace-name .
+        (if starting-ns
+          (:seon.ns/name (db/pull database [:seon.ns/name] starting-ns))
+          (db/q '[:find ?namespace-name .
                 :in $ ?agent-id
                 :where
                 [?agent :seon.cluster.agent/id ?agent-id]
                 [?agent :seon.cluster.agent/namespace ?namespace]
                 [?namespace :seon.ns/name ?namespace-name]]
-              database agent-id)]
+                database agent-id))]
     (cond
       (:seon.error/kind namespace-name) namespace-name
 

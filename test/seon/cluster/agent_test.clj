@@ -367,6 +367,29 @@
                   :args {:seon.cluster.loop/cluster cluster-handle
                          :seon.cluster.agent/routing routing}}}
                 :conns []})]
+          (db/transact!
+           connection
+           [{:seon.ns/name 'my.agents.source-agent-moved}
+            {:seon.cluster.agent/id "source-agent"
+             :seon.cluster.agent/namespace
+             [:seon.ns/name 'my.agents.source-agent-moved]}])
+          (let [refusal
+                (agent/submit-source!
+                 {:seon.cluster.loop/cluster cluster-handle
+                  :seon.cluster.agent/routing routing
+                  :seon.cluster.agent/id "source-agent"
+                  :seon.cluster.run/starting-ns
+                  [:seon.ns/name 'my.agents.source-agent]
+                  :seon.cluster.reply/text text})]
+            (is (= ::run/starting-namespace-changed (::run/rule refusal))
+                "the rendered namespace wins even when assignment changed before submission")
+            (is (nil? (:seon.cluster.run/id refusal)))
+            (is (nil? (async/poll! armer-channel))
+                "a refused submission publishes no wake")
+            (is (empty? (db/q '[:find [?run ...]
+                               :where [?run :seon.cluster.run/id]]
+                             @connection))
+                "the writer rolls back the complete source run"))
           (flow/start armer-graph)
           (flow/resume armer-graph)
           (try

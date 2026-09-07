@@ -597,6 +597,8 @@
       (select-keys request [:seon.sci.admit/caps
                             :seon.sci.eval/time-limit-ms
                             :seon.config/on-core-error
+                            :seon.cluster.agent/id
+                            :seon.render/namespace
                             :seon.render.call/source-output?])]}))
 
 (declare same-call-cache-evidence?)

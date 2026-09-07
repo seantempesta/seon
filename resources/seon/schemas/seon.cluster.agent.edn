@@ -90,6 +90,8 @@
                       [:seon.cluster.agent/routing
                        :seon.cluster.agent/routing]
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
+                      [:seon.cluster.run/starting-ns {:optional true}
+                       :seon.cluster.run/starting-ns]
                       [:seon.cluster.reply/text :seon.cluster.reply/text]],
                      :source-submission-result
                      [:map
