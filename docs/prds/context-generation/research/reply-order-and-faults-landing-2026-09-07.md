@@ -148,6 +148,12 @@ with this lane's changes reverted.
 | `seon.problems-test` + `seon.cluster.agent-namespace-test` | 21 tests / 144 assertions | 0 |
 | `seon.cluster.problem-routing-test` | 4 tests / 91 assertions | 0 |
 
+The five namespaces run together as one gate:
+`bin/test seon.cluster.reply-test seon.render.web-test seon.problems-test
+seon.render.web-performance-test seon.cluster.agent-namespace-test` —
+**98 tests / 605 assertions / 12 failures, 2 errors**, every one of them in the
+eight inherited tests named below.
+
 Inherited `reply-test` reds — `every-refusal-is-a-value`,
 `every-refusal-matches-its-declared-error-class`,
 `forms-run-and-prose-becomes-source-comments` — are the three
