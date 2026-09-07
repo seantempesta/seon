@@ -8,8 +8,9 @@ const fs = require('node:fs/promises');
     executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     headless: true,
   });
+  let page;
   try {
-    const page = await browser.newPage({viewport: {width: 1440, height: 1100}});
+    page = await browser.newPage({viewport: {width: 1440, height: 1100}});
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     const response = await page.goto(process.argv[2], {waitUntil: 'domcontentloaded', timeout: 30000});
@@ -28,6 +29,12 @@ const fs = require('node:fs/promises');
       forms: await page.locator('form').count(), buttons: await page.getByRole('button').allTextContents(),
       readinessError}));
     if (readinessError || errors.length) process.exitCode = 1;
+  } catch (error) {
+    if (page) {
+      await fs.writeFile(`${process.argv[3]}.txt`, await page.locator('body').innerText());
+      await page.screenshot({path: `${process.argv[3]}.png`, fullPage: false});
+    }
+    throw error;
   } finally {
     await browser.close();
   }
