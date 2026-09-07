@@ -177,3 +177,15 @@ attribute changes and retraction invalidating it, canonical map/set ordering,
 nil and 100,000-character results, fixed evidence size, and durable component
 round-trip. The user-visible retained-source/browser proof remains the final
 integration evidence and is owned by the controlled cluster run.
+
+Live integration check, 2026-09-07 00:20 UTC: the owned `juniper-context`
+cluster had 36 persisted result digests, all 64 characters. Three sampled
+evidence entities (105114, 105298, 105109) remained current against the later
+database value and contained no raw result payload. This confirms ordinary
+live evaluation settlement uses the shared durable evidence schema.
+
+The browser check did not pass: the identity preview did not appear within
+30 seconds, and the log reported `submit-source!` invalid-output after
+`agent-already-running`. The web server was stopped again. This check does
+not establish end-to-end reuse or automatic UI updates; the submission refusal
+is being investigated separately.
