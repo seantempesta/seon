@@ -135,13 +135,13 @@ The REPL answers each form with one map the agent is never asked to write:
 ```
 ; the agent's comment, verbatim, above the prompt
 my.agents.juniper=> (+ 1 1)
-#:seon.repl{:value 2, :result result/e0, :ms 3}
+#:seon.repl{:value 2, :result result/e33866, :ms 3}
 
 my.agents.juniper=> (in-ns 'my.tools)
-#:seon.repl{:value #object[Namespace my.tools], :result result/e1, :ns my.tools, :ms 0}
+#:seon.repl{:value #object[Namespace my.tools], :result result/e33884, :ns my.tools, :ms 0}
 
 my.tools=> (println "hi")
-#:seon.repl{:value nil, :result result/e2, :out "hi\n", :ms 1}
+#:seon.repl{:value nil, :result result/e33897, :out "hi\n", :ms 1}
 ```
 
 - Keys in this order, absent when empty: `:seon.repl/value` or
@@ -241,7 +241,7 @@ path-limited.
    comment/duration/print options, one generator, delete the formatters,
    page and prompt through it. Proof: one reply with a comment, a `println`,
    an `in-ns`, an error, a clipped value; page bytes = prompt bytes; the
-   agent's next turn can `(count result/e0)`.
+   agent's next turn can `(count result/e33866)`.
 3. **One eval point and cache**: the page submits previews through the loop;
    delete the bypass and the duplicate stores; regression derived from
    `:seon.fn/calls` (note 1 §5.3) plus closing the config-resolved evaluator
