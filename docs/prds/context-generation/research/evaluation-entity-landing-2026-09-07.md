@@ -228,7 +228,8 @@ expectation — but they were NOT updated, and until they are the gate is red:
   `same-instant-bootstrap-prefix-and-newest-tail-preserve-plan-order`,
   `selected-evaluations-project-only-their-stored-source-and-result`,
   `stored-evaluations-are-terminal-transcript-values`,
-  `supersession-chains-vanish-before-token-accounting` (12)
+  `supersession-chains-vanish-before-token-accounting`,
+  `tight-budgets-pull-only-a-budget-derived-newest-candidate-set` (13)
 - `seon.render-coverage-test/` —
   `effect-receipts-render-state-from-attribute-presence`,
   `important-runtime-entities-declare-and-use-readable-faces` (2): these
@@ -239,9 +240,18 @@ expectation — but they were NOT updated, and until they are the gate is red:
   `crlf-events-stay-within-the-original-reply`,
   `the-source-is-exactly-what-the-agent-wrote`,
   `tilde-fences-have-the-same-presentation-semantics` (5): these ARE the
-  expectations this lane rewrote, and they are still wrong. The likely
-  culprit is how trailing prose joins a form's comment — verify against
-  `plan-sources` rather than guessing.
+  expectations this lane rewrote, and they are still wrong. **Root cause
+  found, and it is production code, not the expectations:** a reader
+  event's `::source` span ALREADY OPENS at the first comment above the
+  form, so `plan-sources` kept handing that span on as the form source
+  while deriving `prose` from `(subs source cursor start)` — the comment
+  therefore landed in the source and the comment fact came back empty. The
+  form source must be `(subs source form-start end)`, where `form-start` is
+  the offset of the form itself. A repair along exactly these lines was in
+  the working tree, unattributed to this lane, when this lane ended
+  (a private `form-start` deriving the offset from the form's own reader
+  metadata); do not duplicate it — read `src/seon/cluster/reply.clj`
+  first.
 
 **Unattributed, and the one that matters:**
 
