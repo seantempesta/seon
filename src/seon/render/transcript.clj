@@ -384,7 +384,12 @@
     {::kind :eval
      ::entity receipt
      ::id (:seon.cluster.eval/id receipt)
-     ::at (:seon.cluster.eval/at receipt)
+     ;; A FROZEN EVALUATION THAT NEVER STARTED HAS NO START INSTANT, and it
+     ;; is still a transcript entry — the run's own opening is when the agent
+     ;; wrote it, which is exactly what the retired `:input` kind used.
+     ::at (or (:seon.cluster.eval/at receipt)
+              (get-in receipt [:seon.cluster.eval/run
+                               :seon.cluster.run/opened-at]))
      ::ordinal ordinal
      ::run-id (get-in receipt [:seon.cluster.eval/run
                                :seon.cluster.run/id])

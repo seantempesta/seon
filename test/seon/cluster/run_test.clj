@@ -277,7 +277,8 @@
         (is (not-any? run/terminal? evaluations)
             "the freeze asserts no terminal fact; that absence IS running")
         (is (empty?
-             (filter #(= "seon.cluster.run.form" (namespace %))
+             (filter #(and (keyword? %)
+                           (= "seon.cluster.run.form" (namespace %)))
                      (keys (:schema database))))
             "no attribute of the deleted form family is installed")
         (is (nil? (find run :seon.cluster.run/forms))

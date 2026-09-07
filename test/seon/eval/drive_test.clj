@@ -41,6 +41,9 @@
                             :seon.config.eval.result/max-collection 32
                             :seon.config.eval.result/max-string 4096
                             :seon.config.eval.result/max-nodes 4096)]
-        (is (= "user=> 42\n42"
+        ;; ONE ENTITY PER (run, ordinal), ONE GRAMMAR: the evaluation names
+        ;; its own namespace through the run's agent instead of falling back
+        ;; to `user`, and the settled value is the one REPL response map.
+        (is (= "my.agents.projection-proof=> 42\n#:seon.repl{:value 42}"
                (full-transcript database "projection-proof"
                                 instance settings)))))))

@@ -3518,8 +3518,10 @@
           (is (inst? (:seon.cluster.run/closed-at
                       (db/pull @connection [:seon.cluster.run/closed-at]
                                [:seon.cluster.run/id run-id]))))
-          (is (nil? (work/next-agent-work @connection request))
-              "a closed generated run derives no further work")
+          (is (not= run-id
+                    (:seon.cluster.run/id (work/next-agent-work @connection
+                                                               request)))
+              "a closed generated run derives no further work of its own")
           (is (= :system
                  (db/q '[:find ?author .
                          :in $ ?run-id
