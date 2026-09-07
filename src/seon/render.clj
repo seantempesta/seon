@@ -337,12 +337,20 @@
   attribute reached by the walk selects that producer ahead of map-shape
   discovery, which is how a cardinality-many or component attribute renders
   as one unit. The form projection keeps its floor when nothing is declared."
-  [projection request output]
-  (if-let [declared (attribute-producer projection request output)]
-    [declared]
-    (when (and (= :seon.render/form output)
-               (:seon.render.walk/attribute request))
-      ['seon.render/render-form])))
+  [projection request value output]
+  (let [attribute (:seon.render.walk/attribute request)
+        ;; The walk also stamps the attribute on a neighbour it REACHED
+        ;; through that attribute. An entity map lacking the attribute is
+        ;; that neighbour, never the attribute's value, and renders by its
+        ;; own shape.
+        attribute-value? (and attribute
+                              (or (not (map? value))
+                                  (contains? value attribute)))]
+    (when attribute-value?
+      (if-let [declared (attribute-producer projection request output)]
+        [declared]
+        (when (= :seon.render/form output)
+          ['seon.render/render-form])))))
 
 (defn- render-invocation-argument
   "Supply an attribute declaration with that attribute's value."
@@ -370,7 +378,7 @@
 
 (defn- declared-producer
   [projection request value output]
-  (if-let [producers (attribute-declared-producers projection request output)]
+  (if-let [producers (attribute-declared-producers projection request value output)]
     (first producers)
     (schema-producer projection request value output)))
 
@@ -469,7 +477,7 @@
 (defn- schema-stage
   [request projection value output]
   (let [producers
-        (or (attribute-declared-producers projection request output)
+        (or (attribute-declared-producers projection request value output)
             (schema-producers projection request value output)
             [])
         selection-error (when (> (count producers) 1)

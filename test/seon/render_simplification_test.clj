@@ -126,7 +126,13 @@
                    (argument projection
                              (dissoc request :seon.render.walk/attribute)
                              producer)))
-               "without a walk attribute the ordinary unit path is unchanged")))))))
+               "without a walk attribute the ordinary unit path is unchanged")
+           (is (not= producer
+                     (:seon.render.selection/selected
+                      (selection (assoc request :seon.render/value
+                                        {:db/id 42 :my.plan.item/id "s1"
+                                         :my.plan.item/title "A step"}))))
+               "a neighbour reached through the attribute is not its value")))))))
 
 (deftest pulled-entity-selection-and-invocation-share-transaction-shape
   (support/with-database
