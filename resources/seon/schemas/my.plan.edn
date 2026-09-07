@@ -57,6 +57,15 @@
           [:map
            [:seon.db/db :seon.db/database-value]
            [:seon.cluster.agent/id :seon.cluster.agent/id]],
+          :item-request
+          [:map
+           [:seon.db/db :seon.db/database-value]
+           [:my.plan.item/id :my.plan.item/id]],
+          :item-ids [:vector :my.plan.item/id],
+          :items-request
+          [:map
+           [:seon.db/db :seon.db/database-value]
+           [:my.plan/item-ids :my.plan/item-ids]],
           :pulled-reference [:map [:db/id :seon.db/ref]],
           :pulled-item
           [:map

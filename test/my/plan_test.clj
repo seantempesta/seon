@@ -222,11 +222,13 @@
                   :seon.config/on-core-error :panic}))
               evaluated (evaluate-source source)
               ready-item (first (:my.plan/ready current))
+              item-source (plan/render-item-ai ready-item)
               item-evaluated
-              (evaluate-source (plan/render-item-ai ready-item))
+              (evaluate-source item-source)
+              ready-source
+              (plan/render-ready-items-ai (:my.plan/ready current))
               ready-evaluated
-              (evaluate-source
-               (plan/render-ready-items-ai (:my.plan/ready current)))
+              (evaluate-source ready-source)
               html (plan/render-plan-html current)]
           (testing "the view reconstructs from the current database value"
             (is (= ["open"] (mapv :my.plan.item/id (:my.plan/ready current))))
@@ -239,6 +241,10 @@
             (is (seon.schema/valid-candidate-value? :my.plan/view current))
             (is (str/includes? source "my.plan/format-plan-ai"))
             (is (str/includes? source "my.plan/plan"))
+            (is (= "(my.plan/format-item-ai (my.plan/item #:my.plan.item{:id \"open\"}))"
+                   item-source))
+            (is (= "(my.plan/format-ready-items-ai (my.plan/items #:my.plan{:item-ids [\"open\"]}))"
+                   ready-source))
             (is (= ai (:seon.sci.admit/value evaluated)))
             (is (= (plan/format-item-ai ready-item)
                    (:seon.sci.admit/value item-evaluated)))
@@ -510,10 +516,14 @@
             bob (evaluate "bob" "(my.plan/plan {})")
             explicit
             (evaluate "alice"
-                      "(my.plan/plan {:seon.cluster.agent/id \"bob\"})")]
+                      "(my.plan/plan {:seon.cluster.agent/id \"bob\"})")
+            cross-agent-item
+            (evaluate "alice" "(my.plan/item {:my.plan.item/id \"bob-work\"})")]
         (is (= ["alice-work"]
                (mapv :my.plan.item/id (:my.plan/ready alice))))
         (is (= ["bob-work"]
                (mapv :my.plan.item/id (:my.plan/ready bob))))
         (is (= bob explicit)
-            "an explicit map entry wins over the calling agent default")))))
+            "an explicit map entry wins over the calling agent default")
+        (is (= "bob-work" (:my.plan.item/id cross-agent-item))
+            "a selected plan item remains inspectable across agent ownership")))))

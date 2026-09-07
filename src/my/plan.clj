@@ -882,6 +882,32 @@
               (assoc :my.plan/older-completions
                      (:my.plan/older-completions completions)))))))))
 
+(defn item
+  "Read one authored plan item by its stable identity."
+  {:malli/schema
+   [:=> [:catn [:request :my.plan/item-request]]
+    [:or :my.plan.item/item :seon.error/value]]}
+  [{database :seon.db/db
+    item-id :my.plan.item/id}]
+  (let [item-entity (item-eid database item-id)]
+    (cond
+      (error-value? item-entity) item-entity
+      (nil? item-entity)
+      {::not-found true
+       :seon.error/kind ::not-found
+       :seon.error/message (str "There is no plan item named "
+                                (pr-str item-id) ".")}
+      :else (item-row database item-entity))))
+
+(defn items
+  "Read authored plan items in the exact supplied identity order."
+  {:malli/schema
+   [:=> [:catn [:request :my.plan/items-request]]
+    [:or :my.plan/pulled-items :seon.error/value]]}
+  [{database :seon.db/db item-ids :my.plan/item-ids}]
+  (db/pull-many database item-selector
+                (mapv (fn [item-id] [:my.plan.item/id item-id]) item-ids)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Declared AI and HTML projections
 ;;; ---------------------------------------------------------------------------
@@ -911,9 +937,9 @@
   [item]
   (pr-str
    (list `format-item-ai
-         (list 'seon.db/pull item-selector
-               [:my.plan.item/id
-                (:my.plan.item/id (item-value item))]))))
+         (list `item
+               {:my.plan.item/id
+                (:my.plan.item/id (item-value item))}))))
 
 (defn render-item-html
   "Explain one step in an agent's plan and its expected outcome."
@@ -971,10 +997,9 @@
   [items]
   (pr-str
    (list `format-ready-items-ai
-         (list 'seon.db/pull-many item-selector
-               (mapv (fn [item]
-                       [:my.plan.item/id (:my.plan.item/id item)])
-                     items)))))
+         (list `items
+               {:my.plan/item-ids
+                (mapv :my.plan.item/id items)}))))
 
 (defn render-ready-items-html
   "Render the ready authored plan frontier as Hiccup."

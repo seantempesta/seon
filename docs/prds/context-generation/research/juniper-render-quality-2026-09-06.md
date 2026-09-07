@@ -166,3 +166,18 @@ The two projections retain the existing HTML and render mechanisms, but gain
 separate inspection-blue and information-blue heading and border accents.
 This leaves the warm Phosphor cream for content and the amber signal color for
 actual status or selection rather than using orange as general decoration.
+
+## Concise plan source calls
+
+The item and ready-item AI renderers previously embedded the complete pull
+selector in every authored source string. The same database reads are now
+ordinary named-map calls: `my.plan/item` reads one stable item identity and
+`my.plan/items` reads an exact ordered identity vector. Call preparation
+supplies the absent current database, while explicit identity arguments remain
+the renderer's selected subjects. The terminal formatters and HTML projections
+are unchanged, and `my.plan/plan` continues to return the structured current
+view rather than presentation text.
+
+The focused `my.plan-test` gate evaluated both generated source forms through
+SCI and passed 13 tests / 144 assertions. Its cross-agent case also proves an
+explicit selected item remains inspectable regardless of ownership.
