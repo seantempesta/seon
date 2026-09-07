@@ -11,6 +11,42 @@ Owner direction: use the visualization to change stored attributes, values,
 refs, and render functions together, then test the assembled context with live
 agents. Existing data placement is not a design constraint.
 
+## Live verification checkpoint — 2026-09-07 01:12 UTC
+
+The owned development root is `tmp/juniper-context-live`, cluster
+`juniper-context`, with the stable debug URL
+`http://127.0.0.1:7766/ns/my.agents.juniper/debug`. After the latest reset,
+the existing fixture installed Juniper entity 34620, its two plan items,
+anchor, and two root messages. Prefer the agent lookup ref over a saved numeric
+subject: numeric ids from earlier resets now describe different entities.
+
+Root personally inspected the fresh page and saved screenshots and text through
+`juniper_context_browser_probe_2026_09_06.cjs`. The browser returned 200 with no
+JavaScript errors, but failed its positive assertion that an evaluated preview
+can be locked into context. AI panels were blank or pending. This is a failed
+acceptance check, not a working context window.
+
+The missing-owner request previously created 1396 instrumentation fault facts.
+That count remained flat after the guard correction. A separate execution reuse
+defect remains: with both old and current browser registrations, total runs grew
+from 34 to 49 during a roughly 30-second browser check. Aggregate source queries
+identified repeated `whoami` and a floor pull for old subject 32367. All twelve
+stored read-evidence entries for the sampled latest floor evaluation 36716 were
+still current. Root stopped only the web server to contain the repeated work;
+the JVM remains reachable through MCP. Follow
+[the existing execution reuse issue](../../../seon/issues/debug-source-execution-invalidates-its-own-preview.md)
+for the fix and subsequent live proof.
+
+Instrumentation also exposed an honest plan contract mismatch: generated pull
+source supplies nested ref maps to `my.plan/format-item-ai`, whose item contract
+expects database refs. Its owning schema/source correction is in progress.
+Source adoption has a separately confirmed mixed-generation race, documented in
+[the instrumentation issue](../../../seon/issues/instrumentation-compiles-under-one-clusters-projection.md).
+The recommended data-preserving pause/adopt/resume design awaits the owner's
+choice; it has not been implemented or declared safe.
+
+The following checkpoints describe earlier disposable databases.
+
 Initial fixture on `lab-run-inspection` (before the later fresh-source refork):
 
 - Agent `juniper`, entity 32455, namespace `my.agents.juniper`.
