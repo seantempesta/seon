@@ -4092,3 +4092,69 @@
                     "and never a queue: sliding-1 holds exactly one")))
             (finally
               (async/close! stream-channel))))))))
+
+(deftest a-turn-hands-its-clusters-projection-to-every-database-call
+  ;; §2.1, measured: a `seon.db` read or write with no handed projection
+  ;; rebuilds the complete projection from the database value it is reading —
+  ;; every declared schema and function contract recompiled (507-670 ms on
+  ;; `projection-lane`, 2026-09-07). The cache is keyed on committed identity,
+  ;; so the turn's OWN commits invalidate it: the rebuild is per commit by
+  ;; construction, not once. `turn` therefore binds the cluster's projection
+  ;; state for the whole pass.
+  ;;
+  ;; The pass runs on a BARE thread, which conveys no dynamic binding. That is
+  ;; what makes this test honest: any projection the turn sees came from the
+  ;; handle, not from the fixture's own ambient binding, so the assertion fails
+  ;; if `turn` stops carrying it.
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            projection-state (:seon.sci.eval/projection-state
+                              (:seon.sci.eval/ctx cluster))
+            ;; the production shape: `seon.cluster/loop-handle` carries the
+            ;; cluster's own projection state on the handle it hands the turn.
+            cluster (assoc cluster
+                           :seon.sci.eval/projection-state projection-state
+                           :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate)
+            derivations (atom 0)
+            original schema/projection-from-database]
+        (is (some? projection-state)
+            "the cluster's own ctx carries the projection state the turn binds")
+        (with-redefs [schema/projection-from-database
+                      (fn [& arguments]
+                        (swap! derivations inc)
+                        (apply original arguments))
+                      ai/complete
+                      (fn [_] {:seon.ai/text
+                               "(+ 1 1)\n(my.run/complete \"two\")"})]
+          (let [work (work/next-agent-work @connection (request connection))
+                outcome (promise)
+                pass (Thread.
+                      ^Runnable
+                      (fn []
+                        (deliver
+                         outcome
+                         (try
+                           (cluster.loop/turn
+                            {:seon.cluster.loop/cluster cluster
+                             :seon.cluster.work/next work}
+                            (Date.))
+                           (catch Throwable throwable throwable))))
+                      "turn-projection-regression")]
+            (is (some? work) "the seeded message is exactly one open trigger")
+            (.start pass)
+            (.join pass (long (* 1000 test-support/event-backstop-seconds)))
+            (is (not (.isAlive pass))
+                (str "the turn did not finish within "
+                     test-support/event-backstop-seconds
+                     "s on a thread carrying no ambient projection"))
+            (let [report (deref outcome 0 ::never-delivered)]
+              (is (not (instance? Throwable report))
+                  (str "the turn threw on a bare thread: " (pr-str report)))
+              (is (= :open (:seon.cluster.work/situation report))
+                  "the pass ran the situation the work derived"))
+            (is (zero? @derivations)
+                (str "the turn rebuilt the schema projection "
+                     @derivations
+                     " time(s); it must receive the cluster's projection "
+                     "state instead of re-deriving it per commit"))))))))

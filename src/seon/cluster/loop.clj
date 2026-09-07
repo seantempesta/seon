@@ -1908,7 +1908,20 @@
   receipt + disposition in ONE transaction) → close or release.
   Every failure inside it is a VALUE: a model error, an unreadable
   reply, and a refused transaction each end the turn with facts the
-  agent reads on its next wake. Nothing throws into the loop."
+  agent reads on its next wake. Nothing throws into the loop.
+
+  The turn binds its own cluster's schema projection state for the whole
+  pass. Every `seon.db` read and write the turn issues therefore RECEIVES
+  the projection (§2.1) instead of rebuilding it from the database value it
+  is reading — a rebuild recompiles every declared schema and function
+  contract, and its cache is keyed on committed identity, so a turn's own
+  commits invalidate it by construction (measured 2026-09-07: 507-670 ms
+  per cold rebuild on `projection-lane`). The binding belongs here, at the
+  transform that holds the handle, rather than in whichever executor
+  happens to run the proc: an executor that does not bind it is a silent
+  half-second-per-commit cliff with no signal. A handle without projection
+  state leaves whatever the caller handed in place, so a fixture that binds
+  its own projection keeps it."
   {:malli/schema [:=> [:cat :seon.cluster.loop/turn-request :inst]
                   :seon.cluster.loop/turn-report]}
   [{:keys [:seon.cluster.loop/cluster] work :seon.cluster.work/next}
@@ -1925,10 +1938,14 @@
         request {::cluster cluster
                  ::work work
                  ::now now
-                 ::report report}]
-    (case (:seon.cluster.work/situation work)
-      :open (open-turn request)
-      :call (call-turn request)
-      :generate (generate-turn request)
-      :resume (resume-turn request)
-      :close (close-turn request))))
+                 ::report report}
+        pass (fn []
+               (case (:seon.cluster.work/situation work)
+                 :open (open-turn request)
+                 :call (call-turn request)
+                 :generate (generate-turn request)
+                 :resume (resume-turn request)
+                 :close (close-turn request)))]
+    (if-let [projection-state (:seon.sci.eval/projection-state cluster)]
+      (schema/call-with-projection-state projection-state pass)
+      (pass))))
