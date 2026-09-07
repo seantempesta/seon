@@ -2356,51 +2356,11 @@
     (pr-str
      `(let [primary-failure# (volatile! nil)]
        (try
-        ;; The live JVM owns the process-root store lock. Reload the
-        ;; source-analysis owners before asking that JVM to publish
-        ;; `current-src`; the running clusters and their program facts remain
-        ;; untouched because their process state is held in defonce Vars.
-        ;; Reload the schema runtime before its loader and before any namespace
-        ;; whose top-level forms call `load!`. A long-lived JVM may predate a
-        ;; newly published schema API that the publication owner calls.
         (when ~publish?
-          (println "● current-src: reload schema runtime")
-          (flush)
-          (require 'seon.schema :reload)
-        (println "● current-src: reload schema declarations")
-        (flush)
-        (require 'seon.schema.edn :reload)
-        (println "● current-src: reload source analyzer")
-        (flush)
-        (require 'seon.fn.analyzer :reload)
-        ;; `seon.fn` canonicalizes analyzed rows through `seon.program`.
-        ;; Reload that owner first so newly recorded program attributes such
-        ;; as call edges cannot be dropped by a stale long-lived Var.
-        (println "● current-src: reload program rows")
-        (flush)
-        (require 'seon.program :reload)
-        (println "● current-src: reload source index")
-        (flush)
-        (require 'seon.fn :reload)
-        ;; A live JVM may already have an older `seon.db` loaded, so
-        ;; `requiring-resolve` cannot replay its new load-time registrations
-        ;; during schema admission.
-        (println "● current-src: reload database functions")
-        (flush)
-        (require 'seon.db :reload)
-        (println "● current-src: reload evaluation runtime")
-        (flush)
-        (require 'seon.sci.eval :reload)
-        (println "● current-src: reload publication owners")
-        (flush)
-        (require 'seon.cluster.source :reload)
-        ;; Reload the publication owner too: its source-root value changes
-        ;; when schema resources move or the monolithic resource is removed.
-        (println "● current-src: reload cluster publication owner")
-        (flush)
-        (require 'seon.cluster :reload)
-        (println "● current-src: reload remaining publication owners")
-        (flush)
+          ;; Publication reads and validates the stable filesystem snapshot
+          ;; before the development reconciliation owner reloads changed Vars.
+          ;; Loading these owners is harmless when they are already present;
+          ;; `:reload` here used to mutate the live JVM before validation.
           (require 'seon.cluster.registry
                    'seon.cluster.store
                    'seon.fs

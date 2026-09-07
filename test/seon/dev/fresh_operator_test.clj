@@ -479,6 +479,19 @@
         (operator-private-outcome 'parse-init-arguments ["--changed"]))
        "init --changed PATH")))
 
+(deftest changed-source-is-validated-before-live-vars-can-reload
+  (let [form (edn/read-string
+              (operator-private-value
+               'init-form project-root nil false ["src/my/plan.clj"]
+               false false "development"))
+        forms (filter seq? (tree-seq coll? seq form))
+        requires (filter #(= 'clojure.core/require (first %)) forms)]
+    (is (seq requires) "the publication owners are still loaded")
+    (is (not-any? #(some #{:reload} %) requires)
+        "an invalid stable snapshot cannot reload a live Var before refusal")
+    (is (some #(some #{"refresh-source!"} (tree-seq coll? seq %)) forms)
+        "the existing stable-snapshot publication owner remains the validator")))
+
 (deftest down-is-the-unambiguous-all-processes-command
   (is (= {:seon.fresh-operator/force? false}
          (operator-private-value 'parse-down-arguments [])))

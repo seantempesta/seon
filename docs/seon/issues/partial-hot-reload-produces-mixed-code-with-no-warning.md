@@ -121,3 +121,29 @@ converge functions, schemas, tests, loaded behavior, and UI automatically on
 source publication. Repeated destructive refork is not the remedy. An Astra
 implementation is extending the existing publication/indexing owners; until
 its live proof passes, host reload alone must not be reported as convergence.
+
+## Publication now validates before development reload, 2026-09-06
+
+`seon.fresh-operator/init-form` previously issued a fixed sequence of
+`require :reload` calls before `seon.cluster/refresh-source!` built or validated
+the stable filesystem manifest. A syntax or schema failure could therefore
+leave the live JVM running changed code even though publication refused. The
+operator now only ensures the existing publication owners are loaded; the
+stable-manifest and scratch-branch publication owners decide first, and the
+existing development reconciliation path reloads admitted changed namespaces.
+A focused generated-form regression proves that the publication form contains
+no `:reload` operation and still invokes the one `refresh-source!` validator.
+
+This does not make Clojure namespace loading transactional. Once validation
+succeeds, a load-time exception in a changed namespace can still leave Vars
+from earlier forms in that namespace updated. The reconciliation owner must
+eventually make that admitted-generation transition coherent; reintroducing a
+pre-validation reload would only move the same risk earlier.
+
+The first live publication after removing the reload roster refused an invalid
+incremental manifest before any reload: the retained publisher produced a
+synthetic row with nil `:seon.ns/name`, and the existing
+`seon.fn/manifest-function-symbols` contract rejected it. That refusal is
+evidence that an older live publication implementation may be unable to admit a
+newer filesystem snapshot. It is preferable to mixed loaded code, but means a
+live publisher compatibility check remains part of this issue's acceptance.

@@ -200,3 +200,10 @@ expected-result facts, while the plan introduction retains a concrete
 `seon.db/transact!` update form using an actual visible item identity. The
 focused gate passed 13 tests / 147 assertions, and `bin/css` compiled the
 maintained stylesheet successfully.
+
+The first browser inspection after this change exposed one remaining data-face
+defect: pulled parent and dependency refs reached the formatter as numeric
+entity ids, so the current card said `Part of 34626` and a blocked card said
+`needs 44147`. The renderer must receive or derive stable
+`:my.plan.item/id` refs from the declared pull shape; CSS cannot repair that
+missing identity. Preserve the exact selected entities when correcting it.
