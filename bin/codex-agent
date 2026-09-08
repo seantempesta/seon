@@ -50,7 +50,7 @@ lanes_dir=$dir/lanes
 sessions_dir=$dir/sessions
 model=${LANE_MODEL:-gpt-6-astra}
 effort=${LANE_EFFORT:-low}
-lane_rule="If another lane's in-flight breakage blocks your gate, STOP and report the exact boundary — never resume, message, or edit another lane's session or files."
+lane_rule="Another lane's in-flight breakage is never a reason to stop (owner, 2026-09-08): gate with bin/test --paths <your files> -- <namespaces> (HEAD plus only your paths) and iterate with bin/test-fast; when the shared tree cannot load, snapshot it (git worktree add tmp/<lane>-wt HEAD, link reference-code, apply your diff) and continue. Name the foreign boundary in your landing note; never resume, message, or edit another lane's session or files."
 
 usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
 
