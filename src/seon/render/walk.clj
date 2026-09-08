@@ -78,6 +78,28 @@
   [attribute width]
   [attribute :limit (inc (long width))])
 
+(defn- connection-width
+  "How many connections on one attribute the AI boundary shows.
+
+  THE ELISION LIVES HERE, at AI context generation, and nowhere else. This
+  read used to be `:seon.config.eval.result/max-collection` — a STORAGE cap —
+  so moving a storage bound silently rewrote the agent's context and the two
+  decisions could never be reasoned about apart. The render profile is the
+  presentation authority (`:seon.render.profile/max-children`), it is already
+  carried on every render request, and it is part of the byte-identity
+  qualification `same db, same commit, same profile`."
+  ^long [request]
+  (let [profile (or (:seon.render/profile request)
+                    (render/request-profile request))
+        declared (:seon.render.profile/max-children profile)]
+    (if (nat-int? declared)
+      (long declared)
+      ;; A REFUSED PROFILE MUST NOT DELETE FACTS. When the presentation
+      ;; authority is unavailable the honest degradation is to show every
+      ;; connection the pull returned, never to cut silently at a number
+      ;; nobody declared. The storage bound is elsewhere.
+      (long Integer/MAX_VALUE))))
+
 (defn- bounded-acquisition-distance
   [distance caps]
   (min (long distance)
@@ -89,15 +111,16 @@
   Every installed scalar attribute is enumerated. Every installed ref is an
   explicit forward and reverse subpattern, so Datahike records the canonical
   stored ref in the dependency plan and never widens component expansion to
-  `:all`. The pull asks for one value beyond the collection cap so the walk can
-  emit an exact elision observation without a second read. Acquisition depth
+  `:all`. The pull asks for one value beyond the AI boundary's declared
+  connection width so the walk can emit an exact elision observation without a
+  second read. Acquisition depth
   also stops at one less than the node cap: a deeper member's path alone would
   already consume more nodes than the result can retain."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.render/distance
-         :seon.sci.admit/caps]
+         :seon.sci.admit/caps :seon.render.profile/max-children]
     :seon.db/pull-selector]}
-  [database distance caps]
+  [database distance caps width]
   (let [installed (installed-attributes database)
         ref-attributes (into []
                              (keep (fn [[attribute properties]]
@@ -119,7 +142,6 @@
                                                           properties)))
                                           attribute)))
                                 installed)
-        width (:seon.config.eval.result/max-collection caps)
         distance (bounded-acquisition-distance distance caps)
         leaf (into [:db/id] identity-attributes)]
     (letfn [(selector-at [remaining]
@@ -196,7 +218,7 @@
    ref-attributes))
 
 (defn- acquisition-members
-  [database root distance caps]
+  [database root distance width]
   (let [installed (installed-attributes database)
         refs (into []
                    (keep (fn [[attribute properties]]
@@ -205,7 +227,7 @@
                              attribute)))
                    installed)
         identities (db/populated-identity-attributes database)
-        width (long (:seon.config.eval.result/max-collection caps))]
+        width (long width)]
     (letfn [(connection-values [entity attribute reverse?]
               (let [display (if reverse?
                               (reverse-attribute attribute)
@@ -272,7 +294,8 @@
                                                (when reverse? "reverse ")
                                                attribute " connection"
                                                "s"
-                                               " at the configured collection cap")
+                                               " at the render profile's"
+                                               " declared connection width")
                                           :seon.error/data
                                           {:seon.render.walk/attribute
                                            attribute}}}))))
@@ -345,20 +368,23 @@
                        (schema/current-projection)
                        {})
         distance (long (get request :seon.render/distance 1))
-        selector (root-selector database distance caps)
+        width (connection-width request)
+        selector (root-selector database distance caps width)
         cache (:seon.schema.projection/compiled projection)
         cache-key [::root-pull-plan
                    (:seon.schema.projection/fingerprint projection)
                    (DatabaseSchemaIdentity.
                     (:schema (db/schema-database database)))
                    distance
-                   caps]
+                   caps
+                   width]
         candidate
         (delay
           {:seon.schema.projection/fingerprint
            (:seon.schema.projection/fingerprint projection)
            :seon.render/distance distance
            :seon.sci.admit/caps caps
+           :seon.render.profile/max-children width
            :seon.render.walk/selector selector
            :datahike.pull/plan
            ((requiring-resolve 'datahike.pull-api/compile-pull-plan)
@@ -394,6 +420,7 @@
      (fn []
        (let [{distance :seon.render/distance
               caps :seon.sci.admit/caps
+              width :seon.render.profile/max-children
               selector :seon.render.walk/selector
               plan :datahike.pull/plan
               :as pull-plan}
@@ -407,7 +434,7 @@
                 {:seon.render.walk/root root}
                 (acquisition-members database root
                                      (bounded-acquisition-distance distance caps)
-                                     caps)))))))
+                                     width)))))))
 
 (defn membership-diff
   "Changed, added, and removed members between two root acquisitions."

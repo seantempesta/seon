@@ -93,8 +93,8 @@
         [:seon.cluster.run/id "temporal-root-run"]}])
      (let [current @connection
            temporal (db/as-of current (db/basis-t current))
-           current-selector (walk/root-selector current 1 caps)
-           temporal-selector (walk/root-selector temporal 1 caps)
+           current-selector (walk/root-selector current 1 caps 8)
+           temporal-selector (walk/root-selector temporal 1 caps 8)
            acquisition
            (walk/root-acquisition
             {:seon.db/db temporal
@@ -248,7 +248,7 @@
            compiled-plan (Object.)]
        (with-redefs-fn
          {#'seon.render.walk/root-selector
-          (fn [_database _distance _caps] (selector))
+          (fn [_database _distance _caps _width] (selector))
           #'pull-api/compile-pull-plan
           (fn [_database _selector] compiled-plan)}
          (fn []
@@ -296,18 +296,19 @@
                                    selector-values)
            plan (:datahike.read/dependency-plan
                  (d/pull-with-evidence @connection selector [::root-id "root"]))
-           attributes (d/dependency-plan-attributes plan 0)]
+           attributes (d/dependency-plan-attributes plan 0)
+           ;; THE AI BOUNDARY'S OWN WIDTH, not a storage cap: the acquisition
+           ;; reports the profile's declared connection width it selected with
+           width (:seon.render.profile/max-children acquisition)]
        (is (= [:pull] @reads)
            "cold root acquisition is exactly one pull and no other read")
        (is (not-any? #{'* :* "*"} selector-values)
            "the selector never widens its dependency fingerprint")
        (is (contains? selector-map-keys
-                      [::forward :limit
-                       (inc (:seon.config.eval.result/max-collection caps))])
-           "the forward stored ref is nested and capped")
+                      [::forward :limit (inc (long width))])
+           "the forward stored ref is nested and asks one past the width")
        (is (contains? selector-map-keys
-                      [(reverse-attribute ::edge) :limit
-                       (inc (:seon.config.eval.result/max-collection caps))])
+                      [(reverse-attribute ::edge) :limit (inc (long width))])
            "the same stored ref has its reverse spelling")
        (is (set? attributes))
        (is (every? attributes

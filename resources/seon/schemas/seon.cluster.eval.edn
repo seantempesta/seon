@@ -84,6 +84,12 @@
                      [:seon.cluster.eval/result-size
                       {:optional true}
                       :seon.cluster.eval/result-size]
+                     [:seon.eval/missing
+                      {:optional true}
+                      :seon.eval/missing]
+                     [:seon.eval/size
+                      {:optional true}
+                      :seon.eval/size]
                      [:seon.cluster.eval/error
                       {:optional true}
                       :seon.cluster.eval/error]
@@ -129,8 +135,8 @@
                      [:seon.test.accretion/report-size {:optional true}
                       :seon.test.accretion/report-size]],
                     :result-blob :seon.blob/digest,
-                    :result-edn [:string #:seon.db{:no-history? true}],
                     :result-size [:int {:min 0}],
+                    :result-edn [:string #:seon.db{:no-history? true}],
                     :refreshes
                     [:and {:seon.db/unique true} :seon.db/ref],
                     :run :seon.db/ref,
@@ -148,6 +154,12 @@
                      [:seon.cluster.eval/result-size
                       {:optional true}
                       :seon.cluster.eval/result-size]
+                     [:seon.eval/missing
+                      {:optional true}
+                      :seon.eval/missing]
+                     [:seon.eval/size
+                      {:optional true}
+                      :seon.eval/size]
                      [:seon.cluster.eval/error
                       {:optional true}
                       :seon.cluster.eval/error]

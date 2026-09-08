@@ -1619,8 +1619,7 @@
               ;; One predicate decides for the binder and both emitters.
               handle (when (and entity-id
                                 (admit/restorable-node
-                                 (:seon.cluster.eval/result-edn evaluation)
-                                 evaluation))
+                                 (:seon.cluster.eval/result-edn evaluation)))
                        (admit/result-handle entity-id))
               evaluation (cond-> evaluation
                            handle (assoc :seon.repl/handle handle))]

@@ -1,5 +1,10 @@
 (ns seon.blob-threshold-test
-  "The measured storage decision behind the shipped blob threshold."
+  "Settlement stores what admission handed it — no window, no second copy.
+
+  The blob threshold decides where the REPLY and stored def values live. It
+  no longer touches an evaluation's value: admission already decided that
+  under the one storage bound, so a value is stored faithfully or it is
+  missing, and settlement is not allowed to make a third answer out of it."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.blob :as blob]
             [seon.cluster.run :as run]
@@ -21,58 +26,51 @@
      :seon.config/on-core-error :record})))
 
 (defn- settlement
-  [connection result-edn]
+  [connection evaluation]
   (let [staged
         (run/settlement-projection
          {:seon.db/connection connection
           :seon.sci.admit/caps caps}
-         {:seon.cluster.eval/result-edn result-edn})
+         evaluation)
         receipt (nth staged 0)
         stages (nth staged 2)]
     (blob/with-publication!
      connection stages #(identity receipt))))
 
-(deftest default-keeps-the-measured-small-result-class-off-the-blob-path
+(deftest settlement-stores-the-admitted-node-unchanged-at-every-size
   (support/with-database
     (fn [connection]
       (let [threshold
-            (:seon.config.eval.result/blob-threshold (config/defaults))
-            result-edn (admitted-result (apply str (repeat 420 \r)))]
+            (:seon.config.eval.result/blob-threshold (config/defaults))]
         (db/transact!
          connection
-         [{:seon.config.eval.result/blob-threshold threshold
-           :seon.render.value/max-collection 8}])
-        (is (< (count result-edn) threshold))
-        (is (= {:seon.cluster.eval/result-edn result-edn
-                :seon.cluster.eval/result-size (count result-edn)}
-               (settlement connection result-edn)))))))
+         [{:seon.config.eval.result/blob-threshold threshold}])
+        (testing "a result under the inline threshold"
+          (let [result-edn (admitted-result (apply str (repeat 420 \r)))]
+            (is (< (count result-edn) threshold))
+            (is (= {:seon.cluster.eval/result-edn result-edn}
+                   (settlement connection
+                               {:seon.cluster.eval/result-edn result-edn})))))
+        (testing "a result far past it keeps EVERY byte and stages nothing"
+          ;; The class this kills: the old seam replaced the stored node with
+          ;; a PAGE of itself whose root face was an ordinary vector, so
+          ;; nothing downstream could tell a complete value from a window.
+          (let [result-edn (admitted-result (vec (repeat 40 (apply str (repeat 4000 \r)))))]
+            (is (< threshold (count result-edn)))
+            (let [settled (settlement connection
+                                      {:seon.cluster.eval/result-edn result-edn})]
+              (is (= {:seon.cluster.eval/result-edn result-edn} settled))
+              (is (not (contains? settled :seon.cluster.eval/result-blob)))
+              (is (not (contains? settled :seon.eval/size))))))))))
 
-(deftest full-stored-shape-decides-an-eligible-result
+(deftest settlement-carries-a-missing-marker-and-stores-no-node
   (support/with-database
     (fn [connection]
       (db/transact!
        connection
-       [{:seon.config.eval.result/blob-threshold 4096
-         :seon.render.value/max-collection 8}])
-      (let [payload (apply str (repeat 4000 \r))
-            window-heavy
-            (admitted-result
-             (bigint (apply str (repeat 4050 "9"))))
-            window-light (admitted-result (vec (repeat 40 payload)))
-            retained (settlement connection window-heavy)
-            blobbed (settlement connection window-light)]
-        (testing "an equal-sized window makes blob plus envelope larger"
-          (is (< 4096 (count window-heavy)))
-          (is (false?
-               (#'run/result-blob-smaller? window-heavy window-heavy)))
-          (is (= {:seon.cluster.eval/result-edn window-heavy
-                  :seon.cluster.eval/result-size (count window-heavy)}
-                 retained)))
-        (testing "a much smaller window plus blob beats four inline copies"
-          (is (< 4096 (count window-light)))
-          (is (contains? blobbed :seon.cluster.eval/result-blob))
-          (is (< (count (:seon.cluster.eval/result-edn blobbed))
-                 (count window-light)))
-          (is (= window-light
-                 (blob/get connection
-                           (:seon.cluster.eval/result-blob blobbed)))))))))
+       [{:seon.config.eval.result/blob-threshold 4096}])
+      (is (= {:seon.eval/missing :over-bound :seon.eval/size 8388608}
+             (settlement connection
+                         {:seon.eval/missing :over-bound
+                          :seon.eval/size 8388608}))
+          "the reason and the bytes it reached, and no value beside them"))))

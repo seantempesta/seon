@@ -789,34 +789,31 @@
           (is (not (str/includes? ai ":audit/field-39")))
           (assert-no-session-narration ai))))))
 
-(deftest capped-state-is-derived-from-receipt-size-without-a-boolean
+(deftest a-missing-value-says-why-and-names-no-result-handle
+  ;; THE CLASS: an evaluation that stored nothing must never render as an
+  ;; evaluation that produced nothing. It states the reason and the bytes it
+  ;; reached, and it emits NO `:result` — the handle is ablated, so a later
+  ;; form naming it gets an ordinary unresolved symbol rather than a lie.
   (support/with-database
     (fn [connection]
-      (let [stored "[0 1 :seon.sci.admit/elided]"
-            digest (apply str (repeat 64 "b"))]
-        (db/transact!
-         connection
-         [{:seon.cluster.agent/id agent-id}
-          {:seon.cluster.run/id "run-blobbed"
-           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-           :seon.cluster.run/opened-at (at 0)}
-          {:seon.cluster.eval/id "eval-blobbed"
-           :seon.cluster.eval/run [:seon.cluster.run/id "run-blobbed"]
-           :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/at (at 1000)
-           :seon.cluster.eval/result-edn stored
-           :seon.cluster.eval/result-blob digest
-           :seon.cluster.eval/result-size 189000
-           :seon.cluster.eval/source "(range 100000)"}])
-        (let [receipt (db/pull @connection '[*]
-                              [:seon.cluster.eval/id "eval-blobbed"])]
-          (is (transcript/capped-result? receipt))
-          (is (not (contains? receipt :seon.sci.admit/capped?)))
-          (let [ai (transcript/render-ai (unit @connection 100000))]
-            (is (str/includes? ai stored))
-            (is (not (str/includes? ai "CAPPED:")))
-            (is (not (str/includes? ai digest)))
-            (assert-no-session-narration ai)))))))
+      (db/transact!
+       connection
+       [{:seon.cluster.agent/id agent-id}
+        {:seon.cluster.run/id "run-missing"
+         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+         :seon.cluster.run/opened-at (at 0)}
+        {:seon.cluster.eval/id "eval-missing"
+         :seon.cluster.eval/run [:seon.cluster.run/id "run-missing"]
+         :seon.cluster.eval/ordinal 0
+         :seon.cluster.eval/at (at 1000)
+         :seon.eval/missing :over-bound
+         :seon.eval/size 8388608
+         :seon.cluster.eval/source "(range)"}])
+      (let [ai (transcript/render-ai (unit @connection 100000))]
+        (is (str/includes? ai ":value #:seon.eval{:missing :over-bound"))
+        (is (str/includes? ai ":size 8388608"))
+        (is (not (str/includes? ai ":result result/")))
+        (assert-no-session-narration ai)))))
 
 (deftest reasoning-is-html-only-and-inline-blob-history-has-one-disclosure
   (support/with-database
@@ -1323,8 +1320,7 @@
                                        "one-grammar-stored" ordinal)])]
                          (when (and (int? (:db/id stored))
                                     (admit/restorable-node
-                                     (:seon.cluster.eval/result-edn stored)
-                                     stored))
+                                     (:seon.cluster.eval/result-edn stored)))
                            (admit/result-handle (:db/id stored)))))
                      (range (count outcomes)))
                page-unit (assoc (unit database 1000000)

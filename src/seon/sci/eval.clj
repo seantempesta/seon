@@ -1193,6 +1193,8 @@
          (when cluster-name
            (db/pull db
                     [:seon.config/on-core-error
+                     :seon.config.eval.result/max-bytes
+                     :seon.config.eval.result/max-source
                      :seon.config.eval.result/max-depth
                      :seon.config.eval.result/max-collection
                      :seon.config.eval.result/max-string
@@ -1733,21 +1735,18 @@
   for the current run would resolve to nothing — or, under the ordinal
   spelling this replaced, to a different run's value.
 
-  A node that kept only a name — a Var, an object, a failure, anything past
-  the caps — binds NOTHING, because the value it describes was never in it,
-  and an unresolved symbol is the honest answer. NEITHER DOES A WINDOWED
-  RESULT: when settlement staged the whole value into a blob, the stored node
-  is one PAGE of it whose root face is an ordinary vector, and binding that
-  would answer `(count result/e41)` with the page's size (audit C4). The
-  storage facts travel with the node so `restorable-node` decides once.
+  A node that kept only a name — a Var, an object, a failure — binds NOTHING,
+  because the value it describes was never in it, and an unresolved symbol is
+  the honest answer. A MISSING VALUE BINDS NOTHING EITHER, by construction:
+  an evaluation over the storage bound stores no `result-edn` at all, so this
+  query never reaches it. There is no window to ask about any more — a value
+  is stored faithfully or it is missing.
 
   Returns the handles it bound."
   [ctx db agent-id]
   (when agent-id
     (let [rows (db/q '[:find ?evaluation (pull ?evaluation
-                                               [:seon.cluster.eval/result-edn
-                                                :seon.cluster.eval/result-blob
-                                                :seon.cluster.eval/result-size])
+                                               [:seon.cluster.eval/result-edn])
                        :in $ ?agent-id
                        :where
                        [?agent :seon.cluster.agent/id ?agent-id]
@@ -1758,8 +1757,7 @@
       (into []
             (keep (fn [[entity-id stored]]
                     (when-let [node (admit/restorable-node
-                                     (:seon.cluster.eval/result-edn stored)
-                                     stored)]
+                                     (:seon.cluster.eval/result-edn stored))]
                       (bind-result! ctx (admit/result-handle (long entity-id))
                                     (admit/semantic-value node)))))
             (sort-by first (or rows []))))))
@@ -2093,14 +2091,22 @@
     print-options :seon.print/options
     definitions :seon.sci.eval/defs
     row :seon.program/row}]
-  (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
-           :seon.cluster.eval/result-edn
-           (:seon.cluster.eval/result-edn admitted)
-           :seon.print/options print-options
-           :seon.cluster.eval/ns [:seon.ns/name namespace-name]
-           :seon.sci.eval/ending-ns ending-namespace
-           :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
-           :seon.sci.admit/record (:seon.sci.admit/record admitted)}
+  (cond-> (cond-> {:seon.print/options print-options
+                   :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                   :seon.sci.eval/ending-ns ending-namespace
+                   :seon.sci.admit/record (:seon.sci.admit/record admitted)}
+            ;; ONE OF TWO TERMINAL SHAPES, never both and never neither: the
+            ;; stored value, or the reason it is missing. `absent = no key`
+            ;; is what lets a reader ask `contains?` instead of guessing.
+            (contains? admitted :seon.sci.admit/value)
+            (assoc :seon.sci.admit/value (:seon.sci.admit/value admitted))
+            (:seon.cluster.eval/result-edn admitted)
+            (assoc :seon.cluster.eval/result-edn
+                   (:seon.cluster.eval/result-edn admitted))
+            (:seon.eval/missing admitted)
+            (assoc :seon.eval/missing (:seon.eval/missing admitted))
+            (int? (:seon.eval/size admitted))
+            (assoc :seon.eval/size (:seon.eval/size admitted)))
     ;; HOW LONG THE FORM TOOK IS A KEY OF THE EVALUATION, not something two
     ;; readers dig out of the diagnostic record by different routes. The
     ;; storage projection and the page's in-memory render both read this one
@@ -2128,15 +2134,20 @@
     triage-edn :seon.cluster.eval/triage-edn
     interrupted-at :seon.cluster.eval/interrupted-at
     :as request}]
-  (cond-> {:seon.sci.admit/value (:seon.sci.admit/value admitted)
-           :seon.cluster.eval/result-edn
-           (:seon.cluster.eval/result-edn admitted)
-           :seon.print/options print-options
-           :seon.cluster.eval/ns [:seon.ns/name namespace-name]
-           :seon.sci.eval/ending-ns namespace-name
-           :seon.cluster.eval/error (:seon.error/message value)
-           :seon.sci.admit/capped? (:seon.sci.admit/capped? admitted)
-           :seon.sci.admit/record record}
+  (cond-> (cond-> {:seon.print/options print-options
+                   :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                   :seon.sci.eval/ending-ns namespace-name
+                   :seon.cluster.eval/error (:seon.error/message value)
+                   :seon.sci.admit/record record}
+            (contains? admitted :seon.sci.admit/value)
+            (assoc :seon.sci.admit/value (:seon.sci.admit/value admitted))
+            (:seon.cluster.eval/result-edn admitted)
+            (assoc :seon.cluster.eval/result-edn
+                   (:seon.cluster.eval/result-edn admitted))
+            (:seon.eval/missing admitted)
+            (assoc :seon.eval/missing (:seon.eval/missing admitted))
+            (int? (:seon.eval/size admitted))
+            (assoc :seon.eval/size (:seon.eval/size admitted)))
     ;; The same one spelling on the failing path.
     (int? (:seon.eval/duration-ms record))
     (assoc :seon.eval/duration-ms (:seon.eval/duration-ms record))
@@ -2183,8 +2194,8 @@
   arm this replaced hand-built four keys of that value inside the loop, so the
   submission backstop's own report — a run cut when its evaluation reached its
   time limit — arrived at `seon.problems/form-problem` missing
-  `:seon.cluster.eval/ns`, `:seon.sci.eval/ending-ns`, `:seon.print/options`,
-  and `:seon.sci.admit/capped?`. The durable evidence of the interruption
+  `:seon.cluster.eval/ns`, `:seon.sci.eval/ending-ns` and
+  `:seon.print/options`. The durable evidence of the interruption
   became a contract violation from the recorder: the diagnostic lied about
   what happened, which is the one thing a diagnostic may never do.
 
@@ -2209,7 +2220,6 @@
              :seon.cluster.eval/ns namespace-ref
              :seon.sci.eval/ending-ns (symbol (str (second namespace-ref)))
              :seon.print/options {}
-             :seon.sci.admit/capped? false
              :seon.sci.admit/record record}
       interrupted? (assoc :seon.cluster.eval/interrupted-at interrupted-at))))
 
@@ -2495,8 +2505,7 @@
               (defs execution-ctx namespace-name before-intern-values
                          source form (built-in-calls))
               admitted (admit/admit
-                        (cond->
-                         {:seon.sci.admit/value value
+                        {:seon.sci.admit/value value
                           :seon.sci.admit/interrupt-fn interrupt-fn
                           :seon.sci.admit/caps caps
                           :seon.schema/projection projection
@@ -2504,14 +2513,10 @@
                           ;; not read a dial of its own, and this
                           ;; evaluator does not default one
                           :seon.config/on-core-error on-core-error
-                          :seon.sci.admit/record evaluation-record}
-                          ;; THE CUT NAMES ITS SOURCE. This evaluation's own
-                          ;; identity is already derived here, so an elision
-                          ;; admission makes can say where to ask for the
-                          ;; rest instead of refusing for want of a name. An
-                          ;; evaluation nobody is storing supplies none.
-                          receipt
-                          (assoc :seon.print/requery-id receipt)))]
+                          ;; ADMISSION MAKES NO CUTS ANY MORE, so it needs no
+                          ;; requery identity: elision happens once, where AI
+                          ;; context is generated, from the stored value.
+                          :seon.sci.admit/record evaluation-record})]
           (success-evaluation
            {:seon.sci.eval/admitted admitted
             :seon.sci.admit/caps caps
@@ -2552,17 +2557,14 @@
                         (assoc :seon.error/message arity-message))
                 admitted
                 (admit/admit
-                 (cond->
-                  {:seon.sci.admit/value value
-                   :seon.sci.admit/interrupt-fn (constantly nil)
-                   :seon.sci.admit/caps caps
-                   :seon.schema/projection
-                   (evaluation-projection
-                    {:seon.sci.eval/ctx evaluation-ctx})
-                   :seon.config/on-core-error :record
-                   :seon.sci.admit/record record}
-                   receipt
-                   (assoc :seon.print/requery-id receipt)))]
+                 {:seon.sci.admit/value value
+                  :seon.sci.admit/interrupt-fn (constantly nil)
+                  :seon.sci.admit/caps caps
+                  :seon.schema/projection
+                  (evaluation-projection
+                   {:seon.sci.eval/ctx evaluation-ctx})
+                  :seon.config/on-core-error :record
+                  :seon.sci.admit/record record})]
           (failed-evaluation
            (cond-> {:seon.sci.eval/admitted admitted
                     :seon.sci.admit/caps caps

@@ -66,7 +66,6 @@
             [seon.fn :as seon.fn]
             [seon.program :as program]
             [seon.render.route :as render.route]
-            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
@@ -154,9 +153,10 @@
       (:seon.cluster.eval/result-blob settlement-evaluation)
       (assoc :seon.cluster.eval/result-blob
              (:seon.cluster.eval/result-blob settlement-evaluation))
-      (:seon.cluster.eval/result-size settlement-evaluation)
-      (assoc :seon.cluster.eval/result-size
-             (:seon.cluster.eval/result-size settlement-evaluation))
+      (:seon.eval/missing settlement-evaluation)
+      (assoc :seon.eval/missing (:seon.eval/missing settlement-evaluation))
+      (int? (:seon.eval/size settlement-evaluation))
+      (assoc :seon.eval/size (:seon.eval/size settlement-evaluation))
       error (assoc :seon.cluster.eval/error error)
       (:seon.cluster.eval/triage-edn evaluation)
       (assoc :seon.cluster.eval/triage-edn
@@ -234,57 +234,18 @@
       (seq rows) (assoc :seon.def/rows rows)
       value (assoc :my.run/value value))))
 
-(defn- result-window-page-size
-  [db]
-  (db/q '[:find ?size .
-          :where [_ :seon.render.value/max-collection ?size]]
-        db))
-
-(def ^:private result-blob-fixed-growth-bytes 743)
-
-(defn- utf8-size
-  [value]
-  (alength (.getBytes ^String value StandardCharsets/UTF_8)))
-
-(defn- result-blob-smaller?
-  [result-edn window-edn]
-  (< (+ result-blob-fixed-growth-bytes
-        (* 4 (utf8-size window-edn))
-        (utf8-size result-edn))
-     (* 4 (utf8-size result-edn))))
-
-(defn- settlement-result
-  [cluster evaluation]
-  (if-let [result-edn (:seon.cluster.eval/result-edn evaluation)]
-    (let [connection (:seon.db/connection cluster)
-          result-size (long (count result-edn))
-          database @connection
-          threshold (result-blob-threshold database)
-          window-edn
-          (when (and threshold (> result-size threshold))
-            (render.value/result-window-edn
-             {:seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-              :seon.render.value/options
-              {:seon.render.value/max-collection
-               (result-window-page-size database)}}
-             result-edn))]
-      (if (and window-edn (result-blob-smaller? result-edn window-edn))
-        (let [staged (blob/stage! connection result-edn)]
-          (assoc evaluation
-                 :seon.cluster.eval/result-edn window-edn
-                 :seon.cluster.eval/result-blob (:seon.blob/digest staged)
-                 :seon.cluster.eval/result-size result-size
-                 :seon.blob/staged-writes [staged]))
-        (assoc evaluation :seon.cluster.eval/result-size result-size)))
-    evaluation))
-
 (defn settlement-projection
   "Project an evaluation into receipt, defs, and staged-blob data."
   {:malli/schema
    [:=> [:cat :seon.cluster.loop/cluster :seon.cluster.loop/evaluation]
     [:tuple :map :map [:vector :seon.blob/staged-write]]]}
   [cluster evaluation]
-  (let [receipt (settlement-result cluster evaluation)
+  ;; A VALUE IS STORED FAITHFULLY OR IT IS MISSING. Admission already made
+  ;; that decision under the one storage bound, so settlement stores the node
+  ;; it was handed and nothing else — no window of a value, no size beside a
+  ;; blob that holds the rest, no second representation to disagree with the
+  ;; first (the storage-bound wave, 2026-09-07).
+  (let [receipt evaluation
         receipt
         (if-let [report-edn (:seon.test.accretion/report-edn receipt)]
           (let [staged (blob/stage! (:seon.db/connection cluster) report-edn)]
@@ -1231,12 +1192,7 @@
 (defn- receipt-settle-tx*
   "Build receipt settlement transaction data without crossing a contract seam."
   [request]
-  (let [request (cond-> request
-                  (and (:seon.cluster.eval/result-edn request)
-                       (not (contains? request :seon.cluster.eval/result-size)))
-                  (assoc :seon.cluster.eval/result-size
-                         (long (count (:seon.cluster.eval/result-edn request)))))
-        required-namespace-rows (::required-namespace-rows request)
+  (let [required-namespace-rows (::required-namespace-rows request)
         request (dissoc request ::required-namespace-rows)]
     (into (vec required-namespace-rows)
           [[:db.fn/call #'receipt-settle-call request]])))
@@ -1700,7 +1656,8 @@
 (def ^:private receipt-terminal-attributes
   [:seon.cluster.eval/result-edn
    :seon.cluster.eval/result-blob
-   :seon.cluster.eval/result-size
+   :seon.eval/missing
+   :seon.eval/size
    :seon.cluster.eval/error
    :seon.cluster.eval/triage-edn
    :seon.cluster.eval/interrupted-at
@@ -1888,7 +1845,7 @@
         (mapv (fn [{:keys [:seon.cluster.eval/ordinal
                           :seon.cluster.loop/admitted-form
                           :seon.sci.eval/evaluation]}]
-                (let [settled (settlement-result cluster evaluation)]
+                (let [settled evaluation]
                   {:seon.cluster.eval/receipt
                    (cond-> (assoc (evaluation-facts
                                    {::id id
@@ -1942,8 +1899,8 @@
            :seon.cluster.eval/result-edn]
           [:seon.cluster.eval/result-blob {:optional true}
            :seon.cluster.eval/result-blob]
-          [:seon.cluster.eval/result-size {:optional true}
-           :seon.cluster.eval/result-size]
+          [:seon.eval/missing {:optional true} :seon.eval/missing]
+          [:seon.eval/size {:optional true} :seon.eval/size]
           [:seon.cluster.eval/error {:optional true}
            :seon.cluster.eval/error]
           [:seon.cluster.eval/interrupted-at {:optional true}

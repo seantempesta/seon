@@ -82,13 +82,30 @@
     (int? length) (assoc :seon.print/length length)
     (int? level) (assoc :seon.print/level level)))
 
+(defn missing-text
+  "The whole answer for an evaluation that stored no value.
+
+  Data, not prose, and not comment-shaped (ruling 45): the reason and — when
+  the storage bound is the reason — the bytes it reached. This is the ONE
+  place that text is written, so the page, the history unit and the prompt
+  say the same thing about the same absence. The response carries no
+  `:seon.repl/result` beside it: a missing value ablates its handle, and a
+  later form naming that handle gets an ordinary unresolved symbol."
+  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
+  [{missing :seon.eval/missing size :seon.eval/size}]
+  (when (keyword? missing)
+    (binding [*print-namespace-maps* true]
+      (pr-str (cond-> {:seon.eval/missing missing}
+                (int? size) (assoc :seon.eval/size size))))))
+
 (defn value-text
   "Render one stored admitted print node as the text the REPL printed.
 
-  The node is the ONE durable representation of a result: this reads it, it
-  never stores it a second time, and a clipped value arrives carrying its own
-  elision node, so nothing here needs a `capped?` flag to tell the truth.
-  An unreadable node degrades to an honest diagnostic value rather than to
+  The node is the ONE durable representation of a result: this reads it and
+  never stores it a second time. A value that was never stored says so
+  through `missing-text` instead — there is nothing between whole and
+  missing, so nothing here needs a `capped?` flag to tell the truth. An
+  unreadable node degrades to an honest diagnostic value rather than to
   silence."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
   [{serialized :seon.cluster.eval/result-edn
@@ -105,6 +122,11 @@
                     :seon.render.transcript/unreadable? true}
                    node)))]
     (cond
+      ;; MISSING WINS OVER EVERY OTHER SOURCE. An evaluation that stored no
+      ;; value has no node and no supplied text to fall back to, and an
+      ;; empty `:value` would read as the value being nothing.
+      (some? (missing-text emission)) (missing-text emission)
+
       (some? supplied) supplied
 
       (nil? node) nil
@@ -222,7 +244,8 @@
                              :seon.cluster.eval/comment
                              :seon.cluster.eval/ordinal
                              :seon.cluster.eval/result-edn
-                             :seon.cluster.eval/result-blob
+                             :seon.eval/missing
+                             :seon.eval/size
                              :seon.cluster.eval/error
                              :seon.cluster.eval/triage-edn
                              :seon.cluster.eval/output
@@ -245,12 +268,10 @@
     ;; agent never name two values alike. An evaluation with no entity id never
     ;; persisted, and a node that kept only a name never held the value: both
     ;; have no handle, and the response then carries no `:result` key.
-    ;; A WINDOWED RESULT NAMES NOTHING EITHER. The stored node is one page
-    ;; of a value staged into a blob, so the fork binds no handle for it
-    ;; (`bind-stored-results!`) and emitting one here would name a symbol
-    ;; that resolves to nothing. One predicate decides for both.
+    ;; A MISSING VALUE NAMES NOTHING EITHER — it stored no node at all, so
+    ;; the same predicate that binds the fork's handles refuses here.
     (and (int? (:db/id unit))
-         (admit/restorable-node (:seon.cluster.eval/result-edn unit) unit))
+         (admit/restorable-node (:seon.cluster.eval/result-edn unit)))
     (assoc :seon.repl/handle (admit/result-handle (:db/id unit)))))
 
 (defn render-ai

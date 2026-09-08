@@ -94,10 +94,16 @@
   :seon.config/available-processors)
 
 (def ^:private result-cap-attributes
-  [:seon.config.eval.result/max-depth
+  ;; `max-bytes` is the ONE bound admission enforces (2026-09-07): the display
+  ;; caps below were deleted from `seon.sci.admit` and survive only for owners
+  ;; outside that seam — the inbound message length limit, the namespace
+  ;; page's query-work bounds, and fault/contract evidence profiles — each of
+  ;; which needs its own declared key before they can go.
+  [:seon.config.eval.result/max-bytes
+   :seon.config.eval.result/max-source
+   :seon.config.eval.result/max-depth
    :seon.config.eval.result/max-collection
    :seon.config.eval.result/max-string
-   :seon.config.eval.result/max-source
    :seon.config.eval.result/max-nodes])
 
 (defn result-caps

@@ -1,7 +1,6 @@
 #:seon.render.value{:artifact
                     [:map
                      [:seon.sci.admit/print-node :seon.print/node]
-                     [:seon.sci.admit/capped? :seon.sci.admit/capped?]
                      [:seon.sci.admit/record
                       {:optional true}
                       :seon.sci.admit/record]],

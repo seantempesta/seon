@@ -1,27 +1,30 @@
 #:seon.sci.admit{:admitted
+                 [:or
+                  [:map
+                   [:seon.sci.admit/print-node :seon.print/node]
+                   [:seon.sci.admit/value :any]
+                   [:seon.cluster.eval/result-edn
+                    :seon.cluster.eval/result-edn]
+                   [:seon.sci.admit/record
+                    {:optional true}
+                    :seon.sci.admit/record]]
+                  :seon.sci.admit/missing],
+                 :missing
                  [:map
-                  [:seon.sci.admit/print-node :seon.print/node]
-                  [:seon.sci.admit/value :any]
-                  [:seon.cluster.eval/result-edn
-                   :seon.cluster.eval/result-edn]
-                  [:seon.sci.admit/capped? :seon.sci.admit/capped?]
+                  {:description
+                   "The whole answer for a value admission stored nothing for: the reason, and the bytes reached when the storage bound is the reason. No print node, no value, no result EDN — a missing value ablates its handle rather than storing a window of itself."}
+                  [:seon.eval/missing :seon.eval/missing]
+                  [:seon.eval/size {:optional true} :seon.eval/size]
                   [:seon.sci.admit/record
                    {:optional true}
                    :seon.sci.admit/record]],
-                 :capped? :boolean,
                  :unbounded? :boolean,
                  :caps
                  [:map
-                  [:seon.config.eval.result/max-depth
-                   :seon.config.eval.result/max-depth]
-                  [:seon.config.eval.result/max-collection
-                   :seon.config.eval.result/max-collection]
-                  [:seon.config.eval.result/max-string
-                   :seon.config.eval.result/max-string]
+                  [:seon.config.eval.result/max-bytes
+                   :seon.config.eval.result/max-bytes]
                   [:seon.config.eval.result/max-source
-                   :seon.config.eval.result/max-source]
-                  [:seon.config.eval.result/max-nodes
-                   :seon.config.eval.result/max-nodes]],
+                   :seon.config.eval.result/max-source]],
                  :interrupt-fn
                  [:fn
                   {:error/message
@@ -54,10 +57,16 @@
                    :seon.schema/projection]
                   [:seon.sci.admit/record
                    {:optional true}
-                   :seon.sci.admit/record]
-                  [:seon.print/requery-id
-                   {:optional true}
-                   :seon.print/requery-id]],
+                   :seon.sci.admit/record]],
                  :value :any,
+                 :admitted-value
+                 [:or
+                  [:map
+                   [:seon.sci.admit/print-node :seon.print/node]
+                   [:seon.sci.admit/value :any]
+                   [:seon.sci.admit/record
+                    {:optional true}
+                    :seon.sci.admit/record]]
+                  :seon.sci.admit/missing],
                  :projection-failed [:= true]
                  :projection-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a value that could not be projected into admitted data"} [:seon.sci.admit/projection-failed :seon.sci.admit/projection-failed] [:seon.error/message :seon.error/message]]}

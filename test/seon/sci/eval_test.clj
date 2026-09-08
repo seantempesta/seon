@@ -1614,9 +1614,10 @@
             compilation-count (atom 0)
             effective-count (atom 0)]
         (with-redefs [render.walk/root-selector
-                      (fn [database distance supplied-caps]
+                      (fn [database distance supplied-caps width]
                         (let [selector
-                              (root-selector database distance supplied-caps)]
+                              (root-selector database distance supplied-caps
+                                             width)]
                           (swap! root-selectors conj selector)
                           selector))
                       pull-api/compile-pull-plan
@@ -2147,34 +2148,24 @@
            (str "#:seon.print{:face :seon.print/vector, :items ["
                 "#:seon.print{:face :seon.print/number, :value 4} "
                 "#:seon.print{:face :seon.print/number, :value 5}]}")}
-          ;; A WINDOWED RESULT IS A PAGE, NOT THE VALUE (audit C4). When
-          ;; settlement stages an oversized result the stored node is one
-          ;; page whose root face is an ordinary vector — nothing in the
-          ;; node says it is partial — and `result-blob` names the whole
-          ;; value. Binding the page would answer `(count result/eN)` with
-          ;; the page's size, which is the worst available failure.
+          ;; A MISSING VALUE ABLATES ITS HANDLE. An evaluation that went over
+          ;; the storage bound stores no node at all — no window, no page —
+          ;; so there is nothing for the fork to bind and a later form
+          ;; naming it gets sci's ordinary unresolved symbol.
           {:seon.cluster.eval/id "[\"rehydration-run-2\" 1]"
            :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run-2"]
            :seon.cluster.eval/ordinal 1
            :seon.cluster.eval/at (java.util.Date.)
-           :seon.cluster.eval/source "(vec (range 100000))"
-           :seon.cluster.eval/result-blob
-           "0000000000000000000000000000000000000000000000000000000000000000"
-           :seon.cluster.eval/result-size 999999
-           :seon.cluster.eval/result-edn
-           (str "#:seon.print{:face :seon.print/vector, :items ["
-                "#:seon.print{:face :seon.print/number, :value 0}]}")}
-          ;; The same refusal without a blob: `result-size` is the whole
-          ;; value's size and the stored node is smaller than it.
+           :seon.cluster.eval/source "(range)"
+           :seon.eval/missing :over-bound
+           :seon.eval/size 8388608}
+          ;; And the other reason: the walk could only describe the value.
           {:seon.cluster.eval/id "[\"rehydration-run-2\" 2]"
            :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run-2"]
            :seon.cluster.eval/ordinal 2
            :seon.cluster.eval/at (java.util.Date.)
-           :seon.cluster.eval/source "(vec (range 50000))"
-           :seon.cluster.eval/result-size 999999
-           :seon.cluster.eval/result-edn
-           (str "#:seon.print{:face :seon.print/vector, :items ["
-                "#:seon.print{:face :seon.print/number, :value 0}]}")}])
+           :seon.cluster.eval/source "(async/chan)"
+           :seon.eval/missing :unserializable}])
         (let [database @connection
               eid (fn [evaluation-id]
                     (:db/id (db/pull database [:db/id]
@@ -2182,9 +2173,9 @@
               first-handle (admit/result-handle (eid "[\"rehydration-run\" 0]"))
               second-handle (admit/result-handle (eid "[\"rehydration-run-2\" 0]"))
               opaque-handle (admit/result-handle (eid "[\"rehydration-run\" 1]"))
-              windowed-handle
+              over-bound-handle
               (admit/result-handle (eid "[\"rehydration-run-2\" 1]"))
-              sized-handle
+              unserializable-handle
               (admit/result-handle (eid "[\"rehydration-run-2\" 2]"))
               ctx (:seon.sci.eval/ctx
                    (eval/fork-for-turn
@@ -2206,21 +2197,18 @@
               "and this run's own value under its own name")
           (is (thrown? Throwable (sci/eval-string* ctx (str opaque-handle)))
               "an opaque node binds no handle rather than a lie about one")
-          (is (thrown? Throwable (sci/eval-string* ctx (str windowed-handle)))
-              "a blob-backed window binds nothing: the node is one page of
-               the value, and a handle onto a page is a wrong answer, not a
-               partial one")
-          (is (thrown? Throwable (sci/eval-string* ctx (str sized-handle)))
-              "so does a stored size larger than the node it was measured
-               against")
-          (is (nil? (admit/restorable-node
-                     "#:seon.print{:face :seon.print/vector, :items []}"
-                     {:seon.cluster.eval/result-blob "digest"}))
+          (is (thrown? Throwable
+                       (sci/eval-string* ctx (str over-bound-handle)))
+              "a value over the storage bound binds nothing: it stored no
+               node, so the honest answer is an unresolved symbol")
+          (is (thrown? Throwable
+                       (sci/eval-string* ctx (str unserializable-handle)))
+              "and so does one the walk could only describe")
+          (is (nil? (admit/restorable-node nil))
               "the one predicate both the binder and the emitter consult")
           (is (some? (admit/restorable-node
-                      "#:seon.print{:face :seon.print/vector, :items []}"
-                      {:seon.cluster.eval/result-size 3}))
-              "a size that matches the stored node is a complete result"))))))
+                      "#:seon.print{:face :seon.print/vector, :items []}"))
+              "a stored node IS the value: there is no second question"))))))
 
 (deftest a-set-print-length-survives-to-the-turns-next-form
   ;; THE SESSION OWNS THE PRINT BINDINGS, NOT THE FORM. At a `clojure.main`

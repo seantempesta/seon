@@ -1,32 +1,41 @@
 (ns seon.sci.admit
-  "Projects values leaving SCI into bounded, printable ordinary data.
+  "Projects values leaving SCI into printable ordinary data under ONE bound.
 
   `admit` walks the supplied value once and calls the supplied
   `:interrupt-fn` before projecting every node. Every result is an
   unambiguous `:seon.print/face` envelope in the closed print grammar;
   authored print keywords remain ordinary child data. Maps, sets,
-  records, sequences, and host collections are rebuilt within the
-  configured depth, width, string, and node caps. Reference values with a
+  records, sequences, and host collections are rebuilt WHOLE — there are no
+  depth, width, string or node caps here any more, because elision happens
+  only where AI context is generated. Reference values with a
   registry-declared identity projection admit only that identity; other
   reference types and arrays are never entered. That registry question is
   asked against ONE declaration projection handed with the admission request
   or its enclosing operation, never reached process-sideways and never once
   per node.
 
-  A cut this walk makes is a COMPLETE elision: it carries the path it stands
-  at, the offset and count of what follows, and — when the request supplies
-  `:seon.print/requery-id`, the identity of the evaluation being stored — the
-  name to ask for the rest. Nothing downstream can repair a cut it did not
-  make, so nothing downstream has to.
+  THE ONE BOUND IS STORAGE, AND IT IS STREAMING. The walk serializes as it
+  projects, into a bounded appendable counting UTF-8 bytes, under the
+  evaluation's own SCI interrupt. A byte count taken on a finished string is
+  not an execution bound — a lazy sequence can block before its first byte —
+  so the count is taken as the bytes are emitted, and emission stops at
+  `:seon.config.eval.result/max-bytes`. What the walk emitted IS what is
+  stored: one serializer, nothing downstream to agree with.
 
-  `admit-value` returns the one bounded print node and its derived semantic
-  value without constructing a print sink. `admit` adds
-  `:seon.cluster.eval/result-edn` from that same node for receipt callers.
-  Admission preserves
-  supplied evaluation diagnostics and reports whether anything was capped.
-  SCI interrupts propagate. Other projection failures panic or degrade to
-  markers according to `:seon.config/on-core-error`. Admission opens no
-  resources and writes no durable state."
+  A value is therefore either stored FAITHFULLY or MISSING. Under the bound,
+  `admit` returns the print node, the derived semantic value, and the exact
+  EDN it emitted. Over the bound — or when the walk could project no data at
+  all, an opaque host reference or a projection that failed — it returns
+  nothing but `:seon.eval/missing` and, for the bound, `:seon.eval/size`.
+  There is no window, no page, and no `capped?` flag: a caller never has to
+  ask whether the thing it holds is the whole value.
+
+  `admit-value` returns that answer without the serialized EDN key; `admit`
+  adds `:seon.cluster.eval/result-edn` for storage callers. Admission
+  preserves supplied evaluation diagnostics. SCI interrupts propagate. Other
+  projection failures panic or degrade to markers according to
+  `:seon.config/on-core-error`. Admission opens no resources and writes no
+  durable state."
   (:require [clojure.edn :as edn]
             [clojure.test.check.generators :as gen]
             ;; sci.lang and sci.impl.types are loaded for their deftypes:
@@ -62,12 +71,67 @@
 (schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
-;;; The walk — one pass, inside the armed boundary
+;;; The bounded appendable — the storage bound, measured as bytes are emitted
 ;;; ---------------------------------------------------------------------------
 
-(defn- node
-  [face]
-  {::print/face face})
+(defn canonical-edn
+  "Return canonical readable EDN independent of ambient print bindings."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [value]
+  (binding [*print-length* nil
+            *print-level* nil
+            *print-meta* false
+            *print-readably* true
+            *print-dup* false
+            *print-namespace-maps* true]
+    (pr-str value)))
+
+(defn- utf8-length
+  "UTF-8 bytes of one string, without allocating the bytes to count them."
+  ^long [^String text]
+  (let [length (.length text)]
+    (loop [index 0
+           total 0]
+      (if (< index length)
+        (let [point (int (.charAt text index))]
+          (recur (inc index)
+                 (long (+ total
+                          (cond
+                            (< point 0x80) 1
+                            (< point 0x800) 2
+                            ;; a surrogate pair is four bytes for two chars,
+                            ;; so each char of it carries two
+                            (Character/isSurrogate (char point)) 2
+                            :else 3)))))
+        total))))
+
+(def ^:private over-bound-marker ::over-bound)
+
+(defn- write!
+  "Emit one fragment, or stop the walk because the storage bound is reached.
+
+  The bound is checked BEFORE the fragment lands, so nothing past it is ever
+  built, and the size reported is the bound itself: the walk stopped there."
+  [state ^String text]
+  (let [bound (:max-bytes state)
+        emitted (long @(:bytes state))
+        total (+ emitted (utf8-length text))]
+    (when (and bound (> total (long bound)))
+      (throw (ex-info "value admission reached its storage bound"
+                      {:seon.error/kind over-bound-marker
+                       over-bound-marker true
+                       :seon.eval/size (long bound)})))
+    (vreset! (:bytes state) total)
+    (.append ^StringBuilder (:builder state) text)
+    nil))
+
+(defn- over-bound?
+  [failure]
+  (true? (over-bound-marker (ex-data failure))))
+
+;;; ---------------------------------------------------------------------------
+;;; The walk — one pass, inside the armed boundary
+;;; ---------------------------------------------------------------------------
 
 (defn- value-node
   [face value]
@@ -98,338 +162,214 @@
     (instance? sci.lang.Namespace value)
     (assoc ::print/rep (pr-str (str (sci.types/getName value))))))
 
-(defn- take-node!
-  "Consume one node from the budget; false when it is exhausted."
-  [state]
-  (if (:unbounded? state)
-    true
-    (if (pos? @(:nodes state))
-    (do (vswap! (:nodes state) dec) true)
-    (do (vreset! (:capped? state) true) false))))
-
-(defn- flag!
-  "Record that something was elided or truncated."
-  [state]
-  (vreset! (:capped? state) true)
-  nil)
-
-(declare semantic-value)
-
-(defn- cut!
-  "Mark one cut and mint the elision that names it.
-
-  A scalar, deliberately: an elision must never be a structure, or the thing
-  that replaces an over-deep value would itself be over-deep. It is a scalar
-  that carries its own evidence — where in the value the cut is, how many
-  items follow it, and the identity to ask for the rest (ruling 63c). The
-  identity is the one this admission was HANDED; an admission nobody is
-  storing carries the refusal instead of a name that resolves to nothing."
-  [state path next-offset omitted total unit]
-  (vreset! (:capped? state) true)
-  (print/elision
-   (cond-> {:seon.render.data/path (vec path)
-            :seon.render.data/next-offset (long next-offset)
-            :seon.print/elision-unit unit}
-     (some? omitted) (assoc :seon.print/omitted omitted)
-     (some? total) (assoc :seon.render.data/total total)
-     (some? (:requery-id state))
-     (assoc :seon.print/requery-id (:requery-id state))
-     (nil? (:requery-id state))
-     (assoc :seon.print/requery-refusal
-            "this admission was handed no requery identity"))))
-
-(defn- elide!
-  "Replace this node itself with the cut standing at its own path."
-  [state path]
-  (cut! state path 0 1 nil :subtree))
-
-(defn- remaining-count
-  "How many items follow the cut, when the source can say without walking it.
-
-  An infinite or lazy source is never counted — that is the whole reason this
-  walk is bounded — so the cut simply does not claim a number it cannot know."
-  [values taken]
-  (when (counted? values)
-    (max 1 (- (count values) taken))))
-
-(defn- prune!
-  [state]
-  (vreset! (:capped? state) true)
-  (node ::print/pruned))
-
 (declare project)
 
-(defn- identity-only-node
-  [value child-depth state path]
+(defn- leaf!
+  "Emit one node that has no child node: its own canonical EDN, exactly."
+  [state node]
+  (write! state (canonical-edn node))
+  node)
+
+(defn- items!
+  "Emit `#:seon.print{:face F, :items [ … ]}` while projecting the children."
+  [state values face]
+  (write! state (str "#:seon.print{:face " face ", :items ["))
+  (let [items (loop [remaining (seq values)
+                     taken 0
+                     accumulated []]
+                (if (nil? remaining)
+                  accumulated
+                  (do
+                    (when (pos? taken) (write! state " "))
+                    (let [child (project (first remaining) state)]
+                      (recur (next remaining) (inc taken)
+                             (conj accumulated child))))))]
+    (write! state "]}")
+    {::print/face face ::print/items items}))
+
+(defn- entries!
+  "Emit a map's or record's `:entries` while projecting both sides of each."
+  [state entries]
+  (write! state "[")
+  (let [projected (loop [remaining (seq entries)
+                         taken 0
+                         accumulated []]
+                    (if (nil? remaining)
+                      accumulated
+                      (let [[entry-key entry-value] (first remaining)]
+                        (when (pos? taken) (write! state " "))
+                        (write! state "[")
+                        (let [projected-key (project entry-key state)]
+                          (write! state " ")
+                          (let [projected-value (project entry-value state)]
+                            (write! state "]")
+                            (recur (next remaining) (inc taken)
+                                   (conj accumulated
+                                         [projected-key
+                                          projected-value])))))))]
+    (write! state "]}")
+    projected))
+
+(defn- map-node!
+  [state entries]
+  (write! state "#:seon.print{:face :seon.print/map, :entries ")
+  {::print/face ::print/map ::print/entries (entries! state entries)})
+
+(defn- record-node!
+  [state value]
+  (let [name* (or (sci-named value) (.getName (class value)))]
+    (write! state (str "#:seon.print{:face :seon.print/record, :name "
+                       (canonical-edn name*) ", :entries "))
+    {::print/face ::print/record
+     ::print/name name*
+     ::print/entries (entries! state value)}))
+
+(defn- identity-only-node!
+  "A registry-declared reference admits its identity, and nothing else."
+  [state value]
   (when-let [projection (some-> (:projection state)
                                 (schema/identity-only-projection-in value))]
-    (if (take-node! state)
-      (assoc (object-node value)
-             ::print/value
-             (project (:seon.schema/identity-value projection)
-                      child-depth state path))
-      (elide! state path))))
+    (let [described (object-node value)]
+      (write! state (str "#:seon.print{:face :seon.print/object, :class "
+                         (canonical-edn (::print/class described))
+                         (when-some [rep (::print/rep described)]
+                           (str ", :rep " (canonical-edn rep)))
+                         ", :value "))
+      (let [child (project (:seon.schema/identity-value projection) state)]
+        (write! state "}")
+        (assoc described ::print/value child)))))
 
-(defn- append-elision!
-  "Append the scalar cut marker, charging its one node."
-  [state accumulated emit path taken values]
-  (flag! state)
-  (if (take-node! state)
-    (emit accumulated
-          (cut! state path taken (remaining-count values taken)
-                (when (counted? values) (count values)) :children))
-    ;; No child can fit. Replacing this collection node with the scalar
-    ;; is the only honest projection that still obeys the node cap.
-    (elide! state path)))
-
-(defn- project-entries
-  "Project up to `width` children, stopping when the node budget runs out.
-  `emit` receives each child's projection. Truncation — by width or by
-  budget — is capping, and says so."
-  [values width depth state path emit]
-  (loop [remaining (seq values)
-         taken 0
-         accumulated (emit)]
-    (cond
-      (nil? remaining) accumulated
-      (and (not (:unbounded? state)) (zero? @(:nodes state))) (elide! state path)
-      :else
-      (let [after (next remaining)
-            ;; width means WIDTH: cut only once `width` items are shown and
-            ;; more remain (the 2026-08-01 off-by-one class — a marker that
-            ;; replaces the last item is strictly less informative than it)
-            cut-for-width? (and (not (:unbounded? state)) after (>= taken width))
-            cut-for-nodes? (and (not (:unbounded? state)) after (= 1 @(:nodes state)))]
-        (if (or cut-for-width? cut-for-nodes?)
-          (append-elision! state accumulated emit path taken values)
-          ;; When siblings remain, hold one node aside for their cut marker.
-          ;; A nested child may consume everything else, but it can never
-          ;; silently erase the parent's remaining siblings.
-          (let [reserved? (some? after)]
-            (when (and reserved? (not (:unbounded? state)))
-              (vswap! (:nodes state) dec))
-            (take-node! state)
-            (let [child (project (first remaining) depth state
-                                 (conj path taken))]
-              (when (and reserved? (not (:unbounded? state)))
-                (vswap! (:nodes state) inc))
-              (recur after
-                     (inc taken)
-                     (emit accumulated child)))))))))
-
-(defn- mark-map-cut!
-  [state accumulated path taken entries]
-  (flag! state)
-  (if (take-node! state)
-    (conj accumulated
-          (cut! state path taken (remaining-count entries taken)
-                (when (counted? entries) (count entries)) :children))
-    (elide! state path)))
-
-(defn- project-map
-  [entries width depth state path]
-  (loop [remaining (seq entries)
-         taken 0
-         accumulated []]
-    (cond
-      (nil? remaining) accumulated
-      (and (not (:unbounded? state)) (< @(:nodes state) 2)) (elide! state path)
-      :else
-      (let [after (next remaining)
-            ;; same width-means-width rule as project-entries above
-            cut-for-width? (and (not (:unbounded? state)) after (>= taken width))
-            cut-for-nodes? (and (not (:unbounded? state)) after (< @(:nodes state) 3))]
-        (if (or cut-for-width? cut-for-nodes?)
-          (mark-map-cut! state accumulated path taken entries)
-          (let [[entry-key entry-value] (first remaining)
-                reserved? (some? after)]
-            (when (and reserved? (not (:unbounded? state)))
-              (vswap! (:nodes state) dec))
-            ;; a map entry is TWO nodes, and a half-projected entry is not an
-            ;; entry: take both or neither
-            (take-node! state)
-            (take-node! state)
-            (let [projected-key (project entry-key depth state
-                                         (conj path taken))
-                  ;; THE VALUE'S PATH IS ITS KEY, because that is how a
-                  ;; requery navigates back into the value (`get-in`).
-                  projected-value (project entry-value depth state
-                                           (conj path
-                                                 (semantic-value projected-key)))]
-              (when (and reserved? (not (:unbounded? state)))
-                (vswap! (:nodes state) inc))
-              (recur after
-                     (inc taken)
-                     (conj accumulated [projected-key projected-value])))))))))
+(defn- throwable-node!
+  [state value]
+  (write! state "#:seon.print{:face :seon.print/throwable, :value ")
+  (let [child (project (Throwable->map value) state)]
+    (write! state "}")
+    {::print/face ::print/throwable ::print/value child}))
 
 (defn- project-node
-  [value depth state path]
-  (let [{:keys [:seon.config.eval.result/max-depth
-                :seon.config.eval.result/max-collection
-                :seon.config.eval.result/max-string]}
-        (:caps state)
-        deep? (and (not (:unbounded? state)) (>= depth max-depth))
-        child-depth (inc depth)
-        identity-node (delay (identity-only-node value child-depth state path))]
+  [value state]
+  (let [identity-node (delay (identity-only-node! state value))]
     (cond
-      (nil? value) (value-node ::print/nil nil)
-      (boolean? value) (value-node ::print/boolean value)
-      (number? value) (value-node ::print/number value)
-      (keyword? value) (value-node ::print/keyword value)
-      (symbol? value) (value-node ::print/symbol value)
-      (char? value) (value-node ::print/char value)
-      (uuid? value) (value-node ::print/uuid value)
+      (nil? value) (leaf! state (value-node ::print/nil nil))
+      (boolean? value) (leaf! state (value-node ::print/boolean value))
+      (number? value) (leaf! state (value-node ::print/number value))
+      (keyword? value) (leaf! state (value-node ::print/keyword value))
+      (symbol? value) (leaf! state (value-node ::print/symbol value))
+      (char? value) (leaf! state (value-node ::print/char value))
+      (uuid? value) (leaf! state (value-node ::print/uuid value))
 
       ;; Date is the ordinary inst and must take the allocation-free path.
       ;; Instant is the other core implementation and normalizes to Date;
       ;; the protocol fallback below is reserved for genuinely exotic Inst
       ;; extensions instead of scanning every collection node.
-      (instance? java.util.Date value) (value-node ::print/inst value)
+      (instance? java.util.Date value)
+      (leaf! state (value-node ::print/inst value))
       (instance? java.time.Instant value)
-      (value-node ::print/inst (java.util.Date. (inst-ms value)))
+      (leaf! state (value-node ::print/inst (java.util.Date. (inst-ms value))))
 
+      ;; A STRING IS ADMITTED WHOLE. The character cap that used to clip it
+      ;; here was a display decision; the storage bound is what stops a
+      ;; runaway string now, and it stops it while the bytes are emitted.
       (string? value)
-      (let [node (if (:unbounded? state)
-                   {::print/face ::print/string ::print/value value}
-                   (print/admit-string
-                    {:seon.print/text value
-                     :seon.config.eval.result/max-string max-string}))]
-        (when (= ::print/truncated-string (::print/face node))
-          (flag! state))
-        node)
-
-      ;; EVERYTHING below this line projects to a structure — a
-      ;; collection, or a marker map — and a structure emitted AT the
-      ;; depth cap would place its own entries one past it. So the cap
-      ;; is checked once, here, for markers and collections alike.
-      ;; (Falsified the other way first: markers-as-maps at the cap
-      ;; produced depth 7 under a cap of 6.)
-      deep? (prune! state)
+      (leaf! state {::print/face ::print/string ::print/value value})
 
       ;; A registry predicate, not a class roster, decides which reference
       ;; values are identities in data. The identity itself re-enters this
-      ;; bounded walk; the reference's structural fields never do.
+      ;; walk; the reference's structural fields never do.
       @identity-node @identity-node
 
-      (instance? Throwable value)
-      (if (take-node! state)
-        {::print/face ::print/throwable
-         ::print/value (project (Throwable->map value) child-depth state
-                                (conj path ::print/throwable))}
-        (elide! state path))
+      (instance? Throwable value) (throwable-node! state value)
 
       (instance? sci.lang.Var value)
-      {::print/face ::print/var
-       ::print/name (subs (str value) 2)}
+      (leaf! state {::print/face ::print/var
+                    ::print/name (subs (str value) 2)})
 
       (instance? sci.lang.Type value)
-      {::print/face ::print/type
-       ::print/name (str value)}
+      (leaf! state {::print/face ::print/type ::print/name (str value)})
 
       (instance? Class value)
-      {::print/face ::print/class
-       ::print/name (.getName ^Class value)}
+      (leaf! state {::print/face ::print/class
+                    ::print/name (.getName ^Class value)})
 
       ;; reference types and arrays: named, never entered. This is what
       ;; makes a cycle unrepresentable rather than detected.
-      (instance? clojure.lang.IDeref value) (object-node value)
-      (some-> value class .isArray) (object-node value)
+      (instance? clojure.lang.IDeref value) (leaf! state (object-node value))
+      (some-> value class .isArray) (leaf! state (object-node value))
 
-      ;; a record IS map-like; it keeps its fields and the name sci gives
-      ;; it. The tag rides at the same level as the fields so the
-      ;; projection's depth is a record's own depth, and the field width
-      ;; leaves room for it.
-      (record? value)
-      (let [fields (project-map value max-collection child-depth state path)]
-        (if (vector? fields)
-          {::print/face ::print/record
-           ::print/name (or (sci-named value) (.getName (class value)))
-           ::print/entries fields}
-          fields))
+      ;; a record IS map-like; it keeps its fields and the name sci gives it.
+      (record? value) (record-node! state value)
 
       (or (map? value) (instance? java.util.Map value))
-      (let [entries (project-map value max-collection child-depth state path)]
-        (if (vector? entries)
-          {::print/face ::print/map ::print/entries entries}
-          entries))
+      (map-node! state value)
 
       (or (set? value) (instance? java.util.Set value))
-      (let [items (project-entries value max-collection child-depth state path
-                                   (fn ([] []) ([acc child] (conj acc child))))]
-        (if (vector? items)
-          {::print/face ::print/set ::print/items items}
-          items))
+      (items! state value ::print/set)
 
       (or (vector? value)
           (instance? java.util.RandomAccess value)
           (instance? clojure.lang.MapEntry value))
-      (let [items (project-entries value max-collection child-depth state path
-                                   (fn ([] []) ([acc child] (conj acc child))))]
-        (if (vector? items)
-          {::print/face ::print/vector ::print/items items}
-          items))
+      (items! state value ::print/vector)
 
-      ;; vectors, lists, lazy and infinite sequences, and host
-      ;; collections all become bounded vectors: a bounded projection of
-      ;; a possibly-infinite thing cannot be that thing. NOTHING here
-      ;; counts the source — `count` on an infinite sequence never
-      ;; returns.
+      ;; vectors, lists, lazy and infinite sequences, and host collections
+      ;; all become vectors of nodes. NOTHING here counts the source —
+      ;; `count` on an infinite sequence never returns, and the storage
+      ;; bound is what ends the realization.
       (or (coll? value) (seq? value) (instance? java.util.Collection value))
-      (let [items (project-entries value max-collection child-depth state path
-                                   (fn ([] []) ([acc child] (conj acc child))))]
-        (if (vector? items)
-          {::print/face ::print/list ::print/items items}
-          items))
+      (items! state value ::print/list)
 
       ;; A third party may extend clojure.core/Inst. This intentionally comes
       ;; after every ordinary scalar and collection classification so its
       ;; protocol lookup is paid only for an exotic leaf.
       (inst? value)
-      (value-node ::print/inst (java.util.Date. (inst-ms value)))
+      (leaf! state (value-node ::print/inst (java.util.Date. (inst-ms value))))
 
       ;; a sci type instance that is neither map- nor collection-like
       ;; (a deftype) is named by sci, not by its host class
-      :else
-      (object-node value))))
+      :else (leaf! state (object-node value)))))
 
 (defn- project
-  "One node: call the interrupt-fn, then project — or mark and move on."
-  [value depth state path]
+  "One node: call the interrupt-fn, then project and emit — or mark it.
+
+  A node that fails part-way has already emitted a prefix, so the emitted
+  text is rewound to where this node began before the marker replaces it:
+  the bytes stored are always the bytes of the node returned."
+  [value state]
   ;; EVERY node, because a native lazy sequence enters no interpreted fn
   ;; body and would otherwise realize forever (probed: 200k elements, zero
   ;; interrupt-fn calls)
   ((:interrupt-fn state))
-  (try
-    (project-node value depth state path)
-    (catch Throwable failure
-      ;; the interrupt is the one throwable admission must not swallow
-      ;; resolved at call time because the guarded kernel requires this
-      ;; namespace: the owner of "is this sci's interrupt?" sits above
-      ;; admission, and admission must not swallow its one throwable
-      (when ((requiring-resolve 'seon.sci.kernel/interrupted?) failure)
-        (throw failure))
-      ;; R41 DECIDES THIS, not local judgement (owner ruling reversing
-      ;; the drafted marker-only choice): a value the total codec cannot
-      ;; project is a core degradation, so development panics on it
-      ;; immediately and production degrades.
-      (when (= :panic (:on-core-error state))
-        (throw (ex-info (str "value admission could not project a "
-                             (.getName (class value)))
-                        {:seon.error/kind ::projection-failed
-                         ::class (.getName (class value)) :seon.sci.admit/projection-failed true}
-                        failure)))
-      ;; a marker is a structure, so at the depth cap the elision scalar
-      ;; is the only thing that fits — the same rule the walk itself
-      ;; follows, applied to the failure path
-      (if (and (not (:unbounded? state))
-               (>= depth (:seon.config.eval.result/max-depth (:caps state))))
-        (elide! state path)
-        (do
-          (vreset! (:capped? state) true)
-          {::print/face ::print/failed
-           ::print/class (.getName (class value))
-           ::print/message (or (ex-message failure)
-                               (.getName (class failure)))})))))
+  (let [^StringBuilder builder (:builder state)
+        mark (.length builder)
+        mark-bytes @(:bytes state)]
+    (try
+      (project-node value state)
+      (catch Throwable failure
+        ;; the interrupt is the one throwable admission must not swallow
+        ;; resolved at call time because the guarded kernel requires this
+        ;; namespace: the owner of "is this sci's interrupt?" sits above
+        ;; admission, and admission must not swallow its one throwable
+        (when ((requiring-resolve 'seon.sci.kernel/interrupted?) failure)
+          (throw failure))
+        ;; nor the storage bound: reaching it ends the whole admission
+        (when (over-bound? failure)
+          (throw failure))
+        ;; R41 DECIDES THIS, not local judgement (owner ruling reversing
+        ;; the drafted marker-only choice): a value the total codec cannot
+        ;; project is a core degradation, so development panics on it
+        ;; immediately and production degrades.
+        (when (= :panic (:on-core-error state))
+          (throw (ex-info (str "value admission could not project a "
+                               (.getName (class value)))
+                          {:seon.error/kind ::projection-failed
+                           ::class (.getName (class value))
+                           :seon.sci.admit/projection-failed true}
+                          failure)))
+        (.setLength builder mark)
+        (vreset! (:bytes state) mark-bytes)
+        (leaf! state {::print/face ::print/failed
+                      ::print/class (.getName (class value))
+                      ::print/message (or (ex-message failure)
+                                          (.getName (class failure)))})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one operation
@@ -493,42 +433,37 @@
     ::print/failed ::print/throwable ::print/truncated-string
     ::print/elided ::print/projected ::print/pruned})
 
+(defn- unserializable-root?
+  "True when the walk produced no data for the value, only a description.
+
+  A bare object node named a host reference it could not enter, and a failed
+  node names a projection that threw. Neither IS the value, so neither is
+  stored as one: the evaluation records `:seon.eval/missing :unserializable`
+  and the handle is ablated. A reference WITH a registry identity projection
+  carries `:seon.print/value` and is faithful, so it is not this."
+  [node]
+  (let [face (::print/face node)]
+    (or (= ::print/failed face)
+        (and (= ::print/object face)
+             (nil? (::print/value node))))))
+
 (defn restorable-node
   "One settled evaluation's print node, when its value survives the node.
 
   Nil for a node that kept only a name, for an unreadable node, and for an
   evaluation that stored none. The question `is this value reachable again?`
   is asked HERE, of the node itself, so nobody has to remember the answer in
-  a flag beside it.
-
-  The second arity adds the evaluation's own storage facts, and refuses a
-  WINDOWED result. When settlement stages an oversized result
-  (`seon.cluster.run/settlement-result`), `:seon.cluster.eval/result-edn`
-  holds a PAGE of the value, `:seon.cluster.eval/result-blob` names the whole
-  one, and `:seon.cluster.eval/result-size` is the whole one's size. That
-  page's root face is an ordinary `:seon.print/vector` — nothing in the node
-  says it is partial — so asking the node alone binds a truncated collection
-  under a complete-looking handle (audit C4). A caller that has the storage
-  facts must pass them; a caller that has only the node keeps the one-arity
-  answer, which is correct for every evaluation that was never windowed."
-  {:malli/schema
-   [:function
-    [:=> [:cat [:maybe :string]] [:maybe :map]]
-    [:=> [:cat [:maybe :string] :map] [:maybe :map]]]}
-  ([serialized]
-   (when (string? serialized)
-     (let [node (try (edn/read-string serialized) (catch Throwable _ nil))]
-       (when (and (map? node)
-                  (::print/face node)
-                  (not (contains? opaque-result-faces (::print/face node))))
-         node))))
-  ([serialized {digest :seon.cluster.eval/result-blob
-                stored-size :seon.cluster.eval/result-size}]
-   (when-not (or (some? digest)
-                 (and (int? stored-size)
-                      (string? serialized)
-                      (> stored-size (count serialized))))
-     (restorable-node serialized))))
+  a flag beside it. There is no second question about windows any more: a
+  value is stored faithfully or it is missing, and a missing evaluation
+  stores no node at all."
+  {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :map]]}
+  [serialized]
+  (when (string? serialized)
+    (let [node (try (edn/read-string serialized) (catch Throwable _ nil))]
+      (when (and (map? node)
+                 (::print/face node)
+                 (not (contains? opaque-result-faces (::print/face node))))
+        node))))
 
 (defn result-handle
   "The symbol naming one stored evaluation's value: `result/e<entity id>`.
@@ -541,77 +476,92 @@
   [entity-id]
   (symbol "result" (str "e" entity-id)))
 
-(defn canonical-edn
-  "Return canonical readable EDN independent of ambient print bindings."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [value]
-  (binding [*print-length* nil
-            *print-level* nil
-            *print-meta* false
-            *print-readably* true
-            *print-dup* false
-            *print-namespace-maps* true]
-    (pr-str value)))
-
 (defn print-node-edn
   "Return canonical readable EDN for one admitted print node.
 
   The result is independent of ambient REPL print bindings. The print node is
-  already finite, so no print cap is needed at this sink."
+  already finite, so no print cap is needed at this sink. Admission itself
+  does NOT come through here — it emits its EDN while it walks, which is how
+  the storage bound stops an unbounded source — so this is for callers that
+  hold a finished node and want its bytes."
   {:malli/schema [:=> [:cat :seon.print/node]
                   :seon.cluster.eval/result-edn]}
   [print-node]
   (canonical-edn print-node))
 
+(declare admit-walk)
+
+(defn- missing-bound-refusal
+  "Absence of the one bound is a refusal that NAMES it, never a cast of nil.
+
+  The class this ends: `admit*` read a cap straight into a `long`, so a caller
+  that handed an incomplete caps map got `RT.longCast` on nil instead of a
+  diagnostic naming the absent key
+  (docs/seon/issues/absent-admission-cap-crashes-the-print-walk.md)."
+  [caps]
+  {:seon.error/kind ::missing-bound
+   :seon.error/message
+   (str "Value admission requires the storage bound "
+        :seon.config.eval.result/max-bytes
+        ", and the supplied caps map does not carry it. Nothing was walked.")
+   :seon.error/diagnostic-member :seon.config.eval.result/max-bytes
+   :seon.error/data {:seon.sci.admit/caps (vec (sort (keys caps)))}})
+
 (defn- admit*
   [{::keys [value interrupt-fn caps record unbounded?]
     supplied-projection :seon.schema/projection
-    requery-id :seon.print/requery-id
     on-core-error :seon.config/on-core-error}]
+  (if (and (not (true? unbounded?))
+           (not (int? (:seon.config.eval.result/max-bytes caps))))
+    (missing-bound-refusal caps)
+    (admit-walk value interrupt-fn caps record unbounded?
+                supplied-projection on-core-error)))
+
+(defn- admit-walk
+  [value interrupt-fn caps record unbounded?
+   supplied-projection on-core-error]
   (let [projection (or supplied-projection (schema/handed-projection))
+        builder (StringBuilder.)
         state {:interrupt-fn interrupt-fn
-               :caps caps
                :on-core-error on-core-error
                ;; Identity projection is handed by the operation boundary.
                ;; Ordinary scalar/collection admissions never require it.
                :projection projection
-               ;; THE IDENTITY THE CALLER ALREADY HAS. A cut this walk makes
-               ;; is the only place that knows both the path and the source,
-               ;; so the evaluation being stored hands its own identity in
-               ;; and every elision names it (ruling 63c).
-               :requery-id requery-id
-               :unbounded? (true? unbounded?)
-               ;; the root is a node like any other
-               :nodes (volatile! (dec (long (:seon.config.eval.result/max-nodes
-                                             caps))))
-               :capped? (volatile! false)}
-        print-node (project value 0 state [])]
-    (cond-> {::print-node print-node
-             ::value (semantic-value print-node)
-             ::capped? @(:capped? state)}
+               :builder builder
+               :bytes (volatile! 0)
+               ;; THE ONE BOUND. `unbounded?` is the caller that is not
+               ;; storing anything and has already bounded its own source.
+               :max-bytes (when-not (true? unbounded?)
+                            (long (:seon.config.eval.result/max-bytes caps)))}
+        answer
+        (try
+          (let [print-node (project value state)]
+            (if (unserializable-root? print-node)
+              {:seon.eval/missing :unserializable}
+              {::print-node print-node
+               ::value (semantic-value print-node)
+               :seon.cluster.eval/result-edn (str builder)}))
+          (catch clojure.lang.ExceptionInfo failure
+            (if (over-bound? failure)
+              {:seon.eval/missing :over-bound
+               :seon.eval/size (:seon.eval/size (ex-data failure))}
+              (throw failure))))]
+    (cond-> answer
       ;; absent in, absent out — never a stored nil
       record (assoc ::record record))))
 
 (defn admit-value
-  "Realize and bound one value without constructing receipt EDN.
+  "Realize and bound one value without constructing storage EDN.
 
   This is the shared admission operation for guarded invocations and literal
   render declarations. It walks the source exactly once and returns the same
-  print node, semantic value, cap signal, and optional diagnostics as
-  `admit`.
-
-  An optional `:seon.print/requery-id` is the identity every cut of this walk
-  names as its source. A caller that is not storing the value supplies none,
-  and the cuts carry the refusal instead."
+  print node, semantic value, and optional diagnostics as `admit` — or, when
+  the value went over the storage bound or could not be projected into data
+  at all, nothing but `:seon.eval/missing` and the size that names why."
   {:malli/schema
-   [:=> [:cat :seon.sci.admit/request]
-    [:map
-     [:seon.sci.admit/print-node :seon.print/node]
-     [:seon.sci.admit/value :any]
-     [:seon.sci.admit/capped? :seon.sci.admit/capped?]
-     [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]]]}
+   [:=> [:cat :seon.sci.admit/request] :seon.sci.admit/admitted-value]}
   [request]
-  (admit* request))
+  (dissoc (admit* request) :seon.cluster.eval/result-edn))
 
 (defn admit
   "Realize and bound one value leaving a sci evaluation. ONE pass.
@@ -619,18 +569,25 @@
   is the contract, not a convention: after disarm there is no time
   limit left to stop an infinite realization.
 
-  Walks `::value` once, calling `::interrupt-fn` at EVERY node, and
-  returns
+  Walks `::value` once, calling `::interrupt-fn` at EVERY node and emitting
+  the value's EDN as it goes, and returns either
 
-      {::value        <the bounded projection>
-       :seon.cluster.eval/result-edn <that projection, printed>
-       ::capped?      <true when anything was elided>
+      {::value        <the projection>
+       ::print-node   <its print node>
+       :seon.cluster.eval/result-edn <the bytes it emitted>
        ::record       <the diagnostics, unchanged>}
 
-  The projection's grammar is the namespace docstring's total codec.
-  `::capped?` is the honest signal that the printed result is not the
-  whole value — a reader must never have to guess whether an elision
-  marker was the agent's own data.
+  or, for a value that reached `:seon.config.eval.result/max-bytes` or that
+  the walk could only describe,
+
+      {:seon.eval/missing :over-bound|:unserializable
+       :seon.eval/size    <bytes reached, for the bound>
+       ::record           <the diagnostics, unchanged>}
+
+  The projection's grammar is the namespace docstring's total codec. There is
+  no `capped?` signal, because there is nothing between whole and missing: a
+  reader never has to guess whether an elision marker was the agent's own
+  data.
 
   `::record` is returned IDENTICAL to the one supplied: admission
   carries `:seon.eval/fn-entries` and `:seon.eval/allocated-bytes`
@@ -647,7 +604,4 @@
   uncatchable interrupt, which must reach `evaluate`."
   {:malli/schema [:=> [:cat :seon.sci.admit/request] :seon.sci.admit/admitted]}
   [request]
-  (let [admitted (admit* request)]
-    (assoc admitted
-           :seon.cluster.eval/result-edn
-           (print-node-edn (::print-node admitted)))))
+  (admit* request))

@@ -51,8 +51,8 @@
    :seon.cluster.eval/source
    :seon.cluster.eval/read-basis-transaction
    :seon.cluster.eval/result-edn
-   :seon.cluster.eval/result-blob
-   :seon.cluster.eval/result-size
+   :seon.eval/missing
+   :seon.eval/size
    :seon.cluster.eval/error
    :seon.cluster.eval/triage-edn
    :seon.cluster.eval/interrupted-at
@@ -368,16 +368,6 @@
       (context/message-custody database run-id agent-id (:db/id message))}
      (get orders (:db/id message)))))
 
-(defn capped-result?
-  "True when a receipt stores less result text than its original size."
-  {:malli/schema [:=> [:cat :map] :boolean]}
-  [receipt]
-  (let [result-edn (:seon.cluster.eval/result-edn receipt)
-        result-size (:seon.cluster.eval/result-size receipt)]
-    (and (string? result-edn)
-         (integer? result-size)
-         (> result-size (count result-edn)))))
-
 (defn- receipt-entry
   [receipt]
   (let [ordinal (:seon.cluster.eval/ordinal receipt)]
@@ -407,9 +397,8 @@
          'user)
      ::read-basis (:seon.cluster.eval/read-basis-transaction receipt)
      ::result (:seon.cluster.eval/result-edn receipt)
-     ::result-blob (:seon.cluster.eval/result-blob receipt)
-     ::result-size (:seon.cluster.eval/result-size receipt)
-     ::capped? (capped-result? receipt)
+     ::missing (:seon.eval/missing receipt)
+     ::size (:seon.eval/size receipt)
      ::error (:seon.cluster.eval/error receipt)
      ::triage-edn (:seon.cluster.eval/triage-edn receipt)
      ::error-kind (:seon.error/kind receipt)
@@ -619,14 +608,14 @@
   A stored evaluation derives it from its own entity id; an in-memory one
   carries the handle the fork actually bound. Either way the name comes from
   the identity the value is reachable under, never from an ordinal that
-  restarts in every run — and never for a windowed result, whose stored node
-  is one page of a value staged into a blob and which the turn's fork
-  therefore binds to nothing (audit C4)."
+  restarts in every run — and never for a value that was not stored, which
+  has no node for the predicate to admit and which the turn's fork therefore
+  binds to nothing."
   [entry]
   (let [entity (::entity entry)]
     (or (:seon.repl/handle entity)
         (when (and (int? (:db/id entity))
-                   (admit/restorable-node (::result entry) entity))
+                   (admit/restorable-node (::result entry)))
           (admit/result-handle (:db/id entity))))))
 
 (defn- emission
@@ -645,8 +634,14 @@
       (::comment entry) (assoc :seon.cluster.eval/comment (::comment entry))
       (::ordinal entry) (assoc :seon.cluster.eval/ordinal (::ordinal entry))
       handle (assoc :seon.repl/handle handle)
-      (::result entry) (assoc :seon.repl/value
-                              (bounded-result unit entry (::result entry)))
+      ;; MISSING IS A TERMINAL FACT OF THE EVALUATION, so it travels as one
+      ;; and `seon.repl` writes the one sentence for it. Bounding a value
+      ;; that was never stored is not a thing this call can do.
+      (::missing entry) (assoc :seon.eval/missing (::missing entry))
+      (int? (::size entry)) (assoc :seon.eval/size (::size entry))
+      (and (::result entry) (nil? (::missing entry)))
+      (assoc :seon.repl/value
+             (bounded-result unit entry (::result entry)))
       (int? (::print-length entry)) (assoc :seon.print/length
                                            (::print-length entry))
       (int? (::print-level entry)) (assoc :seon.print/level

@@ -205,24 +205,34 @@
      :seon.render.value/more? false}))
 
 (defn- admitted-projection
+  "Admit one in-memory value for display, or say honestly that it is missing.
+
+  A value admission answers with the value or with the reason it is not
+  there; an absent answer rendered as an empty panel is the class this
+  project keeps meeting. So a missing admission is re-admitted as ITSELF —
+  the marker map is a handful of bytes — and the panel shows the reason."
   [value unit]
   (let [caps (:seon.sci.admit/caps unit)
         interrupt-fn (get-in unit [:seon.sci.eval/ctx
                                    :seon.sci.kernel/guard
                                    :seon.sci.kernel/interrupt-fn])
-        admitted
-        (admit/admit-value
-         (cond->
-          {:seon.sci.admit/value value
-           :seon.sci.admit/caps caps
-           :seon.sci.admit/interrupt-fn (or interrupt-fn (fn []))
-           :seon.config/on-core-error :record}
-           interrupt-fn
-           (assoc :seon.sci.admit/unbounded? true)))]
-    {:seon.render.value/tree
-     (:seon.sci.admit/print-node admitted)
-     :seon.render.value/semantic (:seon.sci.admit/value admitted)
-     :seon.render.value/truncated? (:seon.sci.admit/capped? admitted)}))
+        request (cond-> {:seon.sci.admit/value value
+                         :seon.sci.admit/caps caps
+                         :seon.sci.admit/interrupt-fn (or interrupt-fn (fn []))
+                         :seon.config/on-core-error :record}
+                  interrupt-fn
+                  (assoc :seon.sci.admit/unbounded? true))
+        admitted (admit/admit-value request)
+        admitted (if (:seon.eval/missing admitted)
+                   (admit/admit-value
+                    (assoc request
+                           :seon.sci.admit/value
+                           (select-keys admitted [:seon.eval/missing
+                                                  :seon.eval/size])
+                           :seon.sci.admit/unbounded? true))
+                   admitted)]
+    {:seon.render.value/tree (:seon.sci.admit/print-node admitted)
+     :seon.render.value/semantic (:seon.sci.admit/value admitted)}))
 
 (defn- distinct-in-order
   [values]
@@ -538,8 +548,7 @@
                          tree (:seon.render.value/layout registered) options))
                       (print/emit-both tree options))
           truncated? (boolean
-                      (or (:seon.render.value/truncated? admitted)
-                          (:seon.render.value/more? display)
+                      (or (:seon.render.value/more? display)
                           (pos? (:seon.render.value/offset display))))
           path (vec (get-in unit [:seon.render.data/cursor
                                   :seon.render.data/path] []))
@@ -583,7 +592,6 @@
   [admitted]
   (select-keys admitted
                [:seon.sci.admit/print-node
-                :seon.sci.admit/capped?
                 :seon.sci.admit/record]))
 
 (defn artifact-edn
@@ -610,27 +618,6 @@
                   :seon.cluster.eval/result-edn]}
   [stored]
   (admit/print-node-edn (:seon.sci.admit/print-node stored)))
-
-(defn result-window-edn
-  "Store a small tagged data window beside an oversized result blob."
-  {:malli/schema
-   [:=> [:cat :seon.render/unit :seon.cluster.eval/result-edn]
-    :seon.cluster.eval/result-edn]}
-  [unit result-edn]
-  (let [parsed (edn/read-string result-edn)
-        node (if (and (map? parsed) (contains? parsed :seon.print/face))
-               parsed
-               (:seon.render.value/tree
-                (admitted-projection parsed unit)))]
-    (admit/print-node-edn
-     (print/fit node
-                (assoc (render-profile unit)
-                       :seon.render.profile/max-children
-                       (max 0
-                            (dec (long
-                                  (get-in unit
-                                          [:seon.sci.admit/caps
-                                           :seon.config.eval.result/max-collection])))))))))
 
 (defn- render-prepared
   [unit output]

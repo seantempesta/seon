@@ -1,7 +1,7 @@
 #:seon.repl{:value
             [:string
              {:description
-              "The text one evaluation printed for its result: the stored admitted print node emitted through seon.print, never a second stored copy. A clipped value arrives carrying its own elision node, so no truncation flag accompanies it."}],
+              "The text one evaluation printed for its result: the stored admitted print node emitted through seon.print, never a second stored copy. An evaluation that stored no value prints seon.repl/missing-text here instead — the reason and the bytes it reached — and carries no :seon.repl/result beside it."}],
             :error
             [:string
              {:description
@@ -50,6 +50,8 @@
              [:seon.cluster.eval/ordinal {:optional true} :seon.cluster.eval/ordinal]
              [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn]
              [:seon.cluster.eval/result-blob {:optional true} :seon.cluster.eval/result-blob]
+             [:seon.eval/missing {:optional true} :seon.eval/missing]
+             [:seon.eval/size {:optional true} :seon.eval/size]
              [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]
              [:seon.cluster.eval/triage-edn {:optional true} :seon.cluster.eval/triage-edn]
              [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]

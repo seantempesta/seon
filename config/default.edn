@@ -45,13 +45,28 @@
  ; unknown, never converted into a healthy observation.
  :seon.config.flow/ping-timeout-ms 20
 
- ; The eval result caps: how much of an agent value `seon.sci.admit`
- ; projects into a receipt's result-edn. Units below; provenance: the
- ; 2026-08-01 measurements in tmp/admission-caps-2026-08-01/. Wide values
- ; cross 10 ms around 7k nodes, the recursive walk overflows near depth
- ; 5000, and string projection is effectively free; these decisions admit
- ; useful query results while remaining far below the measured cliffs.
- ; Unit: nesting levels.
+ ; THE ONE STORAGE BOUND on an evaluation's value. Unit: UTF-8 bytes of
+ ; the serialized print node. Admission streams that serialization under
+ ; the evaluation's own SCI interrupt and stops emitting at this bound, so
+ ; an unbounded lazy source is cut by the bound rather than realized.
+ ; Provenance: measured 2026-09-07 (research/storage-bound-landing-2026-09-07.md).
+ ; One print node costs ~48 bytes per scalar element, so the PRD's own proof
+ ; value `(range 100000)` serializes to 5,288,936 bytes, MEASURED. 8 MiB is
+ ; that measurement with 59% headroom and is 2048x the inline blob threshold
+ ; below, which is where the inline-versus-blob storage decision already
+ ; lives: one power-of-two family, one provenance.
+ :seon.config.eval.result/max-bytes 8388608
+
+ ; The four caps below are NO LONGER READ BY ADMISSION (2026-09-07: the
+ ; display caps were deleted from `seon.sci.admit`; elision happens only at
+ ; the AI context generation boundary, under the render profile). They
+ ; survive only because owners OUTSIDE the admission seam still read them
+ ; through `seon.config/result-caps`: the inbound message length limit
+ ; (`seon.cluster.message`, `seon.render.web`, `seon.eval.drive`), the
+ ; namespace page's query-work bounds (`seon.render.ns`), the fault
+ ; evidence render profile (`seon.error`) and contract evidence
+ ; (`seon.instrument`). Each needs its own declared key; until then these
+ ; stay declared. Unit: nesting levels.
  :seon.config.eval.result/max-depth 64
  ; Unit: elements retained per collection.
  :seon.config.eval.result/max-collection 8192

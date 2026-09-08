@@ -1,7 +1,6 @@
 (ns seon.render.value-test
   "The render floor is one adapter over the sealed print emitter."
-  (:require [clojure.edn :as edn]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.config :as config]
             [seon.print :as print]
@@ -310,16 +309,3 @@
     (is (str/includes? text "window-failed"))
     (is (str/includes? text "poison"))))
 
-(deftest oversized-result-window-remains-tagged-data
-  (let [full (:seon.cluster.eval/result-edn
-              (admit/admit
-               {:seon.sci.admit/value (vec (range 40))
-                :seon.sci.admit/interrupt-fn (fn [])
-                :seon.sci.admit/caps caps
-                :seon.config/on-core-error :record}))
-        window (value/result-window-edn (routed-unit :unused 3) full)
-        node (edn/read-string window)]
-    (is (< (count window) (count full)))
-    (is (= [0 1 :seon.print/elided]
-           (mapv #(or (:seon.print/value %) (:seon.print/face %))
-                 (:seon.print/items node))))))

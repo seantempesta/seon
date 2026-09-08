@@ -2,4 +2,14 @@
             :duration-ms :int,
             :fn-entries :int,
             :host-interop-count [:int {:min 0}],
+            :missing
+            [:enum
+             {:description
+              "Why this evaluation stores no value: it reached the storage bound while its serialization streamed (:over-bound), the walk could not project it into data at all (:unserializable), or its stored bytes are gone (:lost). A missing value ablates the result handle: the response carries no :seon.repl/result and the turn's fork binds nothing, so a later form naming it gets an ordinary unresolved-symbol error."}
+             :over-bound :unserializable :lost],
+            :size
+            [:int
+             {:min 0,
+              :description
+              "UTF-8 bytes reached when the value went over the storage bound. Present only with :seon.eval/missing :over-bound: an unserializable or lost value has no measured size, and a stored value's size is the length of what is stored."}],
             :outcome [:enum :ok :time :error]}

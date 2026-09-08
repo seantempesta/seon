@@ -26,7 +26,10 @@
                           :seon.schema.admission/reason "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation."
                           :gen/elements [nil true 0 "" :k [] {} #{}]}]]
                  [:seon.cluster.eval/result-edn
+                  {:optional true}
                   :seon.cluster.eval/result-edn]
+                 [:seon.eval/missing {:optional true} :seon.eval/missing]
+                 [:seon.eval/size {:optional true} :seon.eval/size]
                  [:seon.cluster.eval/error
                   {:optional true}
                   :seon.cluster.eval/error]
@@ -51,7 +54,6 @@
                   {:optional true}
                   :seon.sci.eval/defs]
                  [:seon.print/options :seon.print/options]
-                 [:seon.sci.admit/capped? :seon.sci.admit/capped?]
                  [:seon.sci.admit/record :seon.sci.admit/record]],
                 :unrun-request
                 [:map
@@ -83,11 +85,12 @@
                   :seon.config/on-core-error]],
                 :invocation-result
                 [:map
-                 [:seon.sci.admit/print-node :seon.print/node]
-                 [:seon.sci.admit/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                 [:seon.sci.admit/print-node {:optional true} :seon.print/node]
+                 [:seon.sci.admit/value {:optional true} [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                           :seon.schema.admission/reason "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation."
                           :gen/elements [nil true 0 "" :k [] {} #{}]}]]
-                 [:seon.sci.admit/capped? :seon.sci.admit/capped?]
+                 [:seon.eval/missing {:optional true} :seon.eval/missing]
+                 [:seon.eval/size {:optional true} :seon.eval/size]
                  [:seon.sci.admit/record :seon.sci.admit/record]],
                 :referenced-vars [:set :symbol],
                 :request
