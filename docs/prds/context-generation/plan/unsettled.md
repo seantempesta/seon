@@ -1701,3 +1701,13 @@ NOW RUNNING in parallel, file-disjoint: lane 2 `listened-attributes`
 (cluster/* + wake/work/loop/run/agent, bootstrap, schedule, effect, error);
 `instrumented-gate-backlog-2` (projection class per law 2.1, worker-group
 scheduling, unreached suites); `verify-p1-p6-and-backlog` (read-only).
+
+`verify-p1-p6-and-backlog` (`research/verify-p1-p6-and-backlog-2026-09-08.md`):
+P1–P6 genuinely fixed (P6: 3,000 property trials green); --all now 156
+distinct reds, errors 244 → 83; 20-red sample: 9 production, 4 fixture, 3
+stale. New: `with-publication!` class fixed at the callee (`[:sequential]`,
+orchestrator); cross-cluster writes not refused (BLOCKER, lane
+`custody-isolation` running); identity row pulls nil; config apply splices
+symbols; `declared-program-namespaces` silent `[]`; the P1 dial refusal
+takes down the whole MCP surface (seam too wide — for the turn lane); the
+`phase` close-on-refusal claim is UNPROVEN (the turn lane must prove it).
