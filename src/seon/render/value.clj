@@ -1,13 +1,11 @@
 (ns seon.render.value
-  "Unit adapter from admitted print data to the two floor projections."
+  "One structural value renderer: profile-bounded AI and complete HTML."
   (:require [clojure.string :as str]
+            [seon.ai.tokens :as tokens]
             [seon.id :as id]
             [clojure.edn :as edn]
             [seon.print :as print]
-            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.schema.form :as schema.form]
-            [seon.schema.internal :as schema.internal]
             [seon.sci.admit :as admit]))
 
 (schema.edn/load! {})
@@ -126,20 +124,18 @@
   [unit]
   (let [profile (or (:seon.render/profile unit)
                     ((requiring-resolve 'seon.render/agent-render-profile)
-                     ((requiring-resolve 'seon.config/defaults))))]
-    (cond-> profile
-      (:seon.cluster.eval/result-blob unit)
-      (assoc :seon.print/requery-id
-             [:seon.blob/digest (:seon.cluster.eval/result-blob unit)])
-
-      (and (nil? (:seon.cluster.eval/result-blob unit))
-           (:seon.render.value/root unit))
-      (assoc :seon.print/requery-id (:seon.render.value/root unit))
-
-      (and (nil? (:seon.cluster.eval/result-blob unit))
-           (nil? (:seon.render.value/root unit)))
-      (assoc :seon.print/requery-refusal
-             "the value has no durable blob or entity identity"))))
+                     ((requiring-resolve 'seon.config/defaults))))
+        root (or (:seon.repl/handle unit)
+                 (:seon.render.value/root unit)
+                 (when-let [evaluation-id (:seon.eval/id unit)]
+                   (id/symbol-in "result" \e evaluation-id))
+                 (when-let [eid (or (:db/id unit)
+                                    (:db/id (:seon.render/value unit)))]
+                   [:db/id eid]))]
+    (if root
+      (assoc profile :seon.print/requery-id root)
+      (assoc profile :seon.print/requery-refusal
+             "the value has no result handle or entity identity"))))
 
 (defn- stable-entries
   [value]
@@ -208,273 +204,154 @@
      :seon.render.value/total total
      :seon.render.value/more? false}))
 
-(defn- admitted-projection
-  "Admit one in-memory value for display, or say honestly that it is missing.
+(defn- reference-identity
+  [database value]
+  (let [identity-attributes (into []
+                                  (comp (filter (fn [[_ properties]]
+                                                  (= :db.unique/identity (:db/unique properties))))
+                                        (map first))
+                                  (:schema database))
+        entity (if (map? value) value
+                   ((requiring-resolve 'seon.db/pull)
+                    database (into [:db/id] identity-attributes) value))]
+    (or (some (fn [attribute]
+                (when-let [entry (find entity attribute)]
+                  [attribute (val entry)]))
+              (sort-by str identity-attributes))
+        (when-let [eid (:db/id entity)] [:db/id eid])
+        value)))
 
-  A value admission answers with the value or with the reason it is not
-  there; an absent answer rendered as an empty panel is the class this
-  project keeps meeting. So a missing admission is re-admitted as ITSELF —
-  the marker map is a handful of bytes — and the panel shows the reason."
-  [value unit]
-  (let [caps (:seon.sci.admit/caps unit)
-        interrupt-fn (get-in unit [:seon.sci.eval/ctx
-                                   :seon.sci.kernel/guard
-                                   :seon.sci.kernel/interrupt-fn])
-        request (cond-> {:seon.sci.admit/value value
-                         :seon.sci.admit/caps caps
-                         :seon.sci.admit/interrupt-fn (or interrupt-fn (fn []))
-                         :seon.config/on-core-error :record}
-                  interrupt-fn
-                  (assoc :seon.sci.admit/unbounded? true))
-        admitted (admit/admit-value request)
-        missing (:seon.eval/missing admitted)
-        admitted (if missing
-                   (admit/admit-value
-                    (assoc request
-                           :seon.sci.admit/value
-                           (select-keys admitted [:seon.eval/missing
-                                                  :seon.eval/size])
-                           :seon.sci.admit/unbounded? true))
-                   admitted)]
-    ;; THE MARKER TRAVELS WITH THE ANSWER. A caller cannot ask the tree
-    ;; whether it is the value or the reason the value is absent — both are
-    ;; ordinary print nodes — so admission says which, and `prepare` stops
-    ;; describing the marker with the vanished value's own measurements.
-    (cond-> {:seon.render.value/tree (:seon.sci.admit/print-node admitted)
-             :seon.render.value/semantic (:seon.sci.admit/value admitted)}
-      missing (assoc :seon.eval/missing missing))))
+(defn- attribute-value
+  [unit attribute value]
+  (let [database (:seon.db/db unit)
+        properties (get-in database [:schema attribute])]
+    (if (= :db.type/ref (:db/valueType properties))
+      (if (= :db.cardinality/many (:db/cardinality properties))
+        (into #{} (map #(reference-identity database %)) value)
+        (reference-identity database value))
+      value)))
 
-(defn- distinct-in-order
-  [values]
-  (reduce (fn [result value]
-            (if (some #{value} result) result (conj result value)))
-          []
-          values))
+(declare value-node)
 
-(defn- declared-attributes
-  [forms schema-key]
-  (letfn [(attributes [form visited required-only?]
-            (cond
-              (and (keyword? form)
-                   (get forms form)
-                   (not (contains? visited form)))
-              (attributes (get forms form) (conj visited form) required-only?)
+(defn- value-node*
+  "Visit only the children the AI profile can show; HTML visits the whole value."
+  [value unit profile output depth path remaining]
+  (let [ai? (= output :seon.render/ai)
+        total (counted-size value)
+        cut (fn [offset total measure bound prefix]
+              (print/elision
+               (cond-> (merge profile
+                              {:seon.render.data/path path
+                               :seon.render.data/next-offset offset
+                               :seon.print/omitted (max 1 (- (or total (inc offset)) offset))
+                               :seon.print/elision-unit measure
+                               :seon.print/bound-by bound})
+                 total (assoc :seon.render.data/total total)
+                 prefix (assoc :seon.print/prefix prefix))))
+        exhausted? (and ai? (not (pos? @remaining)))]
+    (when ai? (vswap! remaining dec))
+    (cond
+      (and (coll? value) (not= 0 total) ai?
+           (or exhausted? (>= depth (:seon.render.profile/max-depth profile))))
+      (cut 0 total :subtree
+           (if exhausted? :seon.render.profile/token-budget
+               :seon.render.profile/max-depth)
+           (str (cond (map? value) "map" (set? value) "set"
+                      (vector? value) "vector" :else "list")
+                " depth " depth " "))
 
-              (schema.form/map-shape? form)
-              (into []
-                    (keep (fn [entry]
-                            (when (vector? entry)
-                              (let [attribute (first entry)
-                                    properties (when (map? (second entry))
-                                                 (second entry))]
-                                (when (and (qualified-keyword? attribute)
-                                           (or (not required-only?)
-                                               (not (:optional properties))))
-                                  attribute)))))
-                    (schema.form/map-entries form))
+      (string? value)
+      (let [limit (if ai? (max 1 (tokens/estimate-chars
+                                 (:seon.render.profile/token-budget profile)))
+                      (count value))]
+        (if (< limit (count value))
+          {:seon.print/face :seon.print/truncated-string
+           :seon.print/value (subs value 0 limit)
+           :seon.print/length (count value)
+           :seon.print/bound-by :seon.render.profile/token-budget
+           :seon.render.data/path path}
+          {:seon.print/face :seon.print/string :seon.print/value value}))
 
-              (and (vector? form) (= :and (first form)))
-              (into []
-                    (mapcat #(attributes % visited required-only?))
-                    (remove map? (rest form)))
+      (coll? value)
+      (let [selected (when (and (map? value) (:seon.sci.eval/ctx unit)
+                                (not (get-in unit [:seon.render.value/options
+                                                   :seon.render.value/structural?])))
+                       (let [node {:seon.print/face :seon.print/map :seon.print/entries []}
+                             projected ((requiring-resolve 'seon.render/project-node)
+                                        unit value node output)]
+                         (when (not= node projected) projected)))
+            map-value? (map? value)
+            set-value? (set? value)
+            face (cond map-value? :seon.print/map set-value? :seon.print/set
+                       (vector? value) :seon.print/vector :else :seon.print/list)
+            child-key (if map-value? :seon.print/entries :seon.print/items)
+            limit (if ai? (:seon.render.profile/max-children profile) Long/MAX_VALUE)
+            ;; Complete print keys determine order. Omitted map values are
+            ;; never visited, even to choose the retained prefix.
+            key-node #(value-node % unit profile :seon.render/html depth [] remaining)
+            key-text #(print/emit-text % {:seon.print/length nil :seon.print/level nil
+                                         :seon.print/width 0 :seon.print/table? false})
+            entries (cond
+                      map-value? (sort-by (comp key-text first)
+                                         (map (fn [[k v]] [(key-node k) k v]) value))
+                      set-value? (sort-by (comp key-text first)
+                                         (map (fn [v] [(key-node v) v v]) value))
+                      :else (map-indexed (fn [i v] [nil i v]) value))
+            children
+            (when-not selected
+             (loop [entries (seq entries) result []]
+              (if-not entries
+                result
+                (let [offset (count result)]
+                  (if (and ai? (or (>= offset limit) (not (pos? @remaining))))
+                    (conj result (cut offset total :children
+                                      (if (>= offset limit)
+                                        :seon.render.profile/max-children
+                                        :seon.render.profile/token-budget) nil))
+                    (let [[key-node key child] (first entries)
+                          ;; Lists are not associative: name their parent.
+                          child-path (if (or map-value? set-value? (vector? value))
+                                       (conj path key) path)
+                          node (value-node (if map-value? (attribute-value unit key child) child)
+                                           unit profile output (inc depth)
+                                           child-path remaining)]
+                      (recur (next entries)
+                             (conj result (if map-value? [key-node node] node)))))))))]
+        (or selected
+         (cond-> {:seon.print/face face child-key children
+                 :seon.render.data/path path}
+          total (assoc :seon.render.data/total total))))
 
-              :else []))]
-    (let [definition (get forms schema-key)
-          declared (distinct-in-order (attributes definition #{} false))
-          required (distinct-in-order (attributes definition #{} true))
-          identity-attribute
-          (some #(when (schema.internal/identity-attr? forms %) %) declared)]
-      (distinct-in-order
-       (concat (when identity-attribute [identity-attribute])
-               (remove #{identity-attribute} required)
-               (remove (set required) declared))))))
+      :else
+      (let [face (cond (nil? value) :seon.print/nil
+                       (boolean? value) :seon.print/boolean
+                       (number? value) :seon.print/number
+                       (keyword? value) :seon.print/keyword
+                       (symbol? value) :seon.print/symbol
+                       (char? value) :seon.print/char
+                       (uuid? value) :seon.print/uuid
+                       (instance? java.util.Date value) :seon.print/inst)]
+        (if face
+          {:seon.print/face face :seon.print/value value}
+          (or (:seon.sci.admit/print-node
+               (admit/admit-value
+                {:seon.sci.admit/value value
+                 :seon.sci.admit/caps (:seon.sci.admit/caps unit {})
+                 :seon.sci.admit/unbounded? true
+                 :seon.sci.admit/interrupt-fn (fn [])
+                 :seon.config/on-core-error :record}))
+              {:seon.print/face :seon.print/object
+               :seon.print/class (.getName (class value))}))))))
 
-(defn- matching-shape-rows
-  [projection value]
-  (let [values (cond-> [value]
-                 (:db/id value) (conj (transacted value)))]
-    (->> values
-         (mapcat #(schema/matching-shapes-in projection %))
-         (reduce (fn [rows row]
-                   (if (some #(= (:seon.schema/key row)
-                                  (:seon.schema/key %))
-                             rows)
-                     rows
-                     (conj rows row)))
-                 []))))
-
-(defn- common-shape
-  [projection rows]
-  (let [matches (mapv #(matching-shape-rows projection %) rows)]
-    (some (fn [candidate]
-            (when (every? (fn [row-matches]
-                            (some #(= (:seon.schema/key candidate)
-                                      (:seon.schema/key %))
-                                  row-matches))
-                          (next matches))
-              candidate))
-          (first matches))))
-
-(defn- map-collection
-  [value]
-  (when (and (coll? value) (not (map? value)))
-    (let [values (vec value)
-          rows (filterv map? values)]
-      (when (and (seq rows)
-                 (every? #(or (map? %) (= :seon.sci.admit/elided %)) values))
-        rows))))
-
-(defn- registered-layout
-  [unit value]
-  (when-let [projection
-             (some->> (:seon.sci.eval/ctx unit)
-                      ((requiring-resolve
-                        'seon.sci.kernel/context-projection)))]
-    (let [rows (cond
-                 (map? value) [value]
-                 :else (map-collection value))]
-      (when (seq rows)
-        (when-let [shape (common-shape projection rows)]
-          {:seon.render.value/layout
-           (if (map? value) :map :map-collection)
-           :seon.render.value/attributes
-           (declared-attributes (:seon.schema.projection/forms projection)
-                                (:seon.schema/key shape))})))))
-
-(defn- child-nodes
-  [node]
-  (case (:seon.print/face node)
-    (:seon.print/vector :seon.print/list :seon.print/set)
-    (:seon.print/items node)
-
-    (:seon.print/map :seon.print/record)
-    (mapcat #(if (vector? %) % [%]) (:seon.print/entries node))
-
-    :seon.print/throwable [(:seon.print/value node)]
-    []))
-
-(defn- projected-node?
-  [node]
-  (or (= :seon.print/projected (:seon.print/face node))
-      (some projected-node? (child-nodes node))))
-
-(defn- entry-attribute
-  [entry]
-  (when (and (vector? entry)
-             (= :seon.print/keyword (:seon.print/face (first entry))))
-    (:seon.print/value (first entry))))
-
-(defn- ordered-map-node
-  [node attributes]
-  (let [rank (zipmap attributes (range))]
-    (update node :seon.print/entries
-            #(->> %
-                  (sort-by (fn [entry]
-                             (if-let [attribute (entry-attribute entry)]
-                               [(get rank attribute Long/MAX_VALUE)
-                                (if (get rank attribute) "" (pr-str attribute))]
-                               [Long/MAX_VALUE "\uffff"])))
-                  vec))))
-
-(defn- layout-tree
-  [tree {:seon.render.value/keys [layout attributes] :as registered}]
-  (when-not (projected-node? tree)
-    (case layout
-      :map
-      (when (= :seon.print/map (:seon.print/face tree))
-        [(ordered-map-node tree attributes) registered])
-
-      :map-collection
-      (when (contains? #{:seon.print/vector :seon.print/list :seon.print/set}
-                       (:seon.print/face tree))
-        (let [items (:seon.print/items tree)]
-          (when (every? #(contains? #{:seon.print/map :seon.print/elided}
-                                    (:seon.print/face %))
-                        items)
-            [(update tree :seon.print/items
-                     (fn [nodes]
-                       (mapv #(if (= :seon.print/map (:seon.print/face %))
-                                (ordered-map-node % attributes)
-                                %)
-                             nodes)))
-             registered])))
-
-      nil)))
-
-(defn- attribute-label
-  [attribute-node duplicated-names options]
-  (let [attribute (:seon.print/value attribute-node)]
-    (if (qualified-keyword? attribute)
-      (if (contains? duplicated-names (name attribute))
-        (str attribute)
-        (name attribute))
-      (print/emit-text attribute-node options))))
-
-(defn- map-components
-  [node options]
-  (let [entries (:seon.print/entries node)
-        duplicated-names
-        (->> entries
-             (keep entry-attribute)
-             (group-by name)
-             (keep (fn [[attribute-name attributes]]
-                     (when (< 1 (count attributes)) attribute-name)))
-             set)]
-    (mapv (fn [entry]
-            (if (vector? entry)
-              {:seon.render.value/label
-               (attribute-label (first entry) duplicated-names options)
-               :seon.render.value/value
-               (print/emit-text (second entry) options)}
-              {:seon.render.value/elision (print/emit-text entry options)}))
-          entries)))
-
-(defn- components-text
-  [components]
-  (str/join
-   ", "
-   (map (fn [{:seon.render.value/keys [label value elision]}]
-          (or elision (str label ": " value)))
-        components)))
-
-(defn- map-html
-  [components]
-  (into [:dl {:class "seon-data-map"}]
-        (mapcat
-         (fn [{:seon.render.value/keys [label value elision]}]
-           (if elision
-             [[:dt {:class "seon-data-key"} "\u2026"]
-              [:dd {:class "seon-data-value"} elision]]
-             [[:dt {:class "seon-data-key"} label]
-              [:dd {:class "seon-data-value"} value]])))
-        components))
-
-(defn- layout-emission
-  [tree layout options]
-  (let [options (assoc options :seon.print/table? false :seon.print/width 0)]
-    (case layout
-      :map
-      (when (= :seon.print/map (:seon.print/face tree))
-        (let [components (map-components tree options)]
-          {:seon.print/text (components-text components)
-           :seon.print/hiccup (map-html components)}))
-
-      :map-collection
-      (when (contains? #{:seon.print/vector :seon.print/list :seon.print/set}
-                       (:seon.print/face tree))
-        (let [rows
-              (mapv (fn [item]
-                      (if (= :seon.print/map (:seon.print/face item))
-                        (components-text (map-components item options))
-                        (print/emit-text item options)))
-                    (:seon.print/items tree))]
-          {:seon.print/text (str/join "\n" rows)
-           :seon.print/hiccup
-           (into [:ol {:class "seon-data-list"}]
-                 (map (fn [row] [:li row]))
-                 rows)}))
-
-      nil)))
+(defn- value-node
+  [value unit profile output depth path remaining]
+  (try
+    (assoc (value-node* value unit profile output depth path remaining)
+           :seon.render.data/path path)
+    (catch Throwable failure
+      {:seon.print/face :seon.print/failed
+       :seon.print/class (.getName (class failure))
+       :seon.print/message (or (ex-message failure) "value realization failed")})))
 
 (defn- breadcrumbs
   [unit path]
@@ -501,7 +378,7 @@
          (path-link unit path (+ offset shown) "next →" "seon-data-page"))]))
 
 (defn prepare
-  "Admit once, recursively dispatch declared producers, fit, then emit."
+  "Project live values within the AI profile, then emit through the shared grammar."
   {:malli/schema
    [:function
     [:=> [:cat :seon.render/unit]
@@ -511,48 +388,14 @@
   ([unit]
    (prepare unit :seon.render/ai))
   ([unit output]
-   (when (:seon.sci.admit/caps unit)
-    (let [display (display-value unit)
-          admitted (if-let [result-edn (:seon.cluster.eval/result-edn unit)]
-                     (let [tree (edn/read-string result-edn)]
-                       {:seon.render.value/tree tree
-                        :seon.render.value/semantic
-                        (admit/semantic-value tree)
-                        :seon.render.value/truncated? false})
-                     (admitted-projection
-                      (:seon.render.value/window display) unit))
-          registered (registered-layout unit
-                                        (:seon.render.value/semantic admitted))
-          ;; A TOTAL DESCRIBES THE TREE BEING FIT, NEVER A TREE THAT WAS
-          ;; NEVER BUILT. `fit` derives an elision's omitted count as the
-          ;; carried total minus the children it admitted, so carrying the
-          ;; vanished value's count over a MISSING admission made the
-          ;; two-key marker map announce `98 more children of 100` — a cut
-          ;; reported for a value nothing ever stored.
-          profile (cond-> (render-profile unit)
-                    (and (not (:seon.eval/missing admitted))
-                         (or (:seon.render.data/total unit)
-                             (:seon.render.value/total display)))
-                    (assoc :seon.render.data/total
-                           (or (:seon.render.data/total unit)
-                               (:seon.render.value/total display))))
-          projected-tree (if (get-in unit [:seon.render.value/options
-                                           :seon.render.value/structural?])
-                           (:seon.render.value/tree admitted)
-                           ((requiring-resolve 'seon.render/project-node)
-                            unit
-                            (:seon.render.value/semantic admitted)
-                            (:seon.render.value/tree admitted)
-                            output))
-          [projected-tree registered]
-          (or (when registered (layout-tree projected-tree registered))
-              [projected-tree nil])
-          ;; ELISION ONLY AT THE AI BOUNDARY (owner ruling, 2026-09-07).
-          ;; Admission markers still become declared elision values in both
-          ;; projections — that is what the stored node already says — but
-          ;; only the AI projection is cut to the profile's sizes; the HTML
-          ;; value surfaces serve the whole stored value.
-          tree (cond-> (print/enrich-elisions projected-tree profile)
+   (let [display (display-value unit)
+          profile (render-profile unit)
+          raw (:seon.render/value unit)
+          initial-tree (if-let [serialized (:seon.cluster.eval/result-edn unit)]
+                         (edn/read-string serialized)
+                         (value-node raw unit profile output 0 []
+                                     (volatile! (:seon.render.profile/token-budget profile))))
+          tree (cond-> initial-tree
                  (= output :seon.render/ai) (print/fit profile))
           options (cond-> (assoc (print-options unit)
                                  :seon.print/length nil
@@ -564,10 +407,7 @@
                     (= :tabular
                        (:seon.render.profile/composition profile))
                     (assoc :seon.print/table? true))
-          emitted (or (when registered
-                        (layout-emission
-                         tree (:seon.render.value/layout registered) options))
-                      (print/emit-both tree options))
+          emitted (print/emit-both tree options)
           truncated? (boolean
                       (or (:seon.render.value/more? display)
                           (pos? (:seon.render.value/offset display))))
@@ -587,7 +427,7 @@
           (:seon.print/hiccup emitted)
           (when truncated?
             [:p {:class "seon-data-capped"}
-             "elided — this value is larger than the configured window"]) ]})))))
+             "elided — this value is larger than the configured window"]) ]}))))
 
 (defn render-ai-data
   "Return the text sink result from one already prepared projection."
@@ -660,19 +500,12 @@
 
 (defn- render-prepared
   [unit output]
-  (if-let [projection (prepare unit output)]
+  (let [projection (prepare unit output)]
     (if (:seon.error/kind projection)
       projection
       (if (= output :seon.render/html)
         (render-html-data projection)
-        (render-ai-data projection)))
-    (if (= output :seon.render/html)
-      [:div {:class "seon-error-card"}
-       [:span {:class "seon-error-card-message"}
-        (str "This panel needs :seon.sci.admit/caps on the unit; without "
-             "them nothing bounds what it would print.")]]
-      (str "This projection needs :seon.sci.admit/caps on the unit; without "
-           "them nothing bounds what it would say."))))
+        (render-ai-data projection)))))
 
 (defn render-ai
   "Render any floor unit through the admitted text sink."

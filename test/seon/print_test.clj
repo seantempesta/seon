@@ -589,3 +589,11 @@
     (is (not= "#object[]" nameless))
     (is (str/includes? nameless ":seon.print/object-without-class")
         "a node that names no class says so instead of printing nothing")))
+
+(deftest canonical-order-belongs-to-print-nodes
+  (let [left (admitted-node (array-map :z 1 :a 2 :m 3))
+        right (admitted-node (array-map :m 3 :a 2 :z 1))]
+    (is (= "{:a 2, :m 3, :z 1}" (print/emit-text left no-cuts)))
+    (is (= (print/emit-both left no-cuts) (print/emit-both right no-cuts)))
+    (is (= "[3 1 2]" (print/emit-text (admitted-node [3 1 2]) no-cuts)))
+    (is (= "(3 1 2)" (print/emit-text (admitted-node '(3 1 2)) no-cuts)))))

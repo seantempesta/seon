@@ -4,10 +4,15 @@
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
             [seon.ai.tokens :as tokens]
-            [seon.render.hiccup :as html]
             [seon.schema :as schema]
             #?(:clj [seon.schema.edn :as schema.edn])
             [seon.schema.form :as schema.form]))
+
+(defn- literal
+  [value]
+  (binding [*print-readably* true *print-dup* false
+            *print-length* nil *print-level* nil *print-meta* false]
+    (pr-str value)))
 
 (defprotocol Sink
   (-open [sink node] "Enter one structural node.")
@@ -208,6 +213,8 @@
 (deftype ^:private TextSink [state options]
   Sink
   (-open [_ node]
+    (when (::summarize? node)
+      (append-chunk! state (str (::summary node) " ")))
     (append-chunk! state (::begin node))
     (vswap! state update ::depth inc))
   (-token [_ face text]
@@ -219,7 +226,7 @@
     (append-chunk! state
                    (if (= :seon.render/ai output)
                      value
-                     (pr-str value))))
+                     (literal value))))
   (-close [_ node]
     (vswap! state update ::depth dec)
     (append-chunk! state (::end node))))
@@ -253,7 +260,7 @@
   (if-let [{::keys [columns rows]} (::table node)]
     [:div
      {:class "seon-print-node seon-print-table"
-      :data-seon-path (pr-str (::path node))}
+      :data-seon-path (literal (::path node))}
      (into [:span {:class "seon-print-content" :hidden "hidden"}] children)
      [:table {:class "seon-print-visual"}
       [:thead
@@ -264,7 +271,7 @@
             rows)]]
     [:details
      {:class (str "seon-print-node " (face-class (::kind node)))
-      :data-seon-path (pr-str (::path node))}
+      :data-seon-path (literal (::path node))}
      [:summary {:class "seon-print-summary"}
       (::summary node)]
      (into [:span {:class "seon-print-content"}] children)]))
@@ -274,7 +281,10 @@
   (-open [_ node]
     (vswap! state update ::stack conj
             {::node node
-             ::children [(hiccup-token ::delimiter (::begin node))]}))
+             ::children (cond-> []
+                          (::summarize? node)
+                          (conj (hiccup-token ::shape (str (::summary node) " ")))
+                          true (conj (hiccup-token ::delimiter (::begin node))))}))
   (-token [_ face text]
     (append-hiccup! state (hiccup-token face text)))
   (-fragment [_ output value]
@@ -380,15 +390,33 @@
       [(subvec (vec items) 0 length) true])))
 
 (defn- node-description
-  [node path begin end separator summary]
+  [node path begin end separator _summary]
   {::kind (::face node)
    ::path path
    ::begin begin
    ::end end
    ::separator separator
-   ::summary summary})
+   ::summary (str (name (::face node)) " "
+                  (or (:seon.render.data/total node)
+                      (count (or (::items node) (::entries node))))
+                  " items, depth " (count path))
+   ::summarize? (boolean (some #(= ::elided (::face %))
+                              (or (::items node) (::entries node))))})
 
 (declare emit-node emit-text)
+
+(defn- requery-form
+  [identity path]
+  (let [source (cond
+                 (symbol? identity) identity
+                 (seq? identity) identity
+                 (or (vector? identity) (int? identity))
+                 (list 'seon.db/pull (list 'quote '[*])
+                       (list 'quote identity)))]
+    (when source
+      (list 'get-in source
+            (if (some #(or (symbol? %) (coll? %)) path)
+              (list 'quote path) path)))))
 
 (defn render-elision-ai
   "Render an elision as a readable, requeryable structural face."
@@ -396,21 +424,23 @@
   [unit]
   (let [omitted (or (:seon.print/omitted unit) 1)
         measure (name (or (:seon.print/elision-unit unit) :subtree))
-        location (str "path " (pr-str (or (:seon.render.data/path unit) []))
+        location (str "path " (literal (or (:seon.render.data/path unit) []))
                       " offset " (or (:seon.render.data/next-offset unit) 0))
-        requery (if-some [identity (:seon.print/requery-id unit)]
-                  (str "requery by " (pr-str identity))
+        form (or (::requery-form unit)
+                 (requery-form (::requery-id unit)
+                               (or (:seon.render.data/path unit) [])))
+        requery (if form
+                  (str "requery " (literal form))
                   (str "requery refused: "
                        (or (:seon.print/requery-refusal unit)
                            "no stable identity was supplied")))]
     (str (or (:seon.print/prefix unit) "") "…"
          " " omitted " more " measure
-         (when-some [total (:seon.render.data/total unit)]
-           (str " of " total))
+         (str " of " (or (:seon.render.data/total unit) "unknown"))
          (when-some [bound-by (:seon.print/bound-by unit)]
            (str "; bounded by " bound-by))
          "; " requery " at " location
-         " with " (pr-str (or (:seon.render.profile/id unit)
+         " with " (literal (or (:seon.render.profile/id unit)
                                :seon.render.profile/unspecified)))))
 
 (def ^:private scalar-faces
@@ -429,7 +459,8 @@
   (let [choice (::table? options)
         row-maps (mapv table-row (::items node))
         maps? (every? some? row-maps)
-        columns (when maps? (mapv first (::entries (first (::items node)))))
+        columns (when maps? (vec (sort-by #(emit-text % generated-item-options)
+                                         (map first (::entries (first (::items node)))))))
         same-columns? (and maps?
                            (every? #(= (set columns) (set (keys %))) row-maps))
         scalar-values? (and maps?
@@ -582,7 +613,7 @@
          [::uuid ::tag]]]
   (defmethod emit face
     [node sink _ _ _]
-    (-token sink token-face (pr-str (::value node)))))
+    (-token sink token-face (literal (::value node)))))
 
 (defmethod emit ::vector
   [node sink options depth path]
@@ -652,7 +683,7 @@
             ;; reader cannot tell an unrenderable value from an empty one. A
             ;; node that names no class says so, in the same flat diagnostic
             ;; shape the unknown face uses.
-            (pr-str
+            (literal
              {:seon.error/kind ::object-without-class
               :seon.error/message "The object print node names no class."
               :seon.error/data
@@ -661,13 +692,13 @@
 
 (defmethod emit ::truncated-string
   [node sink _ _ _]
-  (-token sink ::string (pr-str (str (::value node) "…"))))
+  (-token sink ::string (literal (str (::value node) "…"))))
 
 (defmethod emit ::failed
   [node sink _ _ _]
   (-token sink ::object
           (str "#object[" (::class node) " "
-               (pr-str (str "projection failed: " (::message node))) "]")))
+               (literal (str "projection failed: " (::message node))) "]")))
 
 (defmethod emit ::throwable
   [node sink options depth path]
@@ -697,7 +728,7 @@
   ;; face and node keys. Admission should make this branch rare; totality makes
   ;; it safe and diagnosable when an old artifact or host caller reaches it.
   (-token sink ::object
-          (pr-str
+          (literal
            {:seon.error/kind ::unknown-face
             :seon.error/message "The admitted value has no declared print face."
             :seon.error/data
@@ -771,13 +802,26 @@
 
 (defn- emit-node
   [node sink options depth path]
-  (if (and (contains? #{::vector ::list} (::face node))
+  (let [order-key #(emit-text % generated-item-options)
+        node (case (::face node)
+               (::map ::record)
+               (update node ::entries
+                       #(vec (sort-by (fn [entry]
+                                        (if (vector? entry)
+                                          [0 (order-key (first entry))] [1 ""])) %)))
+               ::set
+               (update node ::items
+                       #(vec (sort-by (fn [item]
+                                        (if (= ::elided (::face item))
+                                          [1 ""] [0 (order-key item)])) %)))
+               node)]
+   (if (and (contains? #{::vector ::list} (::face node))
            (zero? depth)
            (not (structural-cut? options depth)))
     (if-let [table (table-data node options)]
       (emit-table node table sink path)
       (emit node sink options depth path))
-    (emit node sink options depth path))
+    (emit node sink options depth path)))
   sink)
 
 (defn emit-text
@@ -911,6 +955,8 @@
     (some? prefix) (assoc ::prefix prefix)
     (some? bound-by) (assoc ::bound-by bound-by)
     (some? requery-id) (assoc ::requery-id requery-id)
+    (requery-form requery-id (or path []))
+    (assoc ::requery-form (requery-form requery-id (or path [])))
     (and (nil? requery-id) (some? requery-refusal))
     (assoc ::requery-refusal requery-refusal)
     (and (nil? requery-id) (nil? requery-refusal))
@@ -936,8 +982,8 @@
     (throw
      (ex-info
       (str "An elision must carry its requery coordinates: "
-           ":seon.render.data/path " (pr-str path)
-           " and :seon.render.data/next-offset " (pr-str next-offset) ".")
+           ":seon.render.data/path " (literal path)
+           " and :seon.render.data/next-offset " (literal next-offset) ".")
       {:seon.error/kind ::elision-without-requery-coordinates
        ::elision-without-requery-coordinates true
        :seon.render.data/path path
@@ -963,11 +1009,13 @@
     (::requery-id carried)
     (-> cut
         (dissoc ::requery-refusal)
-        (assoc ::requery-id (::requery-id carried)))
+        (assoc ::requery-id (::requery-id carried)
+               ::requery-form (requery-form (::requery-id carried)
+                                            (:seon.render.data/path cut []))))
 
     (::requery-refusal carried)
     (-> cut
-        (dissoc ::requery-id)
+        (dissoc ::requery-id ::requery-form)
         (assoc ::requery-refusal (::requery-refusal carried)))
 
     :else cut))
@@ -1019,7 +1067,7 @@
     (elision-node (assoc profile ::bound-by (::bound-by node))
                   path (count (::value node))
                   (- (::length node) (count (::value node)))
-                  (::length node) :characters (pr-str (::value node)))
+                  (::length node) :characters (literal (::value node)))
 
     ::elided
     (if (::omitted node)
@@ -1041,11 +1089,14 @@
 (defn- fit-entry
   [entry profile depth path child-limit string-limit]
   (if (vector? entry)
-    (mapv (fn [index child]
-            (fit-node child profile (inc depth) (conj path index)
-                      child-limit string-limit))
-          (range)
-          entry)
+    (let [[key-node value-node] entry
+          value-path (or (:seon.render.data/path value-node)
+                         (try
+                           (conj (pop path)
+                                 (edn/read-string (emit-text key-node generated-item-options)))
+                           (catch #?(:clj Throwable :cljs :default) _ (pop path))))]
+      [key-node (fit-node value-node profile depth value-path
+                          child-limit string-limit)])
     entry))
 
 (defn- fit-children
@@ -1066,7 +1117,10 @@
         (when (< retained total)
           (preserve-requery
            (elision-node (assoc profile
-                                ::bound-by :seon.render.profile/max-children)
+                                ::bound-by (or (when (= retained admitted-total)
+                                                 (::bound-by carried-elision))
+                                               (::bound-by profile)
+                                               :seon.render.profile/max-children))
                          path retained (- total retained) total
                          :children nil)
            carried-elision))]
@@ -1082,7 +1136,7 @@
 (defn- projected-text
   [node]
   (let [value (::value node)]
-    (if (string? value) value (pr-str value))))
+    (if (string? value) value (literal value))))
 
 (defn- bounded-text
   [text original character-limit]
@@ -1105,7 +1159,7 @@
                                :seon.render.profile/token-budget))
                     path (count (::value bounded))
                     (- original (count (::value bounded))) original
-                    :characters (pr-str (::value bounded)))
+                    :characters (literal (::value bounded)))
       node)))
 
 (defn- structural-elision
@@ -1118,12 +1172,28 @@
                     (+ admitted omitted))
                   admitted)]
     (preserve-requery
-     (elision-node profile path 0 (max 1 total) total :subtree nil)
+     (elision-node (assoc profile ::bound-by (or (::bound-by profile)
+                                                :seon.render.profile/max-depth))
+                   path 0 (max 1 total) total :subtree nil)
      carried)))
 
 (defn- fit-node
   [node profile depth path child-limit string-limit]
-  (let [face (::face node)]
+  (let [node (case (::face node)
+               (::map ::record)
+               (update node ::entries
+                       #(vec (sort-by (fn [entry]
+                                        (if (vector? entry)
+                                          [0 (emit-text (first entry) generated-item-options)]
+                                          [1 ""])) %)))
+               ::set
+               (update node ::items
+                       #(vec (sort-by (fn [item]
+                                        (if (= ::elided (::face item))
+                                          [1 ""] [0 (emit-text item generated-item-options)])) %)))
+               node)
+        face (::face node)
+        path (or (:seon.render.data/path node) path)]
     (cond
       (and (>= depth (:seon.render.profile/max-depth profile))
            (contains? structural-faces face))
@@ -1155,8 +1225,7 @@
 
   THIS IS THE AI CONTEXT GENERATION BOUNDARY'S ONE ELISION, and the only
   place presentation size cuts a value at all (owner ruling, 2026-09-07).
-  Storage is bounded per value by `seon.sci.admit`; HTML is not bounded at
-  all; the AI projection is bounded HERE, by the render profile the request
+  HTML is not bounded; the AI projection is bounded HERE, by the render profile the request
   carried. A caller that is not generating AI context does not call this —
   a request with no presentation decision must not make one.
 
@@ -1179,21 +1248,24 @@
       (let [candidate (fit-node node
                                 (assoc profile
                                        :seon.render.profile/max-depth
-                                       depth-limit)
+                                       depth-limit
+                                       ::bound-by (when (or (< child-limit initial-children)
+                                                           (< depth-limit initial-depth))
+                                                    :seon.render.profile/token-budget))
                                 0 [] child-limit string-limit)]
         (cond
           (<= (tokens/estimate (emit-text candidate options)) budget)
           candidate
+
+          (> string-limit string-floor)
+          (recur child-limit depth-limit
+                 (max string-floor (quot string-limit 2)))
 
           (pos? child-limit)
           (recur (quot child-limit 2) depth-limit string-limit)
 
           (pos? depth-limit)
           (recur child-limit (dec depth-limit) string-limit)
-
-          (> string-limit string-floor)
-          (recur child-limit depth-limit
-                 (max string-floor (quot string-limit 2)))
 
           :else candidate)))))
 

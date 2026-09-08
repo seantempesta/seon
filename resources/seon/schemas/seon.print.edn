@@ -216,6 +216,7 @@
                 [:seon.print/bound-by
                  {:optional true}
                  :seon.print/bound-by]
+                [:seon.print/requery-form {:optional true} :seon.print/requery-form]
                 [:seon.print/requery-id
                  {:optional true}
                  :seon.print/requery-id]
@@ -263,10 +264,16 @@
              [:map
               [:seon.print/length
                {:optional true}
-               [:maybe :seon.print/length]]
+               [:maybe {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                        :seon.schema.admission/reason "Clojure print bindings use nil to request unlimited printing; these are in-memory options, never stored attributes."
+                        :gen/elements [nil 0 1 8 32]}
+               :seon.print/length]]
               [:seon.print/level
                {:optional true}
-               [:maybe :seon.print/level]]
+               [:maybe {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                        :seon.schema.admission/reason "Clojure print bindings use nil to request unlimited printing; these are in-memory options, never stored attributes."
+                        :gen/elements [nil 0 1 8 32]}
+               :seon.print/level]]
               [:seon.print/width {:optional true} :seon.print/width]
               [:seon.print/namespace-maps?
                {:optional true}
@@ -282,6 +289,9 @@
              :elision-unit
              [:enum :children :characters :subtree :tokens],
              :requery-id :seon.schema/value,
+             :requery-form
+             [:sequential {:description "Executable Clojure form retrieving the omitted value."}
+              :seon.schema/value],
              :requery-refusal [:string {:min 1}],
              :bound-by :qualified-keyword,
              :text :string,
@@ -294,7 +304,8 @@
                :seon.print/elision-unit]
               [:seon.print/prefix {:optional true} :seon.print/prefix]
               [:seon.print/bound-by {:optional true} :seon.print/bound-by]
-              [:seon.print/requery-id
+              [:seon.print/requery-form {:optional true} :seon.print/requery-form]
+                [:seon.print/requery-id
                {:optional true}
                :seon.print/requery-id]
               [:seon.print/requery-refusal

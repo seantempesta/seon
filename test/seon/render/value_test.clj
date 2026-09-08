@@ -1,6 +1,9 @@
 (ns seon.render.value-test
   "The render floor is one adapter over the sealed print emitter."
   (:require [clojure.string :as str]
+            [clojure.edn :as edn]
+            [seon.db :as db]
+            [sci.core :as sci]
             [clojure.test :refer [deftest is]]
             [seon.config :as config]
             [seon.print :as print]
@@ -46,54 +49,14 @@
         (apply str (map lexical-hiccup-text body))))
     :else ""))
 
-(deftest one-admission-and-one-tee-produce-the-floor-twins
-  (let [admissions (atom 0)
-        emissions (atom 0)
-        original-admit admit/admit-value
-        original-emit print/emit-both]
-    (with-redefs [admit/admit-value (fn [request]
-                               (swap! admissions inc)
-                               (original-admit request))
-                  print/emit-both (fn [node options]
-                                    (swap! emissions inc)
-                                    (original-emit node options))]
-      (let [projection (value/prepare (unit {:a [1 2 3]}))]
-        (is (= 1 @admissions))
-        (is (= 1 @emissions))
-        (is (= "{:a [1 2 3]}" (value/render-ai-data projection)))
-        (is (vector? (value/render-html-data projection)))))))
-
-(deftest structural-option-skips-domain-projection-but-keeps-floor-emission
-  (let [calls (atom 0)
-        original render/project-node
-        raw {:stored/attribute "value"}]
-    (with-redefs [render/project-node
-                  (fn [& args]
-                    (swap! calls inc)
-                    (apply original args))]
-      (let [structural (value/prepare
-                        (assoc (unit raw)
-                               :seon.render.value/options
-                               {:seon.render.value/structural? true}))
-            default (value/prepare (unit raw))]
-        (is (= 1 @calls))
-        (is (str/includes? (value/render-ai-data structural) "#:stored{:attribute"))
-        (is (str/includes? (hiccup/->string
-                            (value/render-html-data structural))
-                           "seon-print-keyword"))
-        (is (= (value/render-ai-data structural)
-               (value/render-ai-data default)))))))
-
-(deftest unregistered-values-keep-the-existing-fitted-print-floor
+(deftest ordinary-values-use-one-readable-structural-printer
   (let [raw {:unregistered/value 1 :unregistered/detail [2 3]}
-        floor-unit (unit raw)
-        projection (value/prepare floor-unit)
-        html (hiccup/->string (value/render-html-data projection))]
-    (is (= (pr-str raw) (value/render-ai-data projection)))
-    (is (= :seon.print/map
-           (:seon.print/face (:seon.render.value/tree projection))))
-    (is (str/includes? html "seon-print-map"))
-    (is (not (str/includes? html "seon-data-map")))))
+        projection (value/prepare (unit raw))]
+    (is (= raw (edn/read-string (value/render-ai-data projection))))
+    (is (= "#:unregistered{:detail [2 3], :value 1}"
+           (value/render-ai-data projection)))
+    (is (str/includes? (hiccup/->string (value/render-html (unit raw)))
+                       "seon-print-map"))))
 
 (deftest declared-producers-still-have-absolute-precedence
   (support/with-database
@@ -140,8 +103,8 @@
        (is (= :seon.print/elided (:seon.print/face root-elision)))
        (is (= root (:seon.print/requery-id root-elision)))
        (is (= 2 (:seon.print/omitted root-elision)))
-       (is (str/includes? ai "requery by [:my.message/inbox \"root\"]"))
-       (is (str/includes? html "requery by [:my.message/inbox"))))))
+       (is (str/includes? ai "(get-in (seon.db/pull (quote [*]) (quote [:my.message/inbox \"root\"])) [])"))
+       (is (str/includes? html "requery (get-in (seon.db/pull"))))))
 
 (deftest stored-print-data-feeds-both-sinks-without-readmission
   (let [stored (:seon.cluster.eval/result-edn
@@ -214,59 +177,26 @@
                :seon.print/options {:seon.print/width 20}))
        "\n")))
 
-(deftest storage-is-faithful-under-its-byte-bound-and-missing-over-it
-  ;; THE FIRST OF THE THREE BOUNDS (AGENTS.md §2.4). Admission stores a value
-  ;; whole or not at all: there is no window, no page, and no display cap
-  ;; there any more, so a reader never has to ask whether what it holds is
-  ;; the whole thing. Over the bound the answer is the typed marker naming
-  ;; the bytes it reached — and BOTH projections render that marker as the
-  ;; only thing they know, with no measurement borrowed from the value that
-  ;; was never stored.
-  (let [whole (vec (range 20))
-        oversized (vec (range 100))
-        tight (assoc caps :seon.config.eval.result/max-bytes 32)
-        stored (admit/admit-value
-                {:seon.sci.admit/value whole
-                 :seon.sci.admit/caps caps
-                 :seon.sci.admit/interrupt-fn (fn [])
-                 :seon.config/on-core-error :record})
-        missing (admit/admit-value
-                 {:seon.sci.admit/value oversized
-                  :seon.sci.admit/caps tight
-                  :seon.sci.admit/interrupt-fn (fn [])
-                  :seon.config/on-core-error :record})
-        bounded (assoc (unit oversized) :seon.sci.admit/caps tight)
-        text (value/render-ai bounded)
-        html (hiccup/->string (value/render-html bounded))]
-    (is (= whole (:seon.sci.admit/value stored))
-        "a value under the bound is stored faithfully, never windowed")
-    (is (= (pr-str whole) (value/render-ai (unit whole))))
-    (is (= :over-bound (:seon.eval/missing missing)))
-    (is (<= (:seon.config.eval.result/max-bytes tight)
-            (:seon.eval/size missing))
-        "the marker carries the bytes the stream reached")
-    (is (not (contains? missing :seon.sci.admit/print-node))
-        "an over-bound admission stores no partial node")
-    (is (= (str "#:seon.eval{:missing :over-bound, :size "
-                (:seon.eval/size missing) "}")
-           text))
-    (is (str/includes? html "over-bound"))
-    (doseq [projection [text html]]
-      (is (not (str/includes? projection "more children"))
-          "a value that was never stored has no omitted-child count"))))
+(deftest rendering-live-values-does-not-apply-a-storage-bound
+  (let [raw (vec (range 100))
+        request (assoc (unit raw) :seon.sci.admit/caps
+                       {:seon.config.eval.result/max-bytes 1})]
+    (is (str/includes? (value/render-ai request) "68 more children of 100"))
+    (is (str/includes? (hiccup/->string (value/render-html request)) ">99<"))
+    (is (not (str/includes? (value/render-ai request) "over-bound")))))
 
 (deftest elision-is-a-requeryable-structural-value
   ;; THE SECOND AND THIRD BOUNDS. The AI projection is cut by the render
   ;; profile — the one place presentation elides — and the cut is ordinary
   ;; data naming what was omitted, the bound that made it, and how to ask
   ;; again. HTML is not bounded at all: the same unit serves every item.
-  (let [digest (apply str (repeat 64 "a"))
+  (let [handle 'result/e0123456789ab
         raw (vec (range 100))
         profile (render/agent-render-profile (support/effective-config))
         kept (:seon.render.profile/max-children profile)
-        blob-unit (assoc (unit raw) :seon.cluster.eval/result-blob digest)
-        projection (value/prepare blob-unit)
-        html (hiccup/->string (value/render-html blob-unit))
+        result-unit (assoc (unit raw) :seon.repl/handle handle)
+        projection (value/prepare result-unit)
+        html (hiccup/->string (value/render-html result-unit))
         elision (last (:seon.print/items
                        (:seon.render.value/tree projection)))]
     (is (= {:seon.print/omitted (- (count raw) kept)
@@ -275,7 +205,7 @@
             :seon.render.data/next-offset kept
             :seon.print/bound-by :seon.render.profile/max-children
             :seon.render.profile/id (:seon.render.profile/id profile)
-            :seon.print/requery-id [:seon.blob/digest digest]}
+            :seon.print/requery-id handle}
            (select-keys elision
                         [:seon.print/omitted
                          :seon.render.data/total
@@ -289,8 +219,7 @@
                                    (count raw))))
       (is (str/includes? text
                          "bounded by :seon.render.profile/max-children"))
-      (is (str/includes? text (str "requery by [:seon.blob/digest \""
-                                   digest "\"]"))))
+      (is (str/includes? text "requery (get-in result/e0123456789ab [])")))
     (is (not (str/includes? html "seon-print-elision"))
         "HTML is not bounded at all — it elides nothing to requery")
     (is (str/includes? html ">99<")
@@ -304,16 +233,16 @@
   (let [projection (value/prepare (unit {:reference (atom {:private/value 42})}))
         tree (:seon.render.value/tree projection)
         [_ reference] (first (:seon.print/entries tree))]
-    (is (= #{:seon.print/face :seon.print/class}
+    (is (= #{:seon.print/face :seon.print/class :seon.render.data/path}
            (set (keys reference)))
         "an opaque reference carries no value or representation field")
     (is (= :seon.print/object (:seon.print/face reference)))
     (is (= "clojure.lang.Atom" (:seon.print/class reference)))
     (is (= "{:reference #object[clojure.lang.Atom]}"
            (value/render-ai-data projection)))
-    (is (= "#:seon.eval{:missing :unserializable}"
+    (is (= "#object[clojure.lang.Atom]"
            (value/render-ai (unit (atom {:private/value 42}))))
-        "a top-level reference is missing, named, not an empty render")))
+        "a live reference is named even when no serialization exists")))
 
 (deftest a-window-of-one-shows-one-item-not-an-empty-claim-of-more
   (let [window (value/window [:a :b :c] 0 1)]
@@ -338,9 +267,127 @@
         text (value/render-ai (unit (poison)))
         html (hiccup/->string (value/render-html (unit (poison))))
         window (value/window (poison) 0 3)]
-    (is (= "#:seon.eval{:missing :unserializable}" text))
-    (is (str/includes? html "unserializable"))
+    (is (str/includes? text "poison"))
+    (is (str/includes? html "poison"))
     (is (= :seon.render.value/window-failed
            (:seon.error/kind (:seon.render.value/window window))))
     (is (= "poison" (:seon.error/message (:seon.render.value/window window))))
     (is (zero? (:seon.render.value/shown window)))))
+
+(def ^:private probe-profile
+  {:seon.render.profile/id :seon.render.profile/test
+   :seon.render.profile/token-budget 1024
+   :seon.render.profile/max-depth 4
+   :seon.render.profile/max-children 3
+   :seon.render.profile/composition :single-line})
+
+(defn- probe-unit [raw]
+  (assoc (unit raw)
+         :seon.render/profile probe-profile
+         :seon.render.value/root 'result/e0123456789ab))
+
+(deftest equal-unordered-values-render-identical-bytes
+  (doseq [[left right]
+          [[(array-map :z/value 3 :a/value 1 :m/value 2)
+            (array-map :m/value 2 :a/value 1 :z/value 3)]
+           [(into #{} [{:z 2 :a 1} {:z 4 :a 3}])
+            (into #{} [(array-map :a 3 :z 4) (array-map :a 1 :z 2)])]]]
+    (is (= left right))
+    (is (= (value/render-ai (probe-unit left))
+           (value/render-ai (probe-unit right))))
+    (is (= (value/render-html (probe-unit left))
+           (value/render-html (probe-unit right))))))
+
+(deftest ai-never-visits-the-omitted-tail
+  (let [visits (atom [])
+        raw (map (fn [i] (swap! visits conj i) i) (iterate inc 0))
+        text (value/render-ai (probe-unit raw))]
+    (is (str/includes? text "0 1 2"))
+    (is (str/includes? text "bounded by :seon.render.profile/max-children"))
+    (is (<= (count @visits) 4)
+        "only the retained children and one lookahead are realized")))
+
+(deftest strings-are-quoted-and-their-cut-path-is-associative
+  (let [raw "a\n\"b\\c\t"
+        text (value/render-ai (probe-unit raw))
+        large (.repeat "x\n" 10000)
+        request (probe-unit {:payload/text large})
+        node (-> (value/prepare request) :seon.render.value/tree
+                 :seon.print/entries first second)]
+    (is (= (pr-str raw) text))
+    (is (not (str/includes? text "\n")))
+    (is (= [:payload/text] (:seon.render.data/path node)))
+    (is (= '(get-in result/e0123456789ab [:payload/text])
+           (:seon.print/requery-form node)))
+    (is (= (count large) (:seon.render.data/total node)))
+    (is (pos? (:seon.print/omitted node)))
+    (is (= (pr-str large)
+           (lexical-hiccup-text (value/render-html (probe-unit large)))))))
+
+(deftest depth-cuts-name-the-bound-and-html-keeps-the-leaf
+  (let [raw {:a {:b {:c {:d {:e "last-leaf"}}}}}
+        request (probe-unit raw)
+        ai (value/render-ai request)
+        html (hiccup/->string (value/render-html request))]
+    (is (str/includes? ai "depth 4"))
+    (is (str/includes? ai "bounded by :seon.render.profile/max-depth"))
+    (is (str/includes? ai "[:a :b :c :d]"))
+    (is (str/includes? html "last-leaf"))
+    (is (not (str/includes? html "seon-print-elision")))))
+
+(deftest default-entity-map-renders-refs-as-installed-identities
+  (support/with-database
+   (fn [connection]
+     (let [database @connection
+           target (db/pull database '[:db/id :seon.ns/name] [:seon.ns/name 'seon.print])
+           raw {:seon.ns/requires [target] :fixture/title "no render pair"}
+           request (assoc (probe-unit raw) :seon.db/db database)
+           shown (edn/read-string (value/render-ai request))]
+       (is (:db/id target) "the reference target must really exist")
+       (is (= #{[:seon.ns/name 'seon.print]} (:seon.ns/requires shown)))
+       (is (= "no render pair" (:fixture/title shown)))))))
+
+(deftest large-values-have-bounded-ai-work-and-complete-html
+  (doseq [[label raw terminal]
+          [[:vector (vec (range 100000)) ">99999<"]
+           [:string (.repeat "x" (* 5 1024 1024)) nil]]]
+    (let [request (probe-unit raw)
+          _ (dotimes [_ 3] (value/render-ai request))
+          start (System/nanoTime)
+          ai (value/render-ai request)
+          middle (System/nanoTime)
+          html (value/render-html request)
+          end (System/nanoTime)
+          ai-ms (/ (- middle start) 1e6)
+          html-ms (/ (- end middle) 1e6)]
+      (println "VALUE-RENDERER" label "AI-ms" ai-ms "HTML-ms" html-ms)
+      (is (< ai-ms 100.0) (str label " AI took " ai-ms " ms"))
+      (is (str/includes? ai "requery (get-in result/e0123456789ab [])"))
+      (if terminal
+        (is (str/includes? (hiccup/->string html) terminal))
+        (is (= (pr-str raw) (lexical-hiccup-text html)))))))
+
+(deftest elision-forms-execute-in-the-real-sci-context
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           raw {:payload/text (.repeat "x" 20000)}
+           node (-> (value/prepare (probe-unit raw)) :seon.render.value/tree
+                    :seon.print/entries first second)
+           _ (sci/eval-form ctx '(create-ns 'result))
+           _ (sci/intern ctx 'result 'e0123456789ab raw)]
+       (is (= (:payload/text raw)
+              (sci/eval-form ctx (:seon.print/requery-form node))))
+       (let [cut (print/elision
+                  {:seon.print/requery-id [:seon.ns/name 'seon.print]
+                   :seon.render.data/path [:seon.ns/name]
+                   :seon.render.data/total 1
+                   :seon.print/omitted 1
+                   :seon.print/bound-by :seon.render.profile/max-depth})]
+         (is (= 'seon.print (support/agent-value ctx (pr-str (:seon.print/requery-form cut))))))))))
+
+(deftest caller-print-bindings-do-not-change-string-bytes
+  (let [raw "quoted \"line\"\nnext\t\\"
+        expected (pr-str raw)]
+    (binding [*print-readably* false *print-length* 1 *print-level* 1]
+      (is (= expected (value/render-ai (probe-unit raw)))))))

@@ -17,10 +17,16 @@
                       :boolean]
                      [:seon.print/length
                       {:optional true}
-                      [:maybe :seon.print/length]]
+                      [:maybe {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                        :seon.schema.admission/reason "Clojure print bindings use nil to request unlimited printing; these are in-memory options, never stored attributes."
+                        :gen/elements [nil 0 1 8 32]}
+               :seon.print/length]]
                      [:seon.print/level
                       {:optional true}
-                      [:maybe :seon.print/level]]
+                      [:maybe {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                        :seon.schema.admission/reason "Clojure print bindings use nil to request unlimited printing; these are in-memory options, never stored attributes."
+                        :gen/elements [nil 0 1 8 32]}
+               :seon.print/level]]
                      [:seon.print/width
                       {:optional true}
                       :seon.print/width]
