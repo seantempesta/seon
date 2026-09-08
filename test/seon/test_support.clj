@@ -231,14 +231,46 @@
   ;; exit, and bin/test never reuses this delay across invocations.
   (delay (create-base)))
 
+(defn- seeded-cluster-name
+  "The one cluster this fixture stood up, DERIVED, or nil when it seeded none."
+  [database]
+  (let [names (sort (db/q '[:find [?name ...]
+                            :where [_ :seon.cluster/name ?name]]
+                          database))]
+    (when (= 1 (count names))
+      (first names))))
+
 (defn fork-cluster-ctx
-  "Fork the process source base's acquired SCI ctx for `connection`."
-  [connection]
-  (let [base-ctx (:seon.sci.eval/ctx @database-base)
-        projection (:seon.schema/projection base-ctx)
-        projection-state (sci.eval/projection-state @connection projection)]
-    (sci.eval/fork-cluster-ctx base-ctx @connection connection
-                               projection-state)))
+  "Fork the process source base's acquired SCI ctx for `connection`.
+
+  THE ENVIRONMENT RIDES THE CTX, exactly as boot puts it there
+  (`seon.cluster`, `env/replace-environment!` into the projection state).
+  Without it `seon.call-preparation/hook` finds no connection and returns its
+  arguments untouched, so every supplied default is inert: a producer
+  contracted `[value database]` — the shape an attribute-declared HTML
+  producer takes — was then invoked with one argument and answered
+  `ArityException`, which the walk recorded as a renderer failure. A fixture
+  that omits a declared input is the defect, not the contract (§5.1).
+
+  The cluster name is DERIVED from the database rather than remembered: a
+  fixture that seeded exactly one cluster gets a production-shaped
+  environment; one that seeded none carries no environment, as before."
+  ([connection]
+   (fork-cluster-ctx connection (seeded-cluster-name @connection)))
+  ([connection cluster-name]
+   (let [base-ctx (:seon.sci.eval/ctx @database-base)
+         projection (:seon.schema/projection base-ctx)
+         projection-state (sci.eval/projection-state @connection projection)]
+     (when cluster-name
+       (env/replace-environment!
+        projection-state
+        (env/refuse-incomplete-environment!
+         (env/environment {:seon.boot/cluster-name cluster-name
+                           :seon.db/connection connection
+                           :seon.db/basis-t (db/basis-t @connection)
+                           :seon.schema/projection projection}))))
+     (sci.eval/fork-cluster-ctx base-ctx @connection connection
+                                projection-state))))
 
 (defn environment
   "One subset environment (store + facts, no graphs, no web) for a test.
