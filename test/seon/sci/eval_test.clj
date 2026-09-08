@@ -804,7 +804,6 @@
          {:seon.sci.eval/admitted
           {:seon.sci.admit/value 7
            :seon.cluster.eval/result-edn "7"
-           :seon.sci.admit/capped? false
            :seon.sci.admit/record record}
           :seon.sci.admit/caps
           (assoc caps :seon.config.eval.result/max-string 3)
@@ -820,7 +819,6 @@
             :seon.print/options {:seon.print/length 4}
             :seon.cluster.eval/ns [:seon.ns/name 'user]
             :seon.sci.eval/ending-ns 'next
-            :seon.sci.admit/capped? false
             :seon.sci.admit/record record
             :seon.program/row row
             :seon.sci.eval/defs defs
@@ -834,8 +832,7 @@
         value {:seon.error/kind :seon.sci.eval/time-limit
                :seon.error/message "Ran out of time."}
         admitted {:seon.sci.admit/value value
-                  :seon.cluster.eval/result-edn (pr-str value)
-                  :seon.sci.admit/capped? false}
+                  :seon.cluster.eval/result-edn (pr-str value)}
         defs [{:seon.def/id "user/x"}]
         evaluation
         (#'eval/failed-evaluation
@@ -856,7 +853,6 @@
             :seon.cluster.eval/ns [:seon.ns/name 'user]
             :seon.sci.eval/ending-ns 'user
             :seon.cluster.eval/error "Ran out of time."
-            :seon.sci.admit/capped? false
             :seon.sci.admit/record record
             :seon.sci.eval/defs defs
             :seon.cluster.eval/interrupted-at interrupted-at
@@ -950,12 +946,23 @@
     (is (= :wait (:my.run/disposition (:seon.sci.admit/value evaluation))))))
 
 (deftest an-unbound-var-remains-structured-after-production-admission
-  (let [evaluation (run "(do (declare zz) zz)")
-        admitted (:seon.sci.admit/value evaluation)]
-    (is (= {:seon.sci.admit/opaque "sci.impl.vars.SciUnbound"} admitted)
-        "the real door preserves a value-level marker; no error string is parsed")
+  ;; A BARE HOST REFERENCE AT THE ROOT IS MISSING, not described: sci's
+  ;; unbound marker is an object the walk cannot enter, so nothing is stored
+  ;; for it (the storage-bound wave, 2026-09-07). Where the same marker sits
+  ;; INSIDE a value that is stored, it survives as data and the runtime
+  ;; classifies it exactly as before.
+  (let [bare (run "(do (declare zz) zz)")
+        nested (run "(do (declare zy) {:unbound zy})")
+        admitted (:seon.sci.admit/value nested)]
+    (is (= :unserializable (:seon.eval/missing bare)))
+    (is (not (contains? bare :seon.cluster.eval/result-edn))
+        "and it stores no node to bind a handle to")
+    (is (= {:unbound {:seon.sci.admit/opaque "sci.impl.vars.SciUnbound"}}
+           admitted)
+        "the real evaluation preserves a value-level marker; no error string
+         is parsed")
     (is (work/unbound-value? admitted))
-    (is (nil? (:seon.cluster.eval/error evaluation))
+    (is (nil? (:seon.cluster.eval/error bare))
         "sci produced a value; E2-PRIME, not the evaluator, classifies it red")))
 
 (deftest a-failed-evaluation-records-reconstructable-throwable-data
@@ -1651,8 +1658,8 @@
                  #":seon\.cluster\.agent/id \"host-walker\""
                  value)
                 "the printed walk value names its root agent identity")
-            (is (false? (:seon.sci.admit/capped? through-sci))
-                "the measured string cap admits the ordinary walk whole")
+            (is (not (contains? through-sci :seon.eval/missing))
+                "the ordinary walk is stored whole, never missing")
             (is (map? direct))
             (is (= 2 (count web)))
             (is (= 1 @compilation-count)

@@ -852,7 +852,7 @@
                         "{:clojure.error/cause \"triage evidence\"}"
                         :seon.cluster.eval/result-blob
                         (apply str (repeat 64 "a"))
-                        :seon.cluster.eval/result-size 100}]
+                        :seon.eval/missing :lost}]
             (is (= ::committed
                    (transact-or-refusal connection (start-tx start))))
             (is (not= ::committed
@@ -881,7 +881,8 @@
                                    (pr-str ["receipts" 0])])]
               (is (= "42" (:seon.cluster.eval/result-edn receipt))
                   "the first terminal outcome is preserved")
-              (is (= 100 (:seon.cluster.eval/result-size receipt)))
+              (is (= :lost (:seon.eval/missing receipt))
+                  "and the missing marker is a terminal fact like the rest")
               (is (= "{:clojure.error/cause \"triage evidence\"}"
                      (:seon.cluster.eval/triage-edn receipt)))
               (is (= (apply str (repeat 64 "a"))

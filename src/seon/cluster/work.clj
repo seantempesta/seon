@@ -98,8 +98,9 @@
 (defn- next-ordinal
   "The first evaluable form with no terminal fact, or nil.
   Resume is a QUERY, never a cursor: an evaluation is terminal when it
-  carries a terminal fact — `result-edn`, `error`, or `interrupted-at`
-  (the query twin of `run/terminal?`; there is no status to read) —
+  carries a terminal fact — `result-edn`, `:seon.eval/missing`, `error`, or
+  `interrupted-at` (the query twin of `run/terminal?`; there is no status to
+  read) —
   and `recover-tx` has already stamped a dead process's dangling
   evaluations with `interrupted-at`, so an interrupted form is DONE being
   attempted and the fold moves past it. A comment-only source produces
@@ -119,6 +120,7 @@
                [?evaluation :seon.cluster.eval/source ?source]
                (not-join [?evaluation]
                          (or [?evaluation :seon.cluster.eval/result-edn _]
+                             [?evaluation :seon.eval/missing _]
                              [?evaluation :seon.cluster.eval/error _]
                              [?evaluation
                               :seon.cluster.eval/interrupted-at _]))]

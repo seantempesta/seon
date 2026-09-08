@@ -2100,7 +2100,14 @@
         (is (str/includes? body ":alpha"))
         (is (str/includes? body (str "value=" digest)))))))
 
-(deftest data-caps-a-five-megabyte-attribute-through-the-shared-floor
+(deftest data-serves-a-five-megabyte-attribute-whole-with-its-handle
+  ;; RULED (2026-09-07): HTML renders the stored value with NO limits, and the
+  ;; character cap that used to clip a string during admission was a display
+  ;; decision that is now gone — elision happens only where AI context is
+  ;; generated. So `/data` serves the whole attribute, and the assertion that
+  ;; matters is that it is COMPLETE and still navigable, not that it was cut.
+  ;; The presentation bound this surface still wants is filed, not faked:
+  ;; docs/seon/issues/the-data-route-has-no-presentation-bound-for-a-string.md
   (with-server
     (fn [connection server _context]
       (let [namespace-name 'my.agents.w3-data-cap
@@ -2114,11 +2121,11 @@
                                           "&path=" path "&offset=0"))
               body (.body response)]
           (is (= 200 (.statusCode response)))
-          (is (< (count body) 300000))
-          (is (str/includes? body "elided"))
+          (is (< (* 5 1024 1024) (count body))
+              "the stored value is served whole, never a window of itself")
           (is (str/includes? body "seon-data-panel"))
           (is (str/includes? body (str "entity=" entity))
-              "the capped value retains a handle back to the same root"))))))
+              "and it retains a handle back to the same root"))))))
 
 (deftest each-agent-has-an-isolated-debug-route
   (with-server

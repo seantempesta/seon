@@ -289,13 +289,20 @@
 (defn terminal?
   "True when the receipt carries a terminal fact.
   THE ONE PRESENCE QUESTION over receipts (owner ruling 2026-07-28): a
-  receipt settles by asserting `result-edn` or `error`, and is cut by
-  `interrupted-at`. A receipt carrying none of the three is running —
-  there is no status label to read. `seon.cluster.work/next-ordinal`
-  asks the same question as a query; this is its map twin."
+  receipt settles by asserting `result-edn`, `:seon.eval/missing` or
+  `error`, and is cut by `interrupted-at`. A receipt carrying none of the
+  four is running — there is no status label to read.
+  `seon.cluster.work/next-ordinal` asks the same question as a query; this
+  is its map twin.
+
+  MISSING IS A TERMINAL FACT. A form that ran and whose value went over the
+  storage bound, or that the walk could only describe, is DONE: reading its
+  absence of `result-edn` as `running` would re-attempt a form that already
+  executed, which is the one thing the crash model forbids."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [receipt]
   (boolean (or (:seon.cluster.eval/result-edn receipt)
+               (:seon.eval/missing receipt)
                (:seon.cluster.eval/error receipt)
                (:seon.cluster.eval/interrupted-at receipt))))
 
@@ -919,6 +926,7 @@
                     [?receipt :seon.cluster.eval/run ?run]
                     [?receipt :seon.cluster.eval/ordinal ?ordinal]
                     (or [?receipt :seon.cluster.eval/result-edn _]
+                        [?receipt :seon.eval/missing _]
                         [?receipt :seon.cluster.eval/error _]
                         [?receipt :seon.cluster.eval/interrupted-at _])]
                   db run-eid (dec ordinal))))]

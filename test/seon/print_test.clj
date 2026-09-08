@@ -3,7 +3,7 @@
   (:require [clojure.edn :as edn]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [clojure.walk :as walk]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -50,6 +50,18 @@
                   :seon.sci.admit/interrupt-fn (fn [])
                   :seon.sci.admit/caps admission-caps
                   :seon.config/on-core-error :record}))))
+
+(defn- admitted-member-node
+  "The print node for a value admitted as a MEMBER of an ordinary collection.
+
+  A bare host reference at the ROOT of an admission is
+  `:seon.eval/missing :unserializable` — a description of a value is not a
+  value, so nothing is stored for it (the storage-bound wave, 2026-09-07).
+  The object FACE is still what the grammar produces for that reference where
+  it sits inside a value that IS stored, which is what these trials are
+  about."
+  [value]
+  (first (:seon.print/items (admitted-node [value]))))
 
 (defn- observed-query-shape
   []
@@ -385,12 +397,14 @@
 
 (deftest honest-named-and-object-faces
   (let [namespace-text (print/emit-text
-                        (admitted-node (sci-value "(create-ns 'face.ns)"))
+                        (admitted-member-node
+                         (sci-value "(create-ns 'face.ns)"))
                         no-cuts)
-        atom-node (admitted-node (atom {:private/value 42}))
+        atom-node (admitted-member-node (atom {:private/value 42}))
         atom-text (print/emit-text atom-node no-cuts)
         function-text (print/emit-text
-                       (admitted-node (sci-value "(fn named_face [] 1)"))
+                       (admitted-member-node
+                        (sci-value "(fn named_face [] 1)"))
                        no-cuts)]
     (is (= "#object[sci.lang.Namespace \"face.ns\"]" namespace-text))
     (is (= "#'user/face_var"
@@ -414,7 +428,14 @@
     (is (not (str/includes? function-text "@"))
         "generic host toString identity never reaches the print node")
     (is (not (str/includes? function-text "$"))
-        "function class names are demunged")))
+        "function class names are demunged")
+    (testing "and a bare host reference at the root is missing, not described"
+      (is (= :unserializable
+             (:seon.eval/missing
+              (admit/admit {:seon.sci.admit/value (atom 1)
+                            :seon.sci.admit/interrupt-fn (fn [])
+                            :seon.sci.admit/caps admission-caps
+                            :seon.config/on-core-error :record})))))))
 
 (deftest agent-facing-object-faces-are-byte-stable-across-processes
   (let [expression
@@ -423,18 +444,17 @@
              "(let [values [(sci/eval-string \"(create-ns 'stable.ns)\") "
              "(atom 1)] rendered "
              "(mapv (fn [value] "
-             "(let [node (:seon.sci.admit/print-node "
-             "(admit/admit-value {:seon.sci.admit/value value "
+             ;; admitted as a MEMBER: a bare host reference at the root is
+             ;; missing, and this trial is about the object face's bytes
+             "(let [node (first (:seon.print/items "
+             "(:seon.sci.admit/print-node "
+             "(admit/admit-value {:seon.sci.admit/value [value] "
              ":seon.sci.admit/interrupt-fn (fn []) "
              ":seon.sci.admit/caps "
              (pr-str
-              (assoc (config/result-caps (test-support/effective-config))
-                     :seon.config.eval.result/max-depth 8
-                     :seon.config.eval.result/max-collection 32
-                     :seon.config.eval.result/max-string 4096
-                     :seon.config.eval.result/max-nodes 4096))
+              (config/result-caps (test-support/effective-config)))
              " "
-             ":seon.config/on-core-error :record}))] "
+             ":seon.config/on-core-error :record})))] "
              "(print/emit-text node " (pr-str no-cuts) "))) values)] "
              "(print (pr-str rendered)))")
         run #(shell/sh "java" "-cp" (System/getProperty "java.class.path")

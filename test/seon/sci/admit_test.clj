@@ -234,13 +234,27 @@
    :atom :promise :delay :finite-lazy-seq :host-object :regex :array
    :exception :sorted-map :deep-nest :wide :long-string])
 
+(declare admitted-node-valid?)
+
 (defn- admitted-value-valid?
   [value]
   (let [{:keys [interrupt-fn]} (armed)
         input (request value interrupt-fn)
         admitted (admit/admit input)
-        printed (:seon.cluster.eval/result-edn admitted)
-        projection (edn/read-string printed)]
+        printed (:seon.cluster.eval/result-edn admitted)]
+    (if (:seon.eval/missing admitted)
+      ;; A MISSING ADMISSION IS A COMPLETE ANSWER, and its whole contract is
+      ;; that it stored nothing: no node, no value, no bytes to read back.
+      (and (nil? printed)
+           (not (contains? admitted :seon.sci.admit/print-node))
+           (not (contains? admitted :seon.sci.admit/value))
+           (= (:seon.sci.admit/record input)
+              (:seon.sci.admit/record admitted)))
+      (admitted-node-valid? admitted input printed))))
+
+(defn- admitted-node-valid?
+  [admitted input printed]
+  (let [projection (edn/read-string printed)]
     (and
      (m/validate (compiled-node-schema) projection)
      (string? printed)
@@ -285,7 +299,11 @@
         (when (not= :cyclic-array kind)
           (is (thrown? StackOverflowError (pr-str value)))))
       (testing (str kind " admits cleanly")
-        (let [admitted (admit/admit (request value))]
+        ;; admitted as a MEMBER: a bare host reference at the root stores
+        ;; nothing at all, and the question here is whether the CYCLE is
+        ;; unreachable — which it is, because the walk never enters a
+        ;; reference type wherever it sits.
+        (let [admitted (admit/admit (request [value]))]
           (is (string? (:seon.cluster.eval/result-edn admitted)))
           (is (some? (edn/read-string
                       (:seon.cluster.eval/result-edn admitted))))

@@ -89,15 +89,15 @@
   carried on every render request, and it is part of the byte-identity
   qualification `same db, same commit, same profile`."
   ^long [request]
-  (let [profile (or (:seon.render/profile request)
-                    (render/request-profile request))
-        declared (:seon.render.profile/max-children profile)]
+  (let [declared (:seon.render.profile/max-children
+                  (:seon.render/profile request))]
     (if (nat-int? declared)
       (long declared)
-      ;; A REFUSED PROFILE MUST NOT DELETE FACTS. When the presentation
-      ;; authority is unavailable the honest degradation is to show every
-      ;; connection the pull returned, never to cut silently at a number
-      ;; nobody declared. The storage bound is elsewhere.
+      ;; A REQUEST THAT CARRIES NO PROFILE IS NOT AN AI CONTEXT GENERATION,
+      ;; so it elides nothing: it shows every connection the pull returned.
+      ;; Deriving one here instead would both cut where no presentation
+      ;; decision was made AND re-read effective config per acquisition —
+      ;; the fetch-at-call-time defect (law 2.1) measured three times over.
       (long Integer/MAX_VALUE))))
 
 (defn- bounded-acquisition-distance
