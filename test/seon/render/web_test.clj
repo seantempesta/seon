@@ -544,8 +544,16 @@
                 "debug uses the next transition's compiled root acquisition")
             (is (identical? @connection (:seon.db/db @observed))
                 "the prospective query reads the current immutable database")
+            ;; STALE EXPECTATION, corrected: the debug body no longer
+            ;; labels the whole page `prospective`. It renders TWO panes —
+            ;; the historical captured prompt and the newly computed
+            ;; prospective one — under a `prompt comparison` status, and
+            ;; the pane titles are where `prospective` now appears
+            ;; (`seon.render.web/debug-ai-html`).
             (is (str/includes? body
-                               "seon-debug-context-status\">prospective"))
+                               "seon-debug-context-status\">prompt comparison"))
+            (is (str/includes? body "newly computed prospective prompt")
+                "and the prospective pane is present and named")
             (is (not (str/includes? body
                                     "No recorded context capture exists")))))))))
 

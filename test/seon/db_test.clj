@@ -823,37 +823,70 @@
        (is (not (contains? admitted :seon.sci.admit/capped?))
            "the retired key is absent, never a stored false")))))
 
+(deftest an-agent-namespace-is-shared-and-is-not-an-identity
+  ;; ASSIGNMENT IS NOT IDENTITY. This test used to assert a unique rejection
+  ;; on `:seon.cluster.agent/namespace`; the declaration says the opposite —
+  ;; "not unique — several agents may share one" — and the installed schema
+  ;; agrees with the declaration, so the expectation was stale rather than
+  ;; the behaviour wrong. The one agent a namespace answers for is its
+  ;; `:seon.ns/steward`, which is a different attribute entirely.
+  (test-support/with-database
+   (fn [connection]
+     (db/transact!
+      connection
+      [{:seon.ns/name 'my.agents.db-shared}
+       {:seon.cluster.agent/id "db-shared-first"
+        :seon.cluster.agent/namespace
+        [:seon.ns/name 'my.agents.db-shared]}])
+     (let [accepted
+           (binding [db/*conn* connection]
+             (db/transact!
+              [{:seon.cluster.agent/id "db-shared-second"
+                :seon.cluster.agent/namespace
+                [:seon.ns/name 'my.agents.db-shared]}]))]
+       (is (nil? (:seon.error/kind accepted))
+           "a second agent assigned the same namespace commits")
+       (is (nil? (get-in (:schema @connection)
+                         [:seon.cluster.agent/namespace :db/unique]))
+           "because the installed schema declares no uniqueness on it")
+       (is (= #{"db-shared-first" "db-shared-second"}
+              (set (db/q '[:find [?id ...]
+                           :in $ ?namespace-name
+                           :where
+                           [?namespace :seon.ns/name ?namespace-name]
+                           [?agent :seon.cluster.agent/namespace ?namespace]
+                           [?agent :seon.cluster.agent/id ?id]]
+                         @connection 'my.agents.db-shared)))
+           "and both agents are found by the namespace they share")))))
+
 (deftest unique-rejection-names-the-existing-owner-as-data
   (test-support/with-database
    (fn [connection]
      (db/transact!
       connection
       [{:seon.ns/name 'my.agents.db-conflict}
-       {:seon.cluster.agent/id "db-conflict-owner"
-        :seon.cluster.agent/namespace
+       {:seon.cluster.eval/id "db-conflict-owner"
+        :seon.cluster.eval/refreshes
         [:seon.ns/name 'my.agents.db-conflict]}])
      (let [rejected
            (binding [db/*conn* connection]
              (db/transact!
-              [{:seon.cluster.agent/id "db-conflict-contender"
-                :seon.cluster.agent/namespace
+              [{:seon.cluster.eval/id "db-conflict-contender"
+                :seon.cluster.eval/refreshes
                 [:seon.ns/name 'my.agents.db-conflict]}]))
            conflict (:seon.error/data rejected)]
        (is (= :seon.db/rejected (:seon.error/kind rejected)))
        (is (true? (:seon.db/transaction-refused rejected)))
        (is (= {:error :transact/unique
-               :attribute :seon.cluster.agent/namespace}
+               :attribute :seon.cluster.eval/refreshes}
               (select-keys conflict [:error :attribute])))
        (is (instance? datahike.datom.Datom (:datom conflict)))
        (is (= {:seon.db/conflict-attribute
-               :seon.cluster.agent/namespace
-               :seon.db/conflict-value
-               [:seon.ns/name 'my.agents.db-conflict]
+               :seon.cluster.eval/refreshes
                :seon.db/conflict-owner
-               [:seon.cluster.agent/id "db-conflict-owner"]}
+               [:seon.cluster.eval/id "db-conflict-owner"]}
               (select-keys conflict
                            [:seon.db/conflict-attribute
-                            :seon.db/conflict-value
                             :seon.db/conflict-owner])))
        (is (str/includes? (:seon.error/message rejected)
                           "db-conflict-owner"))
