@@ -41,6 +41,12 @@
       (spit left "(ns fixture)\n")
       (spit right "(ns fixture)\n")
       (is (= (digest left) (digest right)))
+      (is (= (#'dev-cache/sha-256
+              [{:seon.dev-cache/namespace 'fixture
+                :seon.dev-cache/source-url (str (.toURI left))}])
+             (#'dev-cache/sha-256
+              [{:seon.dev-cache/namespace 'fixture
+                :seon.dev-cache/source-url (str (.toURI right))}])))
       (spit right "(ns changed)\n")
       (is (not= (digest left) (digest right)))
       (finally (test-support/delete-recursively! root)))))

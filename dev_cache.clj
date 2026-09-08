@@ -223,7 +223,6 @@
   (let [digest (MessageDigest/getInstance "SHA-256")]
     (doseq [row rows
             value [(str (:seon.dev-cache/namespace row))
-                   (:seon.dev-cache/source-url row)
                    (slurp (:seon.dev-cache/source-url row))]]
       (digest-bytes! digest value))
     (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
