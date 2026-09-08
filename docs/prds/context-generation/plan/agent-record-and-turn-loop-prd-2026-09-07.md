@@ -913,11 +913,13 @@ Vocabulary: "transcript" is retired; the agent's evaluations are
 
 ### Result names are random (owner, 2026-09-08)
 
-`:seon.eval/id` is a random identifier minted when the evaluation is stored
-(twelve base32 characters, 60 bits), declared `:db.unique/identity`. The
-handle is `result/<id>` — the same string on disk, in the in-memory object
-map, and in the prompt — so every cluster a JVM ever holds can share one
-memory map with no collision. No counters, no ordinals in names, no entity
+`:seon.eval/id` is `(str (random-uuid))` — the ONE id generator the system
+uses everywhere (runs, errors, sources); no new generator (owner) —
+declared `:db.unique/identity`. A Clojure symbol cannot begin with a digit
+and a UUID can, so the handle is the id with one leading letter:
+`result/e<uuid>`, e.g. `result/e8b99ae77-cb0a-496e-8f9e-3a1e8ee0d61d` —
+the same id on disk, in the in-memory object map, and in the prompt, so
+every cluster a JVM ever holds shares one memory map with no collision. No counters, no ordinals in names, no entity
 ids (entity ids are a per-branch counter and repeat across clusters and
 resets). The (turn, ordinal) pair stays as the ORDER, never as the name.
 
