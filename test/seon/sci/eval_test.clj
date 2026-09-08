@@ -1621,10 +1621,9 @@
             compilation-count (atom 0)
             effective-count (atom 0)]
         (with-redefs [render.walk/root-selector
-                      (fn [database distance supplied-caps width]
+                      (fn [database distance supplied-caps]
                         (let [selector
-                              (root-selector database distance supplied-caps
-                                             width)]
+                              (root-selector database distance supplied-caps)]
                           (swap! root-selectors conj selector)
                           selector))
                       pull-api/compile-pull-plan

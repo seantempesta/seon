@@ -851,8 +851,7 @@
                         :seon.cluster.eval/triage-edn
                         "{:clojure.error/cause \"triage evidence\"}"
                         :seon.cluster.eval/result-blob
-                        (apply str (repeat 64 "a"))
-                        :seon.eval/missing :lost}]
+                        (apply str (repeat 64 "a"))}]
             (is (= ::committed
                    (transact-or-refusal connection (start-tx start))))
             (is (not= ::committed
@@ -864,6 +863,11 @@
                        (settle-tx (dissoc settle
                                           :seon.cluster.eval/result-edn))))
                 "a settle carrying no terminal fact is refused")
+            ;; MISSING IS A TERMINAL FACT LIKE THE REST. An evaluation whose
+            ;; value went over the storage bound RAN; reading its absent
+            ;; result-edn as "still running" would re-attempt it.
+            (is (run/terminal? {:seon.eval/missing :over-bound})
+                "the missing marker settles an evaluation on its own")
             (is (= ::committed
                    (transact-or-refusal connection (settle-tx settle))))
             (doseq [terminal [settle
@@ -881,8 +885,8 @@
                                    (pr-str ["receipts" 0])])]
               (is (= "42" (:seon.cluster.eval/result-edn receipt))
                   "the first terminal outcome is preserved")
-              (is (= :lost (:seon.eval/missing receipt))
-                  "and the missing marker is a terminal fact like the rest")
+              (is (nil? (:seon.eval/missing receipt))
+                  "a stored value carries no missing marker")
               (is (= "{:clojure.error/cause \"triage evidence\"}"
                      (:seon.cluster.eval/triage-edn receipt)))
               (is (= (apply str (repeat 64 "a"))

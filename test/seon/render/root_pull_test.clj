@@ -93,8 +93,8 @@
         [:seon.cluster.run/id "temporal-root-run"]}])
      (let [current @connection
            temporal (db/as-of current (db/basis-t current))
-           current-selector (walk/root-selector current 1 caps 8)
-           temporal-selector (walk/root-selector temporal 1 caps 8)
+           current-selector (walk/root-selector current 1 caps)
+           temporal-selector (walk/root-selector temporal 1 caps)
            acquisition
            (walk/root-acquisition
             {:seon.db/db temporal
@@ -248,7 +248,7 @@
            compiled-plan (Object.)]
        (with-redefs-fn
          {#'seon.render.walk/root-selector
-          (fn [_database _distance _caps _width] (selector))
+          (fn [_database _distance _caps] (selector))
           #'pull-api/compile-pull-plan
           (fn [_database _selector] compiled-plan)}
          (fn []
@@ -297,9 +297,9 @@
            plan (:datahike.read/dependency-plan
                  (d/pull-with-evidence @connection selector [::root-id "root"]))
            attributes (d/dependency-plan-attributes plan 0)
-           ;; THE AI BOUNDARY'S OWN WIDTH, not a storage cap: the acquisition
-           ;; reports the profile's declared connection width it selected with
-           width (:seon.render.profile/max-children acquisition)]
+           ;; the PULL's limit is query work; the AI boundary's own width is
+           ;; the render profile's, and it is applied to the pulled values
+           width (:seon.config.eval.result/max-collection caps)]
        (is (= [:pull] @reads)
            "cold root acquisition is exactly one pull and no other read")
        (is (not-any? #{'* :* "*"} selector-values)

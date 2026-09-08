@@ -454,7 +454,7 @@
              (pr-str
               (config/result-caps (test-support/effective-config)))
              " "
-             ":seon.config/on-core-error :record})))] "
+             ":seon.config/on-core-error :record}))))] "
              "(print/emit-text node " (pr-str no-cuts) "))) values)] "
              "(print (pr-str rendered)))")
         run #(shell/sh "java" "-cp" (System/getProperty "java.class.path")

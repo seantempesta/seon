@@ -111,16 +111,16 @@
   Every installed scalar attribute is enumerated. Every installed ref is an
   explicit forward and reverse subpattern, so Datahike records the canonical
   stored ref in the dependency plan and never widens component expansion to
-  `:all`. The pull asks for one value beyond the AI boundary's declared
-  connection width so the walk can emit an exact elision observation without a
-  second read. Acquisition depth
+  `:all`. The pull asks for one value beyond the query-work limit so the walk
+  can emit an exact elision observation without a second read. Acquisition
+  depth
   also stops at one less than the node cap: a deeper member's path alone would
   already consume more nodes than the result can retain."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.render/distance
-         :seon.sci.admit/caps :seon.render.profile/max-children]
+         :seon.sci.admit/caps]
     :seon.db/pull-selector]}
-  [database distance caps width]
+  [database distance caps]
   (let [installed (installed-attributes database)
         ref-attributes (into []
                              (keep (fn [[attribute properties]]
@@ -142,6 +142,10 @@
                                                           properties)))
                                           attribute)))
                                 installed)
+        ;; THE PULL'S OWN LIMIT IS QUERY WORK, not the AI boundary's elision:
+        ;; it decides how many stored refs Datahike is asked for, and the
+        ;; walk's declared connection width decides how many the agent sees.
+        width (:seon.config.eval.result/max-collection caps)
         distance (bounded-acquisition-distance distance caps)
         leaf (into [:db/id] identity-attributes)]
     (letfn [(selector-at [remaining]
@@ -368,23 +372,20 @@
                        (schema/current-projection)
                        {})
         distance (long (get request :seon.render/distance 1))
-        width (connection-width request)
-        selector (root-selector database distance caps width)
+        selector (root-selector database distance caps)
         cache (:seon.schema.projection/compiled projection)
         cache-key [::root-pull-plan
                    (:seon.schema.projection/fingerprint projection)
                    (DatabaseSchemaIdentity.
                     (:schema (db/schema-database database)))
                    distance
-                   caps
-                   width]
+                   caps]
         candidate
         (delay
           {:seon.schema.projection/fingerprint
            (:seon.schema.projection/fingerprint projection)
            :seon.render/distance distance
            :seon.sci.admit/caps caps
-           :seon.render.profile/max-children width
            :seon.render.walk/selector selector
            :datahike.pull/plan
            ((requiring-resolve 'datahike.pull-api/compile-pull-plan)
@@ -420,7 +421,6 @@
      (fn []
        (let [{distance :seon.render/distance
               caps :seon.sci.admit/caps
-              width :seon.render.profile/max-children
               selector :seon.render.walk/selector
               plan :datahike.pull/plan
               :as pull-plan}
@@ -432,9 +432,13 @@
                             :datahike.pull/plan plan})]
          (merge pull-plan
                 {:seon.render.walk/root root}
+                ;; THE WIDTH IS THE CALLER'S, NEVER THE CACHED PLAN'S. A
+                ;; compiled pull plan is shared across every caller of one
+                ;; schema generation; reading a presentation decision off it
+                ;; would hand the second caller the first caller's profile.
                 (acquisition-members database root
                                      (bounded-acquisition-distance distance caps)
-                                     width)))))))
+                                     (connection-width request))))))))
 
 (defn membership-diff
   "Changed, added, and removed members between two root acquisitions."
