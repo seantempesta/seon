@@ -3,7 +3,8 @@ type: prd
 status: active
 historical-status: r11 (2026-09-08 midday) — steps 1–2 landed; step 3 partial (answered-by-attempt + index-bound derivation `8dc708b24`; backstop subject carried `4c4bcde70`); clipping collapsed to the value renderer (`9248692d6`); all lanes stopped — the orchestrator is cutting the retired code directly (§11)
 date: 2026-09-07 (evening)
-supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
+supersedes: agent-record-and-repl-response-prd-2026-09-07.md; entity-debug-curation-prd-2026-09-06.md
+historical-supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
 tags: [prd, agent, wake, storage, runtime]
 ---
 
