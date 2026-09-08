@@ -851,6 +851,35 @@
                "role=" role))
     projection))
 
+(def ^:private program-source-root
+  ;; The one root a live cluster's boot loads. `test` is deliberately not
+  ;; here: a worker loads exactly the test namespaces its selection names.
+  "src")
+
+(defn- declared-program-namespaces
+  "Every namespace the first-party program declares, read from its own form.
+
+  DERIVED, NOT LISTED. The reader answers what a file's namespace is; a
+  path-to-symbol convention would be a naming rule, and a roster would be
+  stale within a day. This is what makes the worker's armed set the set a
+  cluster arms: a contract in a namespace no test happens to require —
+  `seon.artifact/-main`, `seon.artifact/install-initialization-pages!`,
+  `seon.test/run` were the three — is enforced on every live cluster and
+  was checked by nothing here."
+  []
+  (into []
+        (keep
+         (fn [^java.io.File file]
+           (when (and (.isFile file)
+                      (or (.endsWith (.getName file) ".clj")
+                          (.endsWith (.getName file) ".cljc")))
+             (with-open [source (java.io.PushbackReader. (io/reader file))]
+               (let [form (read {:read-cond :allow :eof nil} source)]
+                 (when (and (seq? form) (= 'ns (first form)))
+                   (second form)))))))
+        (sort-by (fn [^java.io.File file] (.getPath file))
+                 (file-seq (io/file program-source-root)))))
+
 (defn- arm-contracts!
   "Instrument this worker JVM's loaded contracts exactly as boot does.
 
@@ -865,11 +894,18 @@
   world."
   [projection worker-id namespaces]
   (let [decisions (config/default-decisions)
-        caps (config/result-caps decisions)]
+        caps (config/result-caps decisions)
+        program (declared-program-namespaces)]
     (when (:seon.error/kind caps)
       (throw
        (ex-info (:seon.error/message caps)
                 (assoc caps ::instrumentation-unavailable true))))
+    ;; THE PROGRAM IS LOADED BEFORE IT IS ARMED. Instrumentation selects
+    ;; loaded vars carrying `:malli/schema`, so a namespace nothing required
+    ;; contributes nothing and the gate silently arms a smaller world than
+    ;; the cluster it claims to reproduce.
+    (doseq [namespace-name program]
+      (require namespace-name))
     (let [applied ((requiring-resolve 'seon.instrument/apply!)
                    {:seon.config/on-core-error
                     (:seon.config/on-core-error decisions)
@@ -879,6 +915,20 @@
         (throw
          (ex-info (:seon.error/message applied)
                   (assoc applied ::instrumentation-unavailable true))))
+      ;; ABSENCE IS NEVER HEALTH. A worker that armed nothing would have
+      ;; printed `instrumented= 0` and the gate would have been green about
+      ;; a question it never asked.
+      (when-not (pos-int? (:seon.instrument/instrumented applied))
+        (throw
+         (ex-info
+          (str "bin/test armed no contracts in worker " worker-id
+               ": instrumentation reports "
+               (pr-str (:seon.instrument/instrumented applied))
+               " instrumented vars across "
+               (count program) " program namespaces.")
+          (assoc applied
+                 ::instrumentation-unavailable true
+                 ::program-namespace-count (count program)))))
       (binding [*out* *err*]
         (println "bin/test: CONTRACTS ARMED"
                  "worker=" worker-id

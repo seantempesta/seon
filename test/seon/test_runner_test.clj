@@ -1,6 +1,7 @@
 (ns seon.test-runner-test
   "Declared latest-result facts owned by the JVM test runner."
   (:require [clojure.java.io :as io]
+            [clojure.set]
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is testing]]
             [seon.config :as config]
@@ -171,7 +172,44 @@
       (is (= :seon.instrument/contract-violated
              (:seon.error/kind (ex-data failure)))
           "and a violated contract stops the call inside the gate, exactly
-           as it does on every live cluster"))))
+           as it does on every live cluster")))
+  (testing "the armed set IS the set a cluster arms, derived the same way"
+    ;; The gate's blind spot was namespaces no test happened to require:
+    ;; `seon.artifact` and `seon.test` carried contracts every live cluster
+    ;; enforced and this gate never asked about. The expected set is DERIVED
+    ;; here exactly as the worker derives it — every var in a declared
+    ;; program namespace carrying `:malli/schema` — so the two cannot drift
+    ;; without this assertion saying so.
+    (let [program (#'runner/declared-program-namespaces)
+          ;; Malli's own exclusion, read from its source
+          ;; (`reference-code/malli/src/malli/instrument.clj:15`): a fn
+          ;; carrying a primitive interface cannot be wrapped, so boot cannot
+          ;; arm it either and it is not part of the set under comparison.
+          primitive?
+          (fn [candidate]
+            (let [value (when (bound? candidate) (deref candidate))]
+              (and (fn? value)
+                   (boolean
+                    (some (fn [^Class interface]
+                            (.startsWith (.getName interface)
+                                         "clojure.lang.IFn$"))
+                          (supers (class value)))))))
+          declared
+          (into #{}
+                (comp (mapcat (fn [namespace-name]
+                                (some-> (find-ns namespace-name) ns-interns)))
+                      (map val)
+                      (filter (fn [candidate]
+                                (some-> candidate meta :malli/schema)))
+                      (remove primitive?))
+                program)
+          armed (instrument/instrumented)]
+      (is (pos? (count program))
+          "the program namespaces are genuinely discovered, so an empty
+           derivation cannot make this comparison trivially true")
+      (is (pos? (count declared)))
+      (is (= #{} (clojure.set/difference declared armed))
+          "every contract a live cluster arms is armed in this worker"))))
 
 (deftest root-owning-tasks-never-co-run-inside-one-worker-group
   (let [group-a-tasks (atom [:a-1 :a-2])
