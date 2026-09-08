@@ -1,6 +1,6 @@
 ---
 type: prd
-status: r8 — step 1 and step 2 landed and verified; answered-by-:t qualified (§3, 2026-09-08); step 3 next
+status: r9 — lane 2 verified (research/verify-listened-attributes-2026-09-08.md): four blockers folded into step 3; answered = a turn whose reply came from a model attempt
 date: 2026-09-07 (evening)
 supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
 tags: [prd, agent, wake, storage, runtime]
@@ -244,11 +244,12 @@ Questioned and REMOVED from the record:
   agent's sliding-1 channel. The entity carrying the datom (a message, a
   fault, a schedule row) is ordinary data; nothing is copied, nothing is
   written back onto it.
-- **Only a turn that holds a reply answers wakes** (r8, from lane 2's
-  finding `a-turn-that-dies-before-replying-still-answers-its-wakes`): a
-  turn that crashed before its reply, a turn whose provider call failed, and
-  a source submission (no model call) never showed the wakes to a model, so
-  they answer nothing — the query below joins `[?turn :seon.turn/reply _]`.
+- **Only a turn whose reply came from a model attempt answers wakes** (r9;
+  r8 said "holds a reply", and the verifier showed a source submission
+  stores a reply too): the query joins the turn to a `:seon.ai.attempt` that
+  produced its reply. A turn that crashed before its reply, a turn whose
+  attempts all failed, and a source submission (no attempt) never showed
+  the wakes to a model and answer nothing.
   The wakes stay unanswered and the next turn opens; the turn bound (§1a)
   keeps that finite. Lane 2 landed `:seon.wake/inside` as the third
   property: the attributes that mark a wake as coming from inside the agent
@@ -278,7 +279,22 @@ Questioned and REMOVED from the record:
   and B6 dissolve rather than get fixed.
 - **Whether a listened attribute opens a turn** is the property
   `:seon.wake/opens-turn?`; one declared false only surfaces in the next
-  context (a schedule tick, a notice).
+  context (a schedule tick, a notice) — and it must reach the derivation:
+  `unanswered-wakes` for OPENING binds the turn-opening set, the context
+  walk binds the whole listened set (verifier blocker 8: today both bind
+  the opening set).
+- **The bound's derivation is O(turns), never O(all wakes)** (verifier
+  blocker 9: 47.5 ms per pass at 2,008 lifetime wakes vs 0.163 ms before).
+  The latest outside wake is found by scanning the listened attributes'
+  datoms for the agent through Datahike's own index (`d/datoms :avet`) and
+  taking the max `:t`, bounded ≤ 1 ms at 10,000 wakes; if that cannot be
+  met, the turn that answers an outside wake records that wake's `:t` once
+  (one fact, written at open, derived at the writer — never a counter).
+- **An empty derived set fails CLOSED**: no listened attributes ⇒ no wake
+  can open a turn and the bound does not refill (verifier: an empty
+  `inside` set refilled the bound — fail-open on a paid loop). `route!`
+  re-derives its set when a transaction asserts `:seon.wake/*` on a schema
+  row (today it freezes the set at registration).
 
 A fault in an agent's own code wakes that agent through `:seon.error/steward`
 like any other wake; the turn bound (§1a) is what stops it looping. The
