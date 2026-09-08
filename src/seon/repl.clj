@@ -50,25 +50,28 @@
    :seon.repl/ms])
 
 (defn- def-note
-  "The one-sentence note a top-level `def` earns, or nil.
-
-  Owner ruling, 2026-09-08: nothing defined with `def` is persisted — it
-  lives in the agent's SCI context for this JVM's life — and the agent is
-  told so on EVERY such form. Only a bare `def` earns it: `defn`,
-  `defschema`, `deftest` and the other definers become program rows and
-  persist. The head is read as EDN from the stored source; a source EDN
-  cannot read (a reader macro, an unbalanced form) earns nothing, since the
-  evaluation itself already says what went wrong."
+  "Explain a temporary def or a function missing its installation contract
+  from the evaluation's source evidence. Unreadable source earns no note."
   [source]
   (when (string? source)
     (let [form (try (edn/read-string source) (catch Throwable _ nil))]
-      (when (and (seq? form) (= 'def (first form)) (symbol? (second form)))
-        (str (second form)
+      (when (and (seq? form) (symbol? (second form)))
+        (cond
+          (= 'def (first form))
+          (str (second form)
              " lives only in your SCI context and is lost when the JVM"
              " restarts. Nothing defined with def is persisted, atoms"
              " included; they are for temporary data-modeling experiments."
              " To keep something, write a function, schema, or test, or"
-             " transact the data into the database.")))))
+             " transact the data into the database.")
+          (and (#{'defn 'defn- 'clojure.core/defn 'clojure.core/defn-}
+                (first form))
+               (not (:malli/schema (meta (second form))))
+               (not (:malli/schema
+                     (first (drop-while string? (nnext form))))))
+          (str (second form)
+               " was not installed: every function needs a :malli/schema"
+               " contract to become part of the program."))))))
 
 (defn- read-node
   "Read one stored EDN print node back, or say it is unreadable."

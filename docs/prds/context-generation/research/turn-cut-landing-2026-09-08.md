@@ -7,9 +7,56 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
-No requested deletion row is complete. Work stopped at development SCI
-acquisition of an independently installed function; see
-[the exact acquisition boundary](../../../seon/issues/uncontracted-live-function-blocks-development-acquisition.md).
+No requested deletion row is complete. The resumed lane repaired the
+missing-contract boundary, then stopped under the foreign-lane gate rule:
+the runner's empty `snapshot_paths` expansion fails before tests start.
+See [the runner boundary](../../../seon/issues/test-runner-empty-snapshot-paths-refuses-the-default-gate.md).
+
+## Resumed attempt, after the owner identified the probe row
+
+Prerequisite commit `5a807c144` contains the case-count repair described below.
+The next prerequisite removes uncontracted proposed program rows at
+`gate-function-install`; derives the required note in `seon.repl`; and fixes
+completion admission to derive its schema projection from its held database.
+The live fault identified `loop.clj:553` and a nil `schema/current-projection`.
+
+A new canonical-database, real-SCI, ordinary-proc regression submits an
+uncontracted function and observes closure, no program row, no base Var, and
+the REPL note. The existing REPL regression covers contracted and uncontracted
+definitions. No loop is replaced. The committed live probe now checks both
+uncontracted rejection and shared-function propagation.
+
+The first resumed hook converged to `6aa04b07-4b38-5bff-b5d8-622ec7b70cc8`;
+MCP confirmed default recorded that exact published commit. Later edits met
+concurrent-source advisories; retries were interrupted during reconciliation
+by steering. Final convergence after the complete repair remains unproven.
+Juniper reseeding refused a conflicting upsert: `step-render-plan` resolved
+to both 34744 and 35252. Repeat installation needs repair in the bootstrap move.
+
+The explicit three-namespace gate reached the new proc test's END event in
+26,137 ms, but TERM interrupted it before a tally. The next invocation failed
+before test startup with `snapshot_paths[@]: unbound variable`. Current runner
+commit `cd42689b2` retains that expansion, independently reproduced under
+`/bin/bash -u`. Bare and platform gates are blocked by the same default path.
+New/inherited failure tallies remain unknown; no green count is claimed.
+
+Read the working-tree PRD §14 and its addendum in full. They supersede the
+earlier fresh-fork design below: one live agent context receives base changes;
+system turns append changed read forms across the whole transcript, excluding
+writes and effects. All seven rows and these latest requirements remain
+unfinished. Shared-function propagation, byte identity, and datoms per turn
+remain unmeasured. No schema reset-request lines apply.
+
+Current touched paths: `src/seon/cluster/loop.clj`, `src/seon/repl.clj`,
+`test/seon/cluster/agent_test.clj`, `test/seon/repl_test.clj`, the live probe,
+this note, and the issue notes. All earlier REPL changes and concurrent
+operator/config/renderer/runner edits were preserved. The literal reference
+counts in the table below were remeasured and are unchanged.
+
+Process-table checks found no lane-owned test launcher, worker, adoption
+command, or background shell remaining. Other lanes' processes were identified
+by output files and left alone. Interrupted test evidence remains in `tmp/`.
+The following sections retain the earlier attempt's evidence.
 
 ## Authority and amendments
 

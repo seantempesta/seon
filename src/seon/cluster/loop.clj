@@ -326,7 +326,9 @@
               (assoc :seon.cluster.eval/error (accretion/render-ai refusal)
                      :seon.error/kind
                      :seon.test.accretion/install-refused)))))
-    evaluation))
+    (if (get-in evaluation [:seon.program/row :seon.fn/sym])
+      (dissoc evaluation :seon.program/row)
+      evaluation)))
 
 (defn- def-rows
   "Restore-ladder rows admitted by the terminal receipt transaction."
@@ -554,7 +556,8 @@
                    :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
                    :seon.config/on-core-error
                    (:seon.config/on-core-error cluster)
-                   :seon.schema/projection (schema/current-projection)}))
+                   :seon.schema/projection
+                   (schema/projection-from-database database)}))
           evaluation)
         last-ordinal
         (db/q '[:find (max ?ordinal) .

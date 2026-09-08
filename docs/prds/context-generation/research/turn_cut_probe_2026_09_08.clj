@@ -5,6 +5,7 @@
             [seon.cluster.agent :as agent]
             [seon.db :as db]
             [seon.operator.runtime :as runtime]
+            [seon.repl :as repl]
             [seon.schema :as schema]
             [sci.core :as sci]))
 
@@ -54,7 +55,7 @@
                 (db/pull @connection
                          [:seon.cluster.run/id :seon.cluster.run/closed-at
                           {:seon.cluster.eval/_run
-                           [:seon.cluster.eval/ordinal :seon.cluster.eval/result-edn
+                           [:seon.cluster.eval/ordinal :seon.cluster.eval/source :seon.cluster.eval/result-edn
                             :seon.cluster.eval/error]}]
                          [:seon.cluster.run/id (:seon.cluster.run/id submitted)]))
               (finally
@@ -74,11 +75,22 @@
                           :seon.cluster.agent/namespace {:seon.ns/name b-ns}}])]
            (when (:seon.error/kind created)
              (throw (ex-info "Probe agents could not be created." created)))
-           (let [a-result (submit a "(defn shared-inc {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n(my.run/complete \"Installed.\")")
+           (let [uncontracted (submit a "(defn uncontracted [] 42)\n(my.run/complete \"Checked.\")")
+                 uncontracted-symbol (symbol (str a-ns) "uncontracted")
+                 uncontracted-row? (boolean (db/entity @connection [:seon.fn/sym (str uncontracted-symbol)]))
+                 uncontracted-base? (boolean (sci/resolve (:seon.sci.eval/ctx cluster) uncontracted-symbol))
+                 uncontracted-response (repl/response
+                                        (assoc (first (sort-by :seon.cluster.eval/ordinal
+                                                              (:seon.cluster.eval/_run uncontracted)))
+                                               :seon.ns/name a-ns))
+                 a-result (submit a "(defn shared-inc {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))\n(my.run/complete \"Installed.\")")
                  base-resolves? (boolean (sci/resolve (:seon.sci.eval/ctx cluster)
                                                     function-symbol))
                  b-result (submit b (str "(" function-symbol " 41)\n(my.run/complete \"Called.\")"))]
              {:probe/base-resolves? base-resolves?
+              :probe/uncontracted-program-row? uncontracted-row?
+              :probe/uncontracted-base-var? uncontracted-base?
+              :probe/uncontracted-response uncontracted-response
               :probe/a a-result
               :probe/b b-result
               :probe/provider-stand-in-calls @provider-calls})))))))

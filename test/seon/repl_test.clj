@@ -87,8 +87,13 @@
         "a def carries the note, naming the var")
     (is (str/includes? def-response "transact the data into the database.\"")
         "the note ends by saying what persists")
-    (is (not (str/includes? defn-response ":note"))
-        "a defn becomes a program row and carries no note")
+    (is (str/includes? defn-response
+                       "hello was not installed: every function needs a :malli/schema contract to become part of the program."))
+    (is (not (str/includes?
+              (repl/response
+               (emission "(defn hello {:malli/schema [:=> [:cat] :int]} [] 42)"))
+              ":note"))
+        "a contracted defn is eligible for installation")
     (is (= [:seon.repl/value :seon.repl/note]
            (->> (re-seq #":(value|note|out|ns|ms)" def-response)
                 (map (comp keyword #(str "seon.repl/" %) second))))

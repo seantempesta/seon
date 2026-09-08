@@ -34,6 +34,8 @@
             [seon.flow :as seon.flow]
             [seon.problems :as problems]
             [seon.render :as render]
+            [seon.repl :as repl]
+            [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
             [seon.render.web :as web]
             [seon.schema :as schema]
@@ -363,6 +365,49 @@
   (d/unlisten connection
               (:seon.cluster.agent-test/listener-key event-source))
   (async/close! (:seon.cluster.agent-test/events event-source)))
+
+(deftest a-function-without-a-contract-never-enters-the-program
+  (with-connection real-evaluate
+    (fn [connection ctx]
+      (let [routing (armory)
+            events (database-events connection)
+            source "(defn uncontracted [] 42)"
+            function-symbol 'my.agents.contract-probe/uncontracted]
+        (db/transact! connection [(agent-row "contract-probe")])
+        (try
+          (arm-one! connection ctx routing "contract-probe")
+          (let [submission
+                (agent/submit-source!
+                 {:seon.cluster.loop/cluster (handle connection ctx)
+                  :seon.cluster.agent/routing routing
+                  :seon.cluster.agent/id "contract-probe"
+                  :seon.cluster.reply/text
+                  (str source "\n(my.run/complete \"Checked.\")")})
+                run-id (:seon.cluster.run/id submission)
+                database
+                (await-database-state!
+                 connection (:seon.cluster.agent-test/events events)
+                 #(some? (:seon.cluster.run/closed-at
+                          (db/pull % [:seon.cluster.run/closed-at]
+                                   [:seon.cluster.run/id run-id]))))
+                evaluation
+                (db/q '[:find (pull ?evaluation [*]) .
+                        :in $ ?run-id
+                        :where [?run :seon.cluster.run/id ?run-id]
+                        [?evaluation :seon.cluster.eval/run ?run]
+                        [?evaluation :seon.cluster.eval/ordinal 0]]
+                      database run-id)]
+            (is (string? run-id))
+            (is (= source (:seon.cluster.eval/source evaluation)))
+            (is (nil? (db/entity database [:seon.fn/sym (str function-symbol)])))
+            (is (nil? (sci/resolve ctx function-symbol)))
+            (is (str/includes?
+                 (repl/response (assoc evaluation :seon.ns/name
+                                       'my.agents.contract-probe))
+                 "uncontracted was not installed: every function needs a :malli/schema contract to become part of the program.")))
+          (finally
+            (stop-database-events! connection events)
+            (disarm-all! routing)))))))
 
 (deftest system-source-submission-uses-the-ordinary-durable-run
   (with-connection real-evaluate
