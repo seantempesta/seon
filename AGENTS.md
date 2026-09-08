@@ -290,8 +290,12 @@ and they are separate decisions with separate keys (owner ruling,
 2026-09-07): **storage is bounded per value** as `seon.sci.admit` streams its
 EDN, and a value that reaches the bound is `:seon.eval/missing` with the
 bytes it reached; **the AI projection is bounded by the render profile** —
-`seon.print/fit` applies its string, child-count, depth and token limits, and
-that is the ONE place presentation elides anything. Presentation elides only
+the AI RENDER FUNCTIONS and the VALUE RENDERER (`seon.render.value`'s AI
+projection) apply its string, child-count, depth and token limits, and that
+is the ONE place presentation elides anything — never the walk, never the
+transcript, never a render terminal, never a request seam (owner, 2026-09-08:
+"the ai projection is supposed to be handled by the ai render functions or
+the value renderer. DO NOT INTRODUCE MORE spots where clipping occurs"). Presentation elides only
 under a profile, and a request that carries none is not a request without one:
 `seon.render/request-profile` DERIVES the cluster's agent profile at the render
 entry points, so the AI projection is cut either way (measured, 2026-09-07);

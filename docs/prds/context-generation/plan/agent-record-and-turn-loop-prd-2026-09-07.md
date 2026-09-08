@@ -518,8 +518,11 @@ incomplete?
   references stays (`admit.clj:162-171`). The display caps (depth,
   collection, string, node budget) are deleted.
 - **Elision happens once**, at AI context generation, from the stored value,
-  under the render profile, with requery forms into the stored value. HTML
-  renders the stored value without limits.
+  under the render profile, with requery forms into the stored value — IN
+  THE AI RENDER FUNCTIONS AND THE VALUE RENDERER ONLY (owner, 2026-09-08:
+  no clipping at the walk, the transcript, a render terminal, or a request
+  seam; the repair lanes had introduced three such spots, being collapsed).
+  HTML renders the stored value without limits.
 - **A missing value ablates the handle**: no `:seon.repl/result` key, and
   `:seon.repl/value` says the result is unavailable and why. A later form
   naming a dead handle gets an ordinary unresolved-symbol error.

@@ -1758,3 +1758,12 @@ gate = bare `bin/test` (reach-selected by `:seon.fn/calls`) + explicit
 subject namespaces + `--platform`; NEVER `--all`/`--full` in a lane — full
 suites are the orchestrator's integration checkpoints only (the standing
 rule from 2026-08 that I had drifted from). Applied to every spec from now.
+
+Owner (2026-09-08): "the ai projection is supposed to be handled by the ai
+render functions or the value renderer. DO NOT INTRODUCE MORE spots where
+clipping occurs." The repair lanes put `fit` at the transcript, the walk's
+connection width, and a render terminal — three spots. Astra lane
+`one-clipping-spot` launched: census every clip/elide site, collapse into
+the value renderer's AI projection + declared AI render functions.
+Also: Opus lanes winding down (harness stopped clean at 14 commits; turn-
+loop and render-value finish their in-flight slice); all new lanes = astra.
