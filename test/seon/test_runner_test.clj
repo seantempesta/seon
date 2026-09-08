@@ -1400,7 +1400,12 @@
          "  if [ \"$argument\" = \"--prepare-base\" ]; then prepare=true; fi\n"
          "done\n"
          "if [ \"$prepare\" = true ]; then mkdir -p \"${!#}/data/store\"; echo '{}' > \"${!#}/manifest.edn\"; exit 0; fi\n"
-         "test \"$(cd target/dev-dependency-classes && pwd -P)\" = \"$SEON_FAKE_CACHE_PATH\"\n"
+         "test \"$1\" = -Scp\n"
+         "test \"$2\" = fixture-classpath\n"
+         "test -f workers/pool-1/.gitignore\n"
+         "test ! -L workers/pool-1/.gitignore\n"
+         "test -d workers/pool-1/docs\n"
+         "test ! -L workers/pool-1/docs\n"
          "test -d workers/pool-1/.clj-kondo\n"
          "test ! -L workers/pool-1/.clj-kondo\n"
          "cp test-run.txt \"$SEON_FAKE_TRANSCRIPT\"\n")]
@@ -1596,7 +1601,8 @@
                      (ProcessBuilder.
                       ^java.util.List
                       [(str (io/file project-root "bin" "test"))
-                       "--paths" "bin/test" "--" "seon.fs-test"])
+                       "--paths" "bin/test" "test/seon/test_runner_test.clj"
+                       "--" "seon.fs-test"])
                       (.directory project-root)
                       (.redirectErrorStream true))
                     environment (.environment builder)]

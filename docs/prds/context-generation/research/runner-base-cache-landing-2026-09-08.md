@@ -166,3 +166,175 @@ Manual `bin/seon init --dev default --changed ...` reached complete analysis
 but refused because source changed during that analysis. Publication will be
 retried; no convergence is claimed yet. The before baseline, uncontended
 warm timing, regression/platform tallies and final cleanup remain pending.
+
+
+## Dependency-only identity correction (14:38 owner priority)
+
+`f2e3bcb34` removes first-party inputs from dependency class identity.
+`dependency-configuration-digest` hashes `deps.edn` bytes, Git's staged
+`reference-code` gitlinks, and JDK/runtime architecture properties. Dependency
+namespace source bytes remain validated separately; checkout and source URL
+locations are excluded. The snapshot/base digest still includes first-party
+bytes, so source edits invalidate publication without recompiling dependencies.
+The platform regression `dependency-configuration-excludes-first-party-source`
+changes a source file and then `deps.edn`, asserting the respective unchanged
+and changed dependency identities.
+
+A frozen `f2e3bcb34` checkout primed dependency digest
+`be25ec7be762a5aa35f684128ca7d48bc907fc7c3d9fe6c54f16192477057646`:
+364 namespaces, lock wait 1 ms, held 34,578 ms. Appending a comment to
+`src/seon/test/cache.clj`, then running
+`bin/test --paths src/seon/test/cache.clj -- seon.repl-test`, selected the
+same dependency digest with `:status :current`, no rebuild message, lock
+wait 1,643 ms and held 1,284 ms. Its new snapshot digest was
+`faa4a63068c82e000c64aeba59c4b63fb1368781e04fa90509700981f4ced2d8`.
+Snapshot/dependency/worker phases were 4/7/1 seconds. The publication lock
+waited 67,663 ms; the orchestrator restart terminated publication before a
+tally. This is a dependency hit proof, not a completed gate. Seven lanes
+were active. Evidence: `tmp/runner-dependency-prime.log` and
+`tmp/runner-dependency-gate-1.log`.
+
+## Warm-cache measurement without a competing cache lock
+
+At the same frozen `79326a2d2` source and the same `seon.repl-test` selection,
+a private worktree target was seeded with dependency classes only; its base
+was built by the ordinary publisher. No published store was copied.
+
+| Phase | Cold publication | Warm publication |
+|---|---:|---:|
+| Snapshot | 4 s | 3 s |
+| Dependency cache and classpath | 5 s | 4 s |
+| Worker checkout clones | 1 s | 1 s |
+| Published base | 50 s | 0 s (reuse, 3 ms) |
+| Coordinator and tests | 33 s | 27 s |
+| Total measured phases | 93 s | 35 s |
+| Tally | 15 tests / 50 assertions / 0 failures / 0 errors | same |
+
+Evidence: `tmp/runner-base-cache-isolated-cold.log` and
+`tmp/runner-base-cache-isolated-warm.log`. The whole warm run, including
+tests, is below the 60-second fixed-cost target. This isolates cache-lock
+contention, not CPU contention: eight lanes were active, with three other
+coordinators and six workers observed. It predates the dependency-only key
+correction. The old-harness baseline has not yet produced a completed tally.
+
+
+## Three-regression comparison requested at 14:52
+
+Separate detached worktrees with linked `reference-code`, run serially.
+The two older revisions predate `bin/test-fast`; the probe calls each
+revision's own worker projection and contract-arming functions, then runs
+only the three requested existing tests through `clojure.test/run-tests`.
+No fixture or assertion was changed. A 240-second probe backstop kills and
+reaps its own remaining descendants. Current load exceeded the owner's
+quiet-machine observation; these are assertion comparisons, not timings.
+
+| Revision | Named tests | Assertions | Failures | Errors |
+|---|---:|---:|---:|---:|
+| `90170c3c8^` = `74b5b4b05` | 3 | 33 | 0 | 0 |
+| `90170c3c8` | 3 | 33 | 0 | 0 |
+| `b7e8a9143` (HEAD captured for comparison) | 3 | 33 | 2 | 1 |
+
+At HEAD, fresh-root and interruption pass. The stale-cache fixture alone
+fails its old physical-symlink assertion, exits before writing its
+transcript, and consequently reports the missing transcript and retained
+failed root. `547f59257` changed that layout to shared cache parents plus
+`-Scp`; the fixture still expected the former selected-directory link.
+The pool-sizing change is not the cause of this failure. The worker-layout
+comparison is still running to reproduce the additional isolated failures.
+Evidence logs: `tmp/runner-bisect-{before,sizing,head}.log`.
+
+Reproducible probe, invoked with `clojure -M:test PROBE.clj` in each worktree:
+
+```clojure
+(require '[clojure.test :as test] '[seon.schema :as schema] '[seon.test.runner :as runner])
+(let [owner (or (find-ns 'seon.test.arm) (find-ns 'seon.test.runner))
+      packaged (ns-resolve owner 'packaged-test-projection)
+      arm (ns-resolve owner 'arm-contracts!)
+      decision (ns-resolve owner 'arming-decision)
+      namespaces ['seon.test-runner-test]
+      selected '#{a-fresh-run-root-is-claimed-before-population-and-sweep
+                  interrupted-launcher-awaits-its-runner-before-retaining-the-root
+                  stale-dependency-cache-is-refused-or-selected-and-recorded}]
+  (schema/call-with-projection (packaged "bisect") #(require 'seon.test-runner-test))
+  (let [projection (packaged "bisect")]
+    (arm (decision) projection "bisect" namespaces)
+    (doseq [[name v] (ns-publics 'seon.test-runner-test)
+            :when (and (:test (meta v)) (not (selected name)))]
+      (alter-meta! v dissoc :test))
+    (let [result (future (schema/call-with-projection projection #(test/run-tests 'seon.test-runner-test)))
+          summary (deref result 240000 ::expired)]
+      (prn summary)
+      (when (= ::expired summary) (println "BISECT BACKSTOP: named launcher regressions did not finish in 240 seconds"))
+      (with-open [children (.descendants (java.lang.ProcessHandle/current))]
+        (doseq [child (reverse (vec (iterator-seq (.iterator children))))]
+          (.destroyForcibly ^java.lang.ProcessHandle child)))
+      (shutdown-agents)
+      (System/exit (if (and (map? summary) (zero? (+ (:fail summary) (:error summary)))) 0 1)))))
+```
+
+
+The unmodified HEAD launcher then prepared an actual worker checkout, and
+that checkout ran the identical three-regression probe: **3 tests / 26
+assertions / 5 failures / 2 errors**, matching the owner's reported failure
+counts. Evidence: `tmp/runner-bisect-worker.log`.
+
+The worker's `.gitignore` is a valid symlink to the prepared checkout;
+resolving it succeeds. Nevertheless this bounded direct command in that
+worker produces Git's warning:
+
+```sh
+git --work-tree="$PWD" ls-files --others --exclude-standard -- tmp/runner-ignore-probe
+# warning: unable to access '.gitignore': Too many levels of symbolic links
+```
+
+Git refuses the symlink when reading ignore rules for an explicit work tree.
+This is not a cyclic link. The `--work-tree` snapshot comparison arrived in
+`cd42689b2`, before the sizing commit; the top-level worker symlinks date to
+`be6db44da`. Copying top-level regular-file bytes into each worker retains
+valid ignore rules and avoids walking nested fixture/cache output as new
+source. The stale-cache assertion is independently updated to verify the
+admitted `-Scp` argument and a real worker `.gitignore`, instead of the
+obsolete cache-parent layout. All first-party entries now use the platform copy-on-write operation; only
+`reference-code` remains an external dependency link.
+
+
+Copying top-level files alone removed the Git ignore warning but left
+synthetic directory links. Git treated those directories' unchanged files
+as overlay work, and the fresh-root bound still fired. That partial probe
+was stopped and its own descendants reaped. The final change clones **all
+first-party entries**, preserving authored symlinks with `cp -cRP` on macOS
+(`cp -a --reflink=auto` on Linux). No synthetic first-party directory link
+remains. A newly prepared worker then passed the same probe: **3 tests / 33
+assertions / 0 failures / 0 errors**. Evidence:
+`tmp/runner-bisect-worker-clone.log`. The isolated full runner namespace
+gate is now running over exactly `bin/test` and
+`test/seon/test_runner_test.clj` on frozen `b7e8a9143`.
+
+
+The first full namespace gate with complete COW views reported **41 tests /
+259 assertions / 10 failures / 0 errors**. Only fresh-root and concurrent
+nested gates failed; both passed in confirmation. The retained evidence
+identified an additional runtime-directory recursion: an earlier test leaves
+`workers/confirmation/operator-roots/confirm-world/confirmation-launch.edn`
+in the worker checkout. Bare snapshot enumeration admitted that untracked
+output, and population tried to copy `workers` into its own worker child.
+The launcher now excludes generated `workers/` wherever it already excludes
+`data`, `logs`, `target`, and `tmp`.
+
+The concurrent regression's two nested snapshots omitted the parent's
+changed runner-test file and therefore selected a different source digest.
+Their one cold publication took 161 seconds, followed by JVM initialization;
+the test's 240-second completion bound fired before a tally. The nested
+`--paths` selection now includes `test/seon/test_runner_test.clj`, keeping
+these root-lifecycle checks on the parent's already-published source digest.
+No execution bound or assertion was weakened. Evidence:
+`tmp/runner-cache-fixed-gate.log`, retained root `run.J9B7XW`.
+
+
+Final owned-file gate on frozen `b7e8a9143` plus `bin/test` and
+`test/seon/test_runner_test.clj`: **41 tests / 259 assertions / 0 failures /
+0 errors**, exit 0. Snapshot 7 s, dependency/classpath 7 s, worker copies
+8 s, cold publication 131 s, coordinator/tests 439 s; total launcher wall
+596.35 s including cleanup. This is the runner's nested lifecycle suite,
+not the performance selection. Successful root `run.CVyzaZ` was removed.
+Evidence: `tmp/runner-cache-final-owned-gate.log`.

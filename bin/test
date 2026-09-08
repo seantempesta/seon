@@ -356,15 +356,15 @@ populate_checkout_root() {
       continue
     fi
     case "$entry" in
-      data|logs|target|tmp) ;;
-      .clj-kondo|bin|config|resources|script|src|test)
+      data|logs|target|tmp|workers) ;;
+      reference-code) ln -s "$source_root/$entry" "$target_root/$entry" ;;
+      *)
         case "$(uname -s)" in
-          Darwin) cp -cR "$source_root/$entry" "$target_root/$entry" ;;
+          Darwin) cp -cRP "$source_root/$entry" "$target_root/$entry" ;;
           Linux) cp -a --reflink=auto "$source_root/$entry" "$target_root/$entry" ;;
-          *) cp -pR "$source_root/$entry" "$target_root/$entry" ;;
+          *) cp -pRP "$source_root/$entry" "$target_root/$entry" ;;
         esac
         ;;
-      *) ln -s "$source_root/$entry" "$target_root/$entry" ;;
     esac
   done <<< "$entries"
 
@@ -384,7 +384,7 @@ if [ ${#snapshot_paths[@]} -gt 0 ]; then
   overlay_paths=("${snapshot_paths[@]}")
 else
   git diff --no-renames --name-only -z "$git_sha" -- . ':!reference-code' >"$run_root/.snapshot-paths"
-  git ls-files --others --exclude-standard -z >>"$run_root/.snapshot-paths"
+  git ls-files --others --exclude-standard -z -- . ':!workers' >>"$run_root/.snapshot-paths"
   while IFS= read -r -d '' entry; do
     overlay_paths+=("$entry")
   done <"$run_root/.snapshot-paths"
@@ -420,7 +420,7 @@ git -C "$source_root" --work-tree="$run_root" diff --name-status "$git_sha" -- \
     printf 'bin/test:   %s\n' "$entry"
   done
 git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standard -- \
-  . ':!data' ':!logs' ':!target' ':!tmp' ':!reference-code' ':!test-run.txt' | while IFS= read -r entry; do
+  . ':!data' ':!logs' ':!target' ':!tmp' ':!workers' ':!reference-code' ':!test-run.txt' | while IFS= read -r entry; do
     printf 'bin/test:   A %s\n' "$entry"
   done
 echo "bin/test: end snapshot differences"
