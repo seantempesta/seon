@@ -1593,3 +1593,17 @@ OWNER DECISIONS OPEN (asked 2026-09-07 evening):
    with zero evaluations). Recommended: delete the stored stamp, add a
    `:seon.cluster.run/generator` ref read by presence (evaluation-merge
    landing note §4, option 2).
+
+### Late evening
+
+Landed: step 3 (`3b6ca07e9`, one evaluation point — `loop/preview-sources`;
+evaluator is a Var; invocation cache is the one store; ten loads write
+nothing, live). PRD `agent-record-and-turn-loop-prd-2026-09-07.md` at r6:
+the record is identity + namespace + plan; history is a query; wakes are
+datoms on listened attributes, answered by basis `:t` (REPL-verified on
+live data: same sets as the trigger ref); no claims, no resume, three
+writes per turn; both independent reviews integrated. Running: the REPL
+prototype lane (`research/prototype-turn-loop-in-repl-2026-09-07.md`) —
+NO code is rewritten until it reports (owner: "test out the ideas first in
+the repl"). Open split for the owner: turn bound derived (Opus, PRD) vs one
+explicit allowance (astra).

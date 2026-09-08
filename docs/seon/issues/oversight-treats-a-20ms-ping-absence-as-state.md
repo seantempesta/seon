@@ -47,3 +47,9 @@ oversight render's query over those observable facts.
   and unavailable owner with evidence for each.
 - A stress regression delays scheduling beyond 20 ms and proves no false
   mid-turn state.
+
+## 2026-09-07 evening — seen again
+
+The `one-eval-point` lane observed `seon.render.web/render` answering
+`unknown` to the oversight ping on `juniper-context` while serving every
+page and feed request in milliseconds. Same class; no new mechanism.
