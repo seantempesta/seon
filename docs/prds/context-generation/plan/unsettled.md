@@ -1691,3 +1691,13 @@ the `--all` log lists 260 red names, not 314.
 three priced options — OWNER DECISION). Remaining ~190: that class, ~35
 live-boot/operator suites, 5 repl-parity, singletons. `production-defects-
 p1-p6` still running.
+
+`production-defects-p1-p6` landed (`cbc35a5f8..2d5430992`): all six fixed
+and proven live (10 KB def settles, next turn runs; core faults stored);
+contract violations name every problem path + caller; the worker loads the
+program before arming and refuses when it armed nothing; platform green.
+Filed: `an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker`.
+NOW RUNNING in parallel, file-disjoint: lane 2 `listened-attributes`
+(cluster/* + wake/work/loop/run/agent, bootstrap, schedule, effect, error);
+`instrumented-gate-backlog-2` (projection class per law 2.1, worker-group
+scheduling, unreached suites); `verify-p1-p6-and-backlog` (read-only).
