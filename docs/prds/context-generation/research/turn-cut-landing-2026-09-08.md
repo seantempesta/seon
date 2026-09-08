@@ -7,6 +7,35 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
+## Latest attempt: §15 and read-evidence exactness
+
+Read §15 and the current §14 addendum in the working tree. The latest ID ruling
+is a stable 12-hex `seon.schema/sha-256` digest over branch identity, turn ID,
+and ordinal, with handle `result/e<12hex>`. None of the intervening random-ID
+proposals was implemented. Results are actual objects in memory and shown text
+in the database; automatic compaction retracts evaluations past the configured
+token bound. These changes remain unimplemented.
+
+The first gate is read-evidence exactness. The live default cluster's
+`my.message/inbox` for Juniper returned three messages and five captured reads:
+recipient lookup, incoming-message lookup, and three pulls. All five dependency
+plans retained attribute sets only. In particular, the incoming-message plan
+held `#{:seon.cluster.message/to}` without Juniper's bound recipient entity.
+`seon.db/read-evidence-current?` currently uses attribute revisions followed by
+semantic read replay; it does not perform the required index-pattern since check.
+The reproducible read-only [probe](turn_cut_read_evidence_probe_2026_09_08.clj)
+records this observation. Neither direction's required real-SCI regression has
+passed; this is a structural finding, not an exactness proof.
+
+A prospective evidence implementation was removed after the edit hook hit an
+in-flight plan-renderer arity change. Four tests call the new one-argument
+`my.plan/render-plan-html` with two arguments; publication refuses before
+adoption. The [exact boundary](../../../seon/issues/plan-renderer-arity-change-blocks-development-publication.md)
+records all four locations. No prospective database/schema edits remain, and
+the other lane's files were untouched. No new deletion row or reference-count
+change is claimed. The current attempt adds only this evidence, probe, and issue.
+No provider was called by the probe. No lane-owned background shell remains.
+
 No requested deletion row is complete. The resumed lane repaired the
 missing-contract boundary, then stopped under the foreign-lane gate rule:
 the runner's empty `snapshot_paths` expansion fails before tests start.
