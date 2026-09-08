@@ -34,9 +34,15 @@ grounding, review, and integration.
 3. **The current entry point is the agent record and turn loop PRD:**
    [agent-record-and-turn-loop-prd-2026-09-07.md](prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
    Read it end to end before touching the turn, wake, or agent-record
-   surfaces — it supersedes the record and loop sections of the PRD it
-   names in its own frontmatter, and [[agent-runtime]] in
-   `docs/seon/architecture/` is written to its target. Its `plan/
+   surfaces. Apply later rulings over earlier sections: §13 declares one
+   render pair per entity schema and data-returning `dir`/`doc`; §14
+   stores system turns and refreshes every distinct read form by its latest
+   read evidence and the since-query diff, while each agent retains one
+   live SCI context receiving base diffs; §15 keeps result objects in memory
+   and shown text on disk. Compaction wipes evaluations and regenerates the
+   opening. Manual curation, fresh forks per turn, and serialized result
+   restoration are superseded. [agent-runtime](seon/architecture/agent-runtime.md)
+   contains the additive-context diagrams. Its `plan/
    README.md` ordering and `unsettled.md` working edge remain the one
    ledger of dated state; the PRD is the design, not a second ordering.
 4. **Every inherited claim is a hypothesis** — the previous session's
@@ -57,7 +63,7 @@ names owned paths, protected paths, grounding documents, and one exact
 deliverable; never sandbox a lane. Keep one ordered spine and fill every
 other safe slot with independent work; review and integrate each return
 before building on it; two lanes never edit one mechanism. Supervise on a
-≤15-minute cadence by evidence (commits are the heartbeat; transcripts
+≤15-minute cadence by evidence (commits are the heartbeat; logs
 selectively), and stop + resume with the correction the minute new
 information invalidates a lane's direction.
 
@@ -86,11 +92,11 @@ before trusting its "green."
 - **Verifiers live alongside what they verify**, not in a separate later
   pass bolted on after the fact — a verification script or regression a
   lane writes ships in the same commit as the mechanism it checks.
-- **One `--all` per lane.** A lane runs the full `bin/test --all` gate once,
-  at the end, over its finished slice — not repeatedly while iterating.
-  Repeated full runs mid-lane burn the shared JVM pool for no new evidence;
-  use focused/localized runs while iterating and reserve `--all` for the
-  checkpoint.
+- **Use the binding lane gate in PRD §10.** Bare `bin/test`, the
+  subject's explicit namespaces, and `bin/test --platform` must pass.
+  A lane never runs `--all` or `--full`; full suites belong to serial
+  orchestrator integration checkpoints. Preserve any stricter stop rule
+  in the lane's assignment when concurrent edits block verification.
 - **No self-matching pollers.** A lane's background wait loop must never
   `pgrep`/`ps` for a pattern that matches its own polling command — that
   wedges the loop against itself and never exits. Kill your own background
