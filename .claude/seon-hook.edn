@@ -16,10 +16,14 @@
  :docstring-lint
  {:enabled true}
 
+ ;; THE DEFAULT CLUSTER IS THE DEVELOPMENT ENVIRONMENT (owner, 2026-09-08):
+ ;; the main operator root, cluster `default`. Every admitted edit publishes
+ ;; to current-src and `default` adopts it in place. No side root, no
+ ;; special name; fixtures (Juniper) are data seeded into it.
  :current-source
  {:enabled true
-  :root "tmp/juniper-context-live"
-  :cluster "juniper-context"}
+  :root "."
+  :cluster "default"}
 
  ;; The standing review rubric is DATA: `:skills` names skill directories
  ;; under `.agents/skills/`, each of whose `SKILL.md` is read fresh on every

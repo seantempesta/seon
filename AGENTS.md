@@ -674,11 +674,14 @@ operator's internals separately or kill its children blindly; use
 SECOND DEPLOYMENTS USE `--root`. `bin/acme` is a thin root-scoped wrapper
 selecting cluster `acme`.
 
-**The development cluster (standing order, 2026-09-06).** Development work
-happens on the one cluster the edit hook publishes to: `.claude/seon-hook.edn`
-names it under `:current-source` (a `:root` relative to the repository and a
-`:cluster`); read that file, never assume `default`. Boot it with
-`bin/seon --root ROOT start CLUSTER`; its advertisement prints the web URL.
+**The default cluster IS the development environment (owner, 2026-09-08).**
+`bin/seon start` boots cluster `default` in the main operator root; that is
+the live system every edit hook keeps current, the one MCP `eval_clj`
+reaches with no `root` argument, and the one every lane verifies on.
+`.claude/seon-hook.edn` names it under `:current-source` (`:root "."`,
+`:cluster "default"`). There is no side root and no special name; fixture
+agents such as Juniper are data seeded into `default`. Its advertisement
+prints the web URL.
 How an edit reaches the open browser, in order: the `Edit`/`Write`/
 `apply_patch` hook runs `bin/seon --root ROOT init --dev CLUSTER --changed
 PATH`; the live JVM analyzes the changed files and publishes safe
@@ -699,12 +702,11 @@ Shell writes bypass the hook: follow them with the same `init --dev
 adopt with the new path — stop and start it, then `init --dev`. MCP: every
 `eval_clj` call against this cluster passes `root` and `cluster`; `jvm` mode
 has no agent custody, so agent-elided calls need explicit arguments.
-LANES WORK AGAINST THIS CLUSTER (owner, 2026-09-08): it is the live system
-every edit hook keeps current, so a lane verifies there — not on a scratch
+LANES WORK AGAINST `default`: a lane verifies there — not on a scratch
 cluster — and reads the hook's line after each edit. When adoption refuses
-because a cluster predates an incompatible schema change, the lane reforks
-it at once, never waits: `bin/seon --root ROOT stop CLUSTER`, `init CLUSTER
---force`, `start CLUSTER`, `init --dev CLUSTER`, then reseeds the fixture
+because the cluster predates an incompatible schema change, the lane reforks
+it at once, never waits: `bin/seon stop default`, `bin/seon init default
+--force`, `bin/seon start`, `bin/seon init --dev default`, then reseeds the fixture
 (`docs/prds/context-generation/research/juniper_fixture_2026_09_06.clj`
 through `eval_clj`). Database data is disposable by ruling. Scratch clusters
 remain for destructive drills only.

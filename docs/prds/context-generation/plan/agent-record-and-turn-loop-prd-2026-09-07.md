@@ -671,12 +671,13 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
    scratch roots/worktrees before reporting.
 7. **Words**: verify / falsify / probe — never adversarial verbs. The
    retired spellings in §0a are never written.
-8. **The dev cluster** (`tmp/juniper-context-live`, `juniper-context`) IS
-   where a lane verifies: the edit hook keeps it current on every edit. On
-   "predates the incompatible schema change" the lane reforks it itself at
-   once (stop, `init --force`, start, `init --dev`, reseed the Juniper
-   fixture) — never waits, never piles up. Scratch clusters are for
-   destructive drills only (owner, 2026-09-08).
+8. **The default cluster IS the development environment** (main root,
+   `bin/seon start`, MCP with no root argument): the edit hook keeps it
+   current on every edit and a lane verifies there. On "predates the
+   incompatible schema change" the lane reforks it itself at once
+   (`bin/seon stop default; bin/seon init default --force; bin/seon start;
+   bin/seon init --dev default`, reseed the Juniper fixture) — never waits.
+   Scratch clusters are for destructive drills only (owner, 2026-09-08).
 9. **Default lane agent**: `bin/codex-agent` on `gpt-6-astra` at `low`
    effort; raise effort only for design review.
 10. **Landing note** under `docs/prds/context-generation/research/`, dated,
