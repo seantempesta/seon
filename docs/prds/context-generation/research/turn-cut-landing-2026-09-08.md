@@ -7,7 +7,7 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
-## Virtual submission and compaction, 2026-09-08 19:26 UTC — in progress
+## Virtual submission and compaction, 2026-09-08 19:37 UTC
 
 The exactness checkpoint is commit `823569cd3`. The next owned files are
 `src/seon/turn.clj`, `resources/seon/schemas/seon.turn.edn`, and
@@ -15,7 +15,12 @@ The exactness checkpoint is commit `823569cd3`. The next owned files are
 ordinary agent proc; `compact!` retracts that agent's evaluations and refuses
 an open turn inside the database writer. The canonical fixture regression
 uses real per-agent graphs, the work launcher, SCI, and database events;
-there is no evaluator or loop substitution. Its gate is in progress.
+there is no evaluator or loop substitution. Commit `f3bd1d58c` passed
+`bin/test --paths src/seon/turn.clj resources/seon/schemas/seon.turn.edn
+test/seon/turn_test.clj -- seon.turn-test`: two new tests, 24 assertions,
+zero failures/errors. There are no inherited tests in this new namespace.
+The first snapshot's one failure expected plain EDN instead of the existing
+print-node representation; the corrected gate passed both classes.
 
 On the live main-root `default` cluster, MCP without root/cluster arguments
 submitted `(+ 1 1)` for the disposable agent `turn-cut-virtual` as
