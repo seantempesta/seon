@@ -738,7 +738,141 @@
    (tokens/estimate (if (string? rendered) rendered (pr-str rendered)))
    :seon.render.cost/at (Date.)})
 
+;;; ---------------------------------------------------------------------------
+;;; The typed unknown one refused producer contributes
+;;; ---------------------------------------------------------------------------
+
+;;; A RENDER THAT DID NOT HAPPEN IS AN OBSERVATION, NOT AN ABSENCE (§2.4).
+;;; Every producer runs under `:seon.sci.eval/time-limit-ms`, so a slower
+;;; machine refuses a producer a faster one completes. While that refusal
+;;; contributed nothing, the bound firing MOVED THE PROMPT BYTES — which is
+;;; exactly why "same database value, same adopted commit, same profile ⇒
+;;; same bytes" was unreachable (Opus review B5, PRD §5). The value below is
+;;; what the refusal contributes instead, and it is STABLE BY CONSTRUCTION:
+;;; only the producer, the call, the reason, the refusal's own kind and the
+;;; throwable's class. The kernel's diagnostic record — duration, entrances,
+;;; allocation — is deliberately NOT carried: it is the one part of a refusal
+;;; that differs run to run, and it would otherwise both move prompt bytes and
+;;; mint a fresh `failure-message-id` for every repeat of one broken renderer.
+
+(def ^:private unknown-reason-by-outcome
+  "The reason each guarded invocation outcome states about itself."
+  {:time :time-limit
+   :error :refused})
+
+(defn- unknown-stable-evidence
+  [{producer-symbol :seon.render.unknown/producer
+    output :seon.render/output
+    reason :seon.render.unknown/reason
+    call-id :seon.render.call/id
+    failure :seon.error/value}]
+  (let [data (:seon.error/data failure)]
+    (cond-> (sorted-map :seon.render.unknown/reason reason)
+      producer-symbol (assoc :seon.render.unknown/producer producer-symbol)
+      output (assoc :seon.render.unknown/output output)
+      (qualified-keyword? (:seon.error/kind failure))
+      (assoc :seon.render.unknown/refusal (:seon.error/kind failure))
+      (string? (:seon.sci.eval/throwable data))
+      (assoc :seon.render.unknown/throwable (:seon.sci.eval/throwable data))
+      (vector? call-id) (assoc :seon.render.unknown/call call-id))))
+
+(defn unknown
+  "The ONE stable typed unknown a refused render producer contributes.
+
+  `:seon.render.unknown/reason` is the class marker: `:time-limit` when the
+  producer ran past the request's `:seon.sci.eval/time-limit-ms`, `:refused`
+  when the guarded invocation ended in a throwable or a declared-contract
+  refusal, and `:unselected` when no producer ran at all. The refusal's own
+  `:seon.error/kind` and the throwable's class ride along when the boundary
+  observed them, because they are what a repair starts from and both are
+  stable spellings."
+  {:malli/schema [:=> [:cat :seon.render/unknown-request] :seon.render/unknown]}
+  [{producer-symbol :seon.render.unknown/producer
+    reason :seon.render.unknown/reason
+    :as request}]
+  (let [stable (unknown-stable-evidence request)]
+    (error/diagnostic
+     (assoc stable
+            :seon.error/kind ::unknown
+            :seon.error/message
+            (str "The renderer "
+                 (if producer-symbol (str producer-symbol " ") "")
+                 "did not return: " (name reason) ".")
+            :seon.error/diagnostic-layer :render
+            :seon.error/diagnostic-operation
+            (or producer-symbol 'seon.render/unknown)
+            :seon.error/diagnostic-member :seon.render/output
+            :seon.error/diagnostic-expected :seon.render/rendered
+            :seon.error/diagnostic-offending
+            (or (:seon.render.unknown/call stable) producer-symbol reason)
+            :seon.error/diagnostic-cause reason
+            :seon.error/diagnostic-evidence stable))))
+
+(defn- unknown-evidence-of
+  [unit]
+  (let [value (if (map? (:seon.render/value unit)) (:seon.render/value unit) unit)]
+    (into (sorted-map)
+          (filter (fn [entry]
+                    (= "seon.render.unknown" (namespace (key entry)))))
+          value)))
+
+(defn unknown-ai
+  "`:seon.render/ai` — one refused render as ONE line of data.
+
+  Data, never comment-shaped (ruling 45) and never prose, so the page, the
+  history unit and the prompt say the same thing about the same absence — the
+  same rule `seon.repl/missing-text` follows for a value that was never
+  stored. A sorted map and canonical printing make the line's bytes a
+  function of the refusal alone."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
+  [unit]
+  (admit/canonical-edn (unknown-evidence-of unit)))
+
+(defn unknown-html
+  "`:seon.render/html` — one refused render as one labeled block.
+
+  It keeps the `seon-render-unavailable` class it always had: that class is
+  both the compact diagnostic face in the stylesheet and the ONE placeholder
+  class `seon.render.lint` counts, so a page full of refusals is still a lint
+  finding rather than a new unstyled, uncounted block. What is new is inside
+  it — the same line the agent reads."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/hiccup]}
+  [unit]
+  [:div {:class "seon-render-unavailable seon-render-unknown"}
+   [:span {:class "seon-render-unknown-label"} "renderer unavailable"]
+   [:code {:class "seon-render-unknown-detail"} (unknown-ai unit)]])
+
+(defn refused
+  "Read one refusal as a typed unknown, converting a foreign one in place.
+
+  TOTAL: a refusal that never reached a producer — an ambiguous selection, a
+  missing projection — is still an unavailable observation, so it becomes the
+  same typed unknown with no producer to name and its own kind as the refusal."
+  {:malli/schema [:=> [:cat :seon.error/value] :seon.render/unknown]}
+  [failure]
+  (if (:seon.render.unknown/reason failure)
+    failure
+    (unknown {:seon.render.unknown/reason :unselected
+              :seon.error/value failure})))
+
+(defn unknown-output
+  "One refused render's OUTPUT value for `output` — never absence, never nil."
+  {:malli/schema [:=> [:cat :seon.render/output :seon.error/value]
+                  :seon.render/rendered]}
+  [output failure]
+  (let [value (refused failure)]
+    (if (= :seon.render/html output)
+      (unknown-html {:seon.render/value value})
+      (unknown-ai {:seon.render/value value}))))
+
 (defn- invoke-selected
+  "Run one selected producer and return the guarded invocation's WHOLE result.
+
+  The result, not just its value: `:seon.sci.admit/record` is how the boundary
+  says whether the producer returned at all, and reading it here is what lets
+  `invocation-unknown` tell a refusal from a producer that legitimately
+  RETURNED an ordinary `:seon.error` value. Asking the shape of the value
+  instead would confuse the two forever."
   [{ctx :seon.sci.eval/ctx
     caps :seon.sci.admit/caps
     time-limit-ms :seon.sci.eval/time-limit-ms
@@ -755,22 +889,41 @@
         request (update request :seon.render/rendering
                         (fnil conj #{}) selected)
         argument (render-invocation-argument projection request selected)]
-    (:seon.sci.admit/value
-     (schema/call-with-projection
-      projection
-      #(sci.kernel/invoke
-        (cond->
-         {:seon.sci.eval/ctx ctx
-          :seon.db/db (:seon.db/db request)
-          :seon.fn/sym (str selected)
-          :seon.sci.eval/args [argument]
-          :seon.sci.admit/unbounded? true
-          :seon.sci.eval/time-limit-ms time-limit-ms
-          :seon.sci.admit/caps caps
-          :seon.config/on-core-error on-core-error}
-          (:seon.render.call/captured-reads request)
-          (assoc :seon.db/read-evidence-sink
-                 (:seon.render.call/captured-reads request))))))))
+    (schema/call-with-projection
+     projection
+     #(sci.kernel/invoke
+       (cond->
+        {:seon.sci.eval/ctx ctx
+         :seon.db/db (:seon.db/db request)
+         :seon.fn/sym (str selected)
+         :seon.sci.eval/args [argument]
+         :seon.sci.admit/unbounded? true
+         :seon.sci.eval/time-limit-ms time-limit-ms
+         :seon.sci.admit/caps caps
+         :seon.config/on-core-error on-core-error}
+         (:seon.render.call/captured-reads request)
+         (assoc :seon.db/read-evidence-sink
+                (:seon.render.call/captured-reads request)))))))
+
+(defn- invocation-unknown
+  "The typed unknown for a producer that did not return, else nil."
+  [request output selected result]
+  (when-let [reason (get unknown-reason-by-outcome
+                         (get-in result [:seon.sci.admit/record
+                                         :seon.eval/outcome]))]
+    (unknown (cond-> {:seon.render.unknown/reason reason
+                      :seon.render.unknown/producer selected
+                      :seon.error/value (:seon.sci.admit/value result)}
+               output (assoc :seon.render/output output)
+               (:seon.render.call/id request)
+               (assoc :seon.render.call/id (:seon.render.call/id request))))))
+
+(defn- invoked
+  "One producer's returned value, or the typed unknown that replaces it."
+  [request output selected]
+  (let [result (invoke-selected request selected)]
+    (or (invocation-unknown request output selected result)
+        (:seon.sci.admit/value result))))
 
 (defn- valid-projection?
   [projection output value]
@@ -851,16 +1004,23 @@
       (:seon.error/kind selected) (bounded-error-node request selected)
 
       selected
-      (let [rendered (invoke-selected
-                      (assoc request :seon.render/value value)
-                      selected)]
-        (if (valid-projection? projection output rendered)
-          (if (:seon.error/kind rendered)
-            node
-            {:seon.print/face :seon.print/projected
-             :seon.render/output output
-             :seon.print/value rendered})
-          node))
+      ;; A NESTED PRODUCER THAT DID NOT RETURN SAYS SO. Falling back to the
+      ;; unprojected node here was the same absence-reads-as-health defect the
+      ;; walk had one level up: the bound fired, the node silently changed
+      ;; shape, and nothing named the producer that broke.
+      (let [node-request (assoc request :seon.render/value value)
+            result (invoke-selected node-request selected)
+            rendered (:seon.sci.admit/value result)]
+        (if-let [unavailable (invocation-unknown node-request output selected
+                                                 result)]
+          (bounded-error-node request unavailable)
+          (if (valid-projection? projection output rendered)
+            (if (:seon.error/kind rendered)
+              node
+              {:seon.print/face :seon.print/projected
+               :seon.render/output output
+               :seon.print/value rendered})
+            node)))
 
       :else
       (case (:seon.print/face node)
@@ -901,7 +1061,7 @@
                      (producer request output output-schema))]
     (if (:seon.error/kind selected)
       selected
-      (invoke-selected request selected))))
+      (invoked request output selected))))
 
 (defn- fit-terminal
   "Emit one producer's output, eliding ONLY when it is AI context.
@@ -930,7 +1090,7 @@
   [request output selected]
   (let [projection (sci.kernel/context-projection
                     (:seon.sci.eval/ctx request))
-        rendered (invoke-selected request selected)]
+        rendered (invoked request output selected)]
     (case output
       :seon.render/ai
       (if (or (nil? rendered) (string? rendered) (:seon.error/kind rendered))
@@ -1294,21 +1454,30 @@
         database namespace-name))
 
 (defn renderer-failure
-  "Prepare the audience-safe render failure and its owner message.
+  "Prepare one refused render's OUTPUT values and its owner message.
 
-  The browser receives only an unavailable state. The namespace owner, when
-  one is explicitly assigned, receives one idempotent durable message carrying
-  the internal evidence. No loading state is inferred: without a recorded
-  repair-acceptance event, unavailable is the only honest state. An agentless
-  namespace has no queryable stakeholders yet, so its transaction data is
-  empty rather than guessed."
+  Both audiences read the SAME typed unknown, so the page and the prompt say
+  the same thing about the same absence: `unknown-ai` is one line of data for
+  the agent, `unknown-html` the labeled block for a person. The anonymous
+  sentence `Renderer unavailable.` that used to stand here named neither the
+  producer nor why it stopped, so it taught the reader nothing and hid which
+  renderer broke (§2.4).
+
+  The namespace owner, when one is explicitly assigned, receives one durable
+  message carrying the internal evidence. Its idempotence is real only because
+  the unknown is stable: `failure-message-id` digests the failure, and a
+  failure carrying the kernel's duration and allocation minted a NEW message
+  for every repeat of one broken renderer. An agentless namespace has no
+  queryable stakeholders yet, so its transaction data is empty rather than
+  guessed."
   {:malli/schema [:=> [:cat :seon.render/failure-request]
                   :seon.render/failure]}
   [{database :seon.db/db
     namespace-name :seon.render/namespace
     failure :seon.error/value}]
-  (let [owner (namespace-owner database namespace-name)
-        message-id (failure-message-id namespace-name failure)
+  (let [unavailable (refused failure)
+        owner (namespace-owner database namespace-name)
+        message-id (failure-message-id namespace-name unavailable)
         already-recorded?
         (some? (db/q '[:find ?message .
                        :in $ ?message-id
@@ -1319,11 +1488,11 @@
             (db/pull database [:db/txInstant] (db/basis-t database)))
         message
         (str "A renderer in " namespace-name " failed. "
-             (:seon.error/message failure)
+             (:seon.error/message unavailable)
+             " " (unknown-ai {:seon.render/value unavailable})
              " Inspect the render failure and repair its declared contract.")]
-    {:seon.render/ai "Renderer unavailable."
-     :seon.render/html
-     [:div {:class "seon-render-unavailable"} "renderer unavailable"]
+    {:seon.render/ai (unknown-ai {:seon.render/value unavailable})
+     :seon.render/html (unknown-html {:seon.render/value unavailable})
      :seon.db/tx-data
      (cond-> []
        (and owner (not already-recorded?))

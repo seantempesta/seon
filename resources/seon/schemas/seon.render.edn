@@ -126,6 +126,42 @@
                 [:or :qualified-symbol :seon.render/rendered
                  :seon.error/value]]],
               :distance [:int {:min 0}],
+              :unknown-reason [:enum :time-limit :refused :unselected],
+              :unknown-request
+              [:map
+               [:seon.render.unknown/reason :seon.render/unknown-reason]
+               [:seon.render.unknown/producer
+                {:optional true}
+                :qualified-symbol]
+               [:seon.render/output {:optional true} :seon.render/output]
+               [:seon.render.call/id
+                {:optional true}
+                [:vector :seon.schema/value]]
+               [:seon.error/value {:optional true} :seon.error/value]],
+              :unknown
+              [:map
+               {:seon.error/class true,
+                :seon.render/ai seon.render/unknown-ai,
+                :seon.render/html seon.render/unknown-html,
+                :error/message
+                "must name why a render producer refused, and which one"}
+               [:seon.render.unknown/reason :seon.render/unknown-reason]
+               [:seon.error/message :seon.error/message]
+               [:seon.render.unknown/producer
+                {:optional true}
+                :qualified-symbol]
+               [:seon.render.unknown/output
+                {:optional true}
+                :seon.render/output]
+               [:seon.render.unknown/refusal
+                {:optional true}
+                :seon.error/kind]
+               [:seon.render.unknown/throwable
+                {:optional true}
+                :seon.error/throwable-class]
+               [:seon.render.unknown/call
+                {:optional true}
+                [:vector :seon.schema/value]]],
               :failure
               [:map
                [:seon.render/ai :string]

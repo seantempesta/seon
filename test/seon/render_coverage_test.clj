@@ -9,6 +9,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
+            [seon.instrument :as instrument]
             [seon.repl :as repl]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
@@ -16,7 +17,9 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
-            [seon.test-support :as support])
+            [seon.sci.kernel :as kernel]
+            [seon.test-support :as support]
+            [sci.core :as sci])
   (:import [java.util Date]))
 
 (def ^:private cluster-name "render-coverage")
@@ -398,3 +401,147 @@
                                "private provider reasoning"))
            "reasoning keeps its own disclosure")
        (is (not (str/includes? ai "private provider reasoning")))))))
+
+;;; ---------------------------------------------------------------------------
+;;; A refused render producer contributes a stable typed unknown
+;;; ---------------------------------------------------------------------------
+
+(def ^:private probe-source
+  (str "(ns my.render-probe)"
+       " (defn steady [_] \"steady bytes\")"
+       " (defn slow [_] (loop [n 0] (if (< n 100000000000) (recur (inc n)) \"never\")))"
+       " (defn boom [_] (/ 1 0))"
+       " (defn contracted [_] \"contract bytes\")"))
+
+(def ^:private probe-producers
+  '[my.render-probe/steady my.render-probe/slow
+    my.render-probe/boom my.render-probe/contracted])
+
+(defn- probe-ctx
+  "Fork one cluster context carrying the four probe producers.
+
+  The fork is this test's own — `mark-installed!` says these Vars need no
+  database row, exactly as an already-installed function needs none — so
+  nothing here touches the shared worker JVM's program state."
+  [connection]
+  (let [ctx (support/fork-cluster-ctx connection)]
+    (sci/eval-string* ctx probe-source)
+    (doseq [probe probe-producers]
+      (kernel/mark-installed! ctx probe))
+    ;; ONE CONTRACT, ARMED. `:record` instruments nothing, so a contract
+    ;; refusal is only observable under the dial that raises it — the same
+    ;; call `seon.sci.eval/install-function-contract!` makes for a program row.
+    (let [contracted (sci/resolve ctx 'my.render-probe/contracted)]
+      (sci/bind-root!
+       ctx contracted
+       (instrument/wrap-interpreted 'my.render-probe/contracted
+                                    "[:=> [:cat :string] :string]"
+                                    (kernel/context-projection ctx)
+                                    :panic caps @contracted)))
+    ctx))
+
+(def ^:private probe-call-id
+  [:seon.render/ai [:seon.cluster.agent/id agent-id] 1])
+
+(defn- probe-render
+  [database ctx value producer limit-ms]
+  (render/render-ai (assoc (render-request database ctx value)
+                           :seon.render/ai producer
+                           :seon.render.call/id probe-call-id
+                           :seon.sci.eval/time-limit-ms limit-ms)))
+
+(deftest a-refused-render-producer-contributes-a-stable-typed-unknown
+  ;; THE CLASS: every producer runs under `:seon.sci.eval/time-limit-ms`, and
+  ;; a refusal used to contribute ABSENCE — the walk kept a unit only when its
+  ;; output was a non-empty string with no error. So a slow machine silently
+  ;; moved the prompt bytes a fast one produced, which is why "same database
+  ;; value, same adopted commit, same profile ⇒ same bytes" was unreachable
+  ;; (PRD §5, review B5), and it was a standing §2.4 violation besides: an
+  ;; unavailable observation is the typed unknown, never absence.
+  (support/with-database
+   (fn [connection]
+     (seed-entities! connection)
+     (let [database @connection
+           ctx (probe-ctx connection)
+           value (pulled database [:seon.cluster.agent/id agent-id])]
+       (testing "a producer that runs past the limit names itself and the bound"
+         (let [refused (probe-render database ctx value
+                                     'my.render-probe/slow 50)]
+           (is (= :seon.render/unknown (:seon.error/kind refused)))
+           (is (= :time-limit (:seon.render.unknown/reason refused)))
+           (is (= 'my.render-probe/slow
+                  (:seon.render.unknown/producer refused)))
+           (is (= probe-call-id (:seon.render.unknown/call refused)))
+           (is (= :seon.render/ai (:seon.render.unknown/output refused)))
+           (is (= :seon.sci.kernel/time-limit
+                  (:seon.render.unknown/refusal refused)))))
+
+       (testing "a producer that throws carries the throwable's class"
+         (let [refused (probe-render database ctx value
+                                     'my.render-probe/boom 2000)]
+           (is (= :refused (:seon.render.unknown/reason refused)))
+           (is (= 'my.render-probe/boom
+                  (:seon.render.unknown/producer refused)))
+           (is (= :seon.sci.kernel/invocation-failed
+                  (:seon.render.unknown/refusal refused)))
+           (is (string? (:seon.render.unknown/throwable refused)))))
+
+       (testing "a producer whose declared contract refuses carries it"
+         (let [refused (probe-render database ctx value
+                                     'my.render-probe/contracted 2000)]
+           (is (= :refused (:seon.render.unknown/reason refused)))
+           (is (= 'my.render-probe/contracted
+                  (:seon.render.unknown/producer refused)))
+           (is (= :seon.instrument/contract-violated
+                  (:seon.render.unknown/refusal refused))
+               "the contract's own refusal survives the render boundary")))
+
+       (testing "the unknown reads as ONE line of data the agent can act on"
+         (let [refused (probe-render database ctx value
+                                     'my.render-probe/slow 50)
+               line (render/unknown-output :seon.render/ai refused)]
+           (is (= 1 (count (str/split-lines line))))
+           (is (not (str/starts-with? (str/triml line) ";"))
+               "never comment-shaped (ruling 45)")
+           (is (str/includes? line "my.render-probe/slow"))
+           (is (str/includes? line ":time-limit"))))
+
+       (testing "and as one labeled block for a person"
+         (let [refused (probe-render database ctx value
+                                     'my.render-probe/boom 2000)
+               block (render/unknown-output :seon.render/html refused)
+               text (hiccup/->string block)]
+           (is (hiccup/hiccup? block))
+           (is (str/includes? text "renderer unavailable"))
+           (is (str/includes? text "my.render-probe/boom"))))
+
+       (testing "a producer that RETURNS an error value is not a refusal"
+         (let [returned (probe-render database ctx value
+                                      'my.render-probe/steady 2000)]
+           (is (= "steady bytes" returned))))))))
+
+(deftest one-refused-producer-moves-no-other-rendered-bytes
+  ;; The bound must be able to fire without moving a byte. Two passes with
+  ;; DIFFERENT limits make the refused producer run for measurably different
+  ;; wall-clock times; the working producer's bytes, and the refusal's own
+  ;; line, must be identical across both — which holds only because the typed
+  ;; unknown carries nothing from the kernel's diagnostic record.
+  (support/with-database
+   (fn [connection]
+     (seed-entities! connection)
+     (let [database @connection
+           ctx (probe-ctx connection)
+           value (pulled database [:seon.cluster.agent/id agent-id])
+           pass (fn [limit-ms]
+                  {:steady (probe-render database ctx value
+                                         'my.render-probe/steady 2000)
+                   :refused (render/unknown-output
+                             :seon.render/ai
+                             (probe-render database ctx value
+                                           'my.render-probe/slow limit-ms))})
+           first-pass (pass 50)
+           second-pass (pass 150)]
+       (is (= (:steady first-pass) (:steady second-pass))
+           "the unrefused unit's bytes do not move")
+       (is (= (:refused first-pass) (:refused second-pass))
+           "and the refusal's own bytes do not carry the clock")))))
