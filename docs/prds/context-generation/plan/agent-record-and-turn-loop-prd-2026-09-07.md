@@ -1,6 +1,6 @@
 ---
 type: prd
-status: draft r5 — answered-by-basis model (no claim, no reference); only Clojure's/Datahike's words; Opus review integrated; astra review unanswered
+status: draft r6 — both reviews integrated (research/prd-review-turn-loop-{opus,astra}-2026-09-07.md); REPL prototype of every claim running (research/prototype-turn-loop-in-repl-2026-09-07.md)
 date: 2026-09-07 (evening)
 supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
 tags: [prd, agent, wake, storage, runtime]
@@ -132,8 +132,16 @@ derive, no counters a query can count.
 |---|---|---|
 | `:seon.agent/id` | string, identity | lookup, handles, messaging by id |
 | `:seon.agent/namespace` | ref → `:seon.ns` | the prompt line and where forms evaluate; NOT unique (many agents may share a namespace); stewardship is `:seon.ns/steward` on the namespace |
-| `:seon.agent/plan` | the `my.plan` data | the agent stores it on purpose |
-| `:seon.agent/evals` | component SET → evaluation entities | history (rendered), handles, nothing-re-executes. Order lives on the evaluation (`turn`, `ordinal`), never on the set. An agent identity row never retracts (ruling 47 extended), so the component cascade is never exercised |
+| `:my.plan/*` | the plan facts the agent already stores on itself | the agent stores them on purpose; no wrapper entity (astra: a wrapper duplicates existing ownership) |
+
+That is the whole stored record: identity, namespace, plan. Everything
+else the page or the prompt shows is a QUERY over turns and evaluations
+(astra's angle: "turns consume wakes; evaluations belong to turns; the
+record is a query over those facts"). No `:seon.agent/evals` back-edge:
+`:seon.eval/turn` → `:seon.turn/agent` already says whose evaluation it is,
+and a rendered one-hop value needs no stored ownership edge. The debug page
+renders the record's declared keys, then the derived history, in declared
+order.
 
 Questioned and REMOVED from the record:
 
@@ -145,7 +153,13 @@ Questioned and REMOVED from the record:
   database value" replacing the eleven call sites, `render/request-profile`
   first (review S2).
 - **`turns-left`** — derived (§1a). The loop keeps track of turns by
-  counting them, not by remembering a number.
+  counting them, not by remembering a number. The two reviews split here
+  (Opus: derive; astra: keep one explicit allowance because "turns since the
+  last outside wake" is a heuristic, not a grant model). Decision: derive,
+  as the prototype lane measures it; if a grant model is ever wanted, it is
+  stored GRANTS and `remaining = granted − turns`, never a decrementing
+  counter.
+- **`:seon.agent/evals` component** — deleted (above).
 - **process custody and the open-turn pointer** — both derivable (§1a):
   "mid-turn" is "my turn with no closed-at"; "dead" is "open at boot".
 - **any collection of wakes on the agent** — a wake is a datom on a listened attribute whose value is the agent (§3); nothing is copied onto the record and nothing references the wake back.
@@ -159,7 +173,8 @@ Questioned and REMOVED from the record:
 
 - **A listened attribute** is a ref attribute whose schema row carries
   `:seon.wake/listen true`; its value is the agent to wake. Today:
-  `:seon.message/to`, `:seon.error/steward`, `:seon.schedule/agent`.
+  `:seon.message/to`, `:seon.error/steward`, `:seon.schedule.firing/agent`
+  (one firing entity per firing; a recurrence definition asserts no datom).
   Declaring one is one schema property — which requires attribute
   properties to become schema ROW facts (today only three render properties
   are lifted, from a hand list at `schema.clj:1419-1420`; review B4/S3), so
@@ -237,6 +252,39 @@ byte-identical projection); `interrupted-at` on the turn (it lives on the
 evaluation that was cut); the situation stamp; the plan digest; the forms
 list (evaluations point at the turn).
 
+**A turn can end without evaluations** (astra B2): a crash after open and
+before the reply, a provider failure, an empty or unreadable reply. The
+terminal owner is one function: it closes the turn with its attempts (each
+carrying its error) and, when the reply was never stored, the turn is
+derivably interrupted (closed, no reply, no attempt error) — the
+zero-evaluation recovery proof (`recovery-marks-a-run-that-settled-no-receipt`)
+points at that derivation. No stamp on the turn.
+
+**One open turn per agent is a fence in the writer** (astra B3): `open`
+refuses when the agent already has a turn with no `closed-at`, decided
+inside the `:db.fn/call` by query — the in-memory permit is not the
+writer's fence, because `submit-source!` opens a turn without the permit.
+System-authored turns stay: a submitted source is a turn with a reply and
+no attempts, so `author` is derived (no attempts = system), not stored.
+
+**A refused terminal transaction closes the turn with failure outcomes in
+that same refusal path** (astra B4; today `settle-batch-refusal!`,
+`loop.clj:730-775`). Without that, re-entering `:evaluate` would execute
+the same side effects again before the identity refused the second
+settlement. "Also crash resume" is struck from §7: the evaluate arm handles
+only a turn this pass opened.
+
+**A schedule firing is its own entity** (astra B6): `:seon.schedule/*` is a
+recurrence definition; each firing transacts one entity with
+`:seon.schedule.firing/agent` (the listened attribute), so every firing is a
+new datom with its own `:t`. One wake entity addresses one agent.
+
+**One database value per pure derivation, not per turn** (astra B7): a form
+may transact and its next form may read that transaction, so evaluation
+reads the connection's current value between forms as it does today
+(`loop.clj:1538-1576`). The "20 of 21 reads" line is struck; what is deleted
+is every re-derivation of a value the pass already holds.
+
 An **evaluation** entity, accreted into the EXISTING `seon.eval` family
 (which already holds the gauges `duration-ms`, `allocated-bytes`,
 `fn-entries`, `host-interop-count`; its `outcome` enum is deleted as
@@ -275,18 +323,13 @@ ns/symbol) and coin nothing that a query could express.
 #:seon.agent{:id        [:string {:seon.db/identity true
                                   :description "The agent's stable identity; handles, messages, and stewardship name it."}]
              :namespace [:seon.db/ref {:description "The :seon.ns entity whose REPL this agent sits in. Not unique: agents may share a namespace; stewardship is :seon.ns/steward."}]
-             :plan       [:seon.db/ref {:seon.db/component true
-                                        :description "The agent's my.plan entity; stored on purpose by the agent."}]
-             :evals      [:set {:seon.db/component true
-                                :description "Every evaluation this agent has made, one entity per (turn, ordinal); the history is a projection of this set, ordered by (turn, ordinal). A set: Datahike keeps no order on cardinality-many."}
-                          :seon.db/ref]
              :agent      [:map {:seon.db/attributes true
                                 :seon.render/ai seon.agent/render-ai
                                 :seon.render/html seon.agent/render-html}
                           [:seon.agent/id :seon.agent/id]
                           [:seon.agent/namespace :seon.agent/namespace]
-                          [:seon.agent/plan {:optional true} :seon.agent/plan]
-                          [:seon.agent/evals {:optional true} :seon.agent/evals]]}
+                          [:my.plan/steps {:optional true} :my.plan/steps]
+                          [:my.plan/current-step {:optional true} :my.plan/current-step]]}
 
 ;; seon.turn.edn — one model call and what it produced
 #:seon.turn{:id        [:string {:seon.db/identity true :description "Identity for evaluations and attempts to reference."}]
@@ -309,6 +352,9 @@ ns/symbol) and coin nothing that a query could express.
                         [:seon.turn/reply-missing {:optional true} :seon.turn/reply-missing]
                         [:seon.turn/attempts {:optional true} :seon.turn/attempts]]}
 
+;; Every family below carries its own [:map {:seon.db/attributes true} …] entity schema so the
+;; population INSTALLS it (astra B1: a component ref does not declare its children; leaves need the
+;; map or an explicit declaration property; seon.schema.form admits map entries).
 ;; :seon.ai.attempt/* stays in the AI owner's namespace (resources/seon/schemas/seon.ai.edn); the turn references it.
 ;; It loses :ordinal and gains :prompt-digest [:seon.blob/digest] — the digest of the projected prompt bytes, the byte-identity witness.
 
@@ -328,7 +374,24 @@ ns/symbol) and coin nothing that a query could express.
             :error   [:string {:description "The thrown message."}]
             :triage-edn [:string {:description "clojure.main/ex-triage data as EDN; the suffix names the encoding."}]
             ;; :seon.eval/duration-ms already exists; :seon.print/length and :seon.print/level are the print owner's keys and are reused, not re-coined
-            :interrupted-at [:inst {:description "Asserted at boot on an evaluation with no terminal fact whose turn was open."}]}
+            :interrupted-at [:inst {:description "Asserted at boot on an evaluation with no terminal fact whose turn was open."}]
+            :eval [:map {:seon.db/attributes true :seon.render/ai seon.repl/render-ai :seon.render/html seon.repl/render-html}
+                   [:seon.eval/id :seon.eval/id] [:seon.eval/turn :seon.eval/turn] [:seon.eval/ordinal :seon.eval/ordinal]
+                   [:seon.eval/source :seon.eval/source] [:seon.eval/ns :seon.eval/ns]
+                   [:seon.eval/comment {:optional true} :seon.eval/comment]
+                   [:seon.eval/ending-ns {:optional true} :seon.eval/ending-ns]
+                   [:seon.eval/value {:optional true} :seon.eval/value] [:seon.eval/value-blob {:optional true} :seon.eval/value-blob]
+                   [:seon.eval/missing {:optional true} :seon.eval/missing] [:seon.eval/size {:optional true} :seon.eval/size]
+                   [:seon.eval/out {:optional true} :seon.eval/out] [:seon.eval/error {:optional true} :seon.eval/error]
+                   [:seon.eval/triage-edn {:optional true} :seon.eval/triage-edn] [:seon.eval/duration-ms {:optional true} :seon.eval/duration-ms]
+                   [:seon.print/length {:optional true} :seon.print/length] [:seon.print/level {:optional true} :seon.print/level]
+                   [:seon.eval/interrupted-at {:optional true} :seon.eval/interrupted-at]]}
+
+;; seon.schedule.edn — accretion: each firing is an entity (astra B6)
+#:seon.schedule.firing{:schedule :seon.db/ref
+                       :at :inst
+                       :agent [:seon.db/ref {:seon.wake/listen true :seon.wake/opens-turn? true :description "The agent this firing wakes; one firing, one agent, one datom with its own :t."}]
+                       :firing [:map {:seon.db/attributes true} [:seon.schedule.firing/schedule :seon.schedule.firing/schedule] [:seon.schedule.firing/at :seon.schedule.firing/at] [:seon.schedule.firing/agent :seon.schedule.firing/agent]]}
 
 ;; seon.wake.edn — the mechanism (§3). Both are schema PROPERTIES lifted onto the schema ROW as facts (review S3), so "which attributes wake an agent" is a Datalog query.
 #:seon.wake{:listen [:boolean {:description "On a ref attribute: Datahike listen reports its assertions and the referenced agent is woken; answered is derived from :t."}]
@@ -340,8 +403,8 @@ ns/symbol) and coin nothing that a query could express.
                                      :description "The steward routed to fix it: function → namespace → :seon.ns/steward, computed inside the committing transaction."}]}
 ```
 
-Wake sources declared where they live: `:seon.message/to` (renamed from
-`seon.cluster.message`), `:seon.error/steward`, `:seon.schedule/agent` each
+Listened attributes declared where they live: `:seon.message/to` (renamed
+from `seon.cluster.message`), `:seon.error/steward`, `:seon.schedule.firing/agent` each
 carry `{:seon.wake/listen true :seon.wake/opens-turn? true}`. `:seon.ns/steward`
 (exists, `seon.ns.edn`) is the routing fact they derive from.
 
@@ -352,12 +415,15 @@ incomplete?
 
 ## 5. Storage bound, elision, and the missing marker
 
-- **One storage bound per value** (`:seon.config.eval.result/max-bytes`).
-  Serialization stops at the bound; that is also the realization bound for a
-  lazy sequence. Under it the value is stored faithfully; over it, or
-  unserializable, `:seon.cluster.eval/missing` names the reason and the size
-  reached. The admission caps (depth, collection, string, node budget)
-  are deleted.
+- **One storage bound per value** (`:seon.config.eval.result/max-bytes`),
+  enforced as STREAMING serialization under the evaluation's own SCI
+  interrupt (astra B8: a lazy sequence can block before its first byte, and
+  admission already checks the interrupt at every node, `admit.clj:395-410`;
+  a byte count on a finished string is not an execution bound). Under it the
+  value is stored faithfully; over it, or unserializable, `:seon.eval/missing`
+  names the reason and the size reached. Identity-only admission of
+  references stays (`admit.clj:162-171`). The display caps (depth,
+  collection, string, node budget) are deleted.
 - **Elision happens once**, at AI context generation, from the stored value,
   under the render profile, with requery forms into the stored value. HTML
   renders the stored value without limits.
@@ -387,7 +453,7 @@ turn with the attributes in §4 only), the run pointer and
 takeover and `release-call`, the resume arm, `:seon.context.capture` and
 `:seon.context.contribution`, `plan-digest`, `undisposed-at`, the gate
 counters, `:seon.ai.attempt/ordinal`, `:seon.def/*`, `:seon.render/units`,
-`:seon.eval/outcome`, `:seon.eval/author`, the two hand lists of the wake
+`:seon.eval/outcome`, `:seon.eval/author` (derived: no attempts = system), the `:seon.agent/evals` and `:seon.agent/plan` wrappers, `:seon.cluster.run/trigger` (answered by `:t`), the two hand lists of the wake
 set (`wake.clj:78-93`, `:232-250`) and the render-property hand list
 (`schema.clj:1419-1420`), the admission caps, `bind-stored-results!`'s windowed ambiguity, and 20 of
 the loop's 21 connection reads (one database value enters a pass).
@@ -397,7 +463,7 @@ the loop's 21 connection reads (one database value enters a pass).
 ```
 (defn step [db agent]                                   ; pure
   (cond
-    (open-turn-with-unsettled-evals db agent) :evaluate  ; also crash resume
+    (open-turn-with-unsettled-evals db agent) :evaluate  ; only a turn this pass opened; boot closes the rest
     (and (unanswered-wake db agent) (turns-left? db agent)) :reply
     :else                                            :idle))
 ```
@@ -406,7 +472,7 @@ the loop's 21 connection reads (one database value enters a pass).
 attempts + evaluations (one commit) → fall into `:evaluate`. `:evaluate` = fork → evaluate each unsettled ordinal →
 settle the batch and close the turn (one commit). Commits per model turn:
 three (today 5–6). Boot: close every open turn, stamping its unsettled
-evaluations interrupted — total, never refusing. Fences kept: store results once, and one open turn per agent, as `:db.fn/call`;
+evaluations interrupted — total, never refusing. Fences kept, all `:db.fn/call` deciding by query inside the transaction: one open turn per agent (open refuses); store results once; a refused terminal transaction closes the turn with failure outcomes;
 one evaluation per (turn, ordinal) as the declared `:seon.eval/id`
 identity — a declaration, not a transaction function (review S1). Deleted
 fences: claim/takeover, release, holder-only close, pointer coherence, the
@@ -459,6 +525,9 @@ prefix growth of a mechanism that no longer exists.
 8. Is "no resume" right? What is lost when a crash cuts a turn after its
    forms transacted side effects, and is storing the forms before evaluating
    still worth one commit — or could reply + results be one write?
+10. §4 terminal owner: is one function for reply failure, reader failure,
+    provider failure, and evaluation refusal genuinely one, or four arms in
+    a trench coat? Show its `case`.
 9. Answered-by-`:t` (§3): is there any case where a wake with `:t ≤ basis`
    was NOT in the projected context, or one with `:t > basis` was? (History
    attributes, `noHistory`, a wake on the agent's own transaction.)
