@@ -447,3 +447,35 @@ resolved against existing `5e65fb7c9` and its five passing namespace tests.
 Fresh HTTP proof still failed: default port 7994 returned zero bytes, HTTP 000,
 after 20.003488 seconds. The existing default-web issue records this recurrence;
 MCP still answers. No protected web/adoption source was edited or restarted.
+
+### Isolated verification and instrumentation fixture
+
+The combined 139-test snapshot at `bb0cda832` did not complete: worker exchanges
+expired and SCI tests exposed instrumentation drift (908 removed wrappers at
+one test, 18 at another). Its supervisor was terminated explicitly and exited
+143; this is not a completed or green gate. The separate Flow/await/namespace
+gate at `38d2fc91b` completed with 29 tests, 104 assertions, zero failures and
+23 worker errors. Worker acquisition could not compile the concurrent debug
+test's reference to the removed `seon.render.web/prospective-prompt`
+(`test/seon/render/web_prompt_test.clj:26:6`). The existing shared-base issue
+records that boundary; no foreign session or protected source was changed.
+
+The authorized worktree `tmp/issues-sweep-wt`, based on `e3efb12cc`, uses the
+shared `reference-code` symlink and only this lane's seven test-file changes.
+Its paths-only `--platform` gate exited 0 and removed its successful runner
+root (`run.doXNvF`). In particular, the new canonical instrumentation regression
+entered with real armed contracts, removed them, threw deliberately, and proved
+restoration of the exact callable roots and Malli function-schema registry.
+The fixture now brackets all deliberate instrumentation mutations in the
+cohost, agent, SCI evaluation, SCI instrumentation, and context namespaces.
+Subject-namespace verification is still running; the original issue remains
+open until that result is known.
+
+The retired program-state, agent-graph, and render-delivery skill references
+are now explicitly superseded by §13–§15 rather than directing new work toward
+per-turn forks, restored private definitions, or the old rendering pipeline.
+The shared instruction corrections were included in concurrent commit
+`0cf243f0c`; no duplicate instruction commit is needed. The associated
+instruction-body issue is resolved. The already-resolved trailing-prose skill
+note is moved to the archive: the current skill states the correct rule at
+lines 17–18, and its existing resolution records the parser regression.

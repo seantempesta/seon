@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, docs, sci, wave/docs-honesty]
 ---
@@ -34,7 +34,7 @@ Read on 2026-09-08:
   verify those designs against the PRD before restoring such links.
 
 The updated architecture, handoff, vocabulary, and skill entrypoints
-follow [the binding PRD](../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
+follow [the binding PRD](../../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
 §13–§15. The source implementation is still being changed by its owning
 lanes; this issue does not infer completion from the documentation.
 
@@ -50,3 +50,18 @@ No active instruction tells a lane to create a fresh SCI context each
 turn, persist private defs/results, manually curate context, or restore
 result blobs. Supporting references are source-verified or explicitly
 superseded, and all active links lead to the current contract.
+
+## Resolution — 2026-09-08
+
+Issues-sweep reconciled AGENTS.md's crash, result-boundary, and evaluation
+vocabulary paragraphs against §14–§15. They now state the persistent agent
+context, live private objects, stored shown text, and retired process custody
+and result-serialization designs without claiming the source cut complete.
+The three named supporting references are explicitly superseded and redirect
+to their current skill and the binding PRD. Their old imperative bodies are
+removed; Git retains the historical text and measurements.
+
+A structural search of `.agents/skills` found the remaining restoration and
+fresh-fork phrases only in explicit prohibitions or these superseded notices.
+The Markdown suite passed 31 tests / 376 assertions with no failures/errors.
+No protected runtime or render implementation was changed for this correction.
