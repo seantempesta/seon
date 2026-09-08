@@ -1,7 +1,5 @@
 ---
 name: ui-canvas
-type: skill
-status: active
 description: "Assess whether a requested agent-authored canvas or control needs a new contract or fits Seon's existing namespace-page renderer. Use for generalized forms, buttons, inputs, and my.canvas proposals."
 ---
 
