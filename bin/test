@@ -332,6 +332,15 @@ printf 'pid=%s process-start=%s suite-start=%s git=%s selection=%s\n' \
   "$git_sha" \
   "$selection" >"$run_root/test-run.txt"
 
+phase_started=$SECONDS
+record_phase() {
+  local phase=$1
+  local elapsed=$((SECONDS - phase_started))
+  printf 'bin/test: PHASE %s elapsed-seconds=%s\n' "$phase" "$elapsed"
+  printf 'phase=%s elapsed-seconds=%s\n' "$phase" "$elapsed" >>"$run_root/test-run.txt"
+  phase_started=$SECONDS
+}
+
 populate_checkout_root() {
   local target_root=$1 entry entries
   mkdir -p "$target_root/data" "$target_root/logs" \
@@ -415,13 +424,14 @@ git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standa
     printf 'bin/test:   A %s\n' "$entry"
   done
 echo "bin/test: end snapshot differences"
+record_phase snapshot
 
 # The dependency preparation and all workers consume this same snapshot.
 rmdir "$run_root/target"
 mkdir -p "$source_root/target"
 ln -s "$source_root/target" "$run_root/target"
 cd "$run_root"
-if ! dev_cache_output=$(clojure -T:dev-cache ensure-cache 2>&1); then
+if ! dev_cache_output=$(clojure -T:dev-cache ensure-cache :test? true 2>&1); then
   printf '%s\n' "$dev_cache_output" >&2
   echo "bin/test: dependency cache freshness check failed" >&2
   exit 1
@@ -448,6 +458,29 @@ if ! [[ "$dev_cache_digest" =~ ^[0-9a-f]{64}$ ]] ||
   exit 1
 fi
 
+test_classpath_file=$(bb -e '
+  (require (quote [clojure.edn :as edn]))
+  (print (or (:seon.dev-cache/test-classpath-file
+              (edn/read-string (first *command-line-args*))) ""))' "$dev_cache_result")
+snapshot_digest=
+if [ -n "$test_classpath_file" ]; then
+  test_classpath=$(bb -e '(require (quote [clojure.edn :as edn]))
+    (print (edn/read-string (slurp (first *command-line-args*))))' "$test_classpath_file")
+  snapshot_digest=$(bb -e '
+    (require (quote [clojure.edn :as edn]))
+    (print (:seon.dev-cache/test-digest (edn/read-string (first *command-line-args*))))' "$dev_cache_result")
+  if [ -z "$test_classpath" ] || [ ${#snapshot_digest} -ne 64 ]; then
+    echo "bin/test: test cache returned no classpath or snapshot digest" >&2
+    exit 1
+  fi
+else
+  # A --paths snapshot can predate this launcher's cache protocol. Its own
+  # runner and dependency producer remain authoritative for that invocation.
+  echo "bin/test: snapshot predates cached classpaths; using its test classpath"
+  test_classpath=$(clojure -Spath -M:test)
+fi
+printf 'snapshot-digest=%s\n' "$snapshot_digest" >>"$run_root/test-run.txt"
+
 printf 'dev-cache-digest=%s\n' "$dev_cache_digest" >>"$run_root/test-run.txt"
 rm "$run_root/target"
 mkdir "$run_root/target"
@@ -466,6 +499,8 @@ if [ ${#namespaces[@]} -eq 0 ]; then
   echo "bin/test: no test namespaces found under test/" >&2
   exit 1
 fi
+
+record_phase dependency-cache-and-classpath
 
 logical_processors=$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)
 if ! [[ "$logical_processors" =~ ^[1-9][0-9]*$ ]]; then
@@ -497,7 +532,12 @@ source_root=$original_source_root
 for worker_root in "$worker_parent/"*; do
   ln -s "$dev_cache_path" "$worker_root/target/dev-dependency-classes"
 done
-shared_published_base="$run_root/shared-published-base"
+if [ -n "$snapshot_digest" ]; then
+  shared_published_base="$source_root/target/test-published-bases/$snapshot_digest/base"
+else
+  shared_published_base="$run_root/shared-published-base"
+fi
+record_phase worker-checkouts
 
 if [ -z "$result_root" ]; then
   result_root="$run_root/data/clusters"
@@ -601,12 +641,17 @@ else
   : >"$changed_paths_file"
 fi
 
-echo "bin/test: preparing one shared published test base"
-launch_runner clojure \
-  "-J-Dseon.operator.root=$shared_published_base" \
-  "-J-Dseon.test.root=$run_root" \
-  "-J-Dseon.test.source-root=$source_root" \
-  -M:test -m seon.test.runner --prepare-base "$shared_published_base"
+echo "bin/test: preparing or reusing published test base $snapshot_digest"
+if [ -n "$snapshot_digest" ]; then
+  launch_runner bb --config "$run_root/bb.edn" -m seon.test.cache \
+    "$source_root" "$run_root" "$snapshot_digest" "$test_classpath" "$$"
+else
+  launch_runner clojure -Scp "$test_classpath" \
+    "-J-Dseon.operator.root=$shared_published_base" \
+    "-J-Dseon.test.root=$run_root" \
+    "-J-Dseon.test.source-root=$source_root" \
+    -M:test -m seon.test.runner --prepare-base "$shared_published_base"
+fi
 if await_runner; then
   base_status=0
 else
@@ -618,6 +663,8 @@ if [ "$base_status" -ne 0 ]; then
   echo "bin/test: shared published base preparation failed; retained isolated operator root $run_root" >&2
   exit "$status"
 fi
+
+record_phase published-base
 
 coordinator_jvm_arguments=(
   "-J-Dseon.operator.root=$run_root"
@@ -633,7 +680,7 @@ if [ -n "$persistent_results_root" ]; then
   )
 fi
 
-launch_runner clojure \
+launch_runner clojure -Scp "$test_classpath" \
   "${coordinator_jvm_arguments[@]}" \
   -M:test -m seon.test.runner \
   "${result_cluster:--}" "$result_root" "$git_sha" "$selection_mode" \
@@ -644,6 +691,7 @@ else
   status=$?
 fi
 set -e
+record_phase coordinator-and-tests
 cd "$source_root"
 
 if [ "$status" -eq 0 ]; then
