@@ -1,10 +1,13 @@
 ---
 type: prd
-status: active
+status: SUPERSEDED
+superseded-by: agent-record-and-turn-loop-prd-2026-09-07.md
 tags: [prd, context, render, schema, data-model, web]
 ---
 
 # Agent entity curation: one attribute, one unit of context
+
+SUPERSEDED by [the turn-loop PRD](agent-record-and-turn-loop-prd-2026-09-07.md); the text below is historical evidence.
 
 ## Outcome
 
