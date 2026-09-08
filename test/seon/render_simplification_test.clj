@@ -36,15 +36,19 @@
     ::not-landed))
 
 (defn- render-request
+  "One render call request. ABSENT MEANS NO KEY: `:seon.render/namespace` is
+  optional on `:seon.render/call-request`, and an optional key present as nil
+  fails its contract, so a call with no owning namespace carries no key
+  rather than a stored nil."
   [database ctx owning-namespace rendered-value]
-  {:seon.db/db database
-   :seon.sci.eval/ctx ctx
-   :seon.render/namespace owning-namespace
-   :seon.render.call/id [:seon.render-simplification-test/floor]
-   :seon.render/value rendered-value
-   :seon.sci.admit/caps caps
-   :seon.sci.eval/time-limit-ms 2000
-   :seon.config/on-core-error :panic})
+  (cond-> {:seon.db/db database
+           :seon.sci.eval/ctx ctx
+           :seon.render.call/id [:seon.render-simplification-test/floor]
+           :seon.render/value rendered-value
+           :seon.sci.admit/caps caps
+           :seon.sci.eval/time-limit-ms 2000
+           :seon.config/on-core-error :panic}
+    owning-namespace (assoc :seon.render/namespace owning-namespace)))
 
 (defn- render-ai
   [request]
@@ -210,7 +214,7 @@
                            :seon.render.profile/max-depth 4
                            :seon.render.profile/max-children 10
                            :seon.render.profile/composition
-                           :seon.render.profile.composition/context})
+                           :multiline})
            projection-state-var
            (ns-resolve 'seon.schema '*projection-state*)]
        (with-bindings {projection-state-var nil}
@@ -234,7 +238,11 @@
               [:=> [:cat :string :string] :seon.render/ai]]
              matching [:=> [:cat argument-schema] :seon.render/ai]})
            request
-           (assoc (render-request @connection {} 'probe.render 7)
+           ;; the declared call request takes a REAL ctx even where the
+           ;; projection this test wants is redefined below it.
+           (assoc (render-request @connection
+                                  (support/fork-cluster-ctx connection)
+                                  'probe.render 7)
                   :seon.render/output :seon.render/ai
                   :seon.render/profile
                   {:seon.render.profile/id :seon.render.profile/agent
@@ -242,7 +250,7 @@
                    :seon.render.profile/max-depth 4
                    :seon.render.profile/max-children 10
                    :seon.render.profile/composition
-                   :seon.render.profile.composition/context})]
+                   :multiline})]
        (with-redefs [kernel/context-projection (constantly projection)
                      kernel/public-functions-in
                      (fn [_ctx _namespace-name] [cross-arity matching])]
@@ -697,16 +705,19 @@
        (is (hiccup/hiccup? result))))))
 
 (deftest settled-package-is-reused-by-every-join
-  (let [keyframe "<article id=\"one\">one</article>"
+  ;; A package is keyed by `:seon.render/surface-id`, which is at least nine
+  ;; characters, so the fixture uses a real one rather than a short label.
+  (let [surface-id "block-one"
+        keyframe "<article id=\"block-one\">one</article>"
         keyframe-bytes (.getBytes keyframe "UTF-8")
         package {:seon.render.package/revision 7
                  :seon.render.package/base-revision 6
                  :seon.render.package/basis-transaction 1
                  :seon.render.package/streaming? false
-                 :seon.render.package/keyframe {"one" keyframe}
+                 :seon.render.package/keyframe {surface-id keyframe}
                  :seon.render.package/keyframe-bytes keyframe-bytes
                  :seon.render.package/keyframe-size (alength keyframe-bytes)
-                 :seon.render.package/delta {"one" keyframe}
+                 :seon.render.package/delta {surface-id keyframe}
                  :seon.render.package/delta-bytes keyframe-bytes
                  :seon.render.package/delta-size (alength keyframe-bytes)}]
     (with-redefs [hiccup/->string (fn [& _]
@@ -789,7 +800,8 @@
      (is (= "(+ 1 1)" (authored-source {})))
      (db/transact!
       connection
-      (concat
+      ;; transaction data is a VECTOR, not a lazy sequence.
+      (into
        (agent/creation-tx
         {:seon.cluster.agent/id "source-cache-agent"
          :seon.ns/name fixture-a
@@ -824,7 +836,7 @@
                      :seon.render.profile/max-depth 8
                      :seon.render.profile/max-children 100
                      :seon.render.profile/composition
-                     :seon.render.profile.composition/context}
+                     :multiline}
                     :seon.render.call/id call-id
                     :seon.render/retained-calls retained-calls
                     :seon.render/captured-calls calls

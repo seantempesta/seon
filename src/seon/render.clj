@@ -793,8 +793,16 @@
 
 (defn- project-node*
   [request output path node value]
-  (let [projection (sci.kernel/context-projection
-                    (:seon.sci.eval/ctx request))
+  ;; A RENDER UNIT NEED NOT CARRY A CTX. `:seon.render/unit` declares none —
+  ;; the floor's own entry points take a bare value — and
+  ;; `seon.sci.kernel/context-projection` declares one, so reading the key
+  ;; unguarded turned every ctx-less floor render into a thrown contract
+  ;; violation at the one boundary §2.4 requires a value from. No ctx means
+  ;; no declared-producer projection, which `registered-layout` in
+  ;; `seon.render.value` already says the same way, and which the selection
+  ;; below already treats as "nothing declared".
+  (let [projection (some-> (:seon.sci.eval/ctx request)
+                           sci.kernel/context-projection)
         ;; A PRODUCER IS NEVER RE-ENTERED INSIDE ITS OWN WALK. A
         ;; producer that renders its value THROUGH the floor —
         ;; `seon.ai/attempt-html` calls `render.value/render-html` for

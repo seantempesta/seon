@@ -371,19 +371,27 @@
             exception-envelope? (prepl-exception-envelope? value)
             exception-summary-value (when exception-envelope?
                                       (exception-summary value))
+            instance-projection
+            (some-> (:seon.sci.eval/ctx instance)
+                    env/of
+                    :seon.schema/projection)
             admitted
             (if evaluation-print-node
               {:seon.sci.admit/print-node evaluation-print-node}
+              ;; ABSENT MEANS NO KEY: `:seon.schema/projection` is optional on
+              ;; the admission request, and an optional key present as nil
+              ;; fails its contract, so an instance holding no ctx — a
+              ;; storeless MCP evaluation — supplies no projection rather
+              ;; than a nil one.
               (admit/admit-value
-               {:seon.sci.admit/value (or exception-summary-value value)
-                :seon.sci.admit/interrupt-fn (fn [])
-                :seon.sci.admit/caps caps
-                :seon.schema/projection
-                (some-> (:seon.sci.eval/ctx instance)
-                        env/of
-                        :seon.schema/projection)
-                :seon.config/on-core-error
-                (:seon.config/on-core-error effective)}))
+               (cond-> {:seon.sci.admit/value (or exception-summary-value
+                                                  value)
+                        :seon.sci.admit/interrupt-fn (fn [])
+                        :seon.sci.admit/caps caps
+                        :seon.config/on-core-error
+                        (:seon.config/on-core-error effective)}
+                 instance-projection
+                 (assoc :seon.schema/projection instance-projection))))
             artifact (render.value/artifact admitted)
             content (render.value/artifact-edn artifact)
             content-digest (blob/digest content)
@@ -2420,19 +2428,27 @@
                    :seon.sci.admit/caps caps
                    :seon.error/basis-t (db/basis-t db)
                    :seon.config.error/recurrence-limit
-                   (:seon.config.error/recurrence-limit dials)}
+                   (:seon.config.error/recurrence-limit dials)
+                   ;; THE FAULT FAMILY'S OWN BOUND rides the request the
+                   ;; committer builds, so `error/prepare` AND
+                   ;; `error/commit-tx` — both of which declare it required —
+                   ;; read the one dial this cluster's effective config
+                   ;; carries. Handing it to only one of the two is how every
+                   ;; core fault became unrecordable: `commit-tx` refused its
+                   ;; contract and the operator printed the refusal about
+                   ;; itself instead of the fault.
+                   :seon.config.error/max-evidence-bytes
+                   (:seon.config.error/max-evidence-bytes dials)}
             (:seon.config.error/escalate-to dials)
             (assoc :seon.config.error/escalate-to
                    (:seon.config.error/escalate-to dials))
             run-id (assoc :seon.cluster.run/id run-id)
             agent-id (assoc :seon.cluster.agent/id agent-id))
-          ;; THE FAULT FAMILY'S OWN BOUND decides how much evidence the
+          ;; The fault family's own bound decides how much evidence the
           ;; durable fact keeps; the blob threshold decides where the
-          ;; complete evidence lives. Two decisions, two declared keys.
-          prepared (error/prepare
-                    (assoc request
-                           :seon.config.error/max-evidence-bytes
-                           (:seon.config.error/max-evidence-bytes dials)))
+          ;; complete evidence lives. Two decisions, two declared keys, ONE
+          ;; request — `prepare` and `commit-tx` see the same value.
+          prepared (error/prepare request)
           staged (when (or (let [size (:seon.error/data-size
                                        (:seon.error/fact prepared))]
                              ;; AN UNSERIALIZABLE EVIDENCE MEASURED NOTHING,

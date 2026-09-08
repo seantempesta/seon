@@ -356,7 +356,7 @@
                :seon.render.profile/max-depth 8
                :seon.render.profile/max-children 100
                :seon.render.profile/composition
-               :seon.render.profile.composition/context}
+               :multiline}
               :seon.render.call/id [id]
               :seon.render/captured-calls captured-calls
               :seon.render/captured-invocations captured-invocations
