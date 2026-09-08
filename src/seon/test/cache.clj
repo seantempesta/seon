@@ -15,13 +15,13 @@
     (edn/read-string (slurp file))))
 
 (defn- child! [directory arguments]
-  (let [child (process/process {:dir (str directory) :inherit true
+  (let [child (process/process arguments
+                               {:dir (str directory) :in :inherit :out :inherit :err :inherit
                                 :shutdown (fn [child]
                                             (process/destroy-tree child)
                                             (when-not (.waitFor ^Process (:proc child) 10 TimeUnit/SECONDS)
                                               (.destroyForcibly ^Process (:proc child))
-                                              (.waitFor ^Process (:proc child) 10 TimeUnit/SECONDS)))}
-                               arguments)
+                                              (.waitFor ^Process (:proc child) 10 TimeUnit/SECONDS)))})
         seconds (Long/parseLong (or (System/getenv "SEON_TEST_SILENCE_SECONDS") "300"))]
     (try
       (let [result (deref child (* seconds 1000) ::expired)]
