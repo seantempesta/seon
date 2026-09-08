@@ -259,3 +259,9 @@ old PRDs superseded). Monitors: page up/down transitions, cluster-log
 errors, a quiet-machine re-run of the runner gate. Open: the runner's own
 tests red under load (nested bin/test killed, exit 137) — verdict pending
 the quiet re-run.
+
+Value renderer landed (`2b9336349`): bound BEFORE traversal — 100k-vector
+AI 1994 → 0.20 ms, 5 MiB string 841 → 0.17 ms; canonical map/set order
+(byte identity), pasteable requery forms `(get-in result/e… [path])`,
+quoted strings, default printing for entities without a pair. HTML stays
+unbounded (1.3 s for 100k, by ruling).
