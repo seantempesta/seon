@@ -957,3 +957,35 @@ This records implementation dependencies, not a change to the owner rulings:
   live-object carrier from the evaluation owner. Those APIs were not yet
   present when this lane stopped; the lane did not invent a parallel store
   or rerun saved forms to stand in for them.
+
+## 16. The debug page shows the algorithm (owner, 2026-09-08: "I want to see it in practice")
+
+`/ns/{ns}/debug` for an agent is the one place §14's walk is visible in
+every state, without running a model:
+
+1. **State line**: the agent, how many evaluations it holds, the `:t` of its
+   last turn, and which case the next walk is in — fresh (no evaluations)
+   or continuing.
+2. **Context now**: every evaluation of the agent in (turn `:t`, ordinal)
+   order through `seon.repl/text` — exactly the prompt's stored prefix —
+   with, per evaluation, the as-of check: the stored shown text rendered
+   again at `as-of` its own `:t` equals the stored text (green) or not
+   (red, the renderer stopped being a function of the data).
+3. **Would-be system turn**: the walk computed NOW, writing nothing: for
+   each declared block and each of its read forms — none / unchanged /
+   changed since `:t` naming the facts that moved — and, for the forms that
+   would run, their evaluated bytes. Fresh ⇒ every form; continuing ⇒ only
+   the changed ones; nothing changed ⇒ "no system turn".
+4. **`?prompt=true`** = context now + the would-be system turn = the exact
+   bytes a provider would receive, with their digest.
+5. **Three controls**, each a same-origin POST to the existing context
+   route, after which the page repaints through the feed: **Run system
+   turn** (store what §3 showed), **Virtual turn** (one turn through the
+   ordinary loop with a fixture reply of no-op forms — no provider),
+   **Compact** (retract the agent's evaluations; the next walk is fresh).
+6. The HTML column stays as today, one block per concern.
+
+Owned: the page and the controls by `record-render`; `seon.turn/system-turn`
+(compute, with `:write? false` for the preview), `seon.turn/virtual-turn!`,
+`seon.turn/compact!` by `turn-cut`. Both read this section as their spec.
+
