@@ -289,16 +289,28 @@
   (test-support/with-database
    (fn [connection]
      (db/transact! connection [{:seon.cluster.agent/id "wildcard-agent"}])
-     ;; ABSENT MEANS NO KEY: the admission caps are optional here, and a nil
-     ;; in an optional key fails its contract.
-     (instrument/apply! {:seon.config/on-core-error :panic})
-     (try
-       (is (= "wildcard-agent"
-              (:seon.cluster.agent/id
-               (db/pull @connection '[*]
-                        [:seon.cluster.agent/id "wildcard-agent"]))))
-       (finally
-         (instrument/remove!))))))
+     ;; THE WORKER'S ENTERING WRAPPERS, RESTORED BELOW. A pooled worker runs
+     ;; many tests per JVM and `instrument/remove!` is total by design, so a
+     ;; bare `remove!` in this `finally` left the worker with 926 wrappers
+     ;; gone and every LATER task asserting THIS test's timing rather than
+     ;; its own subject. The runner's own drift report named this test
+     ;; (AGENTS §5.7: own nothing global), and `seon.db-test` was already a
+     ;; known VICTIM of the same class — being its own cause as well is
+     ;; exactly what the class note predicted.
+     (let [entering-roots (into {} (map (juxt identity deref))
+                               (instrument/instrumented))]
+       ;; ABSENT MEANS NO KEY: the admission caps are optional here, and a nil
+       ;; in an optional key fails its contract.
+       (instrument/apply! {:seon.config/on-core-error :panic})
+       (try
+         (is (= "wildcard-agent"
+                (:seon.cluster.agent/id
+                 (db/pull @connection '[*]
+                          [:seon.cluster.agent/id "wildcard-agent"]))))
+         (finally
+           (instrument/remove!)
+           (doseq [[instrumented-var root] entering-roots]
+             (alter-var-root instrumented-var (constantly root)))))))))
 
 (deftest explicit-and-current-database-forms-are-equivalent
   (test-support/with-database
