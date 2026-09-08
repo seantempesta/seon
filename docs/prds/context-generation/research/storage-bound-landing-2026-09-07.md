@@ -50,11 +50,13 @@ Written by the `storage-bound` lane against
 6. **The walk's connection truncation moved to the render profile.**
    `seon.render.walk` read `:seon.config.eval.result/max-collection` — a
    STORAGE cap — to decide how many connections on one attribute the agent
-   sees. It now reads `:seon.render.profile/max-children`, the presentation
-   authority already carried on every render request and already part of the
-   byte-identity qualification (same db, same commit, same profile). When the
-   profile derivation refuses, the walk shows every connection the pull
-   returned rather than cutting silently at a number nobody declared.
+   sees. It now reads `:seon.render.profile/max-children` off the request the
+   caller carried: the presentation authority, already part of the
+   byte-identity qualification (same db, same commit, same profile). A
+   request carrying no profile is not an AI context generation and elides
+   nothing. Deriving one instead both cut where no presentation decision was
+   made and re-read effective config per acquisition — three config reads
+   where `public-walk-is-callable-through-an-agent-sci-eval` proves one.
 7. **The filed NPE class is dead by construction.** The cap it read no longer
    exists; the one bound that replaced it is validated at the seam and its
    absence is a flat refusal naming
@@ -131,6 +133,43 @@ point `settlement-result` can stage above the threshold again and both
 projections resolve the digest. Filed as a finding for the turn lane, which
 owns the pull selectors and the unit.
 
+### 3.3a What `:unserializable` costs, measured
+
+The ruled line — a bare `#object[…]` at the ROOT of an admission stores
+nothing — is wider than the channel the proof names. Every one of these is
+now missing where it used to render as a description:
+
+| value | before | after |
+|---|---|---|
+| `(async/chan)` | `#object[…ManyToManyChannel]` | `#:seon.eval{:missing :unserializable}` |
+| `(atom 1)` | `#object[clojure.lang.Atom]` | the same marker |
+| `(create-ns 'x)` | `#object[sci.lang.Namespace "x"]` | the same marker |
+| `(in-ns 'x)` | the same | the same marker |
+| a fn value | `#object[user/f]` | the same marker |
+| sci's unbound marker | `{…/opaque "sci.impl.vars.SciUnbound"}` | the same marker |
+
+None of them ever carried a restorable handle, so nothing that WAS reachable
+became unreachable. What is lost is the class name, which was the whole
+content of the old node — filed as
+[a missing value loses the class it could not serialize](../../../seon/issues/a-missing-value-loses-the-class-it-could-not-serialize.md)
+with the one-key accretion that would restore it. `clojure.lang.Var` was
+moved onto the existing `:seon.print/var` face in the same wave, because a
+Var IS its name in either world and admitting the host's as an opaque object
+broke every `def` at the JVM REPL.
+
+Two consequences the wave had to repair, both real defects the ruling
+exposed:
+
+1. **Missing had to become a TERMINAL FACT.** An evaluation with no
+   `result-edn` read as still running, so the turn's settlement refused with
+   `::no-terminal-fact` and a form that had already executed would have been
+   re-attempted. `seon.cluster.run/terminal?` and its two query twins
+   (`seon.cluster.work/next-ordinal`, `append-generated-call`'s prefix check)
+   now count `:seon.eval/missing`.
+2. **`seon.render.value/artifact` had to become total.** It returned `{}` for
+   a missing admission — a contract violation, and an empty panel where the
+   reason belongs.
+
 ### 3.4 `:seon.sci.admit/capped?` readers in protected files
 
 Deleting the key is safe: every protected reader is nil-safe and `nil` now
@@ -156,6 +195,16 @@ removal of `:seon.sci.admit/capped?`, which no longer exists.
 `src/seon/cluster/loop.clj:1621` called `restorable-node`'s deleted two-arity
 form. The edit is mechanical (drop the second argument) and the hook's static
 analysis blocked publication until it was made.
+
+### 3.7 The `/data` route now serves a long string whole
+
+`:seon.config.eval.result/max-string` was clipping strings at the `/data`
+navigation surface as a side effect of being a STORAGE cap. With it gone,
+a 5 MiB attribute is served in one response. That is the ruled behavior for
+the value (HTML has no limits) and the test expectation moved to it, but the
+route wants its own declared presentation window beside
+`:seon.render.value/max-collection`:
+[filed](../../../seon/issues/the-data-route-has-no-presentation-bound-for-a-string.md).
 
 ## 4. Gates
 
