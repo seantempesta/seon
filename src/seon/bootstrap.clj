@@ -51,16 +51,15 @@
             turns-used
             ((requiring-resolve 'seon.cluster.work/episode-runs)
              database agent-id)
+            ;; UNREAD AND THE TURN BOUND ARE ONE DERIVATION, BY `:t`.
+            ;; A message is unanswered exactly while its transaction is
+            ;; newer than every turn this agent has opened; the bound is
+            ;; the turns taken since the latest wake from outside the
+            ;; agent. Neither is stored and neither is counted here.
             unread
-            (or (db/q '[:find (count ?message) .
-                        :in $ ?agent-id
-                        :where
-                        [?agent :seon.cluster.agent/id ?agent-id]
-                        [?message :seon.cluster.message/to ?agent]
-                        (not-join [?message]
-                          [?run :seon.cluster.run/trigger ?message])]
-                      database agent-id)
-                0)]
+            (count ((requiring-resolve
+                     'seon.cluster.work/unanswered-triggers)
+                    database agent-id))]
         (cond->
          {:seon.cluster.agent/id agent-id
           :seon.cluster.agent/namespace-ref

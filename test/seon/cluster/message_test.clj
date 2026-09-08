@@ -609,7 +609,8 @@
                             {:sender "alice" :trigger "m-0" :run "r-1"
                              :value (my.message/send "bob" "hello bob")}))
             written (into #{} (mapcat keys) rows)]
-        (is (seq (set/intersection written (wake/wake-attributes)))
+        (is (seq (set/intersection written
+                                   (wake/wake-attributes (db/db connection))))
             "a delivery writes a wake attribute — that IS the transport")
         (is (empty? (set/intersection written
                                       (cluster.loop/committed-attributes)))

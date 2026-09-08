@@ -58,6 +58,7 @@
             [seon.db :as db]
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
+            [seon.cluster.wake :as wake]
             [seon.schema.edn :as schema.edn]
             [seon.sci.reader :as reader]))
 
@@ -355,69 +356,83 @@
 ;;; The derivations
 ;;; ---------------------------------------------------------------------------
 
-(declare unanswered-triggers)
+(declare unanswered-wakes)
 
 ;;; ---------------------------------------------------------------------------
-;;; The episode — derived purely from committed facts (F1 §7)
+;;; The turn bound — derived from transaction :t, with zero stored counters
 ;;; ---------------------------------------------------------------------------
 
-(defn- outside-trigger?
-  "True when the message came from outside the population's AUTONOMOUS
-  activity — a human, or a schedule fire. An agent-sent message carries
-  `:seon.cluster.message/from`; the error recorder's carries
-  `:seon.cluster.message/about` (recorder provenance) and deliberately
-  does NOT reset the episode (F1 seal correction R3: an agent in an
-  error loop must not have its cap reset by its own failure
-  notifications)."
-  [db message-id]
-  (nil? (db/q '[:find ?message .
-               :in $ ?id
-               :where
-               [?message :seon.cluster.message/id ?id]
-               (or [?message :seon.cluster.message/from _]
-                   [?message :seon.cluster.message/about _])]
-             db message-id)))
+(defn- inside-wakes
+  "Of `wakes`, those the population itself caused, by entity id.
+
+  INSIDE-NESS IS DECLARED, NOT INFERRED. An attribute carrying
+  `:seon.wake/inside true` marks any wake entity bearing it as the
+  population's own activity: an agent-sent message
+  (`:seon.cluster.message/from`), the error recorder's notification
+  (`:seon.cluster.message/about`), a fault routed for repair
+  (`:seon.error/steward`), an effect the agent requested
+  (`:seon.effect/to`). The `from`-or-`about` pair this replaces was a
+  hand list inside this namespace; each family now owns its own
+  declaration."
+  [db wakes]
+  (let [ids (into #{} (map :db/id) wakes)]
+    (if (empty? ids)
+      #{}
+      (into #{}
+            (db/q '[:find [?wake ...]
+                    :in $ [?wake ...] [?inside ...]
+                    :where
+                    [?wake ?inside _]]
+                  db ids (wake/inside-attributes db))))))
+
+(defn outside-wake-t
+  "The transaction `:t` of the agent's latest wake from OUTSIDE it, or 0.
+
+  The anchor of the turn bound. A human message and a schedule firing
+  are outside; an agent-sent message, a fault routed to its steward, and
+  an agent's own settled effect are inside (`inside-wakes`). Zero when
+  the agent has never been woken from outside, which counts EVERY turn:
+  all of them are autonomous continuation, and a free pass here would
+  void the bound for exactly the agent-spawned agents it most concerns."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
+                  [:int {:min 0}]]}
+  [db agent-id]
+  (let [wakes (unanswered-wakes db agent-id {:seon.cluster.work/answered? :any})
+        inside (inside-wakes db wakes)]
+    (reduce max 0
+            (keep (fn [wake]
+                    (when-not (contains? inside (:db/id wake))
+                      (:seon.wake/t wake)))
+                  wakes))))
 
 (defn episode-runs
-  "The agent's runs since the one answering the last outside trigger.
+  "The agent's turns taken since its latest wake from outside itself.
 
-  Inclusive of that run, and derived purely from committed facts: every
-  run records its trigger as `:seon.cluster.run/trigger` when it opens.
-  The episode anchor is the FIRST answering run for each outside trigger,
-  then the latest of those first answers; any historical later run carrying
-  the same trigger cannot reset its own bound. A trigger is outside exactly
-  when it carries neither `from`
-  nor `about` (R3 — the error recorder never resets the episode). Zero
-  new facts, no stored counter — an outside trigger's first run IS the
-  reset, so no reset code exists. An agent that has NEVER answered an
-  outside trigger counts EVERY run: all of them are autonomous
-  continuation, and a zero here would void the cap for exactly the
-  agent-spawned agents it most concerns (review-caught, 2026-07-28)."
+  DERIVED FROM `:t` AND NOTHING ELSE. Datahike stamps every datom with
+  its transaction, so a turn's own identity datom carries the basis it
+  projected from and a wake carries the moment it arrived. The count is
+  the turns whose own `:t` is at or after the anchor `outside-wake-t`
+  returns — no stored counter, no episode entity, and no reset code,
+  because an outside wake arriving IS the reset.
+
+  Measured at 0.115 ms against 0.134 ms for the run-trigger derivation
+  it replaces, same answer (prototype claim 4). The anchor moved: this
+  refills the bound the moment an outside wake ARRIVES, where the trigger
+  derivation refilled when one was ANSWERED."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.agent/id]
                   :seon.cluster.work/episode-runs]}
   [db agent-id]
-  (let [first-outside-txs
-        (db/q '[:find ?message (min ?tx)
-               :in $ ?agent-id
-               :where
-               [?agent :seon.cluster.agent/id ?agent-id]
-               [?run :seon.cluster.run/agent ?agent]
-               [?run :seon.cluster.run/id _ ?tx]
-               [?run :seon.cluster.run/trigger ?message]
-               (not [?message :seon.cluster.message/from _])
-               (not [?message :seon.cluster.message/about _])]
-             db agent-id)
-        outside-tx (reduce max 0 (map second first-outside-txs))]
-    (or (db/q '[:find (count ?run) .
-               :in $ ?agent-id ?outside-tx
-               :where
-               [?agent :seon.cluster.agent/id ?agent-id]
-               [?run :seon.cluster.run/agent ?agent]
-               [?run :seon.cluster.run/id _ ?tx]
-               [(>= ?tx ?outside-tx)]]
-             db agent-id outside-tx)
-        0)))
+  (or (db/q '[:find (count ?run) .
+              :in $ ?agent-id ?since
+              :where
+              [?agent :seon.cluster.agent/id ?agent-id]
+              [?run :seon.cluster.run/agent ?agent]
+              [?run :seon.cluster.run/id _ ?tx]
+              [(>= ?tx ?since)]]
+            db agent-id (outside-wake-t db agent-id))
+      0))
 
 (defn- max-episode-runs
   "The episode dial, read from the config singleton on this database
@@ -430,47 +445,55 @@
        db))
 
 (defn- episode-capped?
-  "True when only OUTSIDE triggers may open a run for `agent-id`: the
-  episode count has reached the dial, or the dial is absent
+  "True when only OUTSIDE wakes may open a turn for `agent-id`: the
+  turn count has reached the dial, or the dial is absent
   (fail-closed)."
   [db agent-id]
   (let [limit (max-episode-runs db)]
     (or (nil? limit)
         (>= (episode-runs db agent-id) limit))))
 
-(defn- openable-trigger
-  "The trigger `agent-id`'s next run answers, under the episode gate.
-  Below the cap: oldest-first over all unanswered triggers. AT the cap
-  (or with the dial absent): only OUTSIDE triggers are selectable,
-  oldest such first — a deferred agent-sent trigger is SKIPPED, never a
-  selection blocker, because an older deferred self-trigger that
-  blocked selection would keep the arriving outside trigger from ever
-  opening and the count from ever resetting (F1 seal correction:
-  the cap-hit deadlock found in review)."
+(defn- openable-wakes
+  "The unanswered wakes `agent-id`'s next turn answers, under the bound.
+
+  A TURN OPENS FOR ALL OF THEM AT ONCE. Answeredness is the turn's own
+  `:t`, so every wake at or before it is answered by the one turn whose
+  context contained them — two wakes in one transaction are one paid
+  call, where selecting one at a time paid twice (prototype 1c, measured
+  on live data).
+
+  Below the cap: every unanswered turn-opening wake. AT the cap (or with
+  the dial absent): only OUTSIDE wakes can open, so an agent in a loop
+  still hears a human — and an older deferred inside wake is SKIPPED
+  rather than blocking selection, which is the cap-hit deadlock the F1
+  seal corrected."
   [db agent-id]
-  (let [triggers (unanswered-triggers db agent-id)]
+  (let [wakes (unanswered-wakes db agent-id {})]
     (if (episode-capped? db agent-id)
-      (first (filter #(outside-trigger?
-                       db (:seon.cluster.message/id %))
-                     triggers))
-      (first triggers))))
+      (let [inside (inside-wakes db wakes)]
+        (into [] (remove #(contains? inside (:db/id %))) wakes))
+      wakes)))
 
 (defn deferred-triggers
-  "The unanswered triggers the episode gate is deferring, oldest first.
+  "The unanswered wakes the turn bound is deferring, oldest first.
   Non-empty exactly while the agent is at the cap (or the dial is
-  absent) AND agent-sent triggers are pending. PRESENCE, no stored
+  absent) AND inside wakes are pending. PRESENCE, no stored
   anything: the refusal wrote nothing, so this derivation is the whole
-  \"deferred\" state — the next outside trigger's run resets the count
-  and this derives to empty."
+  deferred state — the next outside wake refills the bound and this
+  derives to empty."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.agent/id]
                   [:vector [:map [:seon.cluster.message/id
                                   :seon.cluster.message/id]]]]}
   [db agent-id]
   (if (episode-capped? db agent-id)
-    (into []
-          (remove #(outside-trigger? db (:seon.cluster.message/id %)))
-          (unanswered-triggers db agent-id))
+    (let [wakes (unanswered-wakes db agent-id {})
+          inside (inside-wakes db wakes)]
+      (into []
+            (comp (filter #(contains? inside (:db/id %)))
+                  (keep :seon.cluster.message/id)
+                  (map (fn [id] {:seon.cluster.message/id id})))
+            wakes))
     []))
 
 (defn- fold-or-close
@@ -499,21 +522,6 @@
       {:seon.cluster.work/situation :generate
        :seon.cluster.run/id run-id
        :seon.cluster.agent/id agent-id})))
-
-(defn- unanswered-background-result?
-  [db agent-id]
-  (boolean
-   (db/q
-    '[:find ?receipt .
-      :in $ ?agent-id
-      :where
-      [?agent :seon.cluster.agent/id ?agent-id]
-      [?receipt :seon.effect/to ?agent]
-      (or-join [?receipt]
-               [?receipt :seon.effect/result-edn]
-               [?receipt :seon.effect/interrupted-at])
-      (not [_ :seon.cluster.run/background-results ?receipt])]
-    db agent-id)))
 
 (defn next-agent-work
   "The ONE thing to do next for `agent-id` on `db`, or nil when idle.
@@ -560,14 +568,18 @@
       (some? run) nil
 
       :else
-      (let [trigger-id (:seon.cluster.message/id
-                        (openable-trigger db agent-id))]
-        (when (or trigger-id (unanswered-background-result? db agent-id))
+      ;; ONE TURN FOR EVERY UNANSWERED WAKE. The turn's own transaction
+      ;; answers all of them, so nothing is selected and nothing is
+      ;; claimed; the wakes are named only so a consumer can say what it
+      ;; is about to answer.
+      (let [wakes (openable-wakes db agent-id)]
+        (when (seq wakes)
           (cond->
            {:seon.cluster.work/situation :open
             :seon.cluster.agent/id agent-id}
-            trigger-id
-            (assoc :seon.cluster.message/id trigger-id)))))))
+            (some :seon.cluster.message/id wakes)
+            (assoc :seon.cluster.message/id
+                   (some :seon.cluster.message/id wakes))))))))
 
 (defn more-agent-work?
   "True when another pass would find work for this agent.
@@ -603,35 +615,97 @@
                (nil? (:seon.cluster.run/process run)))
       {:seon.cluster.run/id (:seon.cluster.run/id run)})))
 
-(defn unanswered-triggers
-  "The agent's trigger messages no run has answered, oldest first.
+(defn latest-turn-t
+  "The transaction `:t` of the newest turn `agent-id` has opened, or 0.
 
-  A trigger is answered exactly when some run points at it through the
-  connection committed when that run opens. This is one query over
-  ordinary facts and there is nothing to keep in sync. A
-  message with no run pointing at it is unanswered by construction —
-  which is also why deleting a run would make its trigger live again,
-  and why nothing deletes runs."
+  A turn's own identity datom carries the `:t` of the transaction that
+  opened it, and that transaction's database value IS what the turn's
+  context projected from (`run/opening-db` derives the same `:t` from
+  the `opened-at` datom and hands it to `as-of`). So the basis is not
+  stored: Datahike already stamps it, and a stored copy was measured off
+  by one on every turn — swallowing a wake transacted with the turn that
+  answered it (prototype 0b.1)."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id]
+                  [:int {:min 0}]]}
+  [db agent-id]
+  (or (db/q '[:find (max ?tx) .
+              :in $ ?agent-id
+              :where
+              [?agent :seon.cluster.agent/id ?agent-id]
+              [?run :seon.cluster.run/agent ?agent]
+              [?run :seon.cluster.run/id _ ?tx]]
+            db agent-id)
+      0))
+
+(defn unanswered-wakes
+  "The agent's wakes no turn has answered, oldest first.
+
+  ANSWERED IS DERIVED FROM `:t`, AND NOTHING IS STORED. A wake is a
+  datom on an attribute declared `:seon.wake/listen true` whose value is
+  this agent; every datom carries its transaction, and a turn's own
+  transaction is the basis its context projected from. So a wake is
+  answered exactly when a turn of that agent has `:t` at or after it —
+  no reference from turn to wake, no claim, no per-wake write, and no
+  way for a turn to answer something its context never contained.
+
+  Two consequences the trigger reference could not express: two wakes in
+  ONE transaction share a `:t` and are answered by ONE turn (they were
+  paid for twice), and a wake asserted DURING a turn has `:t` greater
+  than that turn's and opens the next one.
+
+  `:seon.cluster.work/answered?` `:any` includes answered wakes — what
+  the turn-bound anchor needs; absent means unanswered only. By default
+  only attributes declared `:seon.wake/opens-turn? true` are considered.
+
+  The rule the declarations state and every writer keeps: a wake datom
+  is asserted ONCE and never retracted-and-reasserted, because a
+  reassertion moves its `:t` forward and re-opens a paid turn."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.cluster.agent/id
+                       :seon.cluster.work/wake-request]
+                  [:vector :seon.wake/unanswered]]}
+  [db agent-id {answered? :seon.cluster.work/answered?}]
+  (let [since (if (= :any answered?) -1 (latest-turn-t db agent-id))]
+    (->> (db/q '[:find ?wake ?attribute ?tx
+                 :in $ ?agent-id ?since [?attribute ...]
+                 :where
+                 [?agent :seon.cluster.agent/id ?agent-id]
+                 [?wake ?attribute ?agent ?tx]
+                 [(> ?tx ?since)]]
+               db agent-id since
+               (wake/turn-opening-attributes db))
+         (sort-by (fn [[wake _attribute tx]] [tx wake]))
+         (mapv (fn [[wake attribute tx]]
+                 (let [pulled (db/pull db [:seon.cluster.message/id
+                                           :seon.cluster.message/at
+                                           :seon.cluster.message/ordinal]
+                                       wake)]
+                   (cond-> {:db/id wake
+                            :seon.wake/attribute attribute
+                            :seon.wake/t tx}
+                     (:seon.cluster.message/id pulled)
+                     (assoc :seon.cluster.message/id
+                            (:seon.cluster.message/id pulled))
+                     (:seon.cluster.message/at pulled)
+                     (assoc :seon.cluster.message/at
+                            (:seon.cluster.message/at pulled)))))))))
+
+(defn unanswered-triggers
+  "The agent's unanswered MESSAGE wakes, oldest first.
+
+  A projection of `unanswered-wakes` onto the message family, not a
+  second derivation: answeredness is decided in exactly one place, by
+  `:t`. It survives under this name for the callers that ask about
+  messages specifically — the unread count, the concurrency proofs, the
+  page."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.agent/id]
                   [:vector [:map [:seon.cluster.message/id
                                   :seon.cluster.message/id]]]]}
   [db agent-id]
-  (->> (db/q '[:find ?message ?id ?at ?ordinal ?tx
-              :in $ ?agent-id
-              :where
-              [?agent :seon.cluster.agent/id ?agent-id]
-              [?message :seon.cluster.message/to ?agent]
-              [?message :seon.cluster.message/id ?id]
-              [?message :seon.cluster.message/at ?at ?tx]
-              [(get-else $ ?message :seon.cluster.message/ordinal 0)
-               ?ordinal]
-              ;; answered = SOME run names it as its trigger.
-              ;; The absence is the fact; there is no flag to maintain.
-              (not [_ :seon.cluster.run/trigger ?message])]
-            db agent-id)
-       (sort-by (fn [[message _id at ordinal tx]]
-                  [(inst-ms at) tx ordinal message]))
-       (mapv (fn [[_message id at _ordinal _tx]]
-               {:seon.cluster.message/id id
-                :seon.cluster.message/at at}))))
+  (into []
+        (comp (filter #(= :seon.cluster.message/to (:seon.wake/attribute %)))
+              (map #(select-keys % [:seon.cluster.message/id
+                                    :seon.cluster.message/at])))
+        (unanswered-wakes db agent-id {})))

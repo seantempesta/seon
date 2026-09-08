@@ -95,7 +95,15 @@
                [:seon.effect/duration-ms :seon.effect/duration-ms]
                [:seon.effect/settled-at :seon.effect/settled-at]],
               :settled-at :inst,
-              :to [:and #:seon.db{:index true} :seon.db/ref]
+              :to
+              [:and
+               {:description
+                "The agent a settled effect is delivered to. A LISTENED ATTRIBUTE: the settlement transaction moves the recipient from `notify` to `to`, so the datom appears exactly when the result becomes deliverable and is never retracted-and-reasserted. Also an INSIDE wake — the agent asked for this effect, so its settlement does not reset that agent's turn bound.",
+                :seon.db/index true,
+                :seon.wake/listen true,
+                :seon.wake/opens-turn? true,
+                :seon.wake/inside true}
+               :seon.db/ref]
  :seon.effect/already-recorded [:= true]
  :seon.effect/already-recorded-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.effect/already-recorded class marker"} [:seon.effect/already-recorded :seon.effect/already-recorded] [:seon.error/message :seon.error/message]]
  :seon.effect/already-settled [:= true]

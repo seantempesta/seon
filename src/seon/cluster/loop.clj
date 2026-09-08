@@ -1193,27 +1193,6 @@
                    :seon.cluster.run/closed-at now}))]
             (not (:seon.error/kind closed))))))))
 
-(defn- open-trigger-call
-  "Open a run only while its trigger still has no answering run."
-  [database request]
-  (let [trigger (:seon.cluster.run/trigger request)
-        answering-run
-        (when trigger
-          (db/q '[:find ?run-id .
-                  :in $ ?trigger
-                  :where
-                  [?run :seon.cluster.run/trigger ?trigger]
-                  [?run :seon.cluster.run/id ?run-id]]
-                database trigger))]
-    (if answering-run
-      (throw
-       (ex-info
-        "run opening refused: the trigger already has an answering run"
-        {:seon.error/kind ::trigger-already-answered
-         :seon.cluster.run/trigger trigger
-         :seon.cluster.run/id answering-run :seon.cluster.loop/trigger-already-answered true}))
-      (run/open-call database request))))
-
 (defn- open-turn
   "Open and claim one run before any paid provider call."
   [{cluster ::cluster work ::work now ::now report ::report}]
@@ -1221,8 +1200,20 @@
         process (:seon.cluster.run/process cluster)
         agent-id (:seon.cluster.agent/id work)]
     ;; OPEN + CLAIM FIRST, model second. The busy fence has to exist
-    ;; before the expensive part, and the run records its trigger in
-    ;; this same transaction so answeredness is an ordinary fact.
+    ;; before the expensive part.
+    ;;
+    ;; ANSWEREDNESS IS THIS TRANSACTION'S OWN `:t`. Nothing claims a
+    ;; wake: every wake with `:t` at or before the opening transaction
+    ;; is answered by the turn whose context contained it, so two wakes
+    ;; in one commit are one paid call and a wake arriving mid-turn
+    ;; opens the next one. The `::trigger-already-answered` fence is
+    ;; gone with the reference it guarded — `open-call`'s
+    ;; `::agent-already-running` is what stops two openers, and the
+    ;; derivation is what stops a second turn for an answered wake.
+    ;;
+    ;; `:seon.cluster.run/trigger` is retained as PROVENANCE ONLY — the
+    ;; oldest message wake this turn opened for, which the page and the
+    ;; context still name. It decides nothing.
     (let [id (str (random-uuid))
           open-request
           (cond->
@@ -1240,17 +1231,13 @@
           outcome (db/transact!
                    connection
                    {:tx-data
-                    (into [[:db.fn/call #'open-trigger-call open-request]]
+                    (into [[:db.fn/call #'run/open-call open-request]]
                           (run/claim-tx {:seon.cluster.run/id id
                                          :seon.cluster.run/process process
                                          :seon.cluster.run/live-processes
                                          #{process}
                                          :seon.cluster.run/now now}))})]
       (cond
-        (= ::trigger-already-answered (:seon.error/kind outcome))
-        (assoc (report :released 0)
-               ::trigger-already-answered true)
-
         (:seon.error/kind outcome)
         (do
           ;; The open transaction formed no run, so settlement records the

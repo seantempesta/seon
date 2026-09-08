@@ -4,10 +4,19 @@
                      :nominal-at
                      [:and #:seon.db{:index true} :inst],
                      :observed-at :inst,
+                     :agent
+                     [:and
+                      {:description
+                       "The agent this firing belongs to: the owner of the fired task, carried on the firing so the wake router needs no query. A LISTENED ATTRIBUTE, one datom per firing entity with its own transaction `:t`, asserted once and never retracted-and-reasserted — a recurrence definition asserts nothing. It does NOT open a turn: a firing surfaces in the agent's next context, and the maintenance portfolio's ticks are not model calls.",
+                       :seon.db/index true,
+                       :seon.wake/listen true,
+                       :seon.wake/opens-turn? false}
+                      :seon.db/ref],
                      :fire
                      [:map {:seon.db/attributes true}
                       [:seon.schedule.fire/id :seon.schedule.fire/id]
                       [:seon.schedule.fire/task :seon.schedule.fire/task]
+                      [:seon.schedule.fire/agent :seon.schedule.fire/agent]
                       [:seon.schedule.fire/nominal-at
                        :seon.schedule.fire/nominal-at]
                       [:seon.schedule.fire/observed-at

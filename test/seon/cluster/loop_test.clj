@@ -1206,9 +1206,12 @@
           "an attribute the loop writes that boot cannot install is a
            run that dies on its first transaction"))
     (testing "and every attribute the wake listens for"
-      (is (empty? (remove installable (wake/wake-attributes)))
-          "a wake attribute boot cannot install can never be committed,
-           so the loop would never wake at all"))))
+      (test-support/with-database
+        (fn [connection]
+          (is (empty? (remove installable
+                              (wake/wake-attributes (db/db connection))))
+              "a wake attribute boot cannot install can never be committed,
+               so the loop would never wake at all"))))))
 
 (deftest a-boot-built-database-takes-every-row-the-turn-writes
   ;; NO explicit attribute list: the schema comes from the same

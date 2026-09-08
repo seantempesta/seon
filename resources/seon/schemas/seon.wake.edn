@@ -1,0 +1,34 @@
+#:seon.wake{:listen
+            [:boolean
+             {:description
+              "On a ref attribute: Datahike `listen` reports its assertions and the entity the datom points at is the agent to wake. Answeredness is derived from the transaction `:t` the datom carries, so nothing is copied onto the wake and nothing references it back. THE DATOM IS ASSERTED ONCE AND NEVER RETRACTED-AND-REASSERTED: a reassertion moves the wake's `:t` forward and re-opens a paid turn."}],
+            :opens-turn?
+            [:boolean
+             {:description
+              "Whether an unanswered wake on this attribute opens a turn. Declared false, the wake still routes and still reaches the agent's next context; it never causes a model call on its own — a schedule fire is the example."}],
+            :inside
+            [:boolean
+             {:description
+              "On any attribute: its presence on a wake entity marks that wake as the population's OWN activity, so it does not reset the agent's turn bound. An agent-sent message, a fault routed to its steward, and an effect the agent itself requested are all inside; a human message and a firing are not. THE ANCHOR IS THE LATEST OUTSIDE WAKE'S OWN `:t`."}],
+            :attribute
+            [:qualified-keyword
+             {:description
+              "Which listened attribute carried one wake datom."}],
+            :t
+            [:int
+             {:min 0
+              :description
+              "The transaction `:t` Datahike stamped on one wake datom. Answeredness compares it against a turn's own `:t`; nothing stores either."}],
+            :unanswered
+            [:map
+             {:description
+              "One wake as `seon.cluster.work/unanswered-wakes` returns it: the entity carrying the datom, which attribute carried it, and its transaction. The message keys are present only when the wake is a message."}
+             [:db/id :int]
+             [:seon.wake/attribute :seon.wake/attribute]
+             [:seon.wake/t :seon.wake/t]
+             [:seon.cluster.message/id
+              {:optional true}
+              :seon.cluster.message/id]
+             [:seon.cluster.message/at
+              {:optional true}
+              :seon.cluster.message/at]]}

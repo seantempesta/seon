@@ -5,7 +5,15 @@
   identities and the `java.time` conversion to nominal instants. Every due
   instant claims one durable maintenance receipt. The existing per-agent
   schedule proc calls the declared Var directly; only an error settlement
-  creates a message, through `seon.error/commit-tx`."
+  creates a message, through `seon.error/commit-tx`.
+
+  EACH FIRING IS ITS OWN WAKE. `:seon.schedule.fire/agent` carries the
+  fired task's owner and is a LISTENED attribute, so one firing routes
+  one payload-free wake to that agent — asserted once on a new immutable
+  entity, never re-asserted. It is declared `:seon.wake/opens-turn?
+  false`: a firing surfaces in the agent's next context and never causes
+  a model call by itself, because the maintenance portfolio's ticks are
+  not turns."
   (:require [malli.core :as m]
             [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
@@ -330,7 +338,7 @@
               database claimed-receipt-id)
         declaration
         (first
-         (db/q '[:find ?task ?owner-id ?function ?function-sym
+         (db/q '[:find ?task ?owner-id ?function ?function-sym ?owner
                  :in $ ?task-id
                  :where
                  [?task :seon.schedule.task/id ?task-id]
@@ -354,7 +362,7 @@
                        :seon.schedule.task/id task-id :seon.schedule/incomplete-task true}))
 
       :else
-      (let [[task-eid declared-owner function-eid declared-function]
+      (let [[task-eid declared-owner function-eid declared-function owner-eid]
             declaration]
         (when-not (and (= agent-id declared-owner)
                        (= function declared-function))
@@ -369,6 +377,13 @@
           [{:db/id fire-tempid
             :seon.schedule.fire/id derived-fire-id
             :seon.schedule.fire/task [:seon.schedule.task/id task-id]
+            ;; ONE FIRING, ONE AGENT, ONE DATOM WITH ITS OWN `:t`. The
+            ;; recurrence definition asserts nothing; each firing is a new
+            ;; immutable entity, so the wake fires exactly once per firing
+            ;; and can never be re-asserted. The owner is resolved from the
+            ;; task inside this same transaction, and carried on the firing
+            ;; because the wake router does one map lookup and no query.
+            :seon.schedule.fire/agent owner-eid
             :seon.schedule.fire/nominal-at nominal-at
             :seon.schedule.fire/observed-at observed-at}
            (request-entity request task-eid function-eid fire-tempid

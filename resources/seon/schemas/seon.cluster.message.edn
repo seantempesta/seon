@@ -1,8 +1,9 @@
 #:seon.cluster.message{:about
                        [:and
                         {:description
-                         "The entity this message concerns when one was named.",
-                         :seon.db/index true}
+                         "The entity this message concerns when one was named. Its presence marks the message an INSIDE wake: an agent in an error loop must not have its turn bound reset by its own failure notifications.",
+                         :seon.db/index true,
+                         :seon.wake/inside true}
                         :seon.db/ref],
                        :at :inst,
                        :caused-by
@@ -36,7 +37,12 @@
                          {:optional true}
                          :seon.cluster.message/id]],
                        :from
-                       [:and #:seon.db{:index true} :seon.db/ref],
+                       [:and
+                        {:description
+                         "The agent that sent this message. Its presence marks the message an INSIDE wake: the population's own activity never resets the recipient's turn bound.",
+                         :seon.db/index true,
+                         :seon.wake/inside true}
+                        :seon.db/ref],
                        :id [:string {:min 1, :seon.db/identity true}],
                        :inbound
                        [:or
@@ -95,7 +101,9 @@
                        :to
                        [:and
                         {:description
-                         "The agent addressed by this message; its reverse is that agent's inbox.",
+                         "The agent addressed by this message; its reverse is that agent's inbox. A LISTENED ATTRIBUTE: asserting it wakes that agent. The assertion happens once — a message entity is new, so the datom always exists and is never retracted-and-reasserted.",
+                         :seon.wake/listen true,
+                         :seon.wake/opens-turn? true,
                          :seon.render/ai
                          seon.cluster.message/render-inbox-ai,
                          :seon.render/html

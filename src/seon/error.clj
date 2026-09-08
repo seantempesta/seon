@@ -959,6 +959,40 @@
    :seon.cluster.message/at (:seon.error/at fact)
    :seon.cluster.message/about (fact-tempid (:seon.error/id fact))})
 
+(defn steward-call
+  "Route one fault to the steward of the failing function's namespace.
+
+  Decided INSIDE the committing transaction against the mid-transaction
+  database value, and merged onto the fact through the same string
+  tempid the fact carries, so the routing and the fact are one commit
+  and no caller pre-read can be stale by the time it lands.
+
+  The chain is `:seon.instrument/fn` -> `:seon.fn/ns` ->
+  `:seon.ns/steward`, all declared facts. No steward, no datom: absence
+  is the state, the fact is still committed, and nothing about the fault
+  record depends on someone being on the hook for it. `:seon.error/agent`
+  is a different question — whom it happened TO — and both relations
+  stand on the same fact.
+
+  ASSERTING IT WAKES THE STEWARD, including when the steward is the
+  agent whose own code failed. There is no self-exclusion: the turn
+  bound is what stops that loop, because a fault is a declared INSIDE
+  wake and never refills the bound it spends."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/steward-request]
+                  :seon.store/transaction-data]}
+  [db {fact-id :seon.error/id failing-fn :seon.instrument/fn}]
+  (if-let [steward (and failing-fn
+                        (db/q '[:find ?agent .
+                                :in $ ?sym
+                                :where
+                                [?function :seon.fn/sym ?sym]
+                                [?function :seon.fn/ns ?namespace]
+                                [?namespace :seon.ns/steward ?agent]]
+                              db failing-fn))]
+    [{:db/id (fact-tempid fact-id)
+      :seon.error/steward steward}]
+    []))
+
 (defn commit-tx
   "Transaction data committing one error and everything it must say.
   PURE over a database value: the fact, and zero to two explanation
@@ -1012,9 +1046,14 @@
   `:seon.cluster.message/to`, and the woken loop hit the same broken
   code. Delivery being the wake attribute is exactly what makes error
   delivery free — and exactly what makes an unbounded error path a
-  self-feeding fire. An error fact ALONE wakes nobody
-  (`wake-attributes` is `#{:seon.cluster.message/to}`), so silence is
-  what breaks the cycle. error -> message -> wake -> turn -> error is a real cycle,
+  self-feeding fire. A fault now ALSO routes to the steward of the
+  failing function's namespace through `:seon.error/steward`
+  (`steward-call`), which is a listened attribute of its own — so the
+  cycle no longer needs a message to exist, and the two bounds that stop
+  it are this recurrence limit and the agent's turn bound (both the
+  steward ref and the notification message are declared INSIDE wakes,
+  so neither refills what it spends).
+  error -> message -> wake -> turn -> error is a real cycle,
   and a bounded number of messages per signature per process is what
   makes it terminate. A recurrence escalation to the attributed agent
   itself is skipped rather than sent twice. Together with the
@@ -1100,7 +1139,12 @@
         tell (fn [recipient reason notification]
                (when (and recipient (agent-exists? db recipient))
                  (message-tx fact recipient reason notification)))]
-    (into [(assoc fact :db/id (fact-tempid id))]
+    (into [(assoc fact :db/id (fact-tempid id))
+           ;; The steward is decided inside the commit, not here: the
+           ;; call merges its ref onto this same tempid.
+           [:db.fn/call #'steward-call
+            {:seon.error/id id
+             :seon.instrument/fn (:seon.instrument/fn fact)}]]
           (remove nil?)
           [(when (and attributed interrupted-a-run?
                       (not recurring?) (not silent?))

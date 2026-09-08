@@ -129,30 +129,112 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest a-turn-never-wakes-itself
-  (let [wakes (wake/wake-attributes)
-        commits (cluster.loop/committed-attributes)]
-    (is (seq wakes) "the routed set is not empty")
-    (is (seq commits) "and neither is the committed set")
-    (is (empty? (set/intersection wakes commits))
-        "an agent that wakes on its own commits spins forever — and both
-         sides of this are computed, never a reviewed list")))
+  (with-connection
+    (fn [connection]
+      (let [wakes (wake/wake-attributes (db/db connection))
+            commits (cluster.loop/committed-attributes)]
+        (is (seq wakes) "the routed set is not empty")
+        (is (seq commits) "and neither is the committed set")
+        (is (empty? (set/intersection wakes commits))
+            "an agent that wakes on its own commits spins forever — and both
+             sides of this are computed, never a reviewed list")))))
+
+(deftest the-listened-set-is-declared-not-listed
+  ;; THE CLASS: a hand list of wake attributes drifts from the families
+  ;; that own them. The set is one query over `:seon.wake/listen`, and a
+  ;; synthetic attribute declaring it joins with no code change (the
+  ;; live proof of that is `a-declared-attribute-wakes-with-no-code-change`).
+  (with-connection
+    (fn [connection]
+      (let [database (db/db connection)
+            listened (wake/wake-attributes database)
+            opening (wake/turn-opening-attributes database)
+            inside (wake/inside-attributes database)]
+        (is (= #{:seon.cluster.message/to
+                 :seon.effect/to
+                 :seon.error/steward
+                 :seon.schedule.fire/agent}
+               listened)
+            "the four families that wake an agent, derived from their
+             own declarations")
+        (is (= #{:seon.cluster.message/to :seon.effect/to :seon.error/steward}
+               opening)
+            "a schedule firing surfaces in the next context; it never
+             pays for a model call by itself")
+        (is (= #{:seon.cluster.message/from
+                 :seon.cluster.message/about
+                 :seon.effect/to
+                 :seon.error/steward}
+               inside)
+            "and the population's own activity never refills the turn
+             bound it spends")
+        (is (not (contains? listened :seon.cluster.agent/id))
+            "creating an agent is not a wake: its first message is its
+             first wake, and the armer belt arms an agent created and
+             addressed in one commit")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; C3 — the handler's two absolute prohibitions, live
 ;;; ---------------------------------------------------------------------------
 
-(deftest a-committed-agent-id-wakes-the-armer
-  ;; the second routed attribute: a committed agent creation IS an arm
-  ;; wake, and it is what makes the created-and-messaged-in-one-commit
-  ;; window survivable
+(deftest an-unrouted-recipient-reaches-the-armer
+  ;; THE BELT, and the reason creating an agent is no longer a wake of
+  ;; its own: an agent created and addressed in ONE commit has no
+  ;; routing entry yet, so its message falls through to the armer, whose
+  ;; pass derives (agents in facts) − (armed set) and arms it. A fresh
+  ;; agent's first message IS its first wake.
   (with-connection
     (fn [connection]
       (let [mailbox (async/chan (async/sliding-buffer 1))
             {:keys [armer key]} (route-probe! connection mailbox)]
         (try
           (db/transact! connection [{:seon.cluster.agent/id "agent-b"}])
+          (is (nil? (async/poll! armer))
+              "creating an agent asserts no listened attribute, so it
+               wakes nobody by itself")
+          (db/transact!
+           connection
+           [{:seon.cluster.message/id "m-to-b"
+             :seon.cluster.message/to [:seon.cluster.agent/id "agent-b"]
+             :seon.cluster.message/content "hello"
+             :seon.cluster.message/at (Date.)}])
           (is (some? (test-support/await-event! armer "armer wake"))
               "the armer derives (agents in facts) − (armed set)")
+          (is (nil? (async/poll! mailbox))
+              "and agent-a's mailbox is untouched — the wake's VALUE is
+               the recipient")
+          (finally
+            (wake/unlisten! {:seon.cluster.wake/connection connection
+                             :seon.cluster.wake/key key})))))))
+
+(deftest a-declared-attribute-wakes-with-no-code-change
+  ;; THE CLASS: a new wake source used to be two hand-edited lists in
+  ;; `route!`. It is now one schema property. A synthetic ref attribute
+  ;; declaring `:seon.wake/listen true` — installed exactly the way a
+  ;; genuinely new family would be — routes to the agent it points at,
+  ;; and not one line of this namespace's production code knows it
+  ;; exists.
+  (test-support/with-database
+    {::test-support/extra-schema
+     [{:db/ident ::notice
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one}
+      {:seon.schema/key ::notice
+       :seon.wake/listen true
+       :seon.wake/opens-turn? true}]}
+    (fn [connection]
+      (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
+      (let [recipient (agent-eid connection)
+            mailbox (async/chan (async/sliding-buffer 1))
+            {:keys [key]} (route-probe! connection mailbox)]
+        (try
+          (is (contains? (wake/wake-attributes (db/db connection))
+                         ::notice)
+              "the derived set learned the new attribute from its own
+               declaration")
+          (db/transact! connection [{::notice recipient}])
+          (is (some? (test-support/await-event! mailbox "declared wake"))
+              "and a datom on it woke the agent it points at")
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key key})))))))
@@ -381,6 +463,8 @@
                     (case commit
                       :message (db/transact! connection (message-tx
                                                        (str "pm-" index)))
+                      ;; a bare agent creation asserts no listened
+                      ;; attribute, so it must wake NOBODY
                       :agent (db/transact! connection
                                          [{:seon.cluster.agent/id
                                            (str "pa-" index)}])
@@ -399,7 +483,7 @@
                      (= (count commits) rendered)
                      ;; routing is unchanged by the added delivery
                      (= (count (filter #{:message} commits)) mailed)
-                     (= (count (filter #{:agent} commits)) armed)
+                     (zero? armed)
                      ;; and no fault was raised on any healthy path
                      (nil? (async/poll! faults))))
                   (finally
@@ -412,12 +496,14 @@
 
   (testing "C2 from the other direction: every attribute that routes to
             a mailbox is one no turn commits"
-    (let [wakes (wake/wake-attributes)
-          commits (cluster.loop/committed-attributes)]
-      (is (every? (fn [attribute] (not (contains? commits attribute)))
-                  wakes))
-      (is (every? (fn [attribute] (not (contains? wakes attribute)))
-                  commits)))))
+    (with-connection
+      (fn [connection]
+        (let [wakes (wake/wake-attributes (db/db connection))
+              commits (cluster.loop/committed-attributes)]
+          (is (every? (fn [attribute] (not (contains? commits attribute)))
+                      wakes))
+          (is (every? (fn [attribute] (not (contains? wakes attribute)))
+                      commits)))))))
 
 (deftest unlisten-is-idempotent-and-stops-delivery
   (with-connection

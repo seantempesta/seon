@@ -619,11 +619,7 @@
                ;; self-rewake into this agent's OWN mailbox, coalescing on
                ;; its (sliding-buffer 1): it cannot recurse, because the pass
                ;; is only re-entered after this transform returns
-                      (when
-                       (and
-                        (not
-                         (:seon.cluster.loop/trigger-already-answered report))
-                        (work/more-agent-work? @connection request))
+                      (when (work/more-agent-work? @connection request)
                         (async/offer!
                          (:seon.cluster.wake/channel cluster) ::wake))
                       [(let [run-id

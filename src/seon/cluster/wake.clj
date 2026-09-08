@@ -31,6 +31,15 @@
   (`api/specification.cljc:1076-1078`): N3 never transacts from a
   callback at all.
 
+  THE ROUTED SET IS DECLARED, NOT LISTED. An attribute wakes an agent
+  exactly when its schema row carries `:seon.wake/listen true`
+  (`resources/seon/schemas/seon.wake.edn`), so which attributes wake an
+  agent is one Datalog query over facts the schema population already
+  installs, and adding a source is one schema property with no code
+  change. `wake-attributes` is that query; `route!` runs it ONCE at
+  registration and closes over the answer, because the handler may not
+  query (above).
+
   ROUTING HAS THREE TRAPS, all measured (probe A Q3, probe B Q10):
 
   - `:db/txInstant` is in EVERY tx-data, so routing on \"any datom\"
@@ -45,8 +54,11 @@
     rather than work, so it cannot make an idle cluster do anything;
   - an unchanged value emits no datom, so it emits no wake. Naming a
     routed attribute whose value is idempotently re-asserted produces
-    ZERO wakes, silently. Both routed attributes are safe because a new
-    message and a new agent are each a new entity.
+    ZERO wakes, silently. Every listened attribute is safe because its
+    declaration states the rule its writers keep: the datom is asserted
+    ONCE, on a new entity or as an edge that moves INTO the attribute,
+    and never retracted-and-reasserted. A reassertion would also move
+    the wake's transaction `:t` forward and re-open a paid turn.
 
   A REFUSED TRANSACTION DOES NOT WAKE: dispatch is gated on
   `(map? tx-report)` (`writer.cljc:372`), so a refusal cannot storm a
@@ -76,21 +88,74 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn wake-attributes
-  "The attributes `route!` routes on — the ONE derivation of its set.
+  "The attributes a commit wakes an agent on, derived from schema rows.
 
-  Re-grounded at F2 §3.3: it was `listen!`'s input, and `listen!` is
-  gone with the one-global-channel delivery. It survives because the
-  disjointness property (C2) needs two COMPUTED sets to compare rather
-  than one list to believe — this against
-  `seon.cluster.loop/committed-attributes` — so `route!`'s `case` can
-  never drift from the property silently.
+  ONE query over `:seon.wake/listen`, never a list. A schema property
+  declared on an attribute reaches its schema row through the general
+  property lift (`seon.schema/canonical-schema-rows` ->
+  `seon.schema.datahike/storable-properties-in`), so declaring a new
+  wake source is one property in one schema resource, and this
+  derivation, `route!`'s dispatch and `seon.cluster.work`'s answeredness
+  all learn it with no code change.
 
-  Both are safe against the unchanged-value trap: a new message and a
-  new agent are each a new entity, so the datom always exists and the
-  wake always fires."
-  {:malli/schema [:=> [:cat] :seon.cluster.wake/attributes]}
-  []
-  #{:seon.cluster.message/to :seon.effect/to :seon.cluster.agent/id})
+  The disjointness property (C2) still needs two COMPUTED sets to
+  compare rather than one list to believe — this against
+  `seon.cluster.loop/committed-attributes` — and both sides are now
+  derivations rather than one derivation and one hand list.
+
+  Reads a database value because the declaration IS a fact. Direct
+  `datahike.api` survives here because this namespace is a system-side
+  listener owner holding no agent custody."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  :seon.cluster.wake/attributes]}
+  [database]
+  (into #{}
+        (d/q '[:find [?key ...]
+               :where
+               [?row :seon.wake/listen true]
+               [?row :seon.schema/key ?key]]
+             database)))
+
+(defn turn-opening-attributes
+  "The listened attributes whose unanswered wakes OPEN A TURN.
+
+  The complement still routes and still reaches the agent's next
+  context; it never causes a model call on its own — a schedule firing
+  is the declared example, and the maintenance portfolio's ticks are why
+  the distinction is not academic. One query over
+  `:seon.wake/opens-turn?`, so the policy is a declaration rather than a
+  branch in the loop."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  :seon.cluster.wake/attributes]}
+  [database]
+  (into #{}
+        (d/q '[:find [?key ...]
+               :where
+               [?row :seon.wake/listen true]
+               [?row :seon.wake/opens-turn? true]
+               [?row :seon.schema/key ?key]]
+             database)))
+
+(defn inside-attributes
+  "Attributes whose presence on a wake entity marks it the population's OWN.
+
+  An inside wake never resets an agent's turn bound: an agent-sent
+  message carries `:seon.cluster.message/from`, an error recorder's
+  notification carries `:seon.cluster.message/about`, a fault routed for
+  repair carries `:seon.error/steward`, and an effect the agent itself
+  requested carries `:seon.effect/to`. One query over
+  `:seon.wake/inside`, so the rule that used to be a hard-coded
+  from-or-about pair inside `seon.cluster.work` is now a declaration
+  each family owns."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  :seon.cluster.wake/attributes]}
+  [database]
+  (into #{}
+        (d/q '[:find [?key ...]
+               :where
+               [?row :seon.wake/inside true]
+               [?row :seon.schema/key ?key]]
+             database)))
 
 (defn delivery
   "`offer!`'s answers plus the route owner's derived fence, named.
@@ -164,23 +229,28 @@
     outcome))
 
 (defn route!
-  "Register the ROUTING wake handler on a connection (F1 §4).
+  "Register the ROUTING wake handler on a connection (F1 4).
   The per-agent successor of `listen!`'s one-channel delivery, under
   the SAME two absolute prohibitions (it never throws and never parks
   — every delivery is `offer!` and the whole handler is one
-  try/catch). For each committed datom:
+  try/catch).
 
-  - `:seon.cluster.message/to` — the datom's VALUE is the recipient's
-    entity id, so delivery is one lookup in the routing map the
-    supplied `channels` fn returns: `offer!` a payload-free wake into
-    that agent's mailbox. No query, no derivation, no commit. A
-    recipient with NO routing entry offers to the ARMER instead — the
-    belt for the created-and-messaged-in-one-commit window;
-  - `:seon.cluster.agent/id` — a committed agent creation IS an arm
-    wake: `offer!` to the armer, whose pass derives
-    (agents in facts) − (armed set) and arms each.
+  THE SET IS DERIVED ONCE, HERE. `wake-attributes` runs against the
+  connection's current database value at registration and the handler
+  closes over the answer: the listener itself never queries, because it
+  runs on the committing caller's critical path. A cluster learns a new
+  wake source at its next boot, which is when the schema declaring it is
+  installed anyway.
 
-  THE THIRD DELIVERY (W2) is decided per REPORT, not delivered per
+  DISPATCH IS THE SAME DERIVATION. Every listened attribute is a ref
+  whose VALUE is the recipient agent's entity id, so delivery is one
+  lookup in the routing map the supplied `channels` fn returns: `offer!`
+  a payload-free wake into that agent's mailbox. No query, no
+  derivation, no commit. A recipient with NO routing entry offers to the
+  ARMER instead — the belt that arms an agent created and addressed in
+  one commit, and the reason no separate agent-creation wake is needed.
+
+  THE SECOND DELIVERY (W2) is decided per REPORT, not delivered per
   datom. `:seon.render.web/interest` is one process-local projection
   of retained reads' dependency-plan attributes: `:all` before the
   first complete derivation, otherwise the concrete attribute union.
@@ -194,7 +264,7 @@
   one. Only an exact mailbox route the agent owner derives as fenced is
   benign; a closed render route is still a failure. Coalescing on every
   `(sliding-buffer 1)` target is safe by the standing argument: a wake
-  says only \"look\", and the woken pass derives everything from facts.
+  says only look, and the woken pass derives everything from facts.
   L8 holds by construction: the armer's
   own work commits no wake-set attribute (arming writes nothing; the
   prime is an `offer!`)."
@@ -206,53 +276,41 @@
            :seon.render.web/interest
            :seon.cluster.wake/search-channel
            :seon.cluster.wake/fault-channel :seon.cluster.wake/key]}]
-  (d/listen
-   connection
-   key
-   (fn [report]
-     (try
-       (let [published-interest @interest
-             render? (volatile! (= :all published-interest))]
-         ;; Search needs the report's exact db-before/db-after bases. The
-         ;; sliding-1 channel may coalesce reports; its proc detects that gap
-         ;; and rebuilds from the newest database value instead of guessing.
-         (when search-channel
-           (when-not (true? (async/offer! search-channel report))
-             (async/offer!
-              fault-channel
-              (ex-info
-               "The derived search index refused a transaction report."
-               {:seon.cluster.wake/key key
-                :seon.cluster.wake/route ::search}))))
-         (doseq [datom (:tx-data report)]
-           (let [attribute (nth datom 1)]
-             (when (and (not @render?)
-                        (contains? published-interest attribute))
-               (vreset! render? true))
-             (case attribute
-               :seon.cluster.agent/id
-               (async/offer! armer-channel ::wake)
-
-               :seon.cluster.message/to
-               (if-let [channel (get (channels) (nth datom 2))]
+  (let [listened (wake-attributes (d/db connection))]
+    (d/listen
+     connection
+     key
+     (fn [report]
+       (try
+         (let [published-interest @interest
+               render? (volatile! (= :all published-interest))]
+           ;; Search needs the report's exact db-before/db-after bases. The
+           ;; sliding-1 channel may coalesce reports; its proc detects that gap
+           ;; and rebuilds from the newest database value instead of guessing.
+           (when search-channel
+             (when-not (true? (async/offer! search-channel report))
+               (async/offer!
+                fault-channel
+                (ex-info
+                 "The derived search index refused a transaction report."
+                 {:seon.cluster.wake/key key
+                  :seon.cluster.wake/route ::search}))))
+           (doseq [datom (:tx-data report)]
+             (let [attribute (nth datom 1)]
+               (when (and (not @render?)
+                          (contains? published-interest attribute))
+                 (vreset! render? true))
+               (when (contains? listened attribute)
                  (let [agent-eid (nth datom 2)]
-                   (deliver! fault-channel key ::mailbox channel
-                             #(fenced? agent-eid channel)))
-                 (async/offer! armer-channel ::wake))
-
-               :seon.effect/to
-               (if-let [channel (get (channels) (nth datom 2))]
-                 (let [agent-eid (nth datom 2)]
-                   (deliver! fault-channel key ::mailbox channel
-                             #(fenced? agent-eid channel)))
-                 (async/offer! armer-channel ::wake))
-
-               nil)))
-         (when @render?
-           (deliver! fault-channel key ::render render-channel
-                     (constantly false))))
-       (catch Throwable failure
-         (async/offer! fault-channel failure)))))
+                   (if-let [channel (get (channels) agent-eid)]
+                     (deliver! fault-channel key ::mailbox channel
+                               #(fenced? agent-eid channel))
+                     (async/offer! armer-channel ::wake))))))
+           (when @render?
+             (deliver! fault-channel key ::render render-channel
+                       (constantly false))))
+         (catch Throwable failure
+           (async/offer! fault-channel failure))))))
   key)
 
 (defn unlisten!
