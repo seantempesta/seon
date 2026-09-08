@@ -1,31 +1,22 @@
 ---
 type: decision
-status: active
+status: superseded
 date: 2026-08-04
 tags: [decision, architecture, runtime, sci]
 ---
 
-# ADR-013: Per-turn SCI forks
+# ADR-013: Per-turn SCI forks — superseded
 
-## Decision
+The fresh-fork-per-turn decision is superseded by
+[the agent record and turn loop PRD §14](../../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
+Each agent forks the cluster base once and retains one live SCI context
+across turns. Accepted base changes are interned as diffs; private defs,
+atoms, and result objects retain their identity within that agent.
 
-Each cluster owns one acquired program-only base SCI `ctx`. Every turn evaluates
-in a fresh generation-aware fork of that base and rehydrates only the selected
-agent's defs. Interpreter mutation is private to the turn. Cross-turn sharing
-happens through contracted definitions, admission, durable program facts, and
-the agent's defs—not through shared mutable interpreter state.
+The private layer never enters another agent or the base. A JVM restart
+loses those objects; durable functions, schemas, and tests rebuild the
+program base. Evaluations retain shown text, not serialized private state.
 
-Every function in the cluster program graph remains callable. The fork changes
-mutation ownership, not callability.
-
-## Consequences
-
-- Concurrent turns cannot observe one another's uncommitted definitions.
-- Run reproduction begins from an explicit commit and namespace.
-- Acquisition refreshes the base; each turn uses the cheap SCI fork.
-- There are no per-agent interpreter contexts.
-
-## Related
-
-- [[agent-runtime]] — run lifecycle and interpreter ownership.
-- [[data-model]] — opening commit and namespace facts.
+The historical filename remains a link target, not the name of the
+current mechanism. [Agent runtime](../agent-runtime.md) owns the current
+context lifecycle and diagrams.
