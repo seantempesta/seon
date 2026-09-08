@@ -770,3 +770,13 @@ its program row, and development adoption then refuses the whole cluster
 (measured on `default`, 2026-09-08). The refusal moves to the one seam —
 the install gate — and adoption never sees such a row.
 
+### Blocks: one per concern (owner, 2026-09-08)
+
+Context blocks are self-contained and succinct — never one block per
+scalar. A scalar attribute renders inside its entity's block. A block is
+either the entity's OWN render function covering its scalars (the agent's
+identity: id, namespace, its steward, in one short paragraph of comment +
+forms) or one component/derived value with its own producers: the plan
+tree, the history (turns newest first, evaluations through `seon.repl/text`),
+unanswered wakes, faults routed to me as steward. Five blocks for an agent.
+
