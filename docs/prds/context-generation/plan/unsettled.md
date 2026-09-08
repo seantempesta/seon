@@ -1616,3 +1616,12 @@ each, serial: 1 storage bound + AI-boundary elision (running,
 answered-by-`:t` → 3 the turn + two-arm loop (+ the `seon.turn` rename) →
 4 the record + page → 5 byte identity → 6 reset, reseed, docs. Names table
 in PRD §0c. Simulated turns only.
+
+Owner: "make sure this is done right. the agent's loop is the core of the
+system." Integration gate for every lane in this wave: (1) the orchestrator
+reads the full diff, not the report; (2) an independent verification lane
+(read-only, own scratch cluster) re-proves the lane's claims and hunts for
+absence-reads-as-health before the next lane launches; (3) the turn-loop
+step (§8 step 3) additionally gets a design verifier against PRD §1, §1a,
+§7 and the run-loop-unpacked §5.6 behaviours, and the platform tier plus a
+full `bin/test --all` at its landing.
