@@ -647,9 +647,12 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
    SAME harness the codebase runs on (canonical fixtures, real database,
    real SCI fork, armed contracts), never a mocked or hand-rostered
    stand-in. A misrepresented harness produces garbage code that passes.
-1. **Gate = bare `bin/test`** (it selects the tests reaching your changed
-   code by `:seon.fn/calls` reach from the green basis) **plus the explicit
-   namespaces of your subject, plus `bin/test --platform` green.** NEVER
+1. **Gate = `bin/test --paths <your own files…> <namespaces…>`** — it
+   snapshots HEAD and overlays ONLY the paths you name, so no other lane's
+   in-flight edit can block you (landed `e33a887fe`); bare `bin/test`
+   selects by `:seon.fn/calls` reach when you are alone; **plus
+   `bin/test --platform` green.** Foreign breakage is never a reason to
+   stop. NEVER
    `--all` or `--full` in a lane — full suites are the orchestrator's
    integration checkpoints only. "It's a waste of time to run the entire
    test suite for every change."
