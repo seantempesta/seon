@@ -49,6 +49,11 @@ dir=tmp/orchestrator
 lanes_dir=$dir/lanes
 sessions_dir=$dir/sessions
 model=${LANE_MODEL:-gpt-6-astra}
+# Lanes run concurrently: each gate sizes its worker pool to its selection
+# (a --platform tier alone asks for 12 JVMs), and seven lanes gating at once
+# put 27 JVMs and a load average of 57 on the machine (2026-09-08 15:40),
+# which starved the owner's page. Three workers per lane gate.
+export SEON_TEST_WORKERS=${SEON_TEST_WORKERS:-3}
 effort=${LANE_EFFORT:-low}
 lane_rule="Another lane's in-flight breakage is never a reason to stop (owner, 2026-09-08): gate with bin/test --paths <your files> -- <namespaces> (HEAD plus only your paths) and iterate with bin/test-fast; when the shared tree cannot load, snapshot it (git worktree add tmp/<lane>-wt HEAD, link reference-code, apply your diff) and continue. Name the foreign boundary in your landing note; never resume, message, or edit another lane's session or files."
 
