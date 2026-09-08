@@ -1,6 +1,7 @@
 (ns seon.render.value
   "Unit adapter from admitted print data to the two floor projections."
   (:require [clojure.string :as str]
+            [seon.id :as id]
             [clojure.edn :as edn]
             [seon.print :as print]
             [seon.schema :as schema]
@@ -96,10 +97,8 @@
        :seon.error/data
        {:seon.cluster.agent/id (:seon.cluster.agent/id unit)
         :seon.render.data/path path} :seon.render.value/missing-root-identity true}
-      (let [address [(:seon.cluster.agent/id unit) root-address path]
-            digest (schema/sha-256
-                    [(.getBytes ^String (pr-str address) "UTF-8")])]
-        (str "seon-value-" (subs digest 0 24))))))
+      (str "seon-value-"
+           (id/digest 24 [(:seon.cluster.agent/id unit) root-address path])))))
 
 (defn- encoded
   [value]

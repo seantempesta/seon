@@ -18,6 +18,7 @@
    Reusable form inspection lives in `seon.schema.form`; register!-time gates
    live in `seon.schema.internal`, outside agent context."
   (:require [malli.core :as m]
+            [seon.id :as id]
             [malli.registry :as mr]
             [clojure.set :as set]
             [clojure.walk :as walk]
@@ -28,8 +29,7 @@
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
             [clojure.edn :as edn]
-            [clojure.java.io :as io])
-  (:import [java.security MessageDigest]))
+            [clojure.java.io :as io]))
 
 (defn- direct-references*
   "Canonical registry keys directly referenced by one compiled schema.
@@ -546,16 +546,11 @@
   (bytes? value))
 
 (defn sha-256
-  "Lowercase SHA-256 hex digest of ordered byte arrays."
+  "Lowercase SHA-256 hex digest of ordered byte arrays (`seon.id/sha-256`)."
   {:malli/schema [:=> [:cat [:sequential [:fn seon.schema/byte-array?]]]
                   [:string {:min 64 :max 64}]]}
   [byte-arrays]
-  (let [digester (MessageDigest/getInstance "SHA-256")]
-    (doseq [bytes byte-arrays]
-      (.update digester ^bytes bytes))
-    (apply str
-           (map #(format "%02x" (bit-and 0xff %))
-                (.digest digester)))))
+  (id/sha-256 byte-arrays))
 
 (defn- projection-fingerprint
   [forms function-contracts schema-admissions function-admissions
