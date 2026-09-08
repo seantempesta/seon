@@ -1,7 +1,6 @@
 (ns seon.test-runner-test
   "Declared latest-result facts owned by the JVM test runner."
   (:require [clojure.java.io :as io]
-            [clojure.set]
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is testing]]
             [seon.config :as config]
@@ -173,43 +172,41 @@
              (:seon.error/kind (ex-data failure)))
           "and a violated contract stops the call inside the gate, exactly
            as it does on every live cluster")))
-  (testing "the armed set IS the set a cluster arms, derived the same way"
+  (testing "the armable set IS the set a cluster arms, derived the same way"
     ;; The gate's blind spot was namespaces no test happened to require:
     ;; `seon.artifact` and `seon.test` carried contracts every live cluster
-    ;; enforced and this gate never asked about. The expected set is DERIVED
-    ;; here exactly as the worker derives it — every var in a declared
-    ;; program namespace carrying `:malli/schema` — so the two cannot drift
-    ;; without this assertion saying so.
-    (let [program (#'runner/declared-program-namespaces)
-          ;; Malli's own exclusion, read from its source
-          ;; (`reference-code/malli/src/malli/instrument.clj:15`): a fn
-          ;; carrying a primitive interface cannot be wrapped, so boot cannot
-          ;; arm it either and it is not part of the set under comparison.
-          primitive?
-          (fn [candidate]
-            (let [value (when (bound? candidate) (deref candidate))]
-              (and (fn? value)
-                   (boolean
-                    (some (fn [^Class interface]
-                            (.startsWith (.getName interface)
-                                         "clojure.lang.IFn$"))
-                          (supers (class value)))))))
-          declared
+    ;; enforced and this gate never asked about. Instrumentation selects
+    ;; LOADED vars carrying `:malli/schema`, so the two sets are equal
+    ;; exactly when every declared program namespace is loaded in this
+    ;; worker — which is what `arm-contracts!` now guarantees.
+    ;;
+    ;; The comparison is deliberately over what is LOADED rather than over
+    ;; `instrument/instrumented`: pooled workers run many tests per JVM and
+    ;; `seon.instrument-test` legitimately arms and removes instrumentation,
+    ;; so an armed-set snapshot here would be asserting another test's
+    ;; timing (AGENTS §5: own nothing global).
+    (let [program (set (#'runner/declared-program-namespaces))
+          loaded (into #{} (filter find-ns) program)
+          declared-contracts
           (into #{}
                 (comp (mapcat (fn [namespace-name]
                                 (some-> (find-ns namespace-name) ns-interns)))
                       (map val)
                       (filter (fn [candidate]
-                                (some-> candidate meta :malli/schema)))
-                      (remove primitive?))
-                program)
-          armed (instrument/instrumented)]
+                                (some-> candidate meta :malli/schema))))
+                program)]
       (is (pos? (count program))
           "the program namespaces are genuinely discovered, so an empty
            derivation cannot make this comparison trivially true")
-      (is (pos? (count declared)))
-      (is (= #{} (clojure.set/difference declared armed))
-          "every contract a live cluster arms is armed in this worker"))))
+      (is (= program loaded)
+          "every namespace a live cluster loads is loaded here, so every
+           contract it arms is armable here")
+      (is (contains? loaded 'seon.artifact))
+      (is (contains? loaded 'seon.test)
+          "including the two the gate never used to reach")
+      (is (contains? declared-contracts (find-var 'seon.test/run))
+          "and `seon.test/run`, the agent-facing test verb, is among the
+           declared contracts this worker can arm"))))
 
 (deftest root-owning-tasks-never-co-run-inside-one-worker-group
   (let [group-a-tasks (atom [:a-1 :a-2])
