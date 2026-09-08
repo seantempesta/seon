@@ -127,6 +127,20 @@
           :seon.db/db @connection
           :seon.render/distance 1)))
 
+(deftest a-context-acquisition-diagnostic-names-no-live-channel
+  ;; THE CLASS: a live transport object printed into a durable fact. The
+  ;; awaited event's NAME is the member; the channel is never a value.
+  (planted
+   (fn [connection _]
+     (let [closed (async/chan)
+           _ (async/close! closed)
+           result (acquire-context connection closed)
+           text (pr-str result)]
+       (is (keyword? (:seon.error/kind result)))
+       (is (not (str/includes? text "#object[")))
+       (is (str/includes? text "walk-run"))
+       (is (str/includes? text "context-reply"))))))
+
 (deftest prompt-is-derived-append-only-repl-history
   (planted
    (fn [connection context-channel]

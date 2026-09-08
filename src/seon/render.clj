@@ -1219,10 +1219,9 @@
       :seon.await/diagnostic
       {:seon.error/diagnostic-layer :render
        :seon.error/diagnostic-operation ::context-acquisition
-       :seon.error/diagnostic-member
-       {:seon.cluster.agent/id agent-id
-        :seon.cluster.run/id run-id
-        :seon.render/context-channel context-channel}
+       ;; The member is the NAME of what never arrived, never a live value:
+       ;; a channel here was printed into a stored fact by every projection.
+       :seon.error/diagnostic-member ::context-reply
        :seon.error/diagnostic-expected ::context-reply
        :seon.error/diagnostic-offending ::pending
        :seon.error/diagnostic-evidence

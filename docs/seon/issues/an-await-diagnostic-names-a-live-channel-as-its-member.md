@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, runtime, flow, ugly-output, class/p1]
 ---
@@ -69,3 +69,7 @@ Found by the `print-and-admission` lane of 2026-09-07, whose owned paths were
 two "It did not run" render sites and the run seam. `src/seon/render.clj` is
 held by the `evaluation-merge` lane, so the one-line change is reported rather
 than made.
+
+## Resolution
+
+2026-09-07: `acquire-context!` names `:seon.render/context-reply` as the member; the channel never enters the diagnostic. Regression `seon.cluster.prompt-test/a-context-acquisition-diagnostic-names-no-live-channel`.
