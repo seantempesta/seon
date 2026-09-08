@@ -744,8 +744,13 @@ native collaboration tools instead
 **NEVER SANDBOX A LANE** — a sandbox makes an audit's own output
 unrecordable; ownership is enforced by NAMING OWNED PATHS, path-limited
 commits, and diff review. Write lane specs in neutral engineering language
-("verify", "falsify", "probe"). Give every lane its grounding, owned paths,
-protected paths, and exact deliverable.
+("verify", "falsify", "probe"; never adversarial verbs, which trip model
+safety filters). Give every lane its grounding, owned paths, and exact
+deliverable. A PROTECTED path is only ever a file another lane is editing
+AT THE SAME TIME — a device against clobbering uncommitted work, never a
+reason to leave a defect in place. A lane running alone fixes every root
+cause wherever it lives and lists each file it touched (owner rule,
+2026-09-07: "if shit is wrong fix it").
 
 **Shared-tree safety.** Multiple agents share this working tree; preserve
 unrelated edits and untracked files. Every agent commit is path-limited
