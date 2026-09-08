@@ -1,5 +1,7 @@
 ---
 name: data-oriented-clojure
+type: skill
+status: active
 description: "Write and review Seon Clojure with explicit data, immutable transformations, declared schemas, and database authority. Use before Seon Clojure or maintained dependency-fork changes."
 ---
 
