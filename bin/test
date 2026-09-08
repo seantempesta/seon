@@ -381,6 +381,24 @@ populate_checkout_root() {
 
 populate_checkout_root "$run_root"
 
+# WHAT THIS GATE IS ACTUALLY TESTING, SAID OUT LOUD. The snapshot is the
+# WORKING TREE, not HEAD, and several lanes share this tree: a gate can run
+# against another lane's half-finished edit and report its reds against
+# whoever ran it. Silence about that is the same disease as every other check
+# in this project that reads absence of signal as health, so the first-party
+# paths differing from HEAD are named before the first JVM starts.
+# (docs/seon/issues/bin-test-snapshots-every-concurrent-lanes-uncommitted-edits.md)
+if working_tree_changes=$(git -C "$source_root" status --porcelain -- \
+  .clj-kondo bin config resources script src test 2>/dev/null); then
+  if [ -n "$working_tree_changes" ]; then
+    changed_count=$(printf '%s\n' "$working_tree_changes" | wc -l | tr -d ' ')
+    echo "bin/test: SNAPSHOT IS THE WORKING TREE, not $git_sha:" \
+      "$changed_count first-party path(s) differ from HEAD in this run:"
+    printf '%s\n' "$working_tree_changes" | sed 's/^/bin\/test:   /'
+    echo "bin/test: a red in a path you do not own may belong to another lane"
+  fi
+fi
+
 logical_processors=$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)
 if ! [[ "$logical_processors" =~ ^[1-9][0-9]*$ ]]; then
   logical_processors=2
