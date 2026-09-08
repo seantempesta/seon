@@ -376,7 +376,9 @@ ex-info carrying its private marker. The existing
 direct owner probe returned marker-exposed? true. The fix removes only that
 private key from copied exception data; the real-SCI two-entrance deadline
 regression now rejects its presence while retaining its existing diagnostic
-record assertions. Live after-proof and the combined gate are pending.
+record assertions. Default's hot-reloaded, re-instrumented owner returned
+marker-exposed? false and record-preserved? true in 5,894 ms. The combined
+gate is pending.
 
 The first oversight gate found three stale live-test assumptions: exact empty
 wake buffer, a pong from every plumbing proc, and a later HTTP page still parked.
@@ -408,3 +410,40 @@ owners were read but not edited. Generic class notes spanning those owners
 remain open; a local child fix does not close the class. The dated first-stop
 inventory above still identifies unread or incompletely read bodies rather
 than claiming a completed census.
+
+### Monitor commands, stewardship, and archive-hook follow-up
+
+Default reproduced `java.lang.AbstractMethodError` in 2 ms when the real
+core.async graph's monitor wrapper delegated `Graph/command-proc`.
+`reference-code/core.async/.../flow/impl/graph.clj:24` declares it, but
+`flow.impl/create-flow` does not implement it. The monitor wrapper now returns
+`seon.error/diagnostic` naming that dependency method. The real Flow fanout
+regression asserts typed refusals for two commands and retains the ordinary
+fault/report delivery proof. The first live after-probe correctly caught two
+missing required diagnostic fields in this edit; supplying cause and evidence
+fixed the request. The reloaded, re-instrumented default owner then returned
+the complete flat refusal normally in 7,952 ms. Its subject gate is pending.
+
+`seon.problems` already queried stewardship correctly. Its private derivation,
+HTML heading and log line now use “unstewarded”; the declared result key retains
+its existing meaning. The canonical assigned-versus-stewarded regression's
+operator-line assertions follow that vocabulary. Its subject gate is pending.
+
+The archive operation reproduced the deleted-source Markdown hook failure.
+Git's `ls-files --cached --others --exclude-standard --deduplicate` supplies
+current candidates; `--deleted` supplies observable deletions. Pin validation
+reads surviving subjects, including untracked destinations. The real-Git class
+regression proves current destination pins, stale destination refusal, and
+deletion evidence without claiming a rename. Babashka Markdown gate: 31 tests,
+376 assertions, zero failures/errors. The retained source issue is archived as
+resolved in this checkpoint.
+
+Additional PRD dispositions: route-level string clipping and terminal fenced
+text clipping are superseded by §15's unbounded HTML / one AI projection owner;
+cross-turn session-image attribution is superseded by per-agent live private
+contexts with no restored session image. The changed-test selector note is
+resolved against existing `5e65fb7c9` and its five passing namespace tests.
+
+Fresh HTTP proof still failed: default port 7994 returned zero bytes, HTTP 000,
+after 20.003488 seconds. The existing default-web issue records this recurrence;
+MCP still answers. No protected web/adoption source was edited or restarted.

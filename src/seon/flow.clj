@@ -14,6 +14,7 @@
             [clojure.test.check.generators :as gen]
             [seon.await :as await]
             [seon.env :as env]
+            [seon.error :as error]
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]
             [seon.schema.edn :as schema.edn])
@@ -1072,7 +1073,16 @@
     (ping-proc [_ pid timeout-ms]
       (flow.graph/ping-proc graph pid timeout-ms))
     (command-proc [_ pid command more-kvs]
-      (flow.graph/command-proc graph pid command more-kvs))
+      (error/diagnostic
+       {:seon.error/kind ::unsupported-command
+        :seon.error/message "core.async.flow does not implement command-proc."
+        :seon.error/diagnostic-layer :flow
+        :seon.error/diagnostic-operation 'clojure.core.async.flow.impl.graph/command-proc
+        :seon.error/diagnostic-member :command-proc
+        :seon.error/diagnostic-expected :implemented-protocol-method
+        :seon.error/diagnostic-cause :unimplemented-dependency-method
+        :seon.error/diagnostic-evidence 'clojure.core.async.flow.impl/create-flow
+        :seon.error/diagnostic-offending [pid command more-kvs]}))
     (inject [_ coordinate messages]
       (flow.graph/inject graph coordinate messages))))
 

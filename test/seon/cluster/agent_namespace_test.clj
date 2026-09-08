@@ -128,11 +128,11 @@
         (is (= [{:seon.ns/name 'example.assigned}
                 {:seon.ns/name 'example.unowned}]
                (:seon.problems/unowned-namespaces value))
-            "an assigned namespace nobody stewards is still unowned")
+            "an assigned namespace nobody stewards is still unstewarded")
         (is (= "owner" (agent/steward-of @connection 'example.owned)))
         (is (nil? (agent/steward-of @connection 'example.assigned)))
         (is (str/includes? log-line
-                           "unowned-namespace namespace=example.unowned"))
+                           "unstewarded-namespace namespace=example.unowned"))
         (is (str/includes? log-line
-                           "unowned-namespace namespace=example.assigned"))
+                           "unstewarded-namespace namespace=example.assigned"))
         (is (not (str/includes? log-line "example.owned")))))))

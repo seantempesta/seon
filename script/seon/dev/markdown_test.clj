@@ -2,7 +2,11 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [seon.dev.markdown :as md]))
+            [seon.dev.markdown :as md]
+            [seon.operator.state :as operator.state])
+  (:import [java.nio.file Files]
+           [java.nio.file.attribute FileAttribute]
+           [java.util Comparator]))
 
 (def ^:private historical-authority-body
   (str "# Historical PRD boundary\n"
@@ -221,6 +225,54 @@
     (is (true? (::md/valid? result))
         (str "Dependency pin violations: "
              (pr-str (::md/violations result))))))
+
+(deftest repository-pin-subjects-follow-working-tree-renames
+  (.mkdirs (io/file "tmp"))
+  (let [root (Files/createTempDirectory (.toPath (io/file "tmp"))
+                                       "markdown-pins-" (make-array FileAttribute 0))
+        current "15d98da60991b6ded59b15cf0d499a7055a02266"
+        stale "10540578248eaa686c1f88a7fe57644ee4c9f993"
+        git! (fn [& args]
+               (let [result (operator.state/run-process!
+                             {:seon.operator.subprocess/argv
+                              (into ["git" "-C" (str root)] args)
+                              :seon.operator.subprocess/deadline-ms 30000})]
+                 (when-not (zero? (:seon.operator.subprocess/exit result))
+                   (throw (ex-info "Fixture git failed" result)))))
+        source (io/file (str root) "docs/issue.md")
+        destination (io/file (str root) "docs/archive/issue.md")
+        content (fn [pin] (str "Dependency `reference-code/example` at `" pin "`.\n"))
+        validate! #(md/validate-repository-pins {::md/repository-root (str root)})]
+    (try
+      (git! "init" "--quiet")
+      (io/make-parents source)
+      (spit source (content current))
+      (git! "add" "--" "docs/issue.md")
+      (git! "update-index" "--add" "--cacheinfo"
+            (str "160000," current ",reference-code/example"))
+      (is (::md/valid? (validate!)))
+      (io/make-parents destination)
+      (Files/move (.toPath source) (.toPath destination)
+                  (make-array java.nio.file.CopyOption 0))
+      (let [result (validate!)]
+        (is (::md/valid? result))
+        (is (= ["docs/issue.md"] (::md/deleted-paths result))))
+      (spit destination (content stale))
+      (let [result (validate!)]
+        (is (false? (::md/valid? result)))
+        (is (= ["docs/archive/issue.md"]
+               (mapv ::md/file-path (::md/violations result)))))
+      (Files/delete (.toPath destination))
+      (spit (io/file (str root) "docs/remaining.md") "No dependency citation.\n")
+      (is (= ["docs/issue.md"] (::md/deleted-paths (validate!)))
+          "a deletion without a destination remains observable")
+      (is (= :file-not-found
+             (-> (md/validate-file {::md/file-path (str source)})
+                 ::md/violations first ::md/rule)))
+      (finally
+        (with-open [paths (Files/walk root (make-array java.nio.file.FileVisitOption 0))]
+          (doseq [path (iterator-seq (.iterator (.sorted paths (Comparator/reverseOrder))))]
+            (Files/deleteIfExists path)))))))
 
 (deftest repository-dependency-pin-evidence-fails-closed-test
   (let [result

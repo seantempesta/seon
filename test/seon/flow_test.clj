@@ -2,6 +2,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.core.async.flow :as flow]
+            [clojure.core.async.flow.impl.graph :as flow.graph]
             [clojure.core.async.flow-monitor :as flow-monitor]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -783,6 +784,17 @@
               monitor-messages (async/chan 8)
               transactions (database-events connection)]
           (try
+            (testing "the dependency's unsupported protocol method refuses as data"
+              (doseq [command [:probe :another-probe]]
+                (let [result (flow.graph/command-proc
+                              (::sut/graph fanout) :source command {})]
+                  (is (= ::sut/unsupported-command (:seon.error/kind result)))
+                  (is (m/validate :seon.error/value result
+                                  {:registry (:seon.schema.projection/registry
+                                              (schema/current-projection))}))
+                  (is (= [:source command {}]
+                         (get-in result [:seon.error/data
+                                         :seon.error/diagnostic-offending]))))))
             (with-redefs
               [flow-monitor/send-message
                (fn [_state message]

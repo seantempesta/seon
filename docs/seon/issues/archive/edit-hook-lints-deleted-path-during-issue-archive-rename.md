@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, docs, wave/dev-tooling-face-hygiene]
 ---
@@ -42,3 +42,20 @@ selection.
 - A genuinely broken dependency pin at the destination still fails loudly.
 - A source deletion without a corresponding destination remains observable
   rather than being treated as a successful rename.
+
+## Resolution — 2026-09-08
+
+Issues-sweep reproduced this exact hook error while archiving the changed-test
+selector note. The pin validator read Git's cached paths as though they were
+the working tree. It now includes tracked and untracked Markdown subjects,
+excludes Git-reported deletions from content reads, and returns those deletions
+as `:seon.dev.markdown/deleted-paths`. It does not guess rename identity.
+Explicit validation of a deleted file still returns `:file-not-found`.
+
+The real-Git regression stages an original document and a gitlink, moves the
+document to an untracked archive destination, verifies its valid pin, then
+changes that destination to a stale pin and requires the exact destination
+violation. A deletion without a destination remains reported. The existing
+Babashka Markdown suite passed 31 tests / 376 assertions / zero failures and
+errors. The test owns a project-local temporary repository and deletes it
+without following links.

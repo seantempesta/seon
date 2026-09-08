@@ -92,6 +92,7 @@
 (def ^:private validate-repository-pins-response-schema
   [:map
    [::valid? :boolean]
+   [::deleted-paths {:optional true} [:vector :string]]
    [::violations #'violations-schema]])
 
 (def ^:private format-violations-request-schema
@@ -992,10 +993,11 @@
                       {::repository-root repository-root})))
     gitlinks))
 
-(defn- repository-markdown-paths [repository-root]
+(defn- repository-markdown-paths [repository-root options]
   (->> (successful-git-output
         repository-root
-        ["ls-files" "-z" "--" "docs" ".agents/skills"])
+        (into ["ls-files" "-z"]
+              (concat options ["--" "docs" ".agents/skills"])))
        (#(split-on-character % \u0000))
        (filter #(str/ends-with? % ".md"))
        sort))
@@ -1105,7 +1107,9 @@
                    ::sections []}})))
 
 (defn validate-repository-pins
-  "Validate every dependency pin in tracked docs and curated skills."
+  "Validate dependency pins in working-tree docs and curated skills.
+   Deleted tracked paths are reported separately; untracked destinations
+   participate before a rename is staged."
   {:malli/schema
    [:=>
     [:cat #'validate-repository-pins-request-schema]
@@ -1113,7 +1117,11 @@
   [{::keys [repository-root]}]
   (try
     (let [gitlinks (repository-gitlinks repository-root)
-          paths (vec (repository-markdown-paths repository-root))]
+          deleted (vec (repository-markdown-paths repository-root ["--deleted"]))
+          paths (into [] (remove (set deleted))
+                      (repository-markdown-paths
+                       repository-root
+                       ["--cached" "--others" "--exclude-standard" "--deduplicate"]))]
       (when (empty? paths)
         (throw (ex-info "No Markdown pin subjects were discovered."
                         {::repository-root repository-root})))
@@ -1128,6 +1136,7 @@
                       gitlinks)))
                   paths)]
         {::valid? (empty? violations)
+         ::deleted-paths deleted
          ::violations violations}))
     (catch Exception error
       {::valid? false

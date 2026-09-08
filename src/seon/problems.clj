@@ -276,7 +276,7 @@
                     :seon.problems/deferred-count (count deferred)}))))
        vec))
 
-(defn- unowned-namespaces
+(defn- unstewarded-namespaces
   "Source-bearing program namespaces with no steward.
 
   OWNERSHIP IS THE NAMESPACE'S OWN `:seon.ns/steward` FACT, asserted inside
@@ -391,7 +391,7 @@
         failed (failed-runs db)
         errored (errored-receipts db)
         deferred (deferred-agents db)
-        unowned (unowned-namespaces db)
+        unstewarded (unstewarded-namespaces db)
         stale (stale-vars db)
         missing-model-rows (missing-models db)
         found (cond-> {}
@@ -400,8 +400,8 @@
                 (seq failed) (assoc :seon.problems/failed-runs failed)
                 (seq errored) (assoc :seon.problems/errored-receipts errored)
                 (seq deferred) (assoc :seon.problems/deferred-agents deferred)
-                (seq unowned)
-                (assoc :seon.problems/unowned-namespaces unowned)
+                (seq unstewarded)
+                (assoc :seon.problems/unowned-namespaces unstewarded)
                 (seq stale) (assoc :seon.problems/stale-vars stale)
                 (seq missing-model-rows)
                 (assoc :seon.problems/missing-models missing-model-rows))]
@@ -522,7 +522,7 @@
            "episode runs" (:seon.cluster.work/episode-runs entry)
            "deferred" (:seon.problems/deferred-count entry))))
    (family-section
-    "unowned namespaces"
+    "unstewarded namespaces"
     (for [entry (:seon.problems/unowned-namespaces found)]
       (row "namespace" (:seon.ns/name entry))))
    (family-section
@@ -635,7 +635,7 @@
                " deferred=" (:seon.problems/deferred-count entry)
                " (agent-sent triggers wait for an outside trigger)"))
         (for [entry (:seon.problems/unowned-namespaces found)]
-          (str "seon.problems unowned-namespace namespace="
+          (str "seon.problems unstewarded-namespace namespace="
                (:seon.ns/name entry)))
         (for [entry (:seon.problems/stale-vars found)]
           (str "seon.problems stale-var var=" (:seon.fn/sym entry)

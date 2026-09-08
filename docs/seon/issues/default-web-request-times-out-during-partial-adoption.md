@@ -19,3 +19,8 @@ was being edited by another lane; blob retention did not alter that owner.
 Recheck the request after successful adoption and observe its terminal response.
 The current evidence proves neither healthy browser rendering nor a permanent
 web defect. See the [retention landing note](../../prds/context-generation/research/blob-retention-landing-2026-09-08.md).
+
+Issues-sweep independently re-observed the boundary on 2026-09-08:
+`curl --max-time 20 http://127.0.0.1:7994` exited 28 after 20.003488 seconds,
+HTTP 000, zero bytes. Default MCP JVM probes still returned normally. The
+protected web/adoption owners were left unchanged; the cause remains unproven.

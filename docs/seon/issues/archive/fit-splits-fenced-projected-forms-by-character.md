@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, render, agent, wave/print-path]
 ---
@@ -47,3 +47,12 @@ real subtree elision carrying omitted count, path, and requery identity. No
 output contains an unmatched fence or a token/form prefix. A positive census
 also proves production render producers contain no independent bounded-text
 slicing mechanism outside `seon.print`.
+
+## Disposition — 2026-09-08
+
+Superseded by the turn PRD §15 and AGENTS.md §2.4. HTML has no presentation
+bound, and render terminals do not clip. The proposed repair of terminal
+fenced-text clipping would preserve a mechanism the ruling deletes. AI
+projection belongs to the AI render functions and value renderer; stored
+shown text is rendered unchanged. This is a design disposition, not a claim
+that every protected terminal caller has already been removed.

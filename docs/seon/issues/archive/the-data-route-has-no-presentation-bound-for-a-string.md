@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, web, print]
 ---
@@ -36,4 +36,12 @@ beside `:seon.render.value/max-collection` — never to an admission cap, which
 is what coupled the two decisions in the first place.
 
 Grounding:
-[the storage-bound landing note](../../prds/context-generation/research/storage-bound-landing-2026-09-07.md).
+[the storage-bound landing note](../../../prds/context-generation/research/storage-bound-landing-2026-09-07.md).
+
+## Disposition — 2026-09-08
+
+Superseded by the turn PRD §15 and AGENTS.md §2.4: HTML serves the complete
+value, and presentation elision belongs only to the AI render functions or
+value renderer. The proposed route-level string bound would introduce another
+clipping owner. The existing five-megabyte whole-value regression cited above
+asserts the ruled behavior; no protected web file was changed by this sweep.

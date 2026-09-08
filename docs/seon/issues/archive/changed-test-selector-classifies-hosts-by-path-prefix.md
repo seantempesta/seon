@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, test, class/n7, wave/changed-test-selector]
 ---
@@ -40,3 +40,12 @@ roots and retained test runners.
   maintained manifest or graph edge, not exact-path conditionals.
 - A regression adds and moves temporary source roots without changing the
   selector and proves the appropriate widening.
+
+## Resolution verified — 2026-09-08
+
+The existing fix `5e65fb7c9` deleted this second host classifier.
+`seon.dev.changed-test/run-gate!` delegates to the canonical `bin/test --changed`
+path. The paths-only gate at `74b5b4b05` passed all five
+`seon.dev.changed-test-test` regressions. Its separate oversight failure is
+recorded in the issues-sweep landing; it does not implicate the selector.
+No protected runner file was changed by this sweep.

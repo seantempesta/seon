@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, sci, runtime, class/p1, wave/per-run-fork-context]
 ---
@@ -29,7 +29,7 @@ persists every reported candidate. A concurrent mutation falls inside that
 process-wide comparison.
 
 The complete repro and fact queries are in
-[concurrency streams crossed](../../prds/sci-execution-runtime/research/concurrency-streams-crossed-2026-08-04.md).
+[concurrency streams crossed](../../../prds/sci-execution-runtime/research/concurrency-streams-crossed-2026-08-04.md).
 
 ## Owner
 
@@ -43,3 +43,12 @@ must compare one run's candidate context, never the live cluster context.
 - Every durable definition row is attributable to its defining run and agent.
 - A deterministic collision regression queries terminal transactions and
   proves no cross-run `:seon.code.def` assertion.
+
+## Disposition — 2026-09-08
+
+Superseded by the turn PRD §15: each agent owns a persistent SCI context;
+private definitions stay as live objects and no session image is persisted or
+restored. The proposed per-turn session-delta comparison and durable
+`:seon.code.def` assertions are deleted designs. Durable installed program
+facts still require correct attribution; this closure does not weaken that
+contract or claim the protected turn implementation complete.
