@@ -1,7 +1,5 @@
 ---
 name: datastar-web-ui
-type: skill
-status: active
 description: "Change Seon's Datastar namespace pages, debug previews, entity blocks, route table, SSE delivery, or message form. Use before editing the web render owners; generalized canvas design has a separate contract."
 ---
 
