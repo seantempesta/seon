@@ -1723,3 +1723,11 @@ ONLY A TURN HOLDING A REPLY ANSWERS. Custody lane refuted its premise
 filed). Dev JVM restarted + converged. Running: `verify-listened-attributes`
 (read-only), `instrumented-gate-backlog-2`. Step 3 (turn + loop + rename)
 launches ALONE after both.
+
+Owner (2026-09-08 morning): "You are making very slow progress. Figure out
+what the hold up is and press the gas." The holdup was serialization: each
+lane waited for a verifier AND for the backlog lane's repeated 20-minute
+full-suite runs. Changed: the turn-loop lane (step 3) launched NOW,
+concurrently with backlog 2, ownership split by file; verifiers run
+concurrently with the next lane instead of gating it; `--all` runs once
+per lane, at the end. PRD r9 folds lane 2's verifier blockers into step 3.
