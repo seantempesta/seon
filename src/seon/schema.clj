@@ -3119,17 +3119,6 @@
   "Optional test instrumentation called once per diagnostic schema visit."
   (fn [_schema-key] nil))
 
-;; The ONE thing this slot still holds: the projection last BUILT from a given
-;; packaged population, so the ambient fallback does not rebuild it per call.
-;; It never holds compiled validators or explainers again — those hang off the
-;; projection value itself ([[with-compiled-cache]]). The read below is a
-;; single deref compared by `=` against the forms in hand, so it cannot tear;
-;; that is why the 2026-08-07 audit calibrated THIS path as correct while the
-;; validator cache that used to share the slot was the race.
-(defonce ^:private !ambient-shape-projection
-  (atom {:seon.schema.shape/projection nil
-         :seon.schema.shape/candidate-forms nil}))
-
 (defn projection-validator
   "Compile a validator against exactly one immutable projection."
   {:malli/schema [:=> [:catn [::projection ::projection]
@@ -3228,18 +3217,11 @@
       {:registry (:seon.schema.projection/registry projection)})))
 
 (defn- shape-projection []
-  (or (current-projection)
-      (let [forms (candidate-forms)
-            cached @!ambient-shape-projection]
-        ;; Packaged forms are immutable values read from resources, so two
-        ;; accesses may return equal maps without sharing object identity.
-        (if (= forms (:seon.schema.shape/candidate-forms cached))
-          (:seon.schema.shape/projection cached)
-          (let [projection (build-projection forms)]
-            (reset! !ambient-shape-projection
-                    {:seon.schema.shape/projection projection
-                     :seon.schema.shape/candidate-forms forms})
-            projection)))))
+  (or (handed-projection)
+      (throw
+       (ex-info "Shape inspection requires the operation's schema projection."
+                {:seon.error/kind ::missing-projection
+                 :seon.schema/missing-projection true}))))
 
 (defn- identity-only-descriptors-in
   [projection]

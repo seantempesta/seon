@@ -6,6 +6,21 @@ tags: [research, schema, runtime, test]
 
 # Cluster-scoped registry — stopped baseline, 2026-09-08
 
+## Restart: shape projection holder removed, 20:47 UTC
+
+The orchestrator superseded the stop boundary. `shape-projection` now uses
+the handed immutable projection, including the cluster's projection-state
+carrier. It no longer retains a process-global forms/projection pair or
+rebuilds a projection after consulting that shared pair. Missing custody
+raises `:seon.schema/missing-projection`.
+
+Armed fast loop: **20 tests / 202 assertions**, zero failures/errors.
+The path-isolated gate `bin/test --paths src/seon/schema.clj --
+seon.schema-test` also passed **20 / 202**, base preparation 54,352 ms,
+coordinator/tests 59 seconds, snapshot `82d8ce7cd` plus this file's diff.
+The edit hook refused publication; this is not a live-adoption proof.
+The remaining sections below record the initial, superseded stop.
+
 No implementation landed. The assignment's stop boundary was reached during
 the initial armed baseline, before any production or test edits.
 
