@@ -31,9 +31,23 @@ bin/codex-agent resume <name> "<follow-up>"
 
 `run` and `resume` also accept their prompt on standard input. The wrapper owns
 the Codex command shape, session-id capture, the `-o` summary, transcript
-streaming, and lane/session exclusion. Its defaults are `gpt-5.6-sol` with high
-reasoning effort; a Claude orchestrator may set `LANE_MODEL` and `LANE_EFFORT`
-for a bounded lane.
+streaming, and lane/session exclusion. Its defaults are **`gpt-6-astra` at
+`low` reasoning effort** — "astra light", the owner's default implementation
+agent (2026-09-08) — set as `model=${LANE_MODEL:-gpt-6-astra}` and
+`effort=${LANE_EFFORT:-low}` in `bin/codex-agent` and passed to Codex as
+`codex exec -m "$model" -c model_reasoning_effort="$effort"`. The efforts
+astra accepts, from `~/.codex/models_cache.json`: `low`, `medium`, `high`,
+`xhigh`, `max`, `ultra` (ultra adds automatic task delegation). Raise the
+effort per lane only for genuinely architectural reasoning:
+
+```bash
+LANE_EFFORT=high bin/codex-agent run <name> "<spec>"     # a design review
+LANE_MODEL=gpt-6-astra LANE_EFFORT=low bin/codex-agent run <name> "<spec>"  # the default, spelled out
+```
+
+`gpt-6-astra` needs Codex CLI ≥ 0.153 (`npm i -g @openai/codex@latest`; the
+CLI is the npm global at `/opt/homebrew/bin/codex`); an older CLI answers
+`requires a newer version of Codex`.
 
 Launch `run` or `resume` bare as the harness-tracked background command. Do not
 wrap it in `nohup`, append `&`, redirect its output, or pipe the wrapper through

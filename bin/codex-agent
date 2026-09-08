@@ -23,7 +23,7 @@
 #   bin/codex-agent summary <name>         print a lane's -o summary.
 #   bin/codex-agent status                 running lanes + landed summaries.
 #
-# Dials (env): LANE_MODEL (gpt-5.6-sol), LANE_EFFORT (high).
+# Dials (env): LANE_MODEL (gpt-6-astra), LANE_EFFORT (low — astra "light"; also medium|high|xhigh|max|ultra).
 #
 # NEVER SANDBOX A LANE (owner ruling 2026-07-26). There is no sandbox dial and
 # there must not be one. A sandboxed lane cannot write its own report: a
@@ -48,8 +48,8 @@ export RUST_LOG=${RUST_LOG:-codex_models_manager=off}
 dir=tmp/orchestrator
 lanes_dir=$dir/lanes
 sessions_dir=$dir/sessions
-model=${LANE_MODEL:-gpt-5.6-sol}
-effort=${LANE_EFFORT:-high}
+model=${LANE_MODEL:-gpt-6-astra}
+effort=${LANE_EFFORT:-low}
 lane_rule="If another lane's in-flight breakage blocks your gate, STOP and report the exact boundary — never resume, message, or edit another lane's session or files."
 
 usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }

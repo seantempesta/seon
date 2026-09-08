@@ -739,7 +739,9 @@ integration gates; implementation goes to capable code agents.** One
 research question gets one agent with complete context. A Claude
 orchestrator launches Codex lanes through `bin/codex-agent` as
 harness-tracked background commands, run BARE — never piped (a filter
-reduces the owner's live panel to one line):
+reduces the owner's live panel to one line). The default lane model is
+`gpt-6-astra` at `low` effort ("astra light", owner 2026-09-08); Opus
+subagents are not the default implementation agent:
 
 ```bash
 bin/codex-agent run <name> "<the full spec>"
