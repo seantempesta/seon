@@ -63,6 +63,7 @@
           (test-support/delete-recursively! root))))))
 
 (use-fixtures :once with-published-root)
+(use-fixtures :each test-support/preserving-instrumentation-state)
 
 (defn- projection-state-of
   [instance]
@@ -158,6 +159,5 @@
               (is (= expected (str (:seon.sci.admit/value result)))
                   (str label " returned its own computed value"))))))
       (finally
-        (instrument/remove!)
         (doseq [instance @instances]
           (try (cluster/stop! instance) (catch Throwable _ nil)))))))

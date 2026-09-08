@@ -13,6 +13,7 @@
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
             [malli.core :as m]
+            [malli.instrument :as mi]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
@@ -70,8 +71,11 @@
            (try
              (test-support/preserving-instrumentation-state
               (fn []
-                (instrument/remove!)
-                (is (empty? (instrument/instrumented)))
+                (let [[candidate callable] (first roots)]
+                  (alter-var-root candidate mi/-f->original)
+                  (is (identical? (mi/-f->original callable) @candidate))
+                  (is (not (identical? callable @candidate)))
+                  (is (not (contains? (instrument/instrumented) candidate))))
                 (throw (ex-info "fixture failure" {::cause ::deliberate-failure}))))
              (catch clojure.lang.ExceptionInfo error (::cause (ex-data error))))))
     (is (= (set (keys roots)) (instrument/instrumented)))
@@ -182,3 +186,27 @@
           "the link's target directory survives; only the link was removed")
       (finally
         (test-support/delete-recursively! (str outside))))))
+
+(deftest fixture-resources-close-through-setup-and-cleanup-failures
+  (doseq [acquired-count (range 4)
+          failing-cleanup [nil 0 1 2]]
+    (let [events (atom [])
+          acquire! (fn [ordinal]
+                     (when (= ordinal acquired-count)
+                       (throw (ex-info "setup failed" {})))
+                     (swap! events conj [::opened ordinal])
+                     (test-support/closeable
+                      ordinal
+                      (fn [value]
+                        (swap! events conj [::closed value])
+                        (when (= value failing-cleanup)
+                          (throw (ex-info "cleanup failed" {}))))))]
+      (is (thrown? Exception
+                   (with-open [first-resource (acquire! 0)
+                               second-resource (acquire! 1)
+                               third-resource (acquire! 2)]
+                     (is (= [0 1 2] [@first-resource @second-resource @third-resource]))
+                     (throw (ex-info "body failed" {})))))
+      (is (= (concat (map #(vector ::opened %) (range acquired-count))
+                     (map #(vector ::closed %) (reverse (range acquired-count))))
+             @events)))))

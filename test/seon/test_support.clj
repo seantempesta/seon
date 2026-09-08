@@ -5,6 +5,7 @@
             [clojure.java.io :as io]
             [clojure.test :as test]
             [datahike.api :as d]
+            [malli.instrument :as mi]
             [seon.cluster :as cluster]
             [seon.cluster.export :as cluster.export]
             [seon.cluster.registry :as registry]
@@ -639,8 +640,18 @@
       (body)
       (finally
         (try
-          (instrument/remove!)
+          (doseq [instrumented-var (instrument/instrumented)]
+            (alter-var-root instrumented-var mi/-f->original))
           (finally
             (reset! registry schemas)
             (doseq [[instrumented-var callable] roots]
               (alter-var-root instrumented-var (constantly callable)))))))))
+
+(defn closeable
+  "Adapt an acquired fixture value to Clojure's with-open cleanup scope.
+   Dereferencing returns the value; closing calls its supplied release function."
+  [value release!]
+  (reify java.io.Closeable
+    (close [_] (release! value))
+    clojure.lang.IDeref
+    (deref [_] value)))
