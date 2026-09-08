@@ -1,6 +1,6 @@
 ---
 type: prd
-status: r7 — every claim REPL-prototyped (research/prototype-turn-loop-in-repl-2026-09-07.md): all hold with the amendments below; ready for the owner's go
+status: r7 — owner GO 2026-09-07 late evening; implementing §8 in order (lane specs under tmp/lane-specs/)
 date: 2026-09-07 (evening)
 supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
 tags: [prd, agent, wake, storage, runtime]
@@ -81,6 +81,27 @@ source, situation.
 7. The two-arm `step` returned `:evaluate` / `:reply` / `:idle` from one
    database value on the three fixtures; one JVM per operator root and one
    root-scoped flock confirmed (pid equality across two clusters).
+
+## 0c. Names in the wave (owner go, 2026-09-07)
+
+| today | after | grounding |
+|---|---|---|
+| `seon.cluster.run`, `:seon.cluster.run/*` | `seon.turn`, `:seon.turn/*` | "agent turn" is the vocabulary row |
+| `seon.cluster.eval` storage keys (`result-edn`, `triage-edn`) | accreted into `seon.eval`: `:seon.eval/value`, `/out`, `/error`, `/triage-edn`, `/missing`, `/size` | Clojure's words for a REPL's outputs |
+| `seon.cluster.agent` | `seon.agent` | ruling 70: drop the `cluster` segment |
+| `seon.cluster.message` | `seon.message` | same |
+| `seon.cluster.wake` | `seon.wake` | same; Datahike `listen` inside |
+| `seon.cluster.work` + `seon.cluster.loop` | one owner `seon.turn`: `step`, `open`, `store`, `close` | the loop IS the turn |
+| `my.run` | `my.turn` | agent-facing protocol over the same facts |
+| receipt, trigger, situation, claim, inbox, mailbox, episode, freeze, settle | retired spellings | §0a |
+
+Unchanged: `seon.ai.attempt`, `seon.error`, `seon.schedule` (+ `seon.schedule.firing`),
+`seon.print`, `seon.repl`, `my.plan`, and `seon.cluster` itself (the boot
+owner of a branch).
+
+Simulated turns suffice for every proof: a source submission opens a turn
+with a supplied reply and no attempts; a wake is one transacted message;
+tests stand in the evaluator. No real provider call is required.
 
 ## 1. The loop, as the owner stated it, plus exactly what a crash forces
 

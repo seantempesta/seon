@@ -1607,3 +1607,12 @@ prototype lane (`research/prototype-turn-loop-in-repl-2026-09-07.md`) —
 NO code is rewritten until it reports (owner: "test out the ideas first in
 the repl"). Open split for the owner: turn bound derived (Opus, PRD) vs one
 explicit allowance (astra).
+
+### Owner go (late evening)
+
+"Okay go for it." PRD r7 sealed for implementation; §8 in order, one lane
+each, serial: 1 storage bound + AI-boundary elision (running,
+`tmp/lane-specs/storage-bound-0907.md`) → 2 listened attributes +
+answered-by-`:t` → 3 the turn + two-arm loop (+ the `seon.turn` rename) →
+4 the record + page → 5 byte identity → 6 reset, reseed, docs. Names table
+in PRD §0c. Simulated turns only.
