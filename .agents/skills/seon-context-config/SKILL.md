@@ -1,7 +1,5 @@
 ---
 name: seon-context-config
-type: skill
-status: active
 description: "Change or diagnose Seon's database-backed cluster configuration: schema dials, defaults, sparse overlays, apply operations, and live versus arm-time acquisition."
 ---
 
