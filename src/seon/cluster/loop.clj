@@ -200,7 +200,7 @@
   ;; installable set at once. The test that catches that class is the
   ;; one that transacts these rows into a database built the way boot
   ;; builds it.
-  (into #{:seon.cluster.agent/run}
+  (into #{}
         (comp (mapcat (fn [entity]
                         (schema.form/map-entries
                          (schema/schema-definition entity))))

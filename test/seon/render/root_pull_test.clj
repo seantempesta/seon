@@ -89,8 +89,7 @@
         [:seon.cluster.message/id "temporal-root-message"]
         :seon.cluster.run/opened-at (java.util.Date. 1786400000001)}
        {:seon.cluster.agent/id "temporal-root-agent"
-        :seon.cluster.agent/run
-        [:seon.cluster.run/id "temporal-root-run"]}])
+        }])
      (let [current @connection
            temporal (db/as-of current (db/basis-t current))
            current-selector (walk/root-selector current 1 caps)

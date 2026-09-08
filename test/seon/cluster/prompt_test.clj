@@ -58,8 +58,7 @@
                     [:seon.cluster.message/id "walk-message"]
                     :seon.cluster.run/opened-at (Date. 1700000001000)}
                    {:seon.cluster.agent/id "walker"
-                    :seon.cluster.agent/run
-                    [:seon.cluster.run/id "walk-run"]}])
+                    }])
       (let [context-channel (async/chan)
             render-channel (async/chan (async/sliding-buffer 1))
             runtime-eval-channel (async/chan (async/sliding-buffer 1))
@@ -336,7 +335,7 @@
           [:seon.cluster.message/id "current-task"]
           :seon.cluster.run/opened-at (Date. 1700000006000)}
          {:seon.cluster.agent/id "walker"
-          :seon.cluster.agent/run [:seon.cluster.run/id "current-run"]}])
+          }])
        (let [current-request
              (assoc (request connection context-channel)
                     :seon.cluster.run/id "current-run")

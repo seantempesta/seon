@@ -31,11 +31,7 @@
                  '[:seon.cluster.agent/id
                    {:seon.cluster.agent/namespace
                     [:db/id :seon.ns/name
-                     {:seon.ns/requires [:seon.ns/name]}]}
-                   {:seon.cluster.agent/run
-                    [:seon.cluster.run/id
-                     {:seon.cluster.run/trigger
-                      [:seon.cluster.message/id]}]}]
+                     {:seon.ns/requires [:seon.ns/name]}]}]
                  [:seon.cluster.agent/id agent-id])]
     (if-not (:seon.cluster.agent/id agent)
       {:seon.cluster.agent/no-such-agent agent-id
@@ -43,7 +39,11 @@
        :seon.error/message (str "No agent has id " (pr-str agent-id) ".")
        :seon.error/data {:seon.cluster.agent/id agent-id}}
       (let [namespace (:seon.cluster.agent/namespace agent)
-            run (:seon.cluster.agent/run agent)
+            run (when-let [id (run/open-for-agent database [:seon.cluster.agent/id agent-id])]
+                  (db/pull database
+                           '[:seon.cluster.run/id
+                             {:seon.cluster.run/trigger [:seon.cluster.message/id]}]
+                           [:seon.cluster.run/id id]))
             turn-limit
             (db/q '[:find ?limit .
                    :where [_ :seon.config.run/max-episode-runs ?limit]]
@@ -281,7 +281,6 @@
                 :in $ ?agent-id
                 :where
                 [?agent :seon.cluster.agent/id ?agent-id]
-                [?agent :seon.cluster.agent/cluster ?cluster]
                 [?cluster :seon.cluster/config ?config]
                 [?config :seon.config.bootstrap/beyond-closure-token-budget
                  ?budget]]

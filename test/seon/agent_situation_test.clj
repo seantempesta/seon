@@ -22,8 +22,6 @@
      :seon.cluster.run/agent [:seon.cluster.agent/id "situation"]
      :seon.cluster.run/opened-at #inst "2026-08-12T12:00:00.000-00:00"
      :seon.cluster.run/starting-ns [:seon.ns/name 'my.agents.situation]}
-    [:db/add [:seon.cluster.agent/id "situation"]
-     :seon.cluster.agent/run [:seon.cluster.run/id "situation-run"]]
     {:seon.cluster.message/id "unread"
      :seon.cluster.message/to [:seon.cluster.agent/id "situation"]
      :seon.cluster.message/content "Read me"

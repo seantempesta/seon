@@ -1,59 +1,9 @@
 (ns seon.cluster.work
-  "What ONE AGENT should do next, derived from one database value.
+  "Derive one agent's next operation from one database value.
 
-  This contract layer is fully implemented and live-proven.
-
-  This is a pure work derivation, never a recovery procedure. There is
-  no dirty flag, scan-requested atom, or retry counter: the facts hold
-  the work, and `next-agent-work` reads them. Boot recovery runs before
-  this derivation and closes every interrupted prior-process run.
-
-  FIVE SITUATIONS, TOTAL AND MUTUALLY EXCLUSIVE, `nil` for idle:
-
-  - `:resume` — an open run this process holds, WITH a plan digest.
-    Fold from the first ordinal lacking a terminal receipt. This is the
-    ordinary live fold, never a cold continuation after recovery;
-  - `:call` — an open run this process holds, WITHOUT a plan digest.
-    Derive the prompt, make the ONE paid model call, freeze the plan;
-  - `:generate` — a system-authored generated run whose current prefix has
-    terminal receipts. Derive and append exactly its next dependency-ready
-    form; no model call and no stored whole-episode plan;
-  - `:open` — an agent with no open run and an unanswered trigger under the
-    episode gate. Every closed run answers its trigger, including a refusal;
-    only a new trigger can open another run. Open and claim FIRST, model
-    second: the busy fence must exist before the expensive part, so a second
-    trigger during a model call cannot start a second turn (the claim-early
-    half of n3-plan §9.1, which the night ruling kept);
-  - `:close` — an open run whose every evaluable form already has a terminal
-    receipt. Comment-only input has no reader event and needs no receipt.
-    The fold is done. This is its own situation rather than a
-    `:resume` carrying no ordinal, because fold-vs-close is a different
-    instruction to the turn proc and an instruction must be visible in the
-    value, never inferred from an absent key (seal revision,
-    2026-07-27);
-  - `nil` — idle.
-
-  NO AUTO-RETRY OR COLD RESUME, EVER (owner ruling 25, 2026-07-29).
-  Boot recovery closes the interrupted run, releases custody, and
-  retracts the agent pointer in one transaction. `:call` and `:resume`
-  are therefore reachable only for runs THIS process holds. An open
-  unclaimed run is not work — it is wreckage to settle, which is why
-  `interruption` exists and why `next-agent-work` does not return it.
-
-  Crash walk (the kill positions of n3-plan §9.3, as this namespace
-  answers them):
-  - kill after the trigger commits, before any wake: the trigger is
-    unanswered, so the boot pass derives `:open`. A normal first turn;
-  - kill after opening a run, during the model call, after plan freeze,
-    or mid-fold: `recover-tx` marks any running receipt interrupted,
-    closes the run, releases custody, and retracts the pointer. No
-    unstarted suffix executes. A later unanswered message derives
-    `:open` for a new episode, whose context includes the run's derived
-    interruption evidence;
-  - kill after the last terminal receipt, before close: recovery closes
-    the already-finished run;
-  - kill during recovery itself: `recover-tx` is idempotent and every
-    terminal receipt is byte-untouched, so the derivation is unchanged."
+  The open turn follows its agent ref and absence of closed-at. No pointer
+  or counter is stored on the agent. Legacy process custody and generated
+  turns remain until the turn PRD implementation replaces those paths."
   (:require [clojure.edn :as edn]
             [seon.db :as db]
             [seon.cluster.message :as message]
@@ -73,21 +23,10 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- agent-run
-  "The run an agent currently points at on `db`, pulled whole, or nil.
-  The agent's pointer IS the open-run fact: N2 retracts it at close, so
-  there is no `status` to read and no closed run to filter out here."
-  [db agent-id]
-  (let [run (db/q '[:find (pull ?run [*]) .
-                   :in $ ?agent-id
-                   :where
-                   [?agent :seon.cluster.agent/id ?agent-id]
-                   [?agent :seon.cluster.agent/run ?run]]
-                 db agent-id)]
-    ;; ASK ONLY ABOUT A RUN THAT EXISTS. `open?` of nothing answered
-    ;; "true" (nil contains no closed-at) and the `when` then returned
-    ;; nil anyway — right answer, wrong question, and instrumentation
-    ;; named it the first time it ran.
-    (when (and run (run/open? run)) run)))
+  "The agent's open turn, derived from its owning ref and closed-at."
+  [database agent-id]
+  (when-let [id (run/open-for-agent database [:seon.cluster.agent/id agent-id])]
+    (db/pull database '[*] [:seon.cluster.run/id id])))
 
 (defn- evaluable-source?
   [source]

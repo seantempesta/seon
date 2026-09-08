@@ -148,10 +148,7 @@
                  _close (db/transact!
                          connection
                          [{:seon.cluster.run/id "active-during-add"
-                           :seon.cluster.run/closed-at closed-at}
-                          [:db/retract [:seon.cluster.agent/id "preview-batch-agent"]
-                           :seon.cluster.agent/run
-                           [:seon.cluster.run/id "active-during-add"]]])
+                           :seon.cluster.run/closed-at closed-at}])
                  committed
                  (with-redefs [sci.eval/evaluate
                                (fn [& _] (throw (ex-info "saving re-executed source" {})))]
@@ -177,10 +174,8 @@
              (is (= closed-at (:seon.cluster.run/closed-at saved)))
              (is (nil? (:seon.cluster.run/process saved)))
              (is (nil?
-                   (get-in (db/pull @connection
-                                     [{:seon.cluster.agent/run [:seon.cluster.run/id]}]
-                                     [:seon.cluster.agent/id "preview-batch-agent"])
-                           [:seon.cluster.agent/run :seon.cluster.run/id])))
+                   (run/open-for-agent @connection
+                                       [:seon.cluster.agent/id "preview-batch-agent"])))
              (is (= (count outcomes) (count receipts)))
              (is (= (mapv #(run/receipt-identity "saved-preview" %) (range (count outcomes)))
                     (mapv :seon.cluster.eval/id receipts)))

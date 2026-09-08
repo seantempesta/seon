@@ -28,3 +28,9 @@ log independently said `Publication did not finish within its declared bound.`
 Earlier ordinary virtual turns had completed, including a contracted function
 installed by one agent and called by another. Those completed observations do
 not establish health after this timeout. No fallback transport was used.
+
+Components lane, 2026-09-08: initial `runtime_status` selected default PID
+91455, PREPL 65479, and returned health/flow `unknown` with `Read timed out`.
+A subsequent MCP JVM `(+ 1 1)` returned 2 in 3 ms. The process is reachable;
+that arithmetic result does not establish Flow health. No default lifecycle
+operation was performed.

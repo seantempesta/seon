@@ -267,11 +267,9 @@
                        :seon.sci.eval/time-limit-ms 2000
                        :seon.config/on-core-error :panic
                        :seon.render/distance 2})]
-           (doseq [attribute [:seon.cluster.agent/cluster
-                              :seon.cluster/config]]
-             (let [face (walk-output-by-attribute units attribute)]
-               (is (some? face))
-               (is (not (str/includes? (str face) ":db/id")))))))))))
+           (is (seq units))
+           (is (nil? (walk-output-by-attribute units :seon.cluster.agent/cluster))
+               "the branch is not a stored connection on the agent")))))))
 
 (deftest effect-receipts-render-state-from-attribute-presence
   (is (= {:seon.render/ai `effect/render-ai

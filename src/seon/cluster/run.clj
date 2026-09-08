@@ -1,62 +1,12 @@
 (ns seon.cluster.run
-  "The run data model: claimable database state, transitions inside the
-  transaction.
+  "Turn facts and writer-owned transitions.
 
-  CONTRACT LAYER (orchestrator-authored; revised 2026-07-27 after
-  quality-review-1 live-reproduced two correctness holes — takeover
-  eligibility and agent-pointer fencing — and the first Gemini hook
-  review corroborated the nil-epoch takeover). The schemas and function
-  contracts are SEALED: the implementation lane fills the `*-call`
-  bodies until test/seon/cluster/run_test.clj is green and may not
-  loosen a schema or a test. Friction is reported, never resolved by
-  weakening.
+  Open means no closed-at. Opening queries the agent's existing turns in
+  the writer's database; no agent run pointer is stored. Each transition
+  returns transaction data for the same serial Datahike writer.
 
-  The model (crash rulings, plan README sessions 3 + 2026-07-27;
-  custody revision 2026-07-28,
-  docs/prds/sci-execution-runtime/plan/custody-revision-contracts-2026-07-28.md):
-
-  - A run is the bounded work unit a trigger opens. Its state is DERIVED
-    from primitives — open = no closed-at; held = `::process` present —
-    never a stored status label. CUSTODY IS PRESENCE: there is no epoch
-    and no lease, because the flock + single writer make a competing
-    claimant unrepresentable and the settle-once presence fences close
-    every order a hypothetical late committer could take
-    (research/zombie-constructibility-2026-07-28.md §6).
-  - EVERY transition decision happens INSIDE the transaction. Each
-    transition is one pure function of the mid-transaction database
-    value and a small request map, invoked as `[:db.fn/call f request]`
-    on the one serial writer: it reads current run state from `db`,
-    REFUSES ineligible transitions by throwing (the whole transaction
-    aborts atomically), and returns plain tx-data otherwise. There are
-    no observed-* request fields and no caller pre-reads — the invalid
-    states are unrepresentable, not double-checked.
-  - The run's own connections are the authority: close derives the
-    agent pointer to retract from the run's `::agent` ref; open derives
-    the pointer CAS from the same `::agent` value that lands on the
-    entity. Correlated caller inputs do not exist.
-  - `::now` is the run loop's clock, an explicit request input so every
-    transition stays a deterministic pure function (generative tests
-    supply it). The transition fences STATE; time is first-party input
-    from core code — agents never reach this layer.
-  - Crashes are rare and NOTHING re-executes: boot recovery asserts
-    `::interrupted-at` on the RUN and
-    `:seon.cluster.eval/interrupted-at` on dangling receipts (those
-    carrying no terminal fact), closes every open prior-process run,
-    releases its custody, and retracts the agent pointer. Every settled
-    receipt stays untouched. A form has AT MOST ONE settlement, ever.
-    RECOVERY MARKS WHAT IT INTERRUPTED — the crash model's honesty
-    clause — so \"which runs did the last recovery cut?\" is a query
-    over `::interrupted-at` and never a process-local boot counter. The
-    run stamp is not derivable from the receipt stamps: a process that
-    died before its first receipt row existed leaves none.
-
-  Crash walk: every transition here is ONE atomic transaction (a single
-  `[:db.fn/call ...]`), so a kill at any instant leaves it either fully
-  committed or absent — there is no partial window inside this
-  namespace. The two windows that remain live OUTSIDE it: a run opened
-  before its plan commits (recovery sees an open unplanned run — the
-  known unowned issue), and a receipt started before its eval settles
-  (recovery asserts its `interrupted-at`)."
+  Process custody and generated-turn recovery remain legacy mechanisms
+  pending the turn PRD cut; their presence is not the target crash model."
   (:require [clojure.edn :as edn]
             [clojure.main :as main]
             [clojure.string :as str]
@@ -71,13 +21,6 @@
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form])
   (:import [java.nio.charset StandardCharsets]))
-
-;;; ---------------------------------------------------------------------------
-;;; The agent pointer — owned HERE. Port manifest: old `:seon.agent/*`
-;;; attrs are DEAD for this model; the agent entity is re-decided at its
-;;; own rung. The run model needs exactly an identity to point from and
-;;; the current-run pointer opens race on.
-;;; ---------------------------------------------------------------------------
 
 (schema.edn/load! {})
 
@@ -476,14 +419,26 @@
        (sort-by (fn [[_ effect-id tx]] [tx effect-id]))
        (mapv first)))
 
+(defn open-for-agent
+  "Read the agent's open turn id from its owning ref and absence of closed-at."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/ref]
+                  [:or [:maybe :seon.cluster.run/id] :seon.error/value]]}
+  [database agent-ref]
+  (let [row (db/pull database [:db/id] agent-ref)]
+    (if (:seon.error/kind row)
+      row
+      (when-let [agent-eid (:db/id row)]
+        (db/q '[:find ?id .
+                :in $ ?agent
+                :where [?turn :seon.cluster.run/agent ?agent]
+                [?turn :seon.cluster.run/id ?id]
+                (not [?turn :seon.cluster.run/closed-at])]
+              database agent-eid)))))
+
 (defn open-call
-  "Open one run for an agent, inside the transaction.
-  Refuses when the run id already exists, or when the agent's
-  current-run pointer is present (an agent holds at most one open run).
-  Returns the run entity assertion plus the agent pointer assertion —
-  BOTH derived from the one `::agent` ref in the request; there is no
-  separate agent-id field to disagree with it. The ordinary initial
-  situation is `:call`; generated runs explicitly open in `:generate`."
+  "Open one turn inside the writer; refuse an existing id or open turn.
+  The agent's owning ref and closed-at facts supply the decision in the
+  writer's database. No current-turn pointer is stored on the agent."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map
                         [::id ::id]
@@ -505,12 +460,9 @@
       (nil? agent-eid) (refuse! `open-call ::no-such-agent request)
       (some? (current-run db id)) (refuse! `open-call ::run-exists request)
 
-      (some? (:seon.cluster.agent/run
-              (db/pull db [:seon.cluster.agent/run] agent-eid)))
+      (some? (open-for-agent db agent-eid))
       (refuse! `open-call ::agent-already-running request)
 
-      ; the pointer and the run's own ::agent are the SAME resolved
-      ; entity, so they cannot disagree
       :else [(cond-> {:db/id run-tempid
                       ::id id
                       ::agent agent-eid
@@ -519,8 +471,7 @@
                trigger (assoc ::trigger trigger)
                starting-ns (assoc ::starting-ns starting-ns)
                (seq background-results)
-               (assoc ::background-results background-results))
-             {:db/id agent-eid :seon.cluster.agent/run run-tempid}])))
+               (assoc ::background-results background-results))])))
 
 (defn claim-tx
   "Transaction data claiming `::id` for `::process`."
@@ -606,14 +557,8 @@
   [[:db.fn/call #'close-call request]])
 
 (defn close-call
-  "Close the run, inside the transaction.
-  Assert closed-at, retract custody, retract the owning agent's
-  current-run pointer. The agent is the run's OWN `::agent` connection
-  read from `db` — the request carries no agent id, so a wrong one
-  cannot exist. Refuses unless the run is open and held by exactly
-  `::process` — AND refuses `::agent-pointer-broken` when the owning
-  agent's pointer does not point at this run: a broken relation is
-  settled loudly, never by silently omitting the retraction."
+  "Close the held turn inside the writer by asserting closed-at.
+  The owning agent becomes available through the open-turn query."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map
                         [::id ::id]
@@ -623,17 +568,9 @@
                          ::undisposed-at]]]
                   [:vector :some]]}
   [db request]
-  (let [run (held-run db `close-call request)
-        ; the run's OWN connection names the agent whose pointer this
-        ; close retracts — the request carries no agent id to disagree
-        agent-eid (:db/id (::agent run))
-        pointer (:seon.cluster.agent/run
-                 (db/pull db [:seon.cluster.agent/run] agent-eid))]
-    (when-not (= (:db/id run) (:db/id pointer))
-      (refuse! `close-call ::agent-pointer-broken request))
+  (let [run (held-run db `close-call request)]
     (cond-> (conj (retract-custody run)
-                  [:db/add (:db/id run) ::closed-at (::closed-at request)]
-                  [:db/retract agent-eid :seon.cluster.agent/run (:db/id run)])
+                  [:db/add (:db/id run) ::closed-at (::closed-at request)])
       (::undisposed-at request)
       (conj [:db/add (:db/id run) ::undisposed-at
              (::undisposed-at request)]))))
@@ -848,7 +785,7 @@
   "Open, claim, plan, and start every evaluation of one system-authored run.
 
   The caller owns the ordered sources and their digest. The ordinary run
-  transaction functions retain every custody, pointer, plan, and evaluation
+  transaction functions retain every custody, plan, and evaluation
   fence. The entire execution intent is durable in this one transaction."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.run/system-run-request]
@@ -2015,7 +1952,7 @@
   running receipt (one carrying NO terminal fact) gets
   `:seon.cluster.eval/interrupted-at` asserted at `::now`, every open effect
   receipt gets `:seon.effect/interrupted-at`, and dead custody is released.
-  An ordinary run is CLOSED at `::now` and its agent pointer is retracted. A
+  An ordinary run is CLOSED at `::now`. A
   generated run stays open and attached: its settled receipts are the
   append-only derivation prefix, so the per-agent entry reclaims it and
   derives only the next ordinal. No authored form re-executes.
@@ -2047,12 +1984,7 @@
   the crash model's \"the agent adapts\" clause made literal — the
   interruption is in the agent's next context and the agent decides.
 
-  IT NEVER REFUSES, and that includes wreckage. `close-call` refuses
-  `::agent-pointer-broken` because a live close with a mismatched
-  pointer is a caller bug; at recovery it is just what a dead process
-  left behind, and a boot that threw on it would wedge the cluster it
-  was trying to rescue. So the pointer is retracted exactly when it
-  points at this run when recovery closes the run."
+  Recovery closes the turn from its own facts; no agent pointer is stored."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map
                         [::id ::id]
@@ -2068,25 +2000,14 @@
             (not (open? run))
             (contains? live-processes holder))
       []
-      (let [agent-eid (:db/id (::agent run))
-            pointer (when agent-eid
-                      (:seon.cluster.agent/run
-                       (db/pull db [:seon.cluster.agent/run] agent-eid)))
-            interrupted
+      (let [interrupted
             (into (interrupt-stamps db (:db/id run) now)
                   (effect/interruption-stamps db (:db/id run) now))]
         (cond-> (into interrupted
                       (when (some? holder)
                         (retract-custody run)))
           (not generated?)
-          (conj [:db/add (:db/id run) ::closed-at now])
-          ;; exactly when it points HERE — see the docstring: recovery
-          ;; settles ordinary wreckage, but a generated prefix stays attached
-          ;; so the next process can append without opening a second answer
-          (and (not generated?)
-               (= (:db/id run) (:db/id pointer)))
-          (conj [:db/retract agent-eid :seon.cluster.agent/run
-                 (:db/id run)]))))))
+          (conj [:db/add (:db/id run) ::closed-at now]))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The family default renders — what a run, a form and a receipt LOOK
@@ -2255,80 +2176,3 @@
   (when-let [text (render-ai unit)]
     [:article {:class "seon-family-entry seon-run-entry"}
      [:p text]]))
-
-;;; ---------------------------------------------------------------------------
-;;; The current-run unit
-;;;
-;;; `:seon.cluster.agent/run` is present exactly while a run is open, so
-;;; absence is the whole answer and neither projection invents a state for it.
-;;; The declared producer input is `:seon.schema/value` because the seam hands
-;;; a reference in whichever shape the pull produced; the identity it resolves
-;;; to is always a stable `[:seon.cluster.run/id …]`, never a numeric id.
-;;; ---------------------------------------------------------------------------
-
-(def ^:private current-run-selector
-  '[:db/id
-    :seon.cluster.run/id
-    :seon.cluster.run/opened-at
-    :seon.cluster.run/closed-at
-    :seon.cluster.run/interrupted-at
-    :seon.cluster.run/error
-    :seon.cluster.run/plan-digest
-    :seon.cluster.run/process])
-
-(defn- current-run-row
-  "The open run an agent's `:seon.cluster.agent/run` reference names."
-  [database reference]
-  (let [id (cond
-             (string? reference) reference
-             (map? reference) (::id reference)
-             :else nil)
-        eid (cond
-              (integer? reference) reference
-              (map? reference) (:db/id reference)
-              :else nil)
-        row (cond
-              id (db/pull database current-run-selector [::id id])
-              eid (db/pull database current-run-selector eid)
-              (and (vector? reference) (= 2 (count reference)))
-              (db/pull database current-run-selector reference))]
-    (when (and (map? row) (::id row) (not (:seon.error/kind row)))
-      row)))
-
-(defn render-current-ai
-  "`:seon.render/ai` — source reading the run this agent holds right now.
-
-  Absent reference, absent source: nothing is rendered when no run is open,
-  rather than a renderer answering with emptiness."
-  {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
-                  [:maybe :seon.render/source]]}
-  [reference database]
-  (when-let [row (current-run-row database reference)]
-    (str ";; Am I inside a run? An agent carries :seon.cluster.agent/run\n"
-         ";; exactly while one is open, so its absence is the whole answer.\n"
-         ";; This reads the one it holds now and says what state it is in.\n"
-         (pr-str
-          (list `render-ai
-                (list 'seon.db/pull
-                      (list 'quote current-run-selector)
-                      [::id (::id row)]))))))
-
-(defn render-current-html
-  "`:seon.render/html` — the same open run, with a link to it."
-  {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
-                  :seon.render/hiccup]}
-  [reference database]
-  (if-let [row (current-run-row database reference)]
-    [:article {:class "seon-family-entry seon-run-current"}
-     [:p {:class "seon-kicker"} "Current run"]
-     [:p (render-ai (assoc row :seon.db/db database))]
-     [:p {:class "seon-run-current-link"}
-      [:a {:href (render.route/path
-                  :seon.render.route/data
-                  {}
-                  {:entity (pr-str [::id (::id row)])})}
-       (::id row)]]]
-    [:article {:class "seon-family-entry seon-run-current"}
-     [:p {:class "seon-kicker"} "Current run"]
-     [:p {:class "seon-run-current-empty"}
-      "No run is open; this agent is parked between episodes."]]))

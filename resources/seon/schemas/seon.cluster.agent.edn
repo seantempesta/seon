@@ -10,10 +10,7 @@
                        {:optional true}
                        :seon.cluster.agent/namespace]
                       [:seon.agent/plan {:optional true} :seon.agent/plan]
-                      [:seon.agent/settings {:optional true} :seon.agent/settings]
-                      [:seon.cluster.agent/run
-                       {:optional true}
-                       :seon.cluster.agent/run]],
+                      [:seon.agent/settings {:optional true} :seon.agent/settings]],
                      :arm-request
                      [:map
                       [:seon.cluster.loop/cluster
@@ -36,20 +33,6 @@
                       [:seon.cluster.loop/cluster
                        :seon.cluster.loop/cluster]
                       [:seon.cluster.agent/id :seon.cluster.agent/id]],
-                     :cluster
-                     [:and
-                      {:description
-                       "The cluster this agent belongs to: one database branch, its agents, and their shared plumbing."}
-                      :seon.db/ref],
-                     :context-links
-                     [:map
-                      #:seon.db{:attributes true}
-                      [:seon.cluster.agent/id :seon.cluster.agent/id]
-                      [:seon.cluster.agent/cluster
-                       :seon.cluster.agent/cluster]
-                      [:seon.cluster.agent/instructions
-                       {:optional true}
-                       :seon.cluster.agent/instructions]],
                      :count [:int {:min 0}],
                      :creation-request
                      [:map
@@ -83,7 +66,6 @@
                      [:map
                       [:seon.db/db :seon.db/database-value]
                       [:seon.cluster.agent/id :seon.cluster.agent/id]],
-                     :instructions [:set :seon.db/ref],
                      :namespace
                      [:and
                       {:description
@@ -108,15 +90,6 @@
                      :source-submission-result
                      [:map
                       [:seon.cluster.run/id :seon.cluster.run/id]],
-                     :run
-                     [:and
-                      {:description
-                       "The run this agent currently holds; absent between episodes.",
-                       :seon.render/ai
-                       seon.cluster.run/render-current-ai,
-                       :seon.render/html
-                       seon.cluster.run/render-current-html}
-                      :seon.db/ref],
                      ;; The live value returned by `(help)`. These are
                      ;; projections of current facts, never attributes stored
                      ;; on the agent. Adding a member here is how the generated

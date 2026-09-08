@@ -2308,8 +2308,7 @@
             agent
             (db/pull database
                      '[:seon.cluster.agent/id
-                       {:seon.cluster.agent/namespace [:seon.ns/name]}
-                       {:seon.cluster.agent/cluster [:seon.cluster/name]}]
+                       {:seon.cluster.agent/namespace [:seon.ns/name]}]
                      [:seon.cluster.agent/id agent-id])
             run-agent-id
             (db/q '[:find ?agent-id .
@@ -2322,7 +2321,7 @@
             namespace-name
             (get-in agent [:seon.cluster.agent/namespace :seon.ns/name])
             cluster-name
-            (get-in agent [:seon.cluster.agent/cluster :seon.cluster/name])]
+            (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)]
         (if (and namespace-name cluster-name (= agent-id run-agent-id))
           {:seon.cluster.agent/id agent-id
            :seon.ns/name namespace-name
@@ -2411,7 +2410,7 @@
     served))
 
 (defn- tagged-run
-  "The run the TAGGED agent points at and this process holds, or nil.
+  "The tagged agent's open turn held by this process, or nil.
   Attribution is STRUCTURAL: an agent graph's fault arrives tagged with
   its agent (structural provenance from the error-channel join), so
   attribution is that agent's one held run — exact under concurrency,
@@ -2422,7 +2421,8 @@
          :in $ ?agent-id ?process
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?agent :seon.cluster.agent/run ?run]
+         [?run :seon.cluster.run/agent ?agent]
+         (not [?run :seon.cluster.run/closed-at])
          [?run :seon.cluster.run/process ?process]
          [?run :seon.cluster.run/id ?id]]
        db agent-id process))

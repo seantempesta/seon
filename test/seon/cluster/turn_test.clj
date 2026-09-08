@@ -1769,7 +1769,7 @@
                       :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
                       :seon.cluster.run/opened-at (Date. 1000)}
                      {:seon.cluster.agent/id "agent-a"
-                      :seon.cluster.agent/run [:seon.cluster.run/id "run-crashed"]}])
+                      }])
         ;; A LATER trigger — the one the wedge would strand. Answeredness
         ;; is the turn's own transaction, so a wake OLDER than the wreck
         ;; was answered by the turn that died holding it (no resume, and
@@ -1853,8 +1853,7 @@
                                   [:seon.cluster.message/id "m-1"]
                                   :seon.cluster.run/opened-at (Date.)}
                                  {:seon.cluster.agent/id "agent-a"
-                                  :seon.cluster.agent/run
-                                  [:seon.cluster.run/id "run-next"]}]})
+                                  }]})
           (is (re-find #"DEEPSEEK_API_KEY"
                        (:seon.cluster.prompt/text
                         (prompt/prompt @connection
@@ -1929,7 +1928,7 @@
           ;; ride the evaluation the start mints. There is no twin row to
           ;; assert beside it.
           [{:seon.cluster.agent/id "agent-a"
-            :seon.cluster.agent/run [:seon.cluster.run/id route-run]}]
+            }]
           cat
           [(run/receipt-start-tx
             {:seon.cluster.run/id route-run
@@ -2190,8 +2189,7 @@
                        [:seon.cluster.message/id "m-1"]
                        :seon.cluster.run/opened-at (Date.)}
                       {:seon.cluster.agent/id "agent-a"
-                       :seon.cluster.agent/run
-                       [:seon.cluster.run/id "run-after-unreadable"]}]})
+                       }]})
           (let [next-prompt
                 (:seon.cluster.prompt/text
                  (prompt/prompt
@@ -2333,9 +2331,9 @@
                              @connection))
                 "no error facts — the old path committed one per pass")
             (is (nil? (db/q '[:find ?a . :where
-                             [?a :seon.cluster.agent/run _]] @connection))
-                "the agent is free: its pointer is retracted, so the next
-                 trigger can open a new run")
+                             [?turn :seon.cluster.run/agent ?a]
+                             (not [?turn :seon.cluster.run/closed-at])] @connection))
+                "the agent has no open turn, so another wake can open one")
             (is (str/includes?
                  (db/q '[:find ?edn . :where
                         [_ :seon.cluster.eval/result-edn ?edn]] @connection)
@@ -3597,8 +3595,7 @@
                  :seon.cluster.run/opened-at now
                  :seon.cluster.run/process process}
                 {:seon.cluster.agent/id "agent-a"
-                 :seon.cluster.agent/run
-                 [:seon.cluster.run/id run-id]}])
+                 }])
               (when evaluation?
                 (db/transact!
                  connection
@@ -3698,8 +3695,7 @@
                       :seon.cluster.run/opened-at now
                       :seon.cluster.run/process process}
                      {:seon.cluster.agent/id "agent-a"
-                      :seon.cluster.agent/run
-                      [:seon.cluster.run/id "run-untriggered"]}])
+                      }])
         (with-redefs [ai/complete
                       (recording-completer requests [{:seon.ai/text "unused"}])]
           (let [report (cluster.loop/turn

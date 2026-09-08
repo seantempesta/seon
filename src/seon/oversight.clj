@@ -73,13 +73,14 @@
           (running-instances))))
 
 (defn- current-run-id
-  "The run the agent currently points at, or nil."
+  "The agent's open turn id, or nil when none is open."
   [db agent-id]
   (db/q '[:find ?run-id .
          :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?agent :seon.cluster.agent/run ?run]
+         [?run :seon.cluster.run/agent ?agent]
+         (not [?run :seon.cluster.run/closed-at])
          [?run :seon.cluster.run/id ?run-id]]
        db agent-id))
 

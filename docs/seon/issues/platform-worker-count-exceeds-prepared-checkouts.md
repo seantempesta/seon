@@ -25,3 +25,10 @@ Acceptance: one configured worker count governs preparation and JVM launch;
 the platform gate runs with the requested count on a machine with more
 processors. Evidence is also recorded in
 [the adoption landing note](../../prds/context-generation/research/adoption-rows-landing-2026-09-08.md).
+
+Components reproduced this at snapshot `run.fv5GcQ` on 2026-09-08:
+`pool-4` exited 1 before readiness; its stderr could not locate
+`seon/test/runner`. The coordinator failed after 45 seconds. This was
+`SEON_TEST_WORKERS=3 bin/test --paths <components paths> --platform`.
+The retry uses the documented six-visible-processors setting only in test
+processes, preserving the protected runner files.

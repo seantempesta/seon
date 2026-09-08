@@ -119,7 +119,7 @@
         [:seon.cluster.agent/id agent-id]]])))
 
 (defn creation-tx
-  "Create one agent with its namespace and cluster connection.
+  "Create one agent with its namespace in this database branch.
 
   Transaction data. Context is derived from the entity graph, so agent
   creation stores no blocks or other presentation state. The namespace
@@ -130,8 +130,7 @@
   {:malli/schema [:=> [:cat :seon.cluster.agent/creation-request]
                   :seon.cluster.agent/creation-tx]}
   [{agent-id :seon.cluster.agent/id
-    namespace-name :seon.ns/name
-    cluster-name :seon.cluster/name}]
+    namespace-name :seon.ns/name}]
   (let [namespace-tempid (str "namespace:" namespace-name)]
     [{:db/id namespace-tempid
       :seon.ns/name namespace-name
@@ -140,8 +139,7 @@
        [:seon.ns/name 'my.run]
        [:seon.ns/name 'seon.db]]}
      {:seon.cluster.agent/id agent-id
-      :seon.cluster.agent/namespace namespace-tempid
-      :seon.cluster.agent/cluster [:seon.cluster/name cluster-name]}
+      :seon.cluster.agent/namespace namespace-tempid}
      [:db.fn/call #'steward-call agent-id namespace-name]]))
 
 (defn situation-form
@@ -154,8 +152,8 @@
 
 (def ^:private identity-selector
   '[:seon.cluster.agent/id
-    {:seon.cluster.agent/namespace [:seon.ns/name]}
-    {:seon.cluster.agent/cluster [:seon.cluster/name]}])
+    {:seon.cluster.agent/namespace
+     [:seon.ns/name {:seon.ns/steward [:seon.cluster.agent/id]}]}])
 
 (defn identity-form
   "Return the database read that reproduces an agent's identity."
@@ -186,15 +184,14 @@
          (let [namespace-name
                (get-in agent-data [:seon.cluster.agent/namespace :seon.ns/name])
                cluster-name
-               (get-in agent-data [:seon.cluster.agent/cluster :seon.cluster/name])]
+               (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] (:seon.db/db request))]
            (str "Agent     " agent-id
                 (when namespace-name (str "\nNamespace " namespace-name))
                 (when cluster-name (str "\nCluster   " cluster-name))))))))
 
 (def ^:private identity-source
   "The identity unit's teaching comments and the one form that answers them."
-  (str ";; Who am I? Identity is not remembered — it is three attributes stored\n"
-       ";; on my own entity, and `whoami` reads them from the current database.\n"
+  (str "; Who am I? Read my identity and namespace from this database branch.\n"
        (pr-str (list `whoami))))
 
 (defn render-identity-ai
@@ -215,7 +212,7 @@
   identity-source)
 
 (defn render-identity-html
-  "Render an agent's id, namespace, and cluster as an identity card."
+  "Render an agent's id, namespace, and steward as an identity card."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or [:maybe :seon.render/hiccup] :seon.error/value]]}
   [unit]
@@ -232,9 +229,9 @@
             namespace-name
             (get-in agent-data
                     [:seon.cluster.agent/namespace :seon.ns/name])
-            cluster-name
+            steward
             (get-in agent-data
-                    [:seon.cluster.agent/cluster :seon.cluster/name])]
+                    [:seon.cluster.agent/namespace :seon.ns/steward :seon.cluster.agent/id])]
         (when agent-id
           [:article {:class "seon-family-entry seon-agent-identity-entry"}
            [:header
@@ -245,9 +242,9 @@
                    namespace-name
                    (conj [:div [:dt "Namespace"]
                           [:dd [:code (str namespace-name)]]])
-                   cluster-name
-                   (conj [:div [:dt "Cluster"]
-                          [:dd [:code cluster-name]]])))])))))
+                   steward
+                   (conj [:div [:dt "Steward"]
+                          [:dd [:code steward]]])))])))))
 
 (defn render-id-html
   "Render the identity unit as a compact labeled card.
@@ -400,7 +397,7 @@
     {::episode [::wake]}]))
 
 (defn- held-run-id
-  "The id of the run `agent-id` points at and `process` holds, or nil.
+  "The id of the agent's open turn held by `process`, or nil.
   The turn proc's ping-state derivation — the current run rides in
   `::flow/state`, which is what retired the serial-dependent global
   query F2 §3.3 deleted."
@@ -409,7 +406,8 @@
          :in $ ?agent-id ?process
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?agent :seon.cluster.agent/run ?run]
+         [?run :seon.cluster.run/agent ?agent]
+         (not [?run :seon.cluster.run/closed-at])
          [?run :seon.cluster.run/process ?process]
          [?run :seon.cluster.run/id ?id]]
        db agent-id process))
@@ -1165,7 +1163,8 @@
                     (nil?
                      (db/q '[:find ?run .
                              :in $ ?root
-                             :where [?root :seon.cluster.agent/run ?run]]
+                             :where [?run :seon.cluster.run/agent ?root]
+                             (not [?run :seon.cluster.run/closed-at])]
                            database root-eid)))]
            (when (and worker-closed? root-idle?)
              (let [supervision-tx

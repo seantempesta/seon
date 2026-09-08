@@ -113,11 +113,11 @@
                     :seon.ns/source "(ns example.owned)"
                     :seon.schema.admission/source :agent}
                    {:seon.cluster.agent/id "owner"
-                    :seon.cluster.agent/cluster [:seon.cluster/name "test"]
+
                     :seon.cluster.agent/namespace
                     [:seon.ns/name 'example.owned]}
                    {:seon.cluster.agent/id "worker"
-                    :seon.cluster.agent/cluster [:seon.cluster/name "test"]
+
                     :seon.cluster.agent/namespace
                     [:seon.ns/name 'example.assigned]}])
       (db/transact! connection

@@ -569,7 +569,7 @@
      :seon.cluster.run/opened-at now
      :seon.cluster.run/process process}
     {:seon.cluster.agent/id agent-id
-     :seon.cluster.agent/run [:seon.cluster.run/id run-id]}]))
+     }]))
 
 (defn- call-work
   [agent-id run-id]
@@ -1247,8 +1247,7 @@
                                :seon.cluster.run/plan-digest
                                (apply str (repeat 64 "a"))}
                               {:seon.cluster.agent/id "alice"
-                               :seon.cluster.agent/run
-                               [:seon.cluster.run/id "run-live"]}]}))))
+                               }]}))))
       (testing "one frozen evaluation, then its start and its settlement, all
                 on the ONE entity that (run, ordinal) names"
         (is (map? (db/transact! connection
@@ -1352,7 +1351,7 @@
                closed? (assoc :seon.cluster.run/closed-at now))]
       (not closed?)
       (conj {:seon.cluster.agent/id "agent-a"
-             :seon.cluster.agent/run [:seon.cluster.run/id "run-1"]})
+             })
 
       ;; ONE ENTITY PER (run, ordinal), under the ONE identity derivation the
       ;; writer uses: the freeze asserts the source and the start instant, and

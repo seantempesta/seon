@@ -1737,7 +1737,7 @@
                       :seon.cluster.run/process "99999-1"
                       :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))}
                      {:seon.cluster.agent/id "alice"
-                      :seon.cluster.agent/run [:seon.cluster.run/id "run-crashed"]}
+                      }
                      ;; dangling = started with no terminal fact —
                      ;; running IS that absence, there is no status
                      {:seon.cluster.eval/id "e-0"

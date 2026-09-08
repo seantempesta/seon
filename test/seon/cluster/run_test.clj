@@ -194,11 +194,9 @@
 (defn- run-entity [connection run-id]
   (db/pull (db/db connection) '[*] [:seon.cluster.run/id run-id]))
 
-(defn- agent-pointer [connection agent-id]
-  (get-in (db/pull (db/db connection)
-                  [{:seon.cluster.agent/run [:seon.cluster.run/id]}]
-                  [:seon.cluster.agent/id agent-id])
-          [:seon.cluster.agent/run :seon.cluster.run/id]))
+(defn- open-run-id [connection agent-id]
+  (run/open-for-agent (db/db connection)
+                      [:seon.cluster.agent/id agent-id]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Derivations — state is computed from primitives, never stored
@@ -308,7 +306,7 @@
                 (run/open-tx {::run/id "lesson"
                               ::run/agent [:seon.cluster.agent/id "teacher"]
                               ::run/opened-at t0}))))
-        (is (= "lesson" (agent-pointer connection "teacher"))))
+        (is (= "lesson" (open-run-id connection "teacher"))))
       (testing "claim an unheld open run — CAS-on-absence"
         (is (= ::committed
                (transact-or-refusal
@@ -372,7 +370,7 @@
                                   (::run/closed-at entity)})))
           (is (nil? (::run/process entity))
               "a closed run holds no custody"))
-        (is (nil? (agent-pointer connection "teacher")))))))
+        (is (nil? (open-run-id connection "teacher")))))))
 
 (deftest generated-system-runs-grow-only-after-their-settled-prefix
   (with-model-database
@@ -1431,7 +1429,7 @@
              (nil? (::run/process entity)))
          ;; the agent pointer exists exactly while its run is open
          (let [agent-id (:agent entry)
-               pointer (agent-pointer connection agent-id)]
+               pointer (open-run-id connection agent-id)]
            (if (:closed entry)
              (not= run-id pointer)
              (= run-id pointer)))
@@ -1576,7 +1574,7 @@
                                    (pull-receipts connection run-id))
                            (nil? (::run/process entity))
                            (some? (::run/closed-at entity))
-                           (nil? (agent-pointer connection agent-id)))
+                           (nil? (open-run-id connection agent-id)))
                       ;; a live holder's run needs NOTHING: custody
                       ;; kept, running receipts still running
                       (and (= receipts-before
@@ -1627,7 +1625,7 @@
           "and the dead custody is released")
       (is (some? (::run/closed-at (run-entity connection "order-b")))
           "the interrupted run is ended")
-      (is (nil? (agent-pointer connection "orderer"))
+      (is (nil? (open-run-id connection "orderer"))
           "and the agent pointer is retracted"))))
 
 (deftest recovery-marks-a-run-that-settled-no-receipt
@@ -1715,71 +1713,25 @@
              ::run/opened-at t0}))
       "a blank identity is refused"))
 
-(deftest close-refuses-a-broken-agent-pointer
-  ;; quality-review-2 blocker: a broken relation is settled loudly,
-  ;; never by silently omitting the retraction
+(deftest open-turn-is-derived-without-an-agent-pointer
   (with-model-database
     (fn [connection]
-      (db/transact! connection [{:seon.cluster.agent/id "breaker"}])
+      (db/transact! connection [{:seon.cluster.agent/id "derived"}])
       (db/transact! connection
-                  (run/open-tx {::run/id "broken"
-                                ::run/agent [:seon.cluster.agent/id "breaker"]
-                                ::run/opened-at t0}))
+                    (run/open-tx {::run/id "derived-turn"
+                                  ::run/agent [:seon.cluster.agent/id "derived"]
+                                  ::run/opened-at t0}))
+      (is (= "derived-turn" (open-run-id connection "derived")))
+      (doseq [attribute [:seon.cluster.agent/run :seon.cluster.agent/cluster
+                         :seon.cluster.agent/instructions]]
+        (is (nil? (seon.schema/schema-definition attribute))))
+      (is (= #{:db/id :seon.cluster.agent/id}
+             (set (keys (db/pull @connection '[*]
+                                 [:seon.cluster.agent/id "derived"])))))
       (db/transact! connection
-                  (run/claim-tx {::run/id "broken"
-                                 ::run/process "p1"
-                                 ::run/live-processes #{"p1"}
-                                 ::run/now t1}))
-      ;; sever the relation out from under the run
-      (db/transact! connection
-                  [[:db/retract [:seon.cluster.agent/id "breaker"]
-                    :seon.cluster.agent/run [::run/id "broken"]]])
-      (is (= ::run/agent-pointer-broken
-             (::run/rule
-              (db/transact! connection
-                            (run/close-tx {::run/id "broken"
-                                           ::run/process "p1"
-                                           ::run/closed-at t2}))))
-          "close refuses ::agent-pointer-broken")
-      (is (nil? (::run/closed-at (run-entity connection "broken")))
-          "the refused close committed nothing"))))
-
-(deftest current-run-unit-renders-presence-and-absence-without-inventing-state
-  (test-support/with-database
-    (fn [connection]
-      (db/transact! connection
-                    [{:seon.cluster.agent/id "juno"}
-                     {:seon.cluster.run/id "run-open"
-                      :seon.cluster.run/agent [:seon.cluster.agent/id "juno"]
-                      :seon.cluster.run/opened-at (java.util.Date. 1700000000000)
-                      :seon.cluster.run/process "1-2"}])
-      (let [database @connection
-            reference (:db/id (db/pull database '[:db/id]
-                                       [:seon.cluster.run/id "run-open"]))]
-        (testing "a held run states what is running and since when"
-          (let [source (run/render-current-ai {:db/id reference} database)]
-            (is (str/starts-with? source ";; Am I inside a run?")
-                "the AI projection is source whose comments teach")
-            (is (str/includes?
-                 source
-                 "(seon.cluster.run/render-ai (seon.db/pull")
-                "and whose form is an ordinary read the agent can rerun")
-            (is (str/includes?
-                 source "[:seon.cluster.run/id \"run-open\"]")
-                "named by a stable identity, never a numeric entity id"))
-          (let [rendered (run/render-current-html {:db/id reference} database)]
-            (is (= [:p "Run run-open, opened #inst \"2023-11-14T22:13:20.000-00:00\". It is running now, held by 1-2."]
-                   (nth rendered 3)))
-            (is (= "run-open" (last (last (nth rendered 4))))
-                "and the run is a link, not an id in prose")))
-        (testing "no open run renders nothing for AI and an empty state for HTML"
-          (is (nil? (run/render-current-ai nil database))
-              "absence declares nothing rather than answering with emptiness")
-          (is (= [:article {:class "seon-family-entry seon-run-current"}
-                  [:p {:class "seon-kicker"} "Current run"]
-                  [:p {:class "seon-run-current-empty"}
-                   "No run is open; this agent is parked between episodes."]]
-                 (run/render-current-html nil database))))))))
+                    [[:db/add [:seon.cluster.run/id "derived-turn"]
+                      :seon.cluster.run/closed-at t1]])
+      (is (nil? (open-run-id connection "derived"))))))
 
 ;; THE FAULTS UNIT lives on `:seon.error/agent`, whose renderer needs a run to
 ;; link to; that is why its regression sits beside the run model rather than in

@@ -91,8 +91,6 @@
                          :my.plan.item/expected-result
                          "Juniper identifies the current step and records a truthful plan update from the assembled context."
                          :my.plan.item/needs #{(step-ref "juniper/compare-changed-results")}}}}}
-                  [:db/retract [:seon.cluster.agent/id "juniper"] :my.plan/steps]
-                  [:db/retract [:seon.cluster.agent/id "juniper"] :my.plan/current-step]
                   {:seon.cluster.message/id "design-lab/root-to-juniper/1"
                    :seon.cluster.message/from [:seon.cluster.agent/id "root"]
                    :seon.cluster.message/to [:seon.cluster.agent/id "juniper"]

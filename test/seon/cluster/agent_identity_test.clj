@@ -39,7 +39,7 @@
                (agent/whoami {:seon.db/db @connection :seon.cluster.agent/id agent-id})))
         (is (str/includes? (pr-str html) agent-id))
         (is (str/includes? (pr-str html) (str namespace-name)))
-        (is (str/includes? (pr-str html) cluster-name))
+        (is (str/includes? (pr-str html) "Steward"))
         (db/transact! connection
                       [[:db/add [:seon.cluster/name cluster-name]
                         :seon.cluster/name "renamed-cluster"]])
@@ -111,9 +111,9 @@
         (is (every? :seon.fn.arity/output arities))
         (is (some? live))
         (is (= expected (:seon.sci.admit/value (evaluate "(seon.cluster.agent/whoami)"))))
-        (is (= "Agent     supplied"
+        (is (= "Agent     supplied\nCluster   identity-cluster"
                (:seon.sci.admit/value
                 (evaluate "(seon.cluster.agent/whoami {:seon.cluster.agent/id \"supplied\"})")))
             "the supplied map wins over current-agent defaults")
-        (is (= "Agent     supplied"
+        (is (= "Agent     supplied\nCluster   identity-cluster"
                (agent/whoami {:seon.db/db database :seon.cluster.agent/id "supplied"})))))))

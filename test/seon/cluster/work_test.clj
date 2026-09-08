@@ -93,7 +93,7 @@
                        true (assoc :seon.cluster.work/situation :call)
                        planned? (assoc :seon.cluster.run/plan-digest digest))
                      {:seon.cluster.agent/id agent-id
-                      :seon.cluster.agent/run [:seon.cluster.run/id run-id]}
+                      }
                      (model-attempt run-id now)]
               planned?
               (into (map (fn [ordinal]
@@ -120,8 +120,7 @@
   (db/transact! connection
               [[:db/add [:seon.cluster.run/id run-id]
                 :seon.cluster.run/closed-at now]
-               [:db/retract [:seon.cluster.agent/id agent-id]
-                :seon.cluster.agent/run [:seon.cluster.run/id run-id]]]))
+               ]))
 
 (defn- configure-cap!
   [connection limit]
@@ -151,7 +150,7 @@
             :seon.cluster.run/process process
             :seon.cluster.run/plan-digest digest}
            {:seon.cluster.agent/id agent-id
-            :seon.cluster.agent/run [:seon.cluster.run/id id]}
+            }
            (model-attempt id at)]
           (map-indexed
            (fn [ordinal _]
@@ -179,8 +178,7 @@
   (db/transact! connection
               [[:db/add [:seon.cluster.run/id id]
                 :seon.cluster.run/closed-at at]
-               [:db/retract [:seon.cluster.agent/id agent-id]
-                :seon.cluster.agent/run [:seon.cluster.run/id id]]]))
+               ]))
 
 (def ^:private request
   "The AGENT-SCOPED request (F2 §3.2). The global one died with the
