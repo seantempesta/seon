@@ -664,12 +664,24 @@
                      (run/receipt-settle-batch-tx (mapv ::receipt prepared)))
                (mapcat :seon.db/tx-data)
                prepared)}
+        ;; `with-publication!` IS TOTAL OVER AN EMPTY VECTOR — it calls the
+        ;; commit directly — so the caller has no branch to get wrong. The
+        ;; branch this replaced handed `(seq …)`, a `ChunkedSeq`, where the
+        ;; declared input is `[:vector :seon.blob/staged-write]`: every turn
+        ;; that staged a blob (an agent `def` over the blob threshold)
+        ;; violated the contract, and nothing closed the run.
+        ;;
+        ;; `phase` is what makes that class survivable rather than terminal.
+        ;; A HOST FAILURE IN THE COMMIT IS A REFUSED PHASE, NOT AN ESCAPE:
+        ;; it becomes a flat value the refusal arm settles, so the run
+        ;; closes and the agent takes its next turn. A failure to record a
+        ;; fault may never leave a run open.
         outcome
-        (if-let [stages (seq (:seon.blob/staged-writes transaction))]
-          (blob/with-publication!
-           connection stages
-           #(db/transact! connection {:tx-data (:seon.db/tx-data transaction)}))
-          (db/transact! connection {:tx-data (:seon.db/tx-data transaction)}))]
+        (phase
+         #(blob/with-publication!
+           connection (:seon.blob/staged-writes transaction)
+           (fn [] (db/transact!
+                   connection {:tx-data (:seon.db/tx-data transaction)}))))]
     (if (:seon.error/kind outcome)
       (settle-batch-refusal! cluster requests prepared outcome)
       {:prepared prepared :outcome outcome})))
@@ -809,13 +821,18 @@
           (refusal-terminal-data cluster @connection now agent-id run-id
                                  process ordinal nil prepared)
           prepared)
+        ;; The same total commit as `settle-batch!`: one vector of staged
+        ;; writes (absent means none, never nil into the contract) and one
+        ;; `phase`, so a host failure lands in the refusal arm below rather
+        ;; than escaping with the run still open.
         commit
         (fn [transaction]
-          (if-let [stages (:seon.blob/staged-writes transaction)]
-            (blob/with-publication!
-             connection stages
-             #(db/transact! connection {:tx-data (:seon.db/tx-data transaction)}))
-            (db/transact! connection {:tx-data (:seon.db/tx-data transaction)})))
+          (phase
+           #(blob/with-publication!
+             connection (vec (:seon.blob/staged-writes transaction))
+             (fn [] (db/transact!
+                     connection
+                     {:tx-data (:seon.db/tx-data transaction)})))))
         outcome (commit prepared)]
     (if-not (:seon.error/kind outcome)
       (assoc prepared ::outcome outcome)

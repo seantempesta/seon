@@ -21,6 +21,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.blob :as blob]
             [seon.db :as db]
             [my.run :as my.run]
             [seon.ai :as ai]
@@ -1467,3 +1468,141 @@
         (let [derived (work/next-agent-work (db/db connection) request)]
           (testing (str "work derivation row " row)
             (is (= expected (:seon.cluster.work/situation derived)))))))))
+
+
+;;; ---------------------------------------------------------------------------
+;;; A staged blob settles, and a failed commit still closes the run
+;;; ---------------------------------------------------------------------------
+
+;; THE CLASS, in two halves that must never be separated.
+;;
+;; The terminal commit used to branch on `(seq staged-writes)` and hand
+;; `seon.blob/with-publication!` a `ChunkedSeq` where the declared input is
+;; `[:vector :seon.blob/staged-write]`. Under the contracts every cluster
+;; arms, EVERY turn that staged a blob violated that contract — and an
+;; agent's own `def` over the blob threshold is all it takes. The commit is
+;; total over an empty vector, so the branch had nothing to decide.
+;;
+;; The half that made one bad shape fatal: the violation ESCAPED the
+;; settlement, so no arm closed the run, and the agent was refused
+;; `:seon.cluster.run/agent-already-running` until the JVM was restarted. A
+;; failure to record a fault may never leave a run open, so the commit runs
+;; under `phase` and a host failure lands in the refusal arm like any other.
+(defn- staged-def-evaluation
+  "A REAL evaluation of a `def` whose value is over the blob threshold.
+
+  Hand-building the evaluation map is how a fixture ends up asserting a
+  shape production never produces; this crosses `seon.sci.eval/evaluate`,
+  the one constructor of the value `settle!` declares."
+  [connection ctx size]
+  (let [decisions (config/defaults)]
+    (sci.eval/evaluate
+     {:seon.cluster.eval/source
+      (str "(def probe-staged-def (apply str (repeat " size " \"m\")))")
+      :seon.sci.eval/ctx ctx
+      :seon.cluster.eval/ns [:seon.ns/name 'user]
+      :seon.sci.admit/caps (config/result-caps decisions)
+      :seon.sci.eval/time-limit-ms
+      (:seon.config.eval/time-limit-ms decisions)
+      :seon.config/on-core-error
+      (:seon.config/on-core-error decisions)
+      :seon.db/connection connection})))
+
+(defn- closed-at
+  [connection]
+  (:seon.cluster.run/closed-at
+   (db/pull @connection [:seon.cluster.run/closed-at]
+            [:seon.cluster.run/id "run-1"])))
+
+(defn- commit-agent-receipt!
+  "The turn's own last form: an AGENT-AUTHORED receipt at ordinal 0.
+
+  `undisposed?` — the derivation that closes a run whose last form settled
+  no disposition — reads authorship and last ordinal from facts, so a
+  fixture that mints an unauthored receipt is asserting a different run."
+  [connection]
+  (db/transact!
+   connection
+   [{:seon.cluster.eval/id (run/receipt-identity "run-1" 0)
+     :seon.cluster.eval/run [:seon.cluster.run/id "run-1"]
+     :seon.cluster.eval/ordinal 0
+     :seon.cluster.eval/at now
+     :seon.cluster.eval/author :agent
+     :seon.cluster.eval/source "(def probe-staged-def …)"
+     :seon.cluster.eval/ns [:seon.ns/name 'user]}]))
+
+(defn- settle-staged-def!
+  [connection cluster-name]
+  (let [ctx (test-support/fork-cluster-ctx connection cluster-name)]
+    (cluster.loop/settle!
+     {:seon.cluster.loop/cluster
+      (test-support/cluster-handle
+       {:seon.db/connection connection
+        :seon.cluster/name cluster-name
+        :seon.sci.eval/ctx ctx
+        :seon.cluster.run/process process})
+      :seon.cluster.loop/now now
+      :seon.cluster.agent/id "agent-a"
+      :seon.cluster.run/id "run-1"
+      :seon.cluster.eval/ordinal 0
+      :seon.sci.eval/evaluation
+      (staged-def-evaluation connection ctx 10000)})))
+
+(deftest a-staged-def-settles-under-the-declared-vector-and-closes-its-run
+  (with-database
+    (fn [connection]
+      (config/apply! {:seon.db/connection connection
+                      :seon.boot/cluster-name "loop-blob"})
+      (commit-run! connection {:held? true})
+      (commit-agent-receipt! connection)
+      (let [handed (volatile! ::never-called)
+            publish (var-get #'blob/with-publication!)
+            terminal
+            (with-redefs [blob/with-publication!
+                          (fn [conn staged-writes commit-roots!]
+                            (vreset! handed staged-writes)
+                            (publish conn staged-writes commit-roots!))]
+              (settle-staged-def! connection "loop-blob"))
+            stored
+            (db/q '[:find (pull ?def [*]) .
+                    :in $ ?key
+                    :where [?def :seon.def/key ?key]]
+                  @connection (pr-str ["agent-a" "user/probe-staged-def"]))]
+        (is (vector? @handed)
+            "the staged writes cross the blob seam as the declared vector,
+             not as the seq a `(seq …)` branch produced")
+        (is (= 1 (count @handed))
+            "and a 10,000-character def genuinely staged one blob, so this
+             exercises the publication path rather than the empty one")
+        (is (nil? (:seon.error/kind
+                   (:seon.cluster.loop/outcome terminal)))
+            "the settlement committed")
+        (is (inst? (closed-at connection))
+            "the run closed")
+        (is (string? (:seon.def/blob stored))
+            "and the agent's def is stored as a published blob")))))
+
+(deftest a-refused-terminal-commit-still-closes-the-run
+  (with-database
+    (fn [connection]
+      (config/apply! {:seon.db/connection connection
+                      :seon.boot/cluster-name "loop-blob-refused"})
+      (commit-run! connection {:held? true})
+      (commit-agent-receipt! connection)
+      (let [attempts (volatile! 0)
+            publish (var-get #'blob/with-publication!)
+            terminal
+            (with-redefs [blob/with-publication!
+                          (fn [conn staged-writes commit-roots!]
+                            (vswap! attempts inc)
+                            (if (= 1 @attempts)
+                              (throw (ex-info "the blob store went away"
+                                              {:seon.test/commit-broke true}))
+                              (publish conn staged-writes commit-roots!)))]
+              (settle-staged-def! connection "loop-blob-refused"))]
+        (is (= :seon.cluster.loop/phase-failed
+               (get-in terminal [:seon.error/value :seon.error/kind]))
+            "a host failure in the commit is a refused phase, not an escape")
+        (is (inst? (closed-at connection))
+            "AND THE RUN IS CLOSED: a settlement that cannot commit may not
+             leave the agent holding a run no later turn can take")))))
