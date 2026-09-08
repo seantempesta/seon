@@ -727,7 +727,13 @@ code changes, verify the running system, not only the tests, and report
 what is still broken honestly.
 
 The edit hook runs clj-kondo over prospective Clojure edits and publishes
-admitted changes to `current-src`; it never runs tests. The configured hooks
+admitted changes to `current-src`; it never runs tests. A KONDO "Unresolved
+var" ON A PROTOCOL OR A DEPENDENCY NAME IS A STALE DEPENDENCY CACHE UNTIL
+PROVEN OTHERWISE (2026-09-08: five files "blocked" the gate with no code
+defect): repopulate with `clj-kondo --lint "$(clojure -Spath -M:test)"
+--dependencies --skip-lint --copy-configs`, re-lint, and only then treat a
+surviving error as yours. Never rewrite correct references to satisfy a
+cache. The configured hooks
 cover `apply_patch`, `Edit`, and `Write`, including default config and schema
 publication. Shell file writes do not trigger them: use `bin/seon init --changed
 PATH` after such edits and verify publication. Syntax,
