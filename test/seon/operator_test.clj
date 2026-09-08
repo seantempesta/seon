@@ -800,7 +800,7 @@
      {:seon.boot/cluster-name cluster-name
       :seon.boot/prepl-host "127.0.0.1"
       :seon.boot/prepl-port (.getLocalPort server)
-      :seon.boot/pid (.pid (ProcessHandle/current))
+      :seon.boot/pid (.pid (java.lang.ProcessHandle/current))
       :seon.boot/start-instant (java.util.Date.)}
      :seon.boot/prepl-server server
      :seon.boot/executors
