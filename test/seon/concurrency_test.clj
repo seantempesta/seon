@@ -2,12 +2,16 @@
   "Concurrent source turns through real per-agent graphs on two branches."
   (:require [clojure.core.async :as async]
             [clojure.test :refer [deftest is]]
+            [clojure.edn :as edn]
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.db :as db]
+            [seon.config :as config]
+            [seon.flow :as flow]
             [seon.schema :as schema]
-            [seon.test-support :as support])
+            [seon.test-support :as support]
+            [seon.turn :as turn])
   (:import [java.util.concurrent CountDownLatch]))
 
 (defn- await-closed! [connection run-id]
@@ -31,15 +35,17 @@
      (:seon.sci.eval/projection-state handle)
      (fn []
        (let [created
-             (cluster/ensure-entity!
-              connection (:seon.cluster.run/process handle)
-              {:seon.cluster.agent/id agent-id
+             (db/transact! connection
+              (agent/creation-tx
+               {:seon.cluster.agent/id agent-id
                :seon.cluster/name (:seon.cluster/name handle)
-               :seon.ns/name (symbol (str "my.agents.concurrency." agent-id))})]
+               :seon.ns/name (symbol (str "my.agents.concurrency." agent-id))}))]
          (when (:seon.error/kind created)
            (throw (ex-info "Agent creation refused" created)))
-         (when-let [opening (:seon.cluster.run/id created)]
-           (await-closed! connection opening)))))))
+         (agent/arm! {:seon.cluster.loop/cluster handle
+                      :seon.cluster.agent/routing
+                      (:seon.cluster.agent/routing instance)
+                      :seon.cluster.agent/id agent-id}))))))
 
 (defn- concurrent-wave! [subjects source-fn]
   (let [start (CountDownLatch. 1)
@@ -52,7 +58,7 @@
              (let [handle (:seon.cluster.loop/cluster instance)
                    connection (:seon.db/connection handle)
                    source (source-fn instance agent-id)
-                   result (agent/submit-source!
+                   result (turn/virtual-turn!
                            {:seon.cluster.loop/cluster handle
                             :seon.cluster.agent/routing
                             (:seon.cluster.agent/routing instance)
@@ -68,6 +74,17 @@
                   {::agent agent-id
                    ::cluster (:seon.cluster/name handle)
                    ::run run-id
+                   ::turn
+                   (db/pull @connection
+                            [:seon.cluster.run/opened-at :seon.cluster.run/closed-at
+                             :seon.cluster.run/reply
+                             {:seon.cluster.run/agent [:seon.cluster.agent/id]}]
+                            [:seon.cluster.run/id run-id])
+                   ::attempts
+                   (db/q '[:find (count ?attempt) . :in $ ?id
+                           :where [?turn :seon.cluster.run/id ?id]
+                           [?attempt :seon.ai.attempt/run ?turn]]
+                         @connection run-id)
                    ::evaluations
                    (db/q '[:find (pull ?e [*])
                            :in $ ?run-id
@@ -85,34 +102,97 @@
         (doseq [task submitted]
           (when-not (future-done? task) (future-cancel task)))))))
 
+(defn- with-cluster [cluster-name body]
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection cluster-name)
+     (config/apply! {:seon.db/connection connection
+                    :seon.boot/cluster-name cluster-name})
+     (let [ctx (support/fork-cluster-ctx connection)
+           environment (support/environment cluster-name connection)
+           launcher (flow/start-work-launcher!
+                     {:seon.env/environment environment
+                      :seon.flow/configuration
+                      (select-keys (support/effective-config)
+                                   flow/flow-workload-attributes)})
+           routing (agent/routing)
+           faults (async/chan (async/sliding-buffer 16))
+           handle (support/cluster-handle
+                   {:seon.env/environment environment
+                    :seon.db/connection connection
+                    :seon.cluster/name cluster-name
+                    :seon.flow/work-launcher launcher
+                    :seon.flow/executor
+                    (cluster/projection-executor
+                     (:seon.sci.eval/projection-state ctx))
+                    :seon.sci.eval/ctx ctx
+                    :seon.sci.eval/projection-state
+                    (:seon.sci.eval/projection-state ctx)
+                    :seon.cluster.run/process cluster/boot-process-identity
+                    :seon.cluster.loop/stream-channel
+                    (async/chan (async/sliding-buffer 1))})]
+       (swap! routing assoc :seon.cluster.agent/fault-channel faults)
+       (try
+         (body {:seon.cluster.loop/cluster handle
+                :seon.sci.eval/ctx ctx
+                :seon.cluster.agent/routing routing})
+         (finally
+           (doseq [id (keys (:seon.cluster.agent/armed @routing))]
+             (agent/disarm! {:seon.cluster.agent/routing routing
+                            :seon.cluster.agent/id id}))
+           (flow/stop-work-launcher! launcher)
+           (doseq [channel [faults (:seon.cluster.wake/channel handle)
+                            (:seon.render/context-channel handle)
+                            (:seon.cluster.loop/completion handle)
+                            (:seon.cluster.loop/stream-channel handle)]]
+             (async/close! channel))))))))
+
 (deftest two-clusters-run-concurrent-agent-turns
-  (let [root (str "tmp/concurrency-test/" (random-uuid))]
-    (support/populate-published-root! root)
-    (let [a (cluster/start! {:seon.boot/root root
-                             :seon.boot/cluster-name "concurrency-left"})]
-      (try
-        (let [b (cluster/start! {:seon.boot/root root
-                                 :seon.boot/cluster-name "concurrency-right"})]
-          (try
-            (let [subjects (vec (for [instance [a b] id ["a" "b"]]
+  (with-cluster "concurrency-left"
+    (fn [a]
+      (with-cluster "concurrency-right"
+        (fn [b]
+            (let [subjects (vec (for [instance [a b] id ["a" "b" "c"]]
                                   [instance id]))]
               (is (not (identical? (:seon.sci.eval/ctx a) (:seon.sci.eval/ctx b))))
               (doseq [[instance id] subjects] (create-agent! instance id))
+              (concurrent-wave!
+               subjects
+               (fn [instance id]
+                 (if (and (identical? instance a) (= "a" id))
+                   "(def isolation-marker 739)"
+                   "(+ 1 1)")))
+              (let [wave (concurrent-wave!
+                          subjects
+                          (fn [_ _]
+                            "(boolean (resolve 'my.agents.concurrency.a/isolation-marker))"))]
+                (doseq [result (::results wave)]
+                  (is (= (and (= "concurrency-left" (::cluster result))
+                              (= "a" (::agent result)))
+                         (:seon.print/value
+                          (edn/read-string
+                           (:seon.cluster.eval/result-edn
+                            (ffirst (::evaluations result)))))))))
               (dotimes [ordinal 3]
                 (let [wave (concurrent-wave!
                             subjects
                             (fn [instance id]
-                              (pr-str [(:seon.cluster/name
-                                        (:seon.cluster.loop/cluster instance))
-                                       id ordinal])))]
-                  (is (= 4 (count (::results wave))))
+                              (pr-str (list 'str (str (:seon.cluster/name
+                                            (:seon.cluster.loop/cluster instance))
+                                           "/" id "/" ordinal)))))]
+                  (is (= 6 (count (::results wave))))
                   (doseq [result (::results wave)]
                     (let [evaluations (map first (::evaluations result))]
+                      (is (zero? (or (::attempts result) 0)))
+                      (is (some? (:seon.cluster.run/closed-at (::turn result))))
+                      (is (some? (:seon.cluster.run/opened-at (::turn result))))
+                      (is (string? (:seon.cluster.run/reply (::turn result))))
+                      (is (= (::agent result)
+                             (get-in result [::turn :seon.cluster.run/agent
+                                             :seon.cluster.agent/id])))
                       (is (= 1 (count evaluations)))
-                      (is (= (pr-str [(::cluster result) (::agent result) ordinal])
-                             (:seon.cluster.eval/result-edn (first evaluations))))
-                      (is (not-any? :seon.cluster.eval/error evaluations)))))))
-            (finally (cluster/stop! b))))
-        (finally
-          (cluster/stop! a)
-          (support/delete-recursively! root))))))
+                      (is (= (str (::cluster result) "/" (::agent result) "/" ordinal)
+                             (:seon.print/value
+                              (edn/read-string
+                               (:seon.cluster.eval/result-edn (first evaluations))))))
+                      (is (not-any? :seon.cluster.eval/error evaluations))))))))))))

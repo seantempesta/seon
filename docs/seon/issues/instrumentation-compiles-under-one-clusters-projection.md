@@ -322,3 +322,18 @@ agent facts, directly violating the owner's preservation requirement. A
 process-wide read/write lock around every callable boundary would cover JVM
 REPL calls too, but adds a pervasive second admission mechanism and is likewise
 rejected.
+
+
+## 2026-09-08 cohosted concurrency audit reaffirmation
+
+Three agents each in default and beta completed 60 concurrent provider-free
+source turns in one JVM (2.90461 turns/s). Private scalar defs and evaluation
+handles were agent-local; an installed contracted function was cluster-local.
+This does not clear this issue: current `src/seon/instrument.clj:629` still
+collects all JVM Vars into Malli's global namespace/symbol registry, and
+`:685` applies or removes wrappers globally. First-party SCI callables still
+forward shared host Vars. Independent programs/contracts remain unproven and
+structurally coupled. No production repair was attempted across held owners.
+
+The [concurrency landing](../../prds/context-generation/research/multi-cluster-concurrency-landing-2026-09-08.md)
+records the complete global-state inventory, measurements and design choice.
