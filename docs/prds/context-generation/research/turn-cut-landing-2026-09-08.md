@@ -7,6 +7,42 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
+## Virtual submission and compaction, 2026-09-08 19:26 UTC — in progress
+
+The exactness checkpoint is commit `823569cd3`. The next owned files are
+`src/seon/turn.clj`, `resources/seon/schemas/seon.turn.edn`, and
+`test/seon/turn_test.clj`. `virtual-turn!` submits fixture source to the
+ordinary agent proc; `compact!` retracts that agent's evaluations and refuses
+an open turn inside the database writer. The canonical fixture regression
+uses real per-agent graphs, the work launcher, SCI, and database events;
+there is no evaluator or loop substitution. Its gate is in progress.
+
+On the live main-root `default` cluster, MCP without root/cluster arguments
+submitted `(+ 1 1)` for the disposable agent `turn-cut-virtual` as
+`source:130c5726-7012-4dc3-bc98-7538f90cfabd`. It closed with result 2 and no
+provider attempt. Compaction changed its evaluation count from 1 to 0.
+The next submission, `(inc 2)`, became
+`source:eb8b720d-b797-4e85-b818-9c5900cd6047`, closed with result 3, and its
+attempt query returned `[]`. These exercised in-place development adoption.
+The calls were `seon.turn/virtual-turn!` with the running instance's
+`:seon.cluster.loop/cluster`, `:seon.cluster.agent/routing`, and agent id;
+compaction received the explicit connection and agent id.
+
+This checkpoint does **not** claim the three-transaction cut, stored shown
+text, persistent private contexts, the system walk, or automatic compaction.
+It still passes through the existing source-submission storage path. All
+seven deletion rows remain unfinished; their deletion counts are unchanged.
+
+The persistent-context dependency probe used real `sci.core/init`,
+`eval-string*`, and `namespace-state` on the live JVM. After `(def x 1)`,
+capturing the namespace state, and `(def x 2)`, the old and current Var were
+identical and both dereferenced to 2. Therefore comparing two namespace maps
+alone cannot detect root changes: the saved map contains mutable Vars.
+SCI's `namespace-state`/`install-namespace-state!` remain the resolver-state
+owners (`reference-code/sci/src/sci/core.cljc:751`); program changes must be
+observed at their publication boundary or from their database transactions,
+not inferred from equality of those maps.
+
 ## Read-evidence exactness landed, 2026-09-08 18:59 UTC
 
 The owned-path gate passed: `seon.read-evidence-test seon.db-test`, 42 tests,
