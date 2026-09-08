@@ -479,7 +479,7 @@
 
 (defn ensure-cache
   "Reuse matching dependency classes; optionally prepare the test classpath."
-  [{:keys [test?]}]
+  [{:keys [test? pid]}]
   (let [result
         (with-cache-lock
           (fn []
@@ -491,6 +491,15 @@
                       (println "seon cache: inputs changed; rebuilding")
                       (flush)
                       (refresh!)))]
+              (when (and test? pid)
+                (let [handle (.orElseThrow (java.lang.ProcessHandle/of (long pid)))
+                      started (.orElseThrow (.startInstant (.info handle)))]
+                  (atomic-write-edn!
+                   (io/file process-reference-root (str pid ".edn"))
+                   {:seon.boot/pid pid
+                    :seon.boot/start-instant (java.util.Date/from started)
+                    :seon.operator.process-record/cache-path
+                    (:seon.dev-cache/path selection)})))
               (if test? (test-classpath! selection) selection))))]
     (prn result)
     result))

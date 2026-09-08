@@ -431,7 +431,7 @@ rmdir "$run_root/target"
 mkdir -p "$source_root/target"
 ln -s "$source_root/target" "$run_root/target"
 cd "$run_root"
-if ! dev_cache_output=$(clojure -T:dev-cache ensure-cache :test? true 2>&1); then
+if ! dev_cache_output=$(clojure -T:dev-cache ensure-cache :test? true :pid "$$" 2>&1); then
   printf '%s\n' "$dev_cache_output" >&2
   echo "bin/test: dependency cache freshness check failed" >&2
   exit 1
@@ -487,7 +487,7 @@ populate_cache_links() {
   if [ -n "$snapshot_digest" ]; then
     # Nested gates use the same cache authority, not a cache directory
     # accidentally nested inside an immutable selected classes directory.
-    for cache_name in dev-dependency-classes test-classpaths test-published-bases; do
+    for cache_name in dev-dependency-classes dev-dependency-cache-processes test-classpaths test-published-bases; do
       mkdir -p "$source_root/target/$cache_name"
       ln -s "$source_root/target/$cache_name" "$checkout/target/$cache_name"
     done
