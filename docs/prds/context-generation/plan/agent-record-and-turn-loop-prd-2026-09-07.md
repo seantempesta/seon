@@ -1,6 +1,6 @@
 ---
 type: prd
-status: draft r4 — Opus data-model review integrated (research/prd-review-turn-loop-opus-2026-09-07.md); astra review pending
+status: draft r5 — answered-by-basis model (no claim, no reference); only Clojure's/Datahike's words; Opus review integrated; astra review unanswered
 date: 2026-09-07 (evening)
 supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
 tags: [prd, agent, wake, storage, runtime]
@@ -34,6 +34,18 @@ tags: [prd, agent, wake, storage, runtime]
   first and ground everything in data that we actually need. Question
   everything else."
 
+## 0a. Words
+
+Only Clojure's and the dependency's words. A **wake** is a datom asserted on
+an attribute declared listened; Datahike `listen` reports the transaction
+and we filter by attribute. A turn records the **basis** it projected from,
+Datahike's basis transaction `:t`. A wake is **answered** when a turn of
+that agent has a basis at or after the wake's own transaction `:t`;
+otherwise it is **unanswered**. A turn **stores** the reply's forms, then
+**stores** the results. Retired spellings, never written again: claim,
+pending, inbox, mailbox, trigger, freeze, settle, episode, wake item, wake
+source, situation.
+
 ## 1. The loop, as the owner stated it, plus exactly what a crash forces
 
 ```
@@ -49,7 +61,7 @@ Two facts a crash forces, and nothing else:
 1. **The reply and its forms are stored BEFORE evaluation.** A crash between
    "the model replied" and "results stored" must neither pay the model again
    nor re-execute a form (the nothing-re-executes law). So a turn is two
-   writes: freeze, then settle. Not one.
+   writes: store the forms, then store the results. Not one.
 2. **The process turning the agent is a stored fact.** After a restart, an
    evaluation with no terminal fact whose process is dead is *interrupted*;
    one still running is not. Absence is the one value a dead process cannot
@@ -70,7 +82,7 @@ unrepresentable, so at boot every open turn is dead by construction.
 | stored today | verdict | reason |
 |---|---|---|
 | run id, agent, opened-at, closed-at | KEEP as the turn | open = no closed-at |
-| run trigger ref | KEEP as the wake claim (§3) | the one fact that stops a wake being answered twice |
+| run trigger ref | DELETE | answered is derived: the wake's `:t` ≤ a turn's `basis-t` (§3). Datahike already stamps every datom with its `:t` |
 | run opening basis (`opening-commit-id`) | KEEP as `:seon.turn/basis` | the entire record of the context: projection is deterministic |
 | run reply text / blob / size | KEEP under the storage bound | without it an interrupted turn's history cannot say what the model said |
 | run `process` custody | DERIVE, delete the stamp | at boot every open turn in this cluster belongs to a dead process by construction; within a JVM the permit prevents a second turn. Deletes the stamp, the holder check, dead-holder takeover, holder-only close |
@@ -81,13 +93,13 @@ unrepresentable, so at boot every open turn is dead by construction.
 | run `undisposed-at` | DELETE | derived in the same transaction from the evaluations |
 | run `interrupted-at` | DELETE from the turn | the stamp lives on the evaluation that was cut |
 | context capture + contribution rows | DELETE | basis + profile reproduce them byte for byte (§5) |
-| ai attempt rows | KEEP, written in the freeze commit | a paid call is a fact; its own commit is not |
+| ai attempt rows | KEEP, written in the forms' commit | a paid call is a fact; its own commit is not |
 | ai attempt `ordinal` | DELETE | counted before the write today |
 | evaluation source, comment, ns, ordinal, author | KEEP | the history |
 | evaluation terminal facts (value/missing, out, error, ms, ending-ns, print options) | KEEP | the history and the handles |
 | evaluation `interrupted-at` | KEEP, written at boot | the one recovery stamp |
 | evaluation `result-size` | KEEP only when the value is missing | size reached is the reason |
-| agent `turns-left` | DERIVE — no counter | the bound is `max-episode-runs − turns since the last OUTSIDE wake` (today `bootstrap.clj:47-70`, `work.clj:378-437`); a human message resets it by being an outside wake, with no refill mechanism. If the derivation measures slow, store one episode ANCHOR per outside wake, never a decrementing counter (review B2) |
+| agent `turns-left` | DERIVE — no counter | the bound is `max turns − turns whose basis is at or after the last wake from outside the agent` (today `bootstrap.clj:47-70`, `work.clj:378-437`); a human message resets it by being such a wake. Everything needed is `:t` |
 | agent `cluster` | DELETE | the branch |
 | `:seon.def/*` rows | DELETE | a defn is a program row; kept data is transacted; an atom is not a fact |
 | gate counters | DELETE | derivable from the stored gate report |
@@ -99,17 +111,17 @@ process holds (`work.clj:13-15, 536-540`). At boot, every open turn is
 closed and its unsettled evaluations stamped `interrupted-at`; a turn that
 died with no reply is derived (closed, no reply) and needs no stamp. The
 agent's next context shows the turn up to the cut, and the evaluation-level
-`interrupted-at` MUST render. The model is never re-called because the wake
-was claimed at open; no form re-executes because nothing re-runs an
+`interrupted-at` MUST render. The model is never re-called because the turn's
+basis was recorded at open, so the wake is answered; no form re-executes because nothing re-runs an
 interrupted turn. What dies is the custody predicate — the process stamp,
 `claim-call`'s takeover, `release-call`, holder-only close — not the
 evaluate arm, which §7 keeps for turns this JVM opened.
 
-**Writes per turn: three.** Open (claim every wake item pending at the
-basis, record the basis — the irreducible pair) → freeze (reply, attempts,
-the forms as evaluation entities) → settle and close (results). The freeze
-survives because without it a crash loses the paid reply AND the record
-that side-effecting forms ran.
+**Writes per turn: three.** Open (record the basis `:t` — the one fact
+that answers every wake the context contained) → store the reply, the
+attempts, and the forms as evaluation entities → store the results and
+close. The middle write survives because without it a crash loses the paid
+reply AND the record that side-effecting forms ran.
 
 ## 2. The agent record — every attribute with the need it serves
 
@@ -136,65 +148,74 @@ Questioned and REMOVED from the record:
   counting them, not by remembering a number.
 - **process custody and the open-turn pointer** — both derivable (§1a):
   "mid-turn" is "my turn with no closed-at"; "dead" is "open at boot".
-- **the inbox / any wake collection** — waking is not a thing the agent owns
-  (§3). Not on the record.
+- **any collection of wakes on the agent** — a wake is a datom on a listened attribute whose value is the agent (§3); nothing is copied onto the record and nothing references the wake back.
 - **`:seon.render/units`, reverse-ref units** — the record's components are
   the units, in the entity schema's declared order. Deleted.
 - **run pointer, situation stamp, plan digest, generated runs, the form
   family, context captures, contribution rows, every derived-and-stored
   counter** — see §6.
 
-## 3. Waking — a declared source, never a queue
+## 3. Waking — listened attributes, Datahike `listen`, answered by `:t`
 
-The inbox was wrong because it made "what can wake this agent" a collection
-the agent owns, and only messages fit it. The ruled model: **anything can wake
-an agent, each thing is its own well-schemad fact family, and the loop
-derives "pending" by query.**
+- **A listened attribute** is a ref attribute whose schema row carries
+  `:seon.wake/listen true`; its value is the agent to wake. Today:
+  `:seon.message/to`, `:seon.error/steward`, `:seon.schedule/agent`.
+  Declaring one is one schema property — which requires attribute
+  properties to become schema ROW facts (today only three render properties
+  are lifted, from a hand list at `schema.clj:1419-1420`; review B4/S3), so
+  "which attributes wake an agent" is one Datalog query and
+  `seon.cluster.wake/route!` derives its set and dispatch from it instead of
+  two hand lists (`wake.clj:78-93`, `:232-250`).
+- **A wake** is a datom asserted on a listened attribute. Datahike `listen`
+  reports the transaction; `route!` offers one payload-free value into the
+  agent's sliding-1 channel. The entity carrying the datom (a message, a
+  fault, a schedule row) is ordinary data; nothing is copied, nothing is
+  written back onto it.
+- **Answered is derived from `:t`, nothing is stored.** Every datom carries
+  its transaction `:t`; a turn records the basis `:t` it projected from. A
+  wake is answered iff a turn of that agent has `basis-t ≥` the wake's `:t`
+  — the context projected at that basis contained it. Unanswered wakes are
+  the datoms on listened attributes for this agent with `:t` greater than
+  the agent's latest `basis-t`:
 
-- A **wake source** is an attribute whose schema declares
-  `:seon.wake/source true` and whose value is a ref to the agent. Today's
-  sources: `:seon.cluster.message/to` (a message, from an agent, a person, or
-  the system), `:seon.error/to` (a fault routed to a steward),
-  `:seon.schedule/agent` (a scheduled firing). A new source is one schema
-  property, no loop change.
-- A **wake item** is any entity that references an agent through a wake
-  source. It is ordinary data with its own attributes; nothing is copied into
-  the agent.
-- **Claim** = the TURN asserts `:seon.turn/wake` → item (ruling 70's own
-  words: "a claim ref from the handling run"; also what exists at
-  `work.clj:604-621`). The item stays another agent's immutable fact; one
-  indexed attribute serves every source. `:seon.turn/wake` is
-  cardinality-MANY: a turn claims EVERY item pending at its `basis`, because
-  the context it projected already contained all of them — claiming one and
-  re-paying the model for the next is the live double-pay defect at
-  `work.clj:449-452` (review B3). The claim is taken at the basis, never at
-  settlement: an item arriving mid-turn stays pending and opens the next
-  turn (review B6). **Pending** = `(not [_ :seon.turn/wake ?item])`.
-- **The listener** is the one that exists (`seon.cluster.wake/route!` on
-  Datahike `listen`): a transaction that asserts a wake-source attribute
-  offers one payload-free wake to that agent's turn proc. Today the source
-  set is TWO hand lists (`wake.clj:78-93` and the `case` at `wake.clj:232-250`)
-  and attribute properties never reach the database — only three named
-  render properties are lifted onto schema rows from a hand list at
-  `schema.clj:1419-1420` (review B4). So "one schema property, no loop
-  change" requires: every `seon.*` attribute property lifted onto the schema
-  row (review S3), the listener's set derived by one query over
-  `:seon.wake/source`, and `route!` dispatching from that set (S4).
-- Naming: **wake** is the mechanism's own name (core.async wakes; the Datahike
-  listener is already `seon.cluster.wake`). Source, item, claim, pending are
-  the four words; "inbox", "mailbox", "queue", "trigger" retire.
+  ```clojure
+  [:find ?wake :in $ ?agent :where
+   [?attr :seon.wake/listen true] [?attr :db/ident ?a]
+   [?wake ?a ?agent ?tx] [(> ?tx ?latest-basis)]]
+  ```
 
-Policy lives on the source, not the agent: a source declares whether it
-opens a turn (`:seon.wake/opens-turn? true`) or only surfaces in context on
-the next turn. One exclusion is per ITEM and cannot be a source property: a
-fault whose steward is the agent the fault is about must not wake that
-agent, or the 2026-08-08 escalation loop returns (nine paid calls in twenty
-minutes, `loop.clj:682-696`). The fault committer decides that INSIDE its
-transaction — it computes the steward (fault → function → namespace →
-`:seon.ns/steward`) and asserts `:seon.error/steward` only when the steward
-is not the subject agent (review B7, owner law: decide at the authority).
-`:seon.error/agent` (the subject) and `:seon.error/steward` (the route) are
-two relations and both are declared.
+  Two wakes in one transaction are one turn (both `≤ basis`). A wake
+  asserted mid-turn has `:t > basis` and opens the next turn. No reference
+  from turn to wake, no claim, no per-wake write — the reviewers' B1, B3
+  and B6 dissolve rather than get fixed.
+- **Whether a listened attribute opens a turn** is the property
+  `:seon.wake/opens-turn?`; one declared false only surfaces in the next
+  context (a schedule tick, a notice).
+
+A fault in an agent's own code wakes that agent through `:seon.error/steward`
+like any other wake; the turn bound (§1a) is what stops it looping. The
+per-item escalation guard at `loop.clj:682-696` is deleted with the mailing
+mechanism it guarded. Both relations on a fault are declared:
+`:seon.error/agent` (whom it happened to) and `:seon.error/steward` (whom it
+is routed to: function → namespace → `:seon.ns/steward`, computed inside
+the committing transaction).
+
+### 3a. REPL evidence (live `juniper-context`, 2026-09-07 evening, read-only)
+
+Probe: every `:seon.cluster.message/to` datom for Juniper with its `:t`,
+every run's opening `:t`, and today's `:seon.cluster.run/trigger` refs.
+
+| | value |
+|---|---|
+| wakes (eid, `:t`) | `[33893 536870941] [33900 536870942] [33901 536870942]` |
+| turn openings `:t` | `536870941`, `536870954`, `536870987` |
+| answered by trigger ref today | `#{33893 33900 33901}` |
+| answered by `:t ≤ latest turn :t` | `#{33893 33900 33901}` |
+| unanswered by `:t` | `#{}` |
+
+Identical sets, including the wake asserted in the SAME transaction as the
+turn that answered it (`33893`, `:t` equal: `≤` is the right comparison).
+Two wakes in one transaction (`33900`, `33901`) are one answer.
 
 ## 4. The turn — what is stored, and why each thing
 
@@ -205,10 +226,9 @@ what the model call cost. Every attribute questioned:
 |---|---|
 | `:seon.turn/id` | identity for evaluations and attempts to reference |
 | `:seon.turn/agent` | ref; whose turn |
-| `:seon.turn/wake` | refs (many, indexed) → every wake item pending at the basis (§3); "why this turn"; pending is the absence of this ref |
 | `:seon.turn/opened-at`, `/closed-at` | the bound; open = no closed-at |
-| `:seon.turn/basis-t` | the basis transaction `:t` the context was projected from — Datahike's `as-of` takes a `:t`, so this IS the replay input; the commit id is derivable from it. Nothing else about the context is stored |
-| `:seon.turn/reply` (+ blob over the bound; `reply-missing` when the blob was reclaimed) | the model's bytes, under the storage bound; the freeze evidence; the same ablation rule as a value |
+| `:seon.turn/basis-t` | the basis transaction `:t` the context was projected from — Datahike's `as-of` input, AND the fact that answers every wake with `:t ≤` it (§3). "Why this turn" is the query for wakes between the previous basis and this one |
+| `:seon.turn/reply` (+ blob over the bound; `reply-missing` when the blob was reclaimed) | the model's bytes, under the storage bound; stored before evaluation; a reclaimed blob is marked like a missing value |
 | `:seon.turn/attempts` | component set of `:seon.ai.attempt` entities — the AI owner's existing family, referenced, not re-homed (review F6); one per attempt; a paid call is a fact |
 
 Questioned and removed from the turn: the prompt text and per-segment
@@ -271,20 +291,16 @@ ns/symbol) and coin nothing that a query could express.
 ;; seon.turn.edn — one model call and what it produced
 #:seon.turn{:id        [:string {:seon.db/identity true :description "Identity for evaluations and attempts to reference."}]
             :agent     [:seon.db/ref {:description "Whose turn."}]
-            :wake      [:set {:seon.db/index true
-                              :description "Every wake item (§3) pending at this turn's basis; asserting it IS the claim; pending = no turn references the item."}
-                        :seon.db/ref]
             :opened-at [:inst {:description "When the turn opened; open = no closed-at."}]
             :closed-at [:inst {:description "When the turn settled or was closed as interrupted at boot."}]
             :basis-t   [:int {:min 0 :description "The basis transaction :t the context was projected from; `as-of` this t plus the adopted program commit and the render profile reproduce the prompt byte for byte."}]
-            :reply     [:string {:description "The model's reply under the storage bound; the freeze evidence."}]
+            :reply     [:string {:description "The model's reply under the storage bound; storing the forms evidence."}]
             :reply-blob [:seon.blob/digest {:description "The reply's blob when it exceeds the inline bound."}]
             :reply-missing [:enum {:description "Why no reply text is available: the blob was reclaimed."} :lost]
             :attempts  [:set {:seon.db/component true :description "One :seon.ai.attempt entity per provider attempt."} :seon.db/ref]
             :turn      [:map {:seon.db/attributes true}
                         [:seon.turn/id :seon.turn/id]
                         [:seon.turn/agent :seon.turn/agent]
-                        [:seon.turn/wake :seon.turn/wake]
                         [:seon.turn/opened-at :seon.turn/opened-at]
                         [:seon.turn/closed-at {:optional true} :seon.turn/closed-at]
                         [:seon.turn/basis-t :seon.turn/basis-t]
@@ -315,18 +331,18 @@ ns/symbol) and coin nothing that a query could express.
             :interrupted-at [:inst {:description "Asserted at boot on an evaluation with no terminal fact whose turn was open."}]}
 
 ;; seon.wake.edn — the mechanism (§3). Both are schema PROPERTIES lifted onto the schema ROW as facts (review S3), so "which attributes wake an agent" is a Datalog query.
-#:seon.wake{:source [:boolean {:description "On a ref attribute: a transaction asserting it wakes the referenced agent."}]
-            :opens-turn? [:boolean {:description "Whether a pending item of this source opens a turn or only surfaces in context."}]}
+#:seon.wake{:listen [:boolean {:description "On a ref attribute: Datahike listen reports its assertions and the referenced agent is woken; answered is derived from :t."}]
+            :opens-turn? [:boolean {:description "Whether an unanswered wake on this attribute opens a turn or only surfaces in context."}]}
 
 ;; seon.error.edn — two relations, both declared
 #:seon.error{:agent   [:seon.db/ref {:description "The agent this fault happened to (exists today)."}]
-             :steward [:seon.db/ref {:seon.wake/source true :seon.wake/opens-turn? true
-                                     :description "The steward routed to fix it; asserted inside the committing transaction, never when the steward is the subject agent."}]}
+             :steward [:seon.db/ref {:seon.wake/listen true :seon.wake/opens-turn? true
+                                     :description "The steward routed to fix it: function → namespace → :seon.ns/steward, computed inside the committing transaction."}]}
 ```
 
 Wake sources declared where they live: `:seon.message/to` (renamed from
 `seon.cluster.message`), `:seon.error/steward`, `:seon.schedule/agent` each
-carry `{:seon.wake/source true :seon.wake/opens-turn? true}`. `:seon.ns/steward`
+carry `{:seon.wake/listen true :seon.wake/opens-turn? true}`. `:seon.ns/steward`
 (exists, `seon.ns.edn`) is the routing fact they derive from.
 
 Every key above is a full namespaced attribute with a Malli shape; absent
@@ -382,16 +398,15 @@ the loop's 21 connection reads (one database value enters a pass).
 (defn step [db agent]                                   ; pure
   (cond
     (open-turn-with-unsettled-evals db agent) :evaluate  ; also crash resume
-    (and (pending-wake db agent) (pos? turns-left))  :reply
+    (and (unanswered-wake db agent) (turns-left? db agent)) :reply
     :else                                            :idle))
 ```
 
-`:reply` = open (claim the wake, record basis, decrement turns-left) →
-project → model → freeze reply + attempts + evaluations (one commit) → fall
-into `:evaluate`. `:evaluate` = fork → evaluate each unsettled ordinal →
+`:reply` = open (record the basis `:t`) → project → model → store reply +
+attempts + evaluations (one commit) → fall into `:evaluate`. `:evaluate` = fork → evaluate each unsettled ordinal →
 settle the batch and close the turn (one commit). Commits per model turn:
 three (today 5–6). Boot: close every open turn, stamping its unsettled
-evaluations interrupted — total, never refusing. Fences kept: settle once and one turn per wake item as `:db.fn/call`;
+evaluations interrupted — total, never refusing. Fences kept: store results once, and one open turn per agent, as `:db.fn/call`;
 one evaluation per (turn, ordinal) as the declared `:seon.eval/id`
 identity — a declaration, not a transaction function (review S1). Deleted
 fences: claim/takeover, release, holder-only close, pointer coherence, the
@@ -401,11 +416,11 @@ receipt-exists call.
 
 1. Storage bound + missing marker + AI-boundary elision (`seon.sci.admit`,
    `seon.print/fit`, `seon.repl`).
-2. Wake sources: lift every `seon.*` attribute property onto the schema
-   row; declare `:seon.wake/source` on the three attributes; derive the
-   listener's set and `route!`'s dispatch from one query; `:seon.turn/wake`
-   many + indexed, claimed at basis; the steward decided inside the fault
-   committer's transaction; delete message `to` reverse units.
+2. Listened attributes: lift every `seon.*` attribute property onto the
+   schema row; declare `:seon.wake/listen` on the three attributes; derive
+   `route!`'s set and dispatch from one query; answered by `:t` replaces the
+   trigger ref; the steward computed inside the fault committer's
+   transaction; delete message `to` reverse units.
 3. The turn: rename/trim `seon.cluster.run` to §4; delete generated runs,
    situation, captures; the two-arm loop; one db value per pass.
 4. The record: `:seon.agent/*` keys, delete `:seon.def`, cluster, pointer,
@@ -431,7 +446,7 @@ prefix growth of a mechanism that no longer exists.
    crash needs missing?
 2. Does §3 really let "other things" wake an agent with no loop change? What
    breaks when two sources fire in one transaction?
-3. Is the two-write turn (freeze, then settle) the minimum, or can the freeze
+3. Is the two-write turn (freeze, then settle) the minimum, or can storing the forms
    ride the open?
 4. `turns-left` as a stored counter: is it the one legitimate counter, or
    should the bound be derived (turns since the last human message)?
@@ -442,7 +457,8 @@ prefix growth of a mechanism that no longer exists.
    Name the test in run-loop-unpacked §5.6 each deletion breaks and say
    whether the behaviour it proved still matters under "no resume".
 8. Is "no resume" right? What is lost when a crash cuts a turn after its
-   forms transacted side effects, and is the freeze write still worth one
-   commit under that rule — or could reply + results be one write?
-9. The wake claim at open: with one JVM and one permit, is a stored claim
-   needed at all, or is "a turn references this wake item" enough?
+   forms transacted side effects, and is storing the forms before evaluating
+   still worth one commit — or could reply + results be one write?
+9. Answered-by-`:t` (§3): is there any case where a wake with `:t ≤ basis`
+   was NOT in the projected context, or one with `:t > basis` was? (History
+   attributes, `noHistory`, a wake on the agent's own transaction.)
