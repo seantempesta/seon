@@ -1,8 +1,22 @@
-#:my.plan{:steps
+#:my.plan{:current-value
+          [:map
+           [:my.plan.item/id {:optional true} :my.plan.item/id]
+           [:my.plan.item/title {:optional true} :my.plan.item/title]
+           [:my.plan.item/expected-result {:optional true} :my.plan.item/expected-result]
+           [:my.plan.item/completed-at {:optional true} :my.plan.item/completed-at]
+           [:my.plan.item/about {:optional true} :my.plan.item/about]
+           [:my.plan.item/needs {:optional true} [:vector :my.plan.item/id]]]
+          :step-summary
+          [:map
+           [:my.plan.item/id :my.plan.item/id]
+           [:my.plan.item/title :my.plan.item/title]
+           [:my.plan.item/expected-result {:optional true} :my.plan.item/expected-result]
+           [:my.plan.item/completed-at {:optional true} :my.plan.item/completed-at]
+           [:my.plan.item/about {:optional true} :my.plan.item/about]
+           [:my.plan.item/needs {:optional true} [:vector :my.plan.item/id]]]
+          :steps
           [:set
            {:seon.db/component true,
-            :seon.render/ai my.plan/render-plan-ai,
-            :seon.render/html my.plan/render-plan-html,
             :description
             "The root steps of this agent's one plan. The component edge is the ownership fact: retracting the agent or a step retracts everything it owns, and nothing stores a backlink."}
            :seon.db/ref],
@@ -113,7 +127,9 @@
              :my.plan/stable-item-reference]]],
           :component-view
           [:map
-           {:description
+           {:seon.render/ai my.plan/render-plan-ai
+            :seon.render/html my.plan/render-plan-html
+            :description
             "The derived current projection of one agent-owned plan component tree, read by both projections from the same function."}
            [:seon.cluster.agent/id :seon.cluster.agent/id]
            [:my.plan/steps :my.plan/render-steps]

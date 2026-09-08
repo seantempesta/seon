@@ -35,16 +35,16 @@
    (plan/add! (merge {:my.plan.item/id id :my.plan.item/title title} more)
               connection "alice")))
 
-(defn- steps-of
-  [connection agent-id]
-  (into #{} (map :db/id)
-        (:my.plan/steps (db/pull @connection [:my.plan/steps]
-                                 [:seon.cluster.agent/id agent-id]))))
-
 (defn- plan-of
   ([connection] (plan-of connection "alice"))
   ([connection agent-id]
    (plan/plan {:seon.db/db @connection :seon.cluster.agent/id agent-id})))
+
+(defn- render-view
+  [connection view]
+  (assoc view
+         :seon.db/db @connection
+         :seon.sci.admit/caps (config/result-caps (support/effective-config))))
 
 (defn- ids
   [steps]
@@ -70,13 +70,13 @@
     (fn [connection]
       (let [current (plan-of connection)
             ai (plan/format-plan-ai current)
-            html (plan/render-plan-html (steps-of connection "alice") @connection)]
+            html (plan/render-plan-html (render-view connection current))]
         (is (= [] (:my.plan/steps current)))
         (is (= [] (:my.plan/ready current)))
         (is (not (contains? current :my.plan/current-step)))
         (is (str/includes? ai "Steps: none yet."))
         (is (str/includes? ai "Current step: none selected"))
-        (is (str/includes? (pr-str html) "No current step is selected."))))))
+        (is (str/includes? (pr-str html) "my.plan/steps"))))))
 
 (deftest one-step-is-owned-by-the-agent-through-the-component-edge
   (with-plan
@@ -84,7 +84,7 @@
       (let [added (add connection "ship" "Ship the plan unit")
             current (plan-of connection)]
         (is (= "ship" (:my.plan.item/id added)))
-        (is (= 0 (:my.plan.item/position added)))
+        (is (= {:my.plan.item/id "ship" :my.plan.item/title "Ship the plan unit"} added))
         (is (= ["ship"] (ids (:my.plan/steps current))))
         (is (= ["ship"] (ids (:my.plan/ready current))))
         (is (= 0 (:my.plan/depth (first (:my.plan/steps current)))))
@@ -130,6 +130,31 @@
         (is (= ["verify"] (ids (:my.plan/ready current))))
         (is (= [] (:my.plan/blocked current)))
         (is (= ["prepare"] (ids (:my.plan/recent-completions current))))))))
+
+(deftest compact-reads-and-writes-preserve-ownership-and-dependencies
+  (with-plan
+    (fn [connection]
+      (is (= {} (plan/current @connection "alice")))
+      (is (= "; You have no plan yet.\n(dir my.plan)\n(doc my.plan/add!)"
+             (plan/render-plan-ai (plan-of connection))))
+      (let [prepare (add connection "prepare" "Prepare")
+            verify (add connection "verify" "Verify"
+                        {:my.plan.item/needs #{[:my.plan.item/id "prepare"]}})]
+        (is (= [prepare] (plan/ready @connection "alice")))
+        (is (= [verify] (plan/blocked @connection "alice")))
+        (is (= ["prepare"] (:my.plan.item/needs verify)))
+        (is (= [prepare verify] (plan/steps @connection "alice")))
+        (is (= :my.plan/not-owned
+               (:seon.error/kind (plan/start! "prepare" connection "bob"))))
+        (is (= prepare (plan/start! "prepare" connection "alice")))
+        (is (= prepare (plan/current @connection "alice")))
+        (is (= (assoc prepare :my.plan.item/completed-at (at 0))
+               (plan/complete! "prepare" (at 0) connection "alice")))
+        (is (= {} (plan/current @connection "alice")))
+        (is (= :my.plan/unusable-current-step
+               (:seon.error/kind (plan/start! "prepare" connection "alice"))))
+        (is (= [verify] (plan/ready @connection "alice")))
+        (is (= [] (plan/blocked @connection "alice")))))))
 
 (deftest a-changed-title-is-an-ordinary-fact-update
   (with-plan
@@ -193,23 +218,24 @@
            {:my.plan/parent-step [:my.plan.item/id "root"]})
       (let [current (plan-of connection)
             ai (plan/format-plan-ai current)
-            html (plan/render-plan-html (steps-of connection "alice") @connection)
+            html (plan/render-plan-html (render-view connection current))
             printed (pr-str html)]
         (is (= 1 (count (re-seq #"Plan for alice" ai))))
-        (is (= 1 (count (re-seq #"my-plan-tree" printed))))
+        (is (= 1 (count (re-seq #"my-plan\"" printed))))
         (is (str/includes? ai "1. Improve the plan"))
         (is (str/includes? ai "1.1 Inspect the facts"))
         (is (str/includes? ai "Objective: Improve the plan"))
         (is (str/includes? ai "Current step: Improve the plan"))
         (is (str/includes? printed "Inspect the facts"))
-        (is (str/includes? printed "0 of 2 steps completed"))))))
+        (is (str/includes? printed "my.plan.item/title"))))))
 
 (deftest plan-source-runs-through-the-shared-reader
   (with-plan
     (fn [connection]
       (add connection "ship" "Ship the plan unit")
-      (is (= "(my.plan/format-plan-ai (my.plan/plan {}))"
-             (plan/render-plan-ai #{}))
+      (is (= (str "; Your plan. (dir my.plan) is its API; (doc my.plan/complete!) explains one form.\n"
+                   "(my.plan/current)\n(my.plan/ready)\n(my.plan/blocked)")
+             (plan/render-plan-ai (plan-of connection)))
           "the AI projection emits source the agent can run itself"))))
 
 (deftest no-numeric-entity-reference-reaches-either-projection
@@ -227,7 +253,7 @@
             entity-ids (set (db/q '[:find [?step ...]
                                     :where [?step :my.plan.item/id]]
                                   @connection))
-            html (plan/render-plan-html (steps-of connection "alice") @connection)
+            html (plan/render-plan-html (render-view connection current))
             ai (plan/format-plan-ai current)]
         (is (= [{:my.plan.item/id "prepare"}] (:my.plan/needs step))
             "a dependency travels as its stable identity")
@@ -437,7 +463,7 @@
       (let [current (plan/plan {:seon.db/db @connection
                                 :seon.cluster.agent/id "juniper"})
             ai (plan/format-plan-ai current)
-            printed (pr-str (plan/render-plan-html (steps-of connection "juniper") @connection))]
+            printed (pr-str (plan/render-plan-html (render-view connection current)))]
         (is (= ["juniper/understand-context"
                 "juniper/inspect-identity-messages"
                 "juniper/render-plan"
@@ -455,7 +481,7 @@
         (is (str/includes?
              ai
              "1.3 Compare refreshed results [juniper/compare-changed-results] — blocked — waiting for \"juniper/render-plan\""))
-        (is (str/includes? printed "1 of 5 steps completed"))
-        (is (str/includes? printed "my-plan-item is-current"))
+        (is (str/includes? printed "my.plan.item/completed-at"))
+        (is (str/includes? printed "my.plan/current-step"))
         (is (not (str/includes? printed ":open nil"))
             "no nil attribute reaches the rendered panel")))))

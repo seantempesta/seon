@@ -16,6 +16,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.print :as print]
+            [seon.render.value :as value]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -363,14 +364,54 @@
       pulled
       (into [] (map #(first (derived-steps [%] nil #{} #{}))) pulled))))
 
-(defn ready
-  "Derive this agent's ready plan steps from current facts."
-  {:malli/schema
-   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
-    [:or :my.plan/ready-items :seon.error/value]]}
+(defn- step-summary
+  [step]
+  (if (error-value? step)
+    step
+    (cond-> (select-keys step [:my.plan.item/id :my.plan.item/title
+                             :my.plan.item/expected-result
+                             :my.plan.item/completed-at
+                             :my.plan.item/about])
+    (seq (:my.plan/needs step))
+      (assoc :my.plan.item/needs (mapv :my.plan.item/id (:my.plan/needs step))))))
+
+(defn current
+  "Read your current step; an empty map means none is selected."
+  {:malli/schema [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+                  [:or :my.plan/current-value :seon.error/value]]}
+  [database agent-id]
+  (let [view (plan {:seon.db/db database :seon.cluster.agent/id agent-id})
+        current-id (get-in view [:my.plan/current-step :my.plan.item/id])]
+    (if (error-value? view)
+      view
+      (or (some #(when (= current-id (:my.plan.item/id %)) (step-summary %))
+                (:my.plan/steps view))
+          {}))))
+
+(defn blocked
+  "Read your blocked steps and the step identities they need."
+  {:malli/schema [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+                  [:or [:vector :my.plan/step-summary] :seon.error/value]]}
   [database agent-id]
   (let [view (plan {:seon.db/db database :seon.cluster.agent/id agent-id})]
-    (if (error-value? view) view (:my.plan/ready view))))
+    (if (error-value? view) view (mapv step-summary (:my.plan/blocked view)))))
+
+(defn steps
+  "Read your plan steps in their authored tree order."
+  {:malli/schema [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+                  [:or [:vector :my.plan/step-summary] :seon.error/value]]}
+  [database agent-id]
+  (let [view (plan {:seon.db/db database :seon.cluster.agent/id agent-id})]
+    (if (error-value? view) view (mapv step-summary (:my.plan/steps view)))))
+
+(defn ready
+  "Read your ready steps; complete one with my.plan/complete!."
+  {:malli/schema
+   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+    [:or [:vector :my.plan/step-summary] :seon.error/value]]}
+  [database agent-id]
+  (let [view (plan {:seon.db/db database :seon.cluster.agent/id agent-id})]
+    (if (error-value? view) view (mapv step-summary (:my.plan/ready view)))))
 
 (defn ready-subjects
   "List the resolved subject entities named by this agent's ready steps.
@@ -510,22 +551,22 @@
   {:malli/schema
    [:=> [:cat :my.plan.item/add-request
          :seon.db/connection :seon.cluster.agent/id]
-    [:or :my.plan/render-step :seon.error/value]]}
+    [:or :my.plan/step-summary :seon.error/value]]}
   [step connection agent-id]
   (let [request (assoc step :seon.cluster.agent/id agent-id)
         result (transact-plan! connection agent-id
                                [[:db.fn/call #'add-step-call request]])]
     (if (error-value? result)
       result
-      (item {:seon.db/db (:db-after result)
-             :my.plan.item/id (:my.plan.item/id step)}))))
+      (step-summary (item {:seon.db/db (:db-after result)
+                           :my.plan.item/id (:my.plan.item/id step)})))))
 
 (defn complete!
   "Complete one owned step and clear it when it is this agent's current step."
   {:malli/schema
    [:=> [:cat :my.plan.item/id :my.plan.item/completed-at
          :seon.db/connection :seon.cluster.agent/id]
-    [:or :my.plan/render-step :seon.error/value]]}
+    [:or :my.plan/step-summary :seon.error/value]]}
   [item-id completed-at connection agent-id]
   (let [result
         (transact-plan! connection agent-id
@@ -535,7 +576,38 @@
                            :seon.cluster.agent/id agent-id}]])]
     (if (error-value? result)
       result
-      (item {:seon.db/db (:db-after result) :my.plan.item/id item-id}))))
+      (step-summary (item {:seon.db/db (:db-after result)
+                           :my.plan.item/id item-id})))))
+
+(defn- start-step-call
+  [database agent-id item-id]
+  (let [agent-entity (agent-eid database agent-id)
+        step (step-eid database item-id)]
+    (when-not (and step
+                   (db/q '[:find ?step . :in $ % ?agent ?step
+                            :where (owned ?agent ?step)]
+                         database rules agent-entity step))
+      (refuse! ::not-owned "Select a step owned by this agent."
+               {:my.plan.item/id item-id :seon.cluster.agent/id agent-id}))
+    (when (db/q '[:find ?completed . :in $ ?step
+                  :where [?step :my.plan.item/completed-at ?completed]]
+                database step)
+      (refuse! ::unusable-current-step "Select an open step."
+               {:my.plan.item/id item-id}))
+    [[:db/add agent-entity :my.plan/current-step step]]))
+
+(defn start!
+  "Select one of your steps as current and return that step."
+  {:malli/schema [:=> [:cat :my.plan.item/id :seon.db/connection
+                       :seon.cluster.agent/id]
+                  [:or :my.plan/step-summary :seon.error/value]]}
+  [item-id connection agent-id]
+  (let [result (transact-plan! connection agent-id
+                               [[:db.fn/call #'start-step-call agent-id item-id]])]
+    (if (error-value? result)
+      result
+      (step-summary (item {:seon.db/db (:db-after result)
+                           :my.plan.item/id item-id})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Whole-tree reconciliation
@@ -1066,85 +1138,19 @@
          older (conj (print/render-elision-ai older)))))))
 
 (defn render-plan-ai
-  "Render source which reads and formats this agent's whole plan.
-
-  The plan unit's stored value is the agent's `:my.plan/steps` component set.
-  The source runs through the reply reader and the agent's own fork, where call
-  preparation supplies the database and the calling agent."
-  {:malli/schema [:=> [:cat :my.plan/steps] :seon.render/source]}
-  [_steps]
-  (pr-str (list `format-plan-ai (list `plan {}))))
-
-(defn- plan-tree-html
+  "Choose the plan's read forms from its current data."
+  {:malli/schema [:=> [:cat :my.plan/component-view] :seon.render/source]}
   [view]
-  (let [steps (:my.plan/steps view)]
-    (letfn [(nest [remaining depth]
-              ;; Consume the depth-first sequence into nested lists.
-              (loop [nodes [] remaining remaining]
-                (let [step (first remaining)]
-                  (if (or (nil? step)
-                          (< (long (get step :my.plan/depth 0)) depth))
-                    [nodes remaining]
-                    (let [[children rest-of]
-                          (nest (rest remaining) (inc depth))]
-                      (recur (conj nodes
-                                   (into [:li (render-item-html step)]
-                                         (when (seq children)
-                                           [(into [:ol {:class
-                                                        "my-plan-children"}]
-                                                  children)])))
-                             rest-of))))))]
-      (into [:ol {:class "my-plan-tree"}] (first (nest steps 0))))))
+  (if (seq (:my.plan/steps view))
+    (str "; Your plan. (dir my.plan) is its API; (doc my.plan/complete!) explains one form.\n"
+         "(my.plan/current)\n(my.plan/ready)\n(my.plan/blocked)")
+    "; You have no plan yet.\n(dir my.plan)\n(doc my.plan/add!)"))
 
 (defn render-plan-html
-  "Render the plan these steps belong to as bounded Hiccup.
-
-  The steps are the agent's `:my.plan/steps` value; their owner derives from
-  the component edge, and call preparation supplies the database. Both
-  projections derive the same value from the same reader."
-  {:malli/schema [:=> [:cat :my.plan/steps :seon.db/database-value]
-                  :seon.render/hiccup]}
-  [steps database]
-  ;; The owner is a fact on the value: the agent whose component edge holds
-  ;; these steps. Nothing about the caller decides whose plan this is.
-  (let [agent-id (when (seq steps)
-                   (db/q '[:find ?id .
-                           :in $ ?step
-                           :where
-                           [?agent :my.plan/steps ?step]
-                           [?agent :seon.cluster.agent/id ?id]]
-                         database (first steps)))
-        view (if agent-id
-               (plan {:seon.db/db database :seon.cluster.agent/id agent-id})
-               {:my.plan/steps [] :my.plan/ready [] :my.plan/blocked []})]
-    (if (error-value? view)
-      [:section {:class "seon-family-entry my-plan"}
-       [:p {:class "my-plan-error"} (:seon.error/message view)]]
-      (let [steps (:my.plan/steps view)
-            completed (count (filter :my.plan.item/completed-at steps))
-            older (:my.plan/older-completions view)]
-        (cond->
-         (into [:section {:class "seon-family-entry my-plan"}
-                [:h2 (if agent-id (str agent-id "’s plan") "Plan")]]
-               (remove nil?)
-         [(when-let [objective (first steps)]
-            [:p {:class "my-plan-objective"}
-             [:strong "Objective: "] (:my.plan.item/title objective)])
-          [:p {:class "my-plan-progress"}
-           [:strong (str completed " of " (count steps) " steps completed")]
-           (str " · " (count (:my.plan/ready view)) " ready · "
-                (count (:my.plan/blocked view)) " blocked")]
-          (if-let [current (current-title view)]
-            [:section {:class "my-plan-focus"}
-             [:p {:class "my-plan-kicker"} "Current step"]
-             [:h3 current]]
-            [:p {:class "my-plan-focus"} "No current step is selected."])
-          [:section {:class "my-plan-steps"}
-           [:h3 (str "Steps (" (count steps) ")")]
-           (plan-tree-html view)]
-          [:details {:class "my-plan-help"}
-           [:summary "How to update this plan"]
-           [:pre (update-example view)]]])
-          older
-          (conj [:p {:class "my-plan-elision"}
-                 (print/render-elision-ai older)]))))))
+  "Show the plan data through the shared value renderer."
+  {:malli/schema [:=> [:cat :my.plan/component-view] :seon.render/hiccup]}
+  [view]
+  [:section {:class "seon-family-entry my-plan"}
+   [:h3 "Plan"]
+   (value/render-html (assoc view :seon.render/value
+                             (select-keys view [:my.plan/steps :my.plan/current-step])))])
