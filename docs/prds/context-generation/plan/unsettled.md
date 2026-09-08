@@ -1751,3 +1751,10 @@ hand-rostered fixtures routed through the canonical ones, selection by
 `:seon.fn/calls` proven, bounds/watchdog/reaping probed, `:test-results`
 evidence made real. Three lanes live: turn-loop, refused-render,
 test-harness.
+
+Owner (2026-09-08): "Why not just have the agents do more focused testing.
+It's a waste of time to run the entire test suite for every change." Lane
+gate = bare `bin/test` (reach-selected by `:seon.fn/calls`) + explicit
+subject namespaces + `--platform`; NEVER `--all`/`--full` in a lane — full
+suites are the orchestrator's integration checkpoints only (the standing
+rule from 2026-08 that I had drifted from). Applied to every spec from now.
