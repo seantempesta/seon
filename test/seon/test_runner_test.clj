@@ -1,6 +1,9 @@
 (ns seon.test-runner-test
   "Declared latest-result facts owned by the JVM test runner."
   (:require [clojure.java.io :as io]
+            [clojure.edn :as edn]
+            [seon.test.cache :as cache]
+            [dev-cache]
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is testing]]
             [seon.config :as config]
@@ -15,6 +18,7 @@
             [seon.test.runner :as runner]
             [seon.test-support :as test-support])
   (:import [java.io PrintWriter]
+           [java.lang ProcessHandle]
            [java.util.concurrent CountDownLatch TimeUnit]))
 
 (def ^:private at (java.util.Date. 1785283200000))
@@ -23,6 +27,82 @@
 (def ^:private fake-cache-digest (apply str (repeat 64 "a")))
 (def ^:private project-root
   (.getCanonicalFile (io/file (System/getProperty "user.dir"))))
+
+(deftest dependency-source-digest-does-not-name-the-checkout
+  (let [root (doto (io/file project-root "tmp" (str "digest-" (random-uuid))) .mkdirs)
+        left (io/file root "left.clj")
+        right (io/file root "right.clj")
+        digest (fn [file]
+                 (let [sha (java.security.MessageDigest/getInstance "SHA-256")]
+                   (#'dev-cache/digest-file! sha file)
+                   (vec (.digest sha))))]
+    (try
+      (spit left "(ns fixture)\n")
+      (spit right "(ns fixture)\n")
+      (is (= (digest left) (digest right)))
+      (spit right "(ns changed)\n")
+      (is (not= (digest left) (digest right)))
+      (finally (test-support/delete-recursively! root)))))
+
+(deftest snapshot-digest-follows-selected-bytes
+  (let [root (doto (io/file project-root "tmp" (str "snapshot-digest-" (random-uuid))) .mkdirs)
+        left (io/file root "left")
+        right (io/file root "right")]
+    (try
+      (doseq [checkout [left right]]
+        (.mkdirs (io/file checkout "src"))
+        (spit (io/file checkout "dev_cache.clj") "identical cache owner")
+        (spit (io/file checkout "src/selected.clj") "(ns selected)"))
+      (let [digest (#'dev-cache/test-digest (str left) fake-cache-digest)]
+        (is (= digest (#'dev-cache/test-digest (str right) fake-cache-digest)))
+        (spit (io/file right "src/selected.clj") "(ns selected) (def changed true)")
+        (is (not= digest (#'dev-cache/test-digest (str right) fake-cache-digest))))
+      (finally (test-support/delete-recursively! root)))))
+
+(declare stop-process-tree!)
+
+(deftest consecutive-cache-invocations-reuse-the-published-base
+  (let [published (System/getProperty "seon.test.published-base")
+        root (doto (io/file project-root "tmp" (str "base-reuse-" (random-uuid))) .mkdirs)]
+    (try
+      (is (some? published) "This launcher regression requires bin/test's published base.")
+      (when published
+        (let [original-ready (io/file (.getParentFile (io/file published)) "ready.edn")
+              ready-value (edn/read-string (slurp original-ready))
+              digest (:seon.test.cache/digest ready-value)
+              directory (doto (io/file root "target/test-published-bases" digest) .mkdirs)
+              ready (io/file directory "ready.edn")
+              base (io/file directory "base")
+              before (cache/manifest published)]
+          ;; Use the real published store read-only; only retention metadata
+          ;; belongs to this regression. No fake database or publisher.
+          (java.nio.file.Files/createSymbolicLink
+           (.toPath base) (.toPath (io/file published))
+           (make-array java.nio.file.attribute.FileAttribute 0))
+          (spit ready (pr-str ready-value))
+          (dotimes [ordinal 2]
+            (let [log (io/file root (str ordinal ".log"))
+                  child (.start
+                         (doto (ProcessBuilder.
+                                ^java.util.List
+                                ["bb" "--config" (str (io/file project-root "bb.edn"))
+                                 "-m" "seon.test.cache" (str root) (str project-root)
+                                 digest (System/getProperty "java.class.path")
+                                 (str (.pid (ProcessHandle/current)))])
+                           (.directory project-root)
+                           (.redirectErrorStream true)
+                           (.redirectOutput log)))]
+              (try
+                (is (.waitFor child test-support/event-backstop-seconds TimeUnit/SECONDS))
+                (when-not (.isAlive child)
+                  (is (zero? (.exitValue child)) (slurp log))
+                  (is (str/includes? (slurp log) "REUSE cached base") (slurp log))
+                  (is (not (str/includes? (slurp log) "PUBLISH cached base")) (slurp log)))
+                (finally (stop-process-tree! child)))))
+          (is (= ready-value (edn/read-string (slurp ready))))
+          (is (= before (cache/manifest (str base))))
+          (is (.isDirectory (io/file published "data/store")))))
+      (finally (test-support/delete-recursively! root)))))
 
 (defn- captured-run-with-output []
   (let [writer (java.io.StringWriter.)
@@ -91,8 +171,9 @@
    "  if [ -n \"${SEON_FAKE_CACHE_CALL-}\" ]; then\n"
    "    printf '%s\\n' \"$*\" >\"$SEON_FAKE_CACHE_CALL\"\n"
    "  fi\n"
-   "  printf '#:seon.dev-cache{:digest \\\"%s\\\", :status :rebuilt, :path \\\"%s\\\"}\\n' \\\n"
-   "    \"$SEON_FAKE_CACHE_DIGEST\" \"$SEON_FAKE_CACHE_PATH\"\n"
+   "  printf '\"fixture-classpath\"\\n' >\"$SEON_FAKE_CACHE_PATH/classpath.edn\"\n"
+   "  printf '#:seon.dev-cache{:digest \"%s\", :test-digest \"%s\", :path \"%s\", :test-classpath-file \"%s/classpath.edn\"}\\n' \\\n"
+   "    \"$SEON_FAKE_CACHE_DIGEST\" \"$SEON_FAKE_CACHE_DIGEST\" \"$SEON_FAKE_CACHE_PATH\" \"$SEON_FAKE_CACHE_PATH\"\n"
    "  exit 0\n"
    "fi\n"))
 
@@ -207,6 +288,20 @@
       (is (contains? declared-contracts (find-var 'seon.test/run))
           "and `seon.test/run`, the agent-facing test verb, is among the
            declared contracts this worker can arm"))))
+
+(deftest fast-and-worker-arm-the-complete-program-contract-set
+  ;; Run this same observation in test-fast and in the isolated worker.
+  ;; Both enter initialize-contracts!; observe actual wrappers rather than
+  ;; trusting its count or a hand-maintained list of expected functions.
+  (let [program (#'runner/declared-program-namespaces)
+        expected (instrument/armable program)
+        actual (into #{} (filter expected) (instrument/instrumented))]
+    (is (seq expected) "Absent contracts must not pass set equality.")
+    (is (= expected actual))
+    (is (= :seon.instrument/contract-violated
+           (:seon.error/kind
+            (ex-data (try (error/value "not a fact")
+                          (catch Exception failure failure))))))))
 
 (deftest a-worker-rearms-only-when-a-task-stripped-its-contracts
   ;; CLASS: a pooled worker runs many tests per JVM, and `instrument/remove!`
@@ -1230,7 +1325,7 @@
          "for argument in \"$@\"; do\n"
          "  if [ \"$argument\" = \"--prepare-base\" ]; then prepare=true; fi\n"
          "done\n"
-         "if [ \"$prepare\" = true ]; then exit 0; fi\n"
+         "if [ \"$prepare\" = true ]; then mkdir -p \"${!#}/data/store\"; echo '{}' > \"${!#}/manifest.edn\"; exit 0; fi\n"
          "test \"$(cd target/dev-dependency-classes && pwd -P)\" = \"$SEON_FAKE_CACHE_PATH\"\n"
          "test -d workers/pool-1/.clj-kondo\n"
          "test ! -L workers/pool-1/.clj-kondo\n"
@@ -1781,6 +1876,8 @@
              "cp \"$origin/bin/test\" bin/test\n"
              "cp \"$origin/bin/_java-home-resolver\" bin/_java-home-resolver\n"
              "cp \"$origin/src/seon/fs.clj\" src/seon/fs.clj\n"
+             "mkdir -p src/seon/test\n"
+             "cp \"$origin/src/seon/test/cache.clj\" src/seon/test/cache.clj\n"
              "printf '{:paths [\"src\"]}\\n' > bb.edn\n"
              "printf 'tmp/\\ntarget/\\n' > .gitignore\n"
              "printf 'base\\n' > src/owned.txt\n"
@@ -1804,12 +1901,9 @@
              "test \"$(cat src/foreign.txt)\" = \"${SEON_EXPECT_FOREIGN:-base}\"\n"
              "test \"$(cat src/added.txt)\" = added\n"
              "test ! -e src/deleted.txt\n"
-             "if [ \"$1\" = -T:dev-cache ]; then\n"
-             "  printf '#:seon.dev-cache{:digest \"%s\", :path \"%s\"}\\n' \"$SEON_FAKE_CACHE_DIGEST\" \"$SEON_FAKE_CACHE_PATH\"\n"
-             "  exit 0\n"
-             "fi\n"
+             fake-dev-cache-prologue
              "for argument in \"$@\"; do\n"
-             "  if [ \"$argument\" = --prepare-base ]; then exit 0; fi\n"
+             "  if [ \"$argument\" = --prepare-base ]; then mkdir -p \"${!#}/data/store\"; echo '{}' > \"${!#}/manifest.edn\"; exit 0; fi\n"
              "done\n"
              "for worker in workers/*; do\n"
              "  test \"$(cat \"$worker/src/owned.txt\")\" = owned\n"

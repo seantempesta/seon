@@ -16,7 +16,8 @@
             [seon.fs :as fs]
             [seon.fn :as seon.fn]
             [seon.schema :as schema]
-            [seon.sci.eval :as sci.eval])
+            [seon.sci.eval :as sci.eval]
+            [seon.test.cache :as cache])
   (:import [java.util.concurrent CountDownLatch Future TimeUnit
             TimeoutException]))
 
@@ -145,12 +146,12 @@
   ::unknown-refusal)
 
 (def source-manifest
-  ;; The runner loads every selected test namespace before it invokes a test,
-  ;; so the first fixture derives this immutable value from that invocation's
-  ;; frozen source tree. Every database still installs the complete population
-  ;; through its own transactions; only repeated static analysis is shared.
+  ;; The isolated runner publishes this exact manifest once per snapshot.
+  ;; Direct iteration derives it once from its own source checkout.
   (delay
-    (seon.fn/build-manifest {:seon.fn/roots seon.fn/source-roots})))
+    (if-let [base (System/getProperty "seon.test.published-base")]
+      (cache/manifest base)
+      (seon.fn/build-manifest {:seon.fn/roots seon.fn/source-roots}))))
 
 (def ^:private branch-leases
   ;; Datahike deletes a branch from the roster but retains its head until whole
@@ -211,10 +212,25 @@
          :commit-graph? false
          :keep-history? true
          :schema-flexibility :write}
-        _ (d/create-database configuration)
+        base (System/getProperty "seon.test.published-base")
+        configuration
+        (if base
+          (let [source (store/datahike-configuration (str (io/file base "data" "store")))
+                backend (:store source)
+                id (:id backend)]
+            (-> source
+                (dissoc :fuse-index-roots? :index-config)
+                (assoc :branch source/current-branch
+                       :store {:backend :tiered :id id
+                               :frontend-config {:backend :memory :id id}
+                               :backend-config backend
+                               :write-policy :frontend-only
+                               :read-policy :frontend-first})))
+          configuration)
+        _ (when-not base (d/create-database configuration))
         connection (d/connect configuration)]
     (try
-      (populate-database! connection)
+      (when-not base (populate-database! connection))
       (.addShutdownHook
        (Runtime/getRuntime)
        (Thread. ^Runnable #(close-base! configuration connection)
@@ -558,10 +574,9 @@
         base-projection (:seon.schema/projection base-ctx)
         branch (acquire-branch!)]
     (try
-      ;; The private :db head is populated and sealed exactly once, then never
-      ;; exposed or transacted. Branch creation overwrites this lease's stale
-      ;; deleted head with that same immutable base value.
-      (d/branch! base-connection :db branch)
+      ;; Fork the sealed base head. With a published base, branch heads and
+      ;; transactions live only in this JVM's Konserve memory frontend.
+      (d/branch! base-connection (get configuration :branch :db) branch)
       (let [branch-configuration (assoc configuration :branch branch)
             provisional-connection (d/connect branch-configuration)]
         (try

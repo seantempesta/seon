@@ -185,7 +185,8 @@
 
 (defn- digest-file!
   [^MessageDigest digest file]
-  (digest-bytes! digest (.getCanonicalPath ^java.io.File file))
+  ;; Checkout location is not an input: identical source bytes in two
+  ;; isolated run roots must select the same dependency classes.
   (with-open [input (io/input-stream file)]
     (let [buffer (byte-array 65536)]
       (loop []
@@ -346,11 +347,16 @@
 (defn- current-cache
   []
   (let [project-source-digest (project-digest)]
-    (when-let [selection (selected-cache)]
-      (let [directory (canonical-file (:seon.dev-cache/path selection))]
-        (when-let [manifest (valid-cache directory project-source-digest)]
-          {:seon.dev-cache/directory directory
-           :seon.dev-cache/manifest manifest})))))
+    (some (fn [directory]
+            (when-let [manifest (valid-cache directory project-source-digest)]
+              {:seon.dev-cache/directory directory
+               :seon.dev-cache/manifest manifest}))
+          (distinct
+           (concat
+            (when-let [selection (selected-cache)]
+              [(canonical-file (:seon.dev-cache/path selection))])
+            (filter #(.isDirectory ^java.io.File %)
+                    (.listFiles (io/file cache-root))))))))
 
 (defn- admit!
   [staging directory]
@@ -438,18 +444,55 @@
     (prn result)
     result))
 
+(defn- test-digest
+  [root dependency-digest]
+  (when-not (resolve 'seon.test.selection/input-digests)
+    (load-file (str (io/file root "src/seon/test/selection.clj"))))
+  (hex-digest [((resolve 'seon.test.selection/input-digests) root)
+               (slurp (io/file root "dev_cache.clj")) dependency-digest]))
+
+(defn- test-classpath!
+  [selection]
+  ;; The selector already owns the complete gate inputs. Loading its pure
+  ;; namespace also works in tools.deps' tool classpath (which contains ".").
+  (let [digest (test-digest "." (:seon.dev-cache/digest selection))
+        file (io/file "target/test-classpaths" (str digest ".edn"))
+        _
+        (if (.isFile file)
+          (edn/read-string (slurp file))
+          (let [basis (b/create-basis {:project "deps.edn" :aliases [:test]})
+                root (.toPath (canonical-file "."))
+                paths (mapv
+                       (fn [path]
+                         (let [canonical (.toPath (canonical-file path))]
+                           (if (.startsWith canonical root)
+                             (let [relative (str (.relativize root canonical))]
+                               (if (empty? relative) "." relative))
+                             (str canonical))))
+                       (:classpath-roots basis))
+                value (str/join java.io.File/pathSeparator
+                                (cons (:seon.dev-cache/path selection) paths))]
+            (atomic-write-edn! file value)
+            value))]
+    (assoc selection
+           :seon.dev-cache/test-digest digest
+           :seon.dev-cache/test-classpath-file (.getCanonicalPath file))))
+
 (defn ensure-cache
-  "Reuse the current dependency cache, or rebuild it when inputs changed."
-  [_]
+  "Reuse matching dependency classes; optionally prepare the test classpath."
+  [{:keys [test?]}]
   (let [result
         (with-cache-lock
-          #(if-let [{:seon.dev-cache/keys [directory manifest]}
-                    (current-cache)]
-             (cache-result directory manifest :current)
-             (do
-               (println "seon cache: inputs changed; rebuilding")
-               (flush)
-               (refresh!))))]
+          (fn []
+            (let [selection
+                  (if-let [{:seon.dev-cache/keys [directory manifest]}
+                           (current-cache)]
+                    (cache-result directory manifest :current)
+                    (do
+                      (println "seon cache: inputs changed; rebuilding")
+                      (flush)
+                      (refresh!)))]
+              (if test? (test-classpath! selection) selection))))]
     (prn result)
     result))
 

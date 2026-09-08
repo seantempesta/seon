@@ -15,7 +15,8 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.schema :as schema]
-            [seon.test.selection :as selection])
+            [seon.test.selection :as selection]
+            [seon.test.cache :as cache])
   (:import (java.io BufferedReader PrintWriter StringWriter)
            (java.lang Process ProcessBuilder$Redirect ProcessHandle Runtime Thread)
            (java.nio.charset StandardCharsets)
@@ -1609,7 +1610,9 @@
   "Bulk-tier test symbols for one set of changed repository-relative paths."
   [manifest changed-paths]
   (let [relative (requiring-resolve 'seon.test.selection/manifest-relative-artifacts)
-        artifacts (relative "." manifest)
+        artifacts (relative
+                   (str (.getParentFile (io/file (first (:seon.fn.manifest/roots manifest)))))
+                   manifest)
           tests (selection/reaching-tests artifacts changed-paths)]
     {::symbols (set tests)
      ::reason (str (count tests) " test(s) reach "
@@ -2609,8 +2612,9 @@
                           " " test-namespace)))
         (announce! progress "SELECT building the program graph")
         (let [build-manifest (requiring-resolve 'seon.fn/build-manifest)
-              manifest (build-manifest
-                        {:seon.fn/roots selection/graph-roots})
+              manifest (if-let [base (System/getProperty "seon.test.published-base")]
+                         (cache/manifest base)
+                         (build-manifest {:seon.fn/roots selection/graph-roots}))
               workers (mapv #(.get %) worker-futures)
               pool-workers (filterv #(str/starts-with? (::worker-id %) "pool-")
                                     workers)
@@ -2726,7 +2730,19 @@
     "--prepare-base"
     (let [root (.getCanonicalPath (io/file (second arguments)))]
       (.mkdirs (io/file root))
+      (let [expected (.getCanonicalFile (io/file "src/seon/fn.clj"))
+            actual (.getCanonicalFile (io/file (.toURI (io/resource "seon/fn.clj"))))]
+        (when-not (= expected actual)
+          (throw (ex-info "Publication classpath does not name its snapshot."
+                          {::expected (str expected) ::actual (str actual)}))))
       ((requiring-resolve 'seon.cluster/refresh-source!) root)
+      ;; Publication already holds the exact analysis; do not analyze the
+      ;; same checkout again in the coordinator and every fixture JVM.
+      (let [analysis @(var-get (ns-resolve 'seon.cluster 'source-analysis-cache))
+            manifest (:seon.fn/manifest analysis)]
+        (when-not (seq (:seon.fn.manifest/artifacts manifest))
+          (throw (ex-info "Publication produced no program manifest." {::root root})))
+        (spit (io/file root "manifest.edn") (pr-str manifest)))
       (println "bin/test: shared published test base ready at" root))
 
     (let [[cluster-name root git-sha selection-mode & namespace-names]
