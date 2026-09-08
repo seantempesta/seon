@@ -2,187 +2,95 @@
 name: datastar-web-ui
 type: skill
 status: active
-description: "Work on Seon's Datastar web renderer, route table, namespace pages, debug pages, SSE feeds, message submission, block morphs, backpressure, layout, or render cost. Load before changing seon.render.web, seon.render.route, or another seon.render.* web owner, and before proposing a broader canvas or control surface."
+description: "Change Seon's Datastar namespace pages, debug previews, entity blocks, route table, SSE delivery, or message form. Use before editing the web render owners; generalized canvas design has a separate contract."
 ---
 
 # Datastar web UI
 
-Work on the cluster JVM renderer in `src/seon/render/web.clj`; do not restore
-the deleted CLJS pod (`AGENTS.md:20-31`). Discover the selected cluster's bound
-URL with the one operator:
+The target is [turn PRD §13–§15](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
+Use [UI architecture](../../../docs/seon/architecture/ui.md) for the
+render contract and the seon-flow-architecture skill for proc changes.
 
-```text
-bin/seon status
-bin/seon open NAME
-```
+## Inspect the existing owners
 
-The operator commands are defined at `AGENTS.md:1071-1091`. Boot writes the
-server's actual URL and port into the cluster advertisement
-(`src/seon/cluster.clj:1364-1386`). The server derives a preferred port from
-the cluster name, falls back to an ephemeral port on collision, and returns the
-bound result (`src/seon/render/web.clj:1271-1330`). Do not hard-code a port.
+Discover the endpoint through `bin/seon status`; this wave verifies
+default at the assigned endpoint. An HTTP success proves reachability,
+not layout or adoption.
 
-## Ground the route owner
+The canonical route data and compiled Reitit router live in
+`src/seon/render/route.clj:5` and `:33`; handler binding lives in
+`src/seon/render/web.clj:3633`.
+Read that table instead of carrying another route list. A route name
+or retained manual context handler does not authorize preserving an
+obsolete behavior from before §14.
 
-The selected HTTP dependency is `metosin/reitit-ring` 0.10.1
-(`deps.edn:56-67`). `seon.render.route/routes` is the one live route table and
-`seon.render.web/handler` binds every symbolic handler into one Reitit Ring
-handler (`src/seon/render/route.clj:5-34`,
-`src/seon/render/web.clj:1176-1220`). Route facts are Clojure data in that Var,
-not database facts.
+Stable DOM ids derive through `seon.render.block/surface-id`
+(`src/seon/render/block.clj:61`). Reuse that owner for morph targets.
 
-| method/path | live handler behavior |
-|---|---|
-| `GET /` | alias to the configured root agent's namespace page |
-| `GET /ns/{namespace}` | canonical namespace page |
-| `GET /ns/{namespace}/debug` | entity/render inspection in that viewing namespace; source previews use the shared evaluator and remain in the invocation cache; it does not create a namespace owner |
-| `GET /agent/{id}` | alias to that agent's namespace page |
-| `GET /agent/{id}/debug` | alias to that agent's debug surface |
-| `POST /agent/{id}/message` | same-origin inbound-message commit |
-| `POST /agent/{id}/context` | same-origin Add, compact, or remove through the existing render request channel; Add saves cached evaluations and changes context in one transaction |
-| `GET /feed/{id}` | the existing Datastar SSE feed; debug requests carry `?debug=true`, viewer, subject, output, bounds, and cursors |
-| `GET /data` | schema/entity `get-in` surface |
-| `GET /css/{*path}`, `GET /js/{*path}` | packaged public resources |
+## Entity rendering — target
 
-Verify the exact methods and paths at `src/seon/render/route.clj:5-27`, the
-namespace/root/agent alias behavior at `src/seon/render/web.clj:931-1102`, and
-the message/feed/data/static bindings at `src/seon/render/web.clj:1104-1220`.
-Do not invent an agent-creation route, stop/resume route, `/call`, or a
-generalized action endpoint: none appears in the one route table
-(`src/seon/render/route.clj:5-27`).
+One entity schema declares one AI/HTML pair. Render scalars together
+in its own block, components as their concerns, and derived query
+blocks from functions declared once on the agent schema.
+No render pair means the default attribute-map printer.
+Do not add attribute-level pairs or a second renderer-selection path.
 
-## Keep the namespace page on the one walk
+A render function chooses source from its data. An empty plan emits
+useful `dir`/`doc` forms; a populated plan emits current, ready,
+and blocked queries. Those documentation functions return data.
+There is no separate teaching-prose mechanism.
 
-Resolve an ordinary canonical namespace route through its namespace owner. An
-absent owner is ensured through the existing agent-creation transaction. The
-canonical debug route is read-only and does not ensure an owner; this permits
-inspection in a separate viewing namespace. An unknown or malformed namespace
-returns 404 (`src/seon/render/web.clj:2260-2353`).
-The `/agent/{id}` forms are aliases and return 404 when the agent has no
-assigned namespace (`src/seon/render/web.clj:1089-1102`).
+The evaluation schema declares `seon.repl/render-ai` and
+`seon.repl/render-html`; the walk renders evaluations in order
+through that pair. The current entry points are
+`src/seon/repl.clj:315` and `:323`; `text` at `:246`
+owns the REPL grammar. Do not mistake these existing entry points
+for proof that §15 storage has landed.
 
-Keep AI context and namespace-page HTML on the same visible walk. HTML `page-of` calls
-`seon.render.walk/neighborhood` and `units`; the AI boundary calls
-`seon.render/walk`, which calls the same neighborhood and assembles the AI projection
-(`src/seon/render/web.clj:300-350,1326-1399`,
-`src/seon/render.clj:147-226`, `src/seon/render/walk.clj:693-876`). The debug
-surface inspects one arbitrary database entity. Selected AI and HTML previews
-appear side by side; applicable alternatives appear in a collapsed list in
-priority order. Found datom values also have paired previews, and refs preview
-their connected entities. One evidence-captured `pull-many` acquires these
-entities; previews use the existing render-call and invocation caches
-(`src/seon/render/web.clj`, `render-source-call`). Source previews use
-`seon.cluster.loop/evaluate-sources` with one captured immutable database,
-without run submission, blob staging, or saved facts. The existing invocation
-cache retains exact source, results, namespace, timestamps, and basis. Add and
-compact resolve that cached identity on the render proc's reliable context
-channel, then combine `run/record-evaluated-tx` and the context transaction in
-one `blob/with-publication!`. An evicted preview refuses instead of rerunning.
-Absent renderer slots are
-omitted; actual renderer and acquisition errors stay visible. Structural floor
-HTML and raw datoms remain available as evidence. An agent prompt comparison is
-available explicitly with `?prompt=true`; it is not derived by the initial GET
-(`src/seon/render/web.clj:800-1090,2260-2337`). All results use the existing
-render functions, retained-call evidence, revisioned packages, and feed. Do not
-add a parallel renderer, walk, or delivery path.
+History is chronological, oldest first, with all turns shown by
+default. Do not hand-assemble entry kinds or format evaluations
+outside that pair.
 
-AI and HTML remain distinct projections: AI returns source (comments and
-forms that the ordinary reply reader parses and the turn's SCI fork executes;
-the printed results are what an agent reads) and HTML returns Hiccup. There is
-no form projection: `:seon.render/form` is retired (ruling 44) and the debug
-page never asks for it. Recursive render-function selection applies at every admitted value depth,
-and selected render-function output is terminal (`src/seon/render.clj:300-334,344-369`).
-Rendering limits are disabled for experimentation. `seon.print/fit` preserves
-the admitted node (`src/seon/print.cljc:1000-1011`); do not restore size,
-depth, or child cuts from older examples. Floor preparation uses the carried
-SCI interrupt when bypassing presentation admission caps
-(`src/seon/render/value.clj:207-225`). Prompt construction acquires once at the
-requested distance and retains token measurements without budget enforcement
-(`src/seon/cluster/prompt.clj:174-193`). Query-work bounds, evaluation deadlines,
-and ordinary stored-result admission are separate; existing admission elisions
-remain honest evidence of unavailable data. The owner direction is recorded
-in `docs/prds/context-generation/plan/unsettled.md`.
+## Shown text and previews — target
 
-## Preserve the live delivery path
+The value renderer applies the profile once at evaluation time.
+The evaluation stores shown text, out, and error. History reuses
+those bytes; it never reruns a form or adds a history-wide clip.
+HTML renders actual live result objects without presentation
+clipping and falls back to shown text after restart.
 
-The cluster graph owns one `:io` render proc. It derives revisioned packages
-for watched agents, suppresses unchanged pages, and publishes through a `mult`
-(`src/seon/render/web.clj:989-1072`). The cluster's one Datahike listener
-offers at most one payload-free render wake per transaction report when the
-report intersects the derived render interest
-(`src/seon/cluster/wake.clj:163-228`).
+Generated reads are stored in system turns. Before each agent turn,
+the since-query diff selects changed reads from every distinct
+read form's latest evaluation, including agent-written reads.
+Writes and effects never rerun. Passive browser render work cannot
+append evaluations.
 
-For each tab, preserve this sequence:
+The debug invocation cache holds previews in memory.
+`?prompt=true` projects stored history plus the would-be system
+turn without writing. Compaction wipes evaluations and regenerates
+the opening. Do not preserve manual Add/remove/curation controls
+as a second context mechanism.
 
-1. Register interest, tap the `mult` with `(sliding-buffer 1)`, and paint the
-   current keyframe from the current database value.
-2. Consume the newest complete revisioned package.
-3. Select its delta when the delivered revision is contiguous; otherwise use
-   its complete keyframe.
-4. Send the selected Datastar patch event.
-5. Park the connection-owned virtual thread on http-kit's drain-or-close
-   completion before the next event.
+## Preserve delivery and input
 
-The implementation is `src/seon/render/web.clj:1390-1573`. Complete packages
-make sliding-1 loss safe: a displaced package is superseded by the newer
-package, whose keyframe repairs any revision gap. The maintained http-kit fork exposes pending bytes and the
-drain-or-close completion at
-`reference-code/http-kit/src/org/httpkit/server.clj:321-326`; do not infer
-drain from `send!` alone.
+The render proc owns serialized revisioned packages.
+`join-package` returns retained bytes without deriving or serializing
+again (`src/seon/render/web.clj:1937`).
+The feed writer's `write-package!` waits for drain or close while
+the sliding-one tap retains the newest complete package
+(`src/seon/render/web.clj:2875`).
 
-## Keep human input stable
+The dependency's `write-state` returns pending bytes and a
+drain-or-close completion
+(`reference-code/http-kit/src/org/httpkit/server.clj:321`).
+A successful send alone is not a drain event. Revision gaps use
+the complete keyframe; never put delta-only values in a lossy buffer.
 
-Keep the fixed message form and hidden feed opener stable. Transient text,
-request progress, and refusal prose live in Datastar signals; a successful POST
-commits the admitted message and returns 204 without painting
-(`src/seon/render/web.clj:132-218,883-913`). The commit wakes the ordinary
-render path. Use Datastar's colon-form attributes such as `data-on:submit`; do
-not add an action-specific refresh channel.
+Keep message inputs, disclosure, and scroll stable across morphs.
+Message submission commits ordinary facts, and the existing feed
+renders their consequence. Do not add an action-specific repaint
+channel or pass an SSE connection to agent-authored code.
 
-## Verify the namespace page and feed
-
-Use a browser for layout, stable IDs, form behavior, and console errors. If a
-browser bridge does not hold the SSE connection, verify `/feed/{id}` with a
-server-side HTTP client and inspect the selected cluster log through the
-operator commands in `AGENTS.md:1071-1091`.
-
-## Separate current behavior from target work
-
-These mechanisms are current:
-
-- canonical namespace pages plus root and agent aliases
-  (`src/seon/render/route.clj:5-16`);
-- namespace and agent debug variants over the AI/HTML walk
-  (`src/seon/render/web.clj:1041-1102`);
-- one cluster render proc publishing revisioned packages carrying changed-block
-  deltas and complete keyframes,
-  with feed-side contiguous-revision selection
-  (`src/seon/render/web.clj:708-755,989-1072,1431-1573`); and
-- the fixed message form, `/data`, feed, and static-resource handlers
-  (`src/seon/render/web.clj:1104-1220`).
-
-Keep these distinct and explicitly **[TARGET]**:
-
-- agent-owned `::renders`: the live agent blueprint still contains only
-  mailbox and turn (`src/seon/cluster/agent.clj:240-264`);
-- a generalized `my.canvas`/control API and guarded `/call` action route: the
-  current fixed controls and the complete route table provide neither
-  (`src/seon/render/web.clj:132-169,1027-1037`,
-  `src/seon/render/route.clj:5-27`);
-- database-derived route trees: the live table is the `route/routes` Var
-  (`src/seon/render/route.clj:5-34`).
-
-Do not bolt a target mechanism beside the live owner. Convert the existing
-owner in place only after its target contract is settled.
-
-## Design and measurement
-
-Preserve stable block IDs, semantic hiccup, server-rendered content, and the
-maintained Phosphor tokens. `seon.render.block/surface-id` owns stable DOM IDs
-(`src/seon/render/block.clj:72-107`); `resources/public/css/input.css:54-103`
-owns the palette and typography tokens. Read
-`references/design-principles.md` before visual changes.
-
-For protocol or performance work, also load
-`seon-flow-architecture/references/render-delivery.md`. It records the live
-package/delta/keyframe delivery path and the measured delivery probes.
+Verify actual browser layout, input preservation, and feed updates.
+Separately verify the exact prompt prefix and no-write preview behavior.
+A cache marker or source publication marker alone proves neither.
