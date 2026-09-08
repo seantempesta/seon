@@ -275,3 +275,13 @@ wrappers couple clusters (a cohosted test removed 949 wrappers). Lane
 `cluster-scoped-registry` launched: registry reads/writes through the
 cluster projection; arming once per JVM, honest; regression with two
 clusters in one test JVM.
+
+14:55 — three root causes of the day's stalls found and fixed at the source:
+(1) `bin/codex-agent`'s injected lane rule said STOP on foreign breakage
+(`82d8ce7cd`: snapshot and continue); (2) a stale clj-kondo dependency
+cache refused correct code as "unresolved var" — repopulated, rule in
+AGENTS §5 (`daffede13`), gate self-population assigned to issues-sweep;
+(3) the dev-dependency cache digest includes source inputs, so every edit
+rebuilds under one lock (assigned to runner-base-cache). Runner tests red
+on a quiet machine (3) → bisect assigned (pool sizing vs cache commits).
+`bin/test-fast --paths` (snapshot isolation for the fast loop) assigned.
