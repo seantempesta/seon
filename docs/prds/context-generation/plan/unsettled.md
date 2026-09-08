@@ -1672,3 +1672,13 @@ Running in parallel: `verify-repair-2` (read-only, live scratch) and
 `instrumented-gate-backlog` (drive the 314 to zero by class; production
 defects listed separately). Lane 2 (listened attributes) launches after
 both.
+
+`verify-repair-2` (`research/verify-repair-2-2026-09-08.md`): BR1/BR3/BR4
+hold to the byte; BR2 holds with a 3-var gap; SIX production defects the
+honest gate exposed — P1 every core fault unrecordable (`commit-fault!`
+drops the required evidence bound), P2/P3 a >4 KB `def` wedges the agent
+(`settle-batch!` hands a seq where a vector is declared; the fault cannot
+commit; the run never closes), P4 MCP enrichment throws on a raw string,
+P5 nil into `result-caps`, P6 set-node generator duplicates. Fix lane
+running (`production-defects-p1-p6`) alongside the backlog lane. Also:
+the `--all` log lists 260 red names, not 314.
