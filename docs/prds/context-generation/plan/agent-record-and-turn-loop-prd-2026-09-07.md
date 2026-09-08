@@ -758,3 +758,15 @@ transact the data into the database." Declared in `seon.repl.edn` as
 `:seon.repl/note :string`; written by the one generator `seon.repl` from
 the evaluation's read evidence (the form's head symbol), never by the loop.
 
+### Functions without contracts are refused (owner, 2026-09-08)
+
+"Don't allow functions without malli contracts." A `defn` an agent evaluates
+with no `:malli/schema` is NOT installed: no program row is written, the
+var does not enter the base context, and the response says so in one
+sentence (`:seon.repl/note`): "`<name>` was not installed: every function
+needs a `:malli/schema` contract to become part of the program." Today the
+install gate skips a contract-less function while settlement still writes
+its program row, and development adoption then refuses the whole cluster
+(measured on `default`, 2026-09-08). The refusal moves to the one seam —
+the install gate — and adoption never sees such a row.
+
