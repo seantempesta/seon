@@ -1742,3 +1742,12 @@ them), 20 `parallel-only` (13 sci.eval — filed, unattributed). NOTE:
 `--all` skips 54 declared-long live-boot/operator tests — the wave's final
 gate is `--full`. Running: `turn-loop` (step 3), `refused-render-typed-
 unknown` (step 5 render half). Step 4 spec drafted (`agent-record-0908.md`).
+
+Owner: "make sure the test harness is doing the right thing as that often
+fixes entire classes of problems." Lane `test-harness` launched
+(concurrent): parity with boot as set equality, worker-isolation detector
+(the 20 `parallel-only` verdicts, 13 sci.eval), totality of every tally,
+hand-rostered fixtures routed through the canonical ones, selection by
+`:seon.fn/calls` proven, bounds/watchdog/reaping probed, `:test-results`
+evidence made real. Three lanes live: turn-loop, refused-render,
+test-harness.
