@@ -1,6 +1,6 @@
 ---
 type: prd
-status: r10 — steps 1–2 landed; step 3 in flight (one commit landed: answered by a model attempt, index-bound derivation); one clipping spot ruled (§5); lane rules consolidated (§10)
+status: r11 (2026-09-08 midday) — steps 1–2 landed; step 3 partial (answered-by-attempt + index-bound derivation `8dc708b24`; backstop subject carried `4c4bcde70`); clipping collapsed to the value renderer (`9248692d6`); all lanes stopped — the orchestrator is cutting the retired code directly (§11)
 date: 2026-09-07 (evening)
 supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
 tags: [prd, agent, wake, storage, runtime]
@@ -679,4 +679,31 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
 10. **Landing note** under `docs/prds/context-generation/research/`, dated,
     with exact bytes and measured numbers; issues under `docs/seon/issues/`
     for anything out of scope; never a finding left in chat.
+
+## 11. Where the code actually is (2026-09-08 midday, measured)
+
+| retired thing | references in `src/` | status |
+|---|---|---|
+| generated opening runs, `situation` | 25 | present |
+| the process attribute on a run, takeover, release, holder-only close | 74 | present |
+| the resume arm | — | present |
+| `:seon.context.capture` + `contribution` (a stored copy of the prompt) | 95 | present |
+| `:seon.def/*` (stored defs, rehydrated each turn) | 66 | present — see the open question below |
+| `run/trigger`, `opening-commit-id`, `plan-digest`, `undisposed-at` | 14, 19, … | present, decide nothing |
+| `:seon.render/units`, reverse-ref attributes, `agent/cluster`, instructions | 1, 11 | present |
+| presentation clipping outside the value renderer | 0 | DONE `9248692d6` |
+| `seon.cluster.*` → `seon.turn/agent/message/wake` rename | — | not started |
+
+Open question for the owner (2026-09-08): deleting `:seon.def/*` storage
+means each agent keeps ONE live SCI context in the JVM across turns
+(forked once from the base) instead of a fresh fork per turn; a restart
+loses defs (history shows they were made). Today's fresh-fork-per-turn
+model cannot keep an unstored def alive. Decide before the def family is
+cut.
+
+Method from here: the orchestrator cuts the table above directly, one row
+per commit, leaving a one-line typed refusal where a live caller remains
+(`:seon.error/kind :seon/retired`, naming this PRD) so a mechanism that
+still needs to exist announces itself on the live cluster instead of in
+argument.
 

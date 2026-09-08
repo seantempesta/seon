@@ -701,11 +701,10 @@
       [])))
 
 (defn- ai-output
-  ;; NO ELISION HERE. Presentation elides in exactly one place — the AI
-  ;; context generation boundary's `seon.print/fit`, which every producer's
-  ;; output crosses through `seon.render/fit-terminal` — so the transcript
-  ;; renders the history its own QUERY bound admitted and lets the profile
-  ;; decide what fits. The token ladder this namespace carried was a second
+  ;; NO ELISION HERE. Presentation elides in exactly one place — the value
+  ;; renderer's AI projection (`seon.render.value`) — so the transcript
+  ;; renders the history its own QUERY bound admitted and hands each value
+  ;; to that renderer. The token ladder this namespace carried was a second
   ;; elision mechanism whose only driver (`best-summary`) had no caller, and
   ;; whose reported count came from the history query's limit rather than
   ;; from any budget.
