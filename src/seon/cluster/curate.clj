@@ -272,7 +272,7 @@
 (def ^:private receipt-selector
   [:seon.cluster.eval/id :seon.cluster.eval/ordinal :seon.cluster.eval/at
    :seon.cluster.eval/result-edn :seon.cluster.eval/result-blob
-   :seon.cluster.eval/result-size :seon.cluster.eval/error
+   :seon.cluster.eval/error
    :seon.cluster.eval/triage-edn :seon.cluster.eval/interrupted-at
    :seon.error/kind :seon.cluster.eval/output
    {:seon.cluster.eval/ns [:seon.ns/name]}

@@ -1313,8 +1313,7 @@
                        (let [stored (db/pull
                                      stored-db
                                      [:db/id :seon.cluster.eval/result-edn
-                                      :seon.cluster.eval/result-blob
-                                      :seon.cluster.eval/result-size]
+                                      :seon.cluster.eval/result-blob]
                                      [:seon.cluster.eval/id
                                       (run/receipt-identity
                                        "one-grammar-stored" ordinal)])]

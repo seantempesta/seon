@@ -708,7 +708,6 @@
             {:seon.cluster.run/id run-id
              :seon.cluster.eval/ordinal ordinal
              :seon.cluster.eval/result-edn (pr-str value)
-             :seon.cluster.eval/result-size (long (count (pr-str value)))
              :seon.cluster.eval/error (:seon.error/message value)
              :seon.error/kind (:seon.error/kind value)}
              (seq (:seon.def/rows receipt))
@@ -751,7 +750,6 @@
                ;; unrestorable on the next turn.
                (dissoc :seon.program/row ::run/form-facts)
                (assoc :seon.cluster.eval/result-edn serialized
-                      :seon.cluster.eval/result-size (long (count serialized))
                       :seon.cluster.eval/error (:seon.error/message value)
                       :seon.error/kind (:seon.error/kind value))))
          prepared)

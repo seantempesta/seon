@@ -24,6 +24,11 @@
              {:min 1,
               :description
               "The namespace one evaluation left in effect, present only when the form changed it — the next prompt line already says which namespace it is in."}],
+            :interrupted
+            [:string
+             {:min 1,
+              :description
+              "The instant boot cut one evaluation, as text. Present exactly when the evaluation carries :seon.cluster.eval/interrupted-at, so an evaluation that was interrupted never reads in the agent's own history like one that is still running."}],
             :ms
             [:string
              {:description
@@ -34,6 +39,7 @@
               "The REPL's one answer to one evaluated form, emitted in exactly this key order by seon.repl/response. The agent is never asked to write one; every key is absent when the evaluation has nothing to say for it."}
              [:seon.repl/value {:optional true} :seon.repl/value]
              [:seon.repl/error {:optional true} :seon.repl/error]
+             [:seon.repl/interrupted {:optional true} :seon.repl/interrupted]
              [:seon.repl/result {:optional true} :seon.repl/result]
              [:seon.repl/out {:optional true} :seon.repl/out]
              [:seon.repl/ns {:optional true} :seon.repl/ns]
@@ -53,6 +59,8 @@
              [:seon.eval/missing {:optional true} :seon.eval/missing]
              [:seon.eval/size {:optional true} :seon.eval/size]
              [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]
+             [:seon.cluster.eval/interrupted-at {:optional true}
+              :seon.cluster.eval/interrupted-at]
              [:seon.cluster.eval/triage-edn {:optional true} :seon.cluster.eval/triage-edn]
              [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]
              [:seon.sci.eval/ending-ns {:optional true} :seon.sci.eval/ending-ns]

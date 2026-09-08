@@ -42,6 +42,7 @@
 (def ^:private response-order
   [:seon.repl/value
    :seon.repl/error
+   :seon.repl/interrupted
    :seon.repl/result
    :seon.repl/out
    :seon.repl/ns
@@ -92,11 +93,9 @@
   `:seon.repl/result` beside it: a missing value ablates its handle, and a
   later form naming that handle gets an ordinary unresolved symbol."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
-  [{missing :seon.eval/missing size :seon.eval/size}]
-  (when (keyword? missing)
-    (binding [*print-namespace-maps* true]
-      (pr-str (cond-> {:seon.eval/missing missing}
-                (int? size) (assoc :seon.eval/size size))))))
+  [emission]
+  (when-some [marker (admit/missing-marker emission)]
+    (admit/canonical-edn marker)))
 
 (defn value-text
   "Render one stored admitted print node as the text the REPL printed.
@@ -170,11 +169,20 @@
     ending-ns :seon.sci.eval/ending-ns
     prompt-ns :seon.ns/name
     duration :seon.eval/duration-ms
+    interrupted-at :seon.cluster.eval/interrupted-at
     :as emission}]
   (let [value (value-text emission)
         error (error-text emission)
         by-key {:seon.repl/value (when (and (nil? error) (some? value)) value)
                 :seon.repl/error (some-> error pr-str)
+                ;; AN EVALUATION BOOT CUT SAYS SO. Without this the response
+                ;; for an interrupted evaluation carried `:ms` alone and read
+                ;; exactly like one still running — absence of signal read as
+                ;; health, in the agent's own history (PRD §4).
+                :seon.repl/interrupted
+                (when (inst? interrupted-at)
+                  (pr-str (.toString (.toInstant ^java.util.Date
+                                                 interrupted-at))))
                 ;; A HANDLE IS A FACT, NOT A FLAG. The caller that could bind
                 ;; one hands the symbol it bound; ruling 59c's "no handle" is
                 ;; simply its absence, so nothing here re-decides what the
@@ -247,6 +255,7 @@
                              :seon.eval/missing
                              :seon.eval/size
                              :seon.cluster.eval/error
+                             :seon.cluster.eval/interrupted-at
                              :seon.cluster.eval/triage-edn
                              :seon.cluster.eval/output
                              :seon.sci.eval/ending-ns

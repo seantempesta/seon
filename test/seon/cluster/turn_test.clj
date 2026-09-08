@@ -2223,7 +2223,6 @@
                   (db/q '[:find (pull ?receipt
                                     [:seon.cluster.eval/result-edn
                                      :seon.cluster.eval/result-blob
-                                     :seon.cluster.eval/result-size
                                      :seon.cluster.eval/interrupted-at
                                      :seon.cluster.eval/error
                                      :seon.cluster.eval/output]) .
@@ -2236,7 +2235,6 @@
                          [?receipt :seon.cluster.eval/ordinal 0]
                          [?receipt :seon.cluster.eval/result-edn _ ?tx]
                          [?receipt :seon.cluster.eval/result-blob _ ?tx]
-                         [?receipt :seon.cluster.eval/result-size _ ?tx]
                          [?receipt :seon.cluster.eval/interrupted-at _ ?tx]
                          [?receipt :seon.cluster.eval/error _ ?tx]
                          [?receipt :seon.cluster.eval/output _ ?tx]
@@ -2249,8 +2247,6 @@
                       (:seon.cluster.eval/result-edn receipt)))
                   "settlement accretes delivery onto the disposition")
               (is (= {:seon.cluster.eval/result-blob result-blob
-                      :seon.cluster.eval/result-size
-                      (long (count (:seon.cluster.eval/result-edn receipt)))
                       :seon.cluster.eval/interrupted-at now
                       :seon.cluster.eval/error "combined error"
                       :seon.cluster.eval/output "combined output\n"}
