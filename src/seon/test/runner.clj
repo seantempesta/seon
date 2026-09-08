@@ -816,17 +816,77 @@
 (def ^:private protocol-prefix
   "SEON_TEST_WORKER_EDN ")
 
+(defn- load-declared-predicate-owners!
+  "Load the namespace every packaged predicate symbol names.
+
+  `seon.schema/register-core-predicate!` makes a predicate's owner loaded
+  before anything can declare against it, and schema compilation therefore
+  refuses to LOAD code while examining an authored form. A JVM that loaded
+  only part of the tree breaks that invariant from the other side:
+  `seon.schema/malli-form?` answers FALSE for four ordinary shipped
+  contracts (`my.fs/write`, `my.shell/run`, and their two JVM owners)
+  because `my.fs/content?`, `my.shell/stdin?` and `my.shell/output?` have
+  no loaded Var — and under instrumentation that is a contract violation
+  out of `seon.schema/canonical-definition` on any static analysis of the
+  tree. The set is DERIVED from the population itself: every qualified
+  symbol a Malli form carries is a predicate or generator owner. A symbol
+  that cannot be loaded is left alone; the compile it feeds still refuses
+  loudly and names it."
+  [forms]
+  (doseq [candidate (tree-seq coll? seq (seq forms))
+          :when (qualified-symbol? candidate)]
+    (try
+      (requiring-resolve candidate)
+      (catch Throwable _ nil))))
+
 (defn- packaged-test-projection
   "Acquire the packaged projection once for one test-runner JVM."
   [role]
-  (let [projection
-        (schema/declaration-projection
-         ((requiring-resolve 'seon.schema.edn/packaged-forms)))]
+  (let [forms ((requiring-resolve 'seon.schema.edn/packaged-forms))
+        _ (load-declared-predicate-owners! forms)
+        projection (schema/declaration-projection forms)]
     (binding [*out* *err*]
       (println "bin/test: PACKAGED TEST PROJECTION ACQUIRED"
                "pid=" (.pid (ProcessHandle/current))
                "role=" role))
     projection))
+
+(defn- arm-contracts!
+  "Instrument this worker JVM's loaded contracts exactly as boot does.
+
+  The gate must ask the question a live cluster asks. A contract
+  violation that makes an agent's prompt unavailable on a running
+  cluster was invisible here for as long as the worker never armed
+  instrumentation — a check that reports health because its subject was
+  never asked. The dial and the admission caps are the SHIPPED decisions
+  the operator compiles (`seon.config/default-decisions`), so the gate
+  cannot drift from boot by carrying constants of its own, and an absent
+  cap refuses NAMING the key rather than instrumenting under a partial
+  world."
+  [projection worker-id namespaces]
+  (let [decisions (config/default-decisions)
+        caps (config/result-caps decisions)]
+    (when (:seon.error/kind caps)
+      (throw
+       (ex-info (:seon.error/message caps)
+                (assoc caps ::instrumentation-unavailable true))))
+    (let [applied ((requiring-resolve 'seon.instrument/apply!)
+                   {:seon.config/on-core-error
+                    (:seon.config/on-core-error decisions)
+                    :seon.sci.admit/caps caps
+                    :seon.schema/projection projection})]
+      (when (:seon.error/kind applied)
+        (throw
+         (ex-info (:seon.error/message applied)
+                  (assoc applied ::instrumentation-unavailable true))))
+      (binding [*out* *err*]
+        (println "bin/test: CONTRACTS ARMED"
+                 "worker=" worker-id
+                 "mode=" (:seon.config/on-core-error decisions)
+                 "namespaces=" (count namespaces)
+                 "registered=" (:seon.instrument/registered applied)
+                 "instrumented=" (:seon.instrument/instrumented applied)))
+      applied)))
 
 (defn- write-protocol!
   [^PrintWriter writer value]
@@ -839,12 +899,9 @@
   (.flush writer)
   (not (.checkError writer)))
 
-(defn- worker-command-loop!
+(defn- serve-worker-commands!
   "Read and execute worker commands serially until explicitly stopped."
   [worker-id ^BufferedReader reader ^PrintWriter writer]
-  (write-protocol! writer {::worker-event :ready
-                           ::worker-id worker-id
-                           ::exchange-id (str worker-id "/readiness")})
   (loop []
     (when-let [line (.readLine reader)]
       (let [command (edn/read-string line)]
@@ -853,12 +910,24 @@
           (let [namespaces (mapv symbol (::worker-namespaces command))]
             (doseq [namespace-name namespaces]
               (require namespace-name))
-            (write-protocol! writer
-                             {::worker-event :initialized
-                              ::worker-id worker-id
-                              ::exchange-id (::exchange-id command)
-                              ::worker-namespace-count (count namespaces)})
-            (recur))
+            ;; THE PROJECTION IS ACQUIRED AFTER THE REQUIRES, exactly as a
+            ;; cluster acquires its own after loading: a predicate schema's
+            ;; callable is admitted only once the namespace declaring it is
+            ;; loaded, so a projection built earlier refuses four shipped
+            ;; contracts (`my.fs/content?`, `my.shell/stdin?`,
+            ;; `my.shell/output?`) that a live cluster resolves.
+            (let [projection (packaged-test-projection worker-id)
+                  applied (arm-contracts! projection worker-id namespaces)]
+              (write-protocol! writer
+                               {::worker-event :initialized
+                                ::worker-id worker-id
+                                ::exchange-id (::exchange-id command)
+                                ::worker-namespace-count (count namespaces)
+                                ::worker-instrumented
+                                (:seon.instrument/instrumented applied)})
+              (schema/call-with-projection
+               projection
+               #(serve-worker-commands! worker-id reader writer))))
 
           :run
           (do
@@ -880,18 +949,23 @@
                     {:seon.error/kind ::unknown-worker-command
                      ::command command :seon.test.runner/unknown-worker-command true})))))))
 
+(defn- worker-command-loop!
+  "Announce readiness, then serve commands until stopped."
+  [worker-id ^BufferedReader reader ^PrintWriter writer]
+  (write-protocol! writer {::worker-event :ready
+                           ::worker-id worker-id
+                           ::exchange-id (str worker-id "/readiness")})
+  (serve-worker-commands! worker-id reader writer))
+
 (defn- worker-main!
   [worker-id]
-  (let [projection (packaged-test-projection worker-id)
-        protocol-out (PrintWriter. System/out true)
+  (let [protocol-out (PrintWriter. System/out true)
         reader (io/reader System/in)]
     ;; Only the protocol uses stdout. Test and dependency output goes to the
     ;; worker's attributed stderr log even when a library writes System/out.
     (System/setOut System/err)
     (binding [*out* *err*]
-      (schema/call-with-projection
-       projection
-       #(worker-command-loop! worker-id reader protocol-out)))))
+      (worker-command-loop! worker-id reader protocol-out))))
 
 (defn run!
   "Run namespaces through `clojure.test` and return per-test values.

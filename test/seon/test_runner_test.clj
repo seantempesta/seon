@@ -7,6 +7,8 @@
             [seon.db :as db]
             [seon.cluster.agent :as agent]
             [seon.env :as env]
+            [seon.error :as error]
+            [seon.instrument :as instrument]
             [seon.sci.eval :as eval]
             [seon.cluster.boot-test]
             [seon.test-runner-failure-fixture]
@@ -157,6 +159,19 @@
   (is (= [(str "seon.exchange-test/" case-name)]
          (get-in result [::runner/worker-exchange-result
                          ::runner/task-symbols]))))
+
+(deftest the-gate-runs-under-the-contracts-a-cluster-runs-under
+  (testing "a worker JVM arms instrumentation from the shipped decisions"
+    (is (pos? (count (instrument/instrumented)))
+        "bin/test worker JVMs arm contract instrumentation exactly as boot
+         does; a gate that never asks the contract question reports health
+         about a subject it cannot see")
+    (let [failure (try (error/value "not a fact")
+                       (catch Exception thrown thrown))]
+      (is (= :seon.instrument/contract-violated
+             (:seon.error/kind (ex-data failure)))
+          "and a violated contract stops the call inside the gate, exactly
+           as it does on every live cluster"))))
 
 (deftest root-owning-tasks-never-co-run-inside-one-worker-group
   (let [group-a-tasks (atom [:a-1 :a-2])
