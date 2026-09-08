@@ -289,8 +289,9 @@
   (test-support/with-database
    (fn [connection]
      (db/transact! connection [{:seon.cluster.agent/id "wildcard-agent"}])
-     (instrument/apply! {:seon.config/on-core-error :panic
-                         :seon.sci.admit/caps nil})
+     ;; ABSENT MEANS NO KEY: the admission caps are optional here, and a nil
+     ;; in an optional key fails its contract.
+     (instrument/apply! {:seon.config/on-core-error :panic})
      (try
        (is (= "wildcard-agent"
               (:seon.cluster.agent/id
@@ -928,7 +929,11 @@
   (test-support/with-database
    (fn [connection]
      (let [before @connection
-           before-t (:t before)]
+           ;; THE VOCABULARY'S OWN NAME. `(:t database)` is not a key on a
+           ;; Datahike database value, so this read was nil — a present nil
+           ;; that both `as-of` calls accepted while comparing two views of
+           ;; nothing, until the armed contract asked what a time point is.
+           before-t (db/basis-t before)]
        (db/transact! connection
                      [{:seon.cluster.message/id "db-test-temporal"}])
        (let [after @connection]
@@ -1233,11 +1238,6 @@
    (fn [connection]
      (let [cases
            [[(db/q @connection {:args []}) 'seon.db/q :query]
-            [(db/pull @connection
-                      {:eid [:seon.cluster.agent/id "root"]})
-             'seon.db/pull :selector]
-            [(db/transact! connection {:not-tx-data []})
-             'seon.db/transact! :tx-data]
             [(db/q @connection
                    '[:find ?entity
                      :where
@@ -1259,6 +1259,28 @@
          (is (= member
                 (get-in result
                         [:seon.error/data :seon.error/diagnostic-member]))))
+       ;; `seon.db/pull` declares `:selector` required and `seon.db/transact!`
+       ;; declares the shape of `:tx-data`, so under the contracts every
+       ;; cluster arms the refusal lands one frame before the body — and it
+       ;; is the STRONGER proof: the offending argument in the diagnostic is
+       ;; the caller's own request, unreplaced, observed before the body
+       ;; could compute anything about it.
+       (doseq [[thunk operation path]
+               [[#(db/pull @connection
+                           {:eid [:seon.cluster.agent/id "root"]})
+                 'seon.db/pull [:selector]]
+                [#(db/transact! connection {:not-tx-data []})
+                 'seon.db/transact! [:tx-data]]]]
+         (let [refusal (test-support/refusal-data thunk)]
+           (is (= :seon.instrument/contract-violated
+                  (:seon.error/kind refusal)))
+           (is (= operation
+                  (get-in refusal [:seon.error/data
+                                   :seon.error/diagnostic-operation])))
+           (is (= path
+                  (first (get-in refusal
+                                 [:seon.error/data
+                                  :seon.instrument/problem-paths]))))))
        (let [malformed (first (last cases))]
          (is (= [:entity :attribute :value :transaction :added]
                 (get-in malformed
