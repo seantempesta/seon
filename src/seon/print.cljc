@@ -74,6 +74,65 @@
                :seon.render.profile/id :seon.render.profile/agent
                ::requery-refusal "generated values have no stable identity"}))
 
+(def node-generator
+  "Whole print-node trees spanning every declared face.
+
+  `:seon.print/node` is validated by a predicate rather than a recursive
+  Malli ref (see `node?`), so the domain declares its own generator instead
+  of inheriting one from a recursive reference. Every face the emitter is
+  total over appears here, and containers recur under test.check's own
+  depth bound."
+  (let [named (fn [face]
+                (gen/fmap (fn [name] {::face face ::name name})
+                          gen/string-alphanumeric))
+        scalar
+        (gen/one-of
+         [(gen/return {::face ::nil ::value nil})
+          (gen/fmap (fn [value] {::face ::boolean ::value value}) gen/boolean)
+          (gen/fmap (fn [value] {::face ::number ::value value})
+                    number-generator)
+          (gen/fmap (fn [value] {::face ::keyword ::value value}) gen/keyword)
+          (gen/fmap (fn [value] {::face ::symbol ::value value}) gen/symbol)
+          (gen/fmap (fn [value] {::face ::char ::value value}) char-generator)
+          (gen/fmap (fn [value] {::face ::string ::value value}) gen/string)
+          #?(:clj (gen/fmap (fn [ms] {::face ::inst
+                                      ::value (java.util.Date. (long ms))})
+                            gen/nat))
+          (gen/fmap (fn [value] {::face ::uuid ::value value}) gen/uuid)
+          (named ::var)
+          (named ::type)
+          (named ::class)
+          (gen/fmap (fn [class-name] {::face ::object ::class class-name})
+                    gen/string-alphanumeric)
+          (gen/fmap (fn [value] {::face ::truncated-string
+                                 ::value value
+                                 ::length (inc (count value))
+                                 ::bound-by
+                                 :seon.config.eval.result/max-string})
+                    gen/string)
+          (gen/fmap (fn [[class-name message]]
+                      {::face ::failed ::class class-name ::message message})
+                    (gen/tuple gen/string-alphanumeric gen/string-alphanumeric))
+          elision-node-generator
+          projected-node-generator
+          (gen/return {::face ::pruned})])]
+    (gen/recursive-gen
+     (fn [inner]
+       (let [entries (gen/vector (gen/tuple inner inner) 0 3)]
+         (gen/one-of
+          [(gen/fmap (fn [items] {::face ::vector ::items items})
+                     (gen/vector inner 0 3))
+           (gen/fmap (fn [items] {::face ::list ::items items})
+                     (gen/vector inner 0 3))
+           (gen/fmap (fn [items] {::face ::set ::items items})
+                     (gen/vector inner 0 3))
+           (gen/fmap (fn [rows] {::face ::map ::entries rows}) entries)
+           (gen/fmap (fn [[record-name rows]]
+                       {::face ::record ::name record-name ::entries rows})
+                     (gen/tuple gen/string-alphanumeric entries))
+           (gen/fmap (fn [value] {::face ::throwable ::value value}) inner)])))
+     scalar)))
+
 (defn- append-chunk!
   [state text]
   (let [text (str text)
@@ -707,6 +766,54 @@
 (def ^:private structural-faces
   #{::vector ::list ::set ::map ::record ::throwable})
 
+(defn node-child?
+  "True when `value` occupies one print node's child slot."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (map? value) (keyword? (::face value))))
+
+(defn- node-face-validator
+  []
+  (if-some [projection (schema/handed-projection)]
+    (schema/projection-cache-value
+     projection ::node-face-validator
+     (fn [] (schema/projection-validator projection ::node-face)))
+    (schema/candidate-validator ::node-face)))
+
+(defn- node-children
+  [node]
+  (case (::face node)
+    (::vector ::list ::set) (::items node)
+    (::map ::record) (into []
+                           (mapcat (fn [entry]
+                                     (if (vector? entry) entry [entry])))
+                           (::entries node))
+    ::throwable [(::value node)]
+    nil))
+
+(defn node?
+  "True when `value` is a print node, one node at a time.
+
+  ITERATIVE BY CONSTRUCTION. A recursive Malli `:ref` validates a node by
+  recursing once per level: at depth 3,510 the contract on an admitted
+  value answered `java.lang.StackOverflowError` — an `Error` escaping a
+  total operation at exactly the boundary law 2.4 requires a flat value
+  from, and the walk that produced the node is iterative. Each node is
+  checked against the declared per-face shape (`:seon.print/node-face`)
+  and its children are handed back to this loop, so the face table is
+  declared once and the depth a contract admits is the depth admission
+  admits."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (let [valid? (node-face-validator)]
+    (loop [pending (list value)]
+      (if-some [remaining (seq pending)]
+        (let [node (first remaining)]
+          (if (valid? node)
+            (recur (into (rest remaining) (node-children node)))
+            false))
+        true))))
+
 (defn- requery-fields
   [profile]
   (if-some [identity (::requery-id profile)]
@@ -1010,6 +1117,8 @@
           :else candidate)))))
 
 (schema/register-core-predicate! 'seon.print/sink? sink?)
+(schema/register-core-predicate! 'seon.print/node? node?)
+(schema/register-core-predicate! 'seon.print/node-child? node-child?)
 (schema/register-core-predicate! 'seon.print/print-number? print-number?)
 (schema/register-core-predicate! 'seon.print/print-char? print-char?)
 

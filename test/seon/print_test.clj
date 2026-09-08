@@ -254,12 +254,28 @@
                 summaries)
         "every print summary owns a visible label without CSS")))
 
+(defn- emitted-both
+  "Emit one value through the tee sink WITHOUT the public node contract.
+
+  `seon.print/emit-both` declares `:seon.print/node`, and an undeclared or
+  absent face is not one — under the armed contracts every cluster runs
+  under (and the gate now runs under) that call is refused before the
+  emitter is reached. The floor being asserted here is the emitter's own:
+  whatever face arrives, both sinks answer with the same flat diagnostic
+  rather than a second exception."
+  [node options]
+  (let [text (print/text-sink options)
+        hiccup (print/hiccup-sink)]
+    (#'print/emit-node node (print/tee-sink text hiccup) options 0 [])
+    {:seon.print/text (#'print/sink-result text)
+     :seon.print/hiccup (#'print/sink-result hiccup)}))
+
 (deftest terminal-emission-is-total-for-an-unknown-or-absent-face
   (doseq [node [{:seon.print/face :fixture/unknown
                  :fixture/value 1}
                 {:fixture/value 1}]]
     (let [{:seon.print/keys [text hiccup]}
-          (print/emit-both node no-cuts)
+          (emitted-both node no-cuts)
           error (edn/read-string text)]
       (is (str/includes? text ":seon.print/unknown-face"))
       (is (str/includes? text (pr-str (:seon.print/face node))))

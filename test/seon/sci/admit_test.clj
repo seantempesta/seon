@@ -459,7 +459,13 @@
   ;; depth is bounded by the storage bound and by nothing else.
   (letfn [(nest [n] (reduce (fn [inner _] {:in inner}) :leaf (range n)))]
     (testing "the depth that used to overflow is admitted WHOLE"
-      (doseq [depth [2000 5000]]
+      ;; 20,000 is here because the walk being iterative was not enough: the
+      ;; `:seon.print/node` CONTRACT was a recursive Malli ref, so on any
+      ;; instrumented JVM — every live cluster — validating a node deeper
+      ;; than 3,509 threw `StackOverflowError` out of Malli while the walk
+      ;; that built it never came close. The gate arms the same contracts a
+      ;; cluster arms, so this case now asks the question it claimed to.
+      (doseq [depth [2000 5000 20000]]
         (let [admitted (admit/admit (request (nest depth)))]
           (is (contains? admitted :seon.sci.admit/print-node)
               (str "depth " depth " stored nothing"))
