@@ -95,11 +95,11 @@ inventory were not independently searched in the archive before the stop.
 | [ai-context-bypasses-render-proc-retained-bytes](../../../seon/issues/ai-context-bypasses-render-proc-retained-bytes.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [an-entity-pull-returns-a-sentence-instead-of-its-attributes](../../../seon/issues/an-entity-pull-returns-a-sentence-instead-of-its-attributes.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [an-inbox-entry-carries-a-nil-for-content-history-deliberately-discards](../../../seon/issues/an-inbox-entry-carries-a-nil-for-content-history-deliberately-discards.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
-| [an-unmatched-print-face-throws-no-matching-clause-and-names-nothing](../../../seon/issues/an-unmatched-print-face-throws-no-matching-clause-and-names-nothing.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
+| [an-unmatched-print-face-throws-no-matching-clause-and-names-nothing](../../../seon/issues/archive/an-unmatched-print-face-throws-no-matching-clause-and-names-nothing.md) | Superseded: The owner’s turn PRD §15 explicitly deletes semantic-value and result rehydration. Extending this decoder with another refusal arm would repair the retired result representation. This closes the decoder proposal against the ruling, not a claim that the protected turn-cut has completed deletion. |
 | [anonymous-runtime-contracts-have-recurred](../../../seon/issues/anonymous-runtime-contracts-have-recurred.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [artifact-releases-the-fence-between-install-and-start](../../../seon/issues/artifact-releases-the-fence-between-install-and-start.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [background-binary-settlement-does-not-publish-required-event](../../../seon/issues/background-binary-settlement-does-not-publish-required-event.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
-| [background-result-wakes-have-no-run-trigger](../../../seon/issues/background-result-wakes-have-no-run-trigger.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
+| [background-result-wakes-have-no-run-trigger](../../../seon/issues/archive/background-result-wakes-have-no-run-trigger.md) | Superseded: The turn PRD §3 and §6 remove the trigger reference entirely. Wakes derive from listened attributes, including seon.effect/to, and answeredness derives from transaction evidence. A universal stored trigger reference is no longer the target; the original proposed acceptance would restore deliberately deleted state. The protected turn/wake implementation remains its owner’s work. |
 | [bin-test-shared-base-compiles-other-lanes-half-edits](../../../seon/issues/bin-test-shared-base-compiles-other-lanes-half-edits.md) | Read completely; gate reproduced this class. Protected runner; left open. |
 | [blob-get-assumes-file-store-callback-shape](../../../seon/issues/blob-get-assumes-file-store-callback-shape.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [boot-refusal-has-no-render-producer](../../../seon/issues/boot-refusal-has-no-render-producer.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
@@ -249,7 +249,7 @@ inventory were not independently searched in the archive before the stop.
 | [render-walk-maintains-a-derived-edge-hand-list](../../../seon/issues/render-walk-maintains-a-derived-edge-hand-list.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [render-wave-properties-cannot-produce-their-failing-cases](../../../seon/issues/render-wave-properties-cannot-produce-their-failing-cases.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [repl-parity-divergences](../../../seon/issues/repl-parity-divergences.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
-| [repl-skill-omits-required-instrumentation-request](../../../seon/issues/repl-skill-omits-required-instrumentation-request.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
+| [repl-skill-omits-required-instrumentation-request](../../../seon/issues/archive/repl-skill-omits-required-instrumentation-request.md) | Resolved: The skill now gives the complete reload/re-arm form with the selected connection, immutable database projection, and database-derived core-error mode. Executed through default MCP JVM evaluation on 2026-09-08: registered 901, instrumented 900 (the primitive required-cap function is intentionally excluded by Malli). The same contracted oversight call then returned “delayed: unknown”. This proves hot-reloaded JVM behavior, not program publication or browser paint. The skill passes both its bundled validator and the repository Markdown validator. |
 | [reset-deletes-a-bloated-store-one-lstat-at-a-time](../../../seon/issues/reset-deletes-a-bloated-store-one-lstat-at-a-time.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [retained-render-packages-survive-producer-replacement](../../../seon/issues/retained-render-packages-survive-producer-replacement.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [retired-form-projection-still-declared-and-selected](../../../seon/issues/retired-form-projection-still-declared-and-selected.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
@@ -338,3 +338,23 @@ scheduler and assuming that reproduced the intended absence.
 The edit hook’s static check found only shadowing warnings. Shared publication
 refused the concurrent misplaced `:seon.agent/plan` declaration in my.plan.edn;
 that protected schema is left to its owner. Paths-only gating proceeds.
+
+New inventory member: [skill-frontmatter-validators-disagree](../../../seon/issues/archive/skill-frontmatter-validators-disagree.md) — resolved. The Markdown rule selects the SKILL.md file format and requires name/description, while ordinary documents still require type/status. Skill fields no longer enter the document vault’s type/tag vocabulary. The existing Babashka hook suite passed 30 tests / 369 assertions, including one class regression covering valid skills, ordinary documents using skill fields, and missing/empty skill fields. `validate-file` on .agents/skills/repl/SKILL.md returned valid? true with no violations; the bundled quick_validate.py also returned “Skill is valid!”. The external validator continues to own its full skill-format checks.
+
+### Markdown and REPL skill proof
+
+The hook runs Babashka on `script:resources` (`bin/seon` and the hook’s
+configuration own that classpath). Reproduction with that runtime returned
+two required-fields errors for a valid name/description skill. After the
+format selection fix, the same full `validate-file` returns true and an empty
+violation vector. `bb --classpath script:resources` running the existing
+`seon.dev.markdown-test` suite passed 30 tests / 369 assertions / 0 failures
+and errors. The bundled validator passed the updated REPL skill. The three
+comment-shaped result echoes reported by the docstring hook were removed in
+the same owner file. No production regex was added.
+
+The first JVM re-arm probe lacked the handed config projection and refused
+before reloading. The corrected form brackets config reading with
+`schema/call-with-projection`, reloads oversight, and passes the complete
+request to `instrument/apply!`; that exact corrected workflow is in the skill.
+Default returned 901 registered / 900 instrumented and `delayed: unknown`.

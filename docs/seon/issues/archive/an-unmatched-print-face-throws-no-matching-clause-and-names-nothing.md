@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, sci, class/n1, wave/error-face-budget]
 ---
@@ -59,3 +59,9 @@ probe calls `seon.sci.admit/semantic-value` first. The exact remaining edit is
 to replace its closed `case` miss in `src/seon/sci/admit.clj` with the same
 flat error shape naming the observed face and sorted node keys, with one
 absent/unknown regression in `test/seon/sci/admit_test.clj`.
+
+## Superseded — issues-sweep, 2026-09-08
+
+The owner’s turn PRD §15 explicitly deletes semantic-value and result rehydration. Extending this decoder with another refusal arm would repair the retired result representation. This closes the decoder proposal against the ruling, not a claim that the protected turn-cut has completed deletion.
+
+[Landing evidence](../../../prds/context-generation/research/issues-sweep-landing-2026-09-08.md).

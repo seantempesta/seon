@@ -83,6 +83,24 @@ exercised. Re-evaluating a contracted Var replaces its wrapper;
 `seon.instrument/apply!` documents re-arming with the supplied projection
 at `src/seon/instrument.clj:685`.
 
+For the selected development cluster, the complete JVM form is below.
+Choose the namespace to reload; the database supplies both the projection
+and instrumentation mode (`src/seon/schema.clj:930`, `src/seon/config.clj:533`).
+
+```clojure
+(let [connection (seon.operator/connection "default")
+      database @connection
+      projection (seon.schema/projection-from-database database)]
+  (seon.schema/call-with-projection
+   projection
+   (fn []
+     (let [configuration (seon.config/effective database "default")]
+       (require 'seon.oversight :reload)
+       (seon.instrument/apply!
+        {:seon.config/on-core-error (:seon.config/on-core-error configuration)
+         :seon.schema/projection projection})))))
+```
+
 Use actual agent turns for persistence, isolation, publication, or
 outcome-storage claims. HTTP reachability and a successful host eval
 prove neither those behaviors nor browser repaint.

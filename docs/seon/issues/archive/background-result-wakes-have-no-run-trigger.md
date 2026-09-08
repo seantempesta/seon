@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, agent, runtime, effect, class/p3, wave/why-awake]
 ---
@@ -34,3 +34,9 @@ The run trigger model and background-result open transition in
   run one queryable cause through a declared run connection.
 - `(help)` reports that cause without branching on wake family.
 - The background-result regression no longer expects a cause-free run.
+
+## Superseded — issues-sweep, 2026-09-08
+
+The turn PRD §3 and §6 remove the trigger reference entirely. Wakes derive from listened attributes, including seon.effect/to, and answeredness derives from transaction evidence. A universal stored trigger reference is no longer the target; the original proposed acceptance would restore deliberately deleted state. The protected turn/wake implementation remains its owner’s work.
+
+[Landing evidence](../../../prds/context-generation/research/issues-sweep-landing-2026-09-08.md).

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, docs, wave/docs-honesty]
 ---
@@ -47,3 +47,9 @@ at the owner rather than making every skill carry incompatible metadata.
 An ordinary valid SKILL.md passes both the repository hook and the
 supported skill validator. Non-skill documents still require their
 declared document metadata, and malformed skill frontmatter still fails.
+
+## Resolved — issues-sweep, 2026-09-08
+
+The Markdown rule selects the SKILL.md file format and requires name/description, while ordinary documents still require type/status. Skill fields no longer enter the document vault’s type/tag vocabulary. The existing Babashka hook suite passed 30 tests / 369 assertions, including one class regression covering valid skills, ordinary documents using skill fields, and missing/empty skill fields. `validate-file` on .agents/skills/repl/SKILL.md returned valid? true with no violations; the bundled quick_validate.py also returned “Skill is valid!”. The external validator continues to own its full skill-format checks.
+
+[Landing evidence](../../../prds/context-generation/research/issues-sweep-landing-2026-09-08.md).

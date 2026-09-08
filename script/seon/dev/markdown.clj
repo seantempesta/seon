@@ -483,25 +483,18 @@
       ::fix "Add frontmatter with type and status fields"}]))
 
 (defn- rule-required-fields
-  "type and status fields present in frontmatter."
-  [frontmatter]
+  "The document format's required fields must be present in frontmatter."
+  [frontmatter fields]
   (when frontmatter
-    (let [violations (transient [])]
-      (when-not (:type frontmatter)
-        (conj! violations
-               {::rule :required-fields
-                ::severity :error
-                ::line 1
-                ::message "Frontmatter missing required field: type"
-                ::fix "Add 'type: <value>' to frontmatter"}))
-      (when-not (:status frontmatter)
-        (conj! violations
-               {::rule :required-fields
-                ::severity :error
-                ::line 1
-                ::message "Frontmatter missing required field: status"
-                ::fix "Add 'status: <value>' to frontmatter"}))
-      (persistent! violations))))
+    (into []
+          (keep (fn [field]
+                  (when (str/blank? (get frontmatter field))
+                    {::rule :required-fields
+                     ::severity :error
+                     ::line 1
+                     ::message (str "Frontmatter missing required field: " (name field))
+                     ::fix (str "Add '" (name field) ": <value>' to frontmatter")})))
+          fields)))
 
 (defn- parse-tag-list
   "Parse a frontmatter tags value like '[database, schema]' into keywords."
@@ -820,6 +813,7 @@
            vault-root rules fm-end-line file-path]}]
   (let [active (or rules all-rules)
         run? (fn [r] (contains? active r))
+        skill? (and file-path (= "SKILL.md" (.getName (io/file file-path))))
         fm-end (or fm-end-line 1)]
     (into []
           cat
@@ -834,9 +828,10 @@
            (when (run? :fenced-code-style) (rule-fenced-code-style lines code-lines))
            (when (run? :list-style) (rule-list-style lines code-lines))
            (when (run? :has-frontmatter) (rule-has-frontmatter frontmatter))
-           (when (run? :required-fields) (rule-required-fields frontmatter))
-           (when (run? :valid-tags) (rule-valid-tags frontmatter vault-root))
-           (when (run? :valid-type) (rule-valid-type frontmatter vault-root))
+           (when (run? :required-fields)
+             (rule-required-fields frontmatter (if skill? [:name :description] [:type :status])))
+           (when (and (not skill?) (run? :valid-tags)) (rule-valid-tags frontmatter vault-root))
+           (when (and (not skill?) (run? :valid-type)) (rule-valid-type frontmatter vault-root))
            (when (run? :wikilink-target-exists) (rule-wikilink-target-exists links vault-root))
            (when (run? :no-bare-urls) (rule-no-bare-urls links))
            (when (run? :dependency-pin-current)
@@ -1024,7 +1019,7 @@
 
    Example:
      (parse {::content \"---\\ntype: component\\n---\\n# Title\\n\\nBody\"})
-     ;; => {::content \"...\" ::frontmatter {:type \"component\"} ::headings [...] ...}"
+   Returns the original content, frontmatter, headings, links, and sections."
   {:malli/schema [:=> [:cat #'parse-request-schema] #'document-schema]}
   [{::keys [content]}]
   (let [[frontmatter _remaining _fm-end-line] (parse-frontmatter content)
@@ -1056,7 +1051,7 @@
 
    Example:
      (validate {::content \"# Test\\n\"})
-     ;; => {::valid? false ::violations [...] ::document {...}}"
+   Returns validity, violations, and the parsed document."
   {:malli/schema
    [:=> [:cat #'validate-request-schema] #'validate-response-schema]}
   [{::keys [content rules gitlinks vault-root file-path]}]
@@ -1208,7 +1203,7 @@
 
    Example:
      (fix {::content \"# No blank after\\ntext\"})
-     ;; => {::content \"# No blank after\\n\\ntext\\n\" ::fixed-count 2}"
+   Returns the corrected content and the number of formatting fixes."
   {:malli/schema [:=> [:cat #'fix-request-schema] #'fix-response-schema]}
   [{::keys [content]}]
   (reduce

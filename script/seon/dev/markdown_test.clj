@@ -162,6 +162,22 @@
                                ::md/rules #{:required-fields}})]
       (is (::md/valid? result)))))
 
+(deftest skill-frontmatter-uses-the-skill-format
+  (let [request {::md/file-path ".agents/skills/example/SKILL.md"
+                 ::md/rules #{:has-frontmatter :required-fields :valid-type :valid-tags}}
+        content "---\nname: example\ndescription: Explain the example\n---\n\n# Example\n"]
+    (is (::md/valid? (md/validate (assoc request ::md/content content))))
+    (testing "ordinary documents cannot bypass their metadata using skill fields"
+      (is (= 2 (count (::md/violations
+                       (md/validate (assoc request ::md/file-path "docs/example.md"
+                                                   ::md/content content)))))))
+    (testing "missing, empty, and absent skill frontmatter remain errors"
+      (doseq [invalid ["# Example\n"
+                       "---\ntype: reference\nstatus: active\n---\n# Example\n"
+                       "---\nname: example\ndescription:\n---\n# Example\n"
+                       "---\nname: example\n---\n# Example\n"]]
+        (is (false? (::md/valid? (md/validate (assoc request ::md/content invalid)))))))))
+
 (deftest dependency-pin-current-rule-test
   (let [current "15d98da60991b6ded59b15cf0d499a7055a02266"
         stale "10540578248eaa686c1f88a7fe57644ee4c9f993"

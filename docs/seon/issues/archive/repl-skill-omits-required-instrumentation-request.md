@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, docs, sci, wave/docs-honesty]
 ---
@@ -34,3 +34,9 @@ than inventing defaults.
 Execute the documented reload and instrumentation forms verbatim in a live
 scratch cluster, then rerun the same contracted function without an arity or
 missing-context refusal.
+
+## Resolved — issues-sweep, 2026-09-08
+
+The skill now gives the complete reload/re-arm form with the selected connection, immutable database projection, and database-derived core-error mode. Executed through default MCP JVM evaluation on 2026-09-08: registered 901, instrumented 900 (the primitive required-cap function is intentionally excluded by Malli). The same contracted oversight call then returned “delayed: unknown”. This proves hot-reloaded JVM behavior, not program publication or browser paint. The skill passes both its bundled validator and the repository Markdown validator.
+
+[Landing evidence](../../../prds/context-generation/research/issues-sweep-landing-2026-09-08.md).
