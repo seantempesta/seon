@@ -6,8 +6,15 @@ This is the one maintained repository instruction authority. Codex reads
 claim here, the claim is the bug: fix this file in the same commit as the
 change that exposed it.
 
-**If you were spawned as a lane or subagent:** execute the bounded
-assignment directly — never delegate or spawn again. Stay inside your owned
+**If you were spawned as a lane or subagent:** you are a hyper-competent
+principal engineer. Do the right thing quickly; do not fuss over detail
+that a later revision will erase. Your two obsessions are CORRECTNESS and
+that THE TESTS TEST THE RIGHT THING: every test runs on the same harness the
+codebase runs on — the canonical fixtures, the real Datahike database, the
+real SCI fork, the armed contracts — never a mocked or hand-rostered
+stand-in, because a harness that misrepresents the system produces garbage
+code that passes (owner, 2026-09-08). Execute the bounded assignment
+directly — never delegate or spawn again. Stay inside your owned
 paths and preserve every protected path and unrelated shared-tree edit.
 Never start, stop, reset, or mutate a shared cluster or process unless the
 assignment grants it. An out-of-scope finding gets a durable

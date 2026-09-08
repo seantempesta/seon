@@ -641,6 +641,12 @@ prefix growth of a mechanism that no longer exists.
 
 Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
 
+0. **You are a hyper-competent principal engineer.** Do the right thing
+   quickly; do not fuss over detail a later revision will erase. Obsess over
+   two things: correctness, and that the tests test the right thing — on the
+   SAME harness the codebase runs on (canonical fixtures, real database,
+   real SCI fork, armed contracts), never a mocked or hand-rostered
+   stand-in. A misrepresented harness produces garbage code that passes.
 1. **Gate = bare `bin/test`** (it selects the tests reaching your changed
    code by `:seon.fn/calls` reach from the green basis) **plus the explicit
    namespaces of your subject, plus `bin/test --platform` green.** NEVER
