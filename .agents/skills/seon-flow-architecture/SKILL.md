@@ -1,7 +1,5 @@
 ---
 name: seon-flow-architecture
-type: skill
-status: active
 description: "Design or change Seon procs, graph lifecycle, workloads, channels, and bounded execution using core.async.flow. Use before adding running machinery or changing agent context ownership."
 ---
 
