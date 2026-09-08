@@ -34,3 +34,17 @@ Related: `development-adoption-can-mix-host-and-sci-generations.md`.
   committed through the fault committer, and the acquisition continues;
   it never refuses the cluster. Regression: one agent row with a missing
   namespace in a canonical fixture; adoption succeeds and one fault names it.
+
+## 2026-09-08 acquisition regression
+
+The current refresh caller passes the cluster database, not the source
+snapshot. The armed canonical regression instead reproduced missing
+`:seon.schema.admission/source` on acquisition's reconstructed function
+rows. That refused both the invalid row and its valid sibling.
+The repair carries the cluster-derived provenance, contains typed and
+thrown row failures, and uses the existing cluster fault committer during
+development acquisition. The scoped gate passed 1 test / 10 assertions,
+including a source snapshot without the agent namespace, one durable fault,
+and a callable valid sibling. Full live convergence remains to be verified;
+the first explicit adoption attempt failed earlier at `seon.fn/exact-source`.
+Evidence: [adoption landing note](../../prds/context-generation/research/adoption-rows-landing-2026-09-08.md).

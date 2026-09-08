@@ -1876,6 +1876,27 @@
           (or (io/resource (str resource ".clj"))
               (io/resource (str resource ".cljc")))))))
 
+(declare commit-fault!)
+
+(defn- acquire-development!
+  [connection cluster-name ctx projection]
+  (let [database @connection
+        effective (config/effective database cluster-name)
+        _ (when (:seon.error/kind effective)
+            (refused! "Development acquisition configuration is unavailable."
+                      effective))
+        result (sci.eval/acquire!
+                {:seon.sci.eval/ctx ctx
+                 :seon.db/db database
+                 :seon.schema/projection projection
+                 :seon.flow/commit-fault!
+                 #(commit-fault! connection cluster-name
+                                 "seon.sci.eval/acquire"
+                                 (config/result-caps effective) %)})]
+    (when-let [failure (:seon.sci.eval/acquisition-recording-error result)]
+      (refused! "Development acquisition could not record a row fault." failure))
+    result))
+
 (defn- development-source-refresh!
   [held-store instance before-publication published]
   (let [connection (:seon.boot/cluster-connection instance)
@@ -1975,12 +1996,7 @@
       (report-source-progress! (str "development reload " namespace-name))
       (require namespace-name :reload))
     (report-source-progress! "development SCI acquisition")
-    (let [result (sci.eval/acquire! {:seon.sci.eval/ctx ctx
-                                    :seon.db/db database
-                                    :seon.schema/projection projection})]
-      (when (seq (:seon.sci.eval/acquisition-refusals result))
-        (refused! "Development SCI acquisition refused committed definitions."
-                  result)))
+    (acquire-development! connection cluster-name ctx projection)
     (env/advance-projection! (get ctx env/state-carrier)
                              (db/basis-t database) projection)
     (report-source-progress! "development JVM instrumentation")

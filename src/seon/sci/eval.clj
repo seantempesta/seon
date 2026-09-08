@@ -1398,10 +1398,10 @@
   "A flat agent-mistake value naming one row that could not be installed."
   [row failure]
   (let [identity (program-row-identity row)
-        failure-data (error/refusal failure)
+        failure-data (if (map? failure) failure (error/refusal failure))
         cause-kind (:seon.error/kind failure-data)
         cause-message (or (:seon.error/message failure-data)
-                          (ex-message failure)
+                          (when (instance? Throwable failure) (ex-message failure))
                           (.getName (class failure)))]
     (error/diagnostic
      {:seon.error/kind ::acquisition-refused
@@ -1437,10 +1437,15 @@
 
 (defn- record-acquisition-refusals!
   "Record contained row refusals through the one durable error owner."
-  [ctx db state]
+  [ctx db state commit-fault!]
   (let [refusals (::acquisition-refusals state)]
     (if-not (seq refusals)
       state
+      (if commit-fault!
+        (let [outcomes (mapv commit-fault! refusals)
+              failed (first (remove #(= :seon.flow/committed (second %)) outcomes))]
+          (cond-> (assoc state ::acquisition-refusals-recorded? (nil? failed))
+            failed (assoc ::acquisition-recording-error (second failed))))
       (if-let [connection (:seon.db/connection (::custody ctx))]
         (let [read-effective (database-effective-config db)
               ;; THE FALLBACK KEYS ON THE REFUSAL, not on nil: this read
@@ -1479,7 +1484,7 @@
             (:seon.error/kind outcome)
             (assoc ::acquisition-refusals-recorded? false
                    ::acquisition-recording-error outcome)))
-        (assoc state ::acquisition-refusals-recorded? false)))))
+        (assoc state ::acquisition-refusals-recorded? false))))))
 
 (defn acquire!
   "Install declared renderer roots and agent code plus remaining compiled core.
@@ -1493,7 +1498,8 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx
     db :seon.db/db
-    supplied-projection :seon.schema/projection}]
+    supplied-projection :seon.schema/projection
+    commit-fault! :seon.flow/commit-fault!}]
   (let [projection (or supplied-projection
                        (schema/projection-from-database db))]
     (schema/call-with-projection
@@ -1654,12 +1660,15 @@
                            (:seon.schema/projection state))
                     :seon.db/db db
                     :seon.program/row row})]
-              (assoc state
-                     :seon.schema/projection
-                     (:seon.schema/projection installed)
-                     :seon.sci.eval/installed
-                     (+ (:seon.sci.eval/installed state)
-                        (:seon.sci.eval/installed installed))))
+              (if (:seon.error/kind installed)
+                (update state ::acquisition-refusals (fnil conj [])
+                        (acquisition-refusal row installed))
+                (assoc state
+                       :seon.schema/projection
+                       (:seon.schema/projection installed)
+                       :seon.sci.eval/installed
+                       (+ (:seon.sci.eval/installed state)
+                          (:seon.sci.eval/installed installed)))))
             (catch Throwable failure
               (update state ::acquisition-refusals (fnil conj [])
                       (acquisition-refusal row failure)))))]
@@ -1694,6 +1703,7 @@
                 (update :seon.sci.eval/installed inc))
               (map (fn [[sym source _ source-tx _]]
                      {:seon.fn/sym sym
+                      :seon.schema.admission/source (source-for-transaction source-tx)
                       :seon.fn/source source
                       :seon.fn/ns [:seon.ns/name namespace-name]
                       ::skip-contract-install?
@@ -1712,13 +1722,15 @@
           (reduce
            install-row
            state
-           (map (fn [[sym source _ _]]
+           (map (fn [[sym source _ source-tx]]
                   {:seon.test/sym sym
+                   :seon.schema.admission/source (source-for-transaction source-tx)
                    :seon.test/source source
                    :seon.test/ns [:seon.ns/name namespace-name]})
                 (sort-by first (get test-rows-by-ns namespace-name)))))
         functions-installed
-        namespace-order))))))))
+        namespace-order)
+       commit-fault!)))))))
 
 (defn- def-restore-notice
   [intern-name reason]
