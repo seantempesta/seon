@@ -299,3 +299,23 @@ first then second. On a new `record-render-reconcile` agent, `plan!` returned
 one added step; repeating the same authored input returned converged true
 and a zero diff. These exercised the loaded definitions after development
 adoption reload work; source-commit convergence has not yet been established.
+
+
+### Protected publication boundary
+
+The next explicit default publication (`tmp/record-render-publication7.log`)
+failed static analysis: `src/seon/turn.clj:135:63`, `Unmatched bracket:
+unexpected )`. This is the concurrent turn-cut owner and was not edited or
+operated by record-render. No schema refusal occurred, so no refork was
+performed. Per the assignment's stop rule, no further live adoption is
+attempted in this run. The already-running gate7 uses an owned-path HEAD
+snapshot and can report independently of that in-flight source.
+
+Current commits since the previously landed plan slice: `74b5b4b05`
+(components), `3f42669e0` (tempid/read and render fixes), `b48034365`
+(database-grounded settings reader), `38d2fc91b` (debug HTTP 500 repair and
+algorithm scaffold), and `a86a3d280` (obsolete mocked capture tests removed).
+Source convergence, Juniper reseeding, complete page blocks, the stored
+prefix/as-of/digest checks, and the fresh→system→virtual→compact proof remain
+unfinished. The missing turn/evaluation APIs and their storage contracts
+remain integration dependencies; typed unavailability is visible in Safari.
