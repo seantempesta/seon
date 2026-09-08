@@ -95,7 +95,6 @@ Two lanes with disjoint owned paths, one of them mid-edit on a file the
 other's tests load, both reach a tally; the base preparation names the
 files it overlaid; one regression per claim.
 
-
 Record-render observation, 2026-09-08 20:18 UTC: `bin/test-fast
 my.agent-test seon.render.web-test` reached 59 tests / 105 assertions,
 0 failures / 46 errors. Canonical fixture construction failed at
@@ -112,3 +111,14 @@ only its waiting JVMs and reaped both commands; no other lock user was
 operated. No isolated assertion tally or green result exists for these
 attempts. Evidence: `tmp/record-render-gate9-preparation-threads.txt`,
 `tmp/record-render-gate9.log`, and `tmp/record-render-platform.log`.
+
+Cluster-scoped-registry baseline, 2026-09-08 20:38 UTC:
+`bin/test-fast seon.schema-test seon.instrument-test` armed 932 registered /
+931 instrumented / 909 program-armable Vars, then failed in canonical fixture
+construction for `database-projections-follow-exact-committed-identity` at
+`seon.fn/exact-source:142`, through `test-support/source-manifest:155`, with
+`IndexOutOfBoundsException`. No source file was identified. The process exited
+1 without an aggregate tally or instrumentation assertions. No production
+edits preceded this baseline; no foreign edit is attributed as its cause.
+The assignment's stop boundary was honored; see the
+[partial registry census](../../prds/context-generation/research/cluster-scoped-registry-landing-2026-09-08.md).
