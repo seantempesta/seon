@@ -206,18 +206,37 @@
     database
     (long (dbi/-max-tx database))))
 
+(defn- connection-branch
+  [connection]
+  (:branch (:config @connection)))
+
 (defn- foreign-connection-error
+  "Refuse a write naming a branch outside the writing custody, naming both.
+
+  DECIDED WHERE THE WRITE IS ADMITTED, never from a pre-read: the two
+  identities are read from the two connections this call actually holds,
+  immediately before `transact-call` hands one to Datahike, so nothing can
+  change between the decision and the write it governs."
   [connection]
   (when (some? *conn*)
     (let [ambient-connection-id (connection-id *conn*)
           explicit-connection-id (connection-id connection)]
       (when-not (= ambient-connection-id explicit-connection-id)
-        (error-value
-         ::foreign-connection
-         (str "The explicit transaction connection does not belong to "
-              "the calling agent's cluster.")
-         {::ambient-connection-id ambient-connection-id
-          ::explicit-connection-id explicit-connection-id})))))
+        (let [ambient-branch (connection-branch *conn*)
+              explicit-branch (connection-branch connection)]
+          (error-value
+           ::foreign-connection
+           (str "This write names branch " (pr-str explicit-branch)
+                ", which is not the writing cluster's branch "
+                (pr-str ambient-branch)
+                ". A cluster writes only its own branch: send the work to "
+                "the cluster that owns "
+                (pr-str explicit-branch)
+                " instead of transacting into its connection.")
+           {::ambient-connection-id ambient-connection-id
+            ::explicit-connection-id explicit-connection-id
+            ::ambient-branch ambient-branch
+            ::explicit-branch explicit-branch}))))))
 
 (defn- append-read-evidence!
   [evidence]

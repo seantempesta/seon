@@ -1288,3 +1288,52 @@
                          :seon.error/diagnostic-expected])))
          (is (not (str/includes? (pr-str malformed)
                                  "resolve-pattern-lookup-entity-id"))))))))
+
+(deftest a-write-naming-another-clusters-branch-is-refused-naming-both
+  ;; THE CLASS: the write seam — not a caller pre-read — decides custody, so
+  ;; every path that reaches `transact!` while a cluster's connection is the
+  ;; writing custody is covered by this one decision. The refusal names both
+  ;; branches, and the foreign branch is left untouched.
+  (test-support/with-database
+   (fn [writing-connection]
+     (test-support/with-database
+      (fn [foreign-connection]
+        (binding [db/*conn* writing-connection]
+          (let [explicit (db/transact! writing-connection
+                                       [{:seon.cluster.message/id "own"}])
+                elided (db/transact! [{:seon.cluster.message/id "elided"}])
+                refused (db/transact! foreign-connection
+                                      [{:seon.cluster.message/id "foreign"}])
+                message-ids
+                (fn [connection]
+                  (set (db/q '[:find [?id ...]
+                               :where [_ :seon.cluster.message/id ?id]]
+                             @connection)))
+                branch
+                (fn [connection]
+                  (second
+                   (:datahike/connection-id
+                    (db/connection-identity connection))))
+                data (:seon.error/data refused)]
+            (is (nil? (:seon.error/kind explicit))
+                "the writing cluster's own connection still commits")
+            (is (nil? (:seon.error/kind elided))
+                "the elided arity still commits through the writing custody")
+            (is (= :seon.db/foreign-connection (:seon.error/kind refused)))
+            (is (true? (:seon.db/foreign-connection refused))
+                "the refusal carries its class marker")
+            (is (= (branch writing-connection)
+                   (:seon.db/ambient-branch data))
+                "the refusal names the writing cluster's branch")
+            (is (= (branch foreign-connection)
+                   (:seon.db/explicit-branch data))
+                "the refusal names the branch the write tried to reach")
+            (is (str/includes?
+                 (:seon.error/message refused)
+                 (pr-str (branch foreign-connection))))
+            (is (str/includes?
+                 (:seon.error/message refused)
+                 (pr-str (branch writing-connection))))
+            (is (= #{"own" "elided"} (message-ids writing-connection)))
+            (is (empty? (message-ids foreign-connection))
+                "nothing reaches the foreign branch"))))))))
