@@ -1,6 +1,7 @@
 ---
 type: prd
-status: r11 (2026-09-08 midday) — steps 1–2 landed; step 3 partial (answered-by-attempt + index-bound derivation `8dc708b24`; backstop subject carried `4c4bcde70`); clipping collapsed to the value renderer (`9248692d6`); all lanes stopped — the orchestrator is cutting the retired code directly (§11)
+status: active
+historical-status: r11 (2026-09-08 midday) — steps 1–2 landed; step 3 partial (answered-by-attempt + index-bound derivation `8dc708b24`; backstop subject carried `4c4bcde70`); clipping collapsed to the value renderer (`9248692d6`); all lanes stopped — the orchestrator is cutting the retired code directly (§11)
 date: 2026-09-07 (evening)
 supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
 tags: [prd, agent, wake, storage, runtime]
@@ -8,17 +9,74 @@ tags: [prd, agent, wake, storage, runtime]
 
 # The agent record and the turn loop
 
-## 0. The owner's rulings this evening, verbatim where it matters
+## 0. The design in one page
+
+This is the binding design through §17. Later rulings override earlier
+sentences explicitly marked below; historical measurements are dated evidence,
+not current implementation claims. Implementation gaps are [TARGET] until
+verified against source and the live system.
+
+- **Record (§17).** Identity and namespace are scalars; namespace assignment
+  is not unique. Plan and settings are separate component entities, each
+  with one schema and render pair. History, wakes, and routed faults are
+  derived queries, never copied collections on the agent.
+- **Turn (§4, §14).** One agent's ordered evaluations and any provider
+  attempts. Open means no closing fact; the serial writer enforces one open
+  turn per agent. Its identity datom supplies its basis `:t`. Store the
+  reply before evaluating; boot closes interrupted turns without resuming
+  execution. No process custody stamp, claim epoch, or run pointer.
+- **Evaluation (§15).** One entity per branch, turn, and ordinal records
+  source, shown text, out, error, and read evidence. The actual result is
+  an object in the agent's SCI context, not a second durable entity.
+- **Waking (§3, §14).** Schema-declared listened attributes route transaction
+  notifications; their datoms are asserted once. Answering is derived by
+  `:t`, not a claim ref. A model-reply turn or a system turn holding the
+  wakes' results answers them; opening a turn alone does not. The
+  `opens-turn?` property distinguishes notices from turn-opening wakes.
+- **Loop (§14).** Store the generated opening in system turn 0. Before an
+  agent turn, compare every distinct read form's latest evaluation with
+  the facts changed since its `:t`; store changed reads in a system turn.
+  No change means no system turn. Writes and effects never rerun.
+- **Additive context (§14).** The prompt renders stored evaluations in
+  chronological turn/ordinal order. Previous shown bytes never change.
+  Each agent forks the base SCI context once, keeps its private objects,
+  and receives accepted base diffs. Restart loses those objects.
+  Compaction wipes evaluations and regenerates the opening; no curation.
+- **Results and bounds (§5, §15).** AI presentation elides once, in AI render
+  functions and the value renderer at evaluation time. Save that shown
+  text; history never clips again. HTML uses the live object or saved text
+  after restart. Query-work bounds and evaluation deadlines are separate
+  from the presentation profile: these are the three controls, not three
+  clipping stages. Result serialization and its separate byte bound are
+  deleted. A saved requery cannot recover a lost live object.
+- **Ids (§15).** Use `seon.id/evaluation` for the twelve-hex digest of
+  `[branch-id turn-id ordinal]`, and `seon.id/symbol-in` for `result/e<id>`
+  (`src/seon/id.clj:33`, `:42`, `:50`). No second hash implementation or
+  random evaluation id. This is deterministic identity; 48 bits do not
+  mathematically guarantee collision freedom across arbitrary inputs.
+- **Blocks (§13, §17).** One entity, one render pair, one concern; scalars
+  share its block. Components and declared queries supply further blocks.
+  The history walks evaluation entities through their schema pair. There
+  is no hand-maintained block count or separate history formatter.
+- **Lane rules (§10).** Use the canonical, armed harness and scoped gates;
+  commit owned paths, preserve concurrent edits, and verify on `default`,
+  the development environment. Publication may coalesce edits; verify
+  adoption before claiming an edit is live (`.claude/seon-hook.edn:23–27`).
+  The explicit assignment governs whether a
+  foreign failure requires stopping. The orchestrator owns integration
+  and the session-start exhaust sweep described in `docs/TRANSFER_PROMPT.md`.
+
+## 0h. Historical owner rulings
 
 - "The agents context can and should always be a projection of its data. If
   we store evals then those are surfaced as part of its history. We are also
   generating forms and running them to make context. There is no ever
-  increasing message transcript. We want a byte identical projection method
-  for this reason so the same db creates the same context."
-- "Elision happens only at the AI context generation boundary."
+  increasing message transcript. (superseded by §14) We want a byte identical projection method
+  for this reason so the same db creates the same context. (superseded by §14)"
+- "Elision happens only at the AI context generation boundary." (superseded by §15)
 - "I want bounded storage for result blobs too … We never promise to be able
   to restore a session fully and if we do restore and values are missing we
-  mark it as missing in the context by ablating the result ids." (A total
+  mark it as missing in the context by ablating the result ids." (superseded by §15) (A total
   storage limit is retention — the root maintenance portfolio — not this PRD.)
 - "Functions, tests, schemas should be persisted. Data that is intentionally
   stored in the database should be persisted. Intermediate eval values? I
@@ -29,19 +87,23 @@ tags: [prd, agent, wake, storage, runtime]
 - "The inbox is the wrong mechanism for the waking … we need a better name
   and for other things to be able to wake the agent." (Earlier, ruling 70:
   separate, well-schemad wake components; a claim is a ref, never a
-  retraction; namespace is not identity.)
+  retraction; namespace is not identity.) (superseded by §3)
 - "Do the design work for the data we will be storing on the agent's entity
   first and ground everything in data that we actually need. Question
   everything else."
 
 ## 0a. Words
 
+The historical prose below uses the names of its date; §15 retires
+"transcript" in favor of evaluations and history. Literal old identifiers
+and quotations remain evidence, not names for new mechanisms.
+
 Only Clojure's and the dependency's words. A **wake** is a datom asserted on
 an attribute declared listened; Datahike `listen` reports the transaction
 and we filter by attribute. A turn records the **basis** it projected from,
-Datahike's basis transaction `:t`. A wake is **answered** when a turn of
+Datahike's basis transaction `:t`. (superseded by §0b) A wake is **answered** when a turn of
 that agent has a basis at or after the wake's own transaction `:t`;
-otherwise it is **unanswered**. A turn **stores** the reply's forms, then
+otherwise it is **unanswered**. (superseded by §14) A turn **stores** the reply's forms, then
 **stores** the results. Retired spellings, never written again: claim,
 pending, inbox, mailbox, trigger, freeze, settle, episode, wake item, wake
 source, situation.
@@ -77,7 +139,7 @@ source, situation.
 6. **`:seon.render/distance` is a projection input** the PRD had not listed:
    distance 2 reproduced the capture, distance 1 gave 51,561 characters. It
    belongs to the render profile, so "same db, same adopted commit, same
-   profile" stays the whole qualification.
+   profile" stays the whole qualification. (superseded by §14)
 7. The two-arm `step` returned `:evaluate` / `:reply` / `:idle` from one
    database value on the three fixtures; one JVM per operator root and one
    root-scoped flock confirmed (pid equality across two clusters).
@@ -87,7 +149,7 @@ source, situation.
 | today | after | grounding |
 |---|---|---|
 | `seon.cluster.run`, `:seon.cluster.run/*` | `seon.turn`, `:seon.turn/*` | "agent turn" is the vocabulary row |
-| `seon.cluster.eval` storage keys (`result-edn`, `triage-edn`) | accreted into `seon.eval`: `:seon.eval/value`, `/out`, `/error`, `/triage-edn`, `/missing`, `/size` | Clojure's words for a REPL's outputs |
+| `seon.cluster.eval` storage keys (`result-edn`, `triage-edn`) | accreted into `seon.eval`: `:seon.eval/value`, `/out`, `/error`, `/triage-edn`, `/missing`, `/size` (superseded by §15 for stored values) | Clojure's words for a REPL's outputs |
 | `seon.cluster.agent` | `seon.agent` | ruling 70: drop the `cluster` segment |
 | `seon.cluster.message` | `seon.message` | same |
 | `seon.cluster.wake` | `seon.wake` | same; Datahike `listen` inside |
@@ -105,6 +167,10 @@ tests stand in the evaluator. No real provider call is required.
 
 ## 1. The loop, as the owner stated it, plus exactly what a crash forces
 
+The sketch below regenerates context per pass (superseded by §14); its
+per-turn fork is superseded by §14. The crash paragraphs retain their
+original wording; §1a removes the process stamp.
+
 ```
 context    = project(db, agent)          ; pure; same db + profile ⇒ same bytes
 reply      = model(context)              ; the paid call
@@ -118,11 +184,11 @@ Two facts a crash forces, and nothing else:
 1. **The reply and its forms are stored BEFORE evaluation.** A crash between
    "the model replied" and "results stored" must neither pay the model again
    nor re-execute a form (the nothing-re-executes law). So a turn is two
-   writes: store the forms, then store the results. Not one.
-2. **The process turning the agent is a stored fact.** After a restart, an
-   evaluation with no terminal fact whose process is dead is *interrupted*;
+   writes: store the forms, then store the results. Not one. (superseded by §1a)
+2. **The process turning the agent is a stored fact.** (superseded by §1a) After a restart, an
+   evaluation with no terminal fact whose process is dead is *interrupted*; (superseded by §1a)
    one still running is not. Absence is the one value a dead process cannot
-   corrupt.
+   corrupt. (superseded by §1a)
 
 Plus one thing that keeps an agent from running forever: a turn happens only
 when something woke it (§3) and it has turns left.
@@ -143,19 +209,19 @@ unrepresentable, so at boot every open turn is dead by construction.
 | run opening basis (`opening-commit-id`) | DELETE — the basis is the turn's own `:t` | the transaction that opened the turn is the basis the context projected from (prototype 0b.1); nothing to store |
 | run reply text / blob / size | KEEP under the storage bound | without it an interrupted turn's history cannot say what the model said |
 | run `process` custody | DERIVE, delete the stamp | at boot every open turn in this cluster belongs to a dead process by construction; within a JVM the permit prevents a second turn. Deletes the stamp, the holder check, dead-holder takeover, holder-only close |
-| agent run pointer | DERIVE: the agent's turn with no closed-at | its busy-fence role is the permit's |
-| run `situation` | DELETE | generated runs are gone; every turn is a model call |
+| agent run pointer | DERIVE: the agent's turn with no closed-at | its busy-fence role is the permit's (superseded by §4) |
+| run `situation` | DELETE | generated runs are gone; every turn is a model call (superseded by §14) |
 | run `plan-digest` | DELETE | "frozen" = the turn has evaluation entities |
 | run `forms` component list | DELETED (`caef3850e`) | evaluations point at the turn |
 | run `undisposed-at` | DELETE | derived in the same transaction from the evaluations |
 | run `interrupted-at` | DELETE from the turn | the stamp lives on the evaluation that was cut |
-| context capture + contribution rows | DELETE | basis + profile reproduce them byte for byte (§5) |
+| context capture + contribution rows | DELETE | basis + profile reproduce them byte for byte (§5) (superseded by §14) |
 | ai attempt rows | KEEP, written in the forms' commit | a paid call is a fact; its own commit is not |
 | ai attempt `ordinal` | DELETE | counted before the write today |
 | evaluation source, comment, ns, ordinal, author | KEEP | the history |
-| evaluation terminal facts (value/missing, out, error, ms, ending-ns, print options) | KEEP | the history and the handles |
+| evaluation terminal facts (value/missing, out, error, ms, ending-ns, print options) | KEEP (superseded by §15 for stored values) | the history and the handles |
 | evaluation `interrupted-at` | KEEP, written at boot | the one recovery stamp |
-| evaluation `result-size` | KEEP only when the value is missing | size reached is the reason |
+| evaluation `result-size` | KEEP only when the value is missing (superseded by §15) | size reached is the reason |
 | agent `turns-left` | DERIVE — no counter | the bound is `max turns − turns whose basis is at or after the last wake from outside the agent` (today `bootstrap.clj:47-70`, `work.clj:378-437`); a human message resets it by being such a wake. Everything needed is `:t` |
 | agent `cluster` | DELETE | the branch |
 | `:seon.def/*` rows | DELETE | a defn is a program row; kept data is transacted; an atom is not a fact |
@@ -169,13 +235,13 @@ closed and its unsettled evaluations stamped `interrupted-at`; a turn that
 died with no reply is derived (closed, no reply) and needs no stamp. The
 agent's next context shows the turn up to the cut, and the evaluation-level
 `interrupted-at` MUST render. The model is never re-called because the turn's
-basis was recorded at open, so the wake is answered; no form re-executes because nothing re-runs an
+basis was recorded at open, so the wake is answered; (superseded by §14) no form re-executes because nothing re-runs an
 interrupted turn. What dies is the custody predicate — the process stamp,
 `claim-call`'s takeover, `release-call`, holder-only close — not the
 evaluate arm, which §7 keeps for turns this JVM opened.
 
 **Writes per turn: three.** Open (the turn entity; its own `:t` is the
-basis that answers every wake the context contained) → store the reply, the
+basis that answers every wake the context contained) (superseded by §14) → store the reply, the
 attempts, and the forms as evaluation entities → store the results and
 close. The middle write survives because without it a crash loses the paid
 reply AND the record that side-effecting forms ran.
@@ -189,9 +255,9 @@ derive, no counters a query can count.
 |---|---|---|
 | `:seon.agent/id` | string, identity | lookup, handles, messaging by id |
 | `:seon.agent/namespace` | ref → `:seon.ns` | the prompt line and where forms evaluate; NOT unique (many agents may share a namespace); stewardship is `:seon.ns/steward` on the namespace |
-| `:my.plan/*` | the plan facts the agent already stores on itself | the agent stores them on purpose; no wrapper entity (astra: a wrapper duplicates existing ownership) |
+| `:my.plan/*` | the plan facts the agent already stores on itself | the agent stores them on purpose; no wrapper entity (astra: a wrapper duplicates existing ownership) (superseded by §17) |
 
-That is the whole stored record: identity, namespace, plan. Everything
+That is the whole stored record: identity, namespace, plan. (superseded by §17) Everything
 else the page or the prompt shows is a QUERY over turns and evaluations
 (astra's angle: "turns consume wakes; evaluations belong to turns; the
 record is a query over those facts"). No `:seon.agent/evals` back-edge:
@@ -244,12 +310,12 @@ Questioned and REMOVED from the record:
   agent's sliding-1 channel. The entity carrying the datom (a message, a
   fault, a schedule row) is ordinary data; nothing is copied, nothing is
   written back onto it.
-- **Only a turn whose reply came from a model attempt answers wakes** (r9;
+- **Only a turn whose reply came from a model attempt answers wakes** (superseded by §14) (r9;
   r8 said "holds a reply", and the verifier showed a source submission
   stores a reply too): the query joins the turn to a `:seon.ai.attempt` that
-  produced its reply. A turn that crashed before its reply, a turn whose
+  produced its reply. (superseded by §14) A turn that crashed before its reply, a turn whose
   attempts all failed, and a source submission (no attempt) never showed
-  the wakes to a model and answer nothing.
+  the wakes to a model and answer nothing. (superseded by §14)
   The wakes stay unanswered and the next turn opens; the turn bound (§1a)
   keeps that finite. Lane 2 landed `:seon.wake/inside` as the third
   property: the attributes that mark a wake as coming from inside the agent
@@ -262,10 +328,10 @@ Questioned and REMOVED from the record:
   (the context is projected on the opening transaction's database,
   `loop.clj:1375`, and the prototype reproduced a stored prompt exactly at
   that `:t`). A wake is answered iff a turn of that agent has `:t ≥` the
-  wake's `:t`. A wake datom is asserted once and never retracted-and-
+  wake's `:t`. (superseded by §14) A wake datom is asserted once and never retracted-and-
   reasserted (prototype 0b.2). Unanswered wakes are
   the datoms on listened attributes for this agent with `:t` greater than
-  the agent's latest turn's `:t`:
+  the agent's latest turn's `:t`: (superseded by §14)
 
   ```clojure
   [:find ?wake :in $ ?agent :where
@@ -324,26 +390,26 @@ Two wakes in one transaction (`33900`, `33901`) are one answer.
 ## 4. The turn — what is stored, and why each thing
 
 A turn groups an ordered set of evaluations, names what woke it, and records
-what the model call cost. Every attribute questioned:
+what the model call cost. (superseded by §3) Every attribute questioned:
 
 | attribute | why stored |
 |---|---|
 | `:seon.turn/id` | identity for evaluations and attempts to reference |
 | `:seon.turn/agent` | ref; whose turn |
 | `:seon.turn/opened-at`, `/closed-at` | the bound; open = no closed-at |
-| (no basis attribute) | the turn's own transaction `:t` — the `:t` on its identity datom — is the basis: Datahike's `as-of` input, and the fact that answers every wake with `:t ≤` it (§3). "Why this turn" is the query for wakes between the previous turn's `:t` and this one's |
+| (no basis attribute) | the turn's own transaction `:t` — the `:t` on its identity datom — is the basis: Datahike's `as-of` input, and the fact that answers every wake with `:t ≤` it (§3) (superseded by §14 for which turns qualify). "Why this turn" is the query for wakes between the previous turn's `:t` and this one's |
 | `:seon.turn/reply` (+ blob over the bound; `reply-missing` when the blob was reclaimed) | the model's bytes, under the storage bound; stored before evaluation; a reclaimed blob is marked like a missing value |
 | `:seon.turn/attempts` | component set of `:seon.ai.attempt` entities — the AI owner's existing family, referenced, not re-homed (review F6); one per attempt; a paid call is a fact |
 
 Not in this schema, by design: session curation's superseding ref
 (`[TARGET]` ruled 2026-08-04, today spelled `:seon.cluster.run/supersedes`)
 is an ACCRETION onto the turn when that mechanism lands — one ref, added
-then, declared then. The docs lane (2026-09-08) noted the gap; this is the
-answer.
+then, declared then. (superseded by §14) The docs lane (2026-09-08) noted the gap; this is the
+answer. (superseded by §14)
 
 Questioned and removed from the turn: the prompt text and per-segment
 contribution rows (derivable from basis + profile — and the whole point of
-byte-identical projection); `interrupted-at` on the turn (it lives on the
+byte-identical projection); (superseded by §14) `interrupted-at` on the turn (it lives on the
 evaluation that was cut); the situation stamp; the plan digest; the forms
 list (evaluations point at the turn).
 
@@ -384,14 +450,14 @@ An **evaluation** entity, accreted into the EXISTING `seon.eval` family
 (which already holds the gauges `duration-ms`, `allocated-bytes`,
 `fn-entries`, `host-interop-count`; its `outcome` enum is deleted as
 derivable from `error`/`interrupted-at`/`missing`): `id` (`:db.unique/identity`
-over (turn, ordinal) — the structural nothing-re-executes fence, review S1),
+over (turn, ordinal) (superseded by §15) — the structural nothing-re-executes fence, review S1),
 `turn`, `ordinal`, `comment`, `source`, `ns`; then, once run: `value` under
 the storage bound OR `missing` (why: over-bound, unserializable, lost) with
-`size`, `out`, `error` + `triage-edn`, `ending-ns` when changed,
+`size`, (superseded by §15) `out`, `error` + `triage-edn`, `ending-ns` when changed,
 `duration-ms`, `:seon.print/length`/`level` in effect; `interrupted-at` when
 boot cut it. No terminal fact = not yet evaluated. `author` is deleted:
 generated runs and the page's private evaluation were its producers, and
-both are gone; a system evaluation is one whose turn has no reply.
+both are gone; a system evaluation is one whose turn has no reply. (superseded by §14)
 
 **The other fourteen run attributes** (`live-processes`, `background-results`,
 `supersedes`, `missing-results`, `starting-ns`, `error`, `rule`,
@@ -402,6 +468,12 @@ are in-memory shapes, not stored attributes. A lane that finds a live
 reader names it in its landing note before keeping it.
 
 ## 4a. The schema, complete — every key namespaced, every shape declared
+
+Historical schema proposal, not the current population: direct plan fields
+(superseded by §17); evaluation value/blob/missing/size fields and the
+two-part id description (superseded by §15); `schedule.firing` and its
+turn-opening flag (superseded by §3, which uses `schedule.fire` and false).
+The affected declarations and descriptions below are retained as evidence.
 
 Owner rule (2026-09-07): "every piece of data should have a fully namespaced
 key and a malli schema. We are moving the data to the agent's entity so we
@@ -508,55 +580,58 @@ incomplete?
 
 ## 5. Storage bound, elision, and the missing marker
 
+The result-storage and missing-handle proposals below are historical
+(superseded by §15). The query-work bound remains separate from presentation.
+
 - **One storage bound per value** (`:seon.config.eval.result/max-bytes`),
   enforced as STREAMING serialization under the evaluation's own SCI
   interrupt (astra B8: a lazy sequence can block before its first byte, and
   admission already checks the interrupt at every node, `admit.clj:395-410`;
-  a byte count on a finished string is not an execution bound). Under it the
+  a byte count on a finished string is not an execution bound). (superseded by §15) Under it the
   value is stored faithfully; over it, or unserializable, `:seon.eval/missing`
-  names the reason and the size reached. Identity-only admission of
-  references stays (`admit.clj:162-171`). The display caps (depth,
+  names the reason and the size reached. (superseded by §15) Identity-only admission of
+  references stays (`admit.clj:162-171`). (superseded by §15) The display caps (depth,
   collection, string, node budget) are deleted.
 - **Elision happens once**, at AI context generation, from the stored value,
   under the render profile, with requery forms into the stored value — IN
   THE AI RENDER FUNCTIONS AND THE VALUE RENDERER ONLY (owner, 2026-09-08:
   no clipping at the walk, the transcript, a render terminal, or a request
-  seam; the repair lanes had introduced three such spots, being collapsed).
+  seam; the repair lanes had introduced three such spots, being collapsed). (superseded by §15)
   HTML renders the stored value without limits.
 - **A missing value ablates the handle**: no `:seon.repl/result` key, and
-  `:seon.repl/value` says the result is unavailable and why. A later form
+  `:seon.repl/value` says the result is unavailable and why. (superseded by §15) A later form
   naming a dead handle gets an ordinary unresolved-symbol error.
 - **Byte identity is the regression**, qualified exactly: same database
   value (`as-of` the turn's own `:t`), same adopted program commit, same
   render profile (which includes `:seon.render/distance`, prototype 0b.6)
-  ⇒ same bytes — REPL-proven on a 345,439-character capture; the bytes' digest is `:seon.ai.attempt/prompt-digest`.
+  ⇒ same bytes — REPL-proven on a 345,439-character capture; the bytes' digest is `:seon.ai.attempt/prompt-digest`. (superseded by §15)
   Two things make it unreachable today and are in scope (review B5): a
   render producer runs under a wall-clock time limit (`render.clj:725-756`)
-  and its refusal contributes ABSENCE (`walk.clj:764-766`). A refused render
+  and its refusal contributes ABSENCE (`walk.clj:764-766`). (superseded by §15) A refused render
   contributes a stable typed unknown naming the producer, so the bound can
-  fire without moving a byte. The walk's own truncation of connections
+  fire without moving a byte. (superseded by §15) The walk's own truncation of connections
   (`walk.clj:208, 249-268`) is a QUERY-WORK bound at the pull, reported as
   its own elision naming the bound; it is not presentation and never reads
   the render profile (owner, 2026-09-08: presentation clips in the AI render
   functions and the value renderer only — the r4 wording that moved the
-  walk's cut "under the render profile" is withdrawn). Result
+  walk's cut "under the render profile" is withdrawn). (superseded by §15) Result
   handles embed entity ids, so identity holds within one store, not across a
-  reset (review, non-determinism 7).
+  reset (review, non-determinism 7). (superseded by §15)
 
 ## 6. What this deletes
 
 `:seon.cluster.work/situation` and the generate arm, `generation-complete-*`,
 `append-generated-call`, generated runs and `bootstrap/seed-tx`'s run (the
-opening is the projection), `:seon.cluster.run` as a family (renamed to the
+opening is the projection) (superseded by §14), `:seon.cluster.run` as a family (renamed to the
 turn with the attributes in §4 only), the run pointer and
 `::agent-pointer-broken`, the process custody stamp with `claim-call`'s
 takeover and `release-call`, the resume arm, `:seon.context.capture` and
 `:seon.context.contribution`, `plan-digest`, `undisposed-at`, the gate
 counters, `:seon.ai.attempt/ordinal`, `:seon.def/*`, `:seon.render/units`,
-`:seon.eval/outcome`, `:seon.eval/author` (derived: no attempts = system), the `:seon.agent/evals` and `:seon.agent/plan` wrappers, `:seon.cluster.run/trigger` (answered by `:t`), the two hand lists of the wake
+`:seon.eval/outcome`, `:seon.eval/author` (derived: no attempts = system), the `:seon.agent/evals` and `:seon.agent/plan` wrappers (superseded by §17), `:seon.cluster.run/trigger` (answered by `:t`), the two hand lists of the wake
 set (`wake.clj:78-93`, `:232-250`) and the render-property hand list
 (`schema.clj:1419-1420`), the admission caps, `bind-stored-results!`'s windowed ambiguity, and 20 of
-the loop's 21 connection reads (one database value enters a pass).
+the loop's 21 connection reads (one database value enters a pass). (superseded by §4)
 
 ## 7. The loop code
 
@@ -569,19 +644,23 @@ the loop's 21 connection reads (one database value enters a pass).
 ```
 
 `:reply` = open (record the basis `:t`) → project → model → store reply +
-attempts + evaluations (one commit) → fall into `:evaluate`. `:evaluate` = fork → evaluate each unsettled ordinal →
+attempts + evaluations (one commit) → fall into `:evaluate`. `:evaluate` = fork → evaluate each unsettled ordinal → (superseded by §14)
 settle the batch and close the turn (one commit). Commits per model turn:
 three (today 5–6). Boot: close every open turn, stamping its unsettled
 evaluations interrupted — total, never refusing. Fences kept, all `:db.fn/call` deciding by query inside the transaction: one open turn per agent (open refuses); store results once; a refused terminal transaction closes the turn with failure outcomes;
-one evaluation per (turn, ordinal) as the declared `:seon.eval/id`
+one evaluation per (turn, ordinal) as the declared `:seon.eval/id` (superseded by §15)
 identity — a declaration, not a transaction function (review S1). Deleted
 fences: claim/takeover, release, holder-only close, pointer coherence, the
 receipt-exists call.
 
 ## 8. Order of work (reset the dev database at each schema step)
 
+Historical execution order: result-storage work (superseded by §15),
+per-pass opening projection (superseded by §14). Current work is tracked
+in `unsettled.md`, not by executing this old checklist.
+
 1. Storage bound + missing marker + AI-boundary elision (`seon.sci.admit`,
-   `seon.print/fit`, `seon.repl`).
+   `seon.print/fit`, `seon.repl`). (superseded by §15)
 2. Listened attributes: declare `:seon.wake/listen` on the four attributes
    (message `to`, error `steward`, schedule firing `agent`, effect `to`);
    derive `route!`'s set and dispatch from one query; answered by `:t`
@@ -597,16 +676,19 @@ receipt-exists call.
 4. The record: `:seon.agent/*` keys, delete `:seon.def`, cluster, pointer,
    units; page renders the record's components in declared order.
 5. Byte identity: a refused render is a stable typed unknown; the walk's
-   truncation under the render profile; `prompt-digest` on the attempt.
+   truncation under the render profile; (superseded by §5) `prompt-digest` on the attempt.
 6. Reset, reseed, byte-identity regression, docs and vocabulary.
 
 ## 8a. The generated opening, answered
 
+The unstored-opening proposal in this section is historical
+(superseded by §14).
+
 A fresh agent's first context is the walk over its record with each unit's
 `:seon.render/ai` source EXECUTED in the turn's fork at projection time —
-the debug-units model that already works on the page. The executed forms and
+the debug-units model that already works on the page. (superseded by §14) The executed forms and
 their printed values are prompt bytes, not stored evaluations; nothing about
-the opening is transacted. The two proofs that die with generated runs
+the opening is transacted. (superseded by §14) The two proofs that die with generated runs
 (`generated-system-runs-grow-only-after-their-settled-prefix`,
 `a-generated-run-resumes-then-requests-one-more-form`) proved append-only
 prefix growth of a mechanism that no longer exists.
@@ -618,9 +700,9 @@ prefix growth of a mechanism that no longer exists.
 2. Does §3 really let "other things" wake an agent with no loop change? What
    breaks when two sources fire in one transaction?
 3. Is the two-write turn (freeze, then settle) the minimum, or can storing the forms
-   ride the open?
+   ride the open? (superseded by §1a)
 4. `turns-left` as a stored counter: is it the one legitimate counter, or
-   should the bound be derived (turns since the last human message)?
+   should the bound be derived (turns since the last human message)? (superseded by §0b)
 5. Byte identity: what in today's projection is non-deterministic (time,
    hash order, entity ids in text)?
 6. Where is this still overly complicated?
@@ -637,7 +719,7 @@ prefix growth of a mechanism that no longer exists.
    was NOT in the projected context, or one with `:t > basis` was? (History
    attributes, `noHistory`, a wake on the agent's own transaction.)
 
-## 10. Lane rules for this wave (the one place; every spec cites this section)
+## 10. Lane rules for this wave (the source copied verbatim into AGENTS.md)
 
 Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
 
@@ -647,12 +729,15 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
    SAME harness the codebase runs on (canonical fixtures, real database,
    real SCI fork, armed contracts), never a mocked or hand-rostered
    stand-in. A misrepresented harness produces garbage code that passes.
-1. **Gate = `bin/test --paths <your own files…> -- <namespaces…>`** — it
+1. **Iterate with `bin/test-fast <namespaces…>`**, which loads the program
+   and uses the worker's same contract arming in one JVM without checkout
+   copies or base publication. **Gate a commit with
+   `bin/test --paths <your own files…> -- <namespaces…>`** — it
    snapshots HEAD and overlays ONLY the paths you name, so no other lane's
    in-flight edit can block you (landed `e33a887fe`); bare `bin/test`
    selects by `:seon.fn/calls` reach when you are alone; **plus
    `bin/test --platform` green.** Foreign breakage is never a reason to
-   stop. NEVER
+   stop. (superseded by §0 when an explicit assignment requires stopping) NEVER
    `--all` or `--full` in a lane — full suites are the orchestrator's
    integration checkpoints only. "It's a waste of time to run the entire
    test suite for every change."
@@ -660,7 +745,7 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
    contracts a cluster arms. A test that passes only unarmed is a defect.
 3. **One clipping spot**: presentation elision happens in the AI render
    functions and the value renderer only; storage is bounded by `max-bytes`
-   only; HTML never clips. A spec or diff adding a `fit`/`elision` call
+   only (superseded by §15); HTML never clips. A spec or diff adding a `fit`/`elision` call
    anywhere else is wrong on sight.
 4. **Protected = concurrently edited only.** A path is protected while
    another lane holds uncommitted edits in it; otherwise fix every root
@@ -676,7 +761,8 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
    retired spellings in §0a are never written.
 8. **The default cluster IS the development environment** (main root,
    `bin/seon start`, MCP with no root argument): the edit hook keeps it
-   current on every edit and a lane verifies there. On "predates the
+   current on every edit and a lane verifies there. (superseded by §0 for
+   timing: configured coalescing means publication is not immediate) On "predates the
    incompatible schema change" the lane reforks it itself at once
    (`bin/seon stop default; bin/seon init default --force; bin/seon start;
    bin/seon init --dev default`, reseed the Juniper fixture) — never waits.
@@ -704,9 +790,9 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
 Open question for the owner (2026-09-08): deleting `:seon.def/*` storage
 means each agent keeps ONE live SCI context in the JVM across turns
 (forked once from the base) instead of a fresh fork per turn; a restart
-loses defs (history shows they were made). Today's fresh-fork-per-turn
-model cannot keep an unstored def alive. Decide before the def family is
-cut.
+loses defs (history shows they were made). (superseded by §14) Today's fresh-fork-per-turn
+model cannot keep an unstored def alive. (superseded by §14) Decide before the def family is
+cut. (superseded by §14)
 
 Method from here: the orchestrator cuts the table above directly, one row
 per commit, leaving a one-line typed refusal where a live caller remains
@@ -729,19 +815,19 @@ one agent's context are byte-identical.
 The SCI model that makes this true (owner, same day): the cluster's BASE
 context is shared and accretes every installed program row — a `defn`
 through the install gate, a schema through `register!`, a test — so agents
-pick up what other agents install on their next turn. Each turn takes a
+pick up what other agents install on their next turn. (superseded by §14) Each turn takes a
 fresh `sci/fork` of the CURRENT base and lays the agent's PRIVATE layer on
 top: its defs of data and its atoms, a per-agent in-memory value the proc
-holds, never stored, lost on restart. A private def never reaches the base
-or another agent; an installed defn reaches everyone. Both directions are
-regressions. This supersedes §2's "`:seon.def` deleted … kept data is
-transacted" only in mechanism: the storage is still deleted.
+holds, never stored, lost on restart. (superseded by §14) A private def never reaches the base
+or another agent; an installed defn reaches everyone. (superseded by §14) Both directions are
+regressions. (superseded by §14) This supersedes §2's "`:seon.def` deleted … kept data is
+transacted" only in mechanism: the storage is still deleted. (superseded by §14)
 
-Ruled 2026-09-08 ("yes stop serializing. Store it in memory"): the private
+Ruled 2026-09-08 ("yes stop serializing. (superseded by §14) Store it in memory"): the private
 layer holds the agent's defs and atoms as the OBJECTS THEMSELVES in the
 agent proc's state, never an EDN serialization — an atom keeps its identity
 across turns, and the `:seon.def` rows (which could not hold an atom at all)
-are deleted with their serializer.
+are deleted with their serializer. (superseded by §14)
 
 ### The def note (owner-approved bytes, 2026-09-08)
 
@@ -780,8 +866,8 @@ scalar. A scalar attribute renders inside its entity's block. A block is
 either the entity's OWN render function covering its scalars (the agent's
 identity: id, namespace, its steward, in one short paragraph of comment +
 forms) or one component/derived value with its own producers: the plan
-tree, the history (turns newest first, evaluations through `seon.repl/text`),
-unanswered wakes, faults routed to me as steward. Five blocks for an agent.
+tree, the history (turns newest first, evaluations through `seon.repl/text`), (superseded by §13)
+unanswered wakes, faults routed to me as steward. Five blocks for an agent. (superseded by §17)
 
 ## 13. Storing and rendering data (owner, 2026-09-08)
 
@@ -829,7 +915,7 @@ my.agents.juniper=> (my.plan/blocked)
 ALL turns are shown by default; no clipping in the history "until we get
 shit under control". Order in the prompt: the record's own block, the
 plan, unanswered wakes, faults routed to me, then the history LAST — the
-agent's turns are the tail before it continues. Within the history:
+agent's turns are the tail before it continues. (superseded by §14) Within the history:
 chronological, oldest first, the newest turn last. Each evaluation through
 `seon.repl/text`; nothing else formats it.
 
@@ -839,7 +925,7 @@ chronological, oldest first, the newest turn last. Each evaluation through
 we wipe the data and do a compaction it is an additive process." Provider
 prompt caching works on a stable prefix, so:
 
-- **The transcript IS the prompt, and it only grows.** Generated context is
+- **The transcript IS the prompt, and it only grows.** (superseded by §15) Generated context is
   never re-rendered at the top. Generated forms are EXECUTED AND STORED as
   evaluations on the agent's record like the agent's own forms, in one
   additive sequence: a SYSTEM TURN 0 (identity, plan, `dir`s — the opening),
@@ -868,7 +954,7 @@ prompt caching works on a stable prefix, so:
 - **Byte identity becomes trivial** (the bytes are stored facts). The
   in-memory invocation cache serves the debug page's previews; `?prompt=true`
   projects the stored transcript plus the would-be system turn WITHOUT
-  writing, for inspection. "Prompts are never stored" still holds: the
+  writing, for inspection. (superseded by §15) "Prompts are never stored" still holds: the
   evaluations are stored, the prompt is generated from them.
 
 §8a ("the opening is a projection, nothing transacted") is superseded by
@@ -881,7 +967,7 @@ latest evaluation; if any fact its read evidence names changed since that
 evaluation's `:t` (a `since` query), the system turn appends a fresh
 evaluation of that same form. Writes and effects are never re-run. One
 algorithm, no block-specific code: the cache validity check applied to the
-whole transcript.
+whole transcript. (superseded by §15)
 
 ## 15. Results: objects in memory, shown text on disk (owner, 2026-09-08)
 
@@ -921,10 +1007,10 @@ one derivation reused is the digest: `:seon.eval/id` is
 `seon.schema/sha-256` over the evaluation's identity — the branch id, the
 turn id, the ordinal — truncated to twelve hex characters the way
 `seon.render.value/node-id` already truncates, declared
-`:db.unique/identity`. A Clojure symbol cannot begin with a digit, so the
+`:db.unique/identity`. (superseded by §0) A Clojure symbol cannot begin with a digit, so the
 handle is the id with one leading letter: `result/e9c1b3f2a7d04`. Stable:
 the same evaluation yields the same id after a refork of the same data;
-unique across every cluster a JVM holds (48 bits); nothing minted, only
+unique across every cluster a JVM holds (48 bits); (superseded by §0) nothing minted, only
 derived. (turn, ordinal) stays as the ORDER.
 
 ### The history is a render function like everything else (owner, 2026-09-08)
@@ -937,8 +1023,6 @@ reach the live result object from the in-memory map while it exists. The
 transcript namespace's hand-assembled entries, entry kinds, and any
 history-specific formatting are deleted; nothing assembles the history but
 the walk.
-
-
 
 ### Record-render integration boundary (2026-09-08)
 
@@ -1013,8 +1097,6 @@ Schema: each component is `[:seon.db/ref {:seon.db/component true}]` on the
 agent map, with the component's own `[:map {:seon.db/attributes true
 :seon.render/ai … :seon.render/html …}]` entity schema. The debug page
 renders the record as identity, plan, settings, then the derived blocks.
-
-
 
 §17 integration (record-render, 2026-09-08): component attributes are declared
 in `resources/seon/schemas/seon.agent.edn` as `:seon.agent/plan` and
