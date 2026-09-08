@@ -305,9 +305,7 @@
 
 (deftest the-request-declares-exactly-the-dependencies-the-derivation-reads
   ;; The class: a required argument no code reads. It cannot be passed
-  ;; wrongly, so it can only ever be forgotten — and
-  ;; seon.cluster.curate/execute-revision! forgot it, turning every
-  ;; session-curation proof into an opaque ::proof-fault. The derivation is
+  ;; wrongly, so it can only ever be forgotten. The derivation is
   ;; pure over committed facts and reads no clock, so the request now says
   ;; exactly that, and an unread required key cannot be reintroduced without
   ;; failing here.

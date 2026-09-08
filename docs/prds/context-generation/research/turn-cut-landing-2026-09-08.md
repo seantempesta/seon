@@ -7,6 +7,68 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
+## Opening basis and curation cut, 2026-09-08 21:16 UTC
+
+The owned-path commit gate passed **51 tests, 441 assertions, zero
+failures/errors** across run, schema-program, evaluate-sources, turn,
+evaluation-drive, agent-surface, render-source, and work namespaces. This
+slice strengthens existing tests; it adds no new test declaration. The 51
+executed tests are inherited, including the two turn API tests landed earlier
+by this lane. One obsolete manual-curation test and one private UI-call test
+are deleted; the latter's wanted source-provenance behavior remains covered
+by the real SCI `default-source-reproduces-the-exact-reached-value` proof.
+The final fast iteration passed six tests and 64 assertions. The successful
+gate snapshot was removed by the runner.
+
+Production reference counts (`git grep` at the entering HEAD versus `rg`
+over `src/` and `resources/` after the cut): `opening-commit-id` **23 → 0**;
+`seon.cluster.curate` **31 → 0**. The curation source, schema, and obsolete
+revision/adoption tests are deleted. The grader's ordinary evaluation shape
+now belongs to `seon.eval.drive`, with no alias to the retired owner.
+
+`run/opening-db` now derives its basis from the run identity datom. The
+existing canonical Datahike regression checks opening facts, excludes later
+facts, proves a later `opened-at` correction cannot move the basis, and checks
+that an absent run returns an error. The existing ordinary-proc compaction
+regression remains the replacement proof for deleting manual curation.
+
+Iteration: the first fast snapshot retained an incomplete fixture edit and
+failed (29 tests, 114 assertions, two failures, 19 errors). The corrected
+snapshot passed the run, schema, turn, grader, and agent-surface namespaces;
+its full tally was 32 tests, 324 assertions, ten failures, zero errors because
+one old preview-storage test expected saving during an open turn. That test
+now proves the writer refuses while open, then saves after closing. The same
+expectation is corrected in the render-source proof. The corrected fast run
+then exposed obsolete Add/Remove control calls: the page already uses §16's
+three controls. Those test calls are removed. The cache invalidation proof
+and saved-evaluation proof remain; saving is tested directly through the
+existing writer. A missing test namespace require was corrected before the
+final green fast run and gate.
+
+Live verification remains unproven. MCP JVM evaluation timed out at 20 s;
+publication refused because the Babashka hook could not load `seon.id`
+([issue](../../../seon/issues/hook-babashka-cannot-load-seon-id.md)). A later
+`bin/seon status` waited for an independently running `stop default`, then
+reported no live clusters. Turn-cut did not operate that process. No model
+turn or provider submission was made. This schema deletion has not yet been
+verified through a default-cluster refork. Datoms per turn are unchanged by
+this slice; the three-transaction target remains unfinished.
+
+Subsequently MCP answered on the restarted default JVM. An explicit
+`seon.config/apply!` with `{:seon.config.run/max-episode-runs
+:seon.config/absent}` exceeded the MCP response bound but completed later;
+a separate JVM-session query verified the bound absent. The reusable
+[virtual-proof manifest](turn-cut-virtual-config-2026-09-08.edn) carries that
+same decision for any required refork. Absence prevents automatic model
+replies in `work/episode-capped?`, while explicit source submissions remain
+available. Development publication has reached reconciliation; adoption and
+the schema-reset live proof are still unverified at this commit.
+
+Dependency ledger for the basis cut: Datahike's inclusive `as-of-pred`
+(`reference-code/datahike/src/datahike/db.cljc:142`) and its temporal search
+context (`:612`) are used by the existing `run/opening-db` owner. No new
+historical database or commit-ID mechanism is introduced.
+
 ## System-turn checkpoint, 2026-09-08 20:55 UTC
 
 The corrected owned-path gate passed **85 tests, 711 assertions, zero

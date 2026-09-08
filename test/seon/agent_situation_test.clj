@@ -21,8 +21,6 @@
     {:seon.cluster.run/id "situation-run"
      :seon.cluster.run/agent [:seon.cluster.agent/id "situation"]
      :seon.cluster.run/opened-at #inst "2026-08-12T12:00:00.000-00:00"
-     :seon.cluster.run/opening-commit-id
-     #uuid "11111111-1111-1111-1111-111111111111"
      :seon.cluster.run/starting-ns [:seon.ns/name 'my.agents.situation]}
     [:db/add [:seon.cluster.agent/id "situation"]
      :seon.cluster.agent/run [:seon.cluster.run/id "situation-run"]]

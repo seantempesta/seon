@@ -468,7 +468,7 @@
       (is (nil? (::run/plan-digest
                  (run-entity connection "generated-run")))))))
 
-(deftest run-records-its-opening-commit-and-starting-namespace
+(deftest run-derives-its-opening-database-and-starting-namespace
   (with-model-database
     (fn [connection]
       (db/transact!
@@ -477,8 +477,7 @@
         {:seon.cluster.agent/id "replay-agent"
          :seon.cluster.agent/namespace
          [:seon.ns/name 'replay.start]}])
-      (let [opening-commit-id (db/commit-id @connection)]
-        (db/transact!
+      (db/transact!
          connection
          (run/system-run-tx
           @connection
@@ -494,10 +493,25 @@
                    @connection
                    '[* {:seon.cluster.run/starting-ns [:seon.ns/name]}]
                    [::run/id "replay-run"])]
-          (is (= opening-commit-id (::run/opening-commit-id run)))
-          (is (uuid? (::run/opening-commit-id run)))
+          (db/transact! connection [{:seon.ns/name 'replay.later}
+                                    {::run/id "replay-run"
+                                     ::run/opened-at t1}])
+          (let [opening (run/opening-db @connection "replay-run")]
+            (is (= "replay-run"
+                   (::run/id (db/pull opening [::run/id]
+                                     [::run/id "replay-run"]))))
+            (is (= t0
+                   (::run/opened-at
+                    (db/pull opening [::run/opened-at]
+                             [::run/id "replay-run"]))))
+            (is (= 'replay.start
+                   (:seon.ns/name (db/pull opening [:seon.ns/name]
+                                          [:seon.ns/name 'replay.start]))))
+            (is (nil? (db/pull opening [:seon.ns/name]
+                              [:seon.ns/name 'replay.later]))))
+          (is (:seon.error/kind (run/opening-db @connection "absent-run")))
           (is (= 'replay.start
-                 (get-in run [::run/starting-ns :seon.ns/name])))))
+                 (get-in run [::run/starting-ns :seon.ns/name]))))
       (is (= :system
              (db/q '[:find ?author .
                      :where

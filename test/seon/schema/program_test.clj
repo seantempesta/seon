@@ -76,7 +76,7 @@
     (is (schema/valid-candidate-value? :seon.fn.file/artifact artifact))
     (is (schema/valid-candidate-value? :seon.fn.manifest/manifest manifest))))
 
-(deftest curation-proof-values-have-declared-leaf-shapes
+(deftest evaluation-drive-values-have-declared-leaf-shapes
   (let [run-id "proof:sample"
         receipt {:seon.cluster.run/id run-id
                  :seon.cluster.eval/ordinal 0
@@ -86,27 +86,14 @@
                  :seon.cluster.eval/error ""
                  :seon.error/kind :seon.eval.drive/absent
                  :seon.cluster.eval/at (java.util.Date.)}
-        declaration {:seon.cluster.run/id run-id
-                     :seon.cluster.eval/ordinal 0
-                     :seon.program/identity [:seon.fn/sym "sample/f"]
-                     :seon.program/source-attribute :seon.fn/source
-                     :seon.program/source "(defn f [] 1)"}
         terminal {:seon.eval.drive/outcome :completed
                   :seon.eval.drive/run-ids [run-id]}]
     (is (schema/valid-candidate-value?
-         :seon.cluster.curate/proof-receipt receipt))
-    (is (schema/valid-candidate-value?
-         :seon.cluster.curate/receipts [receipt]))
-    (is (schema/valid-candidate-value?
-         :seon.cluster.curate/declaration declaration))
-    (is (schema/valid-candidate-value?
-         :seon.cluster.curate/declarations [declaration]))
+         :seon.eval.drive/evaluation receipt))
     (is (schema/valid-candidate-value?
          :seon.eval.drive/terminal-state terminal))
-    (is (schema/valid-candidate-value?
-         :seon.cluster.curate/terminal terminal))
     (is (not (schema/valid-candidate-value?
-              :seon.cluster.curate/proof-receipt
+              :seon.eval.drive/evaluation
               (dissoc receipt :seon.cluster.eval/at))))
     (is (not (schema/valid-candidate-value?
               :seon.eval.drive/terminal-state

@@ -142,7 +142,7 @@
   "Ordered fact-space receipt values for `run-ids`."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:vector :seon.cluster.run/id]]
-                  [:vector :seon.cluster.curate/proof-receipt]]}
+                  [:vector :seon.eval.drive/evaluation]]}
   [db run-ids]
   (if (seq run-ids)
     (->> (db/q '[:find ?run-id ?ordinal ?source ?result ?error ?error-kind ?at
@@ -180,7 +180,7 @@
 
 (defn completed-result
   "The last completed result represented by ordered grader receipts."
-  {:malli/schema [:=> [:cat [:vector :seon.cluster.curate/proof-receipt]]
+  {:malli/schema [:=> [:cat [:vector :seon.eval.drive/evaluation]]
                   [:maybe :seon.schema/value]]}
   [receipts]
   (:my.run/result (last (completion-values receipts))))

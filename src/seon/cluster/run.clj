@@ -344,10 +344,9 @@
 (defn opening-db
   "The database value this run opened on.
 
-  The opening transaction is derived from the `opened-at` datom rather than
-  stored as another run attribute. Datahike `as-of` includes that transaction,
-  so the trigger that opened the run is visible and every later transaction is
-  absent by construction."
+  The opening transaction is derived from the identity datom. Datahike
+  `as-of` includes that transaction, so facts asserted with the opening are
+  visible and every later transaction is absent by construction."
   {:malli/schema [:=> [:cat :seon.db/database-value ::id]
                   [:or :seon.db/database-value :seon.error/value]]}
   [database id]
@@ -355,8 +354,7 @@
         (db/q '[:find ?tx .
                 :in $ ?id
                 :where
-                [?run :seon.cluster.run/id ?id]
-                [?run :seon.cluster.run/opened-at _ ?tx]]
+                [?run :seon.cluster.run/id ?id ?tx]]
               database id)]
     (if opening-tx
       (db/as-of database opening-tx)
@@ -495,12 +493,10 @@
                         [:seon.cluster.work/situation
                          {:optional true}
                          :seon.cluster.work/situation]
-                        [::opening-commit-id {:optional true}
-                         ::opening-commit-id]
                         [::opened-at ::opened-at]]]
                   [:vector :some]]}
   [db request]
-  (let [{::keys [id agent trigger opening-commit-id opened-at starting-ns]
+  (let [{::keys [id agent trigger opened-at starting-ns]
          situation :seon.cluster.work/situation} request
         agent-eid (:db/id (db/pull db [:db/id] agent))
         run-tempid (str "seon.cluster.run/" id)
@@ -519,8 +515,6 @@
                       ::id id
                       ::agent agent-eid
                       :seon.cluster.work/situation (or situation :call)
-                      ::opening-commit-id
-                      (or opening-commit-id (db/commit-id db))
                       ::opened-at opened-at}
                trigger (assoc ::trigger trigger)
                starting-ns (assoc ::starting-ns starting-ns)
@@ -843,8 +837,6 @@
                              [:seon.cluster.work/situation
                               {:optional true}
                               :seon.cluster.work/situation]
-                             [::opening-commit-id {:optional true}
-                              ::opening-commit-id]
                              [::opened-at ::opened-at]]]
                   [:vector :some]]}
   [request]
@@ -875,7 +867,6 @@
            (open-tx
             (cond-> {::id run-id
                      ::agent [:seon.cluster.agent/id agent-id]
-                     ::opening-commit-id (db/commit-id database)
                      ::opened-at opened-at}
               trigger (assoc ::trigger trigger)))
            (claim-tx {::id run-id
@@ -980,7 +971,6 @@
                      ::agent [:seon.cluster.agent/id agent-id]
                      ::starting-ns [:seon.ns/name namespace-name]
                      :seon.cluster.work/situation :generate
-                     ::opening-commit-id (db/commit-id database)
                      ::opened-at opened-at}
               trigger (assoc ::trigger trigger)))
            (claim-tx {::id run-id
@@ -1051,7 +1041,6 @@
             (open-call db
                        {::id run-id
                         ::agent (:db/id (::agent prior-run))
-                        ::opening-commit-id (db/commit-id db)
                         ::opened-at opened-at})
             evaluation {:db/id evaluation-id
                         :seon.cluster.eval/id evaluation-id
@@ -1751,7 +1740,7 @@
               database (:db/id run))]
     {::recorded-run
      (-> (select-keys run [::id ::agent ::starting-ns ::opened-at ::closed-at
-                           ::opening-commit-id ::reply ::reply-blob ::reply-size
+                           ::reply ::reply-blob ::reply-size
                            ::plan-digest ::process])
          (update ::agent :db/id)
          (update ::starting-ns #(resolve-namespace-name database (:db/id %))))
@@ -1778,7 +1767,7 @@
         starting-namespace (resolve-namespace-name database starting-ns)
         run-eid (str "seon.cluster.run/" id)
         run (assoc (select-keys request
-                               [::id ::opened-at ::closed-at ::opening-commit-id
+                               [::id ::opened-at ::closed-at
                                 ::reply ::reply-blob ::reply-size])
                    ::agent agent-eid
                    ::starting-ns starting-namespace
@@ -1883,8 +1872,7 @@
         prepared
         (merge (select-keys request [::id ::agent ::starting-ns ::opened-at ::closed-at])
                (dissoc staged-reply :seon.blob/staged-writes)
-               {::opening-commit-id (db/commit-id database)
-                ::sources (mapv (fn [item]
+               {::sources (mapv (fn [item]
                                   (let [form (:seon.cluster.loop/admitted-form item)]
                                     {:seon.cluster.eval/source (:seon.cluster.eval/source form)
                                      :seon.ns/name (resolve-namespace-name

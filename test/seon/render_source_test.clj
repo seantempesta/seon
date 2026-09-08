@@ -3,7 +3,6 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.blob :as blob]
-            [seon.context :as context]
             [seon.cluster.agent :as agent]
             [seon.cluster.run :as run]
             [seon.config :as config]
@@ -52,7 +51,7 @@
     :seon.config.eval/time-limit-ms 2000
     :seon.config/on-core-error :panic}))
 
-(deftest preview-cache-is-memory-only-and-context-add-saves-the-captured-result
+(deftest preview-cache-is-memory-only-and-invalidates-on-read-changes
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "memory-preview")
@@ -112,21 +111,7 @@
                   :seon.render.web/interest (atom {})
                   :seon.render.web/invocations @invocations
                   :seon.render.web/calls {[:memory-preview] @calls}
-                  :seon.render.web/ai-calls {}}
-           change
-           (fn [state action id & [overrides]]
-             (let [reply (async/promise-chan)
-                   [next-state _]
-                   (web/render-step
-                    state :seon.render.web/context
-                    {:seon.render.context/request
-                     (merge {:seon.render/context-action action
-                      :seon.cluster.agent/id "memory-preview-agent"
-                      :seon.cluster.run/id cached-id
-                      :seon.context.contribution/id id}
-                            overrides)
-                     :seon.render.context/reply reply})]
-               [next-state (async/poll! reply)]))]
+                  :seon.render.web/ai-calls {}}]
        (try
          (is (= 1 @evaluated))
          (let [invalidated
@@ -146,99 +131,16 @@
              "previewing, including the busy agent, changes no facts")
          (is (nil? (db/pull @connection [:seon.cluster.run/id] [:seon.cluster.run/id cached-id])))
          (db/transact! connection [{:my.plan.item/id "preview-item" :my.plan.item/title "After"}])
-         (let [[next-state result]
-               (with-redefs [eval/evaluate (fn [& _] (throw (ex-info "Add re-evaluated" {})))]
-                 (change state :append "selected-memory"))
-               saved (db/pull @connection '[*] [:seon.cluster.run/id cached-id])
-               saved-text (transcript/render-ai
-                           (assoc request :seon.db/db @connection :seon.cluster.run/id cached-id))]
-           (is (some? result) "the exact request receives a reply")
-           (is (nil? (:seon.error/kind result)) (pr-str (select-keys result [:seon.error/kind :seon.error/message])))
-           (is (= preview saved-text) "Add preserves the displayed value even after its source fact changed")
-           (is (= (db/commit-id database) (:seon.cluster.run/opening-commit-id saved)))
-           (is (= (:seon.render.call/source entry) (:seon.cluster.run/reply saved)))
-           (is (= "agent-is-busy"
-                  (get-in (db/pull @connection
-                                   [{:seon.cluster.agent/run [:seon.cluster.run/id]}]
-                                   [:seon.cluster.agent/id "memory-preview-agent"])
-                          [:seon.cluster.agent/run :seon.cluster.run/id])))
-           (is (nil? (:seon.error/kind (second (change next-state :append "same-evaluation")))))
-           (is (= 1 (count (set (map :seon.context.contribution/evaluations
-                                    (context/selection @connection "memory-preview-agent"))))))
-           (let [before (db/basis-t @connection)
-                 refusal (second (change (assoc state :seon.render.web/invocations {})
-                                         :append "evicted"))]
-             (is (= :seon.render.web/preview-unavailable (:seon.error/kind refusal)))
-             (is (= before (db/basis-t @connection)))))
          (let [next-calls (atom {})
-               next-invocations (atom {})
-               old-refs (:seon.context.contribution/evaluations
-                         (first (context/selection @connection "memory-preview-agent")))
                next-output (source-call
                             (assoc request :seon.db/db @connection
                                    :seon.render/retained-calls @calls
                                    :seon.render/invocations @invocations
                                    :seon.render/captured-calls next-calls
-                                   :seon.render/captured-invocations next-invocations))]
+                                   :seon.render/captured-invocations (atom {})))]
            (is (str/includes? next-output "After"))
-           (is (not= cached-id (get-in @next-calls [[:memory-preview] :seon.render.call/source-run-id])))
-           (let [next-id (get-in @next-calls [[:memory-preview] :seon.render.call/source-run-id])
-                 [next-state result]
-                 (with-redefs [eval/evaluate (fn [& _] (throw (ex-info "compact re-evaluated" {})))]
-                   (change (assoc state :seon.render.web/invocations @next-invocations)
-                           :compact "selected-memory"
-                           {:seon.cluster.run/id next-id
-                            :seon.context.contribution/evaluations old-refs}))]
-             (is (nil? (:seon.error/kind result)))
-             (is (not= old-refs
-                       (:seon.context.contribution/evaluations
-                        (first (context/selection @connection "memory-preview-agent")))))
-             (is (nil? (:seon.error/kind (second (change next-state :remove "selected-memory")))))
-             (is (= ["same-evaluation"]
-                    (mapv :seon.context.contribution/id
-                          (context/selection @connection "memory-preview-agent"))))
-             (is (some? (db/pull @connection [:seon.cluster.run/id] [:seon.cluster.run/id next-id])))))
+           (is (not= cached-id (get-in @next-calls [[:memory-preview] :seon.render.call/source-run-id]))))
          (finally (async/close! channel)))))))
-
-(deftest found-value-source-uses-the-datoms-own-provenance
-  (support/with-database
-   (fn [connection]
-    (let [found-value (ns-resolve 'seon.render.web 'debug-found-value)
-        source-call-var (ns-resolve 'seon.render.web 'render-source-call)
-        request {:seon.db/db @connection
-                 :seon.render.value/root 101
-                 :seon.render.data/cursor
-                 {:seon.render.data/path [:seon.cluster.agent/run]
-                  :seon.render.data/offset 17}}
-        debug-request {:seon.render.debug/viewer-namespace 'my.agents.provenance
-                       :seon.render.debug/subject 101}
-        sources (atom [])]
-    (with-redefs-fn
-      {source-call-var
-       (fn [request]
-         (if (= :seon.render/ai (:seon.render/output request))
-           (let [source (render/render-default-ai-source request)]
-             (swap! sources conj (read-string source))
-             source)
-           [:span "HTML"]))}
-      (fn []
-        (found-value request debug-request #{:seon.context.contribution/agent} #{}
-                     :incoming {:e 202 :a :seon.context.contribution/agent :v 101}
-                     {:db/id 202 :seon.context.contribution/id "locked"})
-        (found-value request debug-request #{:seon.cluster.agent/namespace} #{}
-                     :outgoing {:e 101 :a :seon.cluster.agent/namespace :v 303}
-                     {:db/id 303 :seon.ns/name 'my.agents.provenance})
-        (found-value request debug-request #{} #{}
-                     :outgoing {:e 404 :a :my.plan.item/title :v "Exact title"}
-                     "Exact title")))
-    (is (= '[(seon.db/pull (quote [*]) 202)
-             (seon.db/pull (quote [*]) 303)
-             (seon.render.data/pull-at
-              (quote [*]) 404
-              {:seon.render.data/path [:my.plan.item/title]
-               :seon.render.data/offset 0})]
-           @sources)
-        "incoming/outgoing refs target their entity; scalar reads reset to the owning datom path")))))
 
 (deftest default-source-reproduces-the-exact-reached-value
   (support/with-database

@@ -1,5 +1,15 @@
 {:seon.eval.drive/absent [:= true]
  :seon.eval.drive/value :seon.schema/value
+ :seon.eval.drive/evaluation
+ [:map
+  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+  [:seon.cluster.eval/source :seon.cluster.eval/source]
+  [:seon.cluster.eval/result-edn :seon.cluster.eval/result-edn]
+  [:seon.eval.drive/value :seon.eval.drive/value]
+  [:seon.cluster.eval/error :seon.cluster.eval/error]
+  [:seon.error/kind :seon.error/kind]
+  [:seon.cluster.eval/at :seon.cluster.eval/at]]
  :seon.eval.drive/run-ids [:vector :seon.cluster.run/id]
  :seon.eval.drive/run-cap [:int {:min 1}]
  :seon.eval.drive/outcome [:enum :completed :capped :stopped :undisposed]

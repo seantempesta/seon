@@ -33,7 +33,6 @@
                    :interrupted-at :inst,
                    :live-processes [:set :seon.cluster.run/process],
                    :missing-results [:int {:min 0}],
-                   :opening-commit-id :uuid,
                    :opened-at :inst,
                    :plan-digest [:string {:min 1}],
                    :reply [:string {:seon.db/no-history? true}],
@@ -73,7 +72,6 @@
                     [:seon.cluster.run/id :seon.cluster.run/id]
                     [:seon.cluster.run/agent :seon.cluster.run/agent]
                     [:seon.cluster.run/starting-ns :seon.cluster.run/starting-ns]
-                    [:seon.cluster.run/opening-commit-id :seon.cluster.run/opening-commit-id]
                     [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]
                     [:seon.cluster.run/closed-at :seon.cluster.run/closed-at]
                     [:seon.cluster.run/reply {:optional true} :seon.cluster.run/reply]
@@ -123,9 +121,6 @@
                      :seon.cluster.run/background-results]
                     [:seon.cluster.run/opened-at
                      :seon.cluster.run/opened-at]
-                    [:seon.cluster.run/opening-commit-id
-                     {:optional true}
-                     :seon.cluster.run/opening-commit-id]
                     [:seon.cluster.run/starting-ns
                      {:optional true}
                      :seon.cluster.run/starting-ns]
