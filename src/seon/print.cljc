@@ -751,16 +751,23 @@
     (assoc ::requery-refusal "the source has no stable requery identity")))
 
 (defn- elision-node
+  ;; ABSENT MEANS NO KEY, here most of all: every field of
+  ;; `:seon.print/elision-request` is optional, and an optional key present
+  ;; as nil is a contract violation — which is what turned every live
+  ;; presentation cut into a refusal instead of an elision the moment `fit`
+  ;; reached this constructor.
   [profile path next-offset omitted total unit prefix]
-  (elision (merge {::omitted omitted
-                   ::elision-unit unit
-                   :seon.render.data/path path
-                   :seon.render.data/next-offset next-offset
-                   :seon.render.data/total total
-                   :seon.render.profile/id (:seon.render.profile/id profile)
-                   ::prefix prefix
-                   ::bound-by (::bound-by profile)}
-                  (requery-fields profile))))
+  (elision
+   (into (requery-fields profile)
+         (remove (comp nil? val))
+         {::omitted omitted
+          ::elision-unit unit
+          ::prefix prefix
+          ::bound-by (::bound-by profile)
+          :seon.render.data/path path
+          :seon.render.data/next-offset next-offset
+          :seon.render.data/total total
+          :seon.render.profile/id (:seon.render.profile/id profile)})))
 
 (defn- preserve-requery
   [cut carried]
@@ -870,7 +877,9 @@
         fitted-elision
         (when (< retained total)
           (preserve-requery
-           (elision-node profile path retained (- total retained) total
+           (elision-node (assoc profile
+                                ::bound-by :seon.render.profile/max-children)
+                         path retained (- total retained) total
                          :children nil)
            carried-elision))]
     (cond->
@@ -902,7 +911,11 @@
                 (::value node))
         original (long (or (::length node) (count value)))]
     (if-let [bounded (bounded-text value original string-limit)]
-      (elision-node profile path (count (::value bounded))
+      (elision-node (assoc profile
+                           ::bound-by
+                           (or (::bound-by node)
+                               :seon.render.profile/token-budget))
+                    path (count (::value bounded))
                     (- original (count (::value bounded))) original
                     :characters (pr-str (::value bounded)))
       node)))

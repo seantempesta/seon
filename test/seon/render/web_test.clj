@@ -145,7 +145,7 @@
                              {:seon.cluster.agent/id agent-id
                               :seon.cluster/name "web-test"
                               :seon.ns/name 'my.agents.root}))
-            ctx (sci.eval/cluster-ctx @connection connection)
+            ctx (support/fork-cluster-ctx connection)
             server (atom nil)
             render-channel (async/chan (async/sliding-buffer 1))
             runtime-eval-channel (async/chan (async/sliding-buffer 1))
@@ -2142,7 +2142,7 @@
        (db/transact! connection
                      [{:seon.ns/name namespace-name :seon.ns/source huge}])
        (let [database @connection
-             ctx (sci.eval/cluster-ctx database connection)
+             ctx (support/fork-cluster-ctx connection)
              profile (render/agent-render-profile (config/defaults))
              request {:seon.db/db database
                       :seon.sci.eval/ctx ctx
@@ -2168,7 +2168,33 @@
          (is (str/includes? ai "requery by")
              "and the elision carries a requery identity")
          (is (<= (count huge) (count html-string))
-             "the HTML projection serves the whole value, unbounded"))))))
+             "the HTML projection serves the whole value, unbounded")
+         ;; THE STRUCTURAL HALF. A wide collection's cut is minted by
+         ;; `fit-children`, which carries no prefix, and a collection cut
+         ;; therefore rode an absent prefix as a STORED NIL into
+         ;; `seon.print/elision` — a contract violation on every live
+         ;; cluster, where the string half only failed when the profile
+         ;; declared no bound. Both cuts are ordinary elision values.
+         (let [wide (vec (range 5000))
+               wide-request (assoc request
+                                   :seon.render/value wide
+                                   :seon.render.call/id
+                                   [::ai-bound-wide namespace-name])
+               wide-ai (render/render-ai wide-request)
+               wide-html (hiccup/->string (render/render-html wide-request))]
+           (is (string? wide-ai) (pr-str wide-ai))
+           (is (< (count wide-ai) (count (pr-str wide)))
+               "a wide collection is cut for AI under the same profile")
+           (is (str/includes? wide-ai "more children")
+               (str "the collection cut is an elision naming what it omitted: "
+                    (subs wide-ai 0 (min 400 (count wide-ai)))))
+           (is (str/includes? wide-ai "requery by")
+               "and it carries a requery identity")
+           (is (str/includes? wide-ai
+                              (str :seon.render.profile/max-children))
+               "naming the bound that made the cut")
+           (is (str/includes? wide-html "4999")
+               "while HTML serves the whole collection")))))))
 
 (deftest each-agent-has-an-isolated-debug-route
   (with-server
