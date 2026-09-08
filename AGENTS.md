@@ -619,7 +619,11 @@ adds tests reaching code changed since the recorded green basis (derived
 from `:seon.fn/calls` edges, never mtimes) — deliberately widening to every
 eligible test when the basis is missing, a file was removed, or a changed
 gate input sits outside the program graph; `--all` adds every
-non-long test; explicit namespaces run complete. The runner enforces the
+non-long test; explicit namespaces run complete. A LANE NEVER RUNS `--all`
+OR `--full` (owner, 2026-09-08: "It's a waste of time to run the entire test
+suite for every change") — bare `bin/test` plus its subject's namespaces
+plus `--platform` is a lane's whole gate; full suites are the orchestrator's
+integration checkpoints. The runner enforces the
 bounded-execution law: a liveness watchdog dumps coordinator AND worker
 JVMs, and the tally is total — unlaunchable or unconfirmed work is typed,
 never silent.

@@ -1,6 +1,6 @@
 ---
 type: prd
-status: r9 — lane 2 verified (research/verify-listened-attributes-2026-09-08.md): four blockers folded into step 3; answered = a turn whose reply came from a model attempt
+status: r10 — steps 1–2 landed; step 3 in flight (one commit landed: answered by a model attempt, index-bound derivation); one clipping spot ruled (§5); lane rules consolidated (§10)
 date: 2026-09-07 (evening)
 supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
 tags: [prd, agent, wake, storage, runtime]
@@ -535,8 +535,11 @@ incomplete?
   and its refusal contributes ABSENCE (`walk.clj:764-766`). A refused render
   contributes a stable typed unknown naming the producer, so the bound can
   fire without moving a byte. The walk's own truncation of connections
-  (`walk.clj:208, 249-268`) IS the AI boundary's elision and moves under the
-  render profile; it is not a second elision point (review S5). Result
+  (`walk.clj:208, 249-268`) is a QUERY-WORK bound at the pull, reported as
+  its own elision naming the bound; it is not presentation and never reads
+  the render profile (owner, 2026-09-08: presentation clips in the AI render
+  functions and the value renderer only — the r4 wording that moved the
+  walk's cut "under the render profile" is withdrawn). Result
   handles embed entity ids, so identity holds within one store, not across a
   reset (review, non-determinism 7).
 
@@ -633,3 +636,41 @@ prefix growth of a mechanism that no longer exists.
 9. Answered-by-`:t` (§3): is there any case where a wake with `:t ≤ basis`
    was NOT in the projected context, or one with `:t > basis` was? (History
    attributes, `noHistory`, a wake on the agent's own transaction.)
+
+## 10. Lane rules for this wave (the one place; every spec cites this section)
+
+Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
+
+1. **Gate = bare `bin/test`** (it selects the tests reaching your changed
+   code by `:seon.fn/calls` reach from the green basis) **plus the explicit
+   namespaces of your subject, plus `bin/test --platform` green.** NEVER
+   `--all` or `--full` in a lane — full suites are the orchestrator's
+   integration checkpoints only. "It's a waste of time to run the entire
+   test suite for every change."
+2. **The gate is instrumented**: every regression runs under the same
+   contracts a cluster arms. A test that passes only unarmed is a defect.
+3. **One clipping spot**: presentation elision happens in the AI render
+   functions and the value renderer only; storage is bounded by `max-bytes`
+   only; HTML never clips. A spec or diff adding a `fit`/`elision` call
+   anywhere else is wrong on sight.
+4. **Protected = concurrently edited only.** A path is protected while
+   another lane holds uncommitted edits in it; otherwise fix every root
+   cause wherever it lives and list every file touched. Never revert or
+   restore a shared file; baseline in a throwaway worktree
+   (`git worktree add tmp/<lane>-wt HEAD` + link `reference-code`).
+5. **Commits are the heartbeat**: path-limited (`git commit --only -- …`),
+   one coherent slice each; never `git add -A`, `reset --hard`, `checkout --`.
+6. **Background hygiene**: never poll with `pgrep -f` on your own command
+   line; run awaited commands in the background; end every shell and delete
+   scratch roots/worktrees before reporting.
+7. **Words**: verify / falsify / probe — never adversarial verbs. The
+   retired spellings in §0a are never written.
+8. **The dev cluster** (`tmp/juniper-context-live`, `juniper-context`): a
+   lane may run only `init --dev` there; a refusal is reported, never
+   worked around; the orchestrator resets and reseeds.
+9. **Default lane agent**: `bin/codex-agent` on `gpt-6-astra` at `low`
+   effort; raise effort only for design review.
+10. **Landing note** under `docs/prds/context-generation/research/`, dated,
+    with exact bytes and measured numbers; issues under `docs/seon/issues/`
+    for anything out of scope; never a finding left in chat.
+
