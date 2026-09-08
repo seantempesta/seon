@@ -482,9 +482,24 @@ fi
 printf 'snapshot-digest=%s\n' "$snapshot_digest" >>"$run_root/test-run.txt"
 
 printf 'dev-cache-digest=%s\n' "$dev_cache_digest" >>"$run_root/test-run.txt"
+populate_cache_links() {
+  local checkout=$1 cache_name
+  if [ -n "$snapshot_digest" ]; then
+    # Nested gates use the same cache authority, not a cache directory
+    # accidentally nested inside an immutable selected classes directory.
+    for cache_name in dev-dependency-classes test-classpaths test-published-bases; do
+      mkdir -p "$source_root/target/$cache_name"
+      ln -s "$source_root/target/$cache_name" "$checkout/target/$cache_name"
+    done
+    ln -s "$source_root/target/dev-dependency-cache.lock" \
+      "$checkout/target/dev-dependency-cache.lock"
+  else
+    ln -s "$dev_cache_path" "$checkout/target/dev-dependency-classes"
+  fi
+}
 rm "$run_root/target"
 mkdir "$run_root/target"
-ln -s "$dev_cache_path" "$run_root/target/dev-dependency-classes"
+populate_cache_links "$run_root"
 if [ "$explicit_selection" -eq 0 ]; then
   namespaces=()
   while IFS= read -r file; do
@@ -530,7 +545,7 @@ populate_checkout_root "$worker_parent/serial"
 populate_checkout_root "$worker_parent/confirmation"
 source_root=$original_source_root
 for worker_root in "$worker_parent/"*; do
-  ln -s "$dev_cache_path" "$worker_root/target/dev-dependency-classes"
+  populate_cache_links "$worker_root"
 done
 if [ -n "$snapshot_digest" ]; then
   shared_published_base="$source_root/target/test-published-bases/$snapshot_digest/base"
