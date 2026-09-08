@@ -1,6 +1,7 @@
 (ns seon.edit.jvm-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
+            [seon.config :as config]
             [seon.edit.jvm]
             [seon.fs :as filesystem])
   (:import [java.nio.charset StandardCharsets]
@@ -13,12 +14,16 @@
   (deref (ns-resolve 'seon.edit.jvm 'edit)))
 
 (defn- policy
+  "The COMPLETE effective config `seon.edit.jvm/edit` declares, with this
+  suite's roots and bounds over it. A hand-rostered map of the three dials
+  this suite reads is a shape the declared contract forbids."
   [root]
-  {:seon.config.fs/working-root (str root)
-   :seon.config.fs/roots [(str root)]
-   :seon.config.fs/max-read-bytes (* 64 1024 1024)
-   :seon.config.fs/max-inline-bytes 8192
-   :seon.config.fs/max-write-bytes (* 64 1024 1024)})
+  (assoc (config/defaults)
+         :seon.config.fs/working-root (str root)
+         :seon.config.fs/roots [(str root)]
+         :seon.config.fs/max-read-bytes (* 64 1024 1024)
+         :seon.config.fs/max-inline-bytes 8192
+         :seon.config.fs/max-write-bytes (* 64 1024 1024)))
 
 (defn- temp-tree
   []

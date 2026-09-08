@@ -168,8 +168,13 @@
         (.shutdownNow ^java.util.concurrent.ExecutorService executor)))))
 
 (defn- config
+  "The COMPLETE effective config `seon.web.jvm`'s handlers declare, with this
+  suite's endpoint and bounds over it. A hand-rostered map of the eight
+  `:seon.config.web/*` dials this suite reads is a shape the declared
+  contract forbids."
   [base-url]
-  {:seon.config.web/timeout-ms 1000
+  (assoc (seon-config/defaults)
+   :seon.config.web/timeout-ms 1000
    :seon.config.web/max-response-bytes 4096
    :seon.config.web/max-inline-bytes 8
    :seon.config.web/max-redirects 3
@@ -177,7 +182,7 @@
    :seon.config.web/search-endpoint (str base-url "/search")
    :seon.config.web/search-api-key-variable "SERPER_API_KEY"
    :seon.config.web/search-result-projection
-   'seon.web.search/organic-results})
+   'seon.web.search/organic-results))
 
 (defn- exact-blob
   [connection digest size]
@@ -190,9 +195,12 @@
     (.toByteArray output)))
 
 (defn- publish-result!
+  "Publish exactly as `seon.effect` does: staged writes are a VECTOR, and a
+  result that staged nothing publishes an empty one rather than a nil the
+  declared contract forbids."
   [connection result]
   (blob/with-publication!
-   connection (:seon.blob/staged-writes result)
+   connection (vec (:seon.blob/staged-writes result))
    #(dissoc result :seon.blob/staged-writes)))
 
 (defn- fetch

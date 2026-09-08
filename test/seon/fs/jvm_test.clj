@@ -6,6 +6,7 @@
             [seon.blob :as blob]
             [seon.db :as db]
             [seon.fs :as filesystem]
+            [seon.config :as config]
             [seon.fs.jvm])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files LinkOption Path]
@@ -21,15 +22,25 @@
   (deref (ns-resolve 'seon.fs.jvm operation)))
 
 (defn- policy
+  "The COMPLETE effective config every filesystem handler declares, with this
+  suite's roots and bounds over it.
+
+  `seon.fs.jvm`'s handlers take `:seon.config/effective` — the whole compiled
+  decision set — so a hand-rostered map of the eight `:seon.config.fs/*` dials
+  this suite happens to read is a shape the declared contract forbids
+  (AGENTS §5: never hand-roster; hand what production hands). The shipped
+  defaults are compiled here and only the dials this suite varies are
+  changed, so a new config member never silently drops out of coverage."
   [root]
-  {:seon.config.fs/working-root (str root)
-   :seon.config.fs/roots [(str root)]
-   :seon.config.fs/max-read-bytes (* 64 1024 1024)
-   :seon.config.fs/max-inline-bytes 8192
-   :seon.config.fs/max-write-bytes (* 64 1024 1024)
-   :seon.config.fs/max-glob-results 64
-   :seon.config.fs/max-traversal-entries 256
-   :seon.config.fs/max-depth 32})
+  (assoc (config/defaults)
+         :seon.config.fs/working-root (str root)
+         :seon.config.fs/roots [(str root)]
+         :seon.config.fs/max-read-bytes (* 64 1024 1024)
+         :seon.config.fs/max-inline-bytes 8192
+         :seon.config.fs/max-write-bytes (* 64 1024 1024)
+         :seon.config.fs/max-glob-results 64
+         :seon.config.fs/max-traversal-entries 256
+         :seon.config.fs/max-depth 32))
 
 (defn- temp-tree
   []
