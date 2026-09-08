@@ -26,7 +26,7 @@ graph per cluster.
 One JVM process may host several named cluster instances. It owns one physical
 Datahike store under the process root and holds one exclusive `flock` for that
 store's lifetime. Each cluster owns one named branch and live connection, one
-acquired base SCI `ctx`, fresh per-turn forks, its agent and render Flow graphs,
+acquired base SCI `ctx`, persistent per-agent contexts, its agent and render Flow graphs,
 routing state, advertisement, and web service. The process root shares only the
 store holder and the bounded
 `:compute` and `:io` executors.
@@ -37,11 +37,16 @@ Datahike's writer and returns either the transaction report or a flat error
 value. No internal database transport, remote replica, protocol version, or second
 mutation owner exists.
 
-Runs are claimable database state. Presence of
-`:seon.cluster.run/process` means held; absence means unheld. Transition
-functions execute inside Datahike transactions, and recovery marks dangling
-receipts interrupted without re-executing work. There is no claim epoch or
-lease clock.
+Turns are open while their closing fact is absent. Transition functions
+decide inside Datahike transactions, including the refusal of a second
+open turn for one agent. Boot closes open turns and marks unfinished
+evaluations interrupted without re-executing work. No process-custody
+stamp, claim epoch, or lease clock belongs to the turn.
+
+The [turn PRD §14–§15](../../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
+governs context lifetime: agent contexts receive accepted base diffs while
+retaining private objects across turns. Restart loses those objects and
+retains evaluation shown text.
 
 ## Consequences
 
@@ -53,7 +58,7 @@ lease clock.
   cluster independently from its branch facts.
 - The browser SSE connection is an external wire. In-process movement uses
   Flow channels and database facts.
-- A committed program change installed in the live base is visible to later turn forks within
+- A committed program change installed in the live base reaches agent contexts by a diff within
   its cluster and never crosses into another cluster.
 
 ## Owners
@@ -64,14 +69,14 @@ lease clock.
   and transaction boundary.
 - `src/seon/db.clj` — co-located application reads over immutable database
   values.
-- `src/seon/sci/eval.clj` — one acquired base cluster `ctx`, per-turn forks, and
+- `src/seon/sci/eval.clj` — one acquired base cluster `ctx`, agent contexts, and
   cold acquisition.
-- `src/seon/cluster/run.clj` and `resources/seon/schemas/seon.cluster.run.edn` — presence
-  custody and transactional recovery.
+- The turn owner and its schema — open-turn refusal and transactional
+  recovery; target owner `seon.turn` in the binding PRD.
 
 ## Related
 
 - [[architecture]] — complete target topology.
-- [[agent-runtime]] — agent graphs, run transitions, and recovery.
+- [[agent-runtime]] — agent graphs, turn transitions, and recovery.
 - The `datahike` and `seon-flow-architecture` skills — exact dependency and
   first-party source seams.
