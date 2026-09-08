@@ -199,8 +199,30 @@ against this test's timing rather than its own subject. That is precisely the
 class [an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker](../../../seon/issues/an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker.md)
 named — now with a culprit rather than a victim. `reassert-contracts!` already
 makes the gate correct despite it, which is why the note is `cleanup` and not
-a blocker; the file belongs to another lane, so the fix hunk is in
-[the issue](../../../seon/issues/a-platform-test-leaves-its-worker-stripped-of-every-contract.md).
+a blocker.
+
+`bin/test --all` then found two more of the same shape:
+
+| task | wrappers stripped and never restored |
+|---|---|
+| `seon.cluster.cohost-boot-test/a-second-cluster-boots-under-the-first-cluster-s-instrumentation` | 918 |
+| `seon.db-test/instrumented-wildcard-pull-keeps-unparsed-database-fields-ordinary` | 926 |
+| `seon.cluster.agent-test/routing-conservation-waits-for-terminal-evidence` | 3 |
+
+`seon.db-test` is the sharp one: it was the VICTIM in
+[an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker](../../../seon/issues/an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker.md)
+— `malformed-reads-return-flat-errors` red in the pool, green alone — and it
+is also a CAUSE, exactly as that note's resolution predicted. It was in this
+lane's owned paths and is **fixed**; the other two belong to another lane and
+their hunks are in
+[the issue](../../../seon/issues/a-platform-test-leaves-its-worker-stripped-of-every-contract.md),
+along with the complete census of `instrument/remove!` callers and which
+of them restore.
+
+One census row matters beyond tidiness: `test/seon/sci/eval_test.clj:1050`
+strips without restoring, and the very next deftest in that file is
+`bare-dir-and-program-derived-doc-are-repl-native` — one of the thirteen. That
+is a SECOND candidate cause for those verdicts, beside §2.1's.
 
 ## 3. Totality — every non-test verdict is typed, counted, and named
 
