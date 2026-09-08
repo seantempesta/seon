@@ -337,9 +337,11 @@
 
 (def ^:private default-inline-limit
   ;; `seon.config` depends on this namespace, so bare `normalize` cannot read
-  ;; its shipped manifest without a cycle. This is the bootstrap value of the
-  ;; existing result blob threshold; running committers supply the live fact.
-  4096)
+  ;; its shipped manifest without a cycle. This is the bootstrap value of
+  ;; `:seon.config.error/max-evidence-bytes`; running committers supply the
+  ;; live fact. The two move together — a fault normalized before config is
+  ;; readable must keep as much evidence as one normalized after it.
+  16384)
 
 (defn- meaningful-source
   [source]
@@ -347,79 +349,62 @@
     (dissoc source ::flow/state)
     source))
 
-(defn- evidence-profile
-  [caps inline-limit token-budget]
-  {:seon.render.profile/id :seon.render.profile/error
-   :seon.render.profile/token-budget token-budget
-   :seon.render.profile/max-depth
-   (:seon.config.eval.result/max-depth caps)
-   :seon.render.profile/max-children
-   (:seon.config.eval.result/max-collection caps)
-   :seon.render.profile/composition :single-line
-   :seon.print/requery-refusal
-   (str "Full fault evidence is " inline-limit
-        " or more inline characters and requires its blob digest.")})
-
 (defn- utf8-size
   [value]
   (alength (.getBytes ^String value StandardCharsets/UTF_8)))
 
-(defn- fitted-node
-  [node caps inline-limit token-budget]
-  (let [profile (evidence-profile caps inline-limit token-budget)]
-    (-> node
-        (print/enrich-elisions profile)
-        (print/fit profile))))
+(defn- evidence-caps
+  "The caps one fault's INLINE evidence is admitted under.
 
-(defn- fitted-evidence-edn
-  [node caps inline-limit]
-  (loop [token-budget
-         (max 1 (tokens/estimate-of-characters inline-limit))]
-    (let [fitted (fitted-node node caps inline-limit token-budget)
-          serialized (admit/print-node-edn fitted)]
-      (cond
-        (<= (utf8-size serialized) inline-limit) serialized
-        (> token-budget 1) (recur (max 1 (quot token-budget 2)))
-        :else serialized))))
+  ONE MECHANISM, TWO BOUNDS. A fault's evidence is a stored value, so it goes
+  through the same streaming admission every other stored value does — with
+  the fault family's own declared byte bound in place of the storage bound.
+  Before this the inline fitting was a token-budget search over a render
+  profile, so when presentation limits were disabled a single fault fact
+  reached 915,655 bytes against its own declared 4,096 (measured 2026-09-07,
+  research/verify-storage-bound-2026-09-07.md B1)."
+  [caps evidence-bytes]
+  (assoc caps :seon.config.eval.result/max-bytes (max 1 (long evidence-bytes))))
 
-(defn- admitted-or-marker
-  "One admission, or — when it stored nothing — the marker re-admitted.
+(defn- bounded-admission
+  "One admission under a declared bound, plus the marker when it kept nothing.
 
   A FAULT MAY NEVER FAIL TO BE RECORDED. An admission that answers with
   `:seon.eval/missing` carries no print node and no bytes, and reading that
   absence as content crashed the fault committer itself (observed live,
   2026-09-07: `String.getBytes` on a null `result-edn`). The marker is a
   handful of bytes and always admits, so the durable fact says why instead of
-  the committer dying."
+  the committer dying — and it rides beside the admission as `::marker`, so a
+  caller can report the absence rather than merely showing its substitute."
   [value caps]
   (let [request {:seon.sci.admit/value value
                  :seon.sci.admit/interrupt-fn (constantly nil)
                  :seon.sci.admit/caps caps
                  :seon.config/on-core-error :record}
         admitted (admit/admit request)]
-    (if (:seon.eval/missing admitted)
-      (admit/admit (assoc request
-                          :seon.sci.admit/value
-                          (select-keys admitted [:seon.eval/missing
-                                                 :seon.eval/size])
-                          :seon.sci.admit/unbounded? true))
+    (if-some [marker (admit/missing-marker admitted)]
+      (assoc (admit/admit (assoc request
+                                 :seon.sci.admit/value marker
+                                 :seon.sci.admit/unbounded? true))
+             ::marker marker)
       admitted)))
 
 (defn- bounded-text
-  [value caps inline-limit]
-  (let [admitted (admitted-or-marker value caps)]
-    (loop [token-budget
-           (max 1 (tokens/estimate-of-characters inline-limit))]
-      (let [fitted (fitted-node (:seon.sci.admit/print-node admitted)
-                                caps inline-limit token-budget)
-            projected (admit/semantic-value fitted)
-            text (if (string? projected)
-                   projected
-                   (print/emit-text fitted (print/default-options)))]
-        (if (or (<= (utf8-size text) inline-limit)
-                (= 1 token-budget))
-          text
-          (recur (max 1 (quot token-budget 2))))))))
+  "One value as the text a fault field stores, under the evidence bound.
+
+  A string is its own text; anything else is its admitted node emitted
+  through the one printer. Over the bound the field IS the missing marker —
+  the same data every other surface reports an absent value with — and the
+  whole value stays reachable in the fault's evidence content."
+  [value caps]
+  (let [admitted (bounded-admission value caps)]
+    (if-some [marker (::marker admitted)]
+      (admit/canonical-edn marker)
+      (let [projected (:seon.sci.admit/value admitted)]
+        (if (string? projected)
+          projected
+          (print/emit-text (:seon.sci.admit/print-node admitted)
+                           (print/default-options)))))))
 
 (defn- projected-instrument-data
   [source]
@@ -431,7 +416,14 @@
       (:seon.error/data projected-error))))
 
 (defn- fit-fact-payload
-  [base-fact node message-value instrument-data caps inline-limit]
+  "Bound every payload field of one fact so the WHOLE fact fits inline.
+
+  Each field carries at most its share of what the base fact leaves, and a
+  field over that share becomes the marker. The halving repeats only because
+  a field's bytes are measured on the admitted value while the fact stores it
+  as an escaped string; it terminates at one byte, where every field is the
+  marker."
+  [base-fact source message-value instrument-data caps inline-limit]
   (let [expected (or (:seon.instrument/schema instrument-data)
                      (:seon.error/diagnostic-expected instrument-data))
         arguments (or (:seon.instrument/args instrument-data)
@@ -439,18 +431,22 @@
         payload-count (+ 2 (if expected 1 0) (if arguments 1 0))
         available (max 1 (- inline-limit (utf8-size (pr-str base-fact))))]
     (loop [field-limit (max 1 (quot available payload-count))]
-      (let [fact
+      (let [field-caps (evidence-caps caps field-limit)
+            evidence (bounded-admission source field-caps)
+            fact
             (cond-> (assoc base-fact
                            :seon.error/message
-                           (bounded-text message-value caps field-limit)
+                           (bounded-text message-value field-caps)
                            :seon.error/data-edn
-                           (fitted-evidence-edn node caps field-limit))
+                           (:seon.cluster.eval/result-edn evidence))
+              (::marker evidence)
+              (merge (::marker evidence))
               expected
               (assoc :seon.instrument/expected
-                     (bounded-text expected caps field-limit))
+                     (bounded-text expected field-caps))
               arguments
               (assoc :seon.instrument/args
-                     (bounded-text arguments caps field-limit)))]
+                     (bounded-text arguments field-caps)))]
         (if (or (<= (utf8-size (pr-str fact)) inline-limit)
                 (= 1 field-limit))
           fact
@@ -460,7 +456,8 @@
   "Prepare one bounded fact and its full meaningful admitted evidence."
   {:malli/schema [:=> [:cat :seon.error/prepare-request]
                   :seon.error/prepared]}
-  [{:seon.error/keys [source id at process basis-t inline-limit]
+  [{:seon.error/keys [source id at process basis-t]
+    evidence-bytes :seon.config.error/max-evidence-bytes
     :seon.sci.admit/keys [caps]
     run-id :seon.cluster.run/id
     agent-id :seon.cluster.agent/id}]
@@ -468,13 +465,22 @@
         class-name (when failure (.getName (class failure)))
         error-kind (kind source failure)
         source (meaningful-source source)
-        admitted (admitted-or-marker source caps)
+        admitted (bounded-admission source caps)
         full-edn (:seon.cluster.eval/result-edn admitted)
-        inline-limit (or inline-limit default-inline-limit)
+        ;; ONE KEY. The fault family's own declared bound decides how much
+        ;; evidence the FACT keeps; the blob threshold decides where the
+        ;; complete evidence lives. `:seon.error/inline-limit` was the same
+        ;; number under a second spelling and is deleted.
+        inline-limit (or evidence-bytes default-inline-limit)
         projected-source (:seon.sci.admit/value admitted)
         instrument-data (projected-instrument-data projected-source)
         flow? (map? source)
-        data-size (utf8-size full-edn)
+        ;; THE SIZE IS THE SOURCE'S, NOT THE SUBSTITUTE'S. When the whole
+        ;; evidence went over the storage bound the marker is a few dozen
+        ;; bytes, and reporting those as `data-size` said the evidence was
+        ;; small precisely when it was too large to keep.
+        data-size (or (:seon.eval/size (::marker admitted))
+                      (utf8-size full-edn))
         base-fact
         (cond-> {:seon.error/id id
                  :seon.error/at at
@@ -499,10 +505,18 @@
           agent-id (assoc :seon.error/agent
                           [:seon.cluster.agent/id agent-id]))
         fact (fit-fact-payload
-              base-fact (:seon.sci.admit/print-node admitted)
+              base-fact source
               (message source failure) instrument-data caps inline-limit)
         fact (assoc fact :seon.error/capped?
-                    (boolean (not= full-edn (:seon.error/data-edn fact))))]
+                    ;; HONEST WHEN EVERYTHING WAS DROPPED. Comparing the two
+                    ;; EDN strings alone reported "nothing omitted" for the
+                    ;; one case where nothing was kept: the FULL admission
+                    ;; also answered with the marker, so both sides were the
+                    ;; same handful of bytes (F1, 2026-09-07).
+                    (boolean (or (::marker admitted)
+                                 (:seon.eval/missing fact)
+                                 (not= full-edn
+                                       (:seon.error/data-edn fact)))))]
     {:seon.error/fact fact
      :seon.error/data-content full-edn}))
 
@@ -1009,7 +1023,8 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.error/commit-tx-request]
                   :seon.store/transaction-data]}
-  [db {:seon.error/keys [source id at process basis-t inline-limit]
+  [db {:seon.error/keys [source id at process basis-t]
+       evidence-bytes :seon.config.error/max-evidence-bytes
        supplied-fact :seon.error/fact
        :seon.sci.admit/keys [caps]
        run-id :seon.cluster.run/id
@@ -1023,8 +1038,9 @@
                            :seon.error/at at
                            :seon.error/process process
                            :seon.sci.admit/caps caps}
-                    inline-limit
-                    (assoc :seon.error/inline-limit inline-limit)
+                    evidence-bytes
+                    (assoc :seon.config.error/max-evidence-bytes
+                           evidence-bytes)
                     basis-t (assoc :seon.error/basis-t basis-t)
                     (and run-id
                          (entity-exists? db :seon.cluster.run/id run-id))

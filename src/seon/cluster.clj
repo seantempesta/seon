@@ -2427,7 +2427,13 @@
                    (:seon.config.error/escalate-to dials))
             run-id (assoc :seon.cluster.run/id run-id)
             agent-id (assoc :seon.cluster.agent/id agent-id))
-          prepared (error/prepare (assoc request :seon.error/inline-limit threshold))
+          ;; THE FAULT FAMILY'S OWN BOUND decides how much evidence the
+          ;; durable fact keeps; the blob threshold decides where the
+          ;; complete evidence lives. Two decisions, two declared keys.
+          prepared (error/prepare
+                    (assoc request
+                           :seon.config.error/max-evidence-bytes
+                           (:seon.config.error/max-evidence-bytes dials)))
           staged (when (or (> (:seon.error/data-size (:seon.error/fact prepared))
                              threshold)
                            (not= (:seon.error/data-content prepared)

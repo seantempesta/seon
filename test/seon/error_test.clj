@@ -384,6 +384,12 @@
         "a source wider than the caps says so")))
 
 (deftest fault-preparation-bounds-the-fact-and-omits-disposable-flow-state
+  ;; THE CLASS PROOF for B1. A fault's evidence is a STORED value and goes
+  ;; through the same streaming admission every stored value does, under the
+  ;; fault family's own declared byte bound. Before this the inline fitting
+  ;; was a token-budget search over a render profile, so when presentation
+  ;; limits were disabled ONE fault fact reached 915,655 bytes against its
+  ;; own declared 4,096 (measured 2026-09-07).
   (let [inline-limit 4096
         large (apply str (repeat 100000 "e"))
         disposable (str "DISPOSABLE-PROC-STATE-" large)
@@ -399,7 +405,7 @@
         (error/prepare
          (assoc (request (assoc (transform-error failure)
                                 ::flow/state {:cached-render disposable}))
-                :seon.error/inline-limit inline-limit))
+                :seon.config.error/max-evidence-bytes inline-limit))
         fact (:seon.error/fact prepared)
         content (:seon.error/data-content prepared)
         fact-bytes (alength (.getBytes (pr-str fact) "UTF-8"))]
@@ -412,9 +418,15 @@
     (is (str/includes? content "seon.render.data/at"))
     (is (str/includes? content large)
         "the original diagnostic string remains available for blob retrieval")
-    (is (str/includes? (:seon.error/message fact) "more characters"))
-    (is (str/includes? (:seon.instrument/expected fact) "more characters"))
-    (is (str/includes? (:seon.instrument/args fact) "more characters"))
+    ;; A FIELD OVER THE FAULT'S OWN DECLARED BYTE BOUND IS MARKED, never
+    ;; silently kept: the same `:seon.eval/missing` data every other surface
+    ;; reports an absent value with, and the whole field stays reachable in
+    ;; the evidence content beside it.
+    (is (str/includes? (:seon.error/message fact) ":missing :over-bound"))
+    (is (str/includes? (:seon.instrument/expected fact) ":missing :over-bound"))
+    (is (str/includes? (:seon.instrument/args fact) ":missing :over-bound"))
+    (is (true? (:seon.error/capped? fact))
+        "a fact whose evidence was replaced says so")
     (is (every? #(some? (get fact %))
                 [:seon.error/id :seon.error/kind :seon.error/message
                  :seon.error/signature :seon.error/data-edn
@@ -427,13 +439,13 @@
         (error/prepare
          (assoc (request {:seon.error/kind :seon.error-test/near-limit
                           :seon.error/message near-limit})
-                :seon.error/inline-limit inline-limit))
+                :seon.config.error/max-evidence-bytes inline-limit))
         fact (:seon.error/fact prepared)
         small
         (error/prepare
          (assoc (request {:seon.error/kind :seon.error-test/short
                           :seon.error/message "short"})
-                :seon.error/inline-limit inline-limit))]
+                :seon.config.error/max-evidence-bytes inline-limit))]
     (is (<= (:seon.error/data-size fact) inline-limit))
     (is (not= (:seon.error/data-edn fact)
               (:seon.error/data-content prepared))
@@ -744,9 +756,20 @@
 ;;; `canonical-database-attributes` is the live boot derivation, not a
 ;;; hand-listed fixture set (the fixture-vs-live-boot class).
 (defn- with-db
+  "A database with this cluster's CONFIG applied, exactly like production.
+
+  The config carries `:seon.config/initialization`'s supplied-default rows,
+  and without them call preparation has nothing to prepare: an
+  attribute-declared producer contracted `[value database]` was then invoked
+  with one argument and answered `ArityException`, which the walk recorded as
+  a renderer failure. A fixture that omits a declared input is the defect,
+  not the producer's contract (§5.1)."
   [body]
   (test-support/with-database
     (fn [connection]
+      (test-support/seed-cluster! connection "error-test")
+      (config/apply! {:seon.db/connection connection
+                      :seon.boot/cluster-name "error-test"})
       (db/transact! connection [{:seon.cluster.agent/id "root"}
                               {:seon.cluster.agent/id "agent-3"}])
       (body connection))))

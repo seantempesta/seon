@@ -200,6 +200,24 @@
  :seon.config.shell/home :seon.config/absent
  :seon.config.shell/lang :seon.config/absent
 
+ ; Unit: UTF-8 bytes one durable fault fact keeps inline, payload fields
+ ; included. The fault's meaningful source, its message, and the contract
+ ; evidence each get a share of what the base fact leaves; a field over its
+ ; share is stored as the missing marker and stays whole in the fault's
+ ; content blob. Declared as the fault family's OWN bound so a storage
+ ; decision and a fault decision can move apart.
+ ; Provenance: the mechanism replaces a token-budget search over a render
+ ; profile, which stopped bounding anything when presentation limits were
+ ; disabled and let ONE fault fact reach 915,655 bytes (measured 2026-09-07,
+ ; research/verify-storage-bound-2026-09-07.md B1). The NUMBER is measured
+ ; 2026-09-08: a real cold-acquisition fault
+ ; (seon.sci.eval/unrestorable-function-root) admits to 1,913 bytes of
+ ; evidence, and the old blob-threshold value of 4,096 divided among the
+ ; payload fields left ~1,700 each — so the fault's typed cause was marked
+ ; missing instead of stored. 16,384 is 4x the inline blob threshold and
+ ; keeps that evidence inline.
+ :seon.config.error/max-evidence-bytes 16384
+
  ; Unit: count of same-signature faults since this process started.
  ; Provenance: the second escalation condition (the first is "no
  ; attributable agent"). Three says a fault that happened once was

@@ -31,6 +31,9 @@
               [:seon.config.error/escalate-to
                {:optional true}
                :seon.config.error/escalate-to]
+              [:seon.config.error/max-evidence-bytes
+               {:optional true}
+               :seon.config.error/max-evidence-bytes]
               [:seon.error/fact {:optional true} :seon.error/fact]],
              :data :map,
              :data-blob :seon.blob/digest,
@@ -87,7 +90,9 @@
                :seon.instrument/expected]
               [:seon.instrument/args
                {:optional true}
-               :seon.instrument/args]],
+               :seon.instrument/args]
+              [:seon.eval/missing {:optional true} :seon.eval/missing]
+              [:seon.eval/size {:optional true} :seon.eval/size]],
              :id [:string {:min 1, :seon.db/identity true}],
              :kind :keyword,
              :message [:string {:min 1, :seon.search/index :text}],
@@ -107,10 +112,9 @@
               [:seon.cluster.agent/id
                {:optional true}
                :seon.cluster.agent/id]
-              [:seon.error/inline-limit
+              [:seon.config.error/max-evidence-bytes
                {:optional true}
-               :seon.error/inline-limit]],
-             :inline-limit [:int {:min 256}],
+               :seon.config.error/max-evidence-bytes]],
              :prepare-request :seon.error/normalize-request,
              :prepared
              [:map
