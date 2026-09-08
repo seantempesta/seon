@@ -157,8 +157,8 @@ moved onto the existing `:seon.print/var` face in the same wave, because a
 Var IS its name in either world and admitting the host's as an opaque object
 broke every `def` at the JVM REPL.
 
-Two consequences the wave had to repair, both real defects the ruling
-exposed:
+Four consequences the wave had to repair, every one a real defect the ruling
+exposed and none of them findable by reading:
 
 1. **Missing had to become a TERMINAL FACT.** An evaluation with no
    `result-edn` read as still running, so the turn's settlement refused with
@@ -166,7 +166,19 @@ exposed:
    re-attempted. `seon.cluster.run/terminal?` and its two query twins
    (`seon.cluster.work/next-ordinal`, `append-generated-call`'s prefix check)
    now count `:seon.eval/missing`.
-2. **`seon.render.value/artifact` had to become total.** It returned `{}` for
+2. **`seon.sci.eval/evaluate` refused its own output.** The evaluation schema
+   required `:seon.sci.admit/value`, which the ruled answer cannot carry.
+   FOUND LIVE, not by reading: submitting `(range)` to the scratch cluster
+   killed the turn before it settled, the agent's run never closed, and every
+   later submission refused `agent-already-running`. Both evaluation shapes
+   now declare value, result-edn, missing and size optional together.
+3. **The fault committer died on a missing admission.**
+   `seon.error/normalize` called `String.getBytes` on the absent bytes, so
+   "A core fault could not be normalized" replaced the fault. One helper now
+   re-admits the marker as itself. (`src/seon/error.clj` is outside the owned
+   paths; this is a crash on the fault path and was repaired rather than
+   filed.)
+4. **`seon.render.value/artifact` had to become total.** It returned `{}` for
    a missing admission — a contract violation, and an empty panel where the
    reason belongs.
 
@@ -208,8 +220,114 @@ route wants its own declared presentation window beside
 
 ## 4. Gates
 
-(filled in below once the runs land)
+### 4.1 The inherited baseline, MEASURED
+
+A detached worktree at `66cedc7fa` — this lane's parent, not the stale commit
+the session banner named — with `reference-code` symlinked to the main tree's
+submodules, same selection:
+
+**17 red tests, inherited, before a line of this lane existed.**
+
+```
+seon.cluster.run-test/settlement-mints-rows-for-unindexed-call-targets
+seon.render.transcript-test/a-tight-budget-degrades-then-elides-loudly
+seon.render.transcript-test/every-generated-history-is-ordered-total-and-token-bounded
+seon.render.transcript-test/malformed-receipt-bytes-and-any-unique-about-stay-replayable
+seon.render.transcript-test/populated-history-restores-the-repl-fidelity-checklist
+seon.render.transcript-test/receipt-content-enters-the-shared-capped-floor
+seon.render.transcript-test/same-instant-bootstrap-prefix-and-newest-tail-preserve-plan-order
+seon.render.transcript-test/supersession-chains-vanish-before-token-accounting
+seon.render.transcript-test/tight-budgets-pull-only-a-budget-derived-newest-candidate-set
+seon.render.walk-test/one-basis-projection-covers-the-complete-walk
+seon.render.web-test/a-fresh-cluster-debug-page-renders-a-prospective-prompt
+seon.render.web-test/a-never-run-agents-debug-context-is-labeled-prospective
+seon.render.web-test/an-unavailable-prospective-context-renders-its-diagnostic-data
+seon.render.web-test/data-caps-a-five-megabyte-attribute-through-the-shared-floor
+seon.render.web-test/the-message-appears-on-the-page-wire-test
+seon.sci.eval-test/runtime-function-rows-carry-parsed-contract-facts
+seon.sci.eval-test/static-and-runtime-contracted-definitions-publish-identical-facts
+```
+
+The eight `seon.render.transcript-test` entries plus
+`settlement-mints-rows-for-unindexed-call-targets` are the documented
+disabled-rendering-limits set
+([the greens note §1.2](repl-grammar-greens-2026-09-07.md)); the two
+`seon.sci.eval-test` contract rows are the pair that note said should be added
+to a ledger; the five `seon.render.web-test` and `seon.render.walk-test` rows
+had never been measured in that selection and are recorded here for the first
+time.
+
+`seon.render.transcript-test/one-reply-reads-identically-on-the-page-in-history-and-in-the-prompt`
+is GREEN in that baseline, so it is this lane's to keep green.
 
 ## 5. Live verification
 
-(filled in below)
+Scratch cluster `storage-lane` under `--root tmp/storage-lane-root`, reset and
+republished onto this lane's commits, seeded with the Juniper fixture. Every
+source below went through `seon.cluster.agent/submit-source!` — the ordinary
+durable turn path — and its facts were read back out of the database.
+
+| source | stored | `:seon.eval/missing` | `:seon.eval/size` | the REPL line the agent reads |
+|---|---|---|---|---|
+| `(range 100000)` | **5,288,936 bytes inline**, no blob | — | — | `#:seon.repl{:value (0 1 … 31 ...), :result result/e34279, :ns my.agents.juniper, :ms 115}` |
+| `(range)` | nothing | `:over-bound` | **8388608** | `#:seon.repl{:value #:seon.eval{:missing :over-bound, :size 8388608}, :ns my.agents.juniper, :ms 116}` |
+| `(atom 1)` | nothing | `:unserializable` | absent | `#:seon.repl{:value #:seon.eval{:missing :unserializable}, :ns my.agents.juniper, :ms 115}` |
+| `(+ 1 1)` | 48 bytes | — | — | `#:seon.repl{:value 2, :result result/e34201, :ns my.agents.juniper, :ms 10}` |
+
+Four things this proves, live:
+
+1. **Faithful storage.** Reading the stored node back and deriving its value
+   gives `{:count 100000, :first 0, :last 99999}` — the whole sequence, no
+   window, no page.
+2. **The bound stops an unbounded source at exactly the bound**, and the
+   evaluation's own SCI interrupt is what the walk consults at every node
+   (157,403 calls measured in the unit probe).
+3. **A missing value ablates its handle.** Neither missing line carries
+   `:result`. A later turn naming the dead handle gets sci's ordinary
+   unresolved symbol, verbatim:
+
+   ```text
+   user=> (inc result/e34154)
+   #:seon.repl{:error "Execution error (ExceptionInfo) at sci.impl.utils/throw-error-with-location (utils.cljc:67).
+   Unable to resolve symbol: result/e34154", :result result/e34351, :ns my.agents.juniper, :ms 3}
+   ```
+
+   while the live handle beside it resolves: `(inc result/e34201)` → `2`… `3`.
+4. **The AI boundary is where the elision is.** The 5 MiB value prints as
+   `(0 1 … 31 ...)` because the session's `*print-length*` is 32 — a
+   presentation decision on the stored value, not a storage cut. The stored
+   bytes are all still there.
+
+`seon.repl/render-html` shows the SAME elided line by construction: it is the
+one REPL grammar the page, the history unit and the prompt share, and its
+byte identity is a landed ruling. "HTML with no limits" is about the VALUE
+surfaces (`/data`, `seon.render.value/render-html`), which now serve the whole
+stored value — see §3.7.
+
+## 6. The development cluster refused adoption — the orchestrator resets
+
+`bin/seon --root tmp/juniper-context-live init --dev juniper-context` reached
+`development JVM instrumentation` and then refused, verbatim:
+
+```text
+Development instrumentation configuration is unavailable.
+{:seon.error/kind :seon.boot/refused
+ :seon.boot/offense
+ {:seon.config/missing-effective "juniper-context"
+  :seon.error/kind :seon.config/missing-effective
+  :seon.error/data #:seon.config{:missing [:seon.config.eval.result/max-bytes]}
+  :seon.error/message "Effective configuration for cluster \"juniper-context\"
+                       is missing required facts
+                       [:seon.config.eval.result/max-bytes]."}}
+```
+
+This is the anticipated config-key refusal, only in the ADDITIVE direction:
+the new bound is a required config fact and the running dev cluster's stored
+configuration predates it. The publication itself succeeded — analysis,
+schema, 30,402 program entities, every changed namespace reloaded — so the
+branch advanced while the in-place adoption did not.
+
+**The lane stopped there and touched nothing else in that root**, as the
+assignment directs. The orchestrator's move is a reset (or a
+`bin/seon --root tmp/juniper-context-live config apply juniper-context
+config/default.edn` followed by a restart, since the config is arm-time).
