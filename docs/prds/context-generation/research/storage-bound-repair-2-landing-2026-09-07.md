@@ -17,11 +17,15 @@ to end — its ranked BR1-BR4 and FR1-FR7 are this lane's assignment),
 
 ## 1. Commits
 
-| commit | blocker |
+| commit | subject |
 |---|---|
 | `07394e485` | BR2 — the gate armed no contract instrumentation |
 | `222559d5c` | BR1 — every presentation cut was a contract violation |
 | `5a26941c6` | BR3 — the print-node contract recursed per level |
+| `91d7e2bef` | BR4 — the transcript's budget mechanism had no driver |
+| `97f864bad` | FR1, FR3, FR5, FR6, FR7 and three contract self-violations |
+| `4ec6bd82a` | the node-face validator's ambient read; SCI evaluation mode's retired keys |
+| `e46df126a` | the platform tier under the contracts it now arms |
 
 ## 2. BR2 — the gate was blind, and what opening its eyes showed
 
@@ -232,3 +236,65 @@ SCI evaluation mode (`eval_clj` `mode: "door"`) answered
 required key` on its first call: `script/seon/dev/mcp.clj` was sending the
 RETIRED `:seon.cluster.run.form/source` and `/ns` spellings, so the evaluator
 received no source at all. Fixed in `4ec6bd82a`.
+
+
+## 8. The gates
+
+| gate | before (instrumented, BR2 only) | after |
+|---|---|---|
+| the assigned selection + `seon.instrument-test`, `seon.test-runner-test`, `seon.effect-test`, `my.message-test` | 221 tests / 459 assertions / **155 red** | 253 tests / **1,365 assertions** / 48 red, then further repairs |
+| `bin/test --platform` | **9 red** (every one the refusal class below) | **GREEN — 73 tests, 398 assertions, 0 failures, 0 errors**, root removed as successful |
+
+The assertion count is the honest measure of what the earlier numbers hid:
+the same selection ran 459 assertions when a fixture defect killed the suite
+at its first ctx, and 1,365 once the fixtures were repaired.
+
+### 8.1 The one class the armed gate exposes everywhere
+
+A test pins a function's own typed refusal for an input its DECLARED contract
+forbids. With contracts armed the contract refuses first — at the same
+crossing, with an equally evidence-complete value naming the function, the
+member and the offending argument. Nine platform members were this; the bulk
+tier has more (`my.message-test`, `seon.sci.admit-test`'s absent-bound case,
+`seon.effect-test`'s oversized-request case). Filed as
+[agent-facing-refusals-are-asserted-where-contracts-refuse-first](../../../seon/issues/agent-facing-refusals-are-asserted-where-contracts-refuse-first.md);
+the platform members are fixed there and named in the note.
+
+### 8.2 `bin/test --all`, whole
+
+**1,439 tests, 11,374 assertions, 314 red** (`tmp/repair2/all2.log`), the
+platform tier green ahead of it. 255 of the reds are uncaught
+`invalid-input` contract violations and 11 are `invalid-output`; the largest
+concentrations are:
+
+| namespace | red | dominant cause |
+|---|---|---|
+| `seon.cluster.turn-test` | 55 | `seon.cluster.loop/turn` handed a non-string where its contract declares one |
+| `seon.cluster.boot-test` | 20 | (live boot fixtures) |
+| `seon.cluster.agent-test` | 16 | |
+| `seon.render.web-test`, `seon.render.value-test`, `seon.fs.jvm-test` | 11 each | |
+| `seon.render-simplification-test` | 10 | |
+| `seon.sci.eval-test`, `seon.dev.fresh-operator-test` | 9 each | `seon.sci.kernel/context-projection` handed something that is not an SCI ctx (25 occurrences across the run) |
+
+Every sampled red is a FIXTURE handing a shape the declared contract forbids,
+or a test pinning a refusal the contract now makes first (§8.1). None is a
+production behaviour change this lane could find — which is the point: this
+is the backlog the gate could not see, now visible, counted, and attributable
+one function at a time.
+
+
+## 9. What is unfinished
+
+- **314 bulk-tier reds** under armed contracts (§8.2). They are the visible
+  backlog, not a regression: the same tree with the gate blind reported them
+  green. They need one wave, one class at a time — `seon.cluster.turn-test`'s
+  55 and the 25 `context-projection` calls are the two biggest single seams.
+- **`seon.instrument-test`'s own eight reds.** The suite is written for a
+  JVM that starts UNARMED (`remove-is-total` expects zero surviving wrappers;
+  `production-instruments-nothing` expects a clean baseline). Arming the
+  worker is what makes them fail; the suite's fixture snapshot/restore keeps
+  the rest of the gate deterministic, so this is the suite's own repair.
+- **The development cluster still refuses adoption** (§7). It needs a stop
+  and start, which this lane's assignment does not permit at that root.
+- **FR2** (a throwable fault keeps no inline evidence) is filed, not fixed.
+- The `my.message-test` assertions are filed with the refusal class (§8.1).
