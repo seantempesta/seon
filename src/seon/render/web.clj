@@ -1895,8 +1895,9 @@
 
 (defn- retained-interest
   [state]
-  (let [calls (concat (vals (::calls state))
-                      (vals (::ai-calls state)))
+  (let [cache @(render/shared-cache (get-in state [:seon.cluster.loop/cluster :seon.sci.eval/ctx]))
+        calls (concat (vals (::calls cache))
+                      (vals (::ai-calls cache)))
         interest (reduce (fn [interest retained]
                            (merge-interest interest
                                            (calls-interest retained)))
@@ -1951,7 +1952,8 @@
        (select-keys request [:seon.render.walk/lookup
                              :seon.render/distance])}
       :seon.render.call/read-evidence
-      (db/read-evidence @captured {:seon.db/retain-read-results? true})
+      (or (:seon.render.call/read-evidence acquisition)
+          (db/read-evidence @captured {:seon.db/retain-read-results? true}))
       :seon.render.call/basis-transaction
       (db/basis-t (:seon.db/db request))
       :seon.render.call/output acquisition
@@ -1971,7 +1973,8 @@
              call-id)]
         {:acquisition acquisition
          :entry entry
-         :changed? (not= previous-acquisition acquisition)})
+         :changed? (not= (select-keys previous-acquisition [:seon.render.walk/root :seon.render.walk/members :seon.render.walk/order])
+                          (select-keys acquisition [:seon.render.walk/root :seon.render.walk/members :seon.render.walk/order]))})
       {:acquisition previous-acquisition
        :entry previous
        :changed? false})))
@@ -2014,10 +2017,9 @@
            (not-any? #(contains? row %)
                      [::run/plan-digest ::run/error ::run/closed-at])))))
 
-(defn- page-refresh
-  [state database streams profile registration-key derive-all? invalidate-calls?]
-  (let [handle (:seon.cluster.loop/cluster state)
-        connection (:seon.db/connection handle)
+(defn- derive-page
+  [handle database streams profile registration-key retained-values derive-all? invalidate-calls?]
+  (let [connection (:seon.db/connection handle)
         caps (:seon.sci.admit/caps handle)
         debug? (and (vector? registration-key)
                     (= ::debug-tab (first registration-key)))
@@ -2025,21 +2027,21 @@
         agent-id (if debug?
                    (:seon.cluster.agent/id debug-request)
                    registration-key)
-        retained-invocations (::invocations state)
+        retained-invocations (::invocations retained-values {})
         captured-invocations (atom {})]
     (if debug?
-      (let [retained (get-in state [::calls registration-key] {})
+      (let [retained (get-in retained-values [::calls registration-key] {})
             candidates (candidate-call-ids retained database)
-            package (get-in state [::packages registration-key])]
+            package (get-in retained-values [::packages registration-key])]
         ;; A join marker shares the newest-only interest channel with database
         ;; and evaluation wakes. A missing exact package is the durable level
         ;; condition. For a retained package, the same read-evidence mechanism
         ;; as every render call decides whether to derive; an unchanged page
         ;; only advances its observed database basis below.
-        (if (or invalidate-calls? (nil? package) (seq candidates))
+        (if (or invalidate-calls? (nil? (get-in retained-values [::page-results registration-key])) (seq candidates))
           (debug-page-result database connection debug-request caps profile
                              (assoc handle :seon.cluster.agent/routing
-                                    (:seon.cluster.agent/routing state))
+                                    (:seon.cluster.agent/routing handle))
                              retained retained-invocations
                              captured-invocations)
           {::retained-only? true
@@ -2048,14 +2050,14 @@
                                    package))
            :seon.render/captured-calls retained
            :seon.render/captured-invocations retained-invocations}))
-      (let [retained (get-in state [::calls registration-key] {})
+      (let [retained (get-in retained-values [::calls registration-key] {})
             candidates (candidate-call-ids retained database)
             call-id (root-call-id :seon.render/html registration-key)
             request
             (cond-> {:seon.db/db database
                      :seon.cluster.agent/id agent-id
                      :seon.render.web/root-agent-id
-                     (:seon.render.web/root-agent-id state)
+                     (:seon.render.web/root-agent-id handle)
                      :seon.sci.admit/caps caps
                      :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                      :seon.config.eval/time-limit-ms
@@ -2067,7 +2069,7 @@
                      :seon.cluster.run/live-processes
                      #{(:seon.cluster.run/process handle)}
                      :seon.render.web/retained-fragments
-                     (get-in state [::fragments registration-key] {})
+                     (get-in retained-values [::fragments registration-key] {})
                      :seon.render/retained-calls retained
                      :seon.render/invocations retained-invocations
                      :seon.render/captured-invocations captured-invocations
@@ -2097,28 +2099,50 @@
              :seon.render/captured-calls calls
              :seon.render/captured-invocations retained-invocations}))))))
 
+(defn- derive-page!
+  "Derive on this caller, sharing immutable call evidence with every reader."
+  [handle database streams profile registration-key derive-all? invalidate-calls?]
+  (let [cache (render/shared-cache (:seon.sci.eval/ctx handle))
+        retained @cache
+        program (some-> handle :seon.sci.eval/ctx :seon.sci.kernel/program-snapshot deref)
+        changed-code? (not (identical? program (get-in retained [::programs registration-key])))
+        result (derive-page handle database streams profile registration-key retained
+                            (or derive-all? changed-code?)
+                            (or invalidate-calls? changed-code?))
+        result (if (::retained-only? result)
+                 (merge (get-in retained [::page-results registration-key]) result)
+                 result)
+        basis (db/basis-t database)]
+    (swap! cache
+           (fn [current]
+             (if (> (long (get-in current [::page-bases registration-key] -1)) basis)
+               current
+               (-> current
+                   (assoc-in [::page-bases registration-key] basis)
+                   (assoc-in [::programs registration-key] program)
+                   (assoc-in [::page-results registration-key] result)
+                   (assoc-in [::calls registration-key] (:seon.render/captured-calls result))
+                   (assoc-in [::fragments registration-key] (:seon.render.web/fragments result))
+                   (update ::invocations merge (:seon.render/captured-invocations result))))))
+    result))
+
 (defn- current-page
-  "Derive a connection's first paint from one current database value.
-  GET and SSE use the same page derivation as the render proc."
+  "GET and first SSE paint derive on their caller from one database value."
   [service database registration-key]
   (let [projection (sci.kernel/context-projection (:seon.sci.eval/ctx service))
-        connection (:seon.store/connection-object service)]
+        connection (:seon.store/connection-object service)
+        handle (merge service (:seon.cluster.loop/cluster service)
+                      {:seon.db/connection connection
+                       :seon.render.web/root-agent-id
+                       (:seon.render.web/root-agent-id service
+                                                      (:seon.cluster.agent/id service))})]
     (schema/call-with-projection
      projection
      (fn []
        (let [effective (config/effective database (current-cluster-name database))
              profile (render/agent-render-profile effective)]
          (:seon.render.web/page
-          (page-refresh
-           {:seon.cluster.loop/cluster
-            (merge service (:seon.cluster.loop/cluster service)
-                   {:seon.db/connection connection})
-            :seon.render.web/root-agent-id
-            (:seon.render.web/root-agent-id service
-                                        (:seon.cluster.agent/id service))
-            :seon.cluster.agent/routing (:seon.cluster.agent/routing service)
-            ::invocations {}}
-           database {} profile registration-key true false)))))))
+          (derive-page! handle database {} profile registration-key false false)))))))
 
 (defn- watched-registration-keys
   [registration]
@@ -2267,6 +2291,8 @@
     (get-in state [:seon.cluster.loop/cluster :seon.sci.eval/ctx]))
    (fn []
   (let [handle (:seon.cluster.loop/cluster state)
+        cache (render/shared-cache (:seon.sci.eval/ctx handle))
+        state (merge state (select-keys @cache [::calls ::ai-calls ::invocations ::packages]))
         registration (:seon.render.web/registration state)
         watched (watched-registration-keys registration)
         profile (or (::profile state)
@@ -2286,12 +2312,11 @@
         ;; throw too; when it does, the string-only floor keeps the proc alive
         ;; instead of ending it with the failure it was reporting.
         previous-signatures (::fault-signatures state)
-        [results pass-invocations pass-signatures]
+        [results _pass-invocations pass-signatures]
         (reduce
          (fn [[results invocations signatures] registration-key]
            (let [result (try
-                          (page-refresh (assoc state ::invocations invocations)
-                                        database streams profile registration-key
+                          (derive-page! (merge state handle) database streams profile registration-key
                                         derive-all? invalidate-calls?)
                           (catch Throwable failure
                             (try
@@ -2348,23 +2373,7 @@
          (:packages advanced)
          results)
         changed? (:changed? advanced)
-        fragments
-        (reduce-kv
-         (fn [retained registration-key result]
-           (assoc retained registration-key
-                  (:seon.render.web/fragments result)))
-         (::fragments state)
-         paint-results)
-        calls
-        (reduce-kv
-         (fn [retained registration-key result]
-           (assoc retained registration-key
-                  (:seon.render/captured-calls result)))
-         (::calls state)
-         results)
-        invocations (select-keys
-                     pass-invocations
-                     (reachable-invocation-keys calls (::ai-calls state)))
+        _ (swap! cache assoc ::packages packages)
         _ (when (or invalidate-calls?
                     (not= packages (::packages state)))
             (reset! (:seon.render.web/latest-packages state) packages))
@@ -2373,11 +2382,9 @@
                   (assoc ::watched (count watched)
                          ::streams streams
                          ::profile profile))]
-    [(assoc state
-            ::packages packages
-            ::fragments fragments
-            ::calls calls
-            ::invocations invocations
+    [(assoc (dissoc state ::packages ::fragments ::calls ::invocations
+                           ::ai-calls ::ai-entries ::page-results ::page-bases
+                           ::context-bases ::context-programs ::programs)
             ;; DERIVED, NOT ACCUMULATED: only the pages that failed THIS pass
             ;; carry a signature, so a page that starts rendering again drops
             ;; out and its next failure is offered afresh.
@@ -2456,10 +2463,10 @@
   [entries]
   (apply str (history-segments entries)))
 
-(defn- context-change-pass
-  "Run the requested ordinary turn operation with this proc's cluster handle."
-  [state request]
-  (let [cluster (:seon.cluster.loop/cluster state)
+(defn- change-context
+  "Run the requested ordinary turn operation on the calling thread."
+  [request]
+  (let [cluster (:seon.cluster.loop/cluster request request)
         connection (:seon.db/connection cluster)
         action (:seon.render/context-action request)
         function (case action
@@ -2475,15 +2482,15 @@
         result (turn-function-result
                 function [(cond-> prepared
                             (= action :system-turn) (assoc :seon.turn/write? true))])]
-    [state (if (:seon.error/kind result) result {:seon.db/db @connection})]))
+    (if (:seon.error/kind result) result {:seon.db/db @connection})))
 
-(defn- context-pass
-  [state message]
-  (let [request (:seon.render.context/request message)
+(defn- context-value
+  [retained-values request]
+  (let [state retained-values
         agent-id (:seon.cluster.agent/id request)
         database (:seon.db/db request)
         retained (get-in state [::ai-calls agent-id] {})
-        retained-invocations (::invocations state)
+        retained-invocations (::invocations state {})
         entries (get-in state [::ai-entries agent-id] [])
         candidates (candidate-call-ids retained database)
         call-id (root-call-id :seon.render/ai agent-id)]
@@ -2531,12 +2538,45 @@
                 :seon.render.history/segments (history-segments entries)
                 :seon.db/db database}]))))
 
+(defn derive-context!
+  "Compute the requesting turn's context directly, sharing retained evidence."
+  {:malli/schema [:=> [:cat :seon.render/context-request]
+                  [:or :seon.render/acquired-context
+                   :seon.render/context-change-result :seon.error/value]]}
+  [request]
+  (let [ctx (:seon.sci.eval/ctx request)
+        cache (render/shared-cache ctx)]
+    (schema/call-with-projection
+     (sci.kernel/context-projection ctx)
+     (fn []
+       (if (:seon.render/context-action request)
+         (change-context request)
+         (let [agent-id (:seon.cluster.agent/id request)
+               program (some-> ctx :seon.sci.kernel/program-snapshot deref)
+               before @cache
+               before (if (identical? program (get-in before [::context-programs agent-id]))
+                        before
+                        (-> before (update ::ai-calls dissoc agent-id)
+                            (update ::ai-entries dissoc agent-id)))
+               [after result] (context-value before request)
+               basis (db/basis-t (:seon.db/db request))]
+           (swap! cache
+                  (fn [current]
+                    (if (> (long (get-in current [::context-bases agent-id] -1)) basis)
+                      current
+                      (-> current
+                          (assoc-in [::context-bases agent-id] basis)
+                          (assoc-in [::context-programs agent-id] program)
+                          (assoc-in [::ai-calls agent-id] (get-in after [::ai-calls agent-id]))
+                          (assoc-in [::ai-entries agent-id] (get-in after [::ai-entries agent-id]))
+                          (update ::invocations merge (::invocations after))))))
+           result))))))
+
 (defn render-step
   "The render proc's transform, in Flow's four arities (F2 §1.1).
 
-  Four in-ports: `::interest`, `::runtime-eval`, and `::stream` use
-  `(sliding-buffer 1)`; `::context` is the reliable demand channel for exact
-  agent context. `::interest` is the database render wake, a payload-free
+  Three in-ports: `::interest`, `::runtime-eval`, and `::stream` use
+  `(sliding-buffer 1)`. The proc only publishes deltas for open tabs. `::interest` is the database render wake, a payload-free
   \"look\"; `::runtime-eval` announces that evaluated code may have changed;
   `::stream` is the cluster's one
   stream conn carrying `{agent-id + run-id + :seon.ai/partial snapshot}`
@@ -2590,7 +2630,6 @@
                 (:seon.render.web/runtime-eval-channel args)
                 ::stream (:seon.cluster.loop/stream-channel
                           (:seon.cluster.loop/cluster args))
-                ::context (:seon.render/context-channel args)
                 ::pages (:seon.render.web/pages-channel args)
                 ::latest-packages (:seon.render.web/latest-packages args)
                 ::render-interest (:seon.render.web/interest args)}]
@@ -2606,16 +2645,9 @@
           {::interest (:seon.render.web/render-channel args)
            ::runtime-eval (:seon.render.web/runtime-eval-channel args)
            ::stream (:seon.cluster.loop/stream-channel
-                     (:seon.cluster.loop/cluster args))
-           ::context (:seon.render/context-channel args)}
+                     (:seon.cluster.loop/cluster args))}
           ::flow/out-ports
           {::pages (:seon.render.web/pages-channel args)}
-          ::packages {}
-          ::fragments {}
-          ::calls {}
-          ::ai-calls {}
-          ::invocations {}
-          ::ai-entries {}
           ::streams {}
           ::passes 0
           ::watched 0
@@ -2629,15 +2661,6 @@
      (async/put! (:seon.render.web/completion state) ::stopped))
    state)
   ([state input message]
-   (if (= ::context input)
-     (let [request (:seon.render.context/request message)
-           [state response] (if (:seon.render/context-action request)
-                              (context-change-pass state request)
-                              (context-pass state message))]
-       (async/put! (:seon.render.context/reply message) response)
-       [(if-let [database (:seon.db/db response)]
-          (publish-interest! state database)
-          state) nil])
      (let [runtime-eval? (= ::runtime-eval input)
            settlement
          (when (and (= ::interest input) (map? message))
@@ -2677,7 +2700,7 @@
            state (-> state
                      (assoc ::coalesce-ms (coalesce-floor database))
                      (publish-interest! database))
-           published (if join? (::packages state) packages)]
+           published (if join? @(:seon.render.web/latest-packages state) packages)]
        ;; A settlement request rides the same sliding-1 in-port as the
        ;; wakes it fences. Its reply is the pass count produced by this
        ;; exact derivation, so a proof need not sample Flow's published
@@ -2686,7 +2709,7 @@
        (when settlement
          (async/put! settlement (::passes state)))
        [(assoc state ::last-pass-nanos (System/nanoTime))
-        (when (seq published) {::pages [published]})])))))
+        (when (seq published) {::pages [published]})]))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The feed — per tab: a tap and a virtual thread (F2 §1.3)
@@ -3229,11 +3252,12 @@
                  nil)
         result (if action
                  (render/acquire-context!
-                  (:seon.render/context-channel service)
-                  {:seon.render/context-action action
+                  (merge service (:seon.cluster.loop/cluster service)
+                  {:seon.db/connection (:seon.store/connection-object service)
+                   :seon.render/context-action action
                    :seon.cluster.agent/id (get-in request [:path-params :id])
                    :seon.sci.eval/time-limit-ms
-                   (:seon.config.eval/time-limit-ms service)})
+                   (:seon.config.eval/time-limit-ms service)}))
                  {:seon.render.web/invalid-context-action true
                   :seon.error/kind ::invalid-context-action
                   :seon.error/message "Choose Run system turn, Virtual turn, or Compact."})]

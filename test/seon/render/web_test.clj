@@ -124,7 +124,6 @@
             server (atom nil)
             render-channel (async/chan (async/sliding-buffer 1))
             runtime-eval-channel (async/chan (async/sliding-buffer 1))
-            context-channel (async/chan)
             pages-channel (async/chan (async/sliding-buffer 1))
             registration (atom {})
             latest-packages (atom {})
@@ -135,7 +134,6 @@
             graph-errors (atom [])
             view {:seon.render.web/render-channel render-channel
                   :seon.render.web/runtime-eval-channel runtime-eval-channel
-                  :seon.render/context-channel context-channel
                   :seon.render.web/pages-channel pages-channel
                   :seon.render.web/registration registration
                   :seon.render.web/latest-packages latest-packages
@@ -152,7 +150,7 @@
                      :seon.config/on-core-error :record
                      :seon.cluster.run/process process
                      :seon.cluster.loop/stream-channel stream-channel
-                     :seon.render/context-channel context-channel})
+})
             graph (flow.core/create-flow
                    {:procs
                     {:seon.render.web/render
@@ -202,8 +200,7 @@ handle))}}
                            :seon.render.web/registration registration
                            :seon.render.web/latest-packages latest-packages
                            :seon.render.web/render-channel render-channel
-                           :seon.render/context-channel context-channel
-                           :seon.render.web/fault-channel fault-channel}))
+                                    :seon.render.web/fault-channel fault-channel}))
           (body connection @server
                 {:graph graph
                  :pages-mult pages-mult
@@ -1981,7 +1978,6 @@ handle))}}
           :seon.render.web/registration (atom {})
           :seon.render.web/latest-packages (atom {})
           :seon.render.web/render-channel (async/chan (async/sliding-buffer 1))
-          :seon.render/context-channel (async/chan (async/sliding-buffer 1))
           :seon.render.web/fault-channel (async/chan (async/dropping-buffer 1))}
          overrides))
 
@@ -2162,7 +2158,7 @@ handle))}}
             three-passes
             (fn [state]
               (with-redefs-fn
-                {#'web/page-refresh (fn [& _] (throw @failure))}
+                {#'web/derive-page! (fn [& _] (throw @failure))}
                 (fn []
                   (reduce (fn [state _]
                             (first (#'web/render-pass state @connection true)))
@@ -2177,7 +2173,7 @@ handle))}}
         (testing "and the proc kept going: every pass produced a page"
           (is (= 3 (::web/passes after)))
           (is (str/includes?
-               (str (vals (get (::web/packages after) "agent-a")))
+               (str (vals (get @(:seon.render.web/latest-packages after) "agent-a")))
                "This page could not be derived")))
         (testing "a DIFFERENT failure on the same page is offered again"
           (reset! failure (ex-info "the page threw something else" {}))
@@ -2203,14 +2199,14 @@ handle))}}
       (let [state (assoc (throwing-render-state connection nil)
                          :seon.cluster.agent/routing nil)
             after (with-redefs-fn
-                    {#'web/page-refresh
+                    {#'web/derive-page!
                      (fn [& _] (throw (ex-info "the page threw" {})))}
                     (fn []
                       (first (#'web/render-pass state @connection true))))]
         (is (= 1 (::web/passes after))
             "the pass completed rather than ending the proc")
         (is (str/includes?
-             (str (vals (get (::web/packages after) "agent-a")))
+             (str (vals (get @(:seon.render.web/latest-packages after) "agent-a")))
              "could not be derived")
             "and the page still says so where its content would have been")))))
 

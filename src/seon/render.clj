@@ -11,9 +11,7 @@
   context and executes through `seon.sci.kernel`; there is no compiled renderer
   lane. A redefinition therefore changes the next call and a cold context
   re-derives the same symbol from its database program row."
-  (:require [clojure.core.async :as async]
-            [seon.await :as await]
-            [seon.ai.tokens :as tokens]
+  (:require [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
@@ -1364,7 +1362,7 @@
               (swap! captured-calls assoc call-id entry))
             ;; Render cost serves the agent-context consumer. A real prompt
             ;; request structurally carries the held run id through
-            ;; `context-pass`; web page, root, and debug renders do not. They
+            ;; the turn caller; web page, root, and debug renders do not. They
             ;; still retain call evidence, but a read-only page observation
             ;; must never transact.
             (when (and (not reusable?)
@@ -1378,38 +1376,27 @@
                [(render-cost-fact request selected output rendered)]))
                 rendered))))))))
 
-(defn acquire-context!
-  "Request exact context bytes or a context change from the owning render proc.
+(defn shared-cache
+  "The cluster environment's shared, disposable render evidence cache.
 
-  One reliable request/reply channel hands retained previews to Add operations
-  and retained AI bytes to prompt assembly."
-  {:malli/schema [:=> [:cat :seon.flow/channel :seon.render/context-request]
+  Allocate once through the environment's existing replacement reference.
+  Every caller carries that same reference; no process registry or worker
+  owns the cached values. Publication never holds a lock while deriving."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.render/cache]}
+  [ctx]
+  (let [state (:seon.sci.eval/projection-state ctx)]
+    (or (:seon.render/cache @state)
+        (:seon.render/cache
+         (swap! state #(if (:seon.render/cache %) %
+                          (assoc % :seon.render/cache (atom {}))))))))
+
+(defn acquire-context!
+  "Derive context on the calling turn's thread using shared read evidence."
+  {:malli/schema [:=> [:cat :seon.render/context-request]
                   [:or :seon.render/acquired-context
                    :seon.render/context-change-result :seon.error/value]]}
-  [context-channel request]
-  (let [reply (async/promise-chan)
-        agent-id (:seon.cluster.agent/id request)
-        run-id (:seon.cluster.run/id request)]
-    (await/await!
-     {:seon.await/bound
-      {:seon.await/config-attribute :seon.config.eval/time-limit-ms
-       :seon.await/config-value (:seon.sci.eval/time-limit-ms request)}
-      :seon.await/diagnostic
-      {:seon.error/diagnostic-layer :render
-       :seon.error/diagnostic-operation ::context-acquisition
-       ;; The member is the NAME of what never arrived, never a live value:
-       ;; a channel here was printed into a stored fact by every projection.
-       :seon.error/diagnostic-member ::context-reply
-       :seon.error/diagnostic-expected ::context-reply
-       :seon.error/diagnostic-offending ::pending
-       :seon.error/diagnostic-evidence
-       {:seon.cluster.agent/id agent-id
-        :seon.cluster.run/id run-id}}
-      :seon.await/port-operations
-      [[context-channel
-        {:seon.render.context/request request
-         :seon.render.context/reply reply}]
-       reply]})))
+  [request]
+  ((requiring-resolve 'seon.render.web/derive-context!) request))
 
 (defn- failure-message-id
   [namespace-name failure]

@@ -2393,7 +2393,6 @@
                                      :seon.render.web/registration
                                      :seon.render.web/latest-packages
                                      :seon.render.web/render-channel
-                                     :seon.render/context-channel
                                      :seon.render.web/fault-channel
                                      :seon.cluster.run/process
                                      :seon.sci.eval/ctx
@@ -2574,7 +2573,7 @@
   per-agent overrides take effect on the next turn without rebuilding the
   graph."
   [connection cluster-name process ctx work-launcher
-   wake-channel stream-channel context-channel completion]
+   wake-channel stream-channel completion]
   (let [dials (config/effective @connection cluster-name)]
     (cond-> {;; The one environment value this cluster's procs and
              ;; submissions carry. The handle's remaining entries are
@@ -2593,7 +2592,6 @@
               ;; the newest complete snapshot wins and the provider fold
               ;; is never parked by presentation
               :seon.cluster.loop/stream-channel stream-channel
-              :seon.render/context-channel context-channel
               :seon.cluster.loop/completion completion
               :seon.sci.admit/caps (config/result-caps dials)
               :seon.config.eval/time-limit-ms
@@ -2695,7 +2693,6 @@
   (let [process (process-identity (:seon.boot/advertisement instance))
         armer-channel (async/chan (async/sliding-buffer 1))
         stream-channel (async/chan (async/sliding-buffer 1))
-        context-channel (async/chan)
         completion (async/promise-chan)
         io-executor
         (projection-executor
@@ -2705,7 +2702,7 @@
          (loop-handle connection cluster-name process
                       (:seon.sci.eval/ctx instance)
                       (:seon.flow/work-launcher instance)
-                      armer-channel stream-channel context-channel completion)
+                      armer-channel stream-channel completion)
          :seon.flow/executor io-executor)
         routing (cluster.agent/routing)
         ;; the render pipeline's external ports (F2 §1): the wake
@@ -2721,7 +2718,6 @@
         render-interest (atom :all)
         view {:seon.render.web/render-channel render-channel
               :seon.render.web/runtime-eval-channel runtime-eval-channel
-              :seon.render/context-channel context-channel
               :seon.render.web/pages-channel pages-channel
               :seon.render.web/registration (atom {})
               :seon.render.web/latest-packages latest-packages
@@ -2915,8 +2911,7 @@
   (when-let [fanout (:seon.flow/error-fanout instance)]
     (flow/stop-error-fanout! fanout))
   (when-let [handle (:seon.cluster.loop/cluster instance)]
-    (some-> (:seon.cluster.loop/stream-channel handle) async/close!)
-    (some-> (:seon.render/context-channel handle) async/close!))
+    (some-> (:seon.cluster.loop/stream-channel handle) async/close!))
   ;; the render pipeline's own ports, after the proc that reads them has
   ;; published its completion: a tab still looping on a tap sees its tap
   ;; close and falls out of the loop

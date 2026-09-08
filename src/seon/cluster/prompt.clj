@@ -175,7 +175,6 @@
   [database request budget calibration]
   (let [distance (long (get request :seon.render/distance default-depth))
         acquired (render/acquire-context!
-                  (:seon.render/context-channel request)
                   (assoc request
                          :seon.db/db database
                          :seon.render/distance distance))]

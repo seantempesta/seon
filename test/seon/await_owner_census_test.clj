@@ -10,8 +10,7 @@
 (def ^:private declared-production-callers
   #{"seon.effect/dispatch"
     "seon.flow/stop-work-launcher!"
-    "seon.render/acquire-context!"
-    "seon.render.web/settle-package!"
+    "seon.render.web/await-feed-package!"
     "seon.render.web/write-package!"
     "seon.shell.jvm/task-result"})
 

@@ -1,4 +1,5 @@
-#:seon.render{:acquired-context
+#:seon.render{:cache :seon.call-preparation/state,
+              :acquired-context
               [:map
                [:seon.cluster.prompt/text :seon.cluster.prompt/text]
                [:seon.render.history/segments
@@ -8,6 +9,8 @@
               :context-change-request
               [:map
                [:seon.render/context-action :seon.render/context-action]
+               [:seon.db/connection :seon.db/connection]
+               [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                [:seon.cluster.agent/id :seon.cluster.agent/id]
                [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]],
               :context-request [:or :seon.cluster.prompt/request

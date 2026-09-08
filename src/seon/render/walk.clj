@@ -407,16 +407,108 @@
           candidate)]
     @acquired))
 
+(defn- acquire-entity
+  "Reuse one entity pull only while its recorded read evidence is current."
+  [database plan lookup cache]
+  (let [cache-key [::entity-pull lookup]
+        previous (get @cache cache-key)]
+    (if (and previous
+             (identical? (:datahike.pull/plan plan) (:datahike.pull/plan previous))
+             (not (:seon.error/kind (:seon.render.call/output previous)))
+             (db/read-evidence-current? database (:seon.render.call/read-evidence previous)))
+      (let [refreshed (render/refresh-read-evidence database previous)]
+        (swap! cache
+               (fn [current]
+                 (if (identical? previous (get current cache-key))
+                   (assoc current cache-key refreshed)
+                   current)))
+        refreshed)
+      (let [captured (atom [])
+            value (binding [db/*read-evidence-sink* captured]
+                    (db/pull database {:selector (:seon.render.walk/selector plan)
+                                       :datahike.pull/plan (:datahike.pull/plan plan)
+                                       :eid lookup}))
+            entry {:datahike.pull/plan (:datahike.pull/plan plan)
+                   :seon.render.call/output value
+                   :seon.render.call/basis-transaction (db/basis-t database)
+                   :seon.render.call/read-evidence
+                   (db/read-evidence @captured {:seon.db/retain-read-results? true})}]
+        (swap! cache
+               (fn [current]
+                 (if (> (long (get-in current [cache-key :seon.render.call/basis-transaction] -1))
+                        (:seon.render.call/basis-transaction entry))
+                   current
+                   (assoc current cache-key entry))))
+        entry))))
+
+(defn- acquired-tree
+  "Expand each distinct entity once, in the walk's declared traversal order."
+  [request distance caps]
+  (let [database (:seon.db/db request)
+        plan (root-pull-plan (assoc request :seon.render/distance 0))
+        cache (render/shared-cache (:seon.sci.eval/ctx request))
+        refs (into [] (keep (fn [[a properties]]
+                             (when (= :db.type/ref (:db/valueType properties)) a)))
+                   (installed-attributes database))
+        connections (concat (map (fn [a] [a a false]) refs)
+                            (map (fn [a] [(reverse-attribute a) a true]) refs))
+        pulled (atom {})
+        visited (atom #{})
+        evidence (atom [])
+        width (pull-width caps)]
+    (letfn [(visit [lookup remaining reached-by]
+              (let [value (or (get @pulled lookup)
+                              (let [entry (acquire-entity database plan lookup cache)
+                                    value (:seon.render.call/output entry)]
+                                (swap! evidence into (:seon.render.call/read-evidence entry))
+                                (swap! pulled assoc lookup value (:db/id value) value)
+                                value))
+                    eid (:db/id value)]
+                (if (or (not eid) (@visited eid))
+                  value
+                  (do
+                    (swap! visited conj eid)
+                    (reduce
+                     (fn [result [display attribute reverse?]]
+                       (if-let [children (get value display)]
+                         (let [expand #(visit (:db/id %) (max 0 (dec remaining)) attribute)]
+                           (assoc result display
+                                  (if (map? children)
+                                    (expand children)
+                                    (let [selected (into #{} (map :db/id)
+                                                         (take width (if reverse?
+                                                                       (sort-by :db/id > children)
+                                                                       children)))]
+                                      (mapv #(if (selected (:db/id %)) (expand %) %) children)))))
+                         result))
+                     value
+                     (cond
+                       (pos? remaining)
+                       (if (:seon.ns/name value)
+                         [[:seon.ns/requires :seon.ns/requires false]
+                          [:seon.ns/_requires :seon.ns/requires true]]
+                         connections)
+                       (= :seon.cluster.message/from reached-by)
+                       [[:seon.cluster.run/_trigger :seon.cluster.run/trigger true]]
+                       :else []))))))]
+      (let [root (visit (:seon.render.walk/lookup request) distance nil)]
+        (when db/*read-evidence-sink*
+          (swap! db/*read-evidence-sink* into
+                 (map #(assoc % :seon.db/db database) @evidence)))
+        {:seon.render.walk/root root
+         :seon.render.call/read-evidence @evidence}))))
+
 (defn root-acquisition
   "Pull and index one agent-root neighbourhood by stable entity identity.
 
-  This performs exactly one database read. Its member values contain only
+  Each distinct entity is acquired once through shared read-evidence caches.
+  Cycles and unrelated namespace refs never trigger recursive repeated pulls.
+  Its member values contain only
   each entity's own attributes and direct ref identities; reverse/nested
   structure supplies membership and paths without making an ancestor appear
   changed when only a descendant changed."
   {:malli/schema [:=> [:cat :seon.render.walk/acquisition-request] :map]}
   [{database :seon.db/db
-    lookup :seon.render.walk/lookup
     ctx :seon.sci.eval/ctx
     :as request}]
   (let [projection (or (sci.kernel/context-projection ctx)
@@ -427,17 +519,12 @@
      (fn []
        (let [{distance :seon.render/distance
               caps :seon.sci.admit/caps
-              selector :seon.render.walk/selector
-              plan :datahike.pull/plan
               :as pull-plan}
              (or (:seon.render.walk/root-pull-plan request)
                  (root-pull-plan request))
-             root (db/pull database
-                           {:selector selector
-                            :eid lookup
-                            :datahike.pull/plan plan})]
-         (merge pull-plan
-                {:seon.render.walk/root root}
+             tree (acquired-tree request (bounded-acquisition-distance distance caps) caps)
+             root (:seon.render.walk/root tree)]
+         (merge pull-plan tree
                 ;; THE WIDTH IS THE CALLER'S, NEVER THE CACHED PLAN'S. A
                 ;; compiled pull plan is shared across every caller of one
                 ;; schema generation; reading a presentation decision off it
@@ -810,7 +897,8 @@
                  (let [lookup (:seon.render.walk/lookup unit)
                        distance (:seon.render/distance unit)
                        message-eid
-                       (when (= :seon.cluster.message/id (first lookup))
+                       (when (and (vector? lookup)
+                            (= :seon.cluster.message/id (first lookup)))
                          (:db/id (db/entity database lookup)))
                        current-task?
                        (and message-eid

@@ -299,8 +299,10 @@
            ;; the PULL's limit is query work; the AI boundary's own width is
            ;; the render profile's, and it is applied to the pulled values
            width (:seon.config.eval.result/max-collection caps)]
-       (is (= [:pull] @reads)
-           "cold root acquisition is exactly one pull and no other read")
+       (is (= 2 (count (filter #{:pull} @reads)))
+           "cold acquisition pulls each distinct entity once, without recursively following cycles")
+       (is (every? #{:pull :q} @reads)
+           "the identity query and entity pulls are the acquisition reads")
        (is (not-any? #{'* :* "*"} selector-values)
            "the selector never widens its dependency fingerprint")
        (is (contains? selector-map-keys
@@ -424,9 +426,9 @@
      (let [captured (atom [])
            database @connection
            fixed (db/as-of database (db/basis-t database))
+           render-request (assoc (request connection) :seon.db/db fixed)
            acquisition (binding [db/*read-evidence-sink* captured]
-                         (walk/root-acquisition
-                          (assoc (request connection) :seon.db/db fixed)))
+                         (walk/root-acquisition render-request))
            call {:seon.render.call/read-evidence (db/read-evidence @captured)
                  :seon.render.call/output acquisition}]
        (is (empty? (#'web/candidate-call-ids
@@ -457,7 +459,7 @@
              appended (web/append-history [] [])]
          (is (= #{call-id} candidates)
              "the relevant attribute revision selects the root read")
-         (is (= 1 @pulls) "the semantically equal root read replays once")
+         (is (zero? @pulls) "Datahike semantic evidence reuses the unchanged entity pull")
          (is (false? (:changed? refreshed)))
          (is (identical?
               (:datahike.pull/plan

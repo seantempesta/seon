@@ -2,7 +2,7 @@
 const {chromium} = require(process.argv[2]);
 const fs = require('node:fs');
 const http = require('node:http');
-const base = 'http://127.0.0.1:7994';
+const base = process.argv[4] || 'http://127.0.0.1:7994';
 
 function firstEvent() {
   return new Promise((resolve, reject) => {
@@ -38,8 +38,26 @@ function firstEvent() {
     }));
     console.log('Three debug tabs open');
     const events = [];
-    for (let n = 0; n < 6; n++) events.push(await firstEvent());
-    const result = {gets, events};
+    const plain = [];
+    for (let n = 0; n < Number(process.argv[5] || 12); n++) {
+      const at = Date.now();
+      const [event, page] = await Promise.all([firstEvent(), new Promise((resolve, reject) => {
+        const started = performance.now();
+        const request = http.get(base + '/ns/my.agents.juniper', response => {
+          let bytes = 0;
+          response.on('data', chunk => {bytes += chunk.length;});
+          response.on('end', () => resolve({status: response.statusCode,
+            milliseconds: performance.now() - started, bytes}));
+          response.on('error', reject);
+        });
+        request.setTimeout(10000, () => request.destroy(new Error('Plain GET exceeded 10 s')));
+        request.on('error', reject);
+      })]);
+      events.push({at, ...event});
+      plain.push({at, ...page});
+      await new Promise(resolve => setTimeout(resolve, Math.max(0, 1000 - (Date.now() - at))));
+    }
+    const result = {base, gets, events, plain};
     fs.writeFileSync(process.argv[3], JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
   } finally {

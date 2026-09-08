@@ -127,3 +127,72 @@ I reread the updated feed issue end to end. The new priority is caller-owned
 derivation with shared read-evidence caches and deletion of the context demand
 channel, before further page layout work. The sub-second concurrent plain-page
 and turn-context measurements remain outstanding.
+
+
+## Caller-owned derivation, 2026-09-08
+
+The render proc no longer accepts a context demand channel. GET and the
+feed's virtual thread call `current-page`; the turn calls
+`seon.render/acquire-context!` directly. They share retained calls,
+invocations, acquisitions, and packages through the SCI environment's cache
+atom. A retained acquisition pulls each distinct entity once and stores its
+refreshed evidence after reuse. The remaining proc derives and publishes
+packages for registered tabs after wakes. No lifecycle operation was applied
+to default.
+
+The dependency probe found repeated recursive acquisition through all
+installed attributes. Request-thread samples after removing the proc wait
+showed `read-evidence-current?` → `replay-read` → pull, and SCI
+`call-preparation/current-snapshot`; they no longer showed `page-refresh`
+waiting on `await!`. A wildcard-selector experiment did not improve the
+write-load result and was removed.
+
+Measured on scratch `page-feed`, PID 97986, HTTP port 7749, canonical Juniper
+fixture, hot-loaded owned render Vars with 910 JVM contracts armed:
+
+- Two real source turns, `source:ee3517c6-9636-4921-ba61-c8cdbddcb73e`
+  and `source:fb27f621-e890-4b4d-a56f-84c98f7bf254`, were observed open
+  in all 18 one-second observations. Three Playwright debug tabs were open.
+  In the overlapping interval, 13 warm plain GETs took **54.959–81.029 ms**,
+  HTTP 200. Two changed-content acquisitions took **2,080.724** and
+  **2,365.156 ms**. Exact response sizes were **191,398** and **199,532 bytes**.
+  This verifies the warm target; it does not claim every changed-content GET
+  is below one second.
+- In the separate 25-write, one-second-target probe, all writes succeeded;
+  first and last completions were epoch milliseconds **1788909826463** and
+  **1788909850472**. Three debug tabs stayed open. The 14 first-event probes
+  overlapping writes all returned HTTP 200 and `datastar-patch-elements`,
+  in **849.690–1,274.912 ms** (see raw measurements for exact values).
+  No agent turns were open in this separate probe.
+- On the same database value, 12 alternating historical `context-pass`
+  derivations (commit `1806ee596`, excluding its old queue) and direct
+  acquisitions returned identical **6,315-character** prompt text.
+  Median historical derivation was **242.695 ms**; median direct acquisition
+  was **246.307 ms**. The raw timings are retained below. Initial direct acquisition was
+  **5,940.276 ms**; warm historical and direct timings overlap, without
+  the former proc queue. This is a derivation comparison, not a claim that
+  cold context construction is below one second.
+
+Evidence and reproducible probes:
+[turn GETs](page-feed-turns-only-2026-09-08.json),
+[open turns](page-feed-turns-only-open-2026-09-08.edn),
+[write-load HTTP](page-feed-cache-refresh-2026-09-08.json),
+[writes](page-feed-cache-refresh-writes-2026-09-08.edn),
+[context timings](page-feed-context-comparison-2026-09-08.edn),
+[live probe](page_feed_live_probe_2026_09_08.clj).
+
+Verification boundary: the unchanged prompt namespace failed at its HEAD
+baseline with **15 failures and 1 error, 11 tests / 56 assertions**; the same
+failures occurred with this lane's context transport removal. They include
+old history/current-task expectations and budget-profile assertions. The
+owned direct-context regression passes with the real proc paused. No foreign
+session was resumed, messaged, or edited.
+
+Platform verification at `2531b2e70` plus owned paths: **82 tests, 486
+assertions, zero failures/errors**, 131 seconds in coordinator/tests.
+Focused path gate: **17 tests, 72 assertions, zero failures/errors**.
+`JAVA_TOOL_OPTIONS=-XX:ActiveProcessorCount=6 SEON_TEST_WORKERS=3` keeps the
+existing platform worker-count boundary at three workers (see the existing
+`platform-worker-count-exceeds-prepared-checkouts.md` issue). Integration
+with landed agent-record commit `67fe1675d` also passed the focused path
+gate: **17 tests, 72 assertions, zero failures/errors**.

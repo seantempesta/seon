@@ -1392,9 +1392,7 @@
                             :seon.sci.eval/time-limit-ms
                             (:seon.config.eval/time-limit-ms cluster)
                             :seon.config/on-core-error
-                            (:seon.config/on-core-error cluster)
-                            :seon.render/context-channel
-                            (:seon.render/context-channel cluster)}))
+                            (:seon.config/on-core-error cluster)}))
           ;; CAPTURE BEFORE THE PROVIDER (ruling 4, 2026-07-28): the
           ;; exact prompt text, the rendered basis and the ordered
           ;; contribution records commit in ONE turn-owned transaction

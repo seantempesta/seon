@@ -13,7 +13,6 @@
                      [:seon.cluster.loop/stream-channel
                       {:optional true}
                       :seon.flow/channel]
-                     [:seon.render/context-channel :seon.flow/channel]
                      [:seon.cluster.loop/completion :seon.flow/channel]
                      [:seon.sci.admit/caps :seon.sci.admit/caps]
                      [:seon.config.eval/time-limit-ms

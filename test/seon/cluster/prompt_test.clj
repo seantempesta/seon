@@ -56,94 +56,31 @@
                     [:seon.cluster.agent/id "walker"]
                     :seon.cluster.run/trigger
                     [:seon.cluster.message/id "walk-message"]
-                    :seon.cluster.run/opened-at (Date. 1700000001000)}
-                   {:seon.cluster.agent/id "walker"
-                    }])
-      (let [context-channel (async/chan)
-            render-channel (async/chan (async/sliding-buffer 1))
-            runtime-eval-channel (async/chan (async/sliding-buffer 1))
-            pages-channel (async/chan (async/sliding-buffer 1))
-            stream-channel (async/chan (async/sliding-buffer 1))
-            completion (async/promise-chan)
-            interest (atom :all)
-            ctx (support/fork-cluster-ctx connection)
-            graph
-            (flow.core/create-flow
-             {:procs
-              {:seon.render.web/render
-               {:proc
-                (flow/var-process
-                 #'web/render-step :io
-                 {:seon.env/environment @test-environment
-                  :seon.render.web/render-channel render-channel
-                  :seon.render.web/runtime-eval-channel runtime-eval-channel
-                  :seon.render/context-channel context-channel
-                  :seon.render.web/pages-channel pages-channel
-                  :seon.render.web/registration (atom {})
-                  :seon.render.web/latest-packages (atom {})
-                  :seon.render.web/interest interest
-                  :seon.render.web/completion completion
-                  :seon.render.web/root-agent-id "walker"
-                  :seon.cluster.loop/cluster
-                  {:seon.db/connection connection
-                   :seon.cluster.loop/stream-channel stream-channel
-                   :seon.sci.admit/caps caps
-                   :seon.sci.eval/ctx ctx
-                   :seon.config.eval/time-limit-ms
-                   (:seon.config.eval/time-limit-ms (config/defaults))
-                   :seon.config/on-core-error :panic
-                   :seon.cluster.run/process "prompt-test"}})}}
-              :conns []
-              :io-exec
-              (cluster/projection-executor
-               (:seon.sci.eval/projection-state ctx))})
-            {:keys [report-chan error-chan]} (flow.core/start graph)]
-        (async/go-loop [] (when (async/<! report-chan) (recur)))
-        (async/go-loop [] (when (async/<! error-chan) (recur)))
-        (try
-          (flow.core/resume graph)
-          (body connection context-channel)
-          (finally
-            (flow.core/stop graph)
-            (async/<!! completion)))))))
+                    :seon.cluster.run/opened-at (Date. 1700000001000)}])
+      (body connection (support/fork-cluster-ctx connection)))))
+
 
 (defn- request
-  [connection context-channel]
+  [connection ctx]
   {:seon.cluster.run/id "walk-run"
    :seon.cluster.agent/id "walker"
    :seon.db/connection connection
    :seon.sci.admit/caps caps
-   :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+   :seon.sci.eval/ctx ctx
    :seon.sci.eval/time-limit-ms 2000
-   :seon.config/on-core-error :panic
-   :seon.render/context-channel context-channel})
+   :seon.config/on-core-error :panic})
 
 (defn- acquire-context
-  [connection context-channel]
+  [connection ctx]
   (render/acquire-context!
-   context-channel
-   (assoc (request connection context-channel)
+   (assoc (request connection ctx)
           :seon.db/db @connection
           :seon.render/distance 1)))
 
-(deftest a-context-acquisition-diagnostic-names-no-live-channel
-  ;; THE CLASS: a live transport object printed into a durable fact. The
-  ;; awaited event's NAME is the member; the channel is never a value.
-  (planted
-   (fn [connection _]
-     (let [closed (async/chan)
-           _ (async/close! closed)
-           result (acquire-context connection closed)
-           text (pr-str result)]
-       (is (keyword? (:seon.error/kind result)))
-       (is (not (str/includes? text "#object[")))
-       (is (str/includes? text "walk-run"))
-       (is (str/includes? text "context-reply"))))))
-
 (deftest prompt-is-derived-append-only-repl-history
   (planted
-   (fn [connection context-channel]
-     (let [render-request (request connection context-channel)
+   (fn [connection ctx]
+     (let [render-request (request connection ctx)
            rendered (prompt/prompt @connection render-request)
            text (:seon.cluster.prompt/text rendered)
            entries (render.walk/history
@@ -232,10 +169,10 @@
 
 (deftest every-call-derives-the-current-basis
   (planted
-   (fn [connection context-channel]
+   (fn [connection ctx]
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection
-                                  (request connection context-channel)))]
+                                  (request connection ctx)))]
        (db/transact! connection
                    [{:seon.cluster.message/id "later"
                      :seon.cluster.message/to
@@ -244,13 +181,13 @@
                      :seon.cluster.message/at (Date. 1700000002000)}])
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt @connection
-                                   (request connection context-channel)))]
+                                   (request connection ctx)))]
          (is (not= before after))
          (is (str/includes? after "new durable fact")))))))
 
 (deftest identical-context-reuses-retained-ai-render-bytes
   (planted
-   (fn [connection context-channel]
+   (fn [connection ctx]
      (let [render-ai! render/render-ai
            invocations (atom 0)]
        (with-redefs [render/render-ai
@@ -259,11 +196,11 @@
                        (render-ai! render-request))]
          (let [first-context
                (prompt/prompt @connection
-                              (request connection context-channel))
+                              (request connection ctx))
                after-first @invocations
                second-context
                (prompt/prompt @connection
-                              (request connection context-channel))]
+                              (request connection ctx))]
            (is (= (:seon.cluster.prompt/text first-context)
                   (:seon.cluster.prompt/text second-context)))
            (is (pos? after-first))
@@ -272,12 +209,12 @@
 
 (deftest unchanged-acquisition-performs-zero-database-door-reads
   (planted
-   (fn [connection context-channel]
-     (acquire-context connection context-channel)
+   (fn [connection ctx]
+     (acquire-context connection ctx)
      ;; The first real context render records its costs and therefore advances
      ;; the connection once. Let retained dependency evidence observe that
      ;; unrelated transaction before measuring a genuinely unchanged basis.
-     (acquire-context connection context-channel)
+     (acquire-context connection ctx)
      (let [reads (atom 0)
            counted (fn [f]
                      (fn [& arguments]
@@ -288,15 +225,15 @@
                      db/pull-many (counted db/pull-many)
                      db/entity (counted db/entity)
                      db/datoms (counted db/datoms)]
-         (acquire-context connection context-channel))
+         (acquire-context connection ctx))
        (is (zero? @reads)
            "unchanged acquisition returns retained bytes without a db read")))))
 
 (deftest one-new-message-appends-exactly-one-entry
   (planted
-   (fn [connection context-channel]
+   (fn [connection ctx]
      (let [before (:seon.cluster.prompt/text
-                   (acquire-context connection context-channel))
+                   (acquire-context connection ctx))
            appended (atom [])
            append web/append-history]
        (db/transact! connection
@@ -312,17 +249,17 @@
                                             (- (count result) (count entries)))
                                      result))]
                      (:seon.cluster.prompt/text
-                      (acquire-context connection context-channel)))]
+                      (acquire-context connection ctx)))]
          (is (str/starts-with? after before) "all prior bytes are retained")
          (is (= [1] @appended)
              "one new message crosses append with exactly one entry"))))))
 
 (deftest a-second-run-replaces-the-opening-task-and-puts-current-task-last
   (planted
-   (fn [connection context-channel]
+   (fn [connection ctx]
      (let [opening (:seon.cluster.prompt/text
                     (prompt/prompt @connection
-                                   (request connection context-channel)))]
+                                   (request connection ctx)))]
        (db/transact!
         connection
         [{:seon.cluster.message/id "current-task"
@@ -337,7 +274,7 @@
          {:seon.cluster.agent/id "walker"
           }])
        (let [current-request
-             (assoc (request connection context-channel)
+             (assoc (request connection ctx)
                     :seon.cluster.run/id "current-run")
              current (:seon.cluster.prompt/text
                       (prompt/prompt @connection current-request))]
@@ -351,14 +288,14 @@
 
 (deftest basis-only-transactions-do-not-append-history
   (planted
-   (fn [connection context-channel]
+   (fn [connection ctx]
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection
-                                  (request connection context-channel)))]
+                                  (request connection ctx)))]
        (db/transact! connection [])
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt @connection
-                                   (request connection context-channel)))]
+                                   (request connection ctx)))]
          (is (= before after)
              "a basis-only transaction creates no new history observation")
          (is (not (str/includes? after ";; REPL state"))
@@ -384,16 +321,16 @@
                 (support/refusal-data
                  #(prompt/prompt @connection
                                  (request connection
-                                          (async/chan)))))))))))
+                                          (support/fork-cluster-ctx connection)))))))))))
 
 (deftest prompt-budget-is-informational-and-does-not-compact
   (planted
-   (fn [connection context-channel]
+   (fn [connection ctx]
      (db/transact! connection
                    [{:seon.cluster.agent/id "walker"
                      :seon.config.ai/prompt-token-budget 3}])
      (let [distances (atom [])
-           acquire (fn [_ render-request]
+           acquire (fn [render-request]
                      (let [distance (:seon.render/distance render-request)]
                        (swap! distances conj distance)
                        {:seon.cluster.prompt/text
@@ -405,7 +342,7 @@
                         :seon.db/db (:seon.db/db render-request)}))]
        (with-redefs [render/acquire-context! acquire]
          (let [compacted (prompt/prompt @connection
-                                        (request connection context-channel))]
+                                        (request connection ctx))]
            (is (= [2] @distances))
            (is (= (apply str (repeat 40 "x"))
                   (:seon.cluster.prompt/text compacted)))
@@ -414,14 +351,14 @@
                                      :seon.ai.tokens/verdict])))))
        (reset! distances [])
        (with-redefs [render/acquire-context!
-                     (fn [_ render-request]
+                     (fn [render-request]
                        (swap! distances conj (:seon.render/distance render-request))
                        {:seon.cluster.prompt/text (apply str (repeat 40 "x"))
                         :seon.render.history/segments
                         [(apply str (repeat 40 "x"))]
                         :seon.db/db (:seon.db/db render-request)})]
          (let [complete (prompt/prompt @connection
-                                       (request connection context-channel))]
+                                       (request connection ctx))]
            (is (= [2] @distances))
            (is (= (apply str (repeat 40 "x"))
                   (:seon.cluster.prompt/text complete)))
@@ -460,7 +397,7 @@
   ;; the units the provider bills in, fitted to this model's own
   ;; recorded usage.
   (planted
-   (fn [connection context-channel]
+   (fn [connection ctx]
      (let [model (db/q '[:find ?model .
                          :where [_ :seon.config.ai/model ?model]]
                        @connection)]
@@ -488,11 +425,11 @@
        ;; the provider would count 106 and would not
        (let [text (apply str (repeat 340 "x"))]
          (with-redefs [render/acquire-context!
-                       (fn [_ render-request]
+                       (fn [render-request]
                          {:seon.cluster.prompt/text text
                           :seon.db/db (:seon.db/db render-request)})]
            (let [result (prompt/prompt @connection
-                                       (request connection context-channel))]
+                                       (request connection ctx))]
              (is (= 106 (tokens/estimate text))
                  "the measured prior catches the first turn too")
              (is (= text (:seon.cluster.prompt/text result)))

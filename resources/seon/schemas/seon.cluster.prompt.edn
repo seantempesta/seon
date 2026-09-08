@@ -20,8 +20,6 @@
                         :seon.sci.eval/time-limit-ms]
                        [:seon.config/on-core-error
                         :seon.config/on-core-error]
-                       [:seon.render/context-channel
-                        :seon.flow/channel]
                        [:seon.render/distance
                         {:optional true}
                         :seon.render/distance]
