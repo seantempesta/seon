@@ -46,10 +46,10 @@ authored as a projection; they are the AI source itself.
 
 The only interactive mutation is the agent message form. Its POST route
 validates same-origin input, target identity, and bounded content, then commits
-one `:seon.cluster.message` row. The agent's own graph wakes from the `/to`
-datom and derives its run from database truth. The HTTP response is not an
-execution-result channel; the web UI feed renders the later message, run, and
-eval facts.
+one `:seon.message` row. The agent's own graph wakes from the `/to`
+datom and derives its next turn from database truth. The HTTP response is not an
+execution-result channel; the web UI feed renders the later message, turn, and
+evaluation facts.
 
 ## Canvas and controls
 
@@ -58,7 +58,7 @@ and human inspect together. Generalized agent-authored canvas and control
 constructors are **[TARGET]**; HEAD currently exposes derived namespace-page
 HTML, browser-local disclosure, and the fixed message form, not a `my.canvas`
 API or generic callback route. A future control produces ordinary render data.
-Its action is either a pure value interpreted by the run loop or a genuine
+Its action is either a pure value interpreted by the turn loop or a genuine
 capability request through `seon.effect/request!`; it never gains an effectful
 eval helper that mutates web-surface state. Exact constructors and routes remain
 unnamed until their schemas and action contract are settled.
@@ -170,8 +170,8 @@ There is one chain and one floor. A layout never redirects resolution, and no
 stored membership, band, or priority attribute exists.
 
 Global-vs-per-agent is decided by the data's connections, never by the block.
-The agent family is scoped by `:seon.cluster.agent/id`; messages, runs,
-receipts, and errors point to their owning or receiving agents through refs.
+The agent family is scoped by `:seon.agent/id`; messages, turns,
+evaluations, and errors point to their owning or receiving agents through refs.
 The render function scopes by the facts it queries. See [[data-model]].
 
 ## The render engine
@@ -190,8 +190,9 @@ siblings never crash.
 root's preview of an attached agent, and that agent's namespace page use the same retained
 block outputs at different fits. The history appends a block's form and AI
 projection; the web UI places its HTML projection. "What the agent saw for this
-model call" is the committed context capture: its exact prompt bytes plus the
-basis-labelled ordered contribution evidence.
+model call" is the turn's own basis transaction `:t`, replayed with `as-of`:
+there is no separately stored prompt or contribution row, because the
+projection is pure and the same basis reproduces the exact bytes.
 
 **The structural floor is one merged data browser.** It combines the bounded
 value skeleton with `/data`'s `get-in` path navigation on the admission codec's one
@@ -208,7 +209,7 @@ not fit contains an ordinary elision value carrying its omitted count, known
 total, path, next offset, producing profile, and requery identity or explicit
 refusal. Elision can therefore be rendered and inspected like any other value.
 
-**The history is form then actual value.** Eval receipts order by their durable
+**The history is form then actual value.** Evaluations order by their durable
 facts, while messages appear as explicit query forms followed by their actual
 returned values. AI renders strict form-then-value REPL text and HTML renders
 the same entries. Each retained entry is immutable; a refresh appends a
@@ -216,12 +217,16 @@ basis-labelled successor and never summarizes, edits, or deletes an earlier
 observation. Database facts and blobs remain available through debug and
 `/data`.
 
-**Authorship makes re-execution unrepresentable.** Constructors assign every run
-form as agent- or system-authored. Only a terminal system-authored read with no
-successor may refresh, and its successor points uniquely to it while retaining
-the receipt's read evidence. Agent-authored forms never enter that transition.
-The web UI and prompt therefore display retained authored results; neither
-re-executes an agent's source to refresh presentation.
+**Authorship makes re-execution unrepresentable.** Only a turn's own reply
+forms become stored `:seon.eval` entities, identified by `(turn, ordinal)` —
+re-freezing an already-settled ordinal upserts rather than re-executes. Every
+other executed form in the prompt is a system-authored read, generated fresh
+at projection time and never stored, so there is no successor pointer or
+refresh transition to represent: recomputing the same basis simply
+re-executes the same read and reproduces the same bytes. The web UI and
+prompt therefore display retained authored results for an agent's own forms,
+and freshly projected bytes for everything else; neither ever re-executes an
+agent's stored source to refresh presentation.
 
 **The database browser pays for opened data.** `/data` exposes the same
 structural floor directly. Bounded expansion uses a cursor that says where to
@@ -297,8 +302,8 @@ bounded fits of the same units rather than parallel presentation systems.
 A streamed reply is the only genuinely high-churn thing the UI shows, and it
 rides a channel, never the writer. Partials are COALESCED COMPLETE VALUES
 offered onto one `(sliding-buffer 1)` conn from the model call's provider reducer
-into the render proc's in-port. Provider attempts, frozen forms, eval receipts,
-run errors, and resulting messages are durable facts; streamed partials never
+into the render proc's in-port. Provider attempts, stored evaluations,
+turn errors, and resulting messages are durable facts; streamed partials never
 touch a database attribute.
 
 Each clause is load-bearing. Complete values rather than deltas, because a
@@ -374,7 +379,7 @@ the agent surface, and there is no separate agent page.
 - `/data` renders the structural database floor for inspection.
 
 Namespace views are generic: adding an agent is creating a namespace,
-never adding a route. A view queries messages, runs, eval receipts,
+never adding a route. A view queries messages, turns, evaluations,
 and routed errors through the refs named in [[data-model]]. Root is
 the ordinary agent whose namespace identity is root's; it has a
 specialized layout but no second route, parent, role, or render model.
@@ -390,7 +395,7 @@ The shared shell links root and data inspection, includes the current web-surfac
 opens its SSE feed, and adds the agent message form only when the route resolves
 an agent identity. `POST /agent/{id}/message` is the one browser mutation
 route. It applies same-origin middleware, validates the target agent and bounded
-content, and transacts one ordinary `:seon.cluster.message` row. No generic
+content, and transacts one ordinary `:seon.message` row. No generic
 callback route or function descriptor crosses the browser boundary.
 
 ## Routing is one code table
@@ -578,10 +583,10 @@ Strict single-ownership: when a fact you need is owned by another doc, follow th
 link and read it.
 
 - [[architecture]] — the map: glossary, the cross-cutting principles, deployment topology.
-- [[data-model]] — the agent, message, run, eval, and flat-error facts these
+- [[data-model]] — the agent, message, turn, evaluation, and flat-error facts these
   renders read.
-- [[agent-runtime]] — the agent graph that assembles the prompt and owns run
-  transitions.
+- [[agent-runtime]] — the agent graph that assembles the prompt and owns the
+  turn loop.
 - The `ui-canvas` skill — the built-versus-target canvas/control boundary.
 - [[context-rebuild]] — the measured arc for knowledge-on-demand (cards +
   state-gated teaching + pull); imported skill bodies remain explicit
