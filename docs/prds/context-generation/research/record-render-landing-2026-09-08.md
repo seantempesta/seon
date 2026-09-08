@@ -251,3 +251,29 @@ structural output instead of demanding one unsplit qualified-key string.
 The test4 gate was deliberately terminated and reaped before assertions
 because it snapshotted those known stale assertions. Test5 contains the
 updated plan/settings/AI paths and selects all three subject namespaces.
+
+
+### Debug page repair, 2026-09-08
+
+The owner observed HTTP 500 at `/ns/my.agents.juniper/debug`: the SCI
+invocation lacked an integer `:seon.sci.eval/time-limit-ms`. The page's new
+`debug-turn-request` copied the handle but did not translate its
+`:seon.config.eval/time-limit-ms`. It now supplies the evaluation key,
+`:seon.sci.admit/caps`, and the agent root identity for value rendering.
+A real-socket regression requests the algorithm page through the existing
+canonical web fixture and checks HTTP 200 and its three controls.
+
+MCP JVM evaluation reloaded ONLY that private function from its checked-in
+source form. HTTP GET on default, port 7994, was 500 before and 200 after
+(`tmp/record-render-debug-before.html`, `tmp/record-render-debug-after.html`).
+This is a hot-reloaded-Var proof, not successful source adoption or browser
+layout proof. The repair commit necessarily includes the pending page
+scaffold and its context-action schemas: the faulty helper belongs to that
+new page path and does not exist in the prior HEAD.
+
+The scaffold groups identity and component concerns, supplies typed values
+naming unavailable `seon.eval/of-agent` and `seon.turn/system-turn`, and routes
+system/virtual/compact requests through the existing context channel.
+It is NOT section 16 completion: ordered stored bytes, last-turn basis,
+as-of checks, prompt digest, derived concern blocks, and the full lifecycle
+proof remain unfinished. No green page test tally is claimed here.

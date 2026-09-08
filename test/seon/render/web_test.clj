@@ -2546,3 +2546,17 @@
              (str (vals (get (::web/packages after) "agent-a")))
              "could not be derived")
             "and the page still says so where its content would have been")))))
+
+
+(deftest debug-algorithm-carries-the-render-evaluation-inputs
+  (with-server
+    (fn [_connection server _context]
+      (let [response (fetch server "/agent/root/debug")
+            body (.body response)]
+        (is (= 200 (.statusCode response))
+            "every algorithm value render receives the handle's deadline and caps")
+        (is (str/includes? body "Context now"))
+        (is (str/includes? body "Would-be system turn"))
+        (is (str/includes? body "Run system turn"))
+        (is (str/includes? body "Virtual turn"))
+        (is (str/includes? body "Compact"))))))

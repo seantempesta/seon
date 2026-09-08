@@ -4,20 +4,12 @@
                [:seon.render.history/segments
                 [:vector {:min 1} :seon.cluster.prompt/text]]
                [:seon.db/db :seon.db/database-value]],
-              :context-action [:enum :append :compact :remove],
+              :context-action [:enum :system-turn :virtual-turn :compact],
               :context-change-request
-              [:and
-               [:map
-                [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]
-                [:seon.db/user {:optional true} :seon.db/user]
-                [:seon.db/process {:optional true} :seon.db/process]]
-               [:or
-                [:and :seon.context/append-request
-                 [:map [:seon.render/context-action [:= :append]]]]
-                [:and :seon.context/compact-request
-                 [:map [:seon.render/context-action [:= :compact]]]]
-                [:and :seon.context/remove-request
-                 [:map [:seon.render/context-action [:= :remove]]]]]],
+              [:map
+               [:seon.render/context-action :seon.render/context-action]
+               [:seon.cluster.agent/id :seon.cluster.agent/id]
+               [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]],
               :context-request [:or :seon.cluster.prompt/request
                                 :seon.render/context-change-request],
               :context-change-result [:map [:seon.db/db :seon.db/database-value]],

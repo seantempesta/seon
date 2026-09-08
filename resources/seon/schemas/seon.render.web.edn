@@ -157,4 +157,19 @@
                   :value-not-found :seon.blob/digest
                   :value-not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the requested rendered value that was not found"} [:seon.render.web/value-not-found :seon.render.web/value-not-found] [:seon.error/message :seon.error/message]]
                   :value-unreadable :seon.blob/digest
-                  :value-unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the rendered value whose blob is unreadable"} [:seon.render.web/value-unreadable :seon.render.web/value-unreadable] [:seon.error/message :seon.error/message]]}
+                  :value-unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the rendered value whose blob is unreadable"} [:seon.render.web/value-unreadable :seon.render.web/value-unreadable] [:seon.error/message :seon.error/message]]
+                  :function-unavailable :qualified-symbol
+                  :function-unavailable-error
+                  [:map {:seon.error/class true
+                         :seon.render/ai seon.error/render-ai
+                         :seon.render/html seon.error/render-html}
+                   [:seon.render.web/function-unavailable :seon.render.web/function-unavailable]
+                   [:seon.error/message :seon.error/message]]
+                  :invalid-context-action [:= true]
+                  :invalid-context-action-error
+                  [:map {:seon.error/class true
+                         :seon.render/ai seon.error/render-ai
+                         :seon.render/html seon.error/render-html}
+                   [:seon.render.web/invalid-context-action :seon.render.web/invalid-context-action]
+                   [:seon.error/message :seon.error/message]]
+}
