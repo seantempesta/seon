@@ -780,3 +780,44 @@ forms) or one component/derived value with its own producers: the plan
 tree, the history (turns newest first, evaluations through `seon.repl/text`),
 unanswered wakes, faults routed to me as steward. Five blocks for an agent.
 
+## 13. Storing and rendering data (owner, 2026-09-08)
+
+Storage: an entity has scalars (facts many things need by themselves: id,
+namespace) and components (one ref to an entity holding a whole concern:
+the plan; a turn with its reply, attempts, evaluations). Derived concerns
+(history, unanswered wakes, faults routed to me) are queries, never stored
+on the record.
+
+Rendering: ONE render pair per entity schema, never per attribute; a block
+is one entity rendered by its schema's `:seon.render/ai` and `/html`. The
+record renders as blocks in declared order: the entity's own block (its
+scalars in one paragraph), each component's block, then the derived blocks
+the agent schema declares once by naming their query functions. Every value
+inside a block prints through the one value renderer (the only elision).
+No pair declared ⇒ the default printer renders the attribute map.
+
+Teaching: no separate teaching prose. `(dir ns)` returns DATA from program
+rows — per public function: sym, arglists, the docstring's first line, and
+the contract's input/output — and `(doc sym)` returns one function's full
+docstring and contract. Every `my.*` read returns small maps with the
+item's own namespaced keys; every write returns the entity it changed.
+
+THE RENDER FUNCTION IS A FUNCTION OF THE DATA and chooses its forms: an
+empty plan emits a comment saying there is none, `(dir my.plan)` and
+`(doc my.plan/add!)` executed so the agent sees the shape to write; a
+non-empty plan emits `(my.plan/current)`, `(my.plan/ready)`,
+`(my.plan/blocked)` and one comment pointing at `dir`; a first turn's
+history says it is the first; a block with nothing to say is absent.
+
+The plan block, exact target bytes (non-empty case):
+
+```
+; Your plan. (dir my.plan) is its API; (doc my.plan/complete!) explains one form.
+my.agents.juniper=> (my.plan/current)
+#:seon.repl{:value #:my.plan.item{:id "juniper/render-plan", :title "Render this plan clearly", :done-when "…"}}
+my.agents.juniper=> (my.plan/ready)
+#:seon.repl{:value [#:my.plan.item{:id "juniper/render-plan", :title "Render this plan clearly"}]}
+my.agents.juniper=> (my.plan/blocked)
+#:seon.repl{:value [#:my.plan.item{:id "juniper/compare-changed-results", :title "Compare refreshed results", :needs ["juniper/render-plan"]}]}
+```
+
