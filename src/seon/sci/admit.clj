@@ -111,7 +111,10 @@
   "Emit one fragment, or stop the walk because the storage bound is reached.
 
   The bound is checked BEFORE the fragment lands, so nothing past it is ever
-  built, and the size reported is the bound itself: the walk stopped there."
+  built. The size reported is the bytes REACHED — everything emitted plus the
+  fragment that crossed the bound — because `:seon.eval/size` is declared as a
+  measurement, and a diagnostic that reads as a measurement and is a constant
+  is the one thing a diagnostic may not be."
   [state ^String text]
   (let [bound (:max-bytes state)
         emitted (long @(:bytes state))
@@ -120,7 +123,7 @@
       (throw (ex-info "value admission reached its storage bound"
                       {:seon.error/kind over-bound-marker
                        over-bound-marker true
-                       :seon.eval/size (long bound)})))
+                       :seon.eval/size total})))
     (vreset! (:bytes state) total)
     (.append ^StringBuilder (:builder state) text)
     nil))
@@ -162,271 +165,409 @@
     (instance? sci.lang.Namespace value)
     (assoc ::print/rep (pr-str (str (sci.types/getName value))))))
 
-(declare project)
-
 (defn- leaf!
   "Emit one node that has no child node: its own canonical EDN, exactly."
   [state node]
   (write! state (canonical-edn node))
   node)
 
-(defn- items!
-  "Emit `#:seon.print{:face F, :items [ … ]}` while projecting the children."
+;;; The walk is ITERATIVE. Every container it opens becomes a frame on an
+;;; explicit stack, and its children are handed back to the loop instead of
+;;; being visited by a nested call. JVM recursion here made the CALL STACK the
+;;; real depth bound: a value nested ~2000 deep threw `StackOverflowError` out
+;;; of `admit` under the production dial, at the one boundary law 2.4 requires
+;;; to answer with a value. Depth is now bounded by the storage bound alone.
+
+(defn- items-frame
+  "Emit `#:seon.print{:face F, :items [` and return the frame that finishes it."
   [state values face]
   (write! state (str "#:seon.print{:face " face ", :items ["))
-  (let [items (loop [remaining (seq values)
-                     taken 0
-                     accumulated []]
-                (if (nil? remaining)
-                  accumulated
-                  (do
-                    (when (pos? taken) (write! state " "))
-                    (let [child (project (first remaining) state)]
-                      (recur (next remaining) (inc taken)
-                             (conj accumulated child))))))]
-    (write! state "]}")
-    {::print/face face ::print/items items}))
+  {::kind ::items ::face face ::remaining (seq values) ::acc []})
 
-(defn- entries!
-  "Emit a map's or record's `:entries` while projecting both sides of each."
-  [state entries]
-  (write! state "[")
-  (let [projected (loop [remaining (seq entries)
-                         taken 0
-                         accumulated []]
-                    (if (nil? remaining)
-                      accumulated
-                      (let [[entry-key entry-value] (first remaining)]
-                        (when (pos? taken) (write! state " "))
-                        (write! state "[")
-                        (let [projected-key (project entry-key state)]
-                          (write! state " ")
-                          (let [projected-value (project entry-value state)]
-                            (write! state "]")
-                            (recur (next remaining) (inc taken)
-                                   (conj accumulated
-                                         [projected-key
-                                          projected-value])))))))]
-    (write! state "]}")
-    projected))
+(defn- open-node
+  "Project one value: emit a finished leaf, or a container's prefix.
 
-(defn- map-node!
-  [state entries]
-  (write! state "#:seon.print{:face :seon.print/map, :entries ")
-  {::print/face ::print/map ::print/entries (entries! state entries)})
-
-(defn- record-node!
-  [state value]
-  (let [name* (or (sci-named value) (.getName (class value)))]
-    (write! state (str "#:seon.print{:face :seon.print/record, :name "
-                       (canonical-edn name*) ", :entries "))
-    {::print/face ::print/record
-     ::print/name name*
-     ::print/entries (entries! state value)}))
-
-(defn- identity-only-node!
-  "A registry-declared reference admits its identity, and nothing else."
-  [state value]
-  (when-let [projection (some-> (:projection state)
-                                (schema/identity-only-projection-in value))]
-    (let [described (object-node value)]
-      (write! state (str "#:seon.print{:face :seon.print/object, :class "
-                         (canonical-edn (::print/class described))
-                         (when-some [rep (::print/rep described)]
-                           (str ", :rep " (canonical-edn rep)))
-                         ", :value "))
-      (let [child (project (:seon.schema/identity-value projection) state)]
-        (write! state "}")
-        (assoc described ::print/value child)))))
-
-(defn- throwable-node!
-  [state value]
-  (write! state "#:seon.print{:face :seon.print/throwable, :value ")
-  (let [child (project (Throwable->map value) state)]
-    (write! state "}")
-    {::print/face ::print/throwable ::print/value child}))
-
-(defn- project-node
+  Returns `{::node n}` when the value is complete after this call, and
+  `{::frame f}` when the loop must still visit its children — the frame
+  carries what remains and how to close it."
   [value state]
-  (let [identity-node (delay (identity-only-node! state value))]
+  (let [identity-projection
+        (delay (some-> (:projection state)
+                       (schema/identity-only-projection-in value)))]
     (cond
-      (nil? value) (leaf! state (value-node ::print/nil nil))
-      (boolean? value) (leaf! state (value-node ::print/boolean value))
-      (number? value) (leaf! state (value-node ::print/number value))
-      (keyword? value) (leaf! state (value-node ::print/keyword value))
-      (symbol? value) (leaf! state (value-node ::print/symbol value))
-      (char? value) (leaf! state (value-node ::print/char value))
-      (uuid? value) (leaf! state (value-node ::print/uuid value))
+      (nil? value) {::node (leaf! state (value-node ::print/nil nil))}
+      (boolean? value) {::node (leaf! state (value-node ::print/boolean value))}
+      (number? value) {::node (leaf! state (value-node ::print/number value))}
+      (keyword? value) {::node (leaf! state (value-node ::print/keyword value))}
+      (symbol? value) {::node (leaf! state (value-node ::print/symbol value))}
+      (char? value) {::node (leaf! state (value-node ::print/char value))}
+      (uuid? value) {::node (leaf! state (value-node ::print/uuid value))}
 
       ;; Date is the ordinary inst and must take the allocation-free path.
       ;; Instant is the other core implementation and normalizes to Date;
       ;; the protocol fallback below is reserved for genuinely exotic Inst
       ;; extensions instead of scanning every collection node.
       (instance? java.util.Date value)
-      (leaf! state (value-node ::print/inst value))
+      {::node (leaf! state (value-node ::print/inst value))}
       (instance? java.time.Instant value)
-      (leaf! state (value-node ::print/inst (java.util.Date. (inst-ms value))))
+      {::node (leaf! state (value-node ::print/inst
+                                       (java.util.Date. (inst-ms value))))}
 
       ;; A STRING IS ADMITTED WHOLE. The character cap that used to clip it
       ;; here was a display decision; the storage bound is what stops a
       ;; runaway string now, and it stops it while the bytes are emitted.
       (string? value)
-      (leaf! state {::print/face ::print/string ::print/value value})
+      {::node (leaf! state {::print/face ::print/string ::print/value value})}
 
       ;; A registry predicate, not a class roster, decides which reference
       ;; values are identities in data. The identity itself re-enters this
       ;; walk; the reference's structural fields never do.
-      @identity-node @identity-node
+      @identity-projection
+      (let [described (object-node value)]
+        (write! state (str "#:seon.print{:face :seon.print/object, :class "
+                           (canonical-edn (::print/class described))
+                           (when-some [rep (::print/rep described)]
+                             (str ", :rep " (canonical-edn rep)))
+                           ", :value "))
+        {::frame {::kind ::identity
+                  ::described described
+                  ::child (:seon.schema/identity-value @identity-projection)}})
 
-      (instance? Throwable value) (throwable-node! state value)
+      (instance? Throwable value)
+      (do (write! state "#:seon.print{:face :seon.print/throwable, :value ")
+          {::frame {::kind ::throwable ::child (Throwable->map value)}})
 
       ;; A VAR IS ITS NAME, in either world. sci's Vars and the host's are
       ;; the same fact to a reader, and admitting the host's as a bare
       ;; `#object[clojure.lang.Var]` threw away the one thing it carries —
       ;; which then read as an unserializable value rather than as `#'foo`.
       (or (instance? sci.lang.Var value) (instance? clojure.lang.Var value))
-      (leaf! state {::print/face ::print/var
-                    ::print/name (subs (str value) 2)})
+      {::node (leaf! state {::print/face ::print/var
+                            ::print/name (subs (str value) 2)})}
 
       (instance? sci.lang.Type value)
-      (leaf! state {::print/face ::print/type ::print/name (str value)})
+      {::node (leaf! state {::print/face ::print/type
+                            ::print/name (str value)})}
 
       (instance? Class value)
-      (leaf! state {::print/face ::print/class
-                    ::print/name (.getName ^Class value)})
+      {::node (leaf! state {::print/face ::print/class
+                            ::print/name (.getName ^Class value)})}
 
       ;; reference types and arrays: named, never entered. This is what
       ;; makes a cycle unrepresentable rather than detected.
-      (instance? clojure.lang.IDeref value) (leaf! state (object-node value))
-      (some-> value class .isArray) (leaf! state (object-node value))
+      (instance? clojure.lang.IDeref value)
+      {::node (leaf! state (object-node value))}
+      (some-> value class .isArray)
+      {::node (leaf! state (object-node value))}
 
       ;; a record IS map-like; it keeps its fields and the name sci gives it.
-      (record? value) (record-node! state value)
+      (record? value)
+      (let [name* (or (sci-named value) (.getName (class value)))]
+        (write! state (str "#:seon.print{:face :seon.print/record, :name "
+                           (canonical-edn name*) ", :entries "))
+        (write! state "[")
+        {::frame {::kind ::entries ::face ::print/record ::name name*
+                  ::remaining (seq value) ::acc [] ::phase ::entry}})
 
       (or (map? value) (instance? java.util.Map value))
-      (map-node! state value)
+      (do (write! state "#:seon.print{:face :seon.print/map, :entries ")
+          (write! state "[")
+          {::frame {::kind ::entries ::face ::print/map
+                    ::remaining (seq value) ::acc [] ::phase ::entry}})
 
       (or (set? value) (instance? java.util.Set value))
-      (items! state value ::print/set)
+      {::frame (items-frame state value ::print/set)}
 
       (or (vector? value)
           (instance? java.util.RandomAccess value)
           (instance? clojure.lang.MapEntry value))
-      (items! state value ::print/vector)
+      {::frame (items-frame state value ::print/vector)}
 
       ;; vectors, lists, lazy and infinite sequences, and host collections
       ;; all become vectors of nodes. NOTHING here counts the source —
       ;; `count` on an infinite sequence never returns, and the storage
       ;; bound is what ends the realization.
       (or (coll? value) (seq? value) (instance? java.util.Collection value))
-      (items! state value ::print/list)
+      {::frame (items-frame state value ::print/list)}
 
       ;; A third party may extend clojure.core/Inst. This intentionally comes
       ;; after every ordinary scalar and collection classification so its
       ;; protocol lookup is paid only for an exotic leaf.
       (inst? value)
-      (leaf! state (value-node ::print/inst (java.util.Date. (inst-ms value))))
+      {::node (leaf! state (value-node ::print/inst
+                                       (java.util.Date. (inst-ms value))))}
 
       ;; a sci type instance that is neither map- nor collection-like
       ;; (a deftype) is named by sci, not by its host class
-      :else (leaf! state (object-node value)))))
+      :else {::node (leaf! state (object-node value))})))
+
+(defn- frame-deliver
+  "Record one finished child on its frame."
+  [frame child]
+  (case (::kind frame)
+    ::items (update frame ::acc conj child)
+    ::entries (case (::phase frame)
+                ::key (assoc frame ::pending-key child ::phase ::value)
+                ::value (-> frame
+                            (update ::acc conj [(::pending-key frame) child])
+                            (dissoc ::pending-key)
+                            (assoc ::phase ::close-entry)))
+    (::identity ::throwable) (assoc frame ::acc child)))
+
+(defn- frame-advance
+  "Deliver one finished child to its frame, then open the next or close.
+
+  Returns `[::open value frame]` while children remain and `[::done node]`
+  when the container is complete. The source sequence is realized HERE, so a
+  realization that throws or blocks belongs to the frame that asked for it —
+  the same attribution the recursive walk had."
+  [frame child state]
+  (loop [frame (cond-> frame (some? child) (frame-deliver child))]
+    (case (::kind frame)
+      ::items
+      (if-some [remaining (::remaining frame)]
+        (do (when (pos? (count (::acc frame))) (write! state " "))
+            [::open (first remaining)
+             (assoc frame ::remaining (next remaining))])
+        (do (write! state "]}")
+            [::done {::print/face (::face frame)
+                     ::print/items (::acc frame)}]))
+
+      ::entries
+      (condp = (::phase frame)
+        ::entry
+        (if-some [remaining (::remaining frame)]
+          (let [entry (first remaining)]
+            (when (pos? (count (::acc frame))) (write! state " "))
+            (write! state "[")
+            [::open (key entry)
+             (assoc frame
+                    ::remaining (next remaining)
+                    ::entry-value (val entry)
+                    ::phase ::key)])
+          (do (write! state "]}")
+              [::done (cond-> {::print/face (::face frame)
+                               ::print/entries (::acc frame)}
+                        (::name frame) (assoc ::print/name (::name frame)))]))
+
+        ::value
+        (do (write! state " ")
+            [::open (::entry-value frame) frame])
+
+        ::close-entry
+        (do (write! state "]")
+            (recur (-> frame (dissoc ::entry-value) (assoc ::phase ::entry)))))
+
+      ::identity
+      (if (contains? frame ::acc)
+        (do (write! state "}")
+            [::done (assoc (::described frame) ::print/value (::acc frame))])
+        [::open (::child frame) frame])
+
+      ::throwable
+      (if (contains? frame ::acc)
+        (do (write! state "}")
+            [::done {::print/face ::print/throwable
+                     ::print/value (::acc frame)}])
+        [::open (::child frame) frame]))))
+
+(defn- failed-node!
+  "Replace one node's emitted prefix with the marker that names its failure."
+  [state mark mark-bytes value failure]
+  (let [^StringBuilder builder (:builder state)]
+    (.setLength builder (long mark))
+    (vreset! (:bytes state) mark-bytes)
+    (leaf! state {::print/face ::print/failed
+                  ::print/class (.getName (class value))
+                  ::print/message (or (ex-message failure)
+                                      (.getName (class failure)))})))
+
+(defn- rethrow-or-degrade!
+  "The two throwables admission must never swallow, then R41's one dial."
+  [state value failure]
+  ;; the interrupt is the one throwable admission must not swallow
+  ;; resolved at call time because the guarded kernel requires this
+  ;; namespace: the owner of "is this sci's interrupt?" sits above
+  ;; admission, and admission must not swallow its one throwable
+  (when ((requiring-resolve 'seon.sci.kernel/interrupted?) failure)
+    (throw failure))
+  ;; nor the storage bound: reaching it ends the whole admission
+  (when (over-bound? failure)
+    (throw failure))
+  ;; R41 DECIDES THIS, not local judgement (owner ruling reversing
+  ;; the drafted marker-only choice): a value the total codec cannot
+  ;; project is a core degradation, so development panics on it
+  ;; immediately and production degrades.
+  (when (= :panic (:on-core-error state))
+    (throw (ex-info (str "value admission could not project a "
+                         (.getName (class value)))
+                    {:seon.error/kind ::projection-failed
+                     ::class (.getName (class value))
+                     :seon.sci.admit/projection-failed true}
+                    failure))))
 
 (defn- project
-  "One node: call the interrupt-fn, then project and emit — or mark it.
+  "Project and emit one value's whole tree, iteratively.
 
   A node that fails part-way has already emitted a prefix, so the emitted
-  text is rewound to where this node began before the marker replaces it:
+  text is rewound to where that node began before the marker replaces it:
   the bytes stored are always the bytes of the node returned."
-  [value state]
-  ;; EVERY node, because a native lazy sequence enters no interpreted fn
-  ;; body and would otherwise realize forever (probed: 200k elements, zero
-  ;; interrupt-fn calls)
-  ((:interrupt-fn state))
-  (let [^StringBuilder builder (:builder state)
-        mark (.length builder)
-        mark-bytes @(:bytes state)]
-    (try
-      (project-node value state)
-      (catch Throwable failure
-        ;; the interrupt is the one throwable admission must not swallow
-        ;; resolved at call time because the guarded kernel requires this
-        ;; namespace: the owner of "is this sci's interrupt?" sits above
-        ;; admission, and admission must not swallow its one throwable
-        (when ((requiring-resolve 'seon.sci.kernel/interrupted?) failure)
-          (throw failure))
-        ;; nor the storage bound: reaching it ends the whole admission
-        (when (over-bound? failure)
-          (throw failure))
-        ;; R41 DECIDES THIS, not local judgement (owner ruling reversing
-        ;; the drafted marker-only choice): a value the total codec cannot
-        ;; project is a core degradation, so development panics on it
-        ;; immediately and production degrades.
-        (when (= :panic (:on-core-error state))
-          (throw (ex-info (str "value admission could not project a "
-                               (.getName (class value)))
-                          {:seon.error/kind ::projection-failed
-                           ::class (.getName (class value))
-                           :seon.sci.admit/projection-failed true}
-                          failure)))
-        (.setLength builder mark)
-        (vreset! (:bytes state) mark-bytes)
-        (leaf! state {::print/face ::print/failed
-                      ::print/class (.getName (class value))
-                      ::print/message (or (ex-message failure)
-                                          (.getName (class failure)))})))))
+  [root state]
+  (let [^StringBuilder builder (:builder state)]
+    (loop [stack []
+           step [::open root]]
+      (case (nth step 0)
+        ::open
+        (let [value (nth step 1)]
+          ;; EVERY node, because a native lazy sequence enters no interpreted
+          ;; fn body and would otherwise realize forever (probed: 200k
+          ;; elements, zero interrupt-fn calls)
+          ((:interrupt-fn state))
+          (let [mark (.length builder)
+                mark-bytes @(:bytes state)
+                outcome (try
+                          (open-node value state)
+                          (catch Throwable failure
+                            (rethrow-or-degrade! state value failure)
+                            {::node (failed-node! state mark mark-bytes
+                                                  value failure)}))]
+            (if-some [node (::node outcome)]
+              (recur stack [::close node])
+              (recur (conj stack (assoc (::frame outcome)
+                                        ::mark mark
+                                        ::mark-bytes mark-bytes
+                                        ::source value))
+                     [::advance nil]))))
 
+        ::advance
+        (let [frame (peek stack)
+              outcome (try
+                        (frame-advance frame (nth step 1) state)
+                        (catch Throwable failure
+                          (rethrow-or-degrade! state (::source frame) failure)
+                          [::done (failed-node! state (::mark frame)
+                                                (::mark-bytes frame)
+                                                (::source frame) failure)]))]
+          (if (= ::open (nth outcome 0))
+            (recur (conj (pop stack) (nth outcome 2)) [::open (nth outcome 1)])
+            (recur (pop stack) [::close (nth outcome 1)])))
+
+        ::close
+        (let [node (nth step 1)]
+          (if (empty? stack)
+            node
+            (recur stack [::advance node])))))))
 ;;; ---------------------------------------------------------------------------
 ;;; The one operation
 ;;; ---------------------------------------------------------------------------
 
-(declare semantic-value)
-
-(defn- semantic-entry
-  [entry]
-  (when (vector? entry)
-    [(semantic-value (first entry))
-     (semantic-value (second entry))]))
-
-(defn semantic-value
-  "Derive the bounded runtime value from one finite print node.
-
-  This never touches the dangerous source a second time."
-  {:malli/schema [:=> [:cat :seon.print/node] :any]}
+(defn- semantic-leaf
+  "The runtime value of one print node that has no child node."
   [print-node]
   (case (::print/face print-node)
     (::print/nil ::print/boolean ::print/number ::print/keyword
      ::print/symbol ::print/char ::print/string ::print/inst ::print/uuid)
     (::print/value print-node)
 
-    ::print/vector (mapv semantic-value (::print/items print-node))
-    ::print/list (apply list (map semantic-value (::print/items print-node)))
-    ::print/set (set (map semantic-value (::print/items print-node)))
-
-    ::print/map
-    (let [entries (::print/entries print-node)
-          projected (into {} (keep semantic-entry) entries)]
-      (if (some #(not (vector? %)) entries)
-        (assoc projected ::elided true)
-        projected))
-
-    ::print/record
-    (assoc (into {} (keep semantic-entry) (::print/entries print-node))
-           ::type (::print/name print-node))
-
     ::print/var {::reference "sci.lang.Var"
                  ::name (str "#'" (::print/name print-node))}
     ::print/type {::opaque "sci.lang.Type" ::name (::print/name print-node)}
     ::print/class {::opaque "java.lang.Class" ::name (::print/name print-node)}
-    ::print/object (if-let [identity-node (::print/value print-node)]
-                     (semantic-value identity-node)
-                     {::opaque (or (::print/class print-node)
-                                   (::print/name print-node))})
+    ::print/object {::opaque (or (::print/class print-node)
+                                 (::print/name print-node))}
     ::print/truncated-string {::truncated-string (::print/value print-node)
                               ::elided true}
     ::print/failed {::opaque (::print/class print-node)
                     ::projection-error (::print/message print-node)}
-    ::print/throwable (semantic-value (::print/value print-node))
     (::print/elided ::print/pruned) ::elided))
+
+(defn- semantic-parts
+  "One node's child nodes and how they rebuild it, or nil when it is a leaf.
+
+  `::pair-count` and `::elided?` are all a map or record needs to reassemble:
+  an entry the walk could not keep is not a vector, and its absence is the
+  `::elided` marker the original derivation added."
+  [node]
+  (case (::print/face node)
+    (::print/vector ::print/list ::print/set)
+    [(vec (::print/items node)) nil]
+
+    (::print/map ::print/record)
+    (let [entries (::print/entries node)
+          pairs (filterv vector? entries)]
+      [(into [] (mapcat (fn [entry] [(first entry) (second entry)])) pairs)
+       {::pair-count (count pairs)
+        ::elided? (boolean (some #(not (vector? %)) entries))}])
+
+    ::print/throwable [[(::print/value node)] nil]
+
+    ;; a reference WITH a registry identity projection carries that identity
+    ;; as its one child; a bare object node is a leaf naming a class
+    ::print/object (when-some [identity-node (::print/value node)]
+                     [[identity-node] nil])
+
+    nil))
+
+(defn- semantic-combine
+  [node children shape]
+  (case (::print/face node)
+    ::print/vector (vec children)
+    ::print/list (apply list children)
+    ::print/set (set children)
+    ::print/map (cond-> (into {} (map vec) (partition 2 children))
+                  (::elided? shape) (assoc ::elided true))
+    ::print/record (assoc (into {} (map vec) (partition 2 children))
+                          ::type (::print/name node))
+    (::print/throwable ::print/object) (first children)))
+
+(defn semantic-value
+  "Derive the bounded runtime value from one finite print node.
+
+  This never touches the dangerous source a second time, and it walks the
+  node ITERATIVELY for the same reason `project` does: a value admission
+  accepted must be a value this can rebuild, and a node deep enough to
+  exhaust the JVM stack would otherwise turn a stored result into an
+  `Error` thrown out of a total operation."
+  {:malli/schema [:=> [:cat :seon.print/node] :any]}
+  [print-node]
+  (loop [stack []
+         step [::open print-node]]
+    (case (nth step 0)
+      ::open
+      (let [node (nth step 1)]
+        (if-some [[children shape] (semantic-parts node)]
+          (recur (conj stack {::node node ::shape shape
+                              ::remaining (seq children) ::acc []})
+                 [::advance])
+          (recur stack [::close (semantic-leaf node)])))
+
+      ::advance
+      (let [frame (peek stack)
+            frame (cond-> frame
+                    (= 2 (count step)) (update ::acc conj (nth step 1)))]
+        (if-some [remaining (::remaining frame)]
+          (recur (conj (pop stack) (assoc frame ::remaining (next remaining)))
+                 [::open (first remaining)])
+          (recur (pop stack)
+                 [::close (semantic-combine (::node frame) (::acc frame)
+                                            (::shape frame))])))
+
+      ::close
+      (let [value (nth step 1)]
+        (if (empty? stack)
+          value
+          (recur stack [::advance value]))))))
+
+(defn missing-marker
+  "The `:seon.eval/missing` answer one admission gave, alone, or nil.
+
+  ONE CONSTRUCTOR for the marker every surface reports an absent value with:
+  the REPL response, a fault fact's evidence, and any caller that has to say
+  why it is holding nothing. Nil when the admission kept the value."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [admitted]
+  (when (keyword? (:seon.eval/missing admitted))
+    (select-keys admitted [:seon.eval/missing :seon.eval/size])))
 
 (def ^:private opaque-result-faces
   ;; A node whose face kept only a name or a class NEVER held the value.
@@ -510,6 +651,33 @@
         ", and the supplied caps map does not carry it. Nothing was walked.")
    :seon.error/diagnostic-member :seon.config.eval.result/max-bytes
    :seon.error/data {:seon.sci.admit/caps (vec (sort (keys caps)))}})
+
+(defn required-cap
+  "One declared cap as a long, or a core fault NAMING the key that is absent.
+
+  Every bound in this system is a declared fact, and a bound that reads as
+  absent must say so: the five bare `(long (:some-cap caps))` sites this
+  replaces answered `RT.longCast` on nil — a `NullPointerException` naming
+  nothing, at seams whose whole job is to bound work. Admission's own storage
+  bound stays a flat refusal because `admit` is a value-returning operation;
+  these callers are private core walk code inside a total render boundary, so
+  an absent declared cap is a core fault with provenance rather than a value
+  every one of them would have to branch on."
+  {:malli/schema [:=> [:cat :map :qualified-keyword] :int]}
+  ^long [caps cap-key]
+  (let [declared (get caps cap-key)]
+    (if (int? declared)
+      (long declared)
+      (throw (ex-info
+              (str "A declared bound is missing: " cap-key
+                   ". The supplied caps map carries "
+                   (pr-str (vec (sort (keys caps)))) ".")
+              {:seon.error/kind ::missing-cap
+               :seon.error/message
+               (str "A declared bound is missing: " cap-key ".")
+               :seon.error/diagnostic-member cap-key
+               :seon.error/data {:seon.sci.admit/caps
+                                 (vec (sort (keys caps)))}})))))
 
 (defn- admit*
   [{::keys [value interrupt-fn caps record unbounded?]

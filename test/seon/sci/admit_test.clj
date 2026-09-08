@@ -408,8 +408,10 @@
                                   :seon.config.eval.result/max-bytes 4096)))]
     (is (= :over-bound (:seon.eval/missing admitted))
         "an infinite source is missing, never a page of itself")
-    (is (= 4096 (:seon.eval/size admitted))
-        "and the size it reports is the bound it reached")
+    (is (>= (long (:seon.eval/size admitted)) 4096)
+        "and the size it reports is the BYTES REACHED, as the schema declares")
+    (is (< (long (:seon.eval/size admitted)) (* 2 4096))
+        "measured at the fragment that crossed the bound, not a running total")
     (is (pos? (calls))
         "the evaluation's own SCI interrupt was consulted at every node")
     (is (not (contains? admitted :seon.cluster.eval/result-edn))
@@ -435,6 +437,44 @@
                  (edn/read-string
                   (:seon.cluster.eval/result-edn admitted)))
               "and the bytes the walk emitted read back as that node"))))))
+
+(defn- node-depth
+  "How many nested map nodes one print node carries, counted iteratively.
+
+  The assertion cannot use `=` or the EDN reader on a value this deep: both
+  recurse, and a test that stack-overflows while checking would report the
+  fix as the defect."
+  [node]
+  (loop [node node
+         depth 0]
+    (if-let [entries (:seon.print/entries node)]
+      (recur (second (first entries)) (inc depth))
+      depth)))
+
+(deftest admission-is-total-in-depth-and-never-throws-a-stack-overflow
+  ;; THE CLASS: the recursive walk made the JVM CALL STACK the real depth
+  ;; bound, so a value nested ~2000 deep threw `StackOverflowError` out of
+  ;; `admit` under the production dial — an Error escaping the one boundary
+  ;; law 2.4 requires to answer with a value. The walk is iterative now, so
+  ;; depth is bounded by the storage bound and by nothing else.
+  (letfn [(nest [n] (reduce (fn [inner _] {:in inner}) :leaf (range n)))]
+    (testing "the depth that used to overflow is admitted WHOLE"
+      (doseq [depth [2000 5000]]
+        (let [admitted (admit/admit (request (nest depth)))]
+          (is (contains? admitted :seon.sci.admit/print-node)
+              (str "depth " depth " stored nothing"))
+          (is (= depth (node-depth (:seon.sci.admit/print-node admitted)))
+              "the stored node keeps every level the value had")
+          (is (= depth
+                 (loop [value (:seon.sci.admit/value admitted)
+                        seen 0]
+                   (if (map? value) (recur (:in value) (inc seen)) seen)))
+              "and the derived semantic value keeps them too"))))
+    (testing "a depth past the storage bound is MARKED, never thrown"
+      (let [admitted (admit/admit (request (nest 100000)))]
+        (is (= :over-bound (:seon.eval/missing admitted)))
+        (is (int? (:seon.eval/size admitted))
+            "an over-bound depth still reports the bytes it reached")))))
 
 (deftest a-host-reference-the-walk-cannot-enter-is-missing-not-described
   ;; A description of a value is not the value. Storing `#object[...]` as
