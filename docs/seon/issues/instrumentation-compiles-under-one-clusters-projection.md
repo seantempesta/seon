@@ -337,3 +337,12 @@ structurally coupled. No production repair was attempted across held owners.
 
 The [concurrency landing](../../prds/context-generation/research/multi-cluster-concurrency-landing-2026-09-08.md)
 records the complete global-state inventory, measurements and design choice.
+
+
+The concurrency lane's platform gate at snapshot `d1e8f4435` exited 0
+(74 tests / 404 assertions), but its drift detector reported 949 wrappers
+removed by `seon.cluster.cohost-boot-test/a-second-cluster-boots-under-the-first-cluster-s-instrumentation`.
+That snapshot's finally explicitly calls `instrument/remove!`. The current
+working tree has another lane's uncommitted preservation-fixture correction;
+this lane did not change or verify it. This measured test-teardown defect is
+separate from the production cross-cluster contract ownership defect above.

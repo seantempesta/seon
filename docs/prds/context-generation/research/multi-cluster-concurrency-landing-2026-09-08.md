@@ -153,9 +153,13 @@ an explicit handover, not a claimed fix.
 Persistent private object identity remains a target: current
 `sci/eval.clj:1821` still forks and rehydrates stored defs. The scalar `def`
 and handle visibility probes prove isolation, not persistent object identity.
-No live beta-message wake observation was performed, so that requested
-behavior remains unproven; source routes each connection's report only into
-that instance's channels (`cluster/wake.clj:395–450`).
+The added `messages-stay-on-their-connection` regression uses the real
+`wake/route!` on two canonical databases, with identical recipient ids and
+listener keys. A committed message positively wakes the right mailbox, leaves
+the left empty, and exists only in the right database. Datahike delivers
+listeners before the transaction promise (`reference-code/datahike/src/datahike/writer.cljc:414`).
+This is a real listener/channel proof, not a provider-driven live beta probe;
+no live beta-message observation is claimed.
 
 ### Resumed gate and publication evidence
 
@@ -179,6 +183,64 @@ with `:seon.sci.eval/install-delete-mismatch` for
 `:seon.schema.admission/source`. These adoption boundaries belong to the
 assigned adoption owner. The live measurements exercised the existing loaded
 procs and explicitly loaded test helper, not a claimed successful adoption.
+
+### Final message-regression iteration and independent cache
+
+The complete namespace passed the armed fast loop: **2 tests / 162
+assertions**, with 913 registered / 912 instrumented / 909 program-armable
+Vars in that newer working tree. The message test itself completed in 27 ms.
+The prior failed fast attempt named a foreign parse boundary exactly:
+`src/seon/fn/analyzer.clj:243:16`, unmatched `}`. It was left untouched.
+
+The main-root platform and message gate never passed cache preparation.
+Own JVMs 89340 and 91636 were parked in `dev_cache/with-cache-lock` →
+`FileChannel.lock`, on `target/dev-dependency-cache.lock`; the platform dump
+already showed 202.77 seconds elapsed. Only these two owned waiting processes
+were terminated; their launchers exited with `dependency cache freshness
+check failed`. No foreign holder was interrupted. The same boundary is recorded in the
+[cache issue](../../../seon/issues/bin-test-shared-base-compiles-other-lanes-half-edits.md).
+
+To continue without altering another lane, created the detached worktree
+`tmp/concurrency-gate-wt` at `d1e8f4435`, linked its `reference-code` to the
+same pinned dependencies, copied only this regression, and ran the canonical
+path-isolated gate with a separate cache. This is a gate retry after an
+infrastructure boundary, not a new fixture or a second test implementation.
+It passed **2 tests / 162 assertions**, no failures or errors. Base lock wait
+was **0 ms**, base work **59,927 ms**. Worker times: message test **15,882 ms**
+(including first fixture acquisition); concurrent-turn test **8,167 ms**.
+`cmp` confirmed the tested namespace exactly matches the main worktree.
+The successful run root `run.ED6soj` was removed by the runner.
+The final platform attempt uses this same independent cache and snapshot:
+`bin/test --platform --paths test/seon/concurrency_test.clj`.
+
+### Final platform result and cleanup
+
+The independent-cache platform command exited **0**: **74 tests / 404
+assertions**, zero failures/errors; cached base reuse took **5 ms**, lock
+wait **0 ms**, coordinator/tests **111 seconds**. It also emitted a
+worker-global-state warning for
+`seon.cluster.cohost-boot-test/a-second-cluster-boots-under-the-first-cluster-s-instrumentation`:
+**949 instrumented wrappers removed**. The snapshot's test finally calls
+`instrument/remove!`; this was verified with `git show d1e8f4435:...`.
+The main working tree already has another lane's in-flight
+`preserving-instrumentation-state` fixture change. It was neither edited nor
+claimed verified here. Therefore the platform assertion tally passes, but
+this is not a clean global-state-isolation verdict.
+
+The failed cache-wait roots `run.Kyk6He` and `run.vvcYq2` were removed after
+checking no JVM/bb process held them. Both successful isolated test roots
+were deleted by their runner. The detached gate worktree and its cache are
+removed after their processes exit. Final main status before that purely
+filesystem cleanup: default alone, PID 36758, prepl 51624, URL 7994; no
+orphan Seon JVMs. Beta and gamma are down; `tmp/other-root` is absent.
+
+Commits: initial partial evidence `e4da59a88`; resumed source-turn proof and
+audit `bace54e98`; the final message regression and this result follow in a
+path-limited commit. Files changed in this complete assignment: the one
+concurrency test namespace, this landing note, the adoption issue, the cache
+issue's initial gate observation, and the instrumentation issue. No held or
+production file was changed. A later foreign addition in the shared cache
+issue was preserved and excluded from this lane's final commit.
 
 ## Initial pass (historical; superseded above)
 

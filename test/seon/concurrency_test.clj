@@ -6,6 +6,7 @@
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.wake :as wake]
             [seon.db :as db]
             [seon.config :as config]
             [seon.flow :as flow]
@@ -13,6 +14,58 @@
             [seon.test-support :as support]
             [seon.turn :as turn])
   (:import [java.util.concurrent CountDownLatch]))
+
+(defn- with-message-route [connection body]
+  (db/transact! connection [{:seon.cluster.agent/id "recipient"}])
+  (let [recipient (:db/id (db/pull @connection [:db/id]
+                                 [:seon.cluster.agent/id "recipient"]))
+        mailbox (async/chan (async/sliding-buffer 1))
+        armer (async/chan (async/sliding-buffer 1))
+        render (async/chan (async/sliding-buffer 1))
+        faults (async/chan (async/sliding-buffer 1))
+        listener-key (wake/route!
+             {:seon.cluster.wake/connection connection
+              :seon.cluster.wake/channels (constantly {recipient mailbox})
+              :seon.cluster.wake/fenced? (fn [_ _] false)
+              :seon.cluster.wake/armer-channel armer
+              :seon.cluster.wake/render-channel render
+              :seon.render.web/interest (atom :all)
+              :seon.cluster.wake/fault-channel faults
+              :seon.cluster.wake/key ::message-isolation})]
+    (try
+      (body mailbox)
+      (is (nil? (async/poll! faults)) "the real listener reported no fault")
+      (finally
+        (wake/unlisten! {:seon.cluster.wake/connection connection
+                        :seon.cluster.wake/key listener-key})
+        (doseq [channel [mailbox armer render faults]] (async/close! channel))))))
+
+(deftest messages-stay-on-their-connection
+  (support/with-database
+   (fn [left]
+     (support/with-database
+      (fn [right]
+        (with-message-route
+          left
+          (fn [left-mailbox]
+            (with-message-route
+              right
+              (fn [right-mailbox]
+                (let [result
+                      (db/transact!
+                       right
+                       [{:seon.cluster.message/id "connection-isolation"
+                         :seon.cluster.message/to
+                         [:seon.cluster.agent/id "recipient"]
+                         :seon.cluster.message/content "only the right recipient"
+                         :seon.cluster.message/at (java.util.Date.)}])]
+                  (is (not (:seon.error/kind result)))
+                  (is (some? (support/await-event! right-mailbox "right message wake")))
+                  ;; Datahike has synchronously delivered the committed report.
+                  ;; The positive right wake proves this was an observed event.
+                  (is (nil? (async/poll! left-mailbox)))
+                  (is (nil? (db/pull @left [:seon.cluster.message/id]
+                                    [:seon.cluster.message/id "connection-isolation"])))))))))))))
 
 (defn- await-closed! [connection run-id]
   (let [event (async/promise-chan)
