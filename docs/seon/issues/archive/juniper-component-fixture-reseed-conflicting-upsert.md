@@ -32,4 +32,4 @@ returned plan entity 73475 with four root steps. The canonical component
 tests and value-renderer tests passed together, 41 tests / 181 assertions.
 The updated HTML renderer preserves component data rather than replacing
 it with identity refs. No schema refusal or refork was needed. Evidence:
-[record-render landing](../../prds/context-generation/research/record-render-landing-2026-09-08.md).
+[record-render landing](../../../prds/context-generation/research/record-render-landing-2026-09-08.md).

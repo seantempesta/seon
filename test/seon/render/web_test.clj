@@ -577,7 +577,9 @@ handle))}}
                     {:my/id "subject"}
                     1.0
                     program-identity)]
-        (is (= (apply str (repeat 64 "0"))
+        (is (= (db/q '[:find ?digest .
+                       :where [_ :seon.source/digest ?digest]]
+                     @connection)
                (:seon.source/digest program-identity))
             "the header identity is the digest recorded by this cluster database")
         (is (= (:seon.schema.projection/fingerprint projection)
@@ -1402,6 +1404,8 @@ handle))}}
             (async/untap (:pages-mult context) slow)
             (.close fast)))))))
 
+(declare service-request)
+
 (deftest failed-ephemeral-bind-preserves-the-bind-failure
   (support/with-database
     (fn [connection]
@@ -1415,6 +1419,7 @@ handle))}}
                 (throw (BindException. "injected ephemeral bind failure")))]
               (try
                 (web/start!
+                 (service-request connection
                  {:seon.store/connection-object connection
                   :seon.cluster.agent/id agent-id
                   :seon.sci.admit/caps caps
@@ -1424,7 +1429,7 @@ handle))}}
                   :seon.render.web/latest-packages (atom {})
                   :seon.render.web/render-channel render-channel
                   :seon.render.web/fault-channel fault-channel
-                  :seon.render.web/port 0})
+                  :seon.render.web/port 0}))
                 nil
                 (catch Throwable thrown thrown)))]
         (try
@@ -1859,7 +1864,7 @@ handle))}}
          (is (str/includes? ai "more characters")
              (str "the cut is an elision value naming what it omitted: "
                   (subs ai 0 (min 400 (count ai)))))
-         (is (str/includes? ai "requery by")
+         (is (str/includes? ai "requery (get-in (seon.db/pull")
              "and the elision carries a requery identity")
          (is (<= (count huge) (count html-string))
              "the HTML projection serves the whole value, unbounded")
@@ -1882,7 +1887,7 @@ handle))}}
            (is (str/includes? wide-ai "more children")
                (str "the collection cut is an elision naming what it omitted: "
                     (subs wide-ai 0 (min 400 (count wide-ai)))))
-           (is (str/includes? wide-ai "requery by")
+           (is (str/includes? wide-ai "requery (get-in (seon.db/pull")
                "and it carries a requery identity")
            (is (str/includes? wide-ai
                               (str :seon.render.profile/max-children))
@@ -1904,17 +1909,16 @@ handle))}}
         (is (str/includes? agent-page "/agent/root/debug")
             "the always-available debug view is linked from the curated page")
         (is (str/includes? root "debug=true"))
-        (is (str/includes? root "include agent prompt comparison")
-            "the expensive prompt comparison is an explicit secondary view")
-        (is (not (str/includes? root "id=\"debug-ai-root\"")))
+        (is (str/includes? root "Would-be system turn")
+            "the algorithm is visible on the ordinary debug route")
+        (is (str/includes? root "id=\"debug-ai-root\""))
         (is (str/includes? alice "/feed/alice"))
         (is (not= root alice) "the stable root address includes the agent"))
       (is (= 404 (.statusCode (fetch server "/agent/missing/debug")))))))
 
 (deftest an-undeclared-incoming-reference-is-reachable-from-the-page
-  ;; Transaction provenance is an ordinary incoming reference to the agent.
-  ;; No unit declares it, so it belongs under Other references with a link
-  ;; that selects the transaction itself.
+  ;; Transaction provenance remains navigable through the reference graph;
+  ;; it does not become an extra context block.
   (with-server
     (fn [connection server _context]
       (db/transact! connection
@@ -1924,10 +1928,10 @@ handle))}}
       (let [stream (open-feed server (debug-feed-path
                                       agent-id [] "&maxRefAttributes=200"))]
         (try
-          (let [paint (read-patches! stream 1)]
-            (is (str/includes? paint "Other references")
-                "undeclared incoming references have their own heading")
-            (is (str/includes? paint ":seon.db/user")
+          (let [paint (read-until! stream "id=\"debug-graph\"")]
+            (is (str/includes? paint "reference graph")
+                "incoming references remain in the graph")
+            (is (str/includes? paint "\"attribute\":\":seon.db\\/user\"")
                 "the transaction's provenance reference is one of them"))
           (finally (.close stream)))))))
 
@@ -1935,24 +1939,21 @@ handle))}}
 ;;; Slice 1 — one POST, the existing route and render chain
 ;;; ---------------------------------------------------------------------------
 
-(deftest the-message-appears-on-the-page-wire-test
-  ;; seed 2026072903 — reverse refs do the echo; no message-specific page code.
+(deftest the-message-route-commits-to-the-addressed-agent
   (with-server
     (fn [connection server _context]
-      (let [stream (open-feed server (str "/feed/" agent-id))]
-        (try
-          (read-complete-paint! stream connection)
-          (let [response (post-form server
-                                    (str "/agent/" agent-id "/message")
-                                    "content=wire-echo-2026072903")]
-            (is (= 204 (.statusCode response)))
-            (is (empty? (.body response))))
-          (let [paint (read-until! stream "wire-echo-2026072903")]
-            (is (str/includes? paint "surface-transcript"))
-            (is (str/includes? paint "wire-echo-2026072903"))
-            (is (not (str/includes? paint "surface-message-bar"))
-                "the existing reverse-ref render changes; the bar does not"))
-          (finally (.close stream)))))))
+      (let [response (post-form server
+                                (str "/agent/" agent-id "/message")
+                                "content=wire-echo-2026072903")]
+        (is (= 204 (.statusCode response)))
+        (is (empty? (.body response)))
+        (is (= #{[agent-id "wire-echo-2026072903"]}
+               (db/q '[:find ?id ?content
+                       :in $ ?content
+                       :where [?message :seon.cluster.message/content ?content]
+                       [?message :seon.cluster.message/to ?agent]
+                       [?agent :seon.cluster.agent/id ?id]]
+                     @connection "wire-echo-2026072903")))))))
 
 (deftest the-inbound-route-is-method-discriminated-test
   ;; seed 2026072905 — the former prefix-dispatch shadow class.
@@ -2152,14 +2153,21 @@ handle))}}
 (defn- throwing-render-state
   "One render-pass state whose pages all throw, with a real fault channel."
   [connection fault-channel]
+  (support/seed-cluster! connection "web-fault-test")
+  (db/transact! connection
+                (cluster.agent/creation-tx
+                 {:seon.cluster.agent/id "agent-a"
+                  :seon.cluster/name "web-fault-test"
+                  :seon.ns/name 'my.agents.fault-test}))
   {:seon.cluster.loop/cluster
+   (support/cluster-handle
    {:seon.cluster/name "web-fault-test"
     :seon.db/connection connection
     :seon.sci.admit/caps caps
-    :seon.sci.eval/ctx nil
+    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
     :seon.config.eval/time-limit-ms 1000
     :seon.config/on-core-error :panic
-    :seon.cluster.run/process "web-fault-test"}
+    :seon.cluster.run/process "web-fault-test"})
    :seon.cluster.agent/routing
    (atom {:seon.cluster.agent/fault-channel fault-channel})
    :seon.render.web/registration (atom {"agent-a" 1})

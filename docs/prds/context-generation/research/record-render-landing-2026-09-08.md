@@ -27,7 +27,7 @@ received. This is an integration record, not a completed acceptance report.
 
 ## Required final blocks
 
-Identity, plan, unanswered wakes, steward-routed faults, history. Empty wake
+Identity, plan, settings, unanswered wakes, steward-routed faults, history. Empty wake
 and fault concerns disappear. History is last, includes all evaluations in
 chronological order, and walks their entity render pairs. Generated forms
 are for the ordinary system turn that turn-cut stores; page previews write
@@ -517,3 +517,66 @@ re-armed contracts, rebound only default's HTTP service on 7994, and then
 re-evaluated the private render pass. It did not reload a foreign owner or
 claim successful development adoption. The subsequent MCP envelope called
 default degraded even though the private reload returned successfully.
+
+### Final boundary for this continuation, 2026-09-08
+
+Component commit: `00b2b95e2`. The original nine assertion failures and one
+error were corrected or re-expressed as listed above. The subsequently
+observed fixed-zero-digest expectation now compares the header with the
+digest in the canonical database; a published fixture has a real digest.
+The final fast run with both projection propagation fixes passed **59 tests
+/ 356 assertions, zero failures and zero errors**.
+
+The final page path gate overlaid only `src/seon/render/web.clj` and
+`test/seon/render/web_test.clj`. It completed **59 tests / 317 assertions,
+zero failures and four errors**. All four were bounded completion waits in
+the pooled worker and passed the runner's isolated confirmation:
+
+- `reconnect-is-repaint`;
+- `reconnect-is-repaint-wire-test`;
+- `reconnect-mid-stream-is-a-fact-only-repaint`;
+- `render-proc-one-derivation-many-tabs-test`.
+
+This is not an isolated green gate. No timeout was increased, and no cause
+is inferred from the pooled/isolated difference. The open finding is
+[debug feed waits](../../../seon/issues/debug-feed-waits-fail-only-in-pooled-worker.md).
+
+`bin/test --platform` completed **82 tests / 483 assertions, two failures
+and zero errors**, both reproduced by isolated confirmation:
+
+- `seon.schema.declaration-population-test/an-unhanded-declaration-projection-refuses-without-reading-resources`
+  expected its test namespace as caller but received
+  `seon.instrument (instrument.clj:603) [no declared source root — nearest frame]`.
+- `seon.test-support-test/an-instrumentation-test-restores-the-entering-contracts-on-failure`
+  expected an empty instrumented-Var set after removal, but Vars remained armed.
+
+`src/seon/schema.clj`, `src/seon/instrument.clj`, and the corresponding test
+files had another lane's uncommitted changes at this observation. The explicit
+assignment stop rule applies to this confirmed boundary. No foreign source,
+test, or session was changed to pass it. Cache-lock waits completed normally;
+they were not the stop condition.
+
+Default was restarted during verification into JVM 45036 and its HTTP service
+fell back to port 58444. After that start completed, the owned handler and
+render pass were re-evaluated, contracts re-armed, and only default's HTTP
+service rebound to 7994. A GET returned 200 in 7.502320 seconds. The checked-in
+HTTP proof then completed ten GETs with statuses
+`[200, 200, 200, 200, 200, 200, 200, 200, 200, 200]`; the final response was
+140,564 bytes. These are HTTP observations, not a browser or lifecycle proof.
+The canonical no-write regression passed in the final fast run. No full
+integration or provider request is claimed.
+
+Still unfinished, in the owner's requested order: `my.turn/evals` and `eval`
+depend on the absent `seon.eval/of-agent` query and stored shown-text field;
+the protected SCI `dir`/`doc` injection still needs its data-returning change.
+Derived wake/fault query blocks, the as-of check, prompt digest, the history
+namespace cut, empty-plan page bytes, and the three-controls lifecycle proof
+remain unfinished. The PRD's existing record-render integration boundary names
+the evaluation owner dependencies; no second store or reconstructed saved text
+was introduced to conceal them.
+
+All owned test commands ended and were reaped before reporting. No process
+held the inspected test roots. Superseded roots were already absent at
+cleanup; the last failed page/platform roots are retained by the test gate
+for their unresolved evidence (`run.Z0t7FF`, `run.ll9Sm1`, if not subsequently
+reaped by the operator's normal sweep). No foreign process was stopped.

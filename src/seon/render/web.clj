@@ -2212,6 +2212,10 @@
   ([state database derive-all?]
    (render-pass state database derive-all? false))
   ([state database derive-all? invalidate-calls?]
+  (schema/call-with-projection
+   (sci.kernel/context-projection
+    (get-in state [:seon.cluster.loop/cluster :seon.sci.eval/ctx]))
+   (fn []
   (let [handle (:seon.cluster.loop/cluster state)
         registration (:seon.render.web/registration state)
         watched (watched-registration-keys registration)
@@ -2328,7 +2332,7 @@
             ;; carry a signature, so a page that starts rendering again drops
             ;; out and its next failure is offered afresh.
             ::fault-signatures pass-signatures)
-     (when changed? packages)])))
+     (when changed? packages)])))))
 
 (defn append-history
   "Merge newly observed history into the retained prompt generation.
@@ -3428,8 +3432,12 @@
                 (bind-handlers handlers)
                 {:reitit.middleware/registry
                  {::route/same-origin {:name ::route/same-origin
-                                       :wrap same-origin-middleware}}})]
-    (ring/ring-handler router not-found)))
+                                       :wrap same-origin-middleware}}})
+        route-handler (ring/ring-handler router not-found)]
+    (fn [request]
+      (schema/call-with-projection
+       (sci.kernel/context-projection (:seon.sci.eval/ctx service))
+       #(route-handler request)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle
