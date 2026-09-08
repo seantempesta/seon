@@ -1785,3 +1785,13 @@ sweep, runner-base-cache (6–8 min fixed cost per gate → seconds),
 hook-coalesce (one publication per quiet window). Known: page 500 on
 default (time-limit dropped on the page path, assigned); the operator
 lifecycle lock contended by per-edit adoptions (assigned).
+
+Multi-cluster proof (`e4da59a88`): two clusters in one JVM hold distinct
+connections, SCI contexts, projection states, routing, render graphs; all
+39 flow-stack threads virtual. TWO DEFECTS: development adoption REFUSES
+with more than one running instance (→ hook-coalesce, refresh path); the
+shared test base is built from the working tree, so `--paths` gates still
+compile other lanes' half-edits (→ runner-base-cache: build the base from
+the snapshot). `bin/test-fast` in flight (armed one-JVM inner loop; arming
+extracted to `seon.test.arm`). Lanes gate per commit with `--paths`, per
+lane with `--platform`; the suite is the orchestrator's only.
