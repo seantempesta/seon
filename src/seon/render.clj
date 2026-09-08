@@ -73,16 +73,12 @@
   (or (:seon.render/profile request)
       (if (schema/handed-projection)
         (let [database (:seon.db/db request)
-              agent-id (:seon.cluster.agent/id request)
               cluster-name
-              (when (and database agent-id)
+              (when database
                 (db/q '[:find ?cluster-name .
-                        :in $ ?agent-id
                         :where
-                        [?agent :seon.cluster.agent/id ?agent-id]
-                        [?agent :seon.cluster.agent/cluster ?cluster]
                         [?cluster :seon.cluster/name ?cluster-name]]
-                      database agent-id))
+                      database))
               effective (when cluster-name
                           (config/effective database cluster-name))]
           (if (:seon.error/kind effective)

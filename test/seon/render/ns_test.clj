@@ -19,6 +19,29 @@
 
 (def ^:private property-seed 2026073102)
 
+(deftest identity-reads-stewardship-without-an-agent-cluster-attribute
+  (support/with-database
+   (fn [connection]
+     (db/transact! connection
+                   [{:db/id "steward" :seon.cluster.agent/id "record-steward"}
+                    {:db/id "namespace" :seon.ns/name 'my.agents.record
+                     :seon.ns/steward "steward"}
+                    {:seon.cluster.agent/id "record-agent"
+                     :seon.cluster.agent/namespace "namespace"}])
+     (let [unit {:seon.db/db @connection
+                 :seon.cluster.agent/id "record-agent"}
+           source (sut/render-agent-ai unit)
+           form (edn/read-string source)
+           selector (second (second form))
+           observed (db/pull @connection selector (nth form 2))]
+       (is (= "record-agent" (:seon.cluster.agent/id observed)))
+       (is (= 'my.agents.record
+              (get-in observed [:seon.cluster.agent/namespace :seon.ns/name])))
+       (is (= "record-steward"
+              (get-in observed [:seon.cluster.agent/namespace :seon.ns/steward
+                                :seon.cluster.agent/id])))
+       (is (not (str/includes? source ":seon.cluster.agent/cluster")))))))
+
 (defn- namespace-unit
   [db namespace-name distance token-budget]
   (assoc (db/pull db [:db/id
