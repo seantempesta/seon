@@ -96,3 +96,33 @@ The subsequent MCP JVM convergence query was:
 At that observation, adopted was `6aa08518-86e0-5fe6-bec7-6584cdaa5d02`,
 current was `6aa0859a-3a76-5d93-8483-112dd3860298`, convergence false.
 Both values must be present; two missing values never count as convergence.
+
+## Slice 2 — diagnostic evidence
+
+The row diagnostic now constructs cause evidence rather than embedding the
+original exception data and its execution projection. The boot refusal
+helper excludes the top-level execution projection. No presentation
+clipping or new renderer was added.
+
+The actual CLI transport owner is `script/seon/fresh_operator.clj`, not the
+absent `src/seon/boot.clj`. Its typed boot-refusal arm now reports the
+message and offense instead of the entire prepl event history and source
+form. This necessary diagnostic edit extends the initially named paths to
+that existing owner. A real Clojure `io-prepl` connection verifies it;
+`reference-code/clojure/src/clj/clojure/core/server.clj:240–257` supplies
+the returned exception data and submitted form.
+
+`seon.adoption-diagnostic-test` measures **1,380 bytes** for a row refusal
+whose input carries a **99,000-byte** projection payload, and **159 bytes**
+for the operator's typed refusal over the real prepl. The diagnostic gate
+also reruns acquisition: **3 tests, 19 assertions, 0 failures, 0 errors**.
+Command: `SEON_TEST_WORKERS=3 bin/test --paths src/seon/sci/eval.clj
+src/seon/cluster.clj script/seon/fresh_operator.clj
+test/seon/adoption_diagnostic_test.clj -- seon.adoption-diagnostic-test
+seon.adoption-rows-test`. Subject times: 49 ms, 4 ms and 34,281 ms;
+coordinator/test phase 69 seconds.
+
+The second explicit live adoption reached SCI acquisition and JVM
+instrumentation, then refused to stamp the commit because source changed
+during adoption. Its terminal refusal measured **151 bytes**, two lines;
+the full progress/warning log was 63,670 bytes. A convergence retry follows.

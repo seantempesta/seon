@@ -1415,7 +1415,10 @@
       :seon.error/diagnostic-offending identity
       :seon.error/diagnostic-cause
       (or cause-kind (.getName (class failure)))
-      :seon.error/diagnostic-evidence failure-data
+      :seon.error/diagnostic-evidence
+      {:seon.error/message cause-message
+       :seon.error/diagnostic-cause
+       (or cause-kind (.getName (class failure)))}
       :seon.error/data
       {::acquisition-row identity
        ::acquisition-cause-kind cause-kind

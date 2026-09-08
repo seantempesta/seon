@@ -578,7 +578,11 @@
                   {:seon.error/kind :seon.boot/refused
                    :seon.boot/refused true
                    :seon.error/message message
-                   :seon.boot/offense offense})))
+                   ;; A projection is execution input, not refusal evidence.
+                   :seon.boot/offense
+                   (if (map? offense)
+                     (dissoc offense :seon.schema/projection)
+                     offense)})))
 
 ;; REQUIRES the population: `resolve-bootstrap` asks two questions and each
 ;; refusal arm asks a third, so the ambient arity made one bootstrap

@@ -1555,8 +1555,15 @@
                (= :ret (:tag event))
                (let [events (conj events event)]
                  (when (:exception event)
-                   (fail! "The cluster rejected the prepl operation."
-                          {:seon.fresh-operator/events events}))
+                   (let [failure (try (edn/read-string (:val event))
+                                      (catch Exception _ nil))
+                         data (:data failure)]
+                     (if (:seon.boot/refused data)
+                       (fail! (or (:seon.error/message data) (:cause failure)
+                                  "The cluster refused the prepl operation.")
+                              (:seon.boot/offense data))
+                       (fail! "The cluster rejected the prepl operation."
+                              {:seon.fresh-operator/events events}))))
                  events)
 
                :else
