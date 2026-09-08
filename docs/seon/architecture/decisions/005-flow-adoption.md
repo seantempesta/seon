@@ -19,17 +19,18 @@ A runtime owner implements `flow.spi/ProcLauncher` when it must select over a
 database interest or another non-Flow source alongside Flow control. Each
 workload class has a bounded input channel and uses core.async's
 `executor-for :io` or `executor-for :compute`. The eval seam additionally
-arms the one `:interrupt-fn`, runs on a platform thread, and holds its admitted
-permit until settlement.
+arms the one `:interrupt-fn` and retains its execution bound until completion.
 
 Flow channels are process-local control, scheduling, backpressure, report, and
-error state. Runs, claims, receipts, program facts, and transaction reports
+error state. Turns, evaluations, program facts, and transaction reports
 remain database authority. A channel wake can prompt a query; it is never the
-only record of durable work.
+only record of durable work. Private defs, atoms, and result objects remain
+in each agent's persistent SCI context, while evaluations store shown text
+under [turn PRD §14–§15](../../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
 
 ## Consequences
 
-- The run loop and render pipeline are Flow procs, not parallel bespoke loops.
+- The turn loop and render pipeline are Flow procs, not parallel bespoke loops.
 - Database-backed owners derive durable state on demand instead of storing it
   in a proc's threaded state.
 - Flow pause, resume, and stop are process-local controls; database fences and
