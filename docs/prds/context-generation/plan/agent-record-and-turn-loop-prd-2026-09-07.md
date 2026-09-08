@@ -1,6 +1,6 @@
 ---
 type: prd
-status: draft r2 — under independent review (loop-data audit added)
+status: draft r3 — under independent review (loop-data audit + complete schema)
 date: 2026-09-07 (evening)
 supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
 tags: [prd, agent, wake, storage, runtime]
@@ -192,6 +192,100 @@ An **evaluation** entity: `turn`, `ordinal`, `comment`, `source`, `ns`,
 bound OR `missing` (why: over-bound, unserializable, lost), `out`, `error` +
 triage, `ending-ns` when changed, `ms`, print options in effect;
 `interrupted-at` when recovery cut it. No terminal fact = not yet evaluated.
+
+## 4a. The schema, complete — every key namespaced, every shape declared
+
+Owner rule (2026-09-07): "every piece of data should have a fully namespaced
+key and a malli schema. We are moving the data to the agent's entity so we
+have a chance to redesign and rename everything so it makes sense and is
+optimal." This section IS the proposed `resources/seon/schemas/` population
+for the record; reviewers judge these keys and shapes, not the prose. Legacy
+spellings (`seon.cluster.run`, `seon.cluster.eval`, `seon.cluster.message`,
+`seon.cluster.agent`) retire in the same wave; names below take the
+dependency's word where one exists (Datahike ref/component, sci ns, Clojure
+ns/symbol) and coin nothing that a query could express.
+
+```clojure
+;; seon.agent.edn — the record
+#:seon.agent{:id        [:string {:seon.db/identity true
+                                  :description "The agent's stable identity; handles, messages, and stewardship name it."}]
+             :namespace [:seon.db/ref {:description "The :seon.ns entity whose REPL this agent sits in. Not unique: agents may share a namespace; stewardship is :seon.ns/steward."}]
+             :turns-left [:int {:min 0
+                                :description "Turns this agent may still take. The one counter the loop keeps: decremented at open, refilled only by an explicit act."}]
+             :plan       [:seon.db/ref {:seon.db/component true
+                                        :description "The agent's my.plan entity; stored on purpose by the agent."}]
+             :evals      [:vector {:seon.db/component true
+                                   :description "Every evaluation this agent has made, one entity per (turn, ordinal); the history is a projection of this set."}
+                          :seon.db/ref]
+             :agent      [:map {:seon.db/attributes true
+                                :seon.render/ai seon.agent/render-ai
+                                :seon.render/html seon.agent/render-html}
+                          [:seon.agent/id :seon.agent/id]
+                          [:seon.agent/namespace :seon.agent/namespace]
+                          [:seon.agent/turns-left :seon.agent/turns-left]
+                          [:seon.agent/plan {:optional true} :seon.agent/plan]
+                          [:seon.agent/evals {:optional true} :seon.agent/evals]]}
+
+;; seon.turn.edn — one model call and what it produced
+#:seon.turn{:id        [:string {:seon.db/identity true :description "Identity for evaluations and attempts to reference."}]
+            :agent     [:seon.db/ref {:description "Whose turn."}]
+            :wake      [:seon.db/ref {:description "The wake item (§3) this turn answers; asserting it IS the claim."}]
+            :opened-at [:inst {:description "When the turn opened; open = no closed-at."}]
+            :closed-at [:inst {:description "When the turn settled or was closed as interrupted at boot."}]
+            :basis     [:seon.db/commit-id {:description "The database commit the context was projected from; with the render profile it reproduces the prompt byte for byte."}]
+            :reply     [:string {:description "The model's reply under the storage bound; the freeze evidence."}]
+            :reply-blob [:seon.blob/digest {:description "The reply's blob when it exceeds the inline bound."}]
+            :attempts  [:vector {:seon.db/component true :description "One entity per provider attempt."} :seon.db/ref]
+            :turn      [:map {:seon.db/attributes true}
+                        [:seon.turn/id :seon.turn/id]
+                        [:seon.turn/agent :seon.turn/agent]
+                        [:seon.turn/wake :seon.turn/wake]
+                        [:seon.turn/opened-at :seon.turn/opened-at]
+                        [:seon.turn/closed-at {:optional true} :seon.turn/closed-at]
+                        [:seon.turn/basis :seon.turn/basis]
+                        [:seon.turn/reply {:optional true} :seon.turn/reply]
+                        [:seon.turn/reply-blob {:optional true} :seon.turn/reply-blob]
+                        [:seon.turn/attempts {:optional true} :seon.turn/attempts]]}
+
+;; seon.turn.attempt.edn — a paid call is a fact (the existing :seon.ai.attempt keys move here unchanged in meaning)
+#:seon.turn.attempt{:provider :keyword, :model :string, :started-at :inst,
+                    :duration-ms [:int {:min 0}], :prompt-digest :string,
+                    :input-tokens [:int {:min 0}], :output-tokens [:int {:min 0}],
+                    :error [:seon.db/ref {:description "The :seon.error entity when the attempt failed."}]}
+
+;; seon.eval.edn — one evaluated form (today's :seon.cluster.eval, renamed; terminal facts absent = not yet evaluated)
+#:seon.eval{:turn :seon.db/ref
+            :ordinal [:int {:min 0 :description "Position in the turn's reply; (turn, ordinal) is the identity — nothing re-executes."}]
+            :author [:enum {:description "Who wrote the form: the agent's reply or the system (a page preview, a steward repair). A bounded closed set, justified by the loop deciding nothing on it."} :agent :system]
+            :comment [:string {:description "The agent's prose above the form, verbatim."}]
+            :source  [:string {:description "The form's exact source text."}]
+            :ns      [:seon.db/ref {:description "The namespace in effect when the form was read."}]
+            :ending-ns [:seon.db/ref {:description "Present only when the form changed the namespace."}]
+            :value   [:string {:description "The result as EDN print node under the storage bound."}]
+            :value-blob :seon.blob/digest
+            :missing [:enum {:description "Why no value is stored: over the storage bound, not serializable, or lost at recovery."} :over-bound :unserializable :lost]
+            :size    [:int {:min 0 :description "Bytes reached when the value is missing; the reason's evidence."}]
+            :out     [:string {:description "Captured *out* text."}]
+            :error   [:string {:description "The thrown message."}]
+            :triage  [:string {:description "clojure.main/ex-triage data as EDN."}]
+            :duration-ms [:int {:min 0}]
+            :print-length [:int {:min 0}] :print-level [:int {:min 0}]
+            :interrupted-at [:inst {:description "Asserted at boot on an evaluation with no terminal fact whose turn was open."}]}
+
+;; seon.wake.edn — the mechanism (§3)
+#:seon.wake{:source [:boolean {:description "Schema PROPERTY on a ref attribute: a transaction asserting it wakes the referenced agent."}]
+            :opens-turn? [:boolean {:description "Schema PROPERTY: whether a pending item of this source opens a turn or only surfaces in context."}]
+            :turn [:seon.db/ref {:description "On a wake item: the turn that answered it. Absent = pending."}]}
+```
+
+Wake sources declared where they live: `:seon.message/to` (renamed from
+`seon.cluster.message`), `:seon.error/to`, `:seon.schedule/agent` each carry
+`{:seon.wake/source true :seon.wake/opens-turn? true}`.
+
+Every key above is a full namespaced attribute with a Malli shape; absent
+means no key; no `:any`, no `[:maybe]`, no `:kind`. Reviewers: is any key
+misnamed against Clojure's or the dependency's own word? Is any shape
+incomplete?
 
 ## 5. Storage bound, elision, and the missing marker
 
