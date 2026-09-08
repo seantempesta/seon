@@ -1625,3 +1625,15 @@ absence-reads-as-health before the next lane launches; (3) the turn-loop
 step (§8 step 3) additionally gets a design verifier against PRD §1, §1a,
 §7 and the run-loop-unpacked §5.6 behaviours, and the platform tier plus a
 full `bin/test --all` at its landing.
+
+Lane 1 (storage bound) landed `3518903dd..8f22125ad` and was VERIFIED
+(`research/verify-storage-bound-2026-09-07.md`): the bound, interrupt,
+faithful storage, ablated handles and byte identity hold; FIVE blockers
+found — faults unbounded (915 KB fact), no string elision at the AI
+boundary (`print/fit` identity), effect requests dispatched as nil (the
+deleted `capped?` was its refusal), StackOverflow at depth 2000,
+`connection-width` hiding the pull cut. Repair lane running
+(`tmp/lane-specs/storage-bound-repair-0907.md`); the gate held — lane 2
+does not launch until the repair is re-verified. Ruling implied and being
+written into AGENTS.md §2.4: rendering limits are ON for the AI projection
+under the render profile; HTML unbounded; storage bounded per value.
