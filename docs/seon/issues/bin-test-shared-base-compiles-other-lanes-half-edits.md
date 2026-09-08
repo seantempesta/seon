@@ -72,6 +72,25 @@ behavior on an inconsistent tree (`seon.fn/index!` / publication).
 
 ## Acceptance
 
+Multi-cluster concurrency observation, 2026-09-08: two gate boundaries
+prevented a verdict and triggered the assignment's explicit stop rule.
+
+- `bin/test --platform`, snapshot HEAD `38d2fc91b`, loaded through namespace
+  119/152, then failed compiling `test/seon/render/web_prompt_test.clj:26`:
+  `Unable to resolve var: seon.render.web/prospective-prompt in this context`.
+  The held web owner no longer defines that Var; the test still references
+  it at lines 27 and 56. Root: `tmp/test-runs/run.Spfc7z`.
+- `bin/test --paths test/seon/concurrency_test.clj -- seon.concurrency-test`
+  snapshotted only that new test over the same HEAD, then failed before test
+  loading: `Cannot open <nil> as a Reader`, while slurping
+  `(:seon.dev-cache/test-classpath-file selection)`. The running gate script
+  consumes the new cache field while HEAD's cache producer predates the
+  uncommitted `dev_cache.clj` addition. The isolated snapshot and executing
+  gate do not represent one consistent interface version.
+
+No owner files or lane sessions were changed. These failures do not establish
+anything about the new concurrency test's assertions.
+
 Two lanes with disjoint owned paths, one of them mid-edit on a file the
 other's tests load, both reach a tally; the base preparation names the
 files it overlaid; one regression per claim.
