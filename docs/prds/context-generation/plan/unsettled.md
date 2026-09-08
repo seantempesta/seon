@@ -247,3 +247,15 @@ gate encounters another lane's in-flight failure, stop at the exact boundary
 when the assignment requires it. Re-observe the current source before
 attributing the cause. The 48-bit identity claim cannot promise collision
 freedom; §0 records that limit without changing the chosen id format.
+
+### 2026-09-08 14:15 — the fast loop
+
+`bin/test-fast NS…` landed (`82eb29a30`, `seon.test.fast` + `seon.test.arm`):
+one armed JVM, ~20 s, same contracts as a worker. Every lane restarted on
+it: iterate with test-fast; `bin/test --paths <files> -- <ns>` once per
+commit; `--platform` once per lane; `--all`/`--full` never in a lane.
+Docs consolidation landed (AGENTS.md at the turn model; PRD §0 one page;
+old PRDs superseded). Monitors: page up/down transitions, cluster-log
+errors, a quiet-machine re-run of the runner gate. Open: the runner's own
+tests red under load (nested bin/test killed, exit 137) — verdict pending
+the quiet re-run.
