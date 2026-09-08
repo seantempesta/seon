@@ -52,22 +52,37 @@
               error (:seon.cluster.eval/error evaluation)
               result-edn (:seon.cluster.eval/result-edn evaluation)
               result
-              {:out (or (:seon.cluster.eval/output evaluation) "")
-               :value (:seon.sci.admit/value evaluation)
-               :err error
-               :ending-ns (:seon.sci.eval/ending-ns evaluation)
-               ;; The receipt stores the closed print tree; presentation is a
-               ;; render-time projection through the text sink.
-               :print-node result-edn
-               :printed
-               (print/emit-text (edn/read-string result-edn)
-                                (:seon.print/options evaluation))
-               ;; This is the face recoverable from today's stored receipt,
-               ;; which does not yet persist the captured SCI print options.
-               :stored-printed
-               (print/emit-text (edn/read-string result-edn) {})
-               :semantic-printed
-               (pr-str (:seon.sci.admit/value evaluation))}]
+              (cond->
+               {:out (or (:seon.cluster.eval/output evaluation) "")
+                :value (:seon.sci.admit/value evaluation)
+                :err error
+                :ending-ns (:seon.sci.eval/ending-ns evaluation)
+                :semantic-printed
+                (pr-str (:seon.sci.admit/value evaluation))}
+                ;; ABSENT MEANS NO KEY, on this side of the boundary too. An
+                ;; evaluation whose value binds nothing — a bare host object,
+                ;; a failed projection — stores NO print node and reports
+                ;; `:seon.eval/missing` instead
+                ;; (`src/seon/sci/admit.clj` `unserializable-root?`). Reading
+                ;; the absent key and handing nil to a total render was this
+                ;; harness asserting a contract violation of its own making,
+                ;; three rows deep, in place of the row's own subject.
+                (some? (:seon.eval/missing evaluation))
+                (assoc :missing (:seon.eval/missing evaluation))
+
+                (some? result-edn)
+                (assoc
+                 ;; The evaluation stores the closed print tree; presentation
+                 ;; is a render-time projection through the text sink.
+                 :print-node result-edn
+                 :printed
+                 (print/emit-text (edn/read-string result-edn)
+                                  (:seon.print/options evaluation))
+                 ;; This is the face recoverable from today's stored
+                 ;; evaluation, which does not yet persist the captured SCI
+                 ;; print options.
+                 :stored-printed
+                 (print/emit-text (edn/read-string result-edn) {})))]
           [(or (:seon.sci.eval/ending-ns evaluation) namespace-name)
            (conj results result)]))
       ['user []]
@@ -396,17 +411,24 @@
                    ["(defrecord ParityRecord [a b])"
                     "(->ParityRecord 1 2)"]))))
 
-(defparity "B10" :passing
-  (let [printed (:printed (first (repl-session ["(atom 1)"])))]
+(defparity "B10" :known-divergence
+  ;; Stock prints a host reference; Seon stores no node for a value that kept
+  ;; only a name and reports the TYPED UNKNOWN instead (AGENTS.md §2.4;
+  ;; `unserializable-root?` in `src/seon/sci/admit.clj`). The divergence is
+  ;; the design, and the row records which side of it we are on.
+  (let [result (first (repl-session ["(atom 1)"]))]
     (checked "#object[clojure.lang.Atom]"
-             printed
-             (= "#object[clojure.lang.Atom]" printed))))
+             (select-keys result [:printed :missing])
+             (= "#object[clojure.lang.Atom]" (:printed result)))))
 
-(defparity "B11" :passing
-  (let [printed (:printed (first (repl-session ["(fn [] 1)"])))]
+(defparity "B11" :known-divergence
+  ;; Same divergence as B10, for a function value.
+  (let [result (first (repl-session ["(fn [] 1)"]))
+        printed (:printed result)]
     (checked "a #object face with a demunged function name"
-             printed
-             (and (str/starts-with? printed "#object[")
+             (select-keys result [:printed :missing])
+             (and (string? printed)
+                  (str/starts-with? printed "#object[")
                   (not (str/includes? printed "@"))
                   (not (str/includes? printed "$"))
                   (not (str/includes? printed "sci.impl"))))))
@@ -864,13 +886,20 @@
               (mapv :value results))))
 
 (defparity "G10" :passing
-  (let [invalid-symbol (read-events "foo/bar/baz")
-        invalid-value (read-events "##Foo")]
+  ;; `sci.reader/read` answers with the ordered EVENTS it read, and a refusal
+  ;; rides the event that could not be read — it is not the return value.
+  ;; Asking the vector for `:seon.error/kind` got nil and compared it to the
+  ;; kind it wanted, which is a check that passes only by accident.
+  (let [refusals (mapv (fn [text]
+                         (mapv :seon.sci.reader/error (read-events text)))
+                       ["foo/bar/baz" "##Foo"])]
     (checked "invalid symbols and symbolic values are clean reader errors"
-             [invalid-symbol invalid-value]
-             (every? #(= :seon.sci.reader/unreadable
-                          (:seon.error/kind %))
-                     [invalid-symbol invalid-value]))))
+             refusals
+             (every? (fn [errors]
+                       (and (= 1 (count errors))
+                            (= :seon.sci.reader/unreadable
+                               (:seon.error/kind (first errors)))))
+                     refusals))))
 
 ;;; Family H — namespaces and vars
 
@@ -907,8 +936,9 @@
                   (not (str/includes? (:printed result)
                                       "seon.sci.admit"))))))
 
-(defparity "H5" :known-divergence
-  ;; Pending Lane 1: namespace mutations are still masked by ctx handling.
+(defparity "H5" :passing
+  ;; Was a known divergence pending Lane 1's ctx handling; namespace mutations
+  ;; are visible to `find-var`/`find-ns` at HEAD, so the row is promoted.
   (let [results
         (repl-session
          ["(ns parity.h5 (:require [clojure.string :as string]))"
