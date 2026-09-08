@@ -4,254 +4,121 @@ status: active
 tags: [architecture, agent, database]
 ---
 
-# Observability — inspect any agent and turn
+# Observability — inspect what an agent evaluated and saw
 
-> **Target design** (present tense). Implementation state, gaps, order, and
-> evidence live only in [[roadmap]].
+> Target contract: [agent record and turn loop PRD](../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
+> §13–§15. Implementation evidence and ordering live in the program roadmap.
 
-Agent forensics are queries over messages, turns, provider attempts,
-evaluations, program rows, and error facts. Process logs remain necessary
-for startup, readiness, transport, and crashes, but they are not a second
-durable agent-history model.
+Agent forensics query turns, evaluations, provider attempts, messages,
+program rows, and error facts. Logs explain process startup, transport,
+and crashes; they do not replace the durable history.
 
-## The evidence spine
+## What the agent saw
 
-One episode leaves a connected set of facts:
+An evaluation records its exact form, namespace, comment, ordinal, shown
+text, out, error, and read evidence as applicable. Shown text is the
+value renderer's output at evaluation time, including profile elisions
+and requery forms. It is an observation, not a serialization of the result.
 
-```text
-agent ← message (a wake)
-  ↑        ↓
-  └── turn ← provider attempt(s)
-        └── evaluation(s)
-               ↓ optional error/problem refs
-```
+The walk renders evaluation entities in chronological turn order and
+ordinal through the schema's `seon.repl/render-ai` and
+`seon.repl/render-html` pair. `seon.repl/text` owns the REPL grammar.
+Every turn is shown by default; no separate history formatter or clipping
+pass changes saved bytes.
 
-The durable joins are concrete:
+To reconstruct a sent prompt, render the evaluations that preceded that
+agent turn from their stored shown text. A later profile change, mutated
+atom, program adoption, or JVM restart cannot rewrite that prefix.
+An attempt's prompt digest witnesses sent bytes. A separate prompt
+capture, print-node store, or result blob is unnecessary.
 
-- the agent is `:seon.agent/id`;
-- messages point through `:seon.message/to`, optional `/from`, optional
-  `/about`, and optional `/caused-by`;
-- a turn points through `:seon.turn/agent`; "which turn answered a given
-  wake" is a query comparing the wake's `:t` against turns' own `:t`, not a
-  stored trigger ref;
-- provider attempts are the turn's component `:seon.turn/attempts`;
-- evaluations point to the turn through `:seon.eval/turn` and order by
-  `:seon.eval/ordinal`; and
-- error facts may point to `/agent` and `/steward`.
+The turn's identity datom supplies its basis `:t`. This remains useful
+for temporal joins, but re-executing reads at that basis is not the
+authority for what was shown: the saved text is.
 
-No turn identity beyond `:seon.turn/id`, phase cursor, custody stamp, route
-row, or browser-session entity is required to reconstruct that chain.
+## Inspect an evaluation
 
-## The basis — what the model saw, reproduced exactly
+`(my.turn/evals)` returns the agent's evaluation maps, filterable by turn
+or form. `(my.turn/eval id)` returns one in full, including read evidence.
+`dir` presents the API as program data.
 
-There is no separately committed prompt-capture row. **The basis is the
-turn's own transaction `:t`** — the `:t` on the turn's identity datom.
-Because the turn opens before the context is projected, `(as-of db turn-t)`
-is the exact database value `project(db, agent)` read, and replaying that
-projection under the same adopted program commit and the same render profile
-(which includes `:seon.render/distance`) reproduces the sent prompt
-byte-for-byte. `:seon.ai.attempt/prompt-digest` is the byte-identity
-witness recorded on the attempt itself.
+An evaluation id derives from branch id, turn id, and ordinal through
+`seon.id/evaluation`. Its `result/e<id>` handle refers directly to the
+actual object in that agent's live SCI context. A handle is not an EDN
+decoder or a durable object locator.
 
-This replaces context captures and per-segment contribution rows: nothing
-needs to be stored beyond the basis, because the projection is pure and
-deterministic. "What did the model see for this turn?" is
-`(seon.turn/basis-db turn)` piped through the same projection function the
-loop itself calls, not a lookup into a separate evidence table.
+While the object exists, HTML may inspect it without presentation
+clipping. After restart the inspection map says the object is gone and
+shown text remains. A previously saved requery form may then have nothing
+to reach. Do not report text recovery as object recovery.
 
-## Provider attempts — what crossed the external boundary
+## Why a system turn appeared
 
-One `:seon.ai.attempt` row, a component of its turn, records each completed
-observation of a model call. It retains:
+A system turn is an ordinary turn with a reply and no provider attempt.
+Opening context and refreshed observations use this shape. For every
+distinct read form, the latest evaluation's evidence and `:t` explain
+the since-query diff that selected it for a new system turn.
 
-- turn, attempt instant, and `/prompt-digest` (the byte-identity witness
-  above);
-- the exact endpoint, model, and canonical effective settings used;
-- open provider usage, finish reason, and optional reasoning content or
-  blob;
-- HTTP and request/response/output phase observations; and
-- error, failover-from, and retry-delay facts when present.
+Generated and agent-written reads participate equally. Writes and effects
+never refresh. Changed dependencies append an observation even though the
+old observation remains in history. Empty reads, disappeared facts, and
+unavailable evidence need explicit interpretation rather than a false
+“nothing changed” conclusion.
 
-`:seon.ai.attempt/ordinal` is deleted — component-set membership under the
-turn plus attempt instant is sufficient, and the count was always taken
-before the write. These are observations, not replay authorization.
-Error-ref presence means the attempt failed. `failover-from` identifies
-which attempt supplied the failure context. Retry disposition, error class,
-normalized usage, and whether an attempt was primary or backup derive from
-those facts; no outcome or role enum duplicates them.
+A system turn holding wakes' results answers those wakes under the `:t`
+rule. A reply alone, or an unrelated source submission, is not proof that
+a particular wake was observed.
 
-The attempt row is written in the same commit as the turn's reply and
-evaluations — after the external call, before evaluation. A process that
-dies during the call leaves no attempt at all, which is the honest limit:
-the database says the call was not recorded, not that it certainly never
-happened. Recovery never retries it. A turn's wakes are answered only when
-some attempt on it actually produced the reply (§"Waking" in
-[[agent-runtime]]); a turn with only failed attempts answers nothing.
+## Provider attempts and uncertainty
 
-## Evaluations — the authentic REPL history
+A turn owns its provider attempts. Each attempt records the provider's
+observed result, effective settings, usage, and error evidence as declared
+by the AI schema. A system turn has no provider attempt and costs no model
+call. The attempt facts are observations, never replay authorization.
 
-The session displays messages through explicit query forms and their
-returned values beside evaluations. One entity per `(turn, ordinal)` carries
-both halves: the form's exact `source`, `ordinal`, `comment`, and optional
-reader `ns`, and — once run — its `ending-ns` when changed, printed `out`,
-admitted `value` (or blob), `error` with `triage-edn`, or `missing` naming
-why (over the storage bound, unserializable, or lost).
+The reply, attempts, and forms are stored before evaluation. A process
+that dies during an external call may leave no completed attempt fact.
+That absence says the call was not recorded, not that it never happened.
+Likewise, absence of an evaluation outcome cannot prove that a side
+effect did not happen.
 
-Evaluation state is presence:
+Boot closes open turns and marks unfinished evaluations interrupted.
+Stored outcomes remain unchanged. No interrupted turn, write, or effect
+re-executes during recovery. The next agent turn adapts to that evidence.
 
-- no `value`/`missing`/`error`/`interrupted-at` → running;
-- `value` or `value-blob` → returned value;
-- `missing` → the value could not be stored, with a reason and the size
-  reached;
-- `error` → failed evaluation; and
-- `interrupted-at` → asserted only at boot, on an evaluation whose turn was
-  still open.
+## Private state and program provenance
 
-Neither the evaluation nor the turn stores `ok?`, status, error-data, phase,
-or outcome. The turn's own `/closed-at` and `/reply` facts explain whether
-work is open, mid-reply, or closed; whether it produced anything is read
-from its evaluations and attempts directly.
+Each agent's persistent SCI context retains its private defs, atoms,
+and actual result objects across turns. Those objects are lost on JVM
+restart. Functions, schemas, and tests accepted as program rows rebuild
+the base; accepted base diffs reach each live agent context.
 
-Printed REPL text is rendered from durable source, output, and result data.
-`:seon.eval/value` remains the data projection; the text and HTML faces come
-from the one print grammar and may re-render without changing the
-evaluation.
+Namespace stewardship describes responsibility, not execution permission
+or agent identity. Program facts and transaction provenance answer which
+definition changed and who changed it. Read evidence names the facts
+a computation observed; it is not a duplicate result payload.
 
-## Large values and blobs
+Core faults arrive through Flow's error channel and are committed with
+provenance. Agent mistakes are flat evaluation values. A diagnostic names
+the failed subject and unavailable observation; silence is never health.
 
-Content-addressed blobs use SHA-256 `:seon.blob/digest`. A result above the
-configured eligibility floor moves to a blob only when the complete
-blob-side shape — bounded projection, digest/size envelope, and binary
-payload — is smaller than the full inline evaluation. Such evaluations keep
-the bounded projection plus `:seon.eval/value-blob` and `/size`; provider
-attempts use the same digest family for large reasoning content and for
-`/prompt-digest`; a turn's reply uses `:seon.turn/reply-blob` the same way.
+## Inspection does not rewrite history
 
-Blob state never becomes a second lifecycle or replay log. The referencing
-row carries the semantic identity, digest, and size. Consumer presentation
-is fitted separately by its render profile at the one AI-context elision
-boundary; HTML renders the stored value without a second bound. A missing
-blob is a loud forensic failure attached to the referencing fact — a reply
-with `:seon.turn/reply-missing :lost`, or an evaluation with
-`:seon.eval/missing :lost`, not silent absence.
+The debug invocation cache is disposable preview state.
+`?prompt=true` previews the stored history plus the would-be system turn
+without writing or calling a provider. Cache loss changes preview cost,
+not the old prompt bytes.
 
-## Error facts
+Compaction explicitly retracts evaluations. The next system turn
+regenerates the opening from current record data. This is the one prefix
+reset; there is no manual curation or adoption of revised historical forms.
+Forensics cannot promise to retrieve evaluations that compaction removed.
 
-Agent-facing failure is the flat `:seon.error/value`. A failure worth
-retaining becomes one `:seon.error/fact` with identity, instant, process
-identity, kind, message, content signature, bounded data projection, capped
-flag, and optional class/Flow/agent/instrumentation evidence.
-`:seon.error/steward` — function → namespace → `:seon.ns/steward`, computed
-inside the committing transaction — is itself a listened attribute: a fault
-wakes its steward exactly like a message wakes its recipient, and the turn
-bound is what stops that loop, not a per-item escalation guard.
+The web UI shows the same facts through the canonical route table.
+The operator reports process identities, ports, readiness, and footprint.
+A reachable HTTP endpoint proves reachability, not that the new context
+algorithm or browser repaint has been exercised.
 
-Kinds are producer-owned namespaced keywords, never a central enum or entity
-discriminator. Recurrence is a query over `/signature`. The core fault
-committer retains at most one bounded fact per signature and process: its
-disposable signature set collapses repeat attempts while a database writer
-is unavailable, and a database query remains the authority after a proc
-rebuild. Distinct signatures remain distinct; no stored recurrence tally is
-needed. The `/agent` and `/steward` refs route the same evidence into the
-responsible agent's context and root's overview. A render failure therefore
-appears in place and remains forensics; fixing the renderer removes the
-current derived problem without deleting history.
-
-Core faults enter through Flow's error channel and the fault committer.
-Agent mistakes become flat values and evaluation records. The channel, not a
-guessed kind list, determines which escalation policy applies.
-
-## Transaction and program provenance
-
-Every datom already names its transaction. `:seon.db/user`,
-`:seon.db/process`, and `:db/txInstant` answer who, through which path, and
-when. Joining a program row's datom through that transaction distinguishes
-admitted source publication from agent-authored changes. **[TARGET — ruled
-2026-08-04]** `:seon.fn/author` records the function author directly for
-curation and accountability queries.
-
-Program rows provide the source side of a forensic answer:
-
-- `:seon.fn` retains exact source, contract, call refs, parsed arities/AST,
-  and explicit capability-leaf workload;
-- `:seon.ns` retains source and effective resolver bindings;
-- `:seon.schema` retains canonical forms; and
-- `:seon.test` and test observation rows retain recurring proof.
-
-There is no `:seon.def` family: an agent's uncontracted definitions live
-only in that turn's SCI fork and are not restored across turns, so there is
-nothing to inspect there beyond the turn's own evaluations.
-
-Effective AI settings are recorded on every provider attempt, so a config
-change after the call cannot rewrite history. The live config remains
-ordinary database facts and can still be inspected at any temporal basis.
-
-## Projection-boundary evidence
-
-Program rows carry queryable `:seon.fn/external-sink` and
-`:seon.fn/projection-boundary` leaf facts. `seon.fn/output-path-report`
-derives the shortest projected, bypass, and unresolved paths to every sink.
-At a particular crossing, the render profile identity and structured elision
-values record why the consumer received a bounded face and how omitted data
-can be queried — or why continuation is refused. This is the ONE elision
-point in the system: everything upstream of it (the storage bound on a
-stored value, streaming serialization) is a different mechanism guarding a
-different failure, never a second trim of the same bytes.
-
-## Crash forensics
-
-Boot closes every turn with no `closed-at` in one transaction: it stamps
-every one of that turn's unsettled evaluations `/interrupted-at` and asserts
-the turn's own `/closed-at`. There is no custody comparison to make first —
-one JVM per store `flock` and one in-memory turn permit per agent make a
-second live holder unrepresentable, so an open turn found at boot belongs to
-a dead process by construction. Settled evaluations are unchanged and
-unstarted forms remain unstarted.
-
-The forensic answer is deliberately bounded:
-
-- a terminal evaluation proves the form settled;
-- an interrupted evaluation says its effect may have happened;
-- an evaluation with no terminal fact says it did not produce a recorded
-  result; and
-- a turn with attempts but no evaluations says the model replied but nothing
-  froze — either the reply held no forms or the crash landed before any did.
-
-Nothing in the model claims automatic effect replay or exactly-once remote
-execution. Recovery closes the wreckage and the agent adapts from the
-evidence in its next context, which names the interrupted evaluation and
-process failure without implying that committed transactions were rolled
-back or that the interrupted form was replayed.
-
-## Web UI and operator inspection
-
-The web UI exposes the same facts through `/`, `/ns/{namespace}`,
-`/ns/{namespace}/debug`, `/agent/{id}`, `/agent/{id}/debug`, and `/data`.
-Namespace and agent debug surfaces walk the current database value, retain
-refs for `get-in` path navigation, and show AI/HTML projections from the
-same render owners. They do not store a display selection or route entity.
-
-The operator separately reports process identities, branches, ports,
-readiness, logs, and per-root disk footprint. Before creating a managed
-root, store, log, or cluster, it publishes one atomic EDN claim under the
-installation control root outside the managed `data/clusters`, `data/store`,
-`data/store.lock`, and `data/blob-staging` siblings. That catalog records the
-canonical root, store, clusters, durable/ephemeral disposition, creator, and
-exact process generations; status derives liveness from `(pid,
-start-instant)` without opening Datahike. The claim survives the process and
-managed tree it describes. These facts govern process lifecycle, not agent
-history. Reproduction uses an isolated cluster fork and the ordinary
-message/turn path.
-
-## Source authority
-
-The admitted schemas own durable evidence shapes. Program-graph queries
-locate the current functions that produce, settle, and render those facts;
-this page does not maintain a parallel source-file roster.
-
-## See also
-
-- [[data-model]] — durable evidence relationships and schema authority.
-- [[agent-runtime]] — the transitions that create and settle them.
-- [[context]] — byte-identical projection and continuity.
-- [[ui]] — the web surfaces that render the same facts for a human.
+See [agent runtime](agent-runtime.md) for transition diagrams,
+[data model](data-model.md) for relationships,
+[context](context.md) for prompt continuity, and [UI](ui.md) for delivery.
