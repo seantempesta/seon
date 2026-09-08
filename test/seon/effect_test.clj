@@ -1,5 +1,6 @@
 (ns seon.effect-test
   (:require [clojure.core.async :as async]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.core :as datahike]
             [sci.core :as sci]
@@ -617,6 +618,38 @@
         (is (nil? (db/pull @connection [:seon.effect/id]
                            [:seon.effect/id
                             (pr-str ["effect-run" 3 0])])))))))
+
+(deftest an-oversized-request-is-refused-and-never-dispatched
+  ;; THE CLASS: this refusal read `:seon.sci.admit/capped?`, and when that key
+  ;; was retired it answered nil forever — so an oversized request was
+  ;; DISPATCHED with a nil request and recorded `:seon.effect/request-edn`
+  ;; "nil" (measured 2026-09-07, research/verify-storage-bound-2026-09-07.md
+  ;; B3). The admission's own answer is the authority: an admission that kept
+  ;; nothing is a refusal naming the bound and the bytes it reached.
+  (test-support/with-database
+    (fn [connection]
+      (db/transact! connection [(cluster-config 600000)])
+      (install-capability! connection)
+      (let [context (assoc-in (request-context connection)
+                              [:seon.sci.admit/caps
+                               :seon.config.eval.result/max-bytes]
+                              8)
+            result (binding [effect/*request-context* context]
+                     (effect/request! #'capability-owner
+                                      {:seon.effect-test/value 41}))]
+        (is (= :seon.effect/request-too-large (:seon.error/kind result))
+            (pr-str result))
+        (is (= :over-bound
+               (get-in result [:seon.error/data :seon.eval/missing]))
+            "the refusal carries WHY the admission kept nothing")
+        (is (= 8 (get-in result [:seon.error/data
+                                 :seon.config.eval.result/max-bytes]))
+            "and it names the declared bound it was measured against")
+        (is (str/includes? (:seon.error/message result)
+                           ":seon.config.eval.result/max-bytes"))
+        (is (nil? (db/pull @connection [:seon.effect/id]
+                           [:seon.effect/id (pr-str ["effect-run" 3 0])]))
+            "nothing was opened, so nothing was dispatched")))))
 
 (deftest interrupted-handlers-mark-the-open-receipt-without-a-result
   (test-support/with-database

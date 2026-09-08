@@ -603,11 +603,25 @@
 
            :else
            (let [projected-request (admitted-value dials request)]
-             (if (:seon.sci.admit/capped? projected-request)
+             ;; A REQUEST ADMISSION THAT KEPT NOTHING IS A REFUSAL, NOT A
+             ;; DISPATCH. The retired `:seon.sci.admit/capped?` key answers
+             ;; nil now, so this branch stopped firing and an oversized
+             ;; request was dispatched with a nil request whose stored
+             ;; `:seon.effect/request-edn` was the string "nil" (measured
+             ;; 2026-09-07, research/verify-storage-bound-2026-09-07.md B3).
+             ;; The bound is the declared storage bound this admission was
+             ;; handed, and the refusal names it and the bytes reached.
+             (if-some [marker (admit/missing-marker projected-request)]
                (flat-error
                 :seon.effect/request-too-large
-                "The capability request exceeds the configured value bounds."
-                {:seon.fn/sym (str owner-sym)})
+                (str "The capability request was not admitted under "
+                     :seon.config.eval.result/max-bytes
+                     " and was refused rather than dispatched.")
+                (merge {:seon.fn/sym (str owner-sym)
+                        :seon.config.eval.result/max-bytes
+                        (:seon.config.eval.result/max-bytes
+                         (:seon.sci.admit/caps dials))}
+                       marker))
                (let [effect-id
                      (pr-str [(:seon.cluster.run/id *request-context*)
                               (:seon.cluster.eval/ordinal *request-context*)
