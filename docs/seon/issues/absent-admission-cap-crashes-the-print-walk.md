@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, schema, wave/schema-admission]
 ---
@@ -48,3 +48,23 @@ against its declared schema and return `seon.error/diagnostic` naming the layer,
 the member, the expected shape and the offending value. One regression: admission
 with a caps map missing one key returns a flat error value whose
 `:seon.error/diagnostic-member` is that key, and never throws.
+
+## Resolution (2026-09-07, the `storage-bound` lane)
+
+Both halves are gone.
+
+1. **The cap it read no longer exists.** `:seon.config.eval.result/max-nodes`
+   and the other three display caps were deleted from `seon.sci.admit`
+   entirely: elision happens only where AI context is generated, so the walk
+   has no depth, width, string or node budget to read
+   (`docs/prds/context-generation/research/storage-bound-landing-2026-09-07.md`).
+2. **The one bound that replaced it refuses instead of casting.**
+   `seon.sci.admit/admit*` validates that the caps map carries
+   `:seon.config.eval.result/max-bytes` before anything is walked, and
+   answers with a flat `:seon.error` value whose
+   `:seon.error/diagnostic-member` is that key. Nothing is realized, nothing
+   is thrown.
+
+Regression: `seon.sci.admit-test/an-absent-storage-bound-refuses-and-names-the-key-it-wanted`
+— admission with an empty caps map returns a flat error naming the member and
+never throws.

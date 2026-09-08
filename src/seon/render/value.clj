@@ -587,12 +587,30 @@
   "Select the one durable value artifact from an admission result.
 
   The print node is the sole value source. Semantic data and printable EDN
-  are derived when read and are never stored beside it."
+  are derived when read and are never stored beside it.
+
+  An admission that stored NOTHING still has to answer, and the answer is the
+  reason: the missing marker is re-admitted as itself — a handful of bytes —
+  so every reader downstream gets a real print node saying
+  `#:seon.eval{:missing :over-bound, :size N}` instead of an empty artifact
+  that would render as though the value were nothing."
   {:malli/schema [:=> [:cat :map] :seon.render.value/artifact]}
   [admitted]
-  (select-keys admitted
-               [:seon.sci.admit/print-node
-                :seon.sci.admit/record]))
+  (if (:seon.eval/missing admitted)
+    (cond-> {:seon.sci.admit/print-node
+             (:seon.sci.admit/print-node
+              (admit/admit-value
+               {:seon.sci.admit/value
+                (select-keys admitted [:seon.eval/missing :seon.eval/size])
+                :seon.sci.admit/interrupt-fn (fn [])
+                :seon.sci.admit/caps {}
+                :seon.sci.admit/unbounded? true
+                :seon.config/on-core-error :record}))}
+      (:seon.sci.admit/record admitted)
+      (assoc :seon.sci.admit/record (:seon.sci.admit/record admitted)))
+    (select-keys admitted
+                 [:seon.sci.admit/print-node
+                  :seon.sci.admit/record])))
 
 (defn artifact-edn
   "Serialize one value artifact with canonical print bindings."

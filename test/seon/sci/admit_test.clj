@@ -23,7 +23,8 @@
   PRECONDITION for this suite to run at all: `org.babashka/sci` must be
   on the default classpath (n3-plan §6.2 moves it out of the `:host`
   alias). Named in the draft report; not edited here."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.async :as async]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -110,45 +111,6 @@
       'seon.sci.admit-test/identity-only-record-identity
       :gen/gen 'seon.sci.admit-test/identity-only-record-generator}
      'seon.sci.admit-test/identity-only-record?])))
-
-;;; ---------------------------------------------------------------------------
-;;; Independent measurement of a projection — never the production walker
-;;; ---------------------------------------------------------------------------
-
-(defn- measure
-  "Semantic depth, node count, width, and longest admitted string."
-  [root]
-  (let [nodes (atom 0)
-        widest (atom 0)
-        longest (atom 0)
-        deepest (atom 0)]
-    (letfn [(walk [node depth]
-              (swap! nodes inc)
-              (swap! deepest max depth)
-              (case (::print/face node)
-                (::print/vector ::print/list ::print/set)
-                (let [items (::print/items node)]
-                  (swap! widest max (count items))
-                  (doseq [child items] (walk child (inc depth))))
-
-                (::print/map ::print/record)
-                (let [entries (::print/entries node)]
-                  (swap! widest max (count entries))
-                  (doseq [entry entries
-                          :when (vector? entry)
-                          child entry]
-                    (walk child (inc depth))))
-
-                ::print/throwable
-                (walk (::print/value node) (inc depth))
-
-                (::print/string ::print/truncated-string)
-                (swap! longest max (count (::print/value node)))
-
-                nil))]
-      (walk root 0))
-    {:nodes @nodes :depth @deepest :widest @widest
-     :longest @longest}))
 
 ;; ONE compiled node schema for the whole namespace. It was compiled per
 ;; generated case, and `schema/current-projection` is nil outside a delta, so
@@ -278,23 +240,20 @@
         input (request value interrupt-fn)
         admitted (admit/admit input)
         printed (:seon.cluster.eval/result-edn admitted)
-        projection (edn/read-string printed)
-        shape (measure projection)]
+        projection (edn/read-string printed)]
     (and
      (m/validate (compiled-node-schema) projection)
      (string? printed)
      (do (edn/read-string printed) true)
-     (<= (:depth shape)
-         (:seon.config.eval.result/max-depth caps))
-     (<= (:nodes shape)
-         (:seon.config.eval.result/max-nodes caps))
-     (<= (:widest shape)
-         (:seon.config.eval.result/max-collection caps))
-     (<= (:longest shape)
-         (:seon.config.eval.result/max-string caps))
+     ;; THE ONE BOUND, and the shape is not part of it: a value is stored
+     ;; whole. What must hold of every admission is that its emitted bytes
+     ;; are within the storage bound and read back as the node it returned.
+     (<= (count (.getBytes ^String printed "UTF-8"))
+         (long (:seon.config.eval.result/max-bytes caps)))
+     (= projection (:seon.sci.admit/print-node admitted))
      (= (:seon.sci.admit/record input)
         (:seon.sci.admit/record admitted))
-     (boolean? (:seon.sci.admit/capped? admitted)))))
+     (not (contains? admitted :seon.sci.admit/capped?)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Totality — the property that makes the codec a codec
@@ -387,7 +346,9 @@
     (testing ":record degrades — the marker, and the run continues"
       (let [admitted (admit/admit (request {:hostile hostile}))]
         (is (string? (:seon.cluster.eval/result-edn admitted)))
-        (is (true? (:seon.sci.admit/capped? admitted)))))
+        (is (str/includes? (:seon.cluster.eval/result-edn admitted)
+                           ":seon.print/failed")
+            "the member that could not be projected says so where it stood")))
     (testing ":panic throws hard and loud — a hole in OUR codec"
       (let [data (try
                    (admit/admit
@@ -408,60 +369,76 @@
 
 (deftest render-admission-can-preserve-a-complete-value-under-the-same-guard
   (let [{:keys [interrupt-fn calls]} (armed)
-        narrow (assoc caps
-                      :seon.config.eval.result/max-depth 1
-                      :seon.config.eval.result/max-collection 1
-                      :seon.config.eval.result/max-string 1
-                      :seon.config.eval.result/max-nodes 2)
         value ["complete" [1 2 3]]
         admitted (admit/admit-value
-                  (assoc (request value interrupt-fn narrow)
+                  (assoc (request value interrupt-fn
+                                  {:seon.config.eval.result/max-bytes 1})
                          :seon.sci.admit/unbounded? true))]
-    (is (= value (:seon.sci.admit/value admitted)))
-    (is (false? (:seon.sci.admit/capped? admitted)))
+    (is (= value (:seon.sci.admit/value admitted))
+        "an unbounded caller is bounding its own source and keeps the value")
     (is (pos? (calls))
         "complete render admission still consults the armed interrupt")))
 
-(deftest every-admission-cut-names-its-path-count-and-source
-  ;; RULING 63c: AN ELISION IS ORDINARY DATA carrying count, path, and requery
-  ;; identity. Admission is where the cut is MADE, so it is the only place
-  ;; that knows all three; a bare `{:seon.print/face :seon.print/elided}`
-  ;; forced every later reader to render a refusal sentence naming no source
-  ;; (docs/seon/issues/admission-elision-cannot-name-its-requery-identity.md).
-  (let [narrow (assoc caps
-                      :seon.config.eval.result/max-collection 2
-                      :seon.config.eval.result/max-depth 4
-                      :seon.config.eval.result/max-nodes 64)
-        identity-supplied [:seon.cluster.eval/id "[\"a-run\" 3]"]
-        admitted (admit/admit-value
-                  (assoc (request {:rows (vec (range 10))}
-                                  (:interrupt-fn (armed))
-                                  narrow)
-                         :seon.print/requery-id identity-supplied))
-        node (:seon.sci.admit/print-node admitted)
-        cut (->> (tree-seq coll? seq node)
-                 (filter #(and (map? %)
-                               (= :seon.print/elided (:seon.print/face %))))
-                 first)]
-    (is (:seon.sci.admit/capped? admitted))
-    (is (some? cut) "a value past the collection cap is cut")
-    (is (= [:rows] (:seon.render.data/path cut))
-        "the cut stands at the path of the collection it cut")
-    (is (= 2 (:seon.render.data/next-offset cut)))
-    (is (= 8 (:seon.print/omitted cut)))
-    (is (= 10 (:seon.render.data/total cut)))
-    (is (= identity-supplied (:seon.print/requery-id cut)))
-    (is (not (contains? cut :seon.print/requery-refusal)))
-    (is (str/includes? (print/emit-text node (print/default-options))
-                       (str "requery by " (pr-str identity-supplied)))
-        "the emitted bytes name the source to ask again"))
-  (testing "an admission nobody is storing refuses honestly instead of lying"
-    (let [narrow (assoc caps :seon.config.eval.result/max-collection 2)
-          node (:seon.sci.admit/print-node
-                (admit/admit-value
-                 (request (vec (range 10)) (:interrupt-fn (armed)) narrow)))
-          cut (last (:seon.print/items node))]
-      (is (= :seon.print/elided (:seon.print/face cut)))
-      (is (not (contains? cut :seon.print/requery-id)))
-      (is (string? (:seon.print/requery-refusal cut))
-          "the reason travels with the cut rather than being invented later"))))
+(deftest the-storage-bound-stops-an-unbounded-source-while-it-emits
+  ;; ASTRA B8: a byte count on a finished string is not an execution bound —
+  ;; a lazy sequence can block before its first byte. The count is taken as
+  ;; the bytes are emitted, and emission stops at the bound.
+  (let [{:keys [interrupt-fn calls]} (armed)
+        admitted (admit-with-deadline
+                  (request (range) interrupt-fn
+                           (assoc caps
+                                  :seon.config.eval.result/max-bytes 4096)))]
+    (is (= :over-bound (:seon.eval/missing admitted))
+        "an infinite source is missing, never a page of itself")
+    (is (= 4096 (:seon.eval/size admitted))
+        "and the size it reports is the bound it reached")
+    (is (pos? (calls))
+        "the evaluation's own SCI interrupt was consulted at every node")
+    (is (not (contains? admitted :seon.cluster.eval/result-edn))
+        "NOTHING is stored for a missing value")
+    (is (not (contains? admitted :seon.sci.admit/print-node)))
+    (is (= (:seon.sci.admit/record (request nil))
+           (:seon.sci.admit/record admitted))
+        "the diagnostics the caller measured travel through untouched")))
+
+(deftest a-value-under-the-bound-is-stored-whole-however-wide-or-deep
+  ;; The display caps are GONE. Width, depth and string length are
+  ;; presentation decisions made where AI context is generated; storage
+  ;; keeps the value or says it did not.
+  (let [wide (vec (range 5000))
+        deep (reduce (fn [inner _] {:in inner}) :leaf (range 200))
+        text (apply str (repeat 100000 \x))]
+    (doseq [[label value] [["wide" wide] ["deep" deep] ["long string" text]]]
+      (testing label
+        (let [admitted (admit/admit (request value))]
+          (is (= value (:seon.sci.admit/value admitted))
+              "the admitted value IS the value, with nothing elided")
+          (is (= (:seon.sci.admit/print-node admitted)
+                 (edn/read-string
+                  (:seon.cluster.eval/result-edn admitted)))
+              "and the bytes the walk emitted read back as that node"))))))
+
+(deftest a-host-reference-the-walk-cannot-enter-is-missing-not-described
+  ;; A description of a value is not the value. Storing `#object[...]` as
+  ;; though it were a result is the project's recurring class: absence
+  ;; reading as content.
+  (doseq [[label value] [["a channel" (async/chan)]
+                         ["an atom" (atom 1)]]]
+    (testing label
+      (let [admitted (admit/admit (request value))]
+        (is (= :unserializable (:seon.eval/missing admitted)))
+        (is (not (contains? admitted :seon.eval/size))
+            "an unserializable value has no measured size to report")
+        (is (not (contains? admitted :seon.cluster.eval/result-edn)))))))
+
+(deftest an-absent-storage-bound-refuses-and-names-the-key-it-wanted
+  ;; docs/seon/issues/absent-admission-cap-crashes-the-print-walk.md: the cap
+  ;; read straight into a `long` gave RT.longCast on nil, a Throwable
+  ;; escaping an evaluation boundary where law 2.4 requires a flat value.
+  (let [refusal (admit/admit (request [1 2 3] (:interrupt-fn (armed)) {}))]
+    (is (= :seon.sci.admit/missing-bound (:seon.error/kind refusal)))
+    (is (= :seon.config.eval.result/max-bytes
+           (:seon.error/diagnostic-member refusal))
+        "the refusal names the member, not RT.longCast")
+    (is (str/includes? (:seon.error/message refusal)
+                       ":seon.config.eval.result/max-bytes"))))

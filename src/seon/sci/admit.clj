@@ -280,7 +280,11 @@
 
       (instance? Throwable value) (throwable-node! state value)
 
-      (instance? sci.lang.Var value)
+      ;; A VAR IS ITS NAME, in either world. sci's Vars and the host's are
+      ;; the same fact to a reader, and admitting the host's as a bare
+      ;; `#object[clojure.lang.Var]` threw away the one thing it carries —
+      ;; which then read as an unserializable value rather than as `#'foo`.
+      (or (instance? sci.lang.Var value) (instance? clojure.lang.Var value))
       (leaf! state {::print/face ::print/var
                     ::print/name (subs (str value) 2)})
 

@@ -241,25 +241,46 @@
                                :seon.cluster.eval/result-edn (number-node 2)})
               ":result"))
         "an evaluation that never persisted has no identity to name")
-    ;; A WINDOWED RESULT NAMES NOTHING EITHER (audit C4). The stored node is
-    ;; one page of a value staged into a blob; the turn's fork refuses to
-    ;; bind it, so emitting `:result` would name an unresolved symbol.
+    ;; A MISSING VALUE ABLATES ITS HANDLE. It stored no node at all, so the
+    ;; fork binds nothing and emitting `:result` would name a symbol that
+    ;; resolves to nothing.
     (is (not (str/includes?
               (repl/render-ai
                {:db/id 8145
-                :seon.cluster.eval/source "(vec (range 100000))"
+                :seon.cluster.eval/source "(range)"
                 :seon.ns/name 'my.agents.juniper
-                :seon.cluster.eval/result-blob (apply str (repeat 64 "0"))
-                :seon.cluster.eval/result-size 999999
-                :seon.cluster.eval/result-edn symbol-vector})
+                :seon.eval/missing :over-bound
+                :seon.eval/size 8388608})
               ":result"))
-        "a blob-backed window is a page of the value, not the value")
-    (is (not (str/includes?
-              (repl/render-ai
-               {:db/id 8146
-                :seon.cluster.eval/source "(vec (range 50000))"
-                :seon.ns/name 'my.agents.juniper
-                :seon.cluster.eval/result-size 999999
-                :seon.cluster.eval/result-edn symbol-vector})
-              ":result"))
-        "so is a stored size larger than the node measured against it")))
+        "a value over the storage bound is not a value to name")))
+
+(deftest a-missing-value-states-the-reason-and-the-bytes-it-reached
+  ;; ONE GENERATOR for the sentence, and it is DATA, never comment-shaped
+  ;; (ruling 45): the agent reads what happened rather than an empty
+  ;; `:value` that would say the form produced nothing.
+  (testing "over the storage bound"
+    (let [emitted (repl/render-ai
+                   {:db/id 9001
+                    :seon.cluster.eval/source "(range)"
+                    :seon.ns/name 'my.agents.juniper
+                    :seon.eval/missing :over-bound
+                    :seon.eval/size 8388608})]
+      (is (str/includes?
+           emitted "#:seon.repl{:value #:seon.eval{:missing :over-bound"))
+      (is (str/includes? emitted ":size 8388608"))
+      (is (not (str/includes? emitted ";")) "nothing emitted is a comment")))
+  (testing "not serializable — no size, because none was measured"
+    (let [emitted (repl/render-ai
+                   {:db/id 9002
+                    :seon.cluster.eval/source "(async/chan)"
+                    :seon.ns/name 'my.agents.juniper
+                    :seon.eval/missing :unserializable})]
+      (is (str/includes? emitted ":value #:seon.eval{:missing :unserializable}"))
+      (is (not (str/includes? emitted ":size")))))
+  (testing "missing wins over any stored node the reader might still find"
+    (is (str/includes?
+         (repl/render-ai {:db/id 9003
+                          :seon.cluster.eval/source "(range)"
+                          :seon.eval/missing :lost
+                          :seon.cluster.eval/result-edn (number-node 2)})
+         ":value #:seon.eval{:missing :lost}"))))
