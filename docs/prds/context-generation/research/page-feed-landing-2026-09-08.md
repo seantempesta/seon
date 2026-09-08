@@ -106,3 +106,24 @@ Datahike historical datom merging. A subsequent GET took **2.618699 s**.
 These are failed latency probes, not evidence of a stopped HTTP listener.
 The debug page still attempted a prospective turn while its evaluation
 query was unavailable; the next UI slice handles that missing dependency.
+
+## Immediate page repair after the 16:35 owner ruling
+
+The expanded attribute page exposed a lane defect: `block-metadata` passed
+scalar, absent, and collection values to `value/transacted`, whose contract
+requires an entity map. It now transacts maps only; other values remain on
+the ordinary value renderer path. The canonical, instrumented regression
+includes nil, an integer, text, and a collection as well as schema metadata.
+
+`SEON_TEST_WORKERS=3 bin/test --paths src/seon/render/web.clj
+test/seon/render/web_debug_test.clj resources/public/css/input.css --
+seon.render.web-debug-test`: **2 tests, 13 assertions, zero failures/errors**.
+After reloading the web Var and re-arming **908 functions**, default debug
+answered **200 in 1.454248 s, 776208 bytes**. The running server was preserved.
+The unfinished walk optimization was shelved to `tmp/page-feed-walk-shelved.patch`;
+further work proceeds in `tmp/page-feed-wt` and the requested scratch root.
+
+I reread the updated feed issue end to end. The new priority is caller-owned
+derivation with shared read-evidence caches and deletion of the context demand
+channel, before further page layout work. The sub-second concurrent plain-page
+and turn-context measurements remain outstanding.

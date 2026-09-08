@@ -644,8 +644,7 @@
   (get-in projection [:seon.schema.projection/forms schema-key]))
 
 (defn- declared-entity-units
-  "The entity schemas’ component attributes, in declaration order.
-  Scalars are rendered together by the entity’s own render function."
+  "Every attribute declared by the entity's matching schemas, in schema order."
   [projection database value]
   (if (map? value)
     (schema/call-with-projection
@@ -659,10 +658,7 @@
                                    (map first)
                                    (filter qualified-keyword?)))
                    cat
-                   (distinct)
-                   (filter #(true? (:seon.db/component
-                                    (schema.form/attr-form-properties
-                                     (projection-form projection %))))))
+                   (distinct))
              (concat (schema/matching-shapes-in
                       projection (value/transacted value database))
                      (schema/matching-shapes-in projection value)))))
@@ -715,8 +711,9 @@
   [database connection agent-id caps render-context]
   (let [request (debug-turn-request database connection agent-id caps render-context)
         evaluations (turn-function-result 'seon.eval/of-agent [database agent-id])
-        prospective (turn-function-result 'seon.turn/system-turn
-                                         [(assoc request :seon.turn/write? false)])]
+        prospective (when-not (:seon.error/kind evaluations)
+                      (turn-function-result 'seon.turn/system-turn
+                                            [(assoc request :seon.turn/write? false)]))]
     {:seon.render.debug/request request
      :seon.render.debug/agent agent-id
      :seon.render.debug/evaluations evaluations
@@ -725,7 +722,9 @@
 (defn- algorithm-value-html
   [request result]
   ;; Unavailable never becomes an empty collection or a false fresh state.
-  (value/render-html (assoc request :seon.render/value result)))
+  (if-let [function (:seon.render.web/function-unavailable result)]
+    [:p {:class "seon-debug-error"} (str "Not yet available: " function)]
+    (value/render-html (assoc request :seon.render/value result))))
 
 (defn- system-turn-html
   [request result]
@@ -778,12 +777,14 @@
        (system-action-form agent-id "system-turn" "Run system turn")
        (system-action-form agent-id "virtual-turn" "Virtual turn")
        (system-action-form agent-id "compact" "Compact")]
-      [:section {:class "seon-debug-prompt-pane"}
+      (when-not (:seon.error/kind evaluations)
+       [:section {:class "seon-debug-prompt-pane"}
        [:h3 "Context now"]
-       (algorithm-value-html request evaluations)]
-      [:section {:class "seon-debug-prompt-pane"}
+       (algorithm-value-html request evaluations)])
+      (when prospective
+       [:section {:class "seon-debug-prompt-pane"}
        [:h3 "Would-be system turn"]
-       (system-turn-html request prospective)]])))
+       (system-turn-html request prospective)])])))
 
 (defn- debug-value-html
   [value]
@@ -1210,13 +1211,40 @@
                        producer)]))
               alternatives)])]))
 
+(defn- block-metadata
+  "Use the rendered value's matching schema and its authored documentation."
+  [projection database value attribute producer]
+  (let [matches (concat
+                 (when (map? value)
+                   (schema/matching-shapes-in projection (value/transacted value database)))
+                 (schema/matching-shapes-in projection value))
+        matching (or (some #(when (and producer
+                                       (or (= producer (:seon.render/ai %))
+                                           (= producer (:seon.render/html %))))
+                              %) matches)
+                     (some #(when (:seon.db/attributes
+                                   (schema.form/attr-form-properties
+                                    (projection-form projection (:seon.schema/key %))))
+                              %) matches))
+        schema-key (:seon.schema/key matching)
+        form (projection-form projection schema-key)
+        properties (schema.form/attr-form-properties form)]
+    {:seon.schema/key schema-key
+     :seon.schema/form form
+     :seon.render.web/block-title (or (:title properties) (some-> schema-key str)
+                                     (str attribute))
+     :seon.render.web/block-description
+     (or (:description properties)
+         (attribute-description projection attribute)
+         (some #(attribute-description projection %)
+               (:seon.schema/required-attrs matching)))}))
+
 (defn- debug-found-value
   "One declared unit: its key, description, references, and paired outputs."
   [projection render-request debug-request attribute value present?
    related _context-selection _context-source-call]
   (let [attribute-schema (projection-form projection
                                           (forward-attribute attribute))
-        description (attribute-description projection attribute)
         root (:seon.render.debug/subject debug-request)
         cursor {:seon.render.data/path
                 (if (reverse-attribute? attribute) [] [attribute])
@@ -1230,18 +1258,21 @@
            :seon.render/html
            (selected-unit-experiment render-request attribute :seon.render/html
                                      value root cursor)})
+        producer (first (keys (get-in experiments [:seon.render/ai :seon.render/previews])))
+        metadata (block-metadata projection (:seon.db/db render-request)
+                                 value attribute producer)
+        description (:seon.render.web/block-description metadata)
         references (when present? (referenced-entity-ids value))]
     [:article {:class "seon-debug-found-value seon-debug-attribute-unit"
                :data-seon-unit (str attribute)}
      [:header {:class "seon-debug-value-header"}
       [:div
-       [:h2 (case attribute
-              :seon.render/value "Identity"
-              :seon.agent/plan "Plan"
-              :seon.agent/settings "Settings"
-              [:code (str attribute)])]
-       [:p {:class "seon-debug-description"}
-        (or description "No Malli :description is declared for this attribute.")]]
+       [:h2 [:code (str attribute)]]
+       (when-let [schema-key (:seon.schema/key metadata)]
+         [:div {:class "seon-debug-value-label"}
+          [:code (str schema-key)]])
+       (when description
+         [:p {:class "seon-debug-description"} description])]
       (when (seq references)
         (let [links (into [:span]
                           (interpose " "
@@ -1277,8 +1308,8 @@
         (debug-value-html value)
         [:p "This attribute is absent on the selected entity."])
       [:h4 "Malli schema"]
-      (if attribute-schema
-        (debug-value-html attribute-schema)
+      (if-let [form (or (:seon.schema/form metadata) attribute-schema)]
+        (debug-value-html form)
         [:p "No schema is registered for this attribute."])]
      (if present?
        (applicable-renderers-html debug-request experiments)
@@ -1287,23 +1318,33 @@
         [:p "No value is available for render-function selection."]])]))
 
 (defn- debug-found-values-html
-  "The entity's own block, then its component concerns in schema order."
+  "Every declared attribute, then other stored attributes and reverse concerns."
   [projection render-request debug-request acquisition declared-units
-   _observation _reverse-values related context-selection context-source-call]
+   observation reverse-values related context-selection context-source-call]
+  (let [declared (set declared-units)
+        additional (->> (concat (keys acquisition) (keys reverse-values))
+                        (filter qualified-keyword?)
+                        (remove #{:db/id})
+                        (remove declared)
+                        distinct
+                        (sort-by str))]
   [:section {:id "debug-units" :class "seon-debug-found-values"}
-   [:h1 {:class "seon-debug-caption"} "Record"]
+   [:h1 {:class "seon-debug-caption"} "Attributes and connections"]
    (if (:seon.error/kind acquisition)
      (debug-value-html acquisition)
-     (into [:div
-            (debug-found-value
-             projection render-request debug-request :seon.render/value
-             acquisition true related context-selection context-source-call)]
-           (keep (fn [attribute]
-                   (when-let [entry (find acquisition attribute)]
+     (into [:div]
+           (map (fn [attribute]
+                  (let [entry (find (if (reverse-attribute? attribute)
+                                     reverse-values acquisition) attribute)]
                      (debug-found-value
                       projection render-request debug-request attribute
-                      (val entry) true related context-selection context-source-call))))
-           declared-units))])
+                      (when entry (val entry)) (some? entry) related
+                      context-selection context-source-call))))
+           (concat declared-units additional)))
+   (when-not (get-in observation [:seon.render.data/incoming
+                                  :seon.render.data/complete?])
+     [:p {:class "seon-debug-empty"}
+      "Incoming connections are a bounded query page; the reference graph shows its continuation."])]))
 
 (declare refresh-retained-read-evidence)
 
@@ -1571,7 +1612,11 @@
                             :max-work (::pull-max-work effective-request)})
                   declared-units
                   (declared-entity-units projection database acquisition)
-                  reverse-units (filterv reverse-attribute? declared-units)
+                  reverse-units
+                  (into (filterv reverse-attribute? declared-units)
+                        (comp (map :a) (map reverse-attribute) (distinct))
+                        (get-in observation [:seon.render.data/incoming
+                                             :seon.render.data/datoms]))
                   ;; ONE pull per declared reverse relationship, each asking
                   ;; for the connected entities themselves: a relationship
                   ;; too large for the declared work bound refuses as that
