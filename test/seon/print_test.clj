@@ -202,6 +202,42 @@
         (readable-value (:seon.print/value node))
         nil))))
 
+(deftest a-generated-set-node-can-never-hold-a-duplicate-item
+  ;; THE CLASS: a dishonest generator. `::set` items came from
+  ;; `(gen/vector inner 0 3)`, so two structurally equal children — or two
+  ;; different nodes that PRINT the same literal, like `::nil` and the
+  ;; `::projected` node whose value is the string nil — could occupy one set
+  ;; node. A real set holds no duplicate, so the grammar it generated was
+  ;; not the grammar the emitter is total over, and the EDN read-back refused
+  ;; with `Duplicate key`. The same hazard is a map or record key.
+  ;;
+  ;; This is the cheap, deterministic falsifier for the class; the long
+  ;; round-trip property is the same statement under 200 trials.
+  (let [samples (gen/sample print/node-generator 300)
+        readable
+        (fn [node]
+          (let [text (print/emit-text node no-cuts)]
+            (try [::read (edn/read-string {:readers {'error identity}} text)]
+                 (catch Throwable _ [::text text]))))
+        container-items
+        (fn [face key-fn]
+          (into []
+                (comp (filter (fn [node] (= face (:seon.print/face node))))
+                      (map (fn [node]
+                             (mapv (fn [item] (readable (key-fn item)))
+                                   (or (:seon.print/items node)
+                                       (:seon.print/entries node))))))
+                samples))
+        offenders
+        (fn [rows] (into [] (remove #(= (count %) (count (set %)))) rows))
+        set-rows (container-items :seon.print/set identity)
+        map-rows (container-items :seon.print/map first)]
+    (is (pos? (count set-rows)) "the sample genuinely contains set nodes")
+    (is (= [] (offenders set-rows))
+        "no generated set node holds two items the reader calls equal")
+    (is (= [] (offenders map-rows))
+        "and no generated map node holds two keys it calls equal")))
+
 (deftest ^{:seon.test/long
            "94.303 s pool: 200 generated grammar validation, text/Hiccup emission, and EDN read-back trials."}
   p-total-generated-grammar-emits-and-readable-faces-round-trip

@@ -1,6 +1,7 @@
 (ns seon.print
   "Emits admitted print nodes through text and hiccup sinks."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test.check.generators :as gen]
             [seon.ai.tokens :as tokens]
             [seon.render.hiccup :as html]
@@ -74,6 +75,49 @@
                :seon.render.profile/id :seon.render.profile/agent
                ::requery-refusal "generated values have no stable identity"}))
 
+(declare emit-text)
+
+(def ^:private generated-item-options
+  ;; The generator's own canonical text: no length cut, no level cut, no
+  ;; soft-wrap column. Two generated children are the SAME set item exactly
+  ;; when they emit the same complete text, which is the equality the EDN
+  ;; reader applies when it reads the emitted literal back.
+  {::length nil ::level nil ::width 0
+   ::namespace-maps? true ::table? false})
+
+(defn- generated-item-identity
+  "The identity the EDN reader itself would give one generated child.
+
+  THE READER IS THE AUTHORITY ON DUPLICATES, not the node and not its text.
+  Node equality is too strict — `{::face ::nil}` and the `::projected` node
+  whose value is the string nil print the same literal — and text equality
+  is too strict too: `[]` and `()` are different literals and the SAME set
+  member, which is exactly the counterexample the round-trip property
+  shrank to. So the key is the value the emitted literal reads back as, and
+  the literal itself only when it does not read."
+  [node]
+  (let [text (emit-text node generated-item-options)]
+    (try
+      [::read (edn/read-string {:readers {'error identity}} text)]
+      (catch #?(:clj Throwable :cljs :default) _
+        [::text text]))))
+
+(defn- distinct-generated-nodes
+  "The generated children that read back as distinct values, in order.
+
+  A `#{}` literal and a `{}` literal CANNOT CARRY A DUPLICATE, so a
+  generator that emits one is dishonest about the grammar and the round-trip
+  it feeds refuses with `Duplicate key`."
+  [key-fn nodes]
+  (first
+   (reduce (fn [[kept seen] node]
+             (let [identity (generated-item-identity (key-fn node))]
+               (if (contains? seen identity)
+                 [kept seen]
+                 [(conj kept node) (conj seen identity)])))
+           [[] #{}]
+           nodes)))
+
 (def node-generator
   "Whole print-node trees spanning every declared face.
 
@@ -124,11 +168,17 @@
                      (gen/vector inner 0 3))
            (gen/fmap (fn [items] {::face ::list ::items items})
                      (gen/vector inner 0 3))
-           (gen/fmap (fn [items] {::face ::set ::items items})
+           (gen/fmap (fn [items]
+                       {::face ::set
+                        ::items (distinct-generated-nodes identity items)})
                      (gen/vector inner 0 3))
-           (gen/fmap (fn [rows] {::face ::map ::entries rows}) entries)
+           (gen/fmap (fn [rows]
+                       {::face ::map
+                        ::entries (distinct-generated-nodes first rows)})
+                     entries)
            (gen/fmap (fn [[record-name rows]]
-                       {::face ::record ::name record-name ::entries rows})
+                       {::face ::record ::name record-name
+                        ::entries (distinct-generated-nodes first rows)})
                      (gen/tuple gen/string-alphanumeric entries))
            (gen/fmap (fn [value] {::face ::throwable ::value value}) inner)])))
      scalar)))
@@ -872,7 +922,27 @@
   ;; as nil is a contract violation — which is what turned every live
   ;; presentation cut into a refusal instead of an elision the moment `fit`
   ;; reached this constructor.
+  ;;
+  ;; THE STRIP IS FOR WHAT IS GENUINELY OPTIONAL — `prefix`, `bound-by`, an
+  ;; unknown `total`. IT IS NOT FOR THE REQUERY COORDINATES. A cut that lost
+  ;; its path and offset reads as an ordinary cut, and the reader asking
+  ;; "what was omitted, and how do I see it" gets silence: absence reported
+  ;; as health, one constructor down. A missing path is a defect AT THE
+  ;; CALLER, so this refuses instead of quietly producing a coordinate-less
+  ;; elision. Every call site in this namespace supplies both, so the
+  ;; refusal is unreachable from ordinary rendering by construction.
   [profile path next-offset omitted total unit prefix]
+  (when-not (and (vector? path) (int? next-offset))
+    (throw
+     (ex-info
+      (str "An elision must carry its requery coordinates: "
+           ":seon.render.data/path " (pr-str path)
+           " and :seon.render.data/next-offset " (pr-str next-offset) ".")
+      {:seon.error/kind ::elision-without-requery-coordinates
+       ::elision-without-requery-coordinates true
+       :seon.render.data/path path
+       :seon.render.data/next-offset next-offset
+       ::elision-unit unit})))
   (elision
    (into (requery-fields profile)
          (remove (comp nil? val))
@@ -880,10 +950,12 @@
           ::elision-unit unit
           ::prefix prefix
           ::bound-by (::bound-by profile)
-          :seon.render.data/path path
-          :seon.render.data/next-offset next-offset
           :seon.render.data/total total
-          :seon.render.profile/id (:seon.render.profile/id profile)})))
+          :seon.render.profile/id (:seon.render.profile/id profile)
+          ;; guaranteed present by the refusal above, so the strip cannot
+          ;; reach them
+          :seon.render.data/path path
+          :seon.render.data/next-offset next-offset})))
 
 (defn- preserve-requery
   [cut carried]
