@@ -21,16 +21,6 @@
    :seon.render/value raw
    :seon.sci.admit/caps caps})
 
-(defn- routed-unit
-  [raw size]
-  (assoc (unit raw)
-         :seon.render.value/root [:seon.cluster.agent/id "root"]
-         :seon.render.value/route-base "/data"
-         :seon.render.data/cursor {:seon.render.data/path []
-                                   :seon.render.data/offset 0}
-         :seon.render.value/options
-         {:seon.render.value/max-collection size}))
-
 (defn- registered-unit
   [connection raw]
   (assoc (unit raw)
@@ -224,72 +214,106 @@
                :seon.print/options {:seon.print/width 20}))
        "\n")))
 
-(deftest admission-caps-stay-the-outer-safety-bound
-  (let [bounded (assoc (unit (vec (range 20)))
-                       :seon.sci.admit/caps
-                       (assoc caps
-                              :seon.config.eval.result/max-collection 4))
+(deftest storage-is-faithful-under-its-byte-bound-and-missing-over-it
+  ;; THE FIRST OF THE THREE BOUNDS (AGENTS.md §2.4). Admission stores a value
+  ;; whole or not at all: there is no window, no page, and no display cap
+  ;; there any more, so a reader never has to ask whether what it holds is
+  ;; the whole thing. Over the bound the answer is the typed marker naming
+  ;; the bytes it reached — and BOTH projections render that marker as the
+  ;; only thing they know, with no measurement borrowed from the value that
+  ;; was never stored.
+  (let [whole (vec (range 20))
+        oversized (vec (range 100))
+        tight (assoc caps :seon.config.eval.result/max-bytes 32)
+        stored (admit/admit-value
+                {:seon.sci.admit/value whole
+                 :seon.sci.admit/caps caps
+                 :seon.sci.admit/interrupt-fn (fn [])
+                 :seon.config/on-core-error :record})
+        missing (admit/admit-value
+                 {:seon.sci.admit/value oversized
+                  :seon.sci.admit/caps tight
+                  :seon.sci.admit/interrupt-fn (fn [])
+                  :seon.config/on-core-error :record})
+        bounded (assoc (unit oversized) :seon.sci.admit/caps tight)
         text (value/render-ai bounded)
         html (hiccup/->string (value/render-html bounded))]
-    (is (str/includes? text "more children"))
-    (is (str/includes? text "elided"))
-    (is (str/includes? html "seon-print-elision"))
-    (is (str/includes? html "seon-data-capped"))))
+    (is (= whole (:seon.sci.admit/value stored))
+        "a value under the bound is stored faithfully, never windowed")
+    (is (= (pr-str whole) (value/render-ai (unit whole))))
+    (is (= :over-bound (:seon.eval/missing missing)))
+    (is (<= (:seon.config.eval.result/max-bytes tight)
+            (:seon.eval/size missing))
+        "the marker carries the bytes the stream reached")
+    (is (not (contains? missing :seon.sci.admit/print-node))
+        "an over-bound admission stores no partial node")
+    (is (= (str "#:seon.eval{:missing :over-bound, :size "
+                (:seon.eval/size missing) "}")
+           text))
+    (is (str/includes? html "over-bound"))
+    (doseq [projection [text html]]
+      (is (not (str/includes? projection "more children"))
+          "a value that was never stored has no omitted-child count"))))
 
 (deftest elision-is-a-requeryable-structural-value
+  ;; THE SECOND AND THIRD BOUNDS. The AI projection is cut by the render
+  ;; profile — the one place presentation elides — and the cut is ordinary
+  ;; data naming what was omitted, the bound that made it, and how to ask
+  ;; again. HTML is not bounded at all: the same unit serves every item.
   (let [digest (apply str (repeat 64 "a"))
-        projection
-        (value/prepare
-         (assoc (unit (vec (range 100)))
-                :seon.cluster.eval/result-blob digest
-                :seon.sci.admit/caps
-                (assoc caps :seon.config.eval.result/max-collection 4)))
-        html (hiccup/->string
-              (value/render-html
-               (assoc (unit (vec (range 100)))
-                      :seon.cluster.eval/result-blob digest
-                      :seon.sci.admit/caps
-                      (assoc caps
-                             :seon.config.eval.result/max-collection 4))))
+        raw (vec (range 100))
+        profile (render/agent-render-profile (support/effective-config))
+        kept (:seon.render.profile/max-children profile)
+        blob-unit (assoc (unit raw) :seon.cluster.eval/result-blob digest)
+        projection (value/prepare blob-unit)
+        html (hiccup/->string (value/render-html blob-unit))
         elision (last (:seon.print/items
                        (:seon.render.value/tree projection)))]
-    (is (= {:seon.print/omitted 96
-            :seon.render.data/total 100
+    (is (= {:seon.print/omitted (- (count raw) kept)
+            :seon.render.data/total (count raw)
             :seon.render.data/path []
-            :seon.render.data/next-offset 4
-            :seon.render.profile/id :seon.render.profile/agent
+            :seon.render.data/next-offset kept
+            :seon.print/bound-by :seon.render.profile/max-children
+            :seon.render.profile/id (:seon.render.profile/id profile)
             :seon.print/requery-id [:seon.blob/digest digest]}
            (select-keys elision
                         [:seon.print/omitted
                          :seon.render.data/total
                          :seon.render.data/path
                          :seon.render.data/next-offset
+                         :seon.print/bound-by
                          :seon.render.profile/id
                          :seon.print/requery-id])))
-    (is (str/includes? (:seon.render.value/text projection)
-                       "96 more children"))
-    (is (str/includes? html "96 more children"))
-    (is (str/includes? html digest))))
+    (let [text (:seon.render.value/text projection)]
+      (is (str/includes? text (str (- (count raw) kept) " more children of "
+                                   (count raw))))
+      (is (str/includes? text
+                         "bounded by :seon.render.profile/max-children"))
+      (is (str/includes? text (str "requery by [:seon.blob/digest \""
+                                   digest "\"]"))))
+    (is (not (str/includes? html "seon-print-elision"))
+        "HTML is not bounded at all — it elides nothing to requery")
+    (is (str/includes? html ">99<")
+        "the last item of the whole value reaches the page")))
 
 (deftest references-stay-opaque
-  (let [projection (value/prepare (unit (atom {:private/value 42})))
+  ;; A reference is never entered: it contributes its class and nothing
+  ;; else, so no private state leaks through a render. A value that is
+  ;; ITSELF an opaque reference projects no data at all, and that answer is
+  ;; the typed marker rather than an empty panel.
+  (let [projection (value/prepare (unit {:reference (atom {:private/value 42})}))
         tree (:seon.render.value/tree projection)
-        text (value/render-ai-data projection)]
+        [_ reference] (first (:seon.print/entries tree))]
     (is (= #{:seon.print/face :seon.print/class}
-           (set (keys tree)))
+           (set (keys reference)))
         "an opaque reference carries no value or representation field")
-    (is (= :seon.print/object (:seon.print/face tree)))
-    (is (= "clojure.lang.Atom" (:seon.print/class tree)))
-    (is (= "#object[clojure.lang.Atom]" text))))
-
-(deftest routed-page-size-is-separate-from-print-length
-  ;; a configured window of N shows N items — the lookahead slot detects
-  ;; more? without costing a row (the 2026-08-01 off-by-one regression)
-  (let [html (hiccup/->string
-              (value/render-html (routed-unit (vec (range 40)) 3)))]
-    (is (str/includes? html "showing 1–3 of 40"))
-    (is (str/includes? html "offset=3"))
-    (is (str/includes? html "seon-data-capped"))))
+    (is (= :seon.print/object (:seon.print/face reference)))
+    (is (= "clojure.lang.Atom" (:seon.print/class reference)))
+    (is (= "{:reference #object[clojure.lang.Atom]}"
+           (value/render-ai-data projection)))
+    (is (= "#:seon.eval{:missing :unserializable}"
+           (value/render-ai (unit (atom {:private/value 42}))))
+        "a top-level reference is missing, named, not an empty render")))
 
 (deftest a-window-of-one-shows-one-item-not-an-empty-claim-of-more
   (let [window (value/window [:a :b :c] 0 1)]
@@ -305,8 +329,18 @@
     (is (true? (:seon.render.value/beyond-end? window)))))
 
 (deftest realization-failure-is-visible-data
-  (let [raw (map (fn [_] (throw (ex-info "poison" {}))) [1])
-        text (value/render-ai (routed-unit raw 3))]
-    (is (str/includes? text "window-failed"))
-    (is (str/includes? text "poison"))))
-
+  ;; A value whose realization throws is not silence and not an exception
+  ;; escaping the render: admission projected no data, so the answer is the
+  ;; typed marker, in both projections. `window` — the paging owner the
+  ;; stored-value route still calls — stays total over the same value and
+  ;; keeps the failure's own message.
+  (let [poison (fn [] (map (fn [_] (throw (ex-info "poison" {}))) [1]))
+        text (value/render-ai (unit (poison)))
+        html (hiccup/->string (value/render-html (unit (poison))))
+        window (value/window (poison) 0 3)]
+    (is (= "#:seon.eval{:missing :unserializable}" text))
+    (is (str/includes? html "unserializable"))
+    (is (= :seon.render.value/window-failed
+           (:seon.error/kind (:seon.render.value/window window))))
+    (is (= "poison" (:seon.error/message (:seon.render.value/window window))))
+    (is (zero? (:seon.render.value/shown window)))))

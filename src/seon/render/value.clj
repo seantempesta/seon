@@ -228,7 +228,8 @@
                   interrupt-fn
                   (assoc :seon.sci.admit/unbounded? true))
         admitted (admit/admit-value request)
-        admitted (if (:seon.eval/missing admitted)
+        missing (:seon.eval/missing admitted)
+        admitted (if missing
                    (admit/admit-value
                     (assoc request
                            :seon.sci.admit/value
@@ -236,8 +237,13 @@
                                                   :seon.eval/size])
                            :seon.sci.admit/unbounded? true))
                    admitted)]
-    {:seon.render.value/tree (:seon.sci.admit/print-node admitted)
-     :seon.render.value/semantic (:seon.sci.admit/value admitted)}))
+    ;; THE MARKER TRAVELS WITH THE ANSWER. A caller cannot ask the tree
+    ;; whether it is the value or the reason the value is absent — both are
+    ;; ordinary print nodes — so admission says which, and `prepare` stops
+    ;; describing the marker with the vanished value's own measurements.
+    (cond-> {:seon.render.value/tree (:seon.sci.admit/print-node admitted)
+             :seon.render.value/semantic (:seon.sci.admit/value admitted)}
+      missing (assoc :seon.eval/missing missing))))
 
 (defn- distinct-in-order
   [values]
@@ -518,9 +524,16 @@
                       (:seon.render.value/window display) unit))
           registered (registered-layout unit
                                         (:seon.render.value/semantic admitted))
+          ;; A TOTAL DESCRIBES THE TREE BEING FIT, NEVER A TREE THAT WAS
+          ;; NEVER BUILT. `fit` derives an elision's omitted count as the
+          ;; carried total minus the children it admitted, so carrying the
+          ;; vanished value's count over a MISSING admission made the
+          ;; two-key marker map announce `98 more children of 100` — a cut
+          ;; reported for a value nothing ever stored.
           profile (cond-> (render-profile unit)
-                    (or (:seon.render.data/total unit)
-                        (:seon.render.value/total display))
+                    (and (not (:seon.eval/missing admitted))
+                         (or (:seon.render.data/total unit)
+                             (:seon.render.value/total display)))
                     (assoc :seon.render.data/total
                            (or (:seon.render.data/total unit)
                                (:seon.render.value/total display))))
