@@ -719,3 +719,14 @@ third agent created mid-run sees neither ("don't cross the streams"); boot
 closes an open run and the next virtual turn proceeds; two projections of
 one agent's context are byte-identical.
 
+The SCI model that makes this true (owner, same day): the cluster's BASE
+context is shared and accretes every installed program row — a `defn`
+through the install gate, a schema through `register!`, a test — so agents
+pick up what other agents install on their next turn. Each turn takes a
+fresh `sci/fork` of the CURRENT base and lays the agent's PRIVATE layer on
+top: its defs of data and its atoms, a per-agent in-memory value the proc
+holds, never stored, lost on restart. A private def never reaches the base
+or another agent; an installed defn reaches everyone. Both directions are
+regressions. This supersedes §2's "`:seon.def` deleted … kept data is
+transacted" only in mechanism: the storage is still deleted.
+
