@@ -351,13 +351,32 @@ against the frozen worktree.
 | CONTENT is what selects | a one-byte digest change → `["src/seon/test/selection.clj"]` |
 | gate inputs no edge can reach widen, and are named | `resources/…` → widening `true`; `src/seon/db.clj` → `false` |
 
-`--all` vs `--full`: the split is **47 declared `:seon.test/long` markers** (32
-on vars, 5 on whole namespaces, 10 with individually authored reasons across 18
-files), every one carrying a non-blank reason and every reason naming a REAL
-cluster, prepl, or store — "Starts a real cluster…", "Restarts a real sovereign
-cluster…", "Starts a real prepl over deliberately corrupted boot storage". The
-split is honest: `--all` skips exactly the live-boot tier and PRINTS what it
-skipped plus the command that runs it. `--full` result below.
+### `--all` vs `--full` — is the split honest?
+
+**Yes.** 47 declared `:seon.test/long` markers (32 on vars, 5 on whole
+namespaces, 10 individually authored) across 18 files resolve to the **54
+tests** `--all` reports skipping, and the runner refuses a blank reason
+(`marker-reason` throws `::invalid-marker-reason`), so every one carries a
+written justification. Every reason names a real process, and most carry a
+measured cost:
+
+```text
+bin/test: skipped 54 long tests:
+ - seon.dev.fresh-operator-export-test/export-verb-produces-an-openable-queryable-store
+     - 200.542 s pool: real start JVM, export JVM, store copy/reidentify,
+       reopen, and query proof.
+ - seon.bootstrap-drive-test/one-fake-o1-drive-grades-on-its-ending-commit
+     - 171.859 s pool: real cluster graph bootstrap, objective/fork drive,
+       and ending-commit grading.
+ - seon.flow-test/forced-child-jvm-death-preserves-committed-facts
+     - Forcibly terminates a child JVM to cover committed-fact survival
+       across process death.
+bin/test: run skipped coverage with: bin/test --full
+```
+
+The tier is not a place slow-and-flaky tests hide: it is the live-boot,
+real-JVM, SIGKILL tier, it is named at the end of every `--all`, and the
+command that runs it is printed beside the list. `--full` result below.
 
 ## 6. Bounds — every await, audited
 
