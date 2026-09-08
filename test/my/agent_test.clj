@@ -19,13 +19,13 @@
                                      [{:seon.agent/settings [:db/id]}]
                                      [:seon.cluster.agent/id "settings-owner"])
                              [:seon.agent/settings :db/id])
-           matches (schema/matching-shapes-in (schema/handed-projection) settings)]
+           matches (schema/matching-shapes-in (schema/projection-from-database database) settings)]
        (is (= {:seon.config.eval/time-limit-ms 1234
                :seon.config.agent/turn-completion-backstop-ms 5678}
               settings))
        (is (some #(= 'my.agent/render-settings-ai (:seon.render/ai %)) matches))
        (is (not-any? #(= 'my.agent/render-settings-ai (:seon.render/ai %))
-                     (schema/matching-shapes-in (schema/handed-projection)
+                     (schema/matching-shapes-in (schema/projection-from-database database)
                                                {:my.plan.item/title "Unrelated"})))
        (db/transact! connection
                      [[:db.fn/retractEntity [:seon.cluster.agent/id "settings-owner"]]])

@@ -342,3 +342,88 @@ This proves hot-reloaded HTTP reachability, not source convergence or full
 §16 behavior: `seon.eval/of-agent` remains visibly unavailable, and the
 would-be value is currently rendered as an elision. No new test tally is
 claimed at this checkpoint.
+
+
+### 2026-09-08 20:27 UTC — would-be forms and verification boundary
+
+The next page slice renders the system result's forms individually: lookup,
+status, basis, changed facts, then the API's evaluated text (or unchanged
+source), each through the value renderer. It no longer feeds the whole walk
+result into the algorithm pane. The web fixture now carries one canonical
+cluster handle through both the proc and HTTP service. Obsolete mocked
+capture/scalar-block tests were deleted; schema-order verification uses a
+real agent with plan/settings components. The HTTP regression loads the
+page ten times and checks that the immutable database value did not change.
+Settings schema verification derives the projection from its database.
+
+Observed fast-loop tallies, all red and all before a complete final proof:
+
+- Components: 20 tests, 102 assertions, 5 failures, 0 errors. Four HTML
+  expectations failed; settings shape discovery was the fifth.
+- First web run: 64 tests, 412 assertions, 39 failures, 1 error. This
+  exposed obsolete capture/scalar tests as well as remaining render failures.
+- Revised settings/web run: 59 tests, 105 assertions, 0 failures, 46 errors.
+  Canonical fixture construction failed in `seon.fn/exact-source:142` before
+  the affected test bodies; the error does not identify its source file.
+
+Gate8 was cancelled after test revisions made its snapshot obsolete. Gate9
+and the platform attempt were cancelled and reaped while waiting on the
+shared dependency-cache lock, with no test tally. No green gate is claimed.
+The existing shared-base issue records the exact stack and paths.
+
+Default GET remained 200 after hot-reloading the two new private page
+functions. The actual visible would-be bytes remain an upstream elision,
+recorded in `docs/seon/issues/debug-system-turn-elision-hides-generated-forms.md`.
+`seon.eval/of-agent` remains absent. Re-seeding the fixture refused a
+conflicting step upsert, recorded in its issue; Juniper has no new plan
+component yet. Development adoption still refuses loading `seon.test-support`
+from the live classpath. These are unresolved observations, not successful
+§16/§17 proof. No protected turn-cut files or other lane sessions were edited.
+
+Unfinished: component/render failures, successful publication/refork and
+Juniper reseeding, empty-plan proof, derived wakes/fault/history blocks,
+`dir`/`doc` data integration, `my.turn`, the history namespace replacement,
+stored-prefix/as-of/digest display, full control/feed lifecycle proof, and
+green isolated/platform gates. The broader lane is not complete.
+
+
+Final HTTP observation for this slice: status 200, 11 would-be source blocks.
+The exact contents of those source blocks are retained (separated by two
+newlines for inspection, not claimed as provider-prompt concatenation) in
+[record-render-juniper-ai-observed-2026-09-08.txt](record-render-juniper-ai-observed-2026-09-08.txt),
+7,650 UTF-8 bytes. The latest page uses the already-rendered
+`seon.turn/text` directly in an escaped HTML pre element; passing that string
+through another printer had shown quotes and literal newline escapes.
+The earlier elision disappeared after subsequent partial development
+reloads, but the 11 blocks still include legacy per-step queries.
+
+The identity block observed exactly:
+
+```clojure
+; This is my identity and namespace; its steward is responsible for it.
+my.agents.juniper=> (seon.db/pull (quote [:seon.cluster.agent/id {:seon.cluster.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.cluster.agent/id]}]}]) [:seon.cluster.agent/id "juniper"])
+#:seon.repl{:value #:seon.cluster.agent{:id "juniper", :namespace #:seon.ns{:name my.agents.juniper,
+    :steward #:seon.cluster.agent{:id "juniper"}}}, :ms 9}
+```
+
+The separate ten-load HTTP script timed out waiting for a response under
+its 30-second per-request bound; it produced no successful total and does
+not establish the no-write claim. The later single GET returned 200. Native
+Safari observation could not acquire a window (`cgWindowNotFound`), so this
+checkpoint does not claim fresh browser paint or feed/control verification.
+
+This slice touches `src/seon/render/web.clj`, `test/seon/render/web_test.clj`,
+`test/my/agent_test.clj`, this landing note, the raw AI observation, the HTTP
+probe script, and four issue notes (the existing shared-base issue plus
+the elision, fixture-upsert, and development-classpath issues). The preceding
+`4c24e894d` repair additionally touched `src/seon/cluster.clj`.
+
+
+Final fast-loop rerun, after displaying `seon.turn/text` without a second
+printer: 59 tests / 358 assertions, 9 failures / 1 error. The settings
+component, canonical component-order, and ten-load HTTP regression completed
+without a reported failure. The namespace remains red: old bind-fixture and
+page expectations, render elision expectations, a fault-count assertion,
+and the message-on-feed test remain unresolved. Output:
+`tmp/record-render-fast-web3.log`. This is an iteration result, never an
+isolated gate or a claim that the whole page works.

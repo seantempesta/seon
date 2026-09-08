@@ -727,6 +727,30 @@
   ;; Unavailable never becomes an empty collection or a false fresh state.
   (value/render-html (assoc request :seon.render/value result)))
 
+(defn- system-turn-html
+  [request result]
+  (if (:seon.error/kind result)
+    (algorithm-value-html request result)
+    (let [forms (:seon.turn/forms result)]
+      (into [:div {:class "seon-debug-system-forms"}
+             (when-not (some :seon.turn/text forms)
+               [:p "No system turn."])]
+            (map (fn [form]
+                   [:section {:class "seon-debug-system-form"}
+                    (algorithm-value-html
+                     request
+                     (select-keys form
+                                  [:seon.render.walk/lookup
+                                   :seon.turn/status
+                                   :seon.cluster.eval/read-basis-transaction
+                                   :seon.turn/changes]))
+                    ;; The turn API already produced these bytes through
+                    ;; seon.repl/text; printing the string again escapes them.
+                    [:pre {:class "seon-debug-source"}
+                     (or (:seon.turn/text form)
+                         (:seon.cluster.eval/source form))]])
+                 forms)))))
+
 (defn- system-action-form
   [agent-id action label]
   [:form {(keyword "data-on:submit")
@@ -759,7 +783,7 @@
        (algorithm-value-html request evaluations)]
       [:section {:class "seon-debug-prompt-pane"}
        [:h3 "Would-be system turn"]
-       (algorithm-value-html request prospective)]])))
+       (system-turn-html request prospective)]])))
 
 (defn- debug-html-id
   [agent-id]

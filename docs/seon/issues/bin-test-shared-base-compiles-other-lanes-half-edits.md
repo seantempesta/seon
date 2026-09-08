@@ -94,3 +94,21 @@ anything about the new concurrency test's assertions.
 Two lanes with disjoint owned paths, one of them mid-edit on a file the
 other's tests load, both reach a tally; the base preparation names the
 files it overlaid; one regression per claim.
+
+
+Record-render observation, 2026-09-08 20:18 UTC: `bin/test-fast
+my.agent-test seon.render.web-test` reached 59 tests / 105 assertions,
+0 failures / 46 errors. Canonical fixture construction failed at
+`seon.fn/exact-source:142` with `IndexOutOfBoundsException`, through
+`seon.test-support/source-manifest`. The exception still names no offending
+source file. Concurrent source changes remain a hypothesis, not an attribution.
+The complete local output is `tmp/record-render-fast-web2.log`.
+
+The subsequent owned-path gate and platform attempt did not reach tests.
+Their cache-preparation JVMs waited at `dev_cache/with-cache-lock:403`
+(`FileChannel.lock`) on `target/dev-dependency-cache.lock`. One captured
+stack showed 260 seconds elapsed in that wait. Record-render terminated
+only its waiting JVMs and reaped both commands; no other lock user was
+operated. No isolated assertion tally or green result exists for these
+attempts. Evidence: `tmp/record-render-gate9-preparation-threads.txt`,
+`tmp/record-render-gate9.log`, and `tmp/record-render-platform.log`.

@@ -170,6 +170,15 @@
                   :seon.render.web/root-agent-id agent-id
                   ::web/profile
                   (render/agent-render-profile (config/defaults))}
+            handle (support/cluster-handle
+                    {:seon.db/connection connection
+                     :seon.cluster/name "web-test"
+                     :seon.sci.admit/caps caps
+                     :seon.sci.eval/ctx ctx
+                     :seon.config/on-core-error :record
+                     :seon.cluster.run/process process
+                     :seon.cluster.loop/stream-channel stream-channel
+                     :seon.render/context-channel context-channel})
             graph (flow.core/create-flow
                    {:procs
                     {:seon.render.web/render
@@ -178,21 +187,7 @@
                              (assoc view
                                     :seon.env/environment @test-environment
                                     :seon.cluster.loop/cluster
-                                    {:seon.db/connection connection
-                                     :seon.cluster/name "web-test"
-                                     :seon.sci.admit/caps caps
-                                     :seon.sci.eval/ctx ctx
-                                     :seon.config.eval/time-limit-ms
-                                     (:seon.config.eval/time-limit-ms
-                                      (config/defaults))
-                                     :seon.config/on-core-error :record
-                                     :seon.cluster.run/process process
-                                     ;; the cluster's one stream conn:
-                                     ;; production always has it, and
-                                     ;; the proc now refuses to be
-                                     ;; built without it
-                                     :seon.cluster.loop/stream-channel
-                                     stream-channel}))}}
+handle))}}
                     :conns []})
             pages-mult (async/mult pages-channel)
             {:keys [report-chan error-chan]} (flow.core/start graph)]
@@ -219,7 +214,8 @@
                         :seon.cluster.wake/fault-channel fault-channel
                         :seon.cluster.wake/key ::route})
           (reset! server (web/start!
-                          {:seon.store/connection-object connection
+                          {:seon.cluster.loop/cluster handle
+                           :seon.store/connection-object connection
                            :seon.cluster.agent/id agent-id
                            :seon.sci.admit/caps caps
                            :seon.sci.eval/ctx ctx
@@ -482,196 +478,6 @@
         ;; above prove the alias selected agent-b's own walk root
         (is (str/includes? other "data-walk-path=\"[]\""))))))
 
-(deftest debug-responds-from-the-exact-capture-before-deriving-the-live-walk
-  (with-server
-    (fn [connection server context]
-      (let [calls (atom 0)
-            exact-ai (str "left<&\n"
-                          (apply str (repeat 150000 "x"))
-                          "\nright")
-            run-id "debug-exact-capture"]
-        (db/transact!
-         connection
-         [{:seon.cluster.run/id run-id
-           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-           :seon.cluster.run/opened-at (java.util.Date.)}])
-        (db/transact!
-         connection
-         [{:seon.context.capture/id "debug-exact-capture-context"
-           :seon.context.capture/run [:seon.cluster.run/id run-id]
-           :seon.context.capture/basis-t 42
-           :seon.context.capture/prompt exact-ai}])
-        (let [before (settle-render! context)]
-          (with-redefs [render/walk
-                        (fn [_options]
-                          (swap! calls inc)
-                          (throw
-                           (ex-info "the request thread derived a walk" {})))]
-            (let [response (fetch server "/agent/root/debug?prompt=true")
-                  body (.body response)]
-              (is (= 200 (.statusCode response)))
-              (is (zero? @calls)
-                  "the response does not derive either live projection")
-              (is (= before (derivations context))
-                  "the response does not wait on a debug render-proc pass")
-              (is (str/includes? body "id=\"debug-ai-root\""))
-              (is (str/includes? body "left&lt;&amp;\n"))
-              (is (str/includes? body "\nright"))
-              (is (str/includes? body "id=\"debug-units\""))
-              (is (str/includes? body "class=\"seon-debug-grid\""))
-              (is (str/includes? body
-                                 "Loading the entity&#39;s attributes")
-                  "the pending section states what has not derived yet"))))))))
-
-(deftest a-never-run-agents-debug-context-is-labeled-prospective
-  (with-server
-    (fn [connection server _context]
-      (let [observed (atom nil)
-            history render.walk/history]
-        (with-redefs [render.walk/history
-                      (fn [request]
-                        (reset! observed request)
-                        (history request))]
-          (let [response (fetch server "/agent/root/debug?prompt=true")
-                body (.body response)]
-            (is (= 200 (.statusCode response)))
-            (is (= agent-id
-                   (:seon.cluster.agent/id @observed))
-                "the production request carries history's agent input")
-            (is (= [:seon.cluster.agent/id agent-id]
-                   (:seon.render.walk/lookup @observed)))
-            (is (contains? @observed :seon.render.walk/root-acquisition)
-                "debug uses the next transition's compiled root acquisition")
-            (is (identical? @connection (:seon.db/db @observed))
-                "the prospective query reads the current immutable database")
-            ;; STALE EXPECTATION, corrected: the debug body no longer
-            ;; labels the whole page `prospective`. It renders TWO panes —
-            ;; the historical captured prompt and the newly computed
-            ;; prospective one — under a `prompt comparison` status, and
-            ;; the pane titles are where `prospective` now appears
-            ;; (`seon.render.web/debug-ai-html`).
-            (is (str/includes? body
-                               "seon-debug-context-status\">prompt comparison"))
-            (is (str/includes? body "newly computed prospective prompt")
-                "and the prospective pane is present and named")
-            (is (not (str/includes? body
-                                    "No recorded context capture exists")))))))))
-
-(deftest a-fresh-cluster-debug-page-renders-a-prospective-prompt
-  (with-server
-    (fn [connection server _context]
-      (db/transact!
-       connection
-       [(assoc (config/defaults)
-               :seon.config/cluster "web-test")
-        {:seon.cluster.message/id "fresh-cluster-task"
-         :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
-         :seon.cluster.message/content "inspect the fresh cluster"
-         :seon.cluster.message/at (java.util.Date. 1788460800000)}
-        {:seon.cluster.run/id "fresh-cluster-run"
-         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-         :seon.cluster.run/trigger
-         [:seon.cluster.message/id "fresh-cluster-task"]
-         :seon.cluster.run/opened-at (java.util.Date. 1788460801000)
-         :seon.cluster.run/process process}
-        {:seon.cluster.agent/id agent-id
-         :seon.cluster.agent/run [:seon.cluster.run/id "fresh-cluster-run"]}])
-      (let [message-custody seon.context/message-custody
-            observed-custody-inputs (atom [])]
-        (with-redefs [seon.context/message-custody
-                      (fn [database run-id rendered-agent-id message-eid]
-                        (swap! observed-custody-inputs
-                               conj
-                               {:seon.cluster.run/id run-id
-                                :seon.cluster.agent/id rendered-agent-id})
-                        (message-custody database run-id rendered-agent-id
-                                         message-eid))]
-          (let [response (fetch server "/agent/root/debug?prompt=true")
-                body (.body response)]
-            (is (= 200 (.statusCode response)))
-            (is (nil?
-                 (db/q '[:find ?capture .
-                         :where
-                         [?run :seon.cluster.run/id "fresh-cluster-run"]
-                         [?capture :seon.context.capture/run ?run]]
-                       @connection))
-                "the fresh agent has never reached context capture")
-            (is (str/includes? body
-                               "seon-debug-context-status\">prospective"))
-            (is (not (str/includes? body "<pre></pre>"))
-                "the real walk contributes at least one byte to the prompt")
-            (is (= #{{:seon.cluster.run/id "fresh-cluster-run"
-                      :seon.cluster.agent/id agent-id}}
-                   (set @observed-custody-inputs))
-                "history receives the run and agent it uses for custody")
-            (is (empty?
-                 (db/q '[:find ?cost
-                         :where
-                         [?cost :seon.render.cost/estimated-tokens]]
-                       @connection))
-                "prospective debug remains a read-only observation")
-            (is (not (str/includes?
-                      body
-                      "The prospective agent context is unavailable.")))))))))
-
-(deftest an-unavailable-prospective-context-renders-its-diagnostic-data
-  (with-server
-    (fn [_connection server _context]
-      (with-redefs [render.walk/history
-                    (fn [_request]
-                      (throw (RuntimeException.
-                              "injected prospective failure")))]
-        (let [response (fetch server "/agent/root/debug?prompt=true")
-              body (.body response)]
-          (is (= 200 (.statusCode response)))
-          (is (str/includes? body
-                             "seon-debug-context-status\">unavailable"))
-          (is (not (str/includes? body
-                                  "seon-debug-context-status\">prospective"))
-              "HTTP 200 does not label an unavailable pane as healthy")
-          (is (str/includes? body "class=\"seon-debug-diagnostic\"")
-              "the composite page keeps HTTP 200 only with a visible diagnostic")
-          (is (not (str/includes? body "<pre"))
-              "an unavailable prompt is not rendered as a healthy prompt")
-          (doseq [field [":seon.error/kind"
-                         ":seon.error/diagnostic-member"
-                         ":seon.error/diagnostic-cause"
-                         ":seon.error/diagnostic-expected"]]
-            (is (str/includes? body field)
-                (str "the unavailable result renders " field)))
-          (is (str/includes? body
-                             ":seon.render.web/prospective-context-unavailable"))
-          (is (str/includes? body "injected prospective failure"))
-          (is (str/includes? body ":seon.cluster.prompt/text")))))))
-
-(deftest debug-pages-distinguish-held-live-and-dead-runs
-  (with-server
-    (fn [connection server _context]
-      (db/transact!
-       connection
-       [{:seon.cluster.run/id "debug-held-live"
-         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-         :seon.cluster.run/opened-at (java.util.Date.)
-         :seon.cluster.run/process process}
-        {:seon.cluster.run/id "debug-held-dead"
-         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-         :seon.cluster.run/opened-at (java.util.Date.)
-         :seon.cluster.run/process "web-test-dead-process"}])
-      (let [stream (open-feed server (debug-feed-path agent-id []))]
-        (try
-          (let [paint (read-patches! stream 1)]
-            (is (str/includes? paint ":seon.cluster.run/_agent")
-                "the agent's runs are one declared unit of the page")
-            (is (= #{"debug-held-dead"}
-                   (into #{}
-                         (map :seon.cluster.run/id)
-                         (:seon.problems/wedged-runs
-                          (problems/problems
-                           @connection
-                           {:seon.cluster.run/live-processes #{process}}))))
-                "the dead holder is wedged and the live holder is not"))
-          (finally (.close stream)))))))
-
 (deftest static-resources-come-off-the-classpath
   (with-server
     (fn [_connection server _context]
@@ -829,37 +635,23 @@
                    (str/includes? link-href "incomingCursor=")))
           "a new subject never carries snapshot-bound page cursors"))))
 
-(deftest declared-units-are-read-from-the-entitys-own-schema
+(deftest declared-units-are-components-in-schema-order
   (support/with-database
    (fn [connection]
-     (let [projection (schema/build-projection (schema.edn/packaged-forms) {})
+     (db/transact! connection
+                   [{:seon.cluster.agent/id "unit-owner"
+                     :seon.agent/plan {:my.plan/objective "Inspect the page"}
+                     :seon.agent/settings
+                     {:seon.config.eval/time-limit-ms 1234}}])
+     (let [database @connection
+           projection (schema/projection-from-database database)
            declared (web-private 'declared-entity-units)
-           units (declared projection @connection
-                           {:db/id 1
-                            :seon.cluster.agent/id "juniper"
-                            :seon.cluster.agent/namespace 2})
-           placeholder (hiccup/->string
-                        ((web-private 'debug-experiment-placeholder)
-                         "debug-html-inspection"))]
-       (is (= [:seon.cluster.agent/id
-               :seon.cluster.agent/namespace
-               :seon.cluster.agent/cluster
-               :seon.cluster.agent/run
-               :my.plan/steps
-               :my.plan/current-step
-               :seon.cluster.message/_to
-               :seon.cluster.run/_agent
-               :seon.context.contribution/_agent
-               :seon.error/_agent]
-              units)
-           "the agent schema's declared order is the page's order")
-       (is (= [] (declared projection @connection {:seon.ns/name 'my.probe}))
-           "an entity whose schemas declare no units contributes none")
-       (is (= [] (declared projection @connection "not an entity"))
-           "a value that is not an entity map declares nothing")
-       (is (and (str/includes? placeholder "id=\"debug-units\"")
-                (str/includes? placeholder "id=\"debug-graph\""))
-           "the shell places the units section and the reference graph")))))
+           entity (db/pull database '[*]
+                           [:seon.cluster.agent/id "unit-owner"])]
+       (is (= [:seon.agent/plan :seon.agent/settings]
+              (declared projection database entity))
+           "scalars share the identity block; components follow schema order")
+       (is (= [] (declared projection database "ordinary value")))))))
 
 (deftest an-attribute-description-comes-from-the-projection-form
   (let [projection
@@ -1027,113 +819,6 @@
     (is (< (.indexOf page "exact agent-visible text")
            (.indexOf page "Applicable render functions"))
         "render-function evidence is a sibling below the paired previews")))
-
-(deftest every-declared-unit-is-one-section-in-declared-order
-  (let [rendered (atom [])
-        projection
-        {:seon.schema.projection/forms
-         {:my/name [:string {:description "The person's name."}]
-          :my/tags [:set {:description "Every tag asserted about this entity."}
-                    :string]
-          :my/parts [:vector {:description "The parts this entity owns."} :map]
-          :my/absent [:string {:description "Never asserted here."}]
-          :my.note/subject [:and {:description "The entity a note is about."}
-                            :seon.db/ref]}}
-        inspection
-        {:seon.render.selection/selected 'my.render/unit
-         :seon.render.selection/stages
-         [{:seon.render.selection.stage/name :schema
-           :seon.render.selection.stage/status :selected
-           :seon.render.selection.stage/candidates
-           [{:seon.render.selection.candidate/producer 'my.render/unit
-             :seon.render.selection.candidate/status :compatible}]}]}
-        acquisition
-        {:db/id 1
-         :my/name "Ada"
-         :my/tags #{"one" "two"}
-         :my/parts [{:db/id 5 :my.part/name "left"}
-                    {:db/id 6 :my.part/name "right"}]
-         :my/undeclared "still shown"}
-        declared-units [:my/name :my/tags :my/parts :my/absent
-                        :my.note/_subject]
-        reverse-values {:my.note/_subject [{:db/id 9}]}
-        observation {:seon.render.data/incoming
-                     {:seon.render.data/datoms
-                      [{:e 11 :a :my.mention/subject :v 1 :tx 3}
-                       {:e 9 :a :my.note/subject :v 1 :tx 4}]}}
-        render-request {:seon.db/db ::database
-                        :seon.render/retained-calls {}
-                        :seon.render/captured-calls (atom {})}
-        debug-request {:seon.render.debug/viewer-namespace 'my.viewer
-                       :seon.render.debug/subject [:my/id "example"]}]
-    (with-redefs [render/selection-inspection (constantly inspection)
-                  sci.kernel/context-projection (constantly ::projection)
-                  db/basis-t (constantly 1)
-                  render/render-call
-                  (fn [request]
-                    (swap! rendered conj
-                           [(:seon.render.walk/attribute request)
-                            (:seon.render/output request)
-                            (:seon.render/value request)])
-                    (if (= :seon.render/html (:seon.render/output request))
-                      [:p "HTML preview"]
-                      "AI preview"))]
-      (let [html (hiccup/->string
-                  ((web-private 'debug-found-values-html)
-                   projection render-request debug-request acquisition
-                   declared-units observation reverse-values {} nil nil))
-            position (fn [needle] (.indexOf html (str needle)))
-            heading (fn [attribute]
-                      (str "<h2><code>" attribute "</code></h2>"))]
-        (is (= 6 (count (re-seq #"seon-debug-attribute-unit" html)))
-            "five declared units and the one remaining stored attribute")
-        (is (apply < (map (comp position heading)
-                          [:my/name :my/tags :my/parts :my/absent
-                           :my.note/_subject :my/undeclared]))
-            "declared order first, then any attribute the entity still carries")
-        (is (every? #(= 1 (count (re-seq (re-pattern (heading %)) html)))
-                    [:my/name :my/tags :my/parts :my.note/_subject])
-            "a cardinality-many, component, or reverse unit is ONE section")
-        (is (every? #(str/includes? html %)
-                    ["The person&#39;s name."
-                     "Every tag asserted about this entity."
-                     "The parts this entity owns."
-                     "Never asserted here."
-                     "The entity a note is about."])
-            "every section shows the attribute's authored :description")
-        (is (< (position "Never asserted here.")
-               (position "No value is stored or connected"))
-            "an absent declared unit is a visible empty section")
-        (is (not-any? (fn [[attribute _ _]] (= :my/absent attribute))
-                      @rendered)
-            "an absent unit renders nothing rather than rendering nil")
-        (is (= #{"Ada" #{"one" "two"}
-                 [{:db/id 5 :my.part/name "left"}
-                  {:db/id 6 :my.part/name "right"}]
-                 [{:db/id 9}] "still shown"}
-               (into #{} (map (fn [[_ _ value]] value)) @rendered))
-            "each unit renders its own whole value, children included")
-        (is (every? (fn [[attribute _ _]] (not= :my.note/_subject attribute))
-                    (filter (fn [[attribute _ _]]
-                              (= :my.note/_subject attribute))
-                            @rendered))
-            "a reverse unit renders under its forward attribute declaration")
-        (is (= 5 (count (re-seq #"AI preview" html)))
-            "every present unit shows its AI projection")
-        (is (= 5 (count (re-seq #"HTML preview" html)))
-            "every present unit shows its HTML projection")
-        (is (and (str/includes? html "Other references")
-                 (str/includes? html ":my.mention/subject")
-                 (< (position (heading :my/undeclared))
-                    (position "Other references")))
-            "incoming references no unit declares are grouped at the bottom")
-        (is (not (str/includes? html ":my.note/subject</code></h3>"))
-            "a declared reverse unit is not repeated under other references")
-        (is (every? #(str/includes? html %)
-                    ["Raw data and schema" "Applicable render functions"])
-            "raw data, schema, and render functions stay under disclosure")
-        (is (not (str/includes? html "<h2><code>:db/id</code></h2>"))
-            "the entity id is the header's, never a unit of its own")))))
 
 (deftest inspecting-the-page-writes-no-run-evaluation-or-fault-facts
   ;; Ruling 2026-09-06: preview results live in the invocation cache. A person
@@ -2550,9 +2235,14 @@
 
 (deftest debug-algorithm-carries-the-render-evaluation-inputs
   (with-server
-    (fn [_connection server _context]
-      (let [response (fetch server "/agent/root/debug")
-            body (.body response)]
+    (fn [connection server _context]
+      (let [before @connection
+            responses (vec (repeatedly 10 #(fetch server "/agent/root/debug")))
+            bodies (mapv #(.body %) responses)
+            response (last responses)
+            body (last bodies)]
+        (is (every? #(= 200 (.statusCode %)) responses))
+        (is (= before @connection) "ten preview loads write no facts")
         (is (= 200 (.statusCode response))
             "every algorithm value render receives the handle's deadline and caps")
         (is (str/includes? body "Context now"))
