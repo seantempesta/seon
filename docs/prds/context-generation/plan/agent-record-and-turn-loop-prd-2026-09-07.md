@@ -1,6 +1,6 @@
 ---
 type: prd
-status: r7 — owner GO 2026-09-07 late evening; implementing §8 in order (lane specs under tmp/lane-specs/)
+status: r8 — step 1 and step 2 landed and verified; answered-by-:t qualified (§3, 2026-09-08); step 3 next
 date: 2026-09-07 (evening)
 supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
 tags: [prd, agent, wake, storage, runtime]
@@ -244,6 +244,18 @@ Questioned and REMOVED from the record:
   agent's sliding-1 channel. The entity carrying the datom (a message, a
   fault, a schedule row) is ordinary data; nothing is copied, nothing is
   written back onto it.
+- **Only a turn that holds a reply answers wakes** (r8, from lane 2's
+  finding `a-turn-that-dies-before-replying-still-answers-its-wakes`): a
+  turn that crashed before its reply, a turn whose provider call failed, and
+  a source submission (no model call) never showed the wakes to a model, so
+  they answer nothing — the query below joins `[?turn :seon.turn/reply _]`.
+  The wakes stay unanswered and the next turn opens; the turn bound (§1a)
+  keeps that finite. Lane 2 landed `:seon.wake/inside` as the third
+  property: the attributes that mark a wake as coming from inside the agent
+  (its own messages, its own effects), so "the last wake from outside the
+  agent" is a query, not a hand-coded `from`/`about` pair. Schedule firings
+  are the existing `seon.schedule.fire` family (one immutable entity per
+  nominal instant), declared `:seon.wake/opens-turn? false`.
 - **Answered is derived from `:t`, nothing is stored.** Every datom carries
   its transaction `:t`; the turn's own `:t` is the basis it projected from
   (the context is projected on the opening transaction's database,
@@ -549,7 +561,11 @@ receipt-exists call.
    inside the fault committer's transaction; delete message `to` reverse
    units and the agent-id wake.
 3. The turn: rename/trim `seon.cluster.run` to §4; delete generated runs,
-   situation, captures; the two-arm loop; one db value per pass.
+   situation, captures, `:seon.cluster.run/trigger` and `opening-commit-id`
+   (lane 2 left them as provenance because seven readers live in the turn's
+   files); the two-arm loop; the reply-holding qualification above; prove
+   the refused-settlement close (unproven by the verifier); one db value per
+   derivation.
 4. The record: `:seon.agent/*` keys, delete `:seon.def`, cluster, pointer,
    units; page renders the record's components in declared order.
 5. Byte identity: a refused render is a stable typed unknown; the walk's
