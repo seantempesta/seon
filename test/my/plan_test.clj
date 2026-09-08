@@ -79,7 +79,7 @@
         (is (not (contains? current :my.plan/current-step)))
         (is (str/includes? ai "Steps: none yet."))
         (is (str/includes? ai "Current step: none selected"))
-        (is (str/includes? (pr-str html) "my.plan/steps"))))))
+        (is (str/includes? (pr-str html) "[] 0 items"))))))
 
 (deftest one-step-is-owned-by-the-agent-through-the-component-edge
   (with-plan
@@ -231,7 +231,7 @@
         (is (str/includes? ai "Objective: Improve the plan"))
         (is (str/includes? ai "Current step: Improve the plan"))
         (is (str/includes? printed "Inspect the facts"))
-        (is (str/includes? printed "my.plan.item/title"))))))
+        (is (str/includes? printed "#:my.plan.item{"))))))
 
 (deftest plan-source-selects-reads-from-current-data
   (with-plan
@@ -487,8 +487,8 @@
         (is (str/includes?
              ai
              "1.3 Compare refreshed results [juniper/compare-changed-results] — blocked — waiting for \"juniper/render-plan\""))
-        (is (str/includes? printed "my.plan.item/completed-at"))
-        (is (str/includes? printed "my.plan/current-step"))
+        (is (str/includes? printed ":completed-at"))
+        (is (str/includes? printed ":current-step"))
         (is (not (str/includes? printed ":open nil"))
             "no nil attribute reaches the rendered panel")))))
 

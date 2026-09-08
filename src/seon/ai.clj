@@ -326,7 +326,8 @@
    [:=> [:cat :seon.db/database-value :seon.cluster.agent/id]
     [:or :seon.config/agent-overlay :seon.error/value]]}
   [db agent-id]
-  (let [attributes (map-attributes (schema/declaration-population)
+  (let [projection (schema/projection-from-database db)
+        attributes (map-attributes (:seon.schema.projection/forms projection)
                                    :seon.config/agent-overlay)
         row (db/pull db [{:seon.agent/settings (vec attributes)}]
                      [:seon.cluster.agent/id agent-id])]

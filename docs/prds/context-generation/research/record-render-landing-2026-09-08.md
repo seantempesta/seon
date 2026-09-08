@@ -229,3 +229,25 @@ A call supplying the root subsequently timed out at 3000 ms. Development
 adoption again refused because source changed during adoption; no schema
 refusal or successful convergence is claimed. No refork, reseed, browser
 paint, or fresh/system/virtual/compact lifecycle proof has completed.
+
+
+Live read evidence after `3f42669e0`: the previously timed-out write did
+commit. `record-render-components/one` exists under the plan component with
+position 4, reproducing the pre-fix tempid-count bug. No write was repeated
+on the assumption that timeout meant absence. A settings component with
+1234 ms evaluation time and 5678 ms completion backstop was then written.
+Under its database projection, `my.agent/settings` returned exactly
+`{:seon.config.eval/time-limit-ms 1234,
+:seon.config.agent/turn-completion-backstop-ms 5678}` and the matching schema
+was `:seon.config/agent-overlay`. The read-only reproduction is
+`record_render_components_proof_2026_09_08.clj` in this directory.
+
+The direct JVM settings call originally lacked a handed projection. The
+follow-up derives it from the supplied database at the existing overlay
+reader; callers no longer need a hidden projection binding for this read.
+The value renderer also demonstrated its namespace-map spelling
+(`#:my.plan{` and `:steps`), so the HTML assertions now check its actual
+structural output instead of demanding one unsplit qualified-key string.
+The test4 gate was deliberately terminated and reaped before assertions
+because it snapshotted those known stale assertions. Test5 contains the
+updated plan/settings/AI paths and selects all three subject namespaces.
