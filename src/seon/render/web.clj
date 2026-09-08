@@ -644,12 +644,13 @@
   (get-in projection [:seon.schema.projection/forms schema-key]))
 
 (defn- declared-entity-units
-  "The ordered unit attributes the schemas matching `value` declare.
+  "The attributes the entity schemas matching `value` declare, in order.
 
-  The unit list is schema metadata read through the same shape matching the
-  renderer's schema stage uses, so every entity declares its own units and no
-  entity shape is named here. A unit is a stored forward attribute or a
-  declared reverse relationship; Datahike pulls both."
+  The data is on the entity and the page renders it on the fly: the
+  attributes are the `:map` entries of every matching entity schema, in the
+  order the schema declares them — never a hand-kept list and never a
+  reverse lookup (owner, 2026-09-08: no render units; an attribute is an
+  attribute)."
   [projection database value]
   (if (map? value)
     (schema/call-with-projection
@@ -658,9 +659,10 @@
        (into []
              (comp (map :seon.schema/key)
                    (distinct)
-                   (keep #(some-> (projection-form projection %)
-                                  schema.form/schema-properties
-                                  :seon.render/units))
+                   (keep #(some->> (projection-form projection %)
+                                   schema.form/map-entries
+                                   (map first)
+                                   (filter qualified-keyword?)))
                    cat
                    (distinct))
              (concat (schema/matching-shapes-in

@@ -6,18 +6,7 @@
                        :seon.render/html
                        seon.cluster.agent/render-identity-html,
                        :seon.render/form
-                       seon.cluster.agent/identity-form,
-                       :seon.render/units
-                       [:seon.cluster.agent/id
-                        :seon.cluster.agent/namespace
-                        :seon.cluster.agent/cluster
-                        :seon.cluster.agent/run
-                        :my.plan/steps
-                        :my.plan/current-step
-                        :seon.cluster.message/_to
-                        :seon.cluster.run/_agent
-                        :seon.context.contribution/_agent
-                        :seon.error/_agent]}
+                       seon.cluster.agent/identity-form}
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
                       [:seon.cluster.agent/namespace
                        {:optional true}
