@@ -6,7 +6,7 @@
   process-global — `alter-var-root` on every schema'd public var — so a
   test that turned it on and walked away would change how every LATER
   suite behaves, and the gate's result would depend on test order. Every
-  test here removes it in a `finally`, and that discipline is the reason
+  test here restores the entering callable roots in a `finally`, and that discipline is the reason
   the whole gate is deterministic with this namespace in it.
 
   THE FIXTURE IS THE ARCHIVED DEFECT. `seon.db/transact!`
@@ -54,7 +54,8 @@
          (body)
          (finally
            (try
-             (instrument/remove!)
+             (doseq [candidate (instrument/instrumented)]
+               (alter-var-root candidate mi/-f->original))
              (finally
                (reset! @function-schemas-state function-schemas)))
            (doseq [[instrumented-var root] instrumented-roots]
@@ -71,7 +72,8 @@
   ;; one no caller is ever in; `preserving-instrumentation-state` puts this
   ;; worker's wrappers back afterwards.
   (instrument/remove!)
-  (let [result (instrument/apply! {:seon.config/on-core-error nil})]
+  (let [result ((mi/-f->original instrument/apply!)
+                {:seon.config/on-core-error nil})]
     (is (= :seon.instrument/invalid-mode (:seon.error/kind result)))
     (is (= {:seon.error/diagnostic-layer :instrumentation
             :seon.error/diagnostic-operation 'seon.instrument/apply!
@@ -224,9 +226,9 @@
            "naming the function whose contract was violated")
        (is (= :arguments
               (:seon.error/diagnostic-member (:seon.error/data data))))
-       (is (= :seon.error/unknown
+       (is (= :seon.error/fact
               (:seon.error/diagnostic-expected (:seon.error/data data)))
-           "without caps, evidence is honestly unavailable rather than printed")
+           "a cluster re-arm retains the JVM wrapper's bounded evidence policy")
        (is (re-find #"invalid-input" (ex-message failure)))))))
 
 (deftest projection-gates-inspect-the-complete-candidate-population
@@ -336,23 +338,18 @@
         (is (= ["not a fact"]
                (:seon.error/diagnostic-offending (:seon.error/data data)))
             "arguments remain bounded ordinary data, never a printed value")
-        (is (= {::instrument/fn "seon.error/value"
-                ::instrument/arm :input
-                ::instrument/schema ":seon.error/fact"
-                ::instrument/args "[\"not a fact\"]"}
-               (select-keys (:seon.error/data data)
-                            [::instrument/fn ::instrument/arm
-                             ::instrument/schema ::instrument/args]))
-            "the bounded fault evidence is complete before normalization"))
+        (is (= :seon.error/fact
+               (:seon.error/diagnostic-expected (:seon.error/data data))))
+        (is (nil? (::instrument/args (:seon.error/data data)))
+            "semantic evidence is not duplicated as serialized arguments"))
       (finally (instrument/remove!))))
   (instrumented!
    (fn [_]
      (let [data (try (error/value "not a fact")
                      (catch Exception thrown (ex-data thrown)))]
-       (is (= :seon.error/unknown
+       (is (= ["not a fact"]
               (:seon.error/diagnostic-offending (:seon.error/data data)))
-           "and with no caps to bound them they are OMITTED, never
-            printed unbounded")))))
+           "re-arming without caps cannot replace the shared reporter")))))
 
 (deftest a-flat-error-value-at-a-contract-boundary-is-its-own-face
   (let [violation @#'instrument/violation
@@ -641,31 +638,16 @@
 ;;; The dial
 ;;; ---------------------------------------------------------------------------
 
-(deftest production-instruments-nothing-and-undoes-what-is-there
-  (try
-    (instrument/apply! {:seon.config/on-core-error :panic})
-    (is (pos? (count (instrument/instrumented))))
-    (let [applied (instrument/apply! {:seon.config/on-core-error :record})]
-      (is (zero? (:seon.instrument/instrumented applied))
-          "moving the dial to production actually takes effect rather
-           than leaving yesterday's wrappers in place")
-      (is (pos? (:seon.instrument/registered applied))
-          "the schemas are still collected — the registry is honest even
-           when nothing is wrapped")
-      (is (map? (try (error/value "x") (catch Exception _ ::threw)))
-          "and a violating call simply RUNS — returning whatever it
-           returns for a bad argument — which is what :report could
-           never have prevented either"))
-    (finally (instrument/remove!))))
-
-(deftest remove-is-total
-  (try
-    (instrument/apply! {:seon.config/on-core-error :panic})
-    (is (zero? (instrument/remove!)))
-    (is (zero? (instrument/remove!)) "and idempotent")
-    (is (empty? (instrument/instrumented)))
-    (finally
-      (instrument/remove!))))
+(deftest cluster-policy-and-removal-preserve-the-jvm-wrappers
+  (instrument/apply! {:seon.config/on-core-error :panic})
+  (let [before (into {} (map (juxt identity deref)) (instrument/instrumented))
+        applied (instrument/apply! {:seon.config/on-core-error :record})]
+    (is (pos? (count before)))
+    (is (= (count before) (:seon.instrument/instrumented applied)))
+    (is (= (count before) (instrument/remove!)))
+    (is (= (count before) (instrument/remove!)))
+    (is (every? (fn [[candidate root]] (identical? root @candidate)) before))
+    (is (thrown? Exception (error/value "not a fact")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The selection is computed

@@ -1,90 +1,17 @@
 (ns seon.instrument
-  "Malli instrumentation, applied explicitly, measured before it was built.
+  "JVM-owned host wrappers with contracts compiled in the caller's projection.
 
-  Every number below was measured on this machine and is reproduced in
-  `research/error-handling-grounding-2026-07-27.md` §4. Nothing here is
-  a preference dressed as a rule.
-
-  THE SELECTION IS COMPUTED, and the computation is one sentence: every
-  loaded var carrying `:malli/schema`. There is no namespace
-  prefix, no allow list, and no exclusion list — a name-based rule is
-  the hand list the standing ruling bans. It excludes every hot inner
-  function BY CONSTRUCTION, which is the part worth understanding:
-  `admit`'s `project`/`project-node`/`project-map`/`take-node!` and
-  `eval`'s `arm`/`diagnosis`/`failure-value` are all `defn-` with no
-  schema, so \"schema\" already means \"a declared boundary\", and
-  instrumentation lands on boundaries and nowhere else without anybody
-  maintaining that fact.
-
-  THE COST, measured: **+129 ns** on `(add2 1 2)` against
-  `[:=> [:cat :int :int] :int]`, **+175 ns** on one closed four-key map
-  argument holding a 32-element vector. Read it as a flat ~130-180 ns
-  per instrumented call, dominated by `(vec args)` + `apply` + the
-  validator walk — not a multiplier. On a per-turn or per-transaction
-  boundary that is free. On a per-node walk it would be fatal, and the
-  paragraph above is why it cannot land there.
-
-  WHAT `:report` CANNOT DO, measured, because the docs read otherwise:
-  malli's wrapper calls `report` FOR EFFECT and then runs the function
-  anyway (`malli/core.cljc:3110-3131`). Probed: the reported call still
-  executed and still threw its natural `ClassCastException`. So a
-  non-throwing report mode is \"tell me, then let it break\" — never
-  graceful degradation, and describing it as such would be a lie a
-  reader would plan around.
-
-  THE DIAL, therefore:
-
-  - `:panic` (development) — INSTRUMENT, and the reporter THROWS. A
-    contract violation is a bug in our own code and the first call is
-    where it is cheapest to find. Fail loud is not fall down: the throw
-    halts that CALL, not boot. And when the caller is a flow proc,
-    the throw is a Throwable escaping our code onto `::flow/error`,
-    which is exactly the path `seon.error` already owns — so an
-    instrumentation violation inside the run loop becomes a durable
-    error fact with `:seon.error/kind ::contract-violated`, an
-    explanation message, and a `problems` entry, through machinery
-    nobody had to add here. That composition is the reason this
-    namespace is small.
-  - `:record` (production) — INSTRUMENT NOTHING, and remove whatever is
-    instrumented. Judgment, flagged for the owner and reversible in one
-    line: report mode cannot prevent the bad call (measured above), it
-    taxes every public boundary ~150 ns forever, and the natural failure
-    that follows a violation still becomes a fault through the wired
-    error channel — so nothing is lost silently by staying out of the
-    way. The alternative, if the owner wants contract violations named
-    in production rather than diagnosed from their consequences, is to
-    instrument with a reporter that commits an error fact instead of
-    throwing.
-
-  HOT RELOAD STRIPS INSTRUMENTATION SILENTLY, and this is the sharpest
-  measured fact here. Re-evaluating a `defn` replaces the var's root,
-  `alter-var-root`'s wrapper is gone, the `::original` meta is gone, and
-  NOTHING warns: the var looks fine and is unprotected. The schema stays
-  registered, so the registry now disagrees with reality. `malli.dev`'s
-  watch does not save it either — the watch fires on
-  `-register-function-schema!`, and a plain re-eval never touches that
-  atom (probed: watch fired on re-collect, not on re-eval).
-
-  THE DISCIPLINE, therefore, is one line: **re-run `apply!` after
-  re-evaluating anything.** It is idempotent, it is fast, and it is the
-  only reliable trigger. A future edit hook can call it for you; that is
-  a note, not a thing this namespace does.
-
-  `malli.dev/start!` is REJECTED as an entry point: it `alter-var-root`s
-  `m/-fail!` globally, installs a pretty printer as the reporter, and
-  writes clj-kondo config (`malli/dev.clj:13-23, 40-66`). We want a
-  violation to become a durable fact, not a coloured box on stderr.
-
-  `remove!` is EMERGENCY RECOVERY, not a dial and never the answer to a
-  noisy report. A noisy report means the schema or the caller is wrong;
-  the first one found this way was real (`loop.clj` passing a
-  transaction argument map where the contract said vector — see
-  `docs/seon/issues/archive/loop-open-transaction-violates-transact-schema.md`)."
+  A loaded Var has one wrapper. Repeated cluster arming preserves its identity;
+  teardown cannot remove it. A replaced Var root is armed on the next apply!.
+  Compiled validators belong to the immutable projection that defines them.
+  Host calls without cluster custody use the packaged JVM program captured at
+  arming; they never consult Malli's global registry."
   (:require [clojure.edn :as edn]
             [clojure.walk :as walk]
             [malli.core :as m]
             [malli.error :as me]
             [malli.instrument :as mi]
+            [malli.registry :as mr]
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.env :as env]
@@ -104,33 +31,17 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn instrumented
-  "The vars carrying an instrumentation wrapper right now.
-  Malli stamps the original fn under `::mi/original` when it wraps, so
-  this is a fact about the running process rather than a count somebody
-  remembered to keep. It is what makes `apply!` idempotence and the
-  hot-reload strip both observable instead of assumed.
-
-  The candidates are the vars malli holds a FUNCTION SCHEMA for, not every
-  var in every loaded namespace. The stamp lives on the wrapper fn and names
-  no var (`reference-code/malli/src/malli/instrument.clj:8,38`), so a plain
-  alias — `(def real-evaluate sci.eval/evaluate)` captured while contracts
-  were armed — deref'd to the same wrapper and answered this question `true`
-  forever. Nothing could ever unstrument it, because malli unstruments what
-  it registered; so `remove!` reported a survivor it had no way to remove and
-  `apply!` in `:record` mode reported instrumenting one var while
-  instrumenting none. A check that reads an alias as its subject."
+  "Loaded Vars bearing their own host wrapper, derived without a registry."
   {:malli/schema [:=> [:cat] [:set :any]]}
   []
   (into #{}
-        (comp (mapcat (fn [[namespace-symbol entries]]
-                        (keep (fn [[name-symbol _]]
-                                (find-var (symbol (str namespace-symbol)
-                                                  (str name-symbol))))
-                              entries)))
+        (comp (mapcat ns-interns)
+              (map val)
               (filter (fn [candidate]
                         (and (bound? candidate)
-                             (some-> (deref candidate) meta ::mi/original)))))
-        (m/function-schemas)))
+                             (identical? candidate
+                                         (::var (meta @candidate)))))))
+        (all-ns)))
 
 (defn- primitive-fn?
   "Malli's own exclusion rule, read from its source rather than remembered.
@@ -505,10 +416,7 @@
           (seq problem-paths) (assoc ::problem-paths problem-paths)
           caller (assoc ::caller caller)
           function-symbol (assoc ::fn (str function-symbol))
-          expected-value
-          (assoc ::schema (admit/canonical-edn expected-value))
-          offending
-          (assoc ::args (admit/canonical-edn offending)))}))))
+)}))))
       (catch Throwable _
         fallback))))
 
@@ -626,85 +534,92 @@
         (recur (or nested-data deepest)))
       deepest)))
 
-(defn- collect-contracts!
-  "Register the same public Vars Malli collects, one Var at a time.
+(def ^:dynamic ^:private *compiling-contract* false)
 
-  Malli's bulk `clj-collect!` reduces over these Vars but loses the current Var
-  when compilation throws (`malli.instrument/-collect!`). Keeping that value
-  beside its own registration operation makes the authored contract and the
-  exact offending Var inseparable from the diagnostic."
-  [caps]
-  (let [bounded-caps (evidence-caps (or caps contract-evidence-caps))]
-    (into #{}
-          (keep
-           (fn [candidate-var]
-             (when-let [authored-schema (mi/-schema candidate-var)]
-               (try
-                 (mi/-collect! candidate-var)
-                 (catch Throwable failure
-                   (let [function-symbol (var-symbol candidate-var)
-                         failure-data (ex-data failure)
-                         root-data (or (registration-cause-data failure)
-                                       failure-data)
-                         nested-schema
-                         (or (:schema root-data)
-                             (get-in root-data [:data :schema])
-                             (get-in root-data [:data :ref]))
-                         diagnostic
-                         (error/diagnostic
-                          {:seon.error/kind ::registration-failed
-                           :seon.instrument/registration-failed true
-                           :seon.error/message
-                           (str "Malli could not register the contract for "
-                                function-symbol ".")
-                           :seon.error/diagnostic-layer :instrumentation
-                           :seon.error/diagnostic-operation
-                           'malli.instrument/-collect!
-                           :seon.error/diagnostic-member function-symbol
-                           :seon.error/diagnostic-expected
-                           (admitted-value bounded-caps authored-schema)
-                           :seon.error/diagnostic-offending
-                           (when nested-schema
-                             (admitted-value bounded-caps nested-schema))
-                           :seon.error/diagnostic-cause
-                           (or (:type root-data)
-                               (some-> failure class .getName))
-                           :seon.error/diagnostic-evidence
-                           (when root-data
-                             (admitted-value bounded-caps root-data))
-                           :seon.error/data
-                           {::fn (str function-symbol)}})]
-                     (throw
-                      (ex-info (:seon.error/message diagnostic)
-                               diagnostic failure)))))))
-           (->> (all-ns)
-                (mapcat ns-interns)
-                (map val)
-                (sort-by (comp str var-symbol)))))))
+(defn- request-member
+  [value member]
+  (when (map? value)
+    (try (get value member)
+         (catch ClassCastException _ nil))))
+
+(defn- supplied-projection
+  [arguments]
+  (or (some (fn [argument]
+              (some (fn [candidate]
+                      (when (request-member candidate :seon.schema.projection/registry)
+                        candidate))
+                    [(request-member argument :seon.schema/projection)
+                     (request-member
+                      (request-member argument :seon.env/environment)
+                      :seon.schema/projection)]))
+            arguments)
+      (let [projection ((mi/-f->original schema/handed-projection))]
+        (when (request-member projection :seon.schema.projection/registry)
+          projection))))
+
+(defn- compiled-wrapper
+  [projection function-symbol authored original caps]
+  ((mi/-f->original schema/projection-cache-value)
+   projection [::wrapper function-symbol original]
+   (fn []
+     (let [contract (get (:seon.schema.projection/function-contracts projection)
+                         function-symbol authored)
+           bound ((mi/-f->original schema/compilable-form)
+                  contract
+                  (get projection :seon.schema.projection/predicate-functions {}))
+           report (throwing-report caps)]
+       (m/-instrument
+        {:schema bound :scope #{:input :output}
+         :report (fn [kind data]
+                   (report kind (assoc data :fn-name function-symbol)))}
+        original
+        {:registry (mr/composite-registry
+                    (:seon.schema.projection/registry projection)
+                    (mr/var-registry))})))))
+
+(defn- arm-var!
+  [candidate authored bootstrap caps]
+  (alter-var-root
+   candidate
+   (fn [current]
+     (if (identical? candidate (::var (meta current)))
+       current
+       (let [original (mi/-f->original current)
+             function-symbol (var-symbol candidate)
+             boot-wrapper (delay
+                            (binding [*compiling-contract* true]
+                              (compiled-wrapper bootstrap function-symbol
+                                                authored original caps)))]
+         (with-meta
+           (fn [& arguments]
+             (if *compiling-contract*
+               (apply original arguments)
+               (let [wrapped
+                     (binding [*compiling-contract* true]
+                       (if-let [projection (supplied-projection arguments)]
+                         (compiled-wrapper projection function-symbol
+                                           authored original caps)
+                         @boot-wrapper))]
+                 (apply wrapped arguments))))
+           {::mi/original original ::var candidate}))))))
+
+(defn- collect-contracts!
+  "Read declarations from the program loaded into this JVM, without Malli's registry."
+  [_caps]
+  (into {}
+        (keep (fn [candidate]
+                (when-let [authored (mi/-schema candidate)]
+                  (when (and (bound? candidate)
+                             (not (primitive-fn? @candidate)))
+                    [candidate authored]))))
+        (mapcat (comp vals ns-interns) (all-ns))))
 
 (defn apply!
-  "Collect function schemas and instrument per the dial. IDEMPOTENT.
-  `(mi/clj-collect! {:ns (all-ns)})` — the FUNCTION, not the macro,
-  because the namespace set is a runtime value — then `mi/instrument!`
-  with `:scope #{:input :output}`. `:guard` is dropped: no schema in the
-  tree declares one and including it costs a validate call per
-  invocation for nothing.
+  "Arm previously unwrapped loaded Vars; existing wrappers remain identical.
 
-  On `:panic` the reporter throws (see the namespace docstring for why,
-  and for what happens when the throw escapes a proc). On `:record`
-  this instruments nothing and REMOVES any wrapper already installed, so
-  moving the dial to production actually takes effect rather than
-  leaving yesterday's wrappers in place.
-
-  Returns `{:seon.instrument/registered n :seon.instrument/instrumented m}`
-  so \"is instrumentation on right now\" is answerable. In `:panic` a
-  count of ZERO is a bug — there are hundreds of schema'd public vars in
-  this tree — so it says so on stderr rather than passing quietly.
-
-  Call it again after re-evaluating anything: a re-`defn` silently
-  strips the wrapper and no watch fires. Malli collection compiles against
-  the caller's cluster-bound schema projection; instrumentation never loads,
-  publishes, or replaces schema declarations."
+  Cluster :record requests cannot disable shared host contracts. Interpreted
+  function policy remains local to wrap-interpreted. New host calls validate
+  through their request projection or the existing evaluation carrier."
   {:malli/schema
    [:=> [:cat :seon.instrument/request]
     [:or :seon.instrument/applied :seon.error/value]]}
@@ -742,37 +657,42 @@
           :seon.error/diagnostic-offending :seon.instrument/missing-projection
           :seon.error/diagnostic-cause ::missing-projection
           :seon.error/diagnostic-evidence nil})
-        (schema/call-with-projection
-         projection
-         (fn []
-           (let [registered (count (collect-contracts! caps))]
-             (case mode
-               :panic
-               (do
-                 (mi/instrument! {:scope #{:input :output}
-                                  :report (throwing-report caps)})
-                 (let [count-now (count (instrumented))]
-                   (when (zero? count-now)
-                     (binding [*out* *err*]
-                       (println "seon.instrument: :panic instrumented ZERO vars —"
-                                "that is a bug, not a quiet success")
-                       (flush)))
-                   {:seon.instrument/registered registered
-                    :seon.instrument/instrumented count-now}))
-
-               :record
-               (do
-                 (mi/unstrument!)
-                 {:seon.instrument/registered registered
-                  :seon.instrument/instrumented (count (instrumented))})))))))))
+        (let [contracts (collect-contracts! caps)
+              pending (remove (fn [[candidate _]]
+                                (identical? candidate (::var (meta @candidate))))
+                              contracts)
+              bootstrap (when (seq pending)
+                          ((mi/-f->original schema/declaration-projection)
+                           (schema.edn/packaged-forms)))]
+          (doseq [[candidate authored] pending]
+            (try
+              (binding [*compiling-contract* true]
+                (compiled-wrapper projection (var-symbol candidate)
+                                  authored (mi/-f->original @candidate) caps))
+              (catch Throwable failure
+                (let [data (registration-cause-data failure)
+                      diagnostic
+                      (error/diagnostic
+                       {:seon.error/kind ::registration-failed
+                        :seon.instrument/registration-failed true
+                        :seon.error/message "The loaded function contract cannot compile."
+                        :seon.error/diagnostic-layer :instrumentation
+                        :seon.error/diagnostic-operation 'seon.instrument/apply!
+                        :seon.error/diagnostic-member (var-symbol candidate)
+                        :seon.error/diagnostic-expected authored
+                        :seon.error/diagnostic-offending
+                        (or (:schema data) (get-in data [:data :ref])
+                            (get-in data [:data :schema]))
+                        :seon.error/diagnostic-cause (:type data)
+                        :seon.error/diagnostic-evidence nil})]
+                  (throw (ex-info (:seon.error/message diagnostic)
+                                  diagnostic failure)))))
+            (arm-var! candidate authored bootstrap caps))
+          {:seon.instrument/registered (count contracts)
+           :seon.instrument/instrumented (count (instrumented))})))))
 
 (defn remove!
-  "Strip every instrumentation wrapper. EMERGENCY RECOVERY ONLY.
-  Not a dial, and never the answer to a noisy report — a noisy report
-  means the schema or the caller is wrong, and both are fixable at the
-  source. Returns how many wrappers survive, which is zero unless
-  something re-instrumented underneath."
+  "Return the shared JVM wrapper count. Cluster teardown cannot remove host contracts."
   {:malli/schema [:=> [:cat] :seon.instrument/instrumented]}
   []
-  (mi/unstrument!)
   (count (instrumented)))

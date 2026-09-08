@@ -4,119 +4,188 @@ status: active
 tags: [research, schema, runtime, test]
 ---
 
-# Cluster-scoped registry — stopped baseline, 2026-09-08
+# Cluster-scoped registry, 2026-09-08
 
-## Restart: shape projection holder removed, 20:47 UTC
+## Outcome and JVM ownership
 
-The orchestrator superseded the stop boundary. `shape-projection` now uses
-the handed immutable projection, including the cluster's projection-state
-carrier. It no longer retains a process-global forms/projection pair or
-rebuilds a projection after consulting that shared pair. Missing custody
-raises `:seon.schema/missing-projection`.
+Host Vars belong to the loaded JVM program. `apply!` reads their authored
+metadata, arms each unwrapped root once, and leaves existing wrapper identities
+alone. A reload produces a new root which the same seam arms. `remove!` cannot
+remove JVM-owned wrappers. A cluster's `:record` request cannot disable host
+validation; the existing interpreted-function policy remains local.
 
-Armed fast loop: **20 tests / 202 assertions**, zero failures/errors.
-The path-isolated gate `bin/test --paths src/seon/schema.clj --
-seon.schema-test` also passed **20 / 202**, base preparation 54,352 ms,
-coordinator/tests 59 seconds, snapshot `82d8ce7cd` plus this file's diff.
-The edit hook refused publication; this is not a live-adoption proof.
-The remaining sections below record the initial, superseded stop.
+At invocation, the wrapper takes the explicit request/environment projection,
+or the projection carried by the calling SCI context. The cluster's function
+contract compiles with that projection's registry and lives in its existing
+projection-local cache. Calls without cluster custody use an immutable packaged
+boot declaration projection, never Malli's mutable default registry. Boot report
+caps remain JVM policy; this does not claim independently loaded host programs
+or atomic hot reload. Nested projection carriers now select the innermost value.
 
-## Database projection ownership, 20:57 UTC
+## Census and dependency ledger
 
-Removed `!database-projections` and its process-wide LRU. The one-argument
-database acquisition returns a projection to its caller; the existing
-two-argument acquisition reuses the caller's projection when its fingerprint
-matches. No replacement global holder was introduced.
+| Source seam | Final disposition |
+|---|---|
+| schema `seon-registry`, `relink-registry!` | Deleted global facade and `mr/set-default-registry!` write |
+| schema.edn `load!` | No global relinking |
+| instrument `mi/-collect!` | Deleted global contract collection; loaded Var metadata supplies declarations |
+| instrument `mi/instrument!`, `mi/unstrument!` | Replaced with identity-preserving JVM wrappers; no cluster removal |
+| schema `!ambient-shape-projection` | Deleted; shape inspection takes the handed projection |
+| schema `!database-projections` | Deleted LRU; caller supplies the reusable prior projection |
+| schema declaration compilation | Carries explicit `:registry` compile options |
+| schedule `declared-maintenance-request-values` | One remaining implicit `m/schema`; exact protected-owner hunk below |
+| test runner `m/function-schemas` | Read-only global-drift observation, not contract lookup |
+| schema `!fallback-counts` | Process diagnostic counts only; no cluster state |
 
-`database-projections-reuse-only-the-handed-value` uses a canonical database,
-transacts a schema declaration, and verifies unchanged-value identity reuse,
-new-value declaration visibility, and the old database/projection remaining
-unchanged. It replaces the former mocked derivation-count test.
+The source census covered Malli schema/function-schema compilation, validation,
+explanation, collection and default-registry writes. Remaining compilation in
+schema/internal, program, call-preparation, render/ns and test/accretion has an
+explicit registry or receives an already compiled schema. `m/default-schemas`
+is the fixed built-in population; `mr/var-registry` resolves loaded schema Vars.
+Neither selects a cluster. No production Seon writer remains for Malli's global
+function-schema registry or default registry in the owned implementation.
 
-Both `bin/test-fast seon.schema-test` and `bin/test --paths
-src/seon/schema.clj test/seon/schema_test.clj -- seon.schema-test` passed
-**20 tests / 200 assertions**, zero failures/errors. Isolated coordinator/tests
-took 67 seconds; the successful run root was removed by the runner.
-The edit hook's publication timed out (exit 124); no live-adoption proof is
-claimed for this slice yet.
+Dependencies read: `reference-code/malli/src/malli/instrument.clj` (`-schema`,
+`-f->original`, collection and root alteration), `reference-code/malli/src/malli/core.cljc`
+(`-instrument`, function-schema registration), and the registry protocols.
+The existing first-party pattern is `schema/projection-cache-value`: derived
+validators are held by the projection that owns their declarations.
 
-No implementation landed. The assignment's stop boundary was reached during
-the initial armed baseline, before any production or test edits.
+## Regression and measured evidence
 
-## Verification boundary
+`test/seon/registry_isolation_test.clj` creates two canonical database fixtures,
+seeds their clusters, records different schema/function-contract facts, forks
+real SCI contexts, and advances each context's own projection. It verifies
+private declaration visibility, actual SCI execution, integer versus string
+contracts on the same host Var, invalid-input rejection, nested carrier
+precedence, unchanged wrappers across both arm/remove calls, and unchanged
+Malli global function schemas. Cleanup restores entering callable roots directly;
+production cluster removal is deliberately not a fixture teardown mechanism.
 
-`bin/test-fast seon.schema-test seon.instrument-test` (JVM PID 79987)
-armed 932 registered / 931 instrumented / 909 program-armable Vars.
-At 20:38:14 UTC, `database-projections-follow-exact-committed-identity`
-failed during canonical fixture construction:
+Earlier landed slices:
 
-```text
-java.lang.IndexOutOfBoundsException
-seon.fn/exact-source (fn.clj:142)
-seon.fn/var-row (fn.clj:350)
-seon.fn/analysis-rows-by-file (fn.clj:738)
-seon.fn/build-manifest (fn.clj:1340)
-seon.test-support/source-manifest (test_support.clj:155)
+- `b49c400e3`: shape holder deletion, fast and isolated **20 tests / 202 assertions** green.
+- `371a50dba`: database LRU deletion, fast and isolated **20 / 200** green.
+
+First complete isolated regression: **43 / 318**, zero failures/errors, but
+worker drift exposed 28 newly armed test Vars. The regression cleanup was fixed.
+First platform: **80 / 443**, two failures, zero errors. One exposed wrapper
+frames in missing-projection diagnostics and is fixed in schema. The other is
+the protected test-support expectation described below. Final isolated gate: **46 tests / 328 assertions**, zero failures/errors and
+no worker-global drift; base preparation **188302 ms**, coordinator/tests
+**157 seconds**. All seven gated source/test files matched the main checkout
+byte for byte. Corrected declaration-population fast loop: **3 / 10** green. Expanded fast testing additionally exposed a pre-existing
+cold-read assumption in the owned declaration-population test: shipped print
+defaults are already a delay. The test now permits its first resource acquisition
+and requires zero subsequent reads, while config operations still require one
+complete acquisition.
+
+Live default JVM PID 36758, after explicit REPL reload and removal of the old
+loaded registry facade, returned in **4473 ms**:
+
+```clojure
+{:same-wrappers true, :left-schema-absent-in-right true,
+ :left-rejects-string true, :global-schema-lookup-refuses true,
+ :right "right", :global-function-schemas 0, :right-rejects-int true,
+ :wrapped 912, :left 7}
 ```
 
-The process exited 1 after entering `seon.instrument-test`, reporting
-`bin/test-fast: initialization or execution failed: nil`. No aggregate tally
-was emitted. No instrumentation assertion or new isolation regression is
-claimed. No isolated gate or platform run followed the stop boundary.
-The exception does not identify the offending source file: concurrent edits
-are a hypothesis, not a verified attribution. This is the already recorded
-[source-span fixture boundary](../../../seon/issues/bin-test-shared-base-compiles-other-lanes-half-edits.md).
+The temporary probe namespace was removed. After the default cluster restarted,
+the retained [probe script](cluster-scoped-registry-live-probe-2026-09-08.clj)
+passed again in **7796 ms**, on fresh JVM **45036**, with **910** observed wrappers
+and the same booleans and values. All four retired registry/cache Vars were
+absent and global function-schema count remained zero (2 ms read). The final script
+bytes, including explicit requires, repeated that result in **8711 ms**. This is a hot-reloaded JVM proof,
+not successful development adoption. CLI adoption twice failed at
+`script/seon/dev/clj_kondo.clj:3:3` because Babashka could not load `seon.id`;
+the existing `hook-babashka-cannot-load-seon-id.md` owns that separate failure.
+The initial live snapshot had 912 wrappers and 98 global schema namespaces.
 
-## Partial census and intended seam
+## Protected test fixture migration
 
-| Owner | Observed path |
-|---|---|
-| `src/seon/schema.clj:1062` | `seon-registry` selects call-bound forms through a process-global Malli default |
-| `src/seon/schema.clj:1085` | `relink-registry!` calls `mr/set-default-registry!` |
-| `src/seon/schema/edn.clj:371` | `load!` calls `relink-registry!` |
-| `src/seon/instrument.clj:643` | collection calls `mi/-collect!`, which compiles through the default and writes Malli's function-schema atom |
-| `src/seon/instrument.clj:752` | `apply!` wraps globally; its `:record` branch unstruments globally |
-| `src/seon/instrument.clj:777` | `remove!` calls global `mi/unstrument!` |
-| `src/seon/schedule.clj:504` | `m/schema :seon.maintenance.request/value` has no explicit registry; this file has foreign uncommitted edits |
-| `src/seon/schema.clj:3129` | `!ambient-shape-projection` retains a shared forms/projection pair |
-| `src/seon/schema.clj:2473` | `!database-projections` retains projections in an LRU keyed by committed-value identity |
-| `src/seon/schema.clj:743` | `!fallback-counts` contains process diagnostics, not cluster authority |
+The platform's remaining obsolete expectation is
+`test/seon/test_support_test.clj:74`: after production `instrument/remove!`,
+it asserts zero wrappers. The fixture in `test/seon/test_support.clj:631` also
+uses production removal as teardown. These files have concurrent owner edits
+and were not modified. Their migration is concrete: fixture teardown directly
+unwraps current roots with Malli `mi/-f->original`, then restores entering roots
+and the saved function-schema atom. Its regression should deliberately unwrap
+one entering root inside the fixture, assert that change, throw, then verify
+exact restoration. It must not assert that a cluster can remove all wrappers.
+The owned instrumentation and isolation tests already use direct root restoration.
 
-This is a partial source census, not clearance of all Malli calls. Calls on
-already compiled Malli schemas must be distinguished from calls on unresolved
-forms: compiled schemas carry their registry. The existing projection-local
-`projection-cache-value` is the pattern for retaining compiled contracts.
+## Schedule caller handoff to turn-cut
 
-The assignment chooses one JVM wrapper per loaded Var, with validation using
-the calling operation's carried projection and with cluster removal unable to
-strip shared wrappers. That seam has not been implemented or proven. The
-operator's repeated arm calls, reload behavior, and test preservation machinery
-must remain coherent when replacing global Malli collection. No new global
-cluster-state holder is justified.
+The remaining implicit runtime Malli lookup is in the concurrently edited
+`src/seon/schedule.clj`. The orchestrator requested the hunk here, without
+editing turn-cut's file. This obtains one projection from the immutable
+database already handed to execution-context and passes it to the lookup:
 
-Dependency ledger: `reference-code/malli/src/malli/instrument.clj` owns
-`-collect!`, `-strument!`, and the `::original` wrapper stamp;
-`reference-code/malli/src/malli/core.cljc:3059` owns the function-schema atom
-and `-register-function-schema!` writes compiled schemas into it.
-First-party call sites are the instrument and schema owners above.
+```diff
+             [seon.operator.runtime :as operator.runtime]
++            [seon.schema :as schema]
+             [seon.schema.edn :as schema.edn])
+@@
+ (defn- declared-maintenance-request-values
+-  [effective]
++  [projection effective]
+   (select-keys
+    effective
+    (m/explicit-keys
+-    (m/deref (m/schema :seon.maintenance.request/value)))))
++    (m/deref
++     (m/schema :seon.maintenance.request/value
++               {:registry (:seon.schema.projection/registry projection)})))))
+@@
+ (defn- execution-context
+   [database cluster]
+-  (let [cluster-name (:seon.cluster/name cluster)
++  (let [projection (schema/projection-from-database database)
++        cluster-name (:seon.cluster/name cluster)
+@@
+-    (merge (declared-maintenance-request-values effective)
++    (merge (declared-maintenance-request-values projection effective)
+```
 
-## Live evidence and scope
+This is a handoff, not an applied or verified schedule change. The default
+Malli registry no longer supplies Seon declarations in a fresh JVM after the
+registry change; this caller must carry its registry before that path runs.
 
-MCP JVM mode on default returned `{:wrapped 912 :global-schema-namespaces 98}`
-in 2 ms. Runtime status answered for PID 36758, with render proc ping unknown.
-The read-only `bin/seon status` waited behind PID 11563's source adoption of
-`test/seon/test_runner_test.clj`; no foreign holder was interrupted.
 
-AGENTS.md was supplied end to end and read from disk; PRD §10, the roadmap
-entry and working edge, the concurrency landing, and the data-modeling,
-datahike, data-oriented Clojure, REPL and testing skills were consulted.
-The broader requested end-to-end source/issue reading was not completed
-before the stop boundary. No completed archaeology or exhaustive audit is
-claimed.
+## Session history and verification method
 
-Only this note and an observation appended to the existing fixture-boundary
-issue were changed. The instrumentation issue remains open. No production
-file, protected file, foreign session, or cluster was changed.
-The fast JVM exited 1. The owned read-only status process was terminated and
-reaped with exit 143 after 182 seconds of lock waiting. No owned background
-process or scratch root remains.
+The initial source-span fixture failure was recorded in `4b56920b1`; the
+orchestrator superseded that stop and requested the snapshot workaround.
+The implementation gates use `tmp/registry-wt` at `82d8ce7cd`, overlaying only
+owned files and linking the maintained dependency sources. No foreign session
+or protected source was changed. Main checkout gates blocked on a shared
+dependency-cache lock were terminated and reaped before independent retries.
+
+AGENTS.md was supplied end to end and read from disk. PRD §10, roadmap entry
+and working edge, concurrency landing and its instrumentation issue, plus the
+data-modeling, datahike, data-oriented Clojure, REPL and testing skills informed
+the change. The initial note's claim that no implementation landed is superseded.
+
+## Exact gate invocation
+
+From the isolated snapshot worktree, with the main owned bytes copied in:
+
+```sh
+bin/test --paths src/seon/schema.clj src/seon/schema/edn.clj src/seon/instrument.clj test/seon/schema_test.clj test/seon/instrument_test.clj test/seon/registry_isolation_test.clj test/seon/schema/declaration_population_test.clj -- seon.instrument-test seon.schema-test seon.registry-isolation-test seon.schema.declaration-population-test
+```
+
+The platform invocation used the same first six paths with `--platform`.
+No `--all` or `--full` gate was run. Kondo over the owned source, tests and
+retained probe reported **0 errors**; existing warnings were retained.
+
+Touched implementation: `src/seon/schema.clj`, `src/seon/schema/edn.clj`,
+`src/seon/instrument.clj`; tests: `test/seon/schema_test.clj`,
+`test/seon/schema/declaration_population_test.clj`, `test/seon/instrument_test.clj`,
+`test/seon/registry_isolation_test.clj`. Documentation: this note and the live
+probe; archived instrumentation ownership issue; separate open adoption and
+protected-fixture follow-ups. The initial source-span issue observation was
+already committed in the first research slice.
+
+The final isolated gate exited 0 and removed its successful run root. All
+owned command sessions were reaped; the lane snapshot and scratch outputs were
+removed before reporting. The main repository dependency tree was preserved.

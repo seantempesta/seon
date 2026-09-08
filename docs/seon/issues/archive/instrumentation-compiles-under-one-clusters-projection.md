@@ -1,11 +1,29 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, runtime, schema, class/p1, wave/seon-env-p3]
 ---
 
 # The operator instruments the whole JVM under one cluster's projection state
+
+## Resolution — 2026-09-08
+
+The assignment explicitly chooses one loaded host program and one wrapper per
+Var generation. Repeated cluster arm/remove calls preserve those roots.
+Contracts compile with the calling request/context projection and are cached
+on that projection; Malli's default and global function-schema registries no
+longer carry Seon declarations. Both process-global projection caches are gone.
+The two canonical clusters regression validates different contracts on the
+same Var and proves neither removal disturbs the other.
+
+This supersedes the historical acceptance criteria asking for independently
+selected host error policy or removal of the operator's selected arm caller:
+JVM host enforcement and boot report caps are shared by the ruled seam;
+interpreted function policy stays cluster-local. Atomic source adoption is a
+separate open issue linked below. Protected fixture/schedule migration and all
+tallies are explicit in the
+[landing note](../../../prds/context-generation/research/cluster-scoped-registry-landing-2026-09-08.md).
 
 ## Problem
 
@@ -15,7 +33,7 @@ clusters share ONE set of contract wrappers compiled against ONE cluster's
 projection.
 
 This is Defect II of the
-[parallel isolation audit](../../prds/sci-execution-runtime/research/parallel-isolation-audit-2026-08-07.md)
+[parallel isolation audit](../../../prds/sci-execution-runtime/research/parallel-isolation-audit-2026-08-07.md)
 — derived state parked in a process-wide slot — at the boot boundary.
 
 ## Evidence
@@ -49,13 +67,13 @@ live and both passed, because both forked the same published commit and their
 projections agree in content. The hazard is real but currently unobservable —
 it becomes observable the moment two co-hosted clusters hold genuinely
 different declarations, which is exactly the
-[test-infrastructure spec](../../prds/sci-execution-runtime/plan/test-infrastructure-spec-2026-08-07.md)'s
+[test-infrastructure spec](../../../prds/sci-execution-runtime/plan/test-infrastructure-spec-2026-08-07.md)'s
 four-worker target.
 
 Ordering note worth keeping: `launch-form` (`:1389`) instruments AFTER
 `start!`, `add-form` (`:1430`) BEFORE it. So a fresh-JVM boot runs unchecked
 and a co-hosted boot runs checked — which is why
-[a-cohosted-second-cluster-cannot-boot](a-cohosted-second-cluster-cannot-boot.md)
+[a-cohosted-second-cluster-cannot-boot](../a-cohosted-second-cluster-cannot-boot.md)
 only ever surfaced on the second cluster.
 
 ## 2026-08-08 — this now BLOCKS the schema-environment fix, and the mechanism
@@ -63,9 +81,9 @@ only ever surfaced on the second cluster.
 ## is narrower than "instrumentation is process-wide"
 
 Found by implementing
-[schema-environment-is-ambient-not-explicit](schema-environment-is-ambient-not-explicit.md)'s
+[schema-environment-is-ambient-not-explicit](../schema-environment-is-ambient-not-explicit.md)'s
 first acceptance criterion and measuring what broke. Evidence:
-[schema-environment-explicit-2026-08-08.md](../../prds/sci-execution-runtime/research/schema-environment-explicit-2026-08-08.md).
+[schema-environment-explicit-2026-08-08.md](../../../prds/sci-execution-runtime/research/schema-environment-explicit-2026-08-08.md).
 
 Restricting `seon.schema`'s registry facade to the packaged bootstrap
 population — deleting the thread-local half, which is what that criterion
@@ -156,7 +174,7 @@ retains its existing operator mechanism.
 
 `script/seon/fresh_operator.clj` (`refresh-instrument-form`,
 `instrument-form`) and `seon.instrument/apply!`. The repair belongs to the
-[seon.env PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)'s
+[seon.env PRD](../../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)'s
 Phase 3 slice "move the compiled caches onto the projection": derived state
 hangs off the value it derives from, so two projections cannot exchange a
 validator.
@@ -255,74 +273,11 @@ named non-publish init both succeeded, with publication commit
 `6a9e0964-b1c2-51fe-9f6d-94228e188eb5`, digest
 `2101a3e72457465d942d1b2eea3f8c090c8bf761c977528bde7cc4dd843aa6ee`.
 
-## 2026-09-06 development adoption has two mixed-generation races
+## Adoption ownership follow-up
 
-The remaining interval is broader than one missing wrapper. The generated
-operator form reloads the schema, source index, database, evaluation, and
-publication namespaces sequentially before invoking `refresh-source!`
-(`script/seon/fresh_operator.clj:2366-2407`). Each `require :reload` replaces
-the affected JVM Var roots immediately. The publication monitor serializes
-publishers only (`src/seon/cluster.clj:1403-1407,1931`); running agent, web,
-and REPL callers do not acquire it. A call during this interval can therefore
-enter new source under an old wrapper or no wrapper before the final
-instrumentation restoration (`script/seon/fresh_operator.clj:2429-2435`).
-
-SCI does not isolate that interval. First-party SCI bindings deliberately
-forward the actual host Vars (`src/seon/sci/eval.clj:1093-1160`), so even an
-already-created or isolated SCI fork observes a replaced host root immediately.
-Staging only SCI namespace state cannot make JVM source generation atomic.
-
-There is a second race during adoption. `development-source-refresh!` changes
-the cluster declarations and program rows, reloads selected namespaces, calls
-`acquire!` on the shared base context, and only afterward advances its projection
-and writes the adopted source commit (`src/seon/cluster.clj:1771-1905`).
-Acquisition changes SCI namespace state through multiple swaps and publishes
-the kernel program snapshot through a separate atom
-(`src/seon/sci/eval.clj:1558-1670`; `src/seon/sci/kernel.clj:108-115`). SCI's
-`fork` copies the context environment in one dereference
-(`reference-code/sci/src/sci/core.cljc:345-351`), but that does not atomically
-include the separate program snapshot or projection carrier. The run loop forks
-without consulting the eventual source-commit fact
-(`src/seon/cluster/loop.clj:1633-1645`). A concurrent turn can therefore combine
-a partial resolver state, a different program snapshot, a forwarded new host
-root, and an old projection.
-
-### Required coherent-adoption seam
-
-The preferred repair preserves the accumulated live cluster and has one
-bounded quiescence and publication owner:
-
-1. Acquire and hold every armed agent's existing turn-completion permit, so an
-   active turn settles and queued wakes cannot begin a new turn. Quiesce the
-   shared render/web work through its existing graph completion events as well;
-   `flow/pause` alone only sends an asynchronous command and is not an
-   acknowledgement
-   (`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:174-189`).
-2. While quiesced, reload JVM source, build and validate the prospective
-   projection, and acquire the prospective SCI namespace and program state in
-   an isolated context.
-3. Publish one generation value containing the namespace state, program
-   snapshot, and projection. Swap the live base context to that complete value,
-   install JVM wrappers for the same projection, then write the adopted source
-   commit.
-4. Release the held completion permits and resume acknowledged shared work only
-   after every step succeeds. On failure, retain or restore the prior complete
-   generation before releasing work.
-
-This requires consolidating the currently separate SCI environment, kernel
-program snapshot, and projection carrier at their existing acquisition owner.
-It does not require a second evaluator, cache, or publication registry.
-
-Orderly stop/refork/start is a coherent fallback because agent disarm waits for
-the exact turn-completion event (`src/seon/cluster/agent.clj:915-951`) and a
-fresh start constructs one database/context/projection generation. It is not
-the recommended development behavior: the current refork operation replaces
-the cluster branch and therefore destroys the live cluster's accumulating
-agent facts, directly violating the owner's preservation requirement. A
-process-wide read/write lock around every callable boundary would cover JVM
-REPL calls too, but adds a pervasive second admission mechanism and is likewise
-rejected.
-
+The mixed-generation adoption evidence is retained in
+[development-adoption-can-mix-host-and-sci-generations](../development-adoption-can-mix-host-and-sci-generations.md).
+It is not resolved by stable wrapper ownership.
 
 ## 2026-09-08 cohosted concurrency audit reaffirmation
 
@@ -335,7 +290,7 @@ collects all JVM Vars into Malli's global namespace/symbol registry, and
 forward shared host Vars. Independent programs/contracts remain unproven and
 structurally coupled. No production repair was attempted across held owners.
 
-The [concurrency landing](../../prds/context-generation/research/multi-cluster-concurrency-landing-2026-09-08.md)
+The [concurrency landing](../../../prds/context-generation/research/multi-cluster-concurrency-landing-2026-09-08.md)
 records the complete global-state inventory, measurements and design choice.
 
 

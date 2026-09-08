@@ -368,7 +368,6 @@
   (let [resource (or resource default-resource)
         {::keys [file forms]}
         (resource-population resource)]
-    (schema/relink-registry!)
     {::file file
      ::keys (count forms)}))
 

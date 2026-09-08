@@ -762,7 +762,7 @@
 ;; another entry — the repository root a test alias adds as `"."`, which also
 ;; holds every vendored fork under `reference-code/`. A frame is actionable
 ;; when its source file resolves on the classpath under one of the survivors.
-(def ^:private resolution-owner-namespaces #{"seon.schema" "seon.schema.edn"})
+(def ^:private resolution-owner-namespaces #{"seon.schema" "seon.schema.edn" "seon.instrument"})
 
 (defn- canonical-directory
   [path]
@@ -929,7 +929,8 @@
   "Call `f` with one immutable database-derived projection for this operation."
   {:malli/schema [:=> [:cat :map [:fn clojure.core/ifn?]] :any]}
   [projection f]
-  (binding [*projection* projection]
+  (binding [*projection* projection
+            *projection-state* nil]
     (f)))
 
 (defn call-with-projection-state
@@ -937,7 +938,9 @@
   {:malli/schema [:=> [:cat [:fn clojure.core/deref] [:fn clojure.core/ifn?]]
                   :any]}
   [projection-state f]
-  (binding [*projection-state* projection-state]
+  (binding [*projection-state* projection-state
+            *projection* nil
+            *packaged-forms* nil]
     (f)))
 
 (defn- active-projection []
@@ -1027,61 +1030,11 @@
     [:=> [:catn [::forms :map]] ::projection]]}
   ([] (declaration-projection (declaration-population)))
   ([forms]
-   (with-compiled-cache
-    {:seon.schema.projection/forms forms
-     :seon.schema.projection/registry (candidate-registry forms)})))
-
-;; THE one stable registry facade Seon installs as Malli's process-global
-;; default. Once a projection is active it reads only that committed
-;; generation; candidate validation passes [[candidate-registry]] explicitly.
-;; Before first activation it reads module declarations so namespace loading
-;; can bootstrap normally. Normal activation never repoints Malli's default.
-;;
-;; KNOWN DEFECT, and why it is still here (2026-08-07 parallel isolation
-;; audit, Defect I.1, `probe_registry_thread_fallback`): [[active-forms]]
-;; selects its population through thread-local dynamic bindings, so this
-;; PROCESS-GLOBAL default answers differently depending on which thread asks,
-;; and on a hop the bindings vanish and it falls back to the packaged
-;; population silently — correct bytes under one cluster, wrong bytes under
-;; two, never an error. Restricting it to the packaged population was
-;; implemented and REVERTED on 2026-08-08 against measured evidence: Malli's
-;; own `malli.instrument/-collect!` registers a Var's `:malli/schema` through
-;; `m/-register-function-schema!`, which resolves against THIS default, and
-;; that is how `seon.instrument` sees contracts a cluster declared but the
-;; packaged resources do not (`applying-uses-the-acquired-projection-without-
-;; publishing-it`). Instrumentation is therefore a live consumer of the
-;; cluster-selecting behavior, and the fix is not in this namespace: it is
-;; `seon.instrument` compiling against the acquired projection instead of
-;; Malli's global function-schema registry, which is itself a second
-;; process-global slot of the same class
-;; (`docs/prds/sci-execution-runtime/research/schema-environment-explicit-2026-08-08.md`).
-(defn- active-forms [] (candidate-forms))
-
-(defonce ^:private seon-registry
-  (let [defaults (mr/composite-registry
-                  (mr/fast-registry (m/default-schemas))
-                  (mr/var-registry))]
-    (reify
-      mr/Registry
-      (-schema [this type]
-        (or (mr/-schema defaults type)
-            (when-let [form (get (active-forms) type)]
-              (m/schema
-               (compilable-form form {})
-               {:registry this}))))
-      (-schemas [_]
-        (merge (mr/-schemas defaults) (active-forms))))))
-
-(defn relink-registry!
-  "Repoint Malli's convenience default to Seon's stable registry facade.
-
-   The bootstrap load wrapper calls this after Malli bundle loads that reset
-   their own default. Normal projection publication does not call this
-   throwable integration boundary."
-  {:malli/schema [:=> [:cat] :boolean]}
-  []
-  (mr/set-default-registry! seon-registry)
-  true)
+   (let [registry (candidate-registry forms)]
+     (with-compiled-cache
+      {:seon.schema.projection/forms forms
+       :seon.schema.projection/registry registry
+       :seon.schema.projection/compile-options {:registry registry}}))))
 
 ;; THE structural registry: Malli's own default schemas, plus one opaque
 ;; placeholder for every other type. It resolves nothing from any declaration
@@ -2742,8 +2695,7 @@
 (defn activate!
   "Validate and atomically activate a complete `{schema-key form}` set.
 
-   The candidate is fully built before either the collector or Malli default
-   registry changes. Existing canonical function contracts are revalidated
+   The candidate is fully built before the declaration collector changes. Existing canonical function contracts are revalidated
    against the replacement schema population. Returns the activated projection."
   {:malli/schema [:=> [:catn [::forms :map]] :map]}
   [forms]
@@ -3041,8 +2993,7 @@
 (defn valid-candidate-value?
   "True when `value` satisfies `schema-key` in the current candidate.
 
-   Candidate declarations intentionally do not mutate Malli's process-global
-   default registry before their database transaction commits. Boundaries
+   Candidate declarations never mutate Malli's process-global default registry. Boundaries
    validating a declaration and its first facts together use this function so
    they see the complete candidate without publishing it early.
 
@@ -3454,15 +3405,3 @@
   {:malli/schema [:=> [:cat] :map]}
   []
   (registered-schemas))
-
-(comment
-  ;; REPL exploration
-  (register! ::test-schema [:string {:min 1}])
-  (registered-schemas)
-  (registered? ::test-schema)
-  (schemas-in-namespace "seon.schema")
-  (m/validate ::test-schema "hello")
-  (m/validate ::test-schema "")          ; fails — min 1
-  (require '[malli.generator :as mg])
-  (mg/generate ::test-schema)
-  nil)

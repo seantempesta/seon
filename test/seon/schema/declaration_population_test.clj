@@ -57,12 +57,14 @@
           "the fallback must actually read resources, or this test is vacuous"))
     (doseq [[operation thunk]
             [["seon.config/default-decisions" config/default-decisions]
-             ["seon.config/default-population" config/default-population]
-             ["seon.print/default-options" print/default-options]]]
+             ["seon.config/default-population" config/default-population]]]
       (testing operation
         (is (= one (resource-reads thunk))
             (str operation
-                 " must perform ONE declaration resolution, not one per item"))))))
+                 " must perform ONE declaration resolution, not one per item"))))
+    (testing "shipped print defaults are already retained after their first acquisition"
+      (is (<= (resource-reads print/default-options) one))
+      (is (zero? (resource-reads print/default-options))))))
 
 (deftest a-supplied-population-is-not-resolved-again
   (testing "every question answered from a population in hand reads nothing"
