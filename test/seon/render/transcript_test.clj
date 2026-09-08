@@ -448,9 +448,11 @@
           (is (str/includes? ai "Execution error (ArithmeticException) at"))
           (is (str/includes? ai "Divide by zero"))
           (assert-no-session-narration ai))
-        (testing "old entries age only in the projection"
-          (is (= [:summary :summary :full :full :full :full :full :full]
-                 (mapv :detail html-rows))))
+        (testing "every admitted entry renders in full"
+          ;; The `:summary` detail existed only for the token ladder's
+          ;; degradation step, whose driver had no caller and is deleted:
+          ;; presentation elides once, at the AI boundary.
+          (is (= (repeat 8 :full) (mapv :detail html-rows))))
         (testing "HTML is the same structure with stable entry ids"
           (is (= (block/surface-id :transcript) (get-in html-value [1 :id])))
           (doseq [{:keys [id kind dom-id]} html-rows]
@@ -612,11 +614,15 @@
                             ")\n#:seon.repl{:value " ordinal))
             ai-positions
             (mapv #(.indexOf ai (prompted %)) (range bootstrap-count))
+            ;; the task message is SOURCE like every other message: its own
+            ;; identity is what the transcript names
             task-position
-            (.indexOf ai (bootstrap/task-message))
+            (.indexOf ai (pr-str bootstrap-task-id))
             pinned-end
             (.indexOf ai (prompted (dec bootstrap-count)))
-            newest-start (.indexOf ai "newest history 0")]
+            ;; the newest message, located by its identity for the same
+            ;; reason: the transcript renders the form that reads it
+            newest-start (.indexOf ai (pr-str (first newest-ids)))]
         (is (zero? (html-elided html-value))
             "the transcript renders its whole query-bounded history")
         (is (= (into [(first pinned-ids) bootstrap-task-id]
