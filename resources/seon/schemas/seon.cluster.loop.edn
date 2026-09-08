@@ -34,7 +34,10 @@
                     :evaluation
                     [:map
                      [:seon.cluster.eval/at {:optional true} :seon.cluster.eval/at]
+                     ;; ONE OF TWO TERMINAL SHAPES: an admitted value with its
+                     ;; bytes, or :seon.eval/missing with the reason.
                      [:seon.sci.admit/value
+                      {:optional true}
                       [:any
                        {:seon.schema.admission/exemption
                         :seon.schema.admission/polymorphic-boundary
@@ -44,6 +47,8 @@
                      [:seon.cluster.eval/result-edn
                       {:optional true}
                       :seon.cluster.eval/result-edn]
+                     [:seon.eval/missing {:optional true} :seon.eval/missing]
+                     [:seon.eval/size {:optional true} :seon.eval/size]
                      [:seon.cluster.eval/error
                       {:optional true}
                       :seon.cluster.eval/error]
@@ -134,6 +139,8 @@
                      [:seon.cluster.eval/result-size
                       {:optional true}
                       :seon.cluster.eval/result-size]
+                     [:seon.eval/missing {:optional true} :seon.eval/missing]
+                     [:seon.eval/size {:optional true} :seon.eval/size]
                      [:seon.cluster.eval/error
                       {:optional true}
                       :seon.cluster.eval/error]

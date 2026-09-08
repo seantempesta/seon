@@ -22,7 +22,13 @@
                 :ending-ns :symbol,
                 :evaluation
                 [:map
-                 [:seon.sci.admit/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                 ;; A VALUE AND ITS BYTES ARE ONE TERMINAL SHAPE, and the
+                 ;; other is :seon.eval/missing. An evaluation over the
+                 ;; storage bound carries neither the value nor the node, so
+                 ;; requiring them made the evaluator's own contract refuse
+                 ;; the answer it is supposed to give.
+                 [:seon.sci.admit/value {:optional true}
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                           :seon.schema.admission/reason "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation."
                           :gen/elements [nil true 0 "" :k [] {} #{}]}]]
                  [:seon.cluster.eval/result-edn
