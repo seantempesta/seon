@@ -3520,7 +3520,10 @@
         workers (Executors/newVirtualThreadPerTaskExecutor)
         wanted (or (:seon.render.web/port service) 0)
         bind! (fn [port]
-                (http/run-server (handler service)
+                ;; Keep the listening socket through development adoption.
+                ;; Resolve the handler Var on each request so reload and
+                ;; re-instrumentation take effect without rebinding the server.
+                (http/run-server (fn [request] ((handler service) request))
                                  {:ip "127.0.0.1"
                                   :port port
                                   :worker-pool workers

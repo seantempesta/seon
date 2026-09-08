@@ -77,3 +77,10 @@ registered server object had changed. The registry then named port 7994
 instead of 58444; requesting that URL also timed out. This additional
 observation cannot attribute the server replacement to development adoption,
 which this request never entered. The availability acceptance remains open.
+
+Page/feed lane observation, 2026-09-08: MCP initially answered on PID 45036
+with readiness port 7994 and advertisement port 58444. The assigned Juniper
+debug URL returned 404 in 0.001537 s. A subsequent MCP evaluation reported
+`repl-unavailable` because the advertisement was missing. The lane did not
+stop or restart default; this observation cannot attribute an outage to
+adoption. Live availability verification remains required.
