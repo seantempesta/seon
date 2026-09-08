@@ -1,6 +1,6 @@
 ---
 type: research
-status: draft — gates in progress
+status: complete
 date: 2026-09-07
 tags: [research, sci, admission, print, storage, repl]
 ---
@@ -259,6 +259,33 @@ time.
 
 `seon.render.transcript-test/one-reply-reads-identically-on-the-page-in-history-and-in-the-prompt`
 is GREEN in that baseline, so it is this lane's to keep green.
+
+`bin/test --platform` is GREEN at `8f22125ad`: 73 platform tests, and the
+runner removed its isolated operator root as successful.
+
+### 4.2 The lane's gate, measured
+
+Same selection at `8f22125ad`:
+
+**16 red tests — every one of them in the inherited 17, and no new red.**
+
+The seventeenth,
+`seon.render.web-test/data-caps-a-five-megabyte-attribute-through-the-shared-floor`,
+is now GREEN: its expectation moved to the ruled behavior (`/data` serves the
+whole attribute) and it is renamed
+`data-serves-a-five-megabyte-attribute-whole-with-its-handle`.
+
+`one-reply-reads-identically-on-the-page-in-history-and-in-the-prompt` — the
+byte-identity proof this lane had to keep — is green.
+
+Three reds this lane briefly owned were repaired before this run, and each
+named a real defect rather than a stale expectation: the missing-terminal-fact
+class above; a settle fixture that made `:seon.eval/missing` its terminal fact
+and then asserted the settle was refused for having none; and putting the
+render profile's width in the COMPILED PULL PLAN'S CACHE KEY, which split one
+plan into two compilations and would have handed a second caller the first
+caller's profile. The pull's limit stayed the caps-derived query-work bound it
+always was; the connection width is derived per acquisition from the request.
 
 ## 5. Live verification
 
