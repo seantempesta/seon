@@ -1,6 +1,6 @@
 ---
 type: defect
-status: open
+status: resolved
 severity: blocker
 tags: [schema, reconciliation, boot, testing, class/p1]
 ---
@@ -62,3 +62,37 @@ The second dissolves the mechanism; the first unblocks the gate today.
 
 Found by the `evaluation-merge` program step while running `bin/test --all`;
 outside its owned paths (`src/seon/cluster.clj`).
+
+## Resolution (2026-09-07)
+
+Fixed in `src/seon/cluster.clj` as the CLASS, not the instance: convergence now
+compares each attribute under the STORE's own semantics. `store-comparable-value`
+reads the compared attribute's `:db/cardinality` out of the installed schema
+(`(:schema db)`) and normalizes a cardinality-many value to a set; every other
+value compares as it stands. `schema-row-converged?` applies that normalization
+to the desired row and to the selected stored row before comparing, and
+`schema-row-changes` calls it in place of the raw `=`. No attribute name appears
+in the fix, and `:seon.render/units` keeps its declaration — its deletion remains
+PRD step 4's.
+
+Evidence, on a canonical `seon.test-support/with-database` database:
+
+```clojure
+(schema-row-changes @connection (schema/registered-schemas))
+;; before => 1 row  (#:seon.schema{:key :seon.cluster.agent/agent};
+;;                   the sole differing attribute was :seon.render/units,
+;;                   cardinality-many, set-equal but vector-unequal)
+;; after  => 0 rows
+```
+
+`bin/test seon.test-support-test seon.cluster-test`: 7 tests, 96 assertions,
+0 failures, 0 errors — including the class regression
+`seon.test-support-test/a-canonical-database-is-the-production-source-population`
+("clock-free schema reconciliation is idempotent"), which had been the platform
+tier's stop. `bin/test --platform` is green.
+
+The new unit regression is
+`seon.cluster-test/schema-row-convergence-uses-the-stores-own-semantics`: on a
+real database carrying a synthetic installed cardinality-many attribute, a value
+read back in another order is convergence while a genuinely different value is
+still a change, and a canonical database yields no rows at all.

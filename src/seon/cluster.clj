@@ -916,6 +916,37 @@
     (coll? value) (into #{} (map as-schema-lookup-refs) value)
     :else value))
 
+(defn- store-comparable-value
+  "Normalize one attribute value into the store's own comparison semantics.
+
+  Datahike holds a cardinality-many attribute as a SET and reads it back in
+  an order it chooses, so a declaration's ordered value never equals its own
+  stored reading. Such a value therefore compares as a set; every other value
+  compares as it stands. The INSTALLED schema decides which — never the
+  attribute's name."
+  [installed-schema attribute value]
+  (if (= :db.cardinality/many
+         (get-in installed-schema [attribute :db/cardinality]))
+    (if (coll? value) (set value) #{value})
+    value))
+
+(defn- schema-row-converged?
+  "Does the stored row already carry every desired attribute value?
+
+  Compares under the store's own semantics for each attribute, so a
+  cardinality-many value read back in a different order is convergence, not a
+  change to re-transact on every branch open."
+  [installed-schema desired current]
+  (letfn [(comparable [row]
+            (into {}
+                  (map (fn [[attribute value]]
+                         [attribute
+                          (store-comparable-value
+                           installed-schema attribute value)]))
+                  row))]
+    (= (comparable desired)
+       (comparable (select-keys current (keys desired))))))
+
 (defn- schema-row-changes
   [db forms]
   (into
@@ -939,7 +970,7 @@
                              [attribute (as-schema-lookup-refs value)]
                              [attribute value])))
                     pulled))]
-        (when-not (= desired (select-keys current (keys desired)))
+        (when-not (schema-row-converged? (:schema db) desired current)
           desired))))
    (schema/canonical-schema-rows forms)))
 
