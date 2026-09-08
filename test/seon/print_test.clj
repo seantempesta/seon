@@ -268,7 +268,13 @@
       (is (= (normalize-whitespace text)
              (normalize-whitespace (lexical-hiccup-text hiccup)))))))
 
-(deftest terminal-projections-ignore-presentation-size-fields
+(deftest fit-bounds-a-terminal-projection-and-names-what-it-omitted
+  ;; `fit` IS the AI context generation boundary's one elision (owner ruling,
+  ;; 2026-09-07). Callers that are not generating AI context do not call it:
+  ;; `seon.render/fit-terminal` fits only `:seon.render/ai`, and the HTML
+  ;; projection is emitted whole. Asserted HERE at the bounder, and at the
+  ;; render seam by
+  ;; `seon.render.web-test/a-five-megabyte-value-is-elided-for-ai-and-complete-for-html`.
   (let [profile (assoc (render/agent-render-profile
                         (test-support/effective-config))
                        :seon.render.profile/token-budget 16
@@ -277,69 +283,21 @@
                        :seon.render.profile/composition :multiline
                        :seon.print/requery-id
                        [:seon.render.call/id :fixture/long])
-        long-text (apply str (repeat 512 "outward "))]
-    (let [fitted (print/fit {:seon.print/face :seon.print/projected
-                             :seon.render/output :seon.render/ai
-                             :seon.print/value long-text}
-                            profile)]
-      (is (= :seon.print/projected (:seon.print/face fitted)))
-      (is (= long-text (:seon.print/value fitted))))
-    (let [fitted (print/fit {:seon.print/face :seon.print/projected
-                             :seon.render/output :seon.render/html
-                             :seon.print/value [:pre long-text]}
-                            profile)
-          html (hiccup/->string (print/emit-hiccup fitted (print/default-options)))]
-      (is (= :seon.print/projected (:seon.print/face fitted)))
-      (is (str/includes? html long-text))
-      (is (not (str/includes? html "[:pre"))))))
-
-(deftest realistic-html-preview-preserves-hiccup-and-fit-bound
-  (let [profile (assoc (render/agent-render-profile
-                        (test-support/effective-config))
-                       :seon.render.profile/token-budget 128
-                       :seon.render.profile/max-depth 2
-                       :seon.render.profile/max-children 1
-                       :seon.render.profile/composition :multiline
-                       :seon.print/requery-id
-                       [:seon.render.call/id :fixture/preview])
-        source (list [:section {:class "preview"}
-                      [:h1 "Visible heading"]
-                      [:div (apply str (repeat 200 "text & value "))]
-                      [:input {:value (apply str (repeat 400 "x"))}]]
-                     [:aside "second fragment"])
-        node {:seon.print/face :seon.print/projected
-              :seon.render/output :seon.render/html
-              :seon.print/value source}
-        fitted (print/fit node profile)
-        output (print/emit-both fitted (print/default-options))
-        html (:seon.print/hiccup output)
-        text (:seon.print/text output)]
-    (is (= :seon.print/projected (:seon.print/face fitted)))
-    (is (hiccup/hiccup? (:seon.print/value fitted)))
-    (let [html-string (hiccup/->string html)]
-      (is (str/includes? html-string "<section"))
-      (is (str/includes? html-string "Visible heading"))
-      (is (not (str/includes? html-string "seon-print-html-elision")))
-      (is (str/includes? html-string "second fragment"))
-      (is (not (str/includes? html-string "[:section"))))
-    (is (> (tokens/estimate text)
-           (:seon.render.profile/token-budget profile)))))
-
-(deftest oversized-html-projection-remains-complete-hiccup
-  (let [profile (assoc (render/agent-render-profile
-                        (test-support/effective-config))
-                       :seon.render.profile/token-budget 1
-                       :seon.render.profile/max-depth 8
-                       :seon.render.profile/max-children 32)
-        node {:seon.print/face :seon.print/projected
-              :seon.render/output :seon.render/html
-              :seon.print/value [:section {:class "oversized"}
-                                 (apply str (repeat 200 "x"))]}
-        fitted (print/fit node profile)
-        html (hiccup/->string (print/emit-hiccup fitted (print/default-options)))]
-    (is (= :seon.print/projected (:seon.print/face fitted)))
-    (is (not (str/includes? html "[:section")))
-    (is (str/includes? html (apply str (repeat 200 "x"))))))
+        long-text (apply str (repeat 512 "outward "))
+        fitted (print/fit {:seon.print/face :seon.print/projected
+                           :seon.render/output :seon.render/ai
+                           :seon.print/value long-text}
+                          profile)]
+    (is (= :seon.print/elided (:seon.print/face fitted))
+        "an over-budget projection becomes a declared elision value")
+    (is (= :characters (:seon.print/elision-unit fitted)))
+    (is (= (count long-text) (:seon.render.data/total fitted))
+        "the elision states the whole size it was cut from")
+    (is (pos? (:seon.print/omitted fitted)))
+    (is (= [:seon.render.call/id :fixture/long]
+           (:seon.print/requery-id fitted))
+        "and it carries the identity the reader asks again with")
+    (is (str/includes? (print/render-elision-ai fitted) "more characters"))))
 
 (deftest fit-preserves-breadth-and-long-strings
   (let [text (apply str (repeat 36 \x))
@@ -362,9 +320,17 @@
                 :seon.print/level nil))]
     (is (str/includes? emitted (pr-str text))
         "a one-line string remains readable before structural breadth")
-    (is (= 116 (count (:seon.print/items fitted))))
-    (is (= (* 2 line-width)
-           (count (:seon.print/value long-string-fit))))))
+    (is (< (count (:seon.print/items fitted)) 116)
+        "breadth past the profile's budget is cut, not carried")
+    (is (= :seon.print/elided
+           (:seon.print/face (peek (:seon.print/items fitted))))
+        "and the cut is a declared elision value, never a silent drop")
+    (is (= :seon.print/elided (:seon.print/face long-string-fit))
+        "an over-budget string becomes a declared elision value")
+    (is (= line-width (:seon.render.data/next-offset long-string-fit))
+        "the string floor is the emitter's own line width, never below it")
+    (is (= (* 2 line-width) (:seon.render.data/total long-string-fit))
+        "and the elision states the whole size it was cut from")))
 
 (deftest tagged-envelope-never-collides-with-authored-print-keywords
   (let [value {:seon.print/face :seon.print/elided
@@ -526,30 +492,24 @@
     (is (= "{:rows [{:a 1, :b x} {:a 22, :b yy}]}" nested-text))
     (is (not (str/includes? nested-text "| :a |")))))
 
-(deftest storage-admission-and-render-fit-share-one-private-text-bounder
-  (let [admitted
-        (print/admit-string
-         {:seon.print/text "abcdef"
-          :seon.config.eval.result/max-string 3})
+(deftest one-private-text-bounder-serves-the-one-elision-boundary
+  ;; `seon.print/admit-string` is DELETED: admission stopped clipping strings
+  ;; when the display caps left it, and a second text bounder with no caller
+  ;; is exactly the dead mechanism this project deletes on sight. The private
+  ;; bounder now has ONE caller, `fit-text`, at the one AI boundary.
+  (let [text (apply str (repeat 512 "z"))
         fitted
-        (print/enrich-elisions
-         admitted
+        (print/fit
+         {:seon.print/face :seon.print/string :seon.print/value text}
          (assoc (render/agent-render-profile
                  (test-support/effective-config))
-                :seon.render.profile/token-budget 8
+                :seon.render.profile/token-budget 1
                 :seon.render.profile/max-depth 1
                 :seon.render.profile/max-children 1
                 :seon.render.profile/composition :single-line
                 :seon.print/requery-id [:my.message/id "message-1"]))]
-    (is (= {:seon.print/face :seon.print/truncated-string
-            :seon.print/value "abc"
-            :seon.print/length 6
-            :seon.print/bound-by :seon.config.eval.result/max-string}
-           admitted))
-    (is (= 3 (:seon.print/omitted fitted)))
-    (is (= 6 (:seon.render.data/total fitted)))
-    (is (= :seon.config.eval.result/max-string
-           (:seon.print/bound-by fitted)))
+    (is (= :seon.print/elided (:seon.print/face fitted)))
+    (is (= 512 (:seon.render.data/total fitted)))
     (is (= [:my.message/id "message-1"]
            (:seon.print/requery-id fitted)))))
 

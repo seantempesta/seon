@@ -285,10 +285,17 @@ caller. Diagnostics tell the truth or say nothing: a thread dump that omits
 virtual threads lies.
 
 Outward values cross one total render contract: renders never throw and
-never refuse an ordinary value. Rendering size, depth, child-count, and token
-limits are disabled for design experimentation; `seon.print/fit` preserves
-the complete admitted node. Query-work bounds, evaluation deadlines, and
-ordinary evaluation-result storage admission remain separate. Previously
+never refuse an ordinary value. THERE ARE EXACTLY THREE BOUNDS ON A VALUE,
+and they are separate decisions with separate keys (owner ruling,
+2026-09-07): **storage is bounded per value** as `seon.sci.admit` streams its
+EDN, and a value that reaches the bound is `:seon.eval/missing` with the
+bytes it reached; **the AI projection is bounded by the render profile** —
+`seon.print/fit` applies its string, child-count, depth and token limits, and
+that is the ONE place presentation elides anything, so a request carrying no
+profile makes no presentation cut; **HTML is not bounded at all** — a page
+serves the value it holds. Query-work bounds and evaluation deadlines remain
+separate from all three, and a query-work cut is reported as its own elision
+naming the bound that made it. Previously
 omitted detail is an elision value — ordinary data
 carrying count, path, and requery identity — never bare truncation; a floor
 hit is counted, never silent. UGLY OUTPUT IS A DEFECT (standing order):

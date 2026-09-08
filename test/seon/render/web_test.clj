@@ -2127,6 +2127,49 @@
           (is (str/includes? body (str "entity=" entity))
               "and it retains a handle back to the same root"))))))
 
+(deftest a-five-megabyte-value-is-elided-for-ai-and-complete-for-html
+  ;; THE OWNER'S RULING, BOTH HALVES AT ONCE (2026-09-07): elision happens at
+  ;; the AI context generation boundary and nowhere else, and HTML is not
+  ;; bounded. Before this `seon.print/fit` was the identity, so one stored
+  ;; 5 MiB string rendered 5,242,987 bytes of `/ai` for a single evaluation
+  ;; (measured, research/verify-storage-bound-2026-09-07.md B2) — a value
+  ;; elided NOWHERE, in storage or in context.
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "ai-bound")
+     (let [namespace-name 'my.agents.ai-bound-source
+           huge (apply str (repeat (* 5 1024 1024) "x"))]
+       (db/transact! connection
+                     [{:seon.ns/name namespace-name :seon.ns/source huge}])
+       (let [database @connection
+             ctx (sci.eval/cluster-ctx database connection)
+             profile (render/agent-render-profile (config/defaults))
+             request {:seon.db/db database
+                      :seon.sci.eval/ctx ctx
+                      ;; THE VALUE IS THE STRING ITSELF, so the bound under
+                      ;; test is the profile's string bound rather than its
+                      ;; child count.
+                      :seon.render/value huge
+                      :seon.render/profile profile
+                      :seon.render.call/id [::ai-bound namespace-name]
+                      :seon.sci.admit/caps
+                      (config/result-caps (config/defaults))
+                      :seon.sci.eval/time-limit-ms 20000
+                      :seon.config/on-core-error :record}
+             ai (render/render-ai request)
+             html (render/render-html request)
+             html-string (hiccup/->string html)]
+         (is (string? ai) (pr-str ai))
+         (is (< (count ai) (count huge))
+             "the AI projection is bounded by the render profile")
+         (is (str/includes? ai "more characters")
+             (str "the cut is an elision value naming what it omitted: "
+                  (subs ai 0 (min 400 (count ai)))))
+         (is (str/includes? ai "requery by")
+             "and the elision carries a requery identity")
+         (is (<= (count huge) (count html-string))
+             "the HTML projection serves the whole value, unbounded"))))))
+
 (deftest each-agent-has-an-isolated-debug-route
   (with-server
     (fn [connection server _context]

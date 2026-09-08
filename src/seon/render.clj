@@ -872,17 +872,23 @@
       (invoke-selected request selected))))
 
 (defn- fit-terminal
+  "Emit one producer's output, eliding ONLY when it is AI context.
+
+  Owner ruling, 2026-09-07: elision happens at the AI context generation
+  boundary and nowhere else. HTML is not bounded — a page serves the value
+  it holds — so the HTML projection is emitted without consulting the
+  profile's sizes, and only the AI projection goes through `seon.print/fit`."
   [request output rendered]
   (if (or (nil? rendered) (:seon.error/kind rendered))
     rendered
     (let [profile (target-profile request)]
       (if (:seon.error/kind profile)
         profile
-        (let [node (print/fit
-                    {:seon.print/face :seon.print/projected
-                     :seon.render/output output
-                     :seon.print/value rendered}
-                    profile)
+        (let [node {:seon.print/face :seon.print/projected
+                    :seon.render/output output
+                    :seon.print/value rendered}
+              node (cond-> node
+                     (= output :seon.render/ai) (print/fit profile))
               emitted (print/emit-both node (print/default-options))]
           (if (= output :seon.render/html)
             (:seon.print/hiccup emitted)

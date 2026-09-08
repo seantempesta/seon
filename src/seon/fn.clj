@@ -1068,14 +1068,17 @@
                  (conj visited current)))))))
 
 (defn- text-boundary-report
+  "Census of the ONE private text bounder and the seam allowed to reach it.
+
+  There is no admission half any more: `seon.sci.admit` stores a string whole
+  or says the value is missing, so the only text bound left is the AI context
+  generation boundary's (owner ruling, 2026-09-07)."
   [graph]
   (let [functions (:seon.fn.output.graph/functions graph)
         calls (:seon.fn.output.graph/calls graph)
         target "seon.print/bounded-text"
         render-seam "seon.print/fit"
-        admission-seam "seon.sci.admit/admit"
-        authorized-callers #{"seon.print/admit-string"
-                             "seon.print/fit-text"}
+        authorized-callers #{"seon.print/fit-text"}
         callers
         (->> calls
              (keep (fn [[caller callees]]
@@ -1091,8 +1094,6 @@
      :seon.fn.output/text-boundary-callers callers
      :seon.fn.output/text-boundary-render-path
      (vec (or (shortest-call-path calls render-seam target) []))
-     :seon.fn.output/text-boundary-admission-path
-     (vec (or (shortest-call-path calls admission-seam target) []))
      :seon.fn.output/text-boundary-bypasses
      (->> callers
           (remove authorized-callers)

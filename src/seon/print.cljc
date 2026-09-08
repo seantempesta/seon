@@ -2,6 +2,7 @@
   "Emits admitted print nodes through text and hiccup sinks."
   (:require [clojure.string :as str]
             [clojure.test.check.generators :as gen]
+            [seon.ai.tokens :as tokens]
             [seon.render.hiccup :as html]
             [seon.schema :as schema]
             #?(:clj [seon.schema.edn :as schema.edn])
@@ -881,78 +882,6 @@
       fitted-elision
       (conj fitted-elision))))
 
-(defn- html-size
-  [value]
-  (count (html/->string value)))
-
-(defn- html-preview
-  "Keep a valid Hiccup prefix without slicing markup or attributes."
-  [value budget child-limit max-depth marker]
-  (let [budget (max 0 (- budget (html-size marker)))]
-    (letfn [(walk [value budget depth]
-              (cond
-                (nil? value) [nil budget false]
-                (string? value)
-                (if (<= (html-size value) budget)
-                  [value (- budget (html-size value)) false]
-                  (let [limit (min (count value) budget)
-                        [prefix remaining]
-                        (loop [low 0 high limit best nil]
-                          (if (> low high)
-                            [best (if best (- budget (html-size best)) budget)]
-                            (let [mid (quot (+ low high) 2)
-                                  candidate (str (subs value 0 mid) "…")]
-                              (if (<= (html-size candidate) budget)
-                                (recur (inc mid) high candidate)
-                                (recur low (dec mid) best)))))]
-                    [prefix remaining true]))
-                (vector? value)
-                (let [tag (nth value 0 nil)
-                      body (subvec value 1)
-                      attrs (when (map? (first body)) (first body))
-                      children (if attrs (subvec body 1) body)
-                      base (cond-> [tag] attrs (conj attrs))]
-                  (if (or (> (html-size base) budget)
-                          (>= depth max-depth))
-                    [nil budget true]
-                    (let [remaining (- budget (html-size base))
-                          [kept _remaining omitted]
-                          (reduce (fn [[kept remaining omitted] child]
-                                    (if (or omitted (zero? remaining)
-                                            (>= (count kept) child-limit))
-                                      (reduced [kept remaining true])
-                                      (let [[child remaining' omitted']
-                                            (walk child remaining (inc depth))]
-                                        [(cond-> kept child (conj child))
-                                         remaining'
-                                         (or omitted omitted')])))
-                                  [[] remaining false]
-                                  children)
-                          result (into base kept)
-                          omitted (or omitted (< (count kept) (count children)))]
-                      [result (- budget (html-size result)) omitted])))
-                (sequential? value)
-                (let [[kept remaining omitted]
-                      (reduce (fn [[kept remaining omitted] child]
-                                (if (or omitted (zero? remaining)
-                                        (>= (count kept) child-limit))
-                                  (reduced [kept remaining true])
-                                  (let [[child remaining' omitted']
-                                        (walk child remaining depth)]
-                                    [(cond-> kept child (conj child)) remaining'
-                                     (or omitted omitted')])))
-                              [[] budget false] value)]
-                  [(seq kept) remaining omitted])
-                :else
-                (let [size (html-size value)]
-                  (if (<= size budget) [value (- budget size) false]
-                      [nil budget true]))))]
-      (let [[preview _ omitted?] (walk value budget 0)]
-        (when preview
-          (if omitted?
-            (list preview marker)
-            preview))))))
-
 (defn- projected-text
   [node]
   (let [value (::value node)]
@@ -965,49 +894,17 @@
       {::value (subs text 0 retained)
        ::length original})))
 
-(defn admit-string
-  "Admit one string through the declared storage character cap."
-  {:malli/schema
-   [:=> [:cat :seon.print/admit-string-request]
-    :seon.print/node]}
-  [{text ::text
-    character-limit :seon.config.eval.result/max-string}]
-  (if-let [bounded (bounded-text text (count text) character-limit)]
-    (assoc bounded
-           ::face ::truncated-string
-           ::bound-by :seon.config.eval.result/max-string)
-    {::face ::string ::value text}))
-
 (defn- fit-text
-  [node profile path child-limit string-limit]
-  (let [html-projection? (and (= ::projected (::face node))
-                              (= :seon.render/html
-                                 (:seon.render/output node)))
-        value (if html-projection?
-                ;; Measure the source representation to retain the existing
-                ;; bound, but never expose that representation as HTML text.
-                (pr-str (::value node))
-                (if (= ::projected (::face node))
-                  (projected-text node)
-                  (::value node)))
+  "Elide one over-long string into an elision naming what it omitted."
+  [node profile path string-limit]
+  (let [value (if (= ::projected (::face node))
+                (projected-text node)
+                (::value node))
         original (long (or (::length node) (count value)))]
     (if-let [bounded (bounded-text value original string-limit)]
-      (if html-projection?
-        (let [elision (elision-node profile path (count (::value bounded))
-                                    (- original (count (::value bounded))) original
-                                    :characters "rendered HTML")
-              marker [:span {:class "seon-print-html-elision"
-                             :data-seon-path (pr-str path)}
-                      (render-elision-ai elision)]]
-          (if-let [preview (html-preview (::value node) string-limit
-                                         child-limit
-                                         (:seon.render.profile/max-depth profile)
-                                         marker)]
-          (assoc node ::value preview)
-            elision))
-        (elision-node profile path (count (::value bounded))
-                      (- original (count (::value bounded))) original
-                      :characters (pr-str (::value bounded))))
+      (elision-node profile path (count (::value bounded))
+                    (- original (count (::value bounded))) original
+                    :characters (pr-str (::value bounded)))
       node)))
 
 (defn- structural-elision
@@ -1048,20 +945,56 @@
                 (conj path ::throwable) child-limit string-limit)
 
         (::string ::truncated-string ::projected)
-        (fit-text node profile path child-limit string-limit)
+        (fit-text node profile path string-limit)
 
         node))))
 
 (defn fit
-  "Return one admitted node without presentation-size cuts.
+  "Fit one admitted node to one declared presentation profile.
 
-  The profile remains carried for presentation identity and composition.
-  Admission elisions already present in the node remain ordinary data."
+  THIS IS THE AI CONTEXT GENERATION BOUNDARY'S ONE ELISION, and the only
+  place presentation size cuts a value at all (owner ruling, 2026-09-07).
+  Storage is bounded per value by `seon.sci.admit`; HTML is not bounded at
+  all; the AI projection is bounded HERE, by the render profile the request
+  carried. A caller that is not generating AI context does not call this —
+  a request with no presentation decision must not make one.
+
+  Token size is measured only through `seon.ai.tokens/estimate`. Structural
+  cuts remain ordinary elision nodes carrying their count, path and requery
+  identity, so a cut names its own source and can be asked again."
   {:malli/schema
    [:=> [:cat :seon.print/node :seon.render.profile/profile]
     :seon.print/node]}
-  [node _profile]
-  node)
+  [node profile]
+  (let [budget (:seon.render.profile/token-budget profile)
+        initial-children (:seon.render.profile/max-children profile)
+        initial-depth (:seon.render.profile/max-depth profile)
+        options (assoc (default-options) ::length nil ::level nil)
+        string-floor (max 1 (::width options))
+        initial-strings (max string-floor (tokens/estimate-chars budget))]
+    (loop [child-limit initial-children
+           depth-limit initial-depth
+           string-limit initial-strings]
+      (let [candidate (fit-node node
+                                (assoc profile
+                                       :seon.render.profile/max-depth
+                                       depth-limit)
+                                0 [] child-limit string-limit)]
+        (cond
+          (<= (tokens/estimate (emit-text candidate options)) budget)
+          candidate
+
+          (pos? child-limit)
+          (recur (quot child-limit 2) depth-limit string-limit)
+
+          (pos? depth-limit)
+          (recur child-limit (dec depth-limit) string-limit)
+
+          (> string-limit string-floor)
+          (recur child-limit depth-limit
+                 (max string-floor (quot string-limit 2)))
+
+          :else candidate)))))
 
 (schema/register-core-predicate! 'seon.print/sink? sink?)
 (schema/register-core-predicate! 'seon.print/print-number? print-number?)

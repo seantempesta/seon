@@ -270,11 +270,6 @@
              :requery-refusal [:string {:min 1}],
              :bound-by :qualified-keyword,
              :text :string,
-             :admit-string-request
-             [:map
-              [:seon.print/text :seon.print/text]
-              [:seon.config.eval.result/max-string
-               :seon.config.eval.result/max-string]],
              :prefix :string,
              :elision-request
              [:map

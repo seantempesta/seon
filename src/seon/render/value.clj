@@ -530,9 +530,13 @@
           [projected-tree registered]
           (or (when registered (layout-tree projected-tree registered))
               [projected-tree nil])
-          tree (-> projected-tree
-                   (print/enrich-elisions profile)
-                   (print/fit profile))
+          ;; ELISION ONLY AT THE AI BOUNDARY (owner ruling, 2026-09-07).
+          ;; Admission markers still become declared elision values in both
+          ;; projections — that is what the stored node already says — but
+          ;; only the AI projection is cut to the profile's sizes; the HTML
+          ;; value surfaces serve the whole stored value.
+          tree (cond-> (print/enrich-elisions projected-tree profile)
+                 (= output :seon.render/ai) (print/fit profile))
           options (cond-> (assoc (print-options unit)
                                  :seon.print/length nil
                                  :seon.print/level nil)

@@ -9,7 +9,6 @@
                  :text-boundary-callers [:vector :seon.fn/sym],
                  :text-boundary-path [:vector :seon.fn/sym],
                  :text-boundary-render-path :seon.fn.output/text-boundary-path,
-                 :text-boundary-admission-path :seon.fn.output/text-boundary-path,
                  :text-boundary-bypasses [:vector :seon.fn/sym],
                  :text-boundary-target-found? :boolean,
                  :text-boundary :seon.fn.output/text-boundary-report,
@@ -20,8 +19,6 @@
                   [:seon.fn.output/text-boundary-callers
                    :seon.fn.output/text-boundary-callers]
                   [:seon.fn.output/text-boundary-render-path
-                   :seon.fn.output/text-boundary-path]
-                  [:seon.fn.output/text-boundary-admission-path
                    :seon.fn.output/text-boundary-path]
                   [:seon.fn.output/text-boundary-bypasses
                    :seon.fn.output/text-boundary-bypasses]],

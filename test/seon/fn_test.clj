@@ -1405,13 +1405,11 @@
         (is (true? (:seon.fn.output/text-boundary-target-found?
                     text-boundary))
             "a census with no bounded-text subject is a failure")
-        (is (= 2 (count (:seon.fn.output/text-boundary-callers
+        (is (= 1 (count (:seon.fn.output/text-boundary-callers
                          text-boundary)))
             (pr-str text-boundary))
         (is (seq (:seon.fn.output/text-boundary-render-path text-boundary))
-            "the render seam must reach the private text bounder")
-        (is (seq (:seon.fn.output/text-boundary-admission-path text-boundary))
-            "the admission seam must reach the private text bounder")
+            "the AI boundary must reach the one private text bounder")
         (is (empty? (:seon.fn.output/text-boundary-bypasses text-boundary))
             (pr-str text-boundary))
         (is (every? #(= :projected (:seon.fn.output/classification %))
