@@ -1424,6 +1424,9 @@
         (str "#!/usr/bin/env bash\n"
              "set -euo pipefail\n"
              fake-dev-cache-prologue
+             "for argument in \"$@\"; do\n"
+             "  if [ \"$argument\" = --prepare-base ]; then mkdir -p \"${!#}/data/store\"; echo '{}' > \"${!#}/manifest.edn\"; fi\n"
+             "done\n"
              "exit 0\n")
         observing-cp
         (str
@@ -1526,7 +1529,7 @@
                      (ProcessBuilder.
                       ^java.util.List
                       [(str (io/file project-root "bin" "test"))
-                       "seon.fs-test"])
+                       "--paths" "bin/test" "--" "seon.fs-test"])
                       (.directory project-root)
                       (.redirectErrorStream true))
                     environment (.environment builder)]
