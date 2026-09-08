@@ -1063,29 +1063,6 @@
       selected
       (invoked request output selected))))
 
-(defn- fit-terminal
-  "Emit one producer's output, eliding ONLY when it is AI context.
-
-  Owner ruling, 2026-09-07: elision happens at the AI context generation
-  boundary and nowhere else. HTML is not bounded — a page serves the value
-  it holds — so the HTML projection is emitted without consulting the
-  profile's sizes, and only the AI projection goes through `seon.print/fit`."
-  [request output rendered]
-  (if (or (nil? rendered) (:seon.error/kind rendered))
-    rendered
-    (let [profile (target-profile request)]
-      (if (:seon.error/kind profile)
-        profile
-        (let [node {:seon.print/face :seon.print/projected
-                    :seon.render/output output
-                    :seon.print/value rendered}
-              node (cond-> node
-                     (= output :seon.render/ai) (print/fit profile))
-              emitted (print/emit-both node (print/default-options))]
-          (if (= output :seon.render/html)
-            (:seon.print/hiccup emitted)
-            (:seon.print/text emitted)))))))
-
 (defn- raw-output
   [request output selected]
   (let [projection (sci.kernel/context-projection
@@ -1119,10 +1096,11 @@
          :seon.error/data {:seon.render/output rendered}}))))
 
 (defn- present-output
-  [request output raw]
-  (if (= output :seon.render/form)
-    raw
-    (fit-terminal request output raw)))
+  "A producer's output, as produced. The value renderer's AI projection is
+  the one place presentation elides (owner, 2026-09-08); this seam passes
+  the data through."
+  [_request _output raw]
+  raw)
 
 (defn render-ai
   "Render one value as text through the unique selected live SCI Var."

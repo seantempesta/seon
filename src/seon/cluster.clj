@@ -411,7 +411,7 @@
                      (if artifact-backed?
                        "the cluster has no database connection"
                        "the value has no durable MCP artifact")))
-            projected-node (print/fit print-node profile)
+            projected-node print-node
             staged (when (and artifact-backed? connection)
                      (blob/stage! connection content))
             stored-digest
