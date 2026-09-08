@@ -382,13 +382,32 @@
         (> token-budget 1) (recur (max 1 (quot token-budget 2)))
         :else serialized))))
 
+(defn- admitted-or-marker
+  "One admission, or — when it stored nothing — the marker re-admitted.
+
+  A FAULT MAY NEVER FAIL TO BE RECORDED. An admission that answers with
+  `:seon.eval/missing` carries no print node and no bytes, and reading that
+  absence as content crashed the fault committer itself (observed live,
+  2026-09-07: `String.getBytes` on a null `result-edn`). The marker is a
+  handful of bytes and always admits, so the durable fact says why instead of
+  the committer dying."
+  [value caps]
+  (let [request {:seon.sci.admit/value value
+                 :seon.sci.admit/interrupt-fn (constantly nil)
+                 :seon.sci.admit/caps caps
+                 :seon.config/on-core-error :record}
+        admitted (admit/admit request)]
+    (if (:seon.eval/missing admitted)
+      (admit/admit (assoc request
+                          :seon.sci.admit/value
+                          (select-keys admitted [:seon.eval/missing
+                                                 :seon.eval/size])
+                          :seon.sci.admit/unbounded? true))
+      admitted)))
+
 (defn- bounded-text
   [value caps inline-limit]
-  (let [admitted (admit/admit
-                  {:seon.sci.admit/value value
-                   :seon.sci.admit/interrupt-fn (constantly nil)
-                   :seon.sci.admit/caps caps
-                   :seon.config/on-core-error :record})]
+  (let [admitted (admitted-or-marker value caps)]
     (loop [token-budget
            (max 1 (tokens/estimate-of-characters inline-limit))]
       (let [fitted (fitted-node (:seon.sci.admit/print-node admitted)
@@ -449,10 +468,7 @@
         class-name (when failure (.getName (class failure)))
         error-kind (kind source failure)
         source (meaningful-source source)
-        admitted (admit/admit {:seon.sci.admit/value source
-                               :seon.sci.admit/interrupt-fn (constantly nil)
-                               :seon.sci.admit/caps caps
-                               :seon.config/on-core-error :record})
+        admitted (admitted-or-marker source caps)
         full-edn (:seon.cluster.eval/result-edn admitted)
         inline-limit (or inline-limit default-inline-limit)
         projected-source (:seon.sci.admit/value admitted)
@@ -486,8 +502,7 @@
               base-fact (:seon.sci.admit/print-node admitted)
               (message source failure) instrument-data caps inline-limit)
         fact (assoc fact :seon.error/capped?
-                    (boolean (or (:seon.sci.admit/capped? admitted)
-                                 (not= full-edn (:seon.error/data-edn fact)))))]
+                    (boolean (not= full-edn (:seon.error/data-edn fact))))]
     {:seon.error/fact fact
      :seon.error/data-content full-edn}))
 
