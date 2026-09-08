@@ -162,7 +162,6 @@ The plan source test currently checks exact source bytes, despite its older
 shared-reader name; it does not prove execution through SCI. This must be
 corrected and supplemented with the real SCI proof before acceptance.
 
-
 ## Resumed for sections 17 and 16
 
 The owner resumed this lane and replaced the concurrency gate with
@@ -204,7 +203,6 @@ schema resources, `test/my/agent_test.clj`, and `test/seon/ai_test.clj`.
 The Juniper fixture and section 17's PRD integration paragraph changed too.
 The section 16 page draft is still uncommitted and not included in this slice.
 
-
 ### Component follow-up, 2026-09-08
 
 The component commit is `74b5b4b05`. Its first completed isolated plan gate
@@ -230,7 +228,6 @@ adoption again refused because source changed during adoption; no schema
 refusal or successful convergence is claimed. No refork, reseed, browser
 paint, or fresh/system/virtual/compact lifecycle proof has completed.
 
-
 Live read evidence after `3f42669e0`: the previously timed-out write did
 commit. `record-render-components/one` exists under the plan component with
 position 4, reproducing the pre-fix tempid-count bug. No write was repeated
@@ -251,7 +248,6 @@ structural output instead of demanding one unsplit qualified-key string.
 The test4 gate was deliberately terminated and reaped before assertions
 because it snapshotted those known stale assertions. Test5 contains the
 updated plan/settings/AI paths and selects all three subject namespaces.
-
 
 ### Debug page repair, 2026-09-08
 
@@ -278,7 +274,6 @@ It is NOT section 16 completion: ordered stored bytes, last-turn basis,
 as-of checks, prompt digest, derived concern blocks, and the full lifecycle
 proof remain unfinished. No green page test tally is claimed here.
 
-
 Gate6 reached the canonical SCI fixture and exposed an owned load-time
 blocker in `test/seon/render/web_prompt_test.clj`: its two `with-redefs-fn`
 tests refer to the deleted private `prospective-prompt` Var. The JVM refused
@@ -300,7 +295,6 @@ one added step; repeating the same authored input returned converged true
 and a zero diff. These exercised the loaded definitions after development
 adoption reload work; source-commit convergence has not yet been established.
 
-
 ### Protected publication boundary
 
 The next explicit default publication (`tmp/record-render-publication7.log`)
@@ -319,7 +313,6 @@ Source convergence, Juniper reseeding, complete page blocks, the stored
 prefix/as-of/digest checks, and the fresh→system→virtual→compact proof remain
 unfinished. The missing turn/evaluation APIs and their storage contracts
 remain integration dependencies; typed unavailability is visible in Safari.
-
 
 ### 2026-09-08 20:10 UTC — HTTP system-turn handle repair
 
@@ -342,7 +335,6 @@ This proves hot-reloaded HTTP reachability, not source convergence or full
 §16 behavior: `seon.eval/of-agent` remains visibly unavailable, and the
 would-be value is currently rendered as an elision. No new test tally is
 claimed at this checkpoint.
-
 
 ### 2026-09-08 20:27 UTC — would-be forms and verification boundary
 
@@ -386,7 +378,6 @@ Juniper reseeding, empty-plan proof, derived wakes/fault/history blocks,
 stored-prefix/as-of/digest display, full control/feed lifecycle proof, and
 green isolated/platform gates. The broader lane is not complete.
 
-
 Final HTTP observation for this slice: status 200, 11 would-be source blocks.
 The exact contents of those source blocks are retained (separated by two
 newlines for inspection, not claimed as provider-prompt concatenation) in
@@ -418,7 +409,6 @@ probe script, and four issue notes (the existing shared-base issue plus
 the elision, fixture-upsert, and development-classpath issues). The preceding
 `4c24e894d` repair additionally touched `src/seon/cluster.clj`.
 
-
 Final fast-loop rerun, after displaying `seon.turn/text` without a second
 printer: 59 tests / 358 assertions, 9 failures / 1 error. The settings
 component, canonical component-order, and ten-load HTTP regression completed
@@ -427,3 +417,103 @@ page expectations, render elision expectations, a fault-count assertion,
 and the message-on-feed test remain unresolved. Output:
 `tmp/record-render-fast-web3.log`. This is an iteration result, never an
 isolated gate or a claim that the whole page works.
+
+### 2026-09-08: resumed assertion repair
+
+The nine failures and one error above belong to six tests:
+
+- `failed-ephemeral-bind-preserves-the-bind-failure` (two failures): the
+  incomplete service request was refused before reaching socket binding.
+  It now uses the canonical service request, including a real SCI context.
+- `an-undeclared-incoming-reference-is-reachable-from-the-page` (two
+  failures): provenance remains in the reference graph, rather than adding
+  an extra context concern. The assertion waits for that graph's SSE patch.
+- `a-five-megabyte-value-is-elided-for-ai-and-complete-for-html` (two failures): the elision now carries
+  an executable `get-in` requery; the assertions name that actual grammar.
+- `each-agent-has-an-isolated-debug-route` (two failures): §16 makes the
+  algorithm visible on the ordinary debug route. Isolation remains checked.
+- `a-page-failing-every-pass-offers-one-fault-and-the-proc-survives`
+  (one failure): the injected render fault now
+  receives a real cluster context and agent, so admission cannot precede
+  the deliberately failing renderer.
+- The message-on-feed test (one timeout error): its retired surface
+  expectation is replaced by a real HTTP route test checking the durable
+  addressed message. This is route coverage; derived-wake repaint coverage
+  remains part of the next implementation slice.
+
+The first retry failed before these assertions because clj-kondo's shared
+cache was locked. The next retry reached armed test bodies. An independent
+GET of `/ns/my.agents.juniper/debug` returned 200 during this retry.
+
+That retry completed 59 tests / 356 assertions with two failures and no
+errors. Both remaining assertions were corrected from the observed values:
+the message Datalog result is a set of tuples, and the reference graph's
+JSON escapes the slash in its attribute string. The final rerun and the
+path-isolated gate are separate processes. The latter snapshot contains
+only `test/seon/render/web_test.clj` over HEAD `b7e8a914336511cfcfeb37b53896ba1a22c0237d`;
+its dependency-cache lock wait completed after 19,284 ms.
+
+The edit hook publication `0376b9c6-520c-4ce8-9a5f-9b4bbd52fad4` ended
+with operator exit 124. Kondo reported warnings (unused requires/bindings
+and shadowed fixture names), not a syntax/arity rejection. A separate
+read-only MCP pull/query of Juniper timed out after 10,000 ms. Neither
+observation is claimed as successful development adoption or fixture proof.
+
+The final fast run is green: **59 tests / 356 assertions, zero failures,
+zero errors** (`tmp/record-render-fast-fixes-final.log`). It includes the
+ten-load no-write regression. The 30-second retry of the live Juniper pull
+completed in 14,567 ms and returned only its agent id: the plan component
+is still absent. The short MCP deadline, rather than absence of the agent,
+explains the earlier unavailable observation; no write was attempted.
+
+### Juniper component slice, 2026-09-08
+
+The fixture resolves existing step identities inside its transaction function,
+using the writer's database value. Fresh steps keep transaction-local ids;
+existing steps use their entity ids. The plan's own component id is reused,
+and the former agent-level step/current edges are retracted. This avoids
+Datahike's `retry-with-tempid` conflicting-upsert path
+(`reference-code/datahike/src/datahike/db/transaction.cljc:843`). No schema
+refusal occurred, so default was not reforked.
+
+The first install exceeded the MCP 30-second response bound, but a subsequent
+read established that it committed. A second install returned the plan,
+and the subsequent query returned `#{[73475 4]}`: the same plan component
+and four root steps. Current is `juniper/render-plan`; positions 0–3 are
+inspect, render, compare, live-turn. The latter two remain blocked by their
+declared dependencies. The fixture's `install!` now declares its contract.
+
+The shared value renderer had reduced component contents to identity refs.
+It now preserves values under `:db/isComponent` attributes; ordinary refs
+still use their identities. This restores the plan's titles and completion
+data in HTML without adding another renderer. The plan fixture regression
+now uses the objective plus four root steps, matching the live shape.
+
+Fast and isolated component gates both passed: **41 tests / 181 assertions,
+zero failures and zero errors**, namespaces `my.plan-test` and
+`seon.render.value-test`. The isolated gate overlaid exactly
+`src/seon/render/value.clj`, `test/my/plan_test.clj`, and the Juniper fixture.
+
+The page returned HTTP 200 in 16.580543 seconds after the HTTP projection
+repair described below. Its exact 12 source blocks (5,414 UTF-8 bytes,
+joined by two newlines for inspection) are in
+[record-render-juniper-component-ai-2026-09-08.txt](record-render-juniper-component-ai-2026-09-08.txt).
+This includes the plan's actual evaluated current/ready/blocked reads;
+the extra legacy blocks are not claimed as the final ruled page structure.
+
+### Projection propagation diagnosis, 2026-09-08
+
+After reseeding, GETs exceeded 30 and 60 seconds. A JVM thread dump including
+virtual threads found 26 debug requests constructing schema projections:
+18 in `seon.schema/admission-from-asserting-transaction` and eight in
+`fold-contract-validations`. That observation locates work, not ownership
+of its cause. A narrower probe supplying the existing SCI projection made
+the same Juniper pull complete in 1 ms. The owned HTTP boundary supplied
+that value only around configuration lookup, dropping it for later reads.
+
+The Ring handler and render pass now supply their handed SCI projection for
+the entire operation. Live verification re-evaluated the owned handler,
+re-armed contracts, rebound only default's HTTP service on 7994, and then
+re-evaluated the private render pass. It did not reload a foreign owner or
+claim successful development adoption. The subsequent MCP envelope called
+default degraded even though the private reload returned successfully.

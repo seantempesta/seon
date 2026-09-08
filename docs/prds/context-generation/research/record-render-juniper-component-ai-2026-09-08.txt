@@ -1,0 +1,65 @@
+; This is my identity and namespace; its steward is responsible for it.
+my.agents.juniper=> (seon.db/pull (quote [:seon.cluster.agent/id {:seon.cluster.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.cluster.agent/id]}]}]) [:seon.cluster.agent/id "juniper"])
+#:seon.repl{:value #:seon.cluster.agent{:id "juniper", :namespace #:seon.ns{:name my.agents.juniper,
+    :steward #:seon.cluster.agent{:id "juniper"}}}, :ms 46}
+
+; Your plan. (dir my.plan) is its API; (doc my.plan/complete!) explains one form.
+my.agents.juniper=> (my.plan/current)
+#:seon.repl{:value #:my.plan.item{:expected-result "The AI plan is concise and actionable; the HTML plan shows progress and stable step references without numeric entity ids.",
+  :id "juniper/render-plan", :title "Render this plan clearly"}, :ms 876}
+
+my.agents.juniper=> (my.plan/ready)
+#:seon.repl{:value [#:my.plan.item{:expected-result "The AI plan is concise and actionable; the HTML plan shows progress and stable step references without numeric entity ids.",
+    :id "juniper/render-plan", :title "Render this plan clearly"}], :ms 767}
+
+my.agents.juniper=> (my.plan/blocked)
+#:seon.repl{:value [#:my.plan.item{:expected-result "The comparison shows the previous and refreshed results together, with the relevant changed input.",
+    :id "juniper/compare-changed-results", :needs ["juniper/render-plan"],
+    :title "Compare refreshed results"} #:my.plan.item{:expected-result "Juniper identifies the current step and records a truthful plan update from the assembled context.",
+    :id "juniper/try-live-turn", :needs ["juniper/compare-changed-results"],
+    :title "Try the assembled context in a live agent turn"}], :ms 874}
+
+my.agents.juniper=> (seon.cluster/format-ai (seon.db/pull (quote [:seon.cluster/name {:seon.cluster/config [:seon.config/cluster]} :seon.cluster/instructions :seon.cluster/toolkit]) [:seon.cluster/name "default"]))
+#:seon.repl{:value "Cluster default.\nConfiguration default; 1 shared instruction and 10 toolkit namespaces.", :ms 104}
+
+;; What have I been sent? Nothing stores an inbox: `my.message/inbox`
+;; joins :seon.cluster.message/to against me and returns the messages
+;; oldest first, so the newest one is the last printed. The empty
+;; request map is the whole call — the database and I are supplied.
+my.agents.juniper=> (my.message/inbox {})
+#:seon.repl{:value [#:my.message{:at #inst "2026-09-06T19:35:00.000-00:00", :content "Please make your current plan and the messages you receive easy to understand together. Start by inspecting the data connected to your agent entity.",
+    :from "root", :id "design-lab/root-to-juniper/1"} #:my.message{:at #inst "2026-09-06T19:36:00.000-00:00",
+    :content "Show Sean which function renders each block and an executable example of updating your plan. We will compare the assembled context before trying a live model turn.",
+    :from "root", :id "design-lab/root-to-juniper/2"} #:my.message{:at #inst "2026-09-08T18:08:21.142-00:00",
+    :content "Define a durable contracted function named largest that returns the row with the greatest :example/amount, or {} for empty input. Call it once, query its stored :seon.fn/spec, then complete with a short reply naming what you built and its contract.",
+    :id "bootstrap-task:juniper"}], :ms 874}
+
+; A new run just opened. Why am I awake — do I have messages?
+my.agents.juniper=> (help)
+#:seon.repl{:value {:seon.cluster.agent/id "juniper", :seon.cluster.agent/namespace-ref [:seon.ns/name
+    my.agents.juniper], :seon.cluster.agent/protocol-namespaces [my.message
+    my.run seon.bootstrap seon.db], :seon.cluster.agent/unread-message-count
+  0, :seon.cluster.run/turns-remaining 97}, :ms 1426}
+
+my.agents.juniper=> (dir my.message)
+#:seon.repl{:value [my.message/decline my.message/inbox my.message/read my.message/send], :out "decline\ninbox\nread\nsend\n", :ms 688}
+
+; My namespace is empty — this function will be its first resident.
+my.agents.juniper=> (dir my.run)
+#:seon.repl{:value [my.run/complete my.run/render-namespace-ai my.run/usage-form my.run/wait
+  my.run/walkthrough], :out "complete\nrender-namespace-ai\nusage-form\nwait\nwalkthrough\n", :ms 20}
+
+; Now let me call it once and query its stored spec:
+my.agents.juniper=> (largest [{:example/amount 10.0} {:example/amount 25.5} {:example/amount 7.3}])
+#:seon.repl{:value #:example{:amount 25.5}, :ms 7}
+
+; Now I should also inspect my current state - looking at the plan items and understanding what context I have. The plan shows I need to work on "juniper/understand-context" - improving context inspection by making identity, messages, plans, and changed results easy to inspect together.
+; Let me look at my current messages and plan state to understand what I'm working with:
+my.agents.juniper=> (seon.db/pull '[:my.plan/current-step {:my.plan/steps [*]}] [:seon.cluster.agent/id "juniper"])
+#:seon.repl{:value nil, :ms 8}
+
+my.agents.juniper=> (my.message/inbox)
+#:seon.repl{:value {:seon.call-preparation/ambiguous-call true, :seon.error/data {:seon.call-preparation/candidates
+    [[0] [0 1]], :seon.call-preparation/supplied-count 0, :seon.fn/sym "my.message/inbox"},
+  :seon.error/kind :seon.call-preparation/ambiguous-call, :seon.error/message
+  "Cannot call my.message/inbox with 0 arguments: more than one derived call shape fits that count, so which positions were named is not determined. Pass the declared arguments in full."}, :ms 699}

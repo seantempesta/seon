@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, agent, database, wave/agent-context]
 ---
@@ -24,3 +24,12 @@ publication separately refuses loading `seon.test-support` from the live
 classpath. The fresh-fork fixture proof and repeat-install proof remain
 unfinished. Acceptance: fresh default can seed the new component shape,
 and repeating the fixture installation does not refuse or duplicate it.
+
+Resolved 2026-09-08: the fixture resolves existing identities at the writer's
+transaction database and reuses the plan component. Default installed it,
+then a second installation returned normally; the subsequent query still
+returned plan entity 73475 with four root steps. The canonical component
+tests and value-renderer tests passed together, 41 tests / 181 assertions.
+The updated HTML renderer preserves component data rather than replacing
+it with identity refs. No schema refusal or refork was needed. Evidence:
+[record-render landing](../../prds/context-generation/research/record-render-landing-2026-09-08.md).

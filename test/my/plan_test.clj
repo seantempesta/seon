@@ -79,7 +79,7 @@
         (is (not (contains? current :my.plan/current-step)))
         (is (str/includes? ai "Steps: none yet."))
         (is (str/includes? ai "Current step: none selected"))
-        (is (str/includes? (pr-str html) "[] 0 items"))))))
+        (is (str/includes? (pr-str html) "vector 0 items"))))))
 
 (deftest one-step-is-owned-by-the-agent-through-the-component-edge
   (with-plan
@@ -431,12 +431,7 @@
 (def ^:private juniper-fixture-steps
   ;; The shape installed by
   ;; docs/prds/context-generation/research/juniper_fixture_2026_09_06.clj.
-  #{{:db/id "step-objective"
-     :my.plan.item/id "juniper/understand-context"
-     :my.plan.item/position 0
-     :my.plan.item/title "Improve Juniper context inspection"
-     :my.plan.item/steps
-     #{{:db/id "step-inspect"
+  #{{:db/id "step-inspect"
         :my.plan.item/id "juniper/inspect-identity-messages"
         :my.plan.item/position 0
         :my.plan.item/title "Inspect identity and messages"
@@ -454,7 +449,7 @@
         :my.plan.item/id "juniper/try-live-turn"
         :my.plan.item/position 3
         :my.plan.item/title "Try the assembled context in a live agent turn"
-        :my.plan.item/needs #{"step-compare"}}}}})
+        :my.plan.item/needs #{"step-compare"}}})
 
 (deftest the-example-fixture-shape-installs-and-renders
   (support/with-database
@@ -468,10 +463,9 @@
                        :my.plan/steps juniper-fixture-steps}}])
       (let [current (plan/plan {:seon.db/db @connection
                                 :seon.cluster.agent/id "juniper"})
-            ai (plan/format-plan-ai current)
+            ai (plan/render-plan-ai current)
             printed (pr-str (plan/render-plan-html (render-view connection current)))]
-        (is (= ["juniper/understand-context"
-                "juniper/inspect-identity-messages"
+        (is (= ["juniper/inspect-identity-messages"
                 "juniper/render-plan"
                 "juniper/compare-changed-results"
                 "juniper/try-live-turn"]
@@ -482,12 +476,11 @@
                (ids (:my.plan/blocked current))))
         (is (= ["juniper/inspect-identity-messages"]
                (ids (:my.plan/recent-completions current))))
-        (is (str/includes? ai "Objective: Improve Juniper context inspection"))
-        (is (str/includes? ai "Current step: Render this plan clearly"))
-        (is (str/includes?
-             ai
-             "1.3 Compare refreshed results [juniper/compare-changed-results] — blocked — waiting for \"juniper/render-plan\""))
-        (is (str/includes? printed ":completed-at"))
+        (is (= "Improve Juniper context inspection" (:my.plan/objective current)))
+        (is (= "juniper/render-plan"
+               (get-in current [:my.plan/current-step :my.plan.item/id])))
+        (is (str/includes? ai "(my.plan/current)\n(my.plan/ready)\n(my.plan/blocked)"))
+        (is (str/includes? printed ":my.plan.item/completed-at"))
         (is (str/includes? printed ":current-step"))
         (is (not (str/includes? printed ":open nil"))
             "no nil attribute reaches the rendered panel")))))

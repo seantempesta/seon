@@ -225,7 +225,8 @@
   [unit attribute value]
   (let [database (:seon.db/db unit)
         properties (get-in database [:schema attribute])]
-    (if (= :db.type/ref (:db/valueType properties))
+    (if (and (= :db.type/ref (:db/valueType properties))
+             (not (:db/isComponent properties)))
       (if (= :db.cardinality/many (:db/cardinality properties))
         (into #{} (map #(reference-identity database %)) value)
         (reference-identity database value))
