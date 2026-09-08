@@ -285,3 +285,14 @@ AGENTS §5 (`daffede13`), gate self-population assigned to issues-sweep;
 rebuilds under one lock (assigned to runner-base-cache). Runner tests red
 on a quiet machine (3) → bisect assigned (pool sizing vs cache commits).
 `bin/test-fast --paths` (snapshot isolation for the fast loop) assigned.
+
+15:15 — VERIFIED: dev-dependency cache keyed by dependency inputs only
+(`f2e3bcb34`): second `ensure-cache` is a 1.4 s hit (was a rebuild under the
+lock on every source edit). LANDED: `seon.turn/system-turn` computed from
+retained read evidence (`a5f453368`: declared sources, latest evaluation
+per form, read-only classification, plan, write? flag) — §14's core in
+code. Also: projections handed to callers (`371a50dba`, `b49c400e3`), Flow
+fault lifecycle on armed fixtures (`a2216e7dd`), short maintenance error
+identities via seon.id (`30e54d58d`). Page outage 14:49–15:11 (a refork
+plus a long adoption under the lifecycle lock) — availability defect
+assigned; reforks are rare by rule.
