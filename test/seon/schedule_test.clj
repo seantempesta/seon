@@ -140,7 +140,9 @@
         (is (= 1 (count-with @connection :seon.maintenance.receipt/result)))
         (is (= 0 (count-with @connection :seon.cluster.run/id)))
         (is (= 0 (count-with @connection :seon.cluster.message/id)))
+        (is (identical? connection (:seon.db/connection (first @handler-calls))))
         (is (= (dissoc (first @handler-calls)
+                       :seon.db/connection
                        :seon.schedule.task/id
                        :seon.schedule.fire/id
                        :seon.cluster.agent/id

@@ -65,10 +65,15 @@
     :seon.schedule/expression "0 3 * * 0"
     :seon.schedule/zone-id "UTC"
     :seon.schedule.task/id "root/maintenance/compact"
-    :seon.fn/sym "seon.operator/collect!"}])
+    :seon.fn/sym "seon.operator/collect!"}
+   {:seon.schedule/id "root/maintenance/blob-retention-schedule"
+    :seon.schedule/expression "* * * * *"
+    :seon.schedule/zone-id "UTC"
+    :seon.schedule.task/id "root/maintenance/blob-retention"
+    :seon.fn/sym "seon.blob.retention/reclaim!"}])
 
 (defn root-maintenance-seed-call
-  "Return initialization data for root's five absent maintenance tasks.
+  "Return initialization data for root's absent maintenance tasks.
 
   Existing task identities are sovereign. In particular, reopening a cluster
   never restores the recommended cron or timezone over an ordinary cadence
@@ -517,7 +522,8 @@
          (or (get-in instance [:seon.boot/config :seon.boot/log-dir])
              (io/file managed-root "data" "clusters" cluster-name "logs")))]
     (merge (declared-maintenance-request-values effective)
-           {:seon.boot/cluster-name cluster-name
+           {:seon.config.blob/max-bytes (:seon.config.blob/max-bytes effective)
+            :seon.boot/cluster-name cluster-name
             :seon.operator/repository-root repository-root
             :seon.operator/managed-root managed-root
             :seon.boot/log-dir log-dir})))
@@ -649,7 +655,8 @@
              (do
                (settle! connection cluster (receipt-identity claimed-fire-id)
                         agent-id
-                        (invoke-handler (:seon.fn/sym task) request))
+                        (invoke-handler (:seon.fn/sym task)
+                                        (assoc request :seon.db/connection connection)))
                (inc fire-count))
              fire-count))
          fire-count)))

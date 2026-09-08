@@ -343,11 +343,11 @@
           forms)))
 
 (defn- branch-blobs
-  [store branch]
-  (let [db (d/branch-as-db (:seon.store/connection-object store) branch)]
+  [connection branch include-history?]
+  (let [db (d/branch-as-db connection branch)]
     (try
       (let [digest-attributes (blob-digest-attributes db)
-            history-view (db/history db)
+            history-view (if include-history? (db/history db) db)
             history-db (if (:seon.error/kind history-view)
                          db
                          history-view)]
@@ -362,10 +362,18 @@
       (finally
         (d/release-materialized-db db)))))
 
-(defn- referenced-blobs
-  [store branches]
+(defn referenced-blobs
+  "Derive blob references across the supplied store branches.
+
+  Collection callers hold the store's exclusive reachability permit while
+  deriving branches, calling this function, and deleting objects. Historical
+  collection includes history; byte retention needs only current datoms."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection [:set :seon.store/branch] :boolean]
+    [:set :seon.blob/digest]]}
+  [connection branches include-history?]
   (into #{}
-        (mapcat #(branch-blobs store %))
+        (mapcat #(branch-blobs connection % include-history?))
         branches))
 
 (defn- branch-heads
@@ -463,7 +471,7 @@
                  :datahike.gc/reachable-extension
                  (fn [{:datahike.gc/keys [branches]}]
                    (reset! heads (branch-heads store branches))
-                   (referenced-blobs store branches)))
+                   (referenced-blobs (:seon.store/connection-object store) branches true)))
                 (assoc-in
                  [:datahike.gc/sweep-opts :konserve.gc/batch-issued]
                  (fn [candidate-store-keys]
@@ -528,4 +536,4 @@
         (assoc options
                :datahike.gc/reachable-extension
                (fn [{:datahike.gc/keys [branches]}]
-                 (referenced-blobs store branches))))))))
+                 (referenced-blobs (:seon.store/connection-object store) branches true))))))))

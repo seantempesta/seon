@@ -1,0 +1,16 @@
+#:seon.blob.retention
+{:request [:map
+           [:seon.db/connection :seon.db/connection]
+           [:seon.config.blob/max-bytes :seon.config.blob/max-bytes]]
+ :bytes-before [:int {:min 0}]
+ :bytes-after [:int {:min 0}]
+ :reclaimed-bytes [:int {:min 0}]
+ :deleted-count [:int {:min 0}]
+ :written-at :inst
+ :excess-bytes [:int {:min 1 :seon.maintenance/attention-when :truthy}]
+ :result [:map {:seon.db/attributes true}
+          [:seon.blob.retention/bytes-before :seon.blob.retention/bytes-before]
+          [:seon.blob.retention/bytes-after :seon.blob.retention/bytes-after]
+          [:seon.blob.retention/reclaimed-bytes :seon.blob.retention/reclaimed-bytes]
+          [:seon.blob.retention/deleted-count :seon.blob.retention/deleted-count]
+          [:seon.blob.retention/excess-bytes {:optional true} :seon.blob.retention/excess-bytes]]}

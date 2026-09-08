@@ -1,32 +1,71 @@
 ---
 type: research
-status: blocked
+status: implemented; verification blocked
 date: 2026-09-08
 tags: [blob, storage, runtime]
 ---
 
-# Blob retention: protected reachability integration required
+# Blob retention landing — 2026-09-08
 
-No retention implementation landed. The required existing reachability owner
-is inside the assignment's explicitly protected `src/seon/cluster/*` paths.
-This note records the integration needed; it does not report retention green.
+Implemented the root-wide 512 MiB budget, oldest-unreferenced-first reclamation,
+and registration through the existing scheduled maintenance portfolio. The
+private-function boundary is resolved. Verification remains incomplete because
+the second focused gate rejected another lane's plan renderer arity change.
 
-## Measurements and proposed default
+## Implementation
 
-`bin/seon status` reported default alive, PID 85105, generation
-`9bdd08c1-8472-4b39-b020-50113b24f940`, web URL
-`http://127.0.0.1:7994`, root footprint **0.35 GiB**, and filesystem usable
-**586.08 GiB (31.5%)**. A separate no-follow file census of `data/store`
-reported **1,148 files and 160,582,484 apparent bytes**. These measure
-different scopes; neither is a blob-only inventory.
+`src/seon/cluster/registry.clj` exposes its existing `referenced-blobs` with a
+Malli contract and an explicit history option. Existing collection includes
+history; retention queries current datoms across every roster branch. There
+is no second schema traversal.
 
-Chosen proposed default for `:seon.config.blob/max-bytes`:
-**536,870,912 bytes (512 MiB)**, above today's entire reported root footprint.
-This is a proposed storage decision, not an installed or enforced dial.
-Referenced bytes may themselves exceed the budget; retention must report that
-remaining excess and preserve those blobs.
+`src/seon/blob/retention.clj` holds Datahike's exclusive sweep permit from
+roster/reference derivation through deletion. It uses Konserve binary metadata,
+`last-write`, and `konserve.impl.defaults/key->store-key`; no payload is read.
+`Files/readAttributes` with `NOFOLLOW_LINKS` measures physical bytes including
+metadata. Non-regular files and absent timestamps refuse inventory. Candidates
+sort by write time, then digest; deletion stops at the budget. Referenced bytes
+survive even above budget, with an explicit excess in the durable result.
 
-Reproduce the exact apparent-byte census from the repository root:
+`resources/seon/schemas/seon.config.blob.edn` declares the dial once;
+`config/default.edn` supplies 536870912. The retention schema declares the
+request and durable result. Excess is absent when within budget.
+
+`src/seon/schedule.clj` registers `root/maintenance/blob-retention` once per
+minute. The ordinary handler request now carries the actual connection and
+configured budget. No independent timer or execution service was added.
+
+The new regression uses the canonical published file-store fixture, real blob
+writes, explicit Konserve timestamps, a sibling Datahike branch, and actual
+reference retraction. It checks oldest-first deletion, sibling-reference
+survival, idempotence, excess reporting, and reclamation when only historical
+references remain. Its corrected version has not completed the gate.
+The schedule regression now checks connection identity and excludes that opaque
+value from request-map equality.
+
+The scheduled-error regression exposed a second defect: Datahike rejected an
+Integer evidence byte count inside its transaction function. `seon.error/prepare`
+now constructs that stored count as a Long. Live error evidence named
+`:seon.error/data-size`, value 19776, and the required `java.lang.Long` class.
+The corrected constructor still needs its post-change gate.
+
+## Grounding and measurements
+
+Read AGENTS.md and the agent-record-and-turn-loop PRD end to end, including
+sections 2, 4a, 10, and 12; read the named scheduler-mining/root-maintenance
+research as historical evidence and checked the current schedule owner.
+Dependency seams read: Datahike `gc_guard.cljc`, `gc.cljc`, and
+`api/specification.cljc`; Konserve `gc.cljc`, `core.cljc`, `filestore.clj`,
+`protocols.cljc`, and `impl/defaults.cljc`, all under `reference-code/`.
+
+Initial `bin/seon status`: root footprint **0.35 GiB**, usable filesystem
+**586.08 GiB (31.5%)**. A no-follow file census of `data/store` found
+**1,148 files / 160,582,484 apparent bytes**. Different scopes; neither was
+blob-only. The owner selected the proposed **512 MiB** default on restart.
+Restart status reported **2.30 GiB** for the root. The corrected live retention
+call measured only **336,000 physical blob bytes**.
+
+Reproduce the apparent-byte census:
 
 ```python
 import os
@@ -36,76 +75,53 @@ sizes = [os.stat(os.path.join(root, name), follow_symlinks=False).st_size
 print({"files": len(sizes), "apparent_bytes": sum(sizes)})
 ```
 
-## Existing mechanisms and the required protected hunk
+## Proofs and exact gate boundary
 
-Sources read: `src/seon/blob.clj`; Datahike's
-`reference-code/datahike/src/datahike/gc_guard.cljc` and `gc.cljc`;
-Konserve's `reference-code/konserve/src/konserve/gc.cljc`; the reachability
-and collection seams in `src/seon/cluster/registry.clj`; and the task
-registration/invocation seams in `src/seon/schedule.clj`.
-
-- `src/seon/blob.clj` publishes bytes and their database references under
-  the existing `:blob` reachability permit. Retention must acquire the same
-  store's exclusive sweep permit before deriving references and hold it
-  through deletion.
-- `src/seon/cluster/registry.clj:316–369` owns the sole schema-derived
-  blob-reference discovery. `referenced-blobs`, `branch-blobs`, and
-  `blob-digest-attributes` are private. A read-only default JVM probe
-  confirmed all three exist and all three carry `:private true`.
-- `src/seon/cluster/registry.clj:345` queries a history view, so its present
-  policy retains historical references as well as current datoms. This is
-  stronger retention than the requested current-datom policy.
-- `src/seon/cluster/registry.clj:521–531` unconditionally supplies its own
-  `:datahike.gc/reachable-extension`. The public `collect!` therefore does
-  not expose a blob-only budget operation; it also collects database objects.
-- Konserve `sweep!` selects by whitelist and timestamp, then batches in key
-  enumeration order. It supplies neither oldest-first byte selection nor a
-  blob-only inventory. Calling whole-store GC is not the requested operation.
-
-Required integration: expose one contracted blob-reference operation from
-the existing registry owner, taking the store and a held exclusive sweep
-permit, verifying that permit, and deriving the union across the current
-branch roster. Accrete an explicit current-datom policy while preserving the
-existing collector's history policy. Both paths must reuse the existing
-schema traversal. The retention owner can then use that operation while
-holding the permit and select only binary blobs, ordered by Konserve
-`last-write` with digest as the deterministic tie-break, deleting the shortest
-oldest-first prefix that meets the budget.
-
-The implementation must not duplicate reference discovery, resolve private
-Vars dynamically in production, or accept references computed before sweep
-admission. This protected integration is a prerequisite to a working scheduled
-handler, not a reason to install an unenforced config dial.
-
-The existing root portfolio is `src/seon/schedule.clj:45–76`; handlers are
-invoked by its existing per-agent proc. Task registration should use that
-same portfolio after the handler exists. No independent timer is needed.
-
-## Live evidence and unfinished work
-
-The default JVM answered `(+ 1 1)` with 2. The complete second probe was:
+MCP JVM mode used no root/cluster arguments. Queries on default confirmed the
+536870912 config fact and new scheduled task. Its first invocation at
+2026-09-08T18:09:00Z failed because the initial implementation passed options to
+Konserve `get`'s not-found arity and received a channel. The four-argument call
+corrected this. A later direct live invocation returned:
 
 ```clojure
-(mapv (fn [s]
-        (let [v (ns-resolve 'seon.cluster.registry s)]
-          {:symbol s :present (boolean v)
-           :private (boolean (:private (meta v)))}))
-      '[referenced-blobs branch-blobs blob-digest-attributes])
+#:seon.blob.retention{:bytes-before 336000, :bytes-after 336000,
+                      :deleted-count 0, :reclaimed-bytes 0}
 ```
 
-Every row returned `:present true`, `:private true`. No production Var was
-changed, no cluster was reforked, and no provider call was made.
+This exercised loaded code following partial in-place development adoption;
+it does not prove source convergence or successful scheduled completion.
+One explicit adoption retry followed the source-changed diagnostic.
 
-Read AGENTS.md and the agent-record-and-turn-loop PRD end to end, including
-its binding sections 2, 4a, 10, and 12. Read the named scheduler-mining and
-root-maintenance design as historical design evidence; the current schedule
-source supersedes its statement that no scheduler exists.
+First focused gate, before corrections:
+`bin/test seon.blob.retention-test seon.blob-test seon.schedule-test seon.cluster.registry-test`
+ran **28 tests / 142 assertions / 9 failures / 3 errors**. Retention, handler
+request equality, and scheduled error writing failed. Each exposed cause was
+corrected; no green result is asserted for those edits.
 
-Unfinished: protected reachability integration; config declaration and
-default; blob inventory and byte reclamation; scheduled registration;
-canonical scratch-store regression proving oldest-unreferenced-first and
-cross-branch referenced survival; default live proof; bare, subject, and
-platform gates. **Test tally: no tests run; no retention proof.**
+Second focused gate exited **1 before executing tests**, during published-base
+preparation. Its exact errors were `test/my/plan_test.clj:73`, `:196`, `:230`,
+and `:440`: **my.plan/render-plan-html is called with 2 args but expects 1**.
+`src/my/plan.clj` was another lane's uncommitted edit in the snapshot. The same
+boundary blocked development publication. It is independently recorded in
+[the plan renderer issue](../../../seon/issues/plan-renderer-arity-change-blocks-development-publication.md).
 
-Initial working tree was clean. Only this landing note is changed by this
-lane. No background shell, scratch cluster, or worktree was created.
+Per the assignment's explicit stop-on-foreign-gate-breakage rule, no further
+gate was started after that result. **Bare bin/test and bin/test --platform
+remain unrun.** The next focused gate must also include `seon.error-test`, then
+run bare and platform gates and prove successful scheduled completion on
+default. No provider call or cluster refork was performed by this lane.
+
+## Files and cleanup
+
+Files touched: `config/default.edn`;
+`resources/seon/schemas/seon.config.blob.edn`;
+`resources/seon/schemas/seon.blob.retention.edn`;
+`src/seon/blob/retention.clj`; `src/seon/cluster/registry.clj`;
+`src/seon/schedule.clj`; `src/seon/error.clj`;
+`test/seon/blob/retention_test.clj`; `test/seon/schedule_test.clj`; this note.
+
+Every launched shell session ended. Failed test roots remain under the runner's
+retention policy with their evidence. No foreign root was removed. The temporary
+virtual-thread-inclusive JVM dump was removed. `git diff --check` passed.
+Unfinished: post-correction gates, full development adoption, successful
+scheduled completion, and any defects exposed by those proofs.

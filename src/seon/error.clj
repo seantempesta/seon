@@ -536,7 +536,7 @@
                  :seon.error/signature (signature process class-name error-kind
                                                   (top-frame failure))
                  :seon.error/capped? true}
-          (int? data-size) (assoc :seon.error/data-size data-size)
+          (int? data-size) (assoc :seon.error/data-size (long data-size))
           class-name (assoc :seon.error/throwable-class class-name)
           (and flow? (::flow/pid source))
           (assoc :seon.error/proc (::flow/pid source))
