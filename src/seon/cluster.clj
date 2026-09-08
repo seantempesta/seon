@@ -2526,7 +2526,6 @@
               :seon.cluster.loop/stream-channel stream-channel
               :seon.render/context-channel context-channel
               :seon.cluster.loop/completion completion
-              :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
               :seon.sci.admit/caps (config/result-caps dials)
               :seon.config.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms dials)

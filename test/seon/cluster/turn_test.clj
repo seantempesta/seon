@@ -161,7 +161,17 @@
         (flow.core/stop graph)
         (async/<!! completion)))))
 
-(defn- with-cluster [body]
+(defn- with-cluster
+  "Drive `body` against one live cluster, optionally under a stand-in evaluator.
+
+  THE EVALUATOR IS A VAR, NOT A CONFIG FACT. `seon.cluster.loop/evaluate-sources`
+  calls `seon.sci.eval/evaluate` directly so the program graph carries the edge,
+  so a test that wants to pin an exact evaluation replaces the Var's root value
+  here. `with-redefs` is the right seam and a dynamic binding is not: a real
+  graph evaluates on its proc's own virtual thread, which a thread binding
+  never reaches."
+  ([body] (with-cluster nil body))
+  ([evaluator body]
   (test-support/with-database
    (fn [connection]
     (let [launcher
@@ -220,7 +230,6 @@
                (test-support/fork-cluster-ctx connection)
                :seon.cluster.wake/channel
                (clojure.core.async/chan (clojure.core.async/sliding-buffer 1))
-             :seon.cluster.loop/evaluate 'seon.cluster.turn-test/fake-evaluate
              :seon.config.eval/time-limit-ms 2000
              :seon.config/on-core-error :panic
              ;; a refused transaction is recorded as a durable error
@@ -242,9 +251,13 @@
                       :seon.config.eval.result/max-collection 8
                       :seon.config.eval.result/max-string 4096
                       :seon.config.eval.result/max-nodes 256)}
-         body)
+         (if evaluator
+           (fn [cluster-handle]
+             (with-redefs [sci.eval/evaluate evaluator]
+               (body cluster-handle)))
+           body))
       (finally
-        (seon.flow/stop-work-launcher! launcher)))))))
+        (seon.flow/stop-work-launcher! launcher))))))))
 
 (defn- request
   "The AGENT-SCOPED work request (F2 §3.2).
@@ -318,9 +331,7 @@
 (deftest a-prose-prefixed-contracted-defn-settles-and-doc-answers
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             source
             (str
              "; The situation is clear - this cluster has stale function references that need a JVM restart to fix. The maintenance tasks are failing because the operator functions (`seon.operator/census-processes!`, `seon.operator/observe-footprint!`, etc.) have been removed from the published program graph but are still loaded in the JVM.\n\n"
@@ -378,9 +389,7 @@
   ;; call, because the reply is the only thing stubbed.
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)]
+      (let [connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text
                                (str "(def widgets (map inc (range 3)))\n"
@@ -486,9 +495,7 @@
   ;; mentions a namespace, because it does not have to.
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)]
+      (let [connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text
                                (str "(defn widget-count [n] (* n 3))\n"
@@ -528,9 +535,7 @@
 (deftest mixed-plan-publishes-only-the-contracted-function
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)]
+      (let [connection (:seon.db/connection cluster)]
         (db/transact! connection
                     [{:seon.ns/name 'my.agents.agent-a}
                      {:seon.cluster.agent/id "agent-a"
@@ -582,9 +587,7 @@
 (deftest ns-unmap-retracts-the-owned-function-after-the-terminal-commit
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)]
+      (let [connection (:seon.db/connection cluster)]
         (db/transact! connection
                     [{:seon.ns/name 'my.agents.agent-a}
                      {:seon.cluster.agent/id "agent-a"
@@ -616,9 +619,7 @@
 (deftest reply-reading-follows-evaluated-alias-and-dynamic-require-state
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)]
+      (let [connection (:seon.db/connection cluster)]
         (with-redefs
           [ai/complete
            (fn [_]
@@ -646,9 +647,7 @@
 (deftest qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             function-sym "my.agents.agent-a/dynamic-obsolete"]
         (with-redefs
           [ai/complete
@@ -673,9 +672,7 @@
 (deftest absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             original-evaluate sci.eval/evaluate
             evaluated-ctx (atom nil)]
         (with-redefs
@@ -705,9 +702,7 @@
 (deftest import-only-ns-unmap-installs-exactly-after-its-context-commit
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             original-evaluate sci.eval/evaluate
             evaluated-ctx (atom nil)]
         (with-redefs
@@ -758,9 +753,7 @@
 (deftest refused-import-only-ns-unmap-leaves-the-run-sci-ctx-unchanged
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            original-evaluate sci.eval/evaluate
+      (let [original-evaluate sci.eval/evaluate
             evaluated-ctx (atom nil)
             transact! db/transact!]
         (with-redefs
@@ -823,9 +816,7 @@
 (deftest import-addition-is-ordinary-data-and-reacquires-exactly
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)]
+      (let [connection (:seon.db/connection cluster)]
         (with-redefs
           [ai/complete
            (fn [_]
@@ -862,9 +853,7 @@
     (testing label
       (with-cluster
         (fn [cluster]
-          (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                               'seon.sci.eval/evaluate)
-                connection (:seon.db/connection cluster)
+          (let [connection (:seon.db/connection cluster)
                 calls (atom [])
                 transact! db/transact!
                 original-install! sci.eval/install-row!
@@ -1010,9 +999,7 @@
 (deftest evaluation-follows-the-readers-parse-time-namespace
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)]
+      (let [connection (:seon.db/connection cluster)]
         (with-redefs
           [ai/complete
            (fn [_]
@@ -1053,9 +1040,7 @@
 (deftest contracted-redefinition-exactly-replaces-the-row
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)]
+      (let [connection (:seon.db/connection cluster)]
         (with-redefs
           [ai/complete
            (fn [_]
@@ -1086,9 +1071,7 @@
 (deftest a-refused-contract-commits-a-receipt-and-no-row
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)]
+      (let [connection (:seon.db/connection cluster)]
         (with-redefs
           [ai/complete
            (fn [_]
@@ -1110,9 +1093,7 @@
 (deftest runtime-schema-registration-commits-the-evaluated-form-and-attribute
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             persistent-key :my.agents.agent-a/nonnegative
             value-key :my.agents.agent-a/label]
         (with-redefs
@@ -1178,9 +1159,7 @@
   ;; and the run stays open through it.
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             schema-key :shared.runtime/refined]
         (with-redefs
           [ai/complete
@@ -1233,9 +1212,7 @@
 (deftest runtime-schema-unregister-removes-one-unused-global-schema
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             schema-key :shared.runtime/unregister-me]
         (with-redefs
           [ai/complete
@@ -1275,9 +1252,7 @@
 (deftest refused-runtime-schema-registration-mutates-neither-row-nor-projection
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             schema-key :my.agents.agent-a/refused
             global-projection (schema/current-projection)
             global-forms (schema/registered-schemas)]
@@ -1307,9 +1282,7 @@
 (deftest runtime-declarations-install-only-from-a-successful-terminal-db-after
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             schema-key :my.agents.agent-a/not-committed
             transact! db/transact!
             install! sci.eval/install-row!
@@ -1363,9 +1336,7 @@
 (deftest runtime-tests-install-run-redefine-and-delete-exactly
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             test-sym "my.agents.agent-a/versioned-test"]
         (with-redefs
           [ai/complete
@@ -1404,9 +1375,7 @@
 (deftest incompatible-clusters-alternate-runtime-schema-validation-without-bleed
   (with-cluster
     (fn [cluster-a]
-      (let [cluster-a (assoc cluster-a :seon.cluster.loop/evaluate
-                             'seon.sci.eval/evaluate)
-            connection-a (:seon.db/connection cluster-a)
+      (let [connection-a (:seon.db/connection cluster-a)
             shared-key :seon.runtime.registration/shared
             a-only-key :seon.runtime.registration/a-only
             global-projection (schema/current-projection)]
@@ -1424,9 +1393,7 @@
           (drive! cluster-a 10))
         (with-cluster
           (fn [cluster-b]
-            (let [cluster-b (assoc cluster-b :seon.cluster.loop/evaluate
-                                   'seon.sci.eval/evaluate)
-                  connection-b (:seon.db/connection cluster-b)]
+            (let [connection-b (:seon.db/connection cluster-b)]
               (with-redefs
                 [ai/complete
                  (fn [_]
@@ -1471,9 +1438,7 @@
 (deftest another-agent-calls-the-live-cluster-definition-without-reinstall
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             replies (atom
                      [(str
                        "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
@@ -1511,9 +1476,7 @@
   (with-cluster
     (fn [cluster]
       (let [cluster (assoc cluster
-                           :seon.cluster/name "turn-test"
-                           :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
+                           :seon.cluster/name "turn-test")
             connection (:seon.db/connection cluster)
             replies
             (atom
@@ -1576,9 +1539,7 @@
 (deftest a-refused-definition-stays-in-its-agents-defs
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             function-sym "my.agents.agent-a/refused-live"
             replies (atom
                      [(str
@@ -1766,7 +1727,7 @@
   ;; next-agent-work finds
   ;; nothing to do for it and every later trigger goes unanswered
   ;; forever. This is that whole sequence, end to end.
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             now (Date.)]
@@ -1819,7 +1780,7 @@
   ;; the drive sat claimed-with-no-plan for 120 s and the operator had to
   ;; reproduce the call by hand to learn it was a missing credential.
   ;; The reason is now a fact, and the next prompt says it.
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
@@ -1874,7 +1835,6 @@
   (with-cluster
     (fn [cluster]
       (let [cluster (assoc cluster
-                           :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
                            ;; a short leash for the runaway case
                            :seon.config.eval/time-limit-ms 300)
             connection (:seon.db/connection cluster)]
@@ -1893,8 +1853,7 @@
 (deftest a-red-form-routes-to-its-namespace-owner-and-the-fold-continues
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster
-                           :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate)
+      (let [cluster (assoc cluster)
             connection (:seon.db/connection cluster)
             route-run "route-run"
             ;; A genuinely red form: SCI throws, and ruling 67/68 make that
@@ -1987,7 +1946,7 @@
               "the whole batch settles in one transaction"))))))
 
 (deftest a-whole-turn-runs-from-trigger-to-closed-run
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (with-redefs [ai/complete
                     (fn [_] {:seon.ai/text
@@ -2018,7 +1977,7 @@
 ;;; source out of prose alone, so a form row that cannot settle is
 ;;; unrepresentable, and the turn refuses LOUDLY instead.
 (deftest a-pure-prose-reply-refuses-and-records-no-unsettleable-form
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)]
         (with-redefs [ai/complete
@@ -2087,8 +2046,7 @@
 (deftest an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster
-                           :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate)
+      (let [cluster (assoc cluster)
             connection (:seon.db/connection cluster)
             reply-text "{:a 1 :b}"
             ;; The attempt's usage participates in the prompt calibration.
@@ -2214,7 +2172,7 @@
                  could not repair (ruling 68: errors only when unrepairable)")))))))
 
 (deftest a-completing-disposition-closes-in-the-terminal-transaction
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (with-redefs [ai/complete
                     (fn [_] {:seon.ai/text "(my.run/complete \"done\")"})]
@@ -2235,7 +2193,7 @@
   ;; Characterization before receipt-request extraction: these facts used to
   ;; be assembled by one inline cond-> and must survive together, not only in
   ;; the separate examples that cover each attribute alone.
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             result (my.run/complete "combined receipt")
@@ -2319,7 +2277,7 @@
   ;; exists at any basis and no separate `:close` pass runs at all.
   ;; Nothing could ever have resumed that run: its plan was fully
   ;; executed, and what resumes is the AGENT, on its next trigger.
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (with-redefs [ai/complete
                     (fn [_] {:seon.ai/text "(my.run/wait \"need input\")"})]
@@ -2448,7 +2406,7 @@
               (:seon.cluster.agent/id (:seon.error/agent pulled))]))))
 
 (deftest one-successful-call-leaves-exactly-one-attempt-fact
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
@@ -2478,7 +2436,7 @@
             "and a call that worked committed no error fact")))))
 
 (deftest successful-call-persists-the-providers-open-usage-document
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])
@@ -2515,7 +2473,7 @@
               "finish reason is its own fact, never inserted into usage"))))))
 
 (deftest a-partial-stream-truncation-is-a-durable-nonfailure-attempt-fact
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])
@@ -2576,7 +2534,7 @@
               "the already-arrived completion still settles as the plan"))))))
 
 (deftest reasoning-starvation-persists-usage-finish-and-the-named-error
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])
@@ -2609,7 +2567,7 @@
               "the receipt points at the named starvation error fact"))))))
 
 (deftest reasoning-only-time-limit-persists-its-flat-diagnostic
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])
@@ -2653,7 +2611,7 @@
                              "configured time limit fired")))))))
 
 (deftest an-unpaid-failure-with-a-backup-makes-exactly-two-calls
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
@@ -2927,11 +2885,9 @@
   ;; THE COMPOSITION QUESTION, answered by the fold rather than by a
   ;; rule: a turn sends in one form and completes in another, because
   ;; the loop reads EVERY form's value, not only the last.
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             requests (atom [])]
         (db/transact! connection [(agent-row "agent-b")])
         ;; ONE ordered provider stub, two agents. Agent identity is a
@@ -3001,7 +2957,7 @@
 (deftest delivery-rows-and-refusal-facts-share-the-terminal-transaction
   ;; Characterization before delivery-rows extraction: one delivery result can
   ;; contain both rails, and neither may be lost when their tx-data is named.
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             asked [(my.message/send "agent-b" "delivered together")
@@ -3057,8 +3013,7 @@
   ;; single turn can reach.
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate
+      (let [cluster (assoc cluster
                            ;; nothing may be delivered at all
                            :seon.config.message/max-chain 0)
             connection (:seon.db/connection cluster)]
@@ -3091,7 +3046,7 @@
   ;; dispatch, and a rewake seen by a DIFFERENT process derives no
   ;; second `:call` for the held run
   ;; (research/trigger-conservation-2026-07-28 §3.2).
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
@@ -3157,9 +3112,7 @@
   (testing "a cut immediately after intent names the run, trigger, and every ordinal"
     (with-cluster
       (fn [cluster]
-        (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                             'seon.sci.eval/evaluate)
-              connection (:seon.db/connection cluster)
+        (let [connection (:seon.db/connection cluster)
               open-work (work/next-agent-work @connection (request connection))
               _ (cluster.loop/turn {:seon.cluster.loop/cluster cluster
                                     :seon.cluster.work/next open-work}
@@ -3212,9 +3165,7 @@
   (testing "a cut after some in-memory evaluations still settles only by recovery"
     (with-cluster
       (fn [cluster]
-        (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                             'seon.sci.eval/evaluate)
-              connection (:seon.db/connection cluster)
+        (let [connection (:seon.db/connection cluster)
               open-work (work/next-agent-work @connection (request connection))
               _ (cluster.loop/turn {:seon.cluster.loop/cluster cluster
                                     :seon.cluster.work/next open-work}
@@ -3270,9 +3221,7 @@
   (testing "one missing defn closer is fixed, evaluated, and stored as the transcript form"
     (with-cluster
       (fn [cluster]
-        (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                             'seon.sci.eval/evaluate)
-              connection (:seon.db/connection cluster)
+        (let [connection (:seon.db/connection cluster)
               original
               (str "(defn repaired [x]\n  (+ x 1)\n"
                    "(+ 40 2)\n"
@@ -3340,9 +3289,7 @@
   (testing "indent mode repairs a mismatched closer type"
     (with-cluster
       (fn [cluster]
-        (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                             'seon.sci.eval/evaluate)
-              connection (:seon.db/connection cluster)
+        (let [connection (:seon.db/connection cluster)
               source "(let [x 1)\n  x)\n(my.run/complete \"fixed\")"]
           (with-redefs [ai/complete (fn [_] {:seon.ai/text source})]
             (drive! cluster 6))
@@ -3354,9 +3301,7 @@
   (testing "an odd map stays an error and the following form still settles"
     (with-cluster
       (fn [cluster]
-        (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                             'seon.sci.eval/evaluate)
-              connection (:seon.db/connection cluster)
+        (let [connection (:seon.db/connection cluster)
               source "{:a 1 :b}\n(+ 20 22)\n(my.run/complete \"continued\")"]
           (with-redefs [ai/complete (fn [_] {:seon.ai/text source})]
             (drive! cluster 6))
@@ -3373,9 +3318,7 @@
 (deftest a-batched-turn-commits-only-queryable-definition-facts
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster :seon.cluster.loop/evaluate
-                           'seon.sci.eval/evaluate)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             source
             (str
              "(require '[seon.schema :as schema] '[clojure.test :refer [deftest is]])\n"
@@ -3470,7 +3413,7 @@
         (pr-str used))))
 
 (deftest generated-fixed-point-closes-the-run
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             run-id "generated-fixed-point"]
@@ -3533,7 +3476,7 @@
                        @connection run-id))))))))
 
 (deftest generated-membership-failure-never-advances-the-run-to-call
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             run-id "generated-membership-failure"]
@@ -3590,7 +3533,7 @@
                  (:seon.cluster.run/error run-state))))))))
 
 (deftest generated-phase-failures-converge-through-one-terminal-exit
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             sequence-number (atom 0)
@@ -3708,7 +3651,7 @@
   ;; `::missing-input`). \"Nothing throws into the agent loop\" is law:
   ;; the loop's one `:call` site catches it and records the flat error
   ;; value, the turn ends `:error`, and no provider call is made.
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
@@ -3746,7 +3689,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest a-run-prompts-from-its-opening-database-value
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
@@ -3897,7 +3840,7 @@
   ;; where the durable transact of the same value is 74-88 ms, so the
   ;; partials were paying ~7,000x to be facts nobody could need once
   ;; the reply had settled.
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [stream-channel (async/chan (async/sliding-buffer 1))
             cluster (assoc cluster :seon.cluster.loop/stream-channel
@@ -3993,7 +3936,7 @@
   ;; FACTS and never from the channel; a displaced snapshot is
   ;; superseded by that agent's next offer; and the producers' fold
   ;; threads are NEVER parked, whatever the render side is doing.
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             stream-channel (async/chan (async/sliding-buffer 1))
@@ -4112,8 +4055,7 @@
             ;; the production shape: `seon.cluster/loop-handle` carries the
             ;; cluster's own projection state on the handle it hands the turn.
             cluster (assoc cluster
-                           :seon.sci.eval/projection-state projection-state
-                           :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate)
+                           :seon.sci.eval/projection-state projection-state)
             derivations (atom 0)
             original schema/projection-from-database]
         (is (some? projection-state)

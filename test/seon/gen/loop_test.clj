@@ -155,7 +155,6 @@
           :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
           :seon.cluster.wake/channel
           (async/chan (async/sliding-buffer 1))
-          :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
           :seon.config.eval/time-limit-ms 2000
           :seon.config/on-core-error :panic
           :seon.config.error/recurrence-limit 3

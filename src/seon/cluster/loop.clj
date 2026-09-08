@@ -1552,8 +1552,7 @@
     sources :seon.cluster.reply/sources
     starting-namespace :seon.ns/name
     defs-notices :seon.sci.eval/defs-notices}]
-  (let [connection (:seon.db/connection cluster)
-        evaluate (requiring-resolve (:seon.cluster.loop/evaluate cluster))]
+  (let [connection (:seon.db/connection cluster)]
     (loop [remaining (seq sources)
            ordinal first-ordinal
            namespace-name starting-namespace
@@ -1586,7 +1585,7 @@
                   :seon.sci.eval/ctx ctx
                   :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)
                   :seon.config/on-core-error (:seon.config/on-core-error cluster)}
-                 #(evaluate request)))
+                 #(sci.eval/evaluate request)))
               evaluation
               (if (:seon.error/kind evaluation)
                 {:seon.sci.admit/value evaluation
@@ -1634,6 +1633,53 @@
                         ::admitted-form form
                         :seon.sci.eval/evaluation evaluation})))
         results))))
+
+(defn preview-sources
+  "Evaluate authored source once in the assigned agent's fork, persisting nothing.
+
+  THE PAGE IS NOT A SECOND EVALUATOR. A preview is the same parse, the same
+  fork, and the same `evaluate-sources` an ordinary turn runs; what it lacks
+  is a run, so nothing settles, no evaluation entity exists, and no
+  `result/eN` handle is bound (ruling 59c). The renderer that shows a preview
+  calls this and renders the returned evaluations; it never forks or parses
+  on its own."
+  {:malli/schema [:=> [:cat :seon.cluster.loop/preview-sources-request]
+                  [:or :seon.cluster.loop/preview :seon.error/value]]}
+  [{cluster ::cluster
+    database :seon.db/db
+    base-ctx :seon.sci.eval/ctx
+    agent-id :seon.cluster.agent/id
+    namespace-name :seon.ns/name
+    text :seon.cluster.reply/text
+    caps :seon.sci.admit/caps}]
+  (let [opened-at (Date.)
+        forked (sci.eval/fork-for-turn
+                {:seon.sci.eval/ctx base-ctx
+                 :seon.db/db database
+                 :seon.db/connection (:seon.db/connection cluster)
+                 :seon.cluster.agent/id agent-id})]
+    (if (:seon.error/kind forked)
+      forked
+      (let [sources (planned-sources
+                     text namespace-name
+                     (:seon.config.eval.result/max-source caps))]
+        (if (map? sources)
+          sources
+          {:seon.cluster.loop/evaluated-sources
+           (evaluate-sources
+            {::cluster cluster
+             :seon.db/db database
+             :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
+             :seon.cluster.agent/id agent-id
+             :seon.cluster.eval/ordinal 0
+             :seon.ns/name namespace-name
+             :seon.cluster.reply/sources sources
+             :seon.sci.eval/defs-notices (vec (:seon.sci.eval/defs-notices forked))})
+           :seon.cluster.agent/id agent-id
+           :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
+           :seon.cluster.run/opened-at opened-at
+           :seon.cluster.run/closed-at (Date.)
+           :seon.db/db database})))))
 
 (defn- resume-turn
   "Evaluate an intent-frozen turn in memory, then settle the whole batch once."

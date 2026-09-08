@@ -1452,3 +1452,88 @@
                (seon.fn/index! {:seon.db/connection connection
                                 :seon.db/process boot-process
                                 :seon.fn/roots [(.getPath root)]}))))))))
+
+;;; ---------------------------------------------------------------------------
+;;; ONE EVALUATION POINT — the census's own regression (ruling 71)
+;;;
+;;; The census that produced these assertions
+;;; (docs/prds/context-generation/research/eval-points-and-caches-census-2026-09-07.md
+;;; §5.3) also named the trap they exist to close: a checker written over
+;;; `:seon.fn/calls` alone reported health while the busiest evaluator in the
+;;; system was invisible, because `evaluate-sources` resolved its evaluator
+;;; from a config fact. The indirection is gone, so the edges below are the
+;;; subject; every one of them asserts a NON-EMPTY result first, because an
+;;; absent subject is the failure class this repository keeps meeting.
+;;; ---------------------------------------------------------------------------
+
+(defn- test-namespace-eids
+  "Every namespace some test declares itself to belong to.
+
+  Derived from `:seon.test/ns`, never from a name ending in `-test`."
+  [database]
+  (set (db/q '[:find [?ns ...] :where [_ :seon.test/ns ?ns]] database)))
+
+(defn- production-callers
+  "The qualified symbols of every non-test function calling `callee-symbol`."
+  [database callee-symbol]
+  (let [tests (test-namespace-eids database)]
+    (into #{}
+          (keep (fn [[caller-symbol namespace-eid]]
+                  (when-not (contains? tests namespace-eid) caller-symbol)))
+          (db/q '[:find ?caller-symbol ?namespace
+                  :in $ ?callee-symbol
+                  :where
+                  [?callee :seon.fn/sym ?callee-symbol]
+                  [?caller :seon.fn/calls ?callee]
+                  [?caller :seon.fn/sym ?caller-symbol]
+                  [?caller :seon.fn/ns ?namespace]]
+                database callee-symbol))))
+
+(deftest sci-evaluation-has-one-first-party-owning-namespace
+  (test-support/with-database
+    (fn [connection]
+      (let [database @connection
+            tests (test-namespace-eids database)
+            edges (db/q '[:find ?caller-symbol ?callee-symbol ?namespace
+                          :where
+                          [?callee :seon.fn/sym ?callee-symbol]
+                          [(clojure.string/starts-with? ?callee-symbol
+                                                        "sci.core/eval")]
+                          [?caller :seon.fn/calls ?callee]
+                          [?caller :seon.fn/sym ?caller-symbol]
+                          [?caller :seon.fn/ns ?namespace]]
+                        database)
+            production (into #{}
+                             (keep (fn [[caller-symbol _ namespace-eid]]
+                                     (when-not (contains? tests namespace-eid)
+                                       caller-symbol)))
+                             edges)
+            owning (into #{}
+                         (map #(first (str/split % #"/")))
+                         production)]
+        (testing "the census inspected a subject that exists"
+          (is (seq edges) "no first-party function calls sci.core/eval* at all")
+          (is (seq tests) "no namespace declares a test, so the filter is blind"))
+        (testing "only one namespace turns a form into running code"
+          (is (= #{"seon.sci.eval"} owning) (pr-str production)))))))
+
+(deftest agent-source-reaches-the-evaluator-through-one-visible-path
+  (test-support/with-database
+    (fn [connection]
+      (let [database @connection
+            evaluate (production-callers database "seon.sci.eval/evaluate")
+            sources (production-callers database
+                                        "seon.cluster.loop/evaluate-sources")
+            previews (production-callers database
+                                         "seon.cluster.loop/preview-sources")]
+        (testing "the turn's edge to the evaluator is visible to the graph"
+          (is (contains? evaluate "seon.cluster.loop/evaluate-sources")
+              (pr-str evaluate)))
+        (testing "no second function evaluates agent source"
+          (is (= #{"seon.cluster.loop/resume-turn"
+                   "seon.cluster.loop/preview-sources"}
+                 sources)
+              (pr-str sources)))
+        (testing "the page's preview path reaches the same evaluator"
+          (is (= #{"seon.render.web/render-source-call"} previews)
+              (pr-str previews)))))))

@@ -39,7 +39,6 @@
           :seon.cluster.wake/channel channel
           :seon.render/context-channel channel
           :seon.cluster.loop/completion channel
-          :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate
           :seon.sci.admit/caps caps
           :seon.config.eval/time-limit-ms 2000
           :seon.config/on-core-error :panic}))

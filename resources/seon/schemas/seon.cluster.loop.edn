@@ -15,7 +15,6 @@
                       :seon.flow/channel]
                      [:seon.render/context-channel :seon.flow/channel]
                      [:seon.cluster.loop/completion :seon.flow/channel]
-                     [:seon.cluster.loop/evaluate :qualified-symbol]
                      [:seon.sci.admit/caps :seon.sci.admit/caps]
                      [:seon.config.eval/time-limit-ms
                       :seon.config.eval/time-limit-ms]
@@ -82,6 +81,24 @@
                      [:seon.cluster.loop/admitted-form :seon.cluster.loop/admitted-form]
                      [:seon.sci.eval/evaluation :seon.cluster.loop/evaluation]],
                     :evaluated-sources [:vector :seon.cluster.loop/evaluated-source],
+                    :preview
+                    [:map
+                     [:seon.cluster.loop/evaluated-sources
+                      :seon.cluster.loop/evaluated-sources]
+                     [:seon.cluster.agent/id :seon.cluster.agent/id]
+                     [:seon.cluster.run/starting-ns :seon.cluster.run/starting-ns]
+                     [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]
+                     [:seon.cluster.run/closed-at :seon.cluster.run/closed-at]
+                     [:seon.db/db :seon.db/database-value]],
+                    :preview-sources-request
+                    [:map
+                     [:seon.cluster.loop/cluster :seon.cluster.loop/cluster]
+                     [:seon.db/db :seon.db/database-value]
+                     [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                     [:seon.cluster.agent/id :seon.cluster.agent/id]
+                     [:seon.ns/name :seon.ns/name]
+                     [:seon.cluster.reply/text :seon.cluster.reply/text]
+                     [:seon.sci.admit/caps :seon.sci.admit/caps]],
                     :evaluate-sources-request
                     [:map
                      [:seon.cluster.loop/cluster :seon.cluster.loop/cluster]

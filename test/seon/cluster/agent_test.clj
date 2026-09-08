@@ -34,6 +34,7 @@
             [seon.flow :as seon.flow]
             [seon.problems :as problems]
             [seon.render :as render]
+            [seon.sci.eval :as sci.eval]
             [seon.render.web :as web]
             [seon.schema :as schema]
             [seon.test-support :as test-support])
@@ -68,6 +69,10 @@
 
 (def ^:private now (Date. 1700000000000))
 
+(def ^:private real-evaluate
+  "The shipped evaluator, captured before any stand-in replaces its Var."
+  sci.eval/evaluate)
+
 (defn fake-evaluate
   "The injected evaluator, decided by the SOURCE it is handed — no
   dynamic binding, because a real graph evaluates on its proc's own
@@ -90,7 +95,15 @@
        :seon.sci.admit/value 1})))
 
 (defn- with-connection
-  [body]
+  "Drive `body` against one live cluster under a stand-in evaluator.
+
+  THE EVALUATOR IS A VAR, NOT A CONFIG FACT. `seon.cluster.loop/evaluate-sources`
+  calls `seon.sci.eval/evaluate` directly so the program graph carries the edge,
+  so a stand-in is installed by replacing that Var's root value — which every
+  proc thread sees, unlike a dynamic binding. The stand-in is passed as a Var
+  so a test may redefine the stand-in itself and still be called."
+  ([body] (with-connection #'fake-evaluate body))
+  ([evaluator body]
   (test-support/with-database
     (fn [connection]
       (let [ctx (test-support/fork-cluster-ctx connection)
@@ -154,14 +167,19 @@
         (async/go-loop [] (when (async/<! error-chan) (recur)))
         (try
           (flow/resume graph)
-          (binding [*work-launcher* launcher
-                    *context-channel* context-channel
-                    *stream-channel* stream-channel]
-            (body connection ctx))
+          ;; THE EVALUATOR IS A VAR, NOT A CONFIG FACT. `evaluate-sources`
+          ;; calls `seon.sci.eval/evaluate` directly so the program graph
+          ;; carries the edge; a stand-in is installed by replacing that
+          ;; Var's root value, which every proc thread sees.
+          (with-redefs [sci.eval/evaluate evaluator]
+            (binding [*work-launcher* launcher
+                      *context-channel* context-channel
+                      *stream-channel* stream-channel]
+              (body connection ctx)))
           (finally
             (flow/stop graph)
             (async/<!! completion)
-            (seon.flow/stop-work-launcher! launcher)))))))
+            (seon.flow/stop-work-launcher! launcher))))))))
 
 (defn- handle
   [connection ctx]
@@ -181,7 +199,6 @@
    ;; replaced per agent by arm! — present so the handle validates
    :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
    :seon.cluster.loop/completion (async/promise-chan)
-   :seon.cluster.loop/evaluate 'seon.cluster.agent-test/fake-evaluate
    :seon.sci.admit/caps
    (assoc (config/result-caps (test-support/effective-config))
           :seon.config.eval.result/max-depth 6
@@ -342,7 +359,7 @@
   (async/close! (:seon.cluster.agent-test/events event-source)))
 
 (deftest system-source-submission-uses-the-ordinary-durable-run
-  (with-connection
+  (with-connection real-evaluate
     (fn [connection ctx]
       (let [routing (armory)
             armer-channel (async/chan (async/sliding-buffer 1))
@@ -361,8 +378,7 @@
         (let [cluster-handle
               (assoc (handle connection ctx)
                      :seon.cluster.wake/channel armer-channel
-                     :seon.cluster.loop/completion armer-completion
-                     :seon.cluster.loop/evaluate 'seon.sci.eval/evaluate)
+                     :seon.cluster.loop/completion armer-completion)
               armer-graph
               (flow/create-flow
                {:procs

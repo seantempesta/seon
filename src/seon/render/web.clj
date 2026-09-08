@@ -71,7 +71,6 @@
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
             [seon.sci.kernel :as sci.kernel]
-            [seon.sci.eval :as sci.eval]
             [starfederation.datastar.clojure.adapter.common :as datastar.common]
             [starfederation.datastar.clojure.adapter.http-kit :as datastar.http-kit]
             [starfederation.datastar.clojure.api :as datastar]
@@ -1489,37 +1488,28 @@
                    [:seon.cluster.agent/id agent-id])
           [:seon.cluster.agent/namespace :seon.ns/name]))
 
-(defn- reusable-evaluated-preview
-  "Recover evaluated data from the retained call after a code observation wake."
-  [request current source namespace-name]
-  (let [previous (get (:seon.render/retained-calls request)
-                      (:seon.render.call/id request))
-        evaluated (:seon.cluster.loop/evaluated-sources previous)
-        evidence (:seon.render.call/read-evidence previous)]
-    (when (and (some? evaluated)
-               (= source (:seon.render.call/source previous))
-               (= (:seon.cluster.agent/id request) (:seon.cluster.agent/id previous))
-               (= [:seon.ns/name namespace-name] (:seon.cluster.run/starting-ns previous))
-               (= (get-in current [:seon.render.call/static-evidence :seon.render.call/producer])
-                  (get-in previous [:seon.render.call/static-evidence :seon.render.call/producer]))
-               (some? (:seon.render/program-snapshot current))
-               (some? (:seon.render/projection current))
-               (identical? (:seon.render/program-snapshot current)
-                           (:seon.render/program-snapshot previous))
-               (identical? (:seon.render/projection current)
-                           (:seon.render/projection previous))
-               (vector? evidence)
-               (db/read-evidence-current? (:seon.db/db request) evidence))
-      (select-keys previous
-                   [:seon.render.call/source-run-id :seon.cluster.loop/evaluated-sources
-                    :seon.cluster.agent/id :seon.cluster.run/starting-ns
-                    :seon.cluster.run/opened-at :seon.cluster.run/closed-at :seon.db/db]))))
+(defn- evaluated-invocation
+  "The preview one call slot points at, read from the ONE store that holds it.
+
+  A CALL ENTRY IS A POINTER, NOT A SECOND STORE. The evaluated forms live once,
+  in the cache keyed by code and input (ruling 71); a slot names the invocation
+  key and the source-run identity it displayed, and this dereferences that."
+  [invocations call]
+  (let [run-id (:seon.render.call/source-run-id call)]
+    (when run-id
+      (some (fn [entry]
+              (when (= run-id (:seon.render.call/source-run-id entry)) entry))
+            (get invocations (:seon.render.call/invocation-key call))))))
 
 (defn- render-source-call
-  "Evaluate authored source once in memory and retain its exact forms and results.
+  "Render one authored source slot, evaluating it through the run loop's one path.
 
-  The existing invocation cache owns the preview. Only Add to context persists
-  it; execution, parsing, admission and transcript formatting keep their owners."
+  THE PAGE HAS NO EVALUATOR. `loop/preview-sources` is the same fork, parse
+  and evaluation an ordinary turn runs; this function only decides whether the
+  ONE cache keyed by code and input already holds the answer — and it does not
+  decide that itself either: `render/render-call` consulted the invocation
+  cache with `same-invocation-evidence?` and the retained read evidence before
+  returning, and an entry carrying an output is that cache's hit."
   [request]
   (let [captured-invocations (:seon.render/captured-invocations request)
         request (cond-> request
@@ -1541,20 +1531,7 @@
             (or (:seon.render/namespace request)
                 (when agent-id (assigned-agent-namespace database agent-id)))
             preview
-            (cond
-              (not (qualified-symbol?
-                    (:seon.cluster.loop/evaluate
-                     (:seon.cluster.loop/cluster request))))
-              (debug-diagnostic
-               ::evaluator-absent
-               "This environment names no evaluator, so no source preview can run."
-               'seon.render.web/render-source-call
-               :seon.cluster.loop/evaluate :seon.cluster.loop/evaluate
-               (select-keys (:seon.cluster.loop/cluster request)
-                            [:seon.cluster/name :seon.cluster.loop/evaluate])
-               ::evaluator-absent nil)
-
-              (not (and agent-id namespace-name))
+            (if-not (and agent-id namespace-name)
               (debug-diagnostic
                ::owner-not-ensured
                "Evaluating this preview requires an agent assigned to the viewing namespace."
@@ -1562,40 +1539,19 @@
                :seon.cluster.agent/id :seon.cluster.agent/id
                (select-keys request [:seon.render/namespace :seon.render.value/root])
                ::owner-not-ensured nil)
-
-              :else
-              (or (reusable-evaluated-preview request call-entry source namespace-name)
-                  (binding [db/*read-evidence-sink* observed]
-                    (let [cluster (:seon.cluster.loop/cluster request)
-                          opened-at (Date.)
-                          forked (sci.eval/fork-for-turn
-                                  {:seon.sci.eval/ctx (:seon.sci.eval/ctx request)
-                                   :seon.db/db database
-                                   :seon.db/connection (:seon.db/connection cluster)
-                                   :seon.cluster.agent/id agent-id})]
-                      (if (:seon.error/kind forked)
-                        forked
-                        (let [sources
-                              (loop/planned-sources
-                               source namespace-name
-                               (:seon.config.eval.result/max-source (:seon.sci.admit/caps request)))
-                              evaluated
-                              (loop/evaluate-sources
-                               {:seon.cluster.loop/cluster cluster
-                                :seon.db/db database
-                                :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
-                                :seon.cluster.agent/id agent-id
-                                :seon.cluster.eval/ordinal 0
-                                :seon.ns/name namespace-name
-                                :seon.cluster.reply/sources sources
-                                :seon.sci.eval/defs-notices (vec (:seon.sci.eval/defs-notices forked))})]
-                          {:seon.render.call/source-run-id (str (random-uuid))
-                           :seon.cluster.loop/evaluated-sources evaluated
-                           :seon.cluster.agent/id agent-id
-                           :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
-                           :seon.cluster.run/opened-at opened-at
-                           :seon.cluster.run/closed-at (Date.)
-                           :seon.db/db database}))))))
+              (binding [db/*read-evidence-sink* observed]
+                (let [evaluated
+                      (loop/preview-sources
+                       {:seon.cluster.loop/cluster (:seon.cluster.loop/cluster request)
+                        :seon.db/db database
+                        :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
+                        :seon.cluster.agent/id agent-id
+                        :seon.ns/name namespace-name
+                        :seon.cluster.reply/text source
+                        :seon.sci.admit/caps (:seon.sci.admit/caps request)})]
+                  (cond-> evaluated
+                    (not (:seon.error/kind evaluated))
+                    (assoc :seon.render.call/source-run-id (str (random-uuid)))))))
             output
             (if (:seon.error/kind preview)
               preview
@@ -1608,12 +1564,26 @@
             (into (db/read-evidence @observed {:seon.db/retain-read-results? true})
                   (mapcat #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
                   (:seon.cluster.loop/evaluated-sources preview))
-            enrich (fn [entry]
-                     (cond-> (assoc entry :seon.render.call/output output)
-                       (not (:seon.error/kind preview)) (merge preview)
-                       (seq evidence) (update :seon.render.call/read-evidence into evidence)))]
-        (replace-current-invocation! captured-invocations invocation-key call-entry enrich)
-        (swap! (:seon.render/captured-calls request) update call-id enrich)
+            ;; ONE STORE OF THE EVALUATION. The invocation entry is the cache
+            ;; keyed by code and input (ruling 71), so the evaluated forms and
+            ;; their rendered bytes live there and nowhere else; the call entry
+            ;; keeps only what every other page slot keeps — the presented
+            ;; output, its evidence, and the pointer to that invocation.
+            enrich-invocation
+            (fn [entry]
+              (cond-> (assoc entry :seon.render.call/output output)
+                (not (:seon.error/kind preview)) (merge preview)
+                (seq evidence) (update :seon.render.call/read-evidence into evidence)))
+            enrich-call
+            (fn [entry]
+              (cond-> (assoc entry :seon.render.call/output output)
+                (not (:seon.error/kind preview))
+                (assoc :seon.render.call/source-run-id
+                       (:seon.render.call/source-run-id preview))
+                (seq evidence) (update :seon.render.call/read-evidence into evidence)))]
+        (replace-current-invocation! captured-invocations invocation-key call-entry
+                                     enrich-invocation)
+        (swap! (:seon.render/captured-calls request) update call-id enrich-call)
         output))))
 
 (defn- debug-render-experiment
@@ -1910,7 +1880,13 @@
         _ (when render-request
             (render-source-call
              (assoc render-request :seon.render.call/id context-call-id)))
-        context-source-call (get @captured-calls context-call-id)
+        context-source-call
+        (let [call (get @captured-calls context-call-id)]
+          (merge call
+                 (select-keys
+                  (evaluated-invocation
+                   (merge retained-invocations @captured-invocations) call)
+                  [:seon.cluster.loop/evaluated-sources])))
         units-html
         (if render-request
           (debug-found-values-html
@@ -2095,22 +2071,11 @@
         (keep :seon.render.call/invocation-key)
         (mapcat vals (concat (vals calls) (vals ai-calls)))))
 
-(defn- current-read-evidence
-  [database retained]
-  (db/read-evidence
-   (mapv (fn [evidence]
-           {:seon.db/db database
-            :seon.db/source-argument-position
-            (:seon.db/source-argument-position evidence)
-            :datahike.read/dependency-plan
-            (:datahike.read/dependency-plan evidence)})
-         retained)))
-
 (defn- evidence-revisions
   [database call]
   (mapv :datahike.read/revision
-        (current-read-evidence database
-                               (:seon.render.call/read-evidence call))))
+        (:seon.render.call/read-evidence
+         (render/refresh-read-evidence database call))))
 
 (defn- retained-revisions
   [call]
@@ -2307,7 +2272,16 @@
   A closed page has no consumer to refresh during that pass, so retaining its
   package would let a later reopen accept old code solely because the database
   basis is unchanged. Calls, fragments, and generated agent context are also
-  code-derived and must be derived again after an evaluation."
+  code-derived and must be derived again after an evaluation.
+
+  THE ONE CACHE IS NOT DROPPED HERE. An invocation entry already states the
+  code it ran under — the program snapshot and the projection it was rendered
+  with, compared by identity — and the reads it depended on. An evaluation
+  that installed a definition replaces the snapshot, so every entry misses on
+  its own evidence; an evaluation that installed nothing leaves entries that
+  are genuinely still current. Emptying the store instead re-evaluated every
+  page preview after any turn, which is what the second hand-written preview
+  predicate existed to paper over."
   [state]
   (let [watched (watched-registration-keys
                  (:seon.render.web/registration state))]
@@ -2331,7 +2305,6 @@
                   (seq source-calls) (assoc registration-key source-calls))))
             {} (::calls state))
            ::ai-calls {}
-           ::invocations {}
            ::ai-entries {})))
 
 (defn- failed-page-result

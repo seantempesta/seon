@@ -670,7 +670,13 @@
 
 (def ^:private same-call-cache-evidence? same-invocation-evidence?)
 
-(defn- refresh-read-evidence
+(defn refresh-read-evidence
+  "Carry one retained call's read evidence forward onto a newer database.
+
+  THE ONE REFRESHER. Every retained entry's evidence is rebuilt from its own
+  `:datahike.read/dependency-plan` and source argument position, so a second
+  hand-written copy of this walk is a defect, not a convenience."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] :map]}
   [database previous]
   (assoc previous :seon.render.call/read-evidence
          (mapv (fn [retained current]

@@ -185,12 +185,6 @@
                                      (:seon.config.eval/time-limit-ms
                                       (config/defaults))
                                      :seon.config/on-core-error :record
-                                     ;; the evaluator every source preview
-                                     ;; runs through: production names it on
-                                     ;; the handle, and a fixture that omits
-                                     ;; it turns one page into a proc death.
-                                     :seon.cluster.loop/evaluate
-                                     'seon.sci.eval/evaluate
                                      :seon.cluster.run/process process
                                      ;; the cluster's one stream conn:
                                      ;; production always has it, and
@@ -1136,6 +1130,13 @@
   ;; Ruling 2026-09-06: preview results live in the invocation cache. A person
   ;; reading the page is not an agent taking a turn, so repeated inspection
   ;; must leave the durable counts exactly where it found them.
+  ;;
+  ;; THE BASIS IS THE TOTAL MEASURE (PRD §8, ten loads write nothing). Counting
+  ;; runs, evaluations and faults says nothing about a datom this page had no
+  ;; name for — a render-cost fact, a committed render fault, a receipt from a
+  ;; preview that settled itself. `:t` moves for any of them, so the ten page
+  ;; loads below assert the basis transaction, and the named counters stay to
+  ;; say which family moved when it does.
   (with-server
     (fn [connection server _context]
       (let [durable-counts
@@ -1169,10 +1170,17 @@
                         [:seon.cluster.run/id "inspection-counts"]
                         :seon.cluster.eval/ordinal 0}])
         (inspect!)
-        (let [before (durable-counts)]
-          (dotimes [_ 3] (inspect!))
+        (is (= 200 (.statusCode (fetch server "/agent/root/debug?prompt=true"))))
+        (let [before (durable-counts)
+              before-basis (db/basis-t @connection)]
+          (dotimes [_ 10]
+            (is (= 200 (.statusCode
+                        (fetch server "/agent/root/debug?prompt=true"))))
+            (inspect!))
           (is (= before (durable-counts))
               "repeated inspection creates no run, evaluation, form, or fault")
+          (is (= before-basis (db/basis-t @connection))
+              "ten loads of the debug page and its feed write no datom at all")
           (is (and (pos? (:runs before)) (pos? (:evaluations before)))
               "the counters see the facts an ordinary turn writes"))))))
 
