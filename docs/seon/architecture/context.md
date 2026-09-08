@@ -7,7 +7,7 @@ tags: [architecture, agent]
 # Context — the neighborhood renders itself as history
 
 > **Target design** (present tense). The block/render machinery lives in
-> [[ui]]; historical run reconstruction and inspection live in
+> [[ui]]; historical turn reconstruction and inspection live in
 > [[observability]]; dated measurements that constrain this live in PRD research.
 > Implementation state lives in [[roadmap]]. A block is the informal name for
 > one render-function call, never a stored data type.
@@ -42,7 +42,7 @@ material then follows its arrival order. A prompt entry carries its stable
 logical render-call identity, observed basis transaction and commit ID, form,
 and already serialized AI bytes.
 
-The agent, cluster, current run, namespace, render profile, program graph, plan,
+The agent, cluster, current turn, namespace, render profile, program graph, plan,
 event membership, and ref edges are facts or pure queries over the selected
 database value. Rendering the same database value (the same store ID, branch,
 commit ID, and basis transaction), code revision, and explicit render arguments
@@ -110,17 +110,20 @@ test for context, not a one-time check.
 **The completeness model.** A continuous agent always knows, so the projection
 always renders:
 
-- **what just happened** — the event that opened this run (an inbound message,
-  a child's outcome notice, a schedule), in the present tense. Absent this, the
-  most salient standing frame in the prompt wins by default — so evergreen
-  advice ("after a restart, resume your plan") is **conditional/derived**,
-  rendered only when its condition actually holds, never planted every turn.
-  A self-healing cluster JVM replacement is one such condition: the next
-  turn names the interrupted eval and process failure, confirms that current
-  functions/schemas/tests were reconstructed from database program facts, and
-  states that live `result/<id>` values and other process-local state
-  were lost. It does not imply that committed transactions were rolled back or
-  that the interrupted form was replayed.
+- **what just happened** — the wake that opened this turn (an inbound
+  message, a child's outcome notice, a schedule firing), in the present
+  tense. Absent this, the most salient standing frame in the prompt wins by
+  default — so evergreen advice ("after a restart, resume your plan") is
+  **conditional/derived**, rendered only when its condition actually holds,
+  never planted every turn. A self-healing cluster JVM replacement is one
+  such condition: the next turn names the interrupted evaluation and process
+  failure, confirms that current functions/schemas/tests were reconstructed
+  from database program facts, and states that live `result/<id>` values and
+  other process-local state were lost. It does not imply that committed
+  transactions were rolled back or that the interrupted evaluation was
+  replayed. No turn is ever resumed: boot closes every open turn and stamps
+  its unsettled evaluations `:seon.eval/interrupted-at` before the agent's
+  next turn ever opens.
 - **where I am** — the plan, rendered with unambiguous status. The plan is not
   a checklist; it is **externalized intent** — the one thing a stateless
   boundary cannot reconstruct unless it was written down as data. An open step
@@ -139,8 +142,9 @@ always renders:
   successor make the observed change explicit without rewriting history.
 
 **Situation, never the answer.** The projection renders the agent's operational
-situation and the operations available on it — "this open run has no process
-custody," "three plan items are open and independent; any may be delegated" —
+situation and the operations available on it — "this turn is still open, its
+model call has not yet returned," "three plan items are open and
+independent; any may be delegated" —
 because a continuous agent would know
 these. It never renders the answer to the agent's task; that is the line
 between context and coaching. Making the situation legible makes the right
@@ -182,8 +186,8 @@ byte-faithful REPL session:
 roles are load-bearing: derived sections **crystallize what the transcript
 will lose** as it decays (the plan is the durable form of intent, findings of
 knowledge — what would otherwise scroll off), and they **surface what the spine
-is blind to** — derived state the agent never eval'd (for example, an open run
-without custody) and non-event changes between model calls. Because the transcript already
+is blind to** — derived state the agent never eval'd (for example, a turn still
+open with no reply yet) and non-event changes between model calls. Because the transcript already
 carries event-deltas (a message that arrived is already a line), the delta
 surface is only the *non-event* changes. Additive sections layer on the spine;
 they never contradict it.
@@ -214,11 +218,14 @@ capture.
 
 The cluster instruction facts teach the grammar owned by `seon.cluster.reply`:
 a model reply is read to natural completion, split into
-ordered form sources, frozen on the run, and reduced in source order. Each
-attempted form records its actual result or error. The reader never
-regex-rewrites model output, invents a result for an unattempted form, or
-treats a model-authored claim as execution evidence. Provider byte streaming
-is transport behavior and does not select a second evaluation mode.
+ordered form sources, stored as the turn's evaluation entities in one commit,
+and reduced in that same order in the turn's `:evaluate` arm. "Frozen" is
+presence, not a stored digest: a turn has frozen its forms exactly when it
+has evaluation entities to reduce. Each attempted form records its actual
+result or error. The reader never regex-rewrites model output, invents a
+result for an unattempted form, or treats a model-authored claim as
+execution evidence. Provider byte streaming is transport behavior and does
+not select a second evaluation mode.
 
 ## A render function supplies two projections
 
@@ -259,17 +266,23 @@ appears in the running agent's next context, and escalates to root. No agent
 exception crosses into a proc and no failure is silently dropped. The
 historical prompt blob—not a re-executed effect—is the byte ground truth.
 
-## Only system-authored reads refresh
+## System-authored reads are never stored
 
-Every run form receives required authorship from its constructor: `:agent` for
-an agent-authored form and `:system` for a system-authored read. A refreshed
-read points uniquely to the prior form it refreshes. The refresh transition
-accepts only a terminal system-authored predecessor with no existing successor,
-and the receipt owns the read evidence that justified refresh. Consequently an
-agent-authored form cannot enter the refresh path and never re-executes. The
-system injects a form only when it is true and the agent has not already done
-the work; ordinary `require` forms execute once in the turn fork and settlement
-records the resulting namespace facts.
+Only a turn's own forms — the ones the reply grammar split out of an actual
+model reply — become `:seon.eval` entities. Every other executed form in the
+prompt is a system-authored read: a unit's `:seon.render/ai` source, executed
+in the turn's fork at projection time to produce the comments-then-forms
+bytes the model reads. These executed forms and their printed values ARE
+prompt bytes, never stored evaluations, so there is no refresh transition,
+no successor pointer, and no authorship flag to persist — recomputing the
+projection from the same basis simply re-executes the same system read and
+gets the same bytes, which is exactly what byte-identical projection
+promises. An agent-authored form, by contrast, is never re-executed: it
+became a stored evaluation the moment its turn stored the reply, and the
+`:seon.eval/id` identity over `(turn, ordinal)` is what makes re-freezing it
+an upsert rather than a second execution. Ordinary `require` forms an agent
+writes execute once in the turn fork, and settlement records the resulting
+namespace facts on that same evaluation.
 
 ## Shared artifact — the agent knows the human sees it
 
@@ -293,7 +306,7 @@ the process that first authored them. These facts use the settled top-level
 `:seon.fn`/`:seon.ns`/`:seon.schema`/`:seon.test` attribute namespaces.
 
 Every namespace has one owner agent, identified by the namespace's unique
-`:seon.cluster.agent/namespace` ref. An agent that needs a symbol changed in
+`:seon.agent/namespace` ref. An agent that needs a symbol changed in
 another namespace sends its owner a durable message and receives a commit or
 rejection by reply. When a message targets an unowned namespace, the running system
 creates an agent and assigns that namespace on demand before delivery. The
@@ -327,7 +340,7 @@ rendering systems.
 
 Render and context functions receive ordinary namespaced request data. The
 render call supplies the immutable `:seon.db/db`, the viewing
-`:seon.cluster.agent/id`, the selected render profile, live-process evidence
+`:seon.agent/id`, the selected render profile, live-process evidence
 when needed, and the pulled value. A render function declares the request it
 consumes and never reaches through a process-global connection or an injectable
 registry.
@@ -345,7 +358,7 @@ owning-namespace ref, the selector queries the acquired candidates for the
 unique contract-fitting public function in that namespace and runs the winner
 through the same render boundary. Without an owning ref it proceeds to the
 schema property and floor. Render functions consume a unit carrying
-`:seon.db/db`, `:seon.cluster.agent/id`, and their domain values; their presence
+`:seon.db/db`, `:seon.agent/id`, and their domain values; their presence
 alone never inserts a context unit.
 
 ### Root is a small specialization of the same mechanism
@@ -395,19 +408,24 @@ that retrieves its deeper representation. Reference code and retrieval beyond
 the current namespace remain functions the agent calls, not a separately pushed
 context block.
 
-Every context capture records each entry's logical identity, basis, content
-hash, estimated tokens, and position as observability facts. Provider cache-read
-usage measures actual prefix reuse. Code remains the compounding asset: as an
-agent persists schemas, functions, and tests, those program facts enter its
-neighborhood and render through the same acquisition and history mechanism.
+A turn's own `:seon.ai.attempt/prompt-digest` is the durable, per-turn
+byte-identity witness; the render proc's own per-entry logical identity,
+basis, content hash, estimated tokens, and position are process-local
+performance evidence, not a second durable capture family. Provider
+cache-read usage measures actual prefix reuse. Code remains the compounding
+asset: as an agent persists schemas, functions, and tests, those program
+facts enter its neighborhood and render through the same acquisition and
+history mechanism.
 
 ## Work wakes and render refresh are separate
 
-The one `seon.cluster.wake` listener performs two distinct kinds of routing.
-Agent work wakes only for facts addressed to that agent, such as a message to it
-or an error against it. A render refresh is passive: the listener offers one
-payload-free signal only when transaction attributes intersect the union of
-retained read interests. It never starts a turn. If a fact deserves immediate
+The one `seon.wake` router performs two distinct kinds of routing. Agent work
+wakes only for facts on a listened attribute addressed to that agent — a
+message to it, a fault routed to it, an effect settlement it requested — and
+only when `:seon.wake/opens-turn?` is true does an unanswered instance open a
+turn. A render refresh is passive: the listener offers one payload-free
+signal only when transaction attributes intersect the union of retained read
+interests. It never starts a turn on its own. If a fact deserves immediate
 attention, its author sends the agent a message.
 
 The render proc responds to that signal by dereferencing the latest immutable
@@ -422,11 +440,11 @@ report, changed-attribute payload, render result, or durable invalidation log.
 
 ## Multi-agent context
 
-Agents relate through durable `:seon.cluster.message` rows, shared namespace
+Agents relate through durable `:seon.message` rows, shared namespace
 ownership, and ordinary refs such as a message's optional `/about` fact. There
 is no persisted parent tree or orphan state. Root's namespace page derives the
-agent population by `:seon.cluster.agent/id`; an agent web surface derives received and
-sent messages, runs, eval receipts, and routed errors by their current refs.
+agent population by `:seon.agent/id`; an agent web surface derives received and
+sent messages, turns, evaluations, and routed errors by their current refs.
 Empty queries render nothing, so visibility needs no notification or
 acknowledgement state.
 
@@ -437,9 +455,11 @@ uses the same root pull and structural floor. It exposes every reachable
 schema'd value—including system apparatus hidden from the curated namespace page—preserves
 identities and refs for `get-in` path navigation, and never transacts a display choice.
 The surface also shows each unit's form, AI, and HTML projections and their source
-facts. Through [[observability]], the same surface reaches a run's exact
-`:seon.context.capture/prompt`, database basis transaction, ordered
-contributions, AI attempts, forms, eval receipts, and errors.
+facts. Through [[observability]], the same surface reaches a turn's exact
+basis (its own transaction `:t`, replayed with `as-of`), its provider
+attempts, and its evaluations and errors — there is no separately stored
+prompt or contribution row to reach, because replaying the basis reproduces
+the prompt exactly.
 
 ## Configuration
 
@@ -454,7 +474,7 @@ read process environment variables or a configuration file.
 `seon.config/apply!` is the one exact reconciliation mechanism and
 `seon.config/effective` reads the ordinary effective map from an immutable
 database value. Acquisition belongs to each consumer: process structures read
-at boot, loop handles capture their dials when an agent graph arms, AI settings
+at boot, the turn loop reads its dials when an agent graph arms, AI settings
 resolve once per turn including the agent overlay, and render-request dials
 read from that request's database value. Applying facts therefore affects a
 consumer at its documented acquisition boundary; it does not silently rebuild
@@ -481,7 +501,7 @@ The manifest-owned config singleton remains a separate entity reached by
 
 Prompt acquisition resolves the system text and the agent's retained context
 generation under one selected render profile. That one ordinary result flows
-unchanged through context capture, token accounting, every retry, the provider
+unchanged through the turn's open, token accounting, every retry, the provider
 request owner, and the debug surface. None of those consumers re-resolves live config
 after the prompt database value has been chosen.
 
@@ -489,8 +509,8 @@ after the prompt database value has been chosen.
 
 - [[ui]] — the block, its three projections, the schema-derived root pull and
   selection chain, and the live channel.
-- [[data-model]] — admitted context, run, receipt, and program-graph facts.
-- [[observability]] — context captures, attempts, receipts, errors, and blobs.
+- [[data-model]] — admitted context, turn, evaluation, and program-graph facts.
+- [[observability]] — the turn's basis, attempts, evaluations, errors, and blobs.
 - Dated PRD research — cache-stability, render-prominence, and context trials.
 - [[think-in-clojure]] — a fn's specced in/out is the query substrate for
   both rendering and running.
