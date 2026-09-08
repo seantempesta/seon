@@ -1,5 +1,7 @@
 ---
 name: datahike
+type: skill
+status: active
 description: "Use Seon's database owner for Datalog, pull, transactions, refs, temporal values, and read evidence. Use for database queries, schema-bridge behavior, or since-diff diagnosis."
 ---
 
