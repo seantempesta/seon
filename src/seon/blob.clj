@@ -272,7 +272,11 @@
   "Publish staged blobs and commit their direct roots under one permit."
   {:malli/schema
    [:=>
-    [:cat :seon.db/connection [:vector :seon.blob/staged-write]
+    ;; A SEQUENTIAL, not a vector: the body only walks it in order, and four
+    ;; production callers hand it the raw `(:seon.blob/staged-writes …)` seq
+    ;; a settlement built. Requiring a vector at this seam refused the
+    ;; callers' honest shape (2026-09-08 verification, P2's class).
+    [:cat :seon.db/connection [:sequential :seon.blob/staged-write]
      [:fn clojure.core/fn?]]
     :seon.schema/value]}
   [connection staged-writes commit-roots!]

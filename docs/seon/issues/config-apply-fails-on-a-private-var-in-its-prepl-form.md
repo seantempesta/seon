@@ -34,3 +34,12 @@ Make the prepl form reference public entry points only (or move the
 reconciliation into one public function the operator calls), resolve the
 manifest path against the working directory, and add the operator drill:
 apply the shipped manifest to a running cluster, then `init --dev` converges.
+
+## 2026-09-08 — the class is wider than the symptom
+
+`verify-p1-p6-and-backlog` (`research/verify-p1-p6-and-backlog-2026-09-08.md`)
+read the operator: `config apply` splices the manifest's SYMBOL values into
+a compiled form, so it is loud only because the referenced var happens to
+be private — a public one would silently store the function object as a
+config fact. The fix is the same as above: send data, resolve nothing on the
+operator side.
