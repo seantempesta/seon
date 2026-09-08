@@ -1718,10 +1718,14 @@
   [path]
   (.getCanonicalPath (io/file path)))
 
-(defn- unreported-source-current?
+(defn- changed-source-paths
   [published-file-digests current-file-digests reported-paths]
-  (= (apply dissoc published-file-digests reported-paths)
-     (apply dissoc current-file-digests reported-paths)))
+  (->> (concat reported-paths
+               (filter #(not= (get published-file-digests %)
+                               (get current-file-digests %))
+                       (set/union (set (keys published-file-digests))
+                                  (set (keys current-file-digests)))))
+       distinct sort vec))
 
 (defn- incremental-source-refresh!
   [root store changed-paths]
@@ -1733,9 +1737,12 @@
                  expected-commit
                  (= expected-commit (:seon.source/commit-id cached))
                  (map? (:seon.source/file-digests cached)))
-      (full-source-refresh! root store)
-      (let [paths (->> changed-paths (map canonical-path) distinct sort vec)
-            snapshot-before (current-source-snapshot)
+      (do (report-source-progress! "complete publication: missing or stale artifact")
+          (full-source-refresh! root store))
+      (let [snapshot-before (current-source-snapshot)
+            paths (changed-source-paths (:seon.source/file-digests cached)
+                                        (:seon.source/file-digests snapshot-before)
+                                        (map canonical-path changed-paths))
             known-functions (seon.fn/manifest-function-symbols manifest)
             changes
             (try
@@ -1751,7 +1758,7 @@
                                 {:seon.fn.file/path path
                                  :seon.fn.file/first-party-functions
                                  known-functions}))]
-                 (seon.fn/plan-file-change
+                 (assoc (seon.fn/plan-file-change
                   (cond->
                    {:seon.fn.change/status
                     (cond
@@ -1762,27 +1769,30 @@
                     current
                     (assoc :seon.fn.change/current-artifact current)
                     desired
-                    (assoc :seon.fn.change/desired-artifact desired)))))
+                    (assoc :seon.fn.change/desired-artifact desired)))
+                        :seon.fn.change/artifact desired)))
               paths)
              (catch clojure.lang.ExceptionInfo failure
                (if (= :seon.fn/index-refused (:seon.error/kind (ex-data failure)))
                  ;; A new callee in another edited file is absent from the
                  ;; old manifest. The complete analyzer is authoritative;
                  ;; it either resolves the new population or refuses it.
-                 [{:seon.fn.change/action :full-rebuild}]
+                 [{:seon.fn.change/action :full-rebuild
+                   :seon.fn.change/reasons [:analysis-refused]}]
                  (throw failure))))
             snapshot-after (current-source-snapshot)
             digest-after (:seon.source/digest snapshot-after)
-            unreported-current?
-            (unreported-source-current?
-             (:seon.source/file-digests cached)
-             (:seon.source/file-digests snapshot-after)
-             paths)]
-        (if (or (empty? paths)
-                (not= snapshot-before snapshot-after)
-                (not unreported-current?)
-                (some #(= :full-rebuild (:seon.fn.change/action %)) changes))
-          (full-source-refresh! root store)
+            reasons (into #{} (mapcat :seon.fn.change/reasons) changes)
+            structural (set/difference reasons
+                                       #{:component-or-cardinality-many-change
+                                         :attribute-retraction})
+            _ (when-not (= snapshot-before snapshot-after)
+                (refused! "Source changed while incremental publication was being analyzed."
+                          {:seon.source/digest-before (:seon.source/digest snapshot-before)
+                           :seon.source/digest-after digest-after}))]
+        (if (or (empty? paths) (seq structural))
+          (do (report-source-progress! (str "complete publication: " (pr-str (sort reasons))))
+              (full-source-refresh! root store))
           (let [desired-artifacts
                 ;; Persist complete file analysis for the next edit. Only
                 ;; `:seon.fn.change/rows` is the safe database delta.
@@ -1790,7 +1800,11 @@
                 next-manifest
                 (seon.fn/replace-manifest-artifacts manifest desired-artifacts)
                 _ (report-analysis-warnings! next-manifest)
-                rows (into [] (mapcat :seon.fn.change/rows) changes)
+                scalar? (empty? reasons)
+                rows (if scalar? (into [] (mapcat :seon.fn.change/rows) changes) [])
+                _ (report-source-progress!
+                   (str (if scalar? "incremental scalar publication" "incremental manifest reconciliation")
+                        ": " (count paths) " paths; reasons=" (pr-str (sort reasons))))
                 unchanged
                 (when (and (empty? rows)
                            (= digest-after (:seon.source/digest cached)))
@@ -1798,18 +1812,19 @@
                 result
                 (or unchanged
                     (source/upsert!
-                     {:seon.store/store store
+                     (cond-> {:seon.store/store store
                       :seon.source/expected-commit-id expected-commit
                       :seon.source/digest digest-after
                       :seon.source/upsert-rows rows
                       :seon.source/activation `derive-activation
                       :seon.db/process
-                      [:seon.db.process/id boot-process-identity]}))]
+                      [:seon.db.process/id boot-process-identity]}
+                       (not scalar?) (assoc :seon.fn/manifest next-manifest))))]
             (when-not unchanged
               (write-source-artifact! root
                                       (source-artifact result next-manifest
                                                        snapshot-after)))
-            (assoc result :seon.source/upsert-rows rows)))))))
+            (cond-> result scalar? (assoc :seon.source/upsert-rows rows))))))))
 
 (defn reload-order
   "Namespaces ordered so each one's required namespaces reload first.
@@ -2002,8 +2017,9 @@
   "Publish the current source tree onto the one `current-src` branch.
 
   With changed paths, reuse the published manifest for safe same-identity
-  upserts. Any deletion, new identity, schema resource, missing/stale artifact,
-  or uncertain projection falls back to one complete scratch publication."
+  upserts. Same-identity metadata changes reconcile the existing manifest.
+  Structural changes or a missing/stale artifact require complete analysis;
+  snapshot differences supply any paths missed by an editing hook."
   {:malli/schema
    [:function
     [:=> [:cat :seon.boot/root] :seon.source/published]
@@ -2020,9 +2036,8 @@
      (report-source-progress! "bootstrap configuration")
      (let [instance (when development-cluster
                       (get @running-instances development-cluster))
-           _ (when (and development-cluster
-                        (or (not instance) (not= 1 (count @running-instances))))
-               (refused! "Development updates require their own running JVM."
+           _ (when (and development-cluster (not instance))
+               (refused! "Development updates require the named cluster to be running."
                          {:seon.boot/cluster-name development-cluster}))
            config (resolve-bootstrap {:seon.boot/root root})
            store-dir (:seon.boot/store-dir config)

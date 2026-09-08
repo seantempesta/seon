@@ -48,6 +48,9 @@
 (def pending-review-lock-path (io/file review-state-root ".pending-review.lock"))
 (def review-worker-path (io/file review-state-root ".review-worker.edn"))
 (def reviews-path (io/file review-state-root "reviews"))
+(def pending-source-path (io/file review-state-root ".pending-source.edn"))
+(def source-worker-path (io/file review-state-root ".source-worker.edn"))
+(def source-results-path (io/file review-state-root "source-publications"))
 (def max-pending-files 50)
 
 ;;; ---------------------------------------------------------------------------
@@ -1024,21 +1027,21 @@
       (when (.exists file) (edn/read-string (slurp file))))
     (catch Exception _ nil)))
 
+(defn- launch-hook-worker!
+  "Start one detached hook worker; admission and state remain under the pending lock."
+  [arguments]
+  (.start
+   (doto (ProcessBuilder.
+          ^java.util.List (into [(str (root-file "bin/seon-hook"))] arguments))
+     (.directory (io/file repo-root))
+     (.redirectOutput java.lang.ProcessBuilder$Redirect/DISCARD)
+     (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD))))
+
 (defn- launch-review-worker-unlocked!
   "Launch and record one detached worker. Caller owns the pending lock."
   [interval-seconds]
   (try
-    (let [builder
-          (doto
-           (ProcessBuilder.
-            ^java.util.List
-            [(str (root-file "bin/seon-hook"))
-             "--review-worker"
-             (str interval-seconds)])
-            (.directory (io/file repo-root))
-            (.redirectOutput java.lang.ProcessBuilder$Redirect/DISCARD)
-            (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD))
-          child (.start builder)
+    (let [child (launch-hook-worker! ["--review-worker" (str interval-seconds)])
           state {:seon.review.worker/pid (.pid child)
                  :seon.review.worker/window-start-ms
                  (System/currentTimeMillis)
@@ -1174,7 +1177,13 @@
   (let [output (str (:out result) "\n" (:err result))
         evidence (root-file "logs/current-source-failure.log")
         omitted (max 0 (- (count output) hook-log-cap))
-        failure (publication-exception result)]
+        failure (publication-exception result)
+        failure-data (:data failure)
+        failure-data (if (:seon.fn/findings failure-data)
+                       (update failure-data :seon.fn/findings
+                               #(filterv (fn [finding]
+                                           (= :error (:seon.fn.analyzer/level finding))) %))
+                       failure-data)]
     (io/make-parents evidence)
     (spit evidence
           (str (when (pos? omitted)
@@ -1183,24 +1192,16 @@
     (str "ADVISORY — current-src publication failed. Diagnostic: "
          (.getPath evidence) ". "
          (if failure
-           (str (:cause failure) " " (pr-str (:data failure)))
+           (str (:cause failure) " " (pr-str failure-data))
            (str "Operator exit " (:exit result) "."))
          " Inspect the published head before relying on it.")))
 
-(defn- current-source-feedback
-  "Publish edited source and update the explicitly selected development cluster."
-  [event config]
-  (let [paths (->> (event-file-paths event)
-                   (filter source-index-path?)
-                   (map absolute-file-path)
-                   distinct
-                   vec)]
-    (when (and (= (:hook_event_name event) "PostToolUse")
-               (get-in config [:current-source :enabled] true)
-               (seq paths))
-      (try
-        (let [result
-              (process/sh
+(defn- publish-source-paths
+  "Publish one admitted union of paths and return its terminal feedback."
+  [paths config]
+  (try
+        (let [child
+              (process/process
                {:cmd (into
                       (cond-> [(str (root-file "bin/seon"))]
                         (get-in config [:current-source :root])
@@ -1214,17 +1215,132 @@
                 :dir repo-root
                 :out :string
                 :err :string
-                :continue true})]
+                :continue true})
+              result (deref child
+                            (* 1000 (get-in config [:current-source :timeout-seconds] 180))
+                            ::timeout)
+              result (if (= ::timeout result)
+                       (do (process/destroy-tree child)
+                           @child
+                           {:exit 124 :err "Publication did not finish within its declared bound."})
+                       result)]
           (if (zero? (:exit result))
-            (last (remove str/blank? (str/split-lines (:out result))))
+            (if-let [terminal (last (remove str/blank? (str/split-lines (:out result))))]
+              (str (if (get-in config [:current-source :cluster]) "converged: " "published: ")
+                   terminal)
+              "refused: the operator returned no publication evidence.")
             (clip-feedback
              config
-             (publication-failure-message result))))
+             (str "refused: " (publication-failure-message result)))))
         (catch Exception error
           (clip-feedback
            config
            (str "ADVISORY — current-src publication could not run; inspect the "
-                "published head before relying on it. " (.getMessage error))))))))
+                "published head before relying on it. " (.getMessage error))))))
+
+(defn- read-source-state [path]
+  (when (.exists (io/file path))
+    (edn/read-string (slurp path))))
+
+(defn- source-result-path [id]
+  (io/file source-results-path (str id ".edn")))
+
+(defn- launch-source-worker-unlocked!
+  "Use the review worker admission pattern under the same pending lock."
+  []
+  (let [worker (read-source-state source-worker-path)]
+    (when-not (process-alive? (:seon.hook/pid worker))
+      (let [child (launch-hook-worker! ["--source-worker"])]
+        (spit source-worker-path (pr-str {:seon.hook/pid (.pid child)}))))))
+
+(defn- enqueue-source-unlocked! [paths]
+  (let [pending (read-source-state pending-source-path)
+        batch (-> (or pending {:seon.hook/publication (str (random-uuid))
+                              :seon.hook/queued-at (System/currentTimeMillis)})
+                  (update :seon.hook/paths #(vec (sort (into (set %) paths))))
+                  (assoc :seon.hook/edited-at (System/currentTimeMillis)))]
+    (spit pending-source-path (pr-str batch))
+    (let [result (source-result-path (:seon.hook/publication batch))]
+      (io/make-parents result)
+      (.createNewFile result))
+    (launch-source-worker-unlocked!)
+    (:seon.hook/publication batch)))
+
+(defn- run-source-worker!
+  "Drain a quiet snapshot once; edits during publication get the next window."
+  []
+  (let [config (load-config)
+        quiet-ms (* 1000 (get-in config [:current-source :quiet-seconds] 5))
+        timeout-ms (* 1000 (get-in config [:current-source :timeout-seconds] 180))]
+    (try
+      (loop []
+        (let [batch
+              (with-pending-lock
+                (fn []
+                  (if-let [pending (read-source-state pending-source-path)]
+                    (let [now (System/currentTimeMillis)
+                          remaining (- (+ (:seon.hook/edited-at pending) quiet-ms) now)
+                          bound (- (+ (:seon.hook/queued-at pending) timeout-ms) now)]
+                      (cond
+                        (not (pos? bound))
+                        (do (.delete pending-source-path)
+                            (assoc pending :seon.hook/feedback
+                                   "refused: no quiet window arrived within the publication deadline."))
+                        (pos? remaining) {:seon.hook/wait-ms (min remaining bound)}
+                        :else (do (.delete pending-source-path) pending)))
+                    (do (.delete source-worker-path) nil))))]
+          (when batch
+            (if-let [wait-ms (:seon.hook/wait-ms batch)]
+              (Thread/sleep (long wait-ms))
+              (let [id (:seon.hook/publication batch)
+                    paths (:seon.hook/paths batch)
+                    feedback (or (:seon.hook/feedback batch)
+                                 (publish-source-paths paths config))
+                    result (source-result-path id)]
+                (io/make-parents result)
+                ;; One newline terminates the result. Every editor tails this
+                ;; same file and reads only a complete terminal line.
+                (with-pending-lock
+                  #(spit result (str (pr-str (assoc batch
+                                                   :seon.hook/worker-pid
+                                                   (.pid (java.lang.ProcessHandle/current))
+                                                   :seon.hook/feedback feedback)) "\n")))
+                (log! "SOURCE_BATCH" (str "publication=" id)
+                      (str "paths=" (count paths)) feedback)))
+            (recur))))
+      (catch Exception error
+        (log! "SOURCE_WORKER_ERROR" (.getMessage error))
+        (with-pending-lock #(.delete source-worker-path))))))
+
+(defn- current-source-feedback
+  "Join one quiet publication and wait for the result covering this edit."
+  [event config]
+  (let [paths (->> (event-file-paths event)
+                   (filter source-index-path?)
+                   (map absolute-file-path) distinct vec)]
+    (when (and (= (:hook_event_name event) "PostToolUse")
+               (get-in config [:current-source :enabled] true)
+               (seq paths))
+      (let [id (with-pending-lock #(enqueue-source-unlocked! paths))
+            result-path (source-result-path id)
+            child (process/process ["tail" "-n" "+1" "-f" (str result-path)]
+                                   {:out :stream :err :string})]
+        (try
+          (with-open [reader (io/reader (:out child))]
+            (try
+             (let [line (future (.readLine reader))
+                  result (deref line
+                                (* 1000 (get-in config [:current-source :timeout-seconds] 180))
+                                ::timeout)]
+              (if (or (= ::timeout result) (nil? result))
+                (str "ADVISORY — current-src publication refused: no result arrived at "
+                     result-path ". Convergence is unknown.")
+                (str "Publication " id " covered " (str/join ", " paths)
+                     ": " (:seon.hook/feedback (edn/read-string result)))))
+             (finally (process/destroy-tree child))))
+          (finally
+            (process/destroy-tree child)
+            @child))))))
 
 
 (defn- feedback-response [feedback]
@@ -1312,7 +1428,9 @@
               (println "HOOK ERROR:" message))
             (output! {:continue true}))))))))
 
-(if (= "--review-worker" (first *command-line-args*))
+(cond
+  (= "--source-worker" (first *command-line-args*)) (run-source-worker!)
+  (= "--review-worker" (first *command-line-args*))
   (run-review-worker!
    (or (some-> (second *command-line-args*) parse-long) 120))
-  (-main))
+  :else (-main))

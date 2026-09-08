@@ -18,6 +18,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [sci.core :as sci]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent]
@@ -1019,6 +1020,57 @@
     (is (= '[a.b a.c] (cluster/reload-order '#{a.c a.b} {})))
     (is (= [] (cluster/reload-order #{} {})))))
 
+(deftest ^{:seon.test/long
+           "Real source publication and two cohosted clusters verify named adoption and independent SCI programs."}
+  development-adoption-targets-one-of-two-cohosted-clusters
+  (let [root (bare-root)
+        extra-root (doto (io/file root "source") .mkdirs)
+        path (io/file extra-root "adoption_probe.clj")
+        write-value! (fn [value]
+                       (spit path
+                             (str "(ns adoption-probe)\n"
+                                  "(defn value {:malli/schema [:=> [:cat] :int]} [] "
+                                  value ")\n")))
+        roots (conj seon.fn/source-roots (.getCanonicalPath extra-root))]
+    (try
+      (write-value! 1)
+      (test-support/preserving-instrumentation-state
+       (fn []
+         (with-redefs [seon.fn/source-roots roots
+                       cluster/source-roots (conj roots "config/default.edn")]
+           (let [fork (cluster/refresh-source! root)
+                 default (cluster/start! {:seon.boot/root root
+                                          :seon.boot/cluster-name "default"})]
+             (try
+               (let [beta (cluster/start! {:seon.boot/root root
+                                           :seon.boot/cluster-name "beta"})]
+                 (try
+                   (let [connection (:seon.boot/cluster-connection default)
+                         beta-connection (:seon.boot/cluster-connection beta)
+                         adopted (fn [conn name]
+                                   (:seon.source/commit-id
+                                    (db/pull @conn [:seon.source/commit-id]
+                                             [:seon.cluster/name name])))
+                         evaluate (fn [instance]
+                                    (sci/eval-string* (:seon.sci.eval/ctx instance)
+                                                      "(adoption-probe/value)"))]
+                     (is (= (:seon.source/commit-id fork) (adopted beta-connection "beta")))
+                     (is (= 1 (evaluate default) (evaluate beta)))
+                     (write-value! 2)
+                     (let [published (cluster/refresh-source!
+                                      root [(.getCanonicalPath path)] "default")]
+                       (is (not= (:seon.source/commit-id fork)
+                                 (:seon.source/commit-id published)))
+                       (is (= (:seon.source/commit-id published)
+                              (adopted connection "default")))
+                       (is (= (:seon.source/commit-id fork)
+                              (adopted beta-connection "beta")))
+                       (is (= 2 (evaluate default)))
+                       (is (= 1 (evaluate beta)))))
+                   (finally (cluster/stop! beta))))
+               (finally (cluster/stop! default)))))))
+      (finally (delete-recursively! root)))))
+
 (deftest unchanged-complete-source-refresh-reuses-the-published-head
   (let [digest (apply str (repeat 64 "a"))
         commit-id (random-uuid)
@@ -1124,21 +1176,21 @@
       (finally
         (delete-recursively! root)))))
 
-(deftest incremental-source-refresh-requires-every-unreported-file-to-match
-  (let [current? (deref #'cluster/unreported-source-current?)
+(deftest incremental-source-refresh-includes-unreported-changes
+  (let [changed (deref #'cluster/changed-source-paths)
         published {"/repo/src/a.clj" "a1"
                    "/repo/src/b.clj" "b1"
                    "/repo/resources/schema.edn" "s1"}]
-    (is (current? published
+    (is (= ["/repo/src/a.clj"] (changed published
                   (assoc published "/repo/src/a.clj" "a2")
-                  ["/repo/src/a.clj"]))
-    (is (false? (current? published
+                  ["/repo/src/a.clj"])))
+    (is (= ["/repo/src/a.clj" "/repo/src/b.clj"] (changed published
                           (assoc published "/repo/src/b.clj" "b2")
                           ["/repo/src/a.clj"])))
-    (is (false? (current? published
+    (is (= ["/repo/resources/schema.edn" "/repo/src/a.clj"] (changed published
                           (dissoc published "/repo/resources/schema.edn")
                           ["/repo/src/a.clj"])))
-    (is (false? (current? published
+    (is (= ["/repo/src/a.clj" "/repo/src/new.clj"] (changed published
                           (assoc published "/repo/src/new.clj" "n1")
                           ["/repo/src/a.clj"])))))
 
@@ -1156,7 +1208,9 @@
 (deftest ^{:seon.test/long
            "Publishes real source edits to cover complete fallback and incremental branch agreement."}
   incremental-source-refresh-preserves-agreement-across-real-edits
-  (let [root (bare-root)
+  (let [complete-builds (atom 0)
+        build-manifest seon.fn/build-manifest
+        root (bare-root)
         project (io/file root "project")
         source-root (io/file project "src")
         test-root (io/file project "test")
@@ -1177,7 +1231,10 @@
     (.mkdirs test-root)
     (try
       (with-redefs [seon.fn/source-roots roots
-                    cluster/source-roots all-roots]
+                    cluster/source-roots all-roots
+                    seon.fn/build-manifest (fn [request]
+                                             (swap! complete-builds inc)
+                                             (build-manifest request))]
         (cluster/refresh-source! root)
 
         (testing "two consecutive scalar edits retain complete artifacts"
@@ -1198,7 +1255,7 @@
                         vec))
                 "the artifact remains a complete file projection")))
 
-        (testing "a missed X followed by reported Y forces complete repair"
+        (testing "a missed X followed by reported Y repairs both incrementally"
           (write-source! source-root "sample/a.clj"
                          "(ns sample.a)\n(defn value [] 4)\n")
           (write-source! source-root "sample/b.clj"
@@ -1224,7 +1281,13 @@
                           db)
                      "[] 20")))
               (finally
-                (store/release-store! opened))))))
+                (store/release-store! opened)))))
+        (testing "body keyword metadata reconciles without complete analysis"
+          (write-source! source-root "sample/a.clj"
+                         "(ns sample.a)\n(defn value [] :sample/new-value)\n")
+          (cluster/refresh-source! root [a-path])
+          (is (= 1 @complete-builds)
+              "scalar, missed-path, and metadata edits reuse the manifest")))
       (finally
         (delete-recursively! root)))))
 

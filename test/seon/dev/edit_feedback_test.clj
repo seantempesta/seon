@@ -4,20 +4,21 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [seon.operator.state :as operator.state]))
+            [seon.operator.state :as operator.state]
+            [seon.test-support :as test-support]))
 
 (def ^:private repo-root
   (.getCanonicalFile (io/file (System/getProperty "user.dir"))))
 
 (defn- run-process
-  [{::keys [command directory environment input]}]
+  [{::keys [command directory environment input deadline-ms]}]
   (let [result
         (operator.state/run-process!
          {:seon.operator.subprocess/argv command
           :seon.operator.subprocess/directory directory
           :seon.operator.subprocess/extra-env (or environment {})
           :seon.operator.subprocess/input (or input "")
-          :seon.operator.subprocess/deadline-ms 30000})]
+          :seon.operator.subprocess/deadline-ms (or deadline-ms 30000)})]
     {::exit (:seon.operator.subprocess/exit result)
      ::stdout (:seon.operator.subprocess/output result)
      ::stderr (:seon.operator.subprocess/error-output result)}))
@@ -47,6 +48,56 @@
     (is (zero? (::exit result)) (::stderr result))
     (is (= [failure failure failure nil]
            (edn/read-string (::stdout result))))))
+
+(deftest concurrent-editors-receive-the-one-publication-covering-their-paths
+  (let [directory (fixture-directory)
+        config (io/file directory "hook.edn")
+        state (io/file directory "state")
+        paths (mapv #(str (io/file repo-root %))
+                    ["src/seon/cluster.clj" "src/seon/cluster/source.clj"
+                     "test/seon/cluster/source_test.clj"
+                     "test/seon/cluster/boot_test.clj"
+                     "test/seon/dev/edit_feedback_test.clj"])
+        operator-root (str (.relativize (.toPath repo-root)
+                                        (.toPath (io/file directory "operator"))))]
+    (try
+      (spit config
+            (pr-str {:docstring-lint {:enabled false}
+                     :review {:enabled false}
+                     :current-source {:enabled true :root operator-root
+                                      :cluster "missing" :quiet-seconds 5
+                                      :timeout-seconds 20}}))
+      (let [requests
+            (mapv (fn [path]
+                    (future
+                      (run-process
+                       {::command [(str (io/file repo-root "bin/seon-hook"))]
+                        ::directory repo-root
+                        ::environment {"SEON_HOOK_CONFIG" (str config)
+                                       "SEON_HOOK_STATE_DIR" (str state)}
+                        ::input (json/generate-string
+                                 {:hook_event_name "PostToolUse" :tool_name "Edit"
+                                  :tool_input {:file_path path}})})))
+                  paths)
+            responses (mapv #(test-support/await-event! % "coalesced hook result") requests)
+            result-files (vec (.listFiles (io/file state "source-publications")))]
+        (is (= 1 (count result-files)) "one real operator request covers five editors")
+        (doseq [response responses]
+          (is (zero? (::exit response)) (::stderr response)))
+        (when (= 1 (count result-files))
+          (let [result (edn/read-string (slurp (first result-files)))
+                id (:seon.hook/publication result)
+                worker (java.lang.ProcessHandle/of (:seon.hook/worker-pid result))]
+            (is (= (set paths) (set (:seon.hook/paths result))))
+            (is (str/includes? (:seon.hook/feedback result) "refused")
+                "the real operator refuses the absent JVM; absence is never convergence")
+            (doseq [[path response] (map vector paths responses)]
+              (is (str/includes? (::stdout response) id))
+              (is (str/includes? (::stdout response) path)))
+            (when (.isPresent worker)
+              (.get (.onExit (.get worker)) 5 java.util.concurrent.TimeUnit/SECONDS))
+            (is (not (.exists (io/file state ".source-worker.edn")))))))
+      (finally (test-support/delete-recursively! directory)))))
 
 (deftest pre-edit-blocks-reconstructed-error-level-findings
   (let [directory (fixture-directory)
@@ -130,6 +181,7 @@
         (fn [event]
           (run-process
            {::command [(str (io/file repo-root "bin/seon-hook"))]
+            ::deadline-ms 120000
             ::directory repo-root
             ::environment {"SEON_HOOK_CONFIG" (str config)}
             ::input (json/generate-string event)}))]

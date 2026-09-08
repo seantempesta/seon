@@ -14,6 +14,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.db :as db]
+            [seon.fn :as fn]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -373,9 +374,12 @@
 
 (defn upsert!
   "Publish canonical safe upserts against one exact source commit."
-  {:malli/schema [:=> [:cat :seon.source/upsert-request]
+  {:malli/schema [:=> [:cat [:and :seon.source/upsert-request
+                            [:map [:seon.fn/manifest {:optional true}
+                                   :seon.fn.manifest/manifest]]]]
                   :seon.source/published]}
   [{:keys [:seon.store/store :seon.db/process]
+    manifest :seon.fn/manifest
     rows :seon.source/upsert-rows
     expected-commit :seon.source/expected-commit-id
     source-digest :seon.source/digest
@@ -389,6 +393,10 @@
       (let [connection (store/open-branch! store scratch)]
         (try
           (assert-scalar-rows! @connection rows)
+          (when manifest
+            (fn/index! {:seon.db/connection connection
+                        :seon.fn/manifest manifest
+                        :seon.source/previous-database @connection}))
           (let [digest-entities
                 (db/q '[:find [?entity ...]
                        :where [?entity :seon.source/digest]]

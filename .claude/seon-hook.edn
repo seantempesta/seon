@@ -23,7 +23,9 @@
  :current-source
  {:enabled true
   :root "."
-  :cluster "default"}
+  :cluster "default"
+  :quiet-seconds 5
+  :timeout-seconds 180}
 
  ;; The standing review rubric is DATA: `:skills` names skill directories
  ;; under `.agents/skills/`, each of whose `SKILL.md` is read fresh on every
