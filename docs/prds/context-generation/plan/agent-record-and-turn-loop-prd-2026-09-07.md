@@ -989,3 +989,25 @@ Owned: the page and the controls by `record-render`; `seon.turn/system-turn`
 (compute, with `:write? false` for the preview), `seon.turn/virtual-turn!`,
 `seon.turn/compact!` by `turn-cut`. Both read this section as their spec.
 
+## 17. Components: merge similar data (owner, 2026-09-08)
+
+The record's scalars stay scalars (id, namespace: many things need them
+alone). Everything else about one concern is ONE component entity, one
+pull, one block, one render pair:
+
+- `:seon.agent/plan` → one entity: `:my.plan/objective`, the step tree
+  (`:my.plan/steps`, component), `:my.plan/current-step`. Today steps and
+  current-step sit directly on the agent and the objective on the root
+  step; they merge. `my.plan` reads and writes address this entity.
+- `:seon.agent/settings` → one entity: the per-agent overlay — model,
+  time limit, the turn bound, and every other `:seon.config.agent/*` dial
+  — today config rows keyed off the agent elsewhere. `(my.agent/settings)`
+  returns it; the block renders it once.
+- The turn stays as it is: reply, attempts, evaluations under one entity.
+- Messages and faults stay one entity each; no thread component yet.
+
+Schema: each component is `[:seon.db/ref {:seon.db/component true}]` on the
+agent map, with the component's own `[:map {:seon.db/attributes true
+:seon.render/ai … :seon.render/html …}]` entity schema. The debug page
+renders the record as identity, plan, settings, then the derived blocks.
+
