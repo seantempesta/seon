@@ -61,12 +61,16 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
    retired spellings in §0a are never written.
 8. **The default cluster IS the development environment** (main root,
    `bin/seon start`, MCP with no root argument): the edit hook keeps it
-   current on every edit and a lane verifies there. (superseded by §0 for
-   timing: configured coalescing means publication is not immediate) On "predates the
-   incompatible schema change" the lane reforks it itself at once
-   (`bin/seon stop default; bin/seon init default --force; bin/seon start;
-   bin/seon init --dev default`, reseed the Juniper fixture) — never waits.
-   Scratch clusters are for destructive drills only (owner, 2026-09-08).
+   current on every edit and a lane verifies there (configured coalescing
+   means publication is not immediate). **A lane never stops, reforks, or
+   restarts `default`** — it is the owner's window, and lanes reforking it
+   kept it down most of 2026-09-08. On "predates the incompatible schema
+   change" the lane records RESET NEEDED with the commit in its landing
+   note, verifies on its own scratch cluster (`bin/seon --root
+   tmp/<lane>-root start <lane>`, Juniper fixture seeded, downed and deleted
+   after), and continues; the orchestrator reforks `default` once, batching
+   every pending schema change (`bin/seon stop default; bin/seon init
+   default --force; bin/seon start; bin/seon init --dev default`, reseed).
 9. **Default lane agent**: `bin/codex-agent` on `gpt-6-astra` at `low`
    effort; raise effort only for design review.
 10. **Landing note** under `docs/prds/context-generation/research/`, dated,
