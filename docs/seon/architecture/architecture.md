@@ -62,7 +62,7 @@ loaded behavior immediately without rewriting that branch's program facts.
 
 ### Agent graphs and shared plumbing
 
-Every agent graph comes from one blueprint and is parked between episodes.
+Every agent graph comes from one blueprint and is parked between turns.
 Messages and other declared database interests wake the graph to re-derive
 work; a wake payload is never the durable work itself. The cluster also owns a
 small number of shared render and fault-commit graphs. There is no central
@@ -75,11 +75,11 @@ value is re-derivable from facts or superseded by a newer complete value.
 
 ### Browser and external systems
 
-The browser is a client of the cluster's web endpoint. It receives bounded HTML
+The browser is a client of the cluster's web endpoint. It receives HTML
 packages and submits actions; it owns no database logic or durable UI state.
 Model providers, filesystems, shells, and downstream services remain outside
-the process. Calls to them are bounded effects whose durable receipts and
-settled results live in the cluster database.
+the process. Calls to them are bounded effects with durable execution evidence
+in the cluster database.
 
 Downstream products compose public data and function seams and pin a
 coordinated Seon build. Consumer-specific UI, integrations, and domain models
@@ -89,10 +89,12 @@ remain downstream rather than becoming a second mechanism inside core.
 
 ### Facts and values
 
-Anything recovery or another process may need is a database fact, with bulky
-payloads addressed as blobs. A computation carries its database value,
+Anything recovery or another process may need is a database fact. Evaluation
+results themselves remain live objects in each agent's SCI context; evaluations
+store shown text, out, and error, not result blobs. A computation carries its database value,
 environment, schema projection, render profile, and effect settlement inputs.
-Nothing stores a projection that can be derived from those values.
+Shown text is an observation of what the agent saw at evaluation time.
+Later rendering cannot derive those bytes from a changed object or profile.
 
 Durable identities and relationships are attributes and refs, not kind stamps
 or parallel registries. The admitted schemas are the exact fact census;
@@ -122,23 +124,32 @@ Actual namespaces and contracts are always derived from the program graph.
 ### Bounded execution and recovery
 
 Detection is event-driven and every execution entrance carries a bound. A
-turn is claimable database state; "custody" needs no stamp, because one
-lifetime filesystem lock per store plus one in-memory turn permit per agent
-make a second live opener of the same turn unrepresentable. Settlement fences
-live in database transitions rather than caller pre-reads. A bound firing
-creates explicit interruption or fault evidence at boot, closing every open
-turn. Recovery closes wreckage from facts and never re-executes an uncertain
-effect.
+turn is open while its closing fact is absent. The database writer refuses
+a second open turn for that agent; the process-root store lock prevents
+another JVM from writing the same store. Outcome storage and closure
+decisions live in database transitions rather than caller pre-reads.
+A bound firing produces explicit failure evidence. Boot closes open turns
+and marks unfinished evaluations interrupted without re-executing effects.
 
 [[agent-runtime]] owns the agent record, the two-arm turn loop, waking,
 per-agent graph behavior, and crash recovery.
 
 ### Context, rendering, and the human surface
 
-One render contract produces form, AI, and HTML projections of the same value.
-Context is a bounded derivation for the next model call; the web UI is a bounded
-human projection over the same render blocks. Stable identities permit package
-replacement and morphing without storing a second DOM or render snapshot.
+One entity schema declares one AI/HTML render pair. Scalars share the entity's
+block; components and declared derived queries render whole concerns.
+The value renderer applies the profile once at evaluation time; shown text
+is then stored. HTML renders the live object without presentation clipping,
+or saved text after restart.
+
+Context grows through ordinary system and agent turns. Before each agent
+turn, the since-query diff over every distinct read form selects changed
+reads for a system turn. The prompt is stored evaluations rendered in order;
+earlier bytes never change. Each agent likewise retains one live SCI context
+receiving base diffs, private objects, and result handles across turns.
+Compaction wipes evaluations and regenerates the opening; it is the explicit
+prefix reset. See the [binding PRD](../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
+§13–§15.
 
 [[context]] owns context acquisition, ordering, continuity, and shared-artifact
 semantics. [[ui]] owns namespace pages, blocks, the canvas/control boundary, routing, and
