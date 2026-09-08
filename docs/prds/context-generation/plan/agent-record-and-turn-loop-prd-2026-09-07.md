@@ -1,6 +1,6 @@
 ---
 type: prd
-status: draft — under independent review
+status: draft r2 — under independent review (loop-data audit added)
 date: 2026-09-07 (evening)
 supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
 tags: [prd, agent, wake, storage, runtime]
@@ -58,6 +58,53 @@ Two facts a crash forces, and nothing else:
 Plus one thing that keeps an agent from running forever: a turn happens only
 when something woke it (§3) and it has turns left.
 
+## 1a. Every fact the loop stores today, audited against derive-or-need
+
+Ground truth the audit rests on: ONE JVM per cluster under a lifetime
+`flock` (`src/seon/cluster/store.clj`), one turn proc per agent with an
+in-memory turn permit (`seon.cluster.agent/await-turn-permit!`), Datahike's
+serial writer. A second live process on this cluster is unrepresentable.
+
+| stored today | verdict | reason |
+|---|---|---|
+| run id, agent, opened-at, closed-at | KEEP as the turn | open = no closed-at |
+| run trigger ref | KEEP as the wake claim (§3) | the one fact that stops a wake being answered twice |
+| run opening basis (`opening-commit-id`) | KEEP as `:seon.turn/basis` | the entire record of the context: projection is deterministic |
+| run reply text / blob / size | KEEP under the storage bound | without it an interrupted turn's history cannot say what the model said |
+| run `process` custody | DERIVE, delete the stamp | at boot every open turn in this cluster belongs to a dead process by construction; within a JVM the permit prevents a second turn. Deletes the stamp, the holder check, dead-holder takeover, holder-only close |
+| agent run pointer | DERIVE: the agent's turn with no closed-at | its busy-fence role is the permit's |
+| run `situation` | DELETE | generated runs are gone; every turn is a model call |
+| run `plan-digest` | DELETE | "frozen" = the turn has evaluation entities |
+| run `forms` component list | DELETED (`caef3850e`) | evaluations point at the turn |
+| run `undisposed-at` | DELETE | derived in the same transaction from the evaluations |
+| run `interrupted-at` | DELETE from the turn | the stamp lives on the evaluation that was cut |
+| context capture + contribution rows | DELETE | basis + profile reproduce them byte for byte (§5) |
+| ai attempt rows | KEEP, written in the freeze commit | a paid call is a fact; its own commit is not |
+| ai attempt `ordinal` | DELETE | counted before the write today |
+| evaluation source, comment, ns, ordinal, author | KEEP | the history |
+| evaluation terminal facts (value/missing, out, error, ms, ending-ns, print options) | KEEP | the history and the handles |
+| evaluation `interrupted-at` | KEEP, written at boot | the one recovery stamp |
+| evaluation `result-size` | KEEP only when the value is missing | size reached is the reason |
+| agent `turns-left` | KEEP, the one counter | a deliberate assertion; refilled by an explicit act |
+| agent `cluster` | DELETE | the branch |
+| `:seon.def/*` rows | DELETE | a defn is a program row; kept data is transacted; an atom is not a fact |
+| gate counters | DELETE | derivable from the stored gate report |
+| `:seon.render/units` | DELETE | the record's components in declared order |
+
+**On resume, explicitly.** There is no resume mechanism. A crash mid-turn is
+not resumed: at boot, every open turn is closed and its unsettled
+evaluations stamped `interrupted-at`; the agent's next context shows that
+turn as it happened up to the cut. The model is never re-called because the
+wake was claimed at open; no form re-executes because nothing re-runs an
+interrupted turn. This deletes the resume arm, `claim-call`'s takeover,
+`release-call`, and the process stamp together, and reduces the loop to the
+two arms in §7. The `:evaluate` arm handles only turns this JVM opened.
+
+**Writes per turn: three.** Open (claim the wake, record basis, decrement
+the counter) → freeze (reply, attempts, the forms as evaluation entities) →
+settle and close (results). The freeze survives only so an interrupted
+turn's history is honest about what ran.
+
 ## 2. The agent record — every attribute with the need it serves
 
 An entity IS its attributes. No kind stamp, no pointers to things a query can
@@ -68,8 +115,6 @@ derive, no counters a query can count.
 | `:seon.agent/id` | string, identity | lookup, handles, messaging by id |
 | `:seon.agent/namespace` | ref → `:seon.ns` | the prompt line and where forms evaluate; NOT unique (many agents may share a namespace); stewardship is `:seon.ns/steward` on the namespace |
 | `:seon.agent/turns-left` | int | the bound on turns; the one counter the loop keeps, decremented per turn, refilled by an explicit act |
-| `:seon.agent/process` | `(pid, start-instant)` string | custody while a JVM is turning this agent; absent = idle; a dead value = recover |
-| `:seon.agent/turn` | ref → the open turn | "am I mid-turn"; absent when idle; replaces the run pointer |
 | `:seon.agent/plan` | the `my.plan` data | the agent stores it on purpose |
 | `:seon.agent/evals` | component set → evaluation entities | history (rendered), handles, nothing-re-executes |
 
@@ -79,6 +124,8 @@ Questioned and REMOVED from the record:
   writes it); data the agent wants kept, it transacts; an atom's contents are
   not a fact. Deleted.
 - **cluster attribute** — the branch is the cluster. Deleted.
+- **process custody and the open-turn pointer** — both derivable (§1a):
+  "mid-turn" is "my turn with no closed-at"; "dead" is "open at boot".
 - **the inbox / any wake collection** — waking is not a thing the agent owns
   (§3). Not on the record.
 - **`:seon.render/units`, reverse-ref units** — the record's components are
@@ -171,7 +218,8 @@ triage, `ending-ns` when changed, `ms`, print options in effect;
 `append-generated-call`, generated runs and `bootstrap/seed-tx`'s run (the
 opening is the projection), `:seon.cluster.run` as a family (renamed to the
 turn with the attributes in §4 only), the run pointer and
-`::agent-pointer-broken`, `:seon.context.capture` and
+`::agent-pointer-broken`, the process custody stamp with `claim-call`'s
+takeover and `release-call`, the resume arm, `:seon.context.capture` and
 `:seon.context.contribution`, `plan-digest`, `undisposed-at`, the gate
 counters, `:seon.ai.attempt/ordinal`, `:seon.def/*`, `:seon.render/units`,
 the admission caps, `bind-stored-results!`'s windowed ambiguity, and 20 of
@@ -187,14 +235,15 @@ the loop's 21 connection reads (one database value enters a pass).
     :else                                            :idle))
 ```
 
-`:reply` = open (claim the wake, record basis, decrement turns-left, set
-process) → project → model → freeze reply + evaluations (one commit) → fall
+`:reply` = open (claim the wake, record basis, decrement turns-left) →
+project → model → freeze reply + attempts + evaluations (one commit) → fall
 into `:evaluate`. `:evaluate` = fork → evaluate each unsettled ordinal →
-settle the batch and close the turn (one commit). Commits per model turn: open,
-one per attempt, freeze, settle+close = 4 (today 5–6). Fences kept, all
+settle the batch and close the turn (one commit). Commits per model turn:
+three (today 5–6). Boot: close every open turn, stamping its unsettled
+evaluations interrupted — total, never refusing. Fences kept, all
 `:db.fn/call`: one evaluation per (turn, ordinal); settle once; one turn per
-wake item; holder-only close; dead-holder takeover; total never-refusing
-recovery.
+wake item. Deleted fences: claim/takeover, release, holder-only close,
+pointer coherence.
 
 ## 8. Order of work (reset the dev database at each schema step)
 
@@ -222,3 +271,11 @@ recovery.
 5. Byte identity: what in today's projection is non-deterministic (time,
    hash order, entity ids in text)?
 6. Where is this still overly complicated?
+7. §1a: is every KEEP genuinely needed, and is every DERIVE/DELETE safe?
+   Name the test in run-loop-unpacked §5.6 each deletion breaks and say
+   whether the behaviour it proved still matters under "no resume".
+8. Is "no resume" right? What is lost when a crash cuts a turn after its
+   forms transacted side effects, and is the freeze write still worth one
+   commit under that rule — or could reply + results be one write?
+9. The wake claim at open: with one JVM and one permit, is a stored claim
+   needed at all, or is "a turn references this wake item" enough?
