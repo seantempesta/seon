@@ -911,17 +911,18 @@ Vocabulary: "transcript" is retired; the agent's evaluations are
 `(seon.eval/of-agent db agent)` and their rendered block is the history.
 `seon.render.transcript` is renamed with the history it renders.
 
-### Result names are random (owner, 2026-09-08)
+### Result names are stable digests (owner, 2026-09-08; supersedes "random")
 
-`:seon.eval/id` is `(str (random-uuid))` — the ONE id generator the system
-uses everywhere (runs, errors, sources); no new generator (owner) —
-declared `:db.unique/identity`. A Clojure symbol cannot begin with a digit
-and a UUID can, so the handle is the id with one leading letter:
-`result/e<uuid>`, e.g. `result/e8b99ae77-cb0a-496e-8f9e-3a1e8ee0d61d` —
-the same id on disk, in the in-memory object map, and in the prompt, so
-every cluster a JVM ever holds shares one memory map with no collision. No counters, no ordinals in names, no entity
-ids (entity ids are a per-branch counter and repeat across clusters and
-resets). The (turn, ordinal) pair stays as the ORDER, never as the name.
+There is no short random id generator in the system and none is added. The
+one derivation reused is the digest: `:seon.eval/id` is
+`seon.schema/sha-256` over the evaluation's identity — the branch id, the
+turn id, the ordinal — truncated to twelve hex characters the way
+`seon.render.value/node-id` already truncates, declared
+`:db.unique/identity`. A Clojure symbol cannot begin with a digit, so the
+handle is the id with one leading letter: `result/e9c1b3f2a7d04`. Stable:
+the same evaluation yields the same id after a refork of the same data;
+unique across every cluster a JVM holds (48 bits); nothing minted, only
+derived. (turn, ordinal) stays as the ORDER.
 
 ### The history is a render function like everything else (owner, 2026-09-08)
 
