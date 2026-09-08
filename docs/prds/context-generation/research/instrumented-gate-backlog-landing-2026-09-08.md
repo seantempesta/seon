@@ -145,6 +145,50 @@ declared predicate is `deref`, which an atom holding nil fails), and
 | `f325d9dfd` | Stop handing an absent ctx and an absent database to functions that require them |
 | `8a2e4d495` | Hand the render service and the program rows their declared members |
 
-## 4. What remains
+## 4. The gates
 
-(filled in from the final `--all` below)
+| gate | before (`tmp/repair2/all2.log`, `4ec6bd82a`) | after (`tmp/backlog/all-after2.log`) |
+|---|---|---|
+| `bin/test --platform` | GREEN | GREEN (73 tests, 395 assertions) |
+| `bin/test --all`, distinct failing tests | **260** | **190** |
+| `bin/test --all`, uncaught contract violations | **266** (255 input, 11 output) | **108** |
+| assertions run | 11,374 | 12,082 |
+
+98 tests went green; 28 are newly red. The assertion count rising while the
+failing count falls is the honest measure: fixtures that used to die at their
+first contract violation now run their suites out.
+
+**Attribution of the 28 newly red.** Seventeen are NOT this lane's: a foreign
+lane held uncommitted edits to `src/seon/sci/eval.clj`,
+`src/seon/instrument.clj`, `src/seon/print.cljc` and `src/seon/cluster/loop.clj`
+in the shared tree while this gate ran, and fifteen `seon.sci.eval-test`
+failures plus `seon.shell.jvm-test/time-limit-reaps-the-process-tree-and-marks-the-receipt-interrupted`
+and `seon.instrument-test/many-problem-contract-violations-have-bounded-headlines`
+are behavioural failures in exactly those files' subjects (arm counts,
+`eval-form` call counts, headline bounds) with no contract violation in them.
+
+Four ARE this lane's and are fixed in `1b2ac7c9`-adjacent follow-up:
+declaring `:seon.config.error/max-evidence-bytes` on the handle meant
+`seon.cluster.agent-test`'s hand-built handle no longer satisfied `arm!`, so
+four of its previously green tests turned red. That suite now uses
+`test-support/cluster-handle` like the others.
+
+The remaining seven (`seon.cluster.turn-test` ×2, `seon.fn-test` ×2,
+`seon.render.web-test` ×2, `seon.cluster-test` ×1) carry no contract
+violation and are unattributed at the time of writing.
+
+## 5. What remains red, by class
+
+| class | tests | note |
+|---|---|---|
+| the incremental projection build | ~15 | [filed](../../../seon/issues/an-incremental-projection-build-refuses-the-key-it-just-added.md): `malli-form?` asks the ambient registry, the authority holds the projection |
+| live boot and operator suites (`seon.cluster.boot-test`, `seon.dev.fresh-operator-test`, `seon.cluster.armed-test`) | ~35 | untouched by this wave; they build real clusters and their reds were never sampled |
+| `seon.repl-parity-test` (5) | 5 | `seon.print/emit-text` handed `(edn/read-string result-edn)` where the evaluation stored no node |
+| `seon.cluster.fault-storage-test`, `seon.sci.admit-test`, `seon.test.accretion-test`, `seon.render.value-options-test` | ~7 | one or two each, each needing its own live probe |
+| everything else | the balance | ordinary assertion failures with no contract violation, most of them predating the arm |
+
+The 108 remaining contract violations concentrate in the projection-build
+class above, the live-boot suites, and `seon.error/prepare` reached through
+partial `config/effective` stand-ins in `seon.flow-test` and
+`seon.ai-stream-fold-test` — the same "hand-rostered config" shape §2 names,
+in two suites this wave did not reach.
