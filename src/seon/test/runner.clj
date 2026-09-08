@@ -2016,12 +2016,7 @@
             (println "bin/test: WORKER-GLOBAL STATE CHANGED by"
                      (str/join "," (::task-symbols task))
                      "worker=" (::worker-id worker)
-                     (pr-str (into (sorted-map)
-                                   (map (fn [[member value]]
-                                          [member
-                                           (dissoc value ::drift-added
-                                                   ::drift-removed)]))
-                                   drift))))
+                     (pr-str (into (sorted-map) drift))))
         result
         (if (exchange-failure? result)
           (let [test-symbols (mapv str (::task-symbols task))
@@ -2416,9 +2411,23 @@
       (println "Tasks that changed worker-global state —" (count drifting)
                "(AGENTS §5.7: own nothing global):")
       (doseq [task-result drifting]
-        (println " -" (str/join "," (::task-symbols task-result))
-                 (pr-str (vec (sort (keys (::task-ambient-drift
-                                           task-result))))))))))
+        (println " -" (str/join "," (::task-symbols task-result)))
+        (doseq [[member drift] (sort-by key (::task-ambient-drift task-result))]
+          ;; NAME WHAT CHANGED, not only which member. "3 wrappers removed"
+          ;; sends the reader nowhere; "seon.db/pull removed" is the fix.
+          (println "    " member
+                   (str/join
+                    " "
+                    (into []
+                          (remove nil?)
+                          [(when-let [added (::drift-added drift)]
+                             (str "added " (::drift-added-count drift) ": "
+                                  (str/join ", " added)))
+                           (when-let [removed (::drift-removed drift)]
+                             (str "removed " (::drift-removed-count drift) ": "
+                                  (str/join ", " removed)))
+                           (when-let [changed (::drift-changed drift)]
+                             (str "changed: " (str/join ", " changed)))]))))))))
 
 (defn- finish-run!
   [{summary ::summary

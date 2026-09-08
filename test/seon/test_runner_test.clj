@@ -1675,7 +1675,8 @@
                ::runner/task-symbols ["seon.leaker/strips"]
                ::runner/task-ambient-drift
                {::runner/snapshot-instrumented
-                {::runner/drift-removed ["seon.db/pull"]}}}]))]
+                {::runner/drift-removed ["seon.db/pull"]
+                 ::runner/drift-removed-count 1}}}]))]
       (is (str/includes? tally "Worker exchange failures"))
       (is (str/includes? tally "seon.a/one"))
       (is (str/includes? tally "/tmp/pool-1.log"))
@@ -1688,7 +1689,10 @@
       (is (str/includes? tally "Parallel-only tasks"))
       (is (str/includes? tally "seon.leaker/strips")
           "the parallel-only line names its suspected leaker")
-      (is (str/includes? tally "changed worker-global state")))))
+      (is (str/includes? tally "changed worker-global state"))
+      (is (str/includes? tally "removed 1: seon.db/pull")
+          "and the drift line NAMES what changed: \"3 wrappers removed\" sends
+           the reader nowhere, \"seon.db/pull removed\" is the fix"))))
 
 (deftest a-confirmation-loads-the-pool-workers-world
   ;; CLASS: a verdict that does not mean what it says. The confirmation used

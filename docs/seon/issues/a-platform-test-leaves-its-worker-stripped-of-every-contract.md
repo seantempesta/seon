@@ -5,7 +5,7 @@ severity: cleanup
 tags: [issue, test, runtime, wave/contract-gate]
 ---
 
-# A platform test leaves its worker stripped of every contract
+# Two tests leave their worker stripped of contracts they did not restore
 
 Found 2026-09-08 by `test-harness`, on the FIRST `bin/test --platform` run
 after the runner learned to measure what a task leaves behind
@@ -27,6 +27,19 @@ unarmed — asserting this test's timing rather than its own subject. It is
 exactly the class
 [an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker](an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker.md)
 named, now with a named culprit instead of a victim.
+
+A second, smaller one from the same detector on `bin/test --all`:
+
+```text
+bin/test: WORKER-GLOBAL STATE CHANGED by
+  seon.cluster.agent-test/routing-conservation-waits-for-terminal-evidence
+  worker= pool-1  {:snapshot-instrumented {:drift-removed-count 3}}
+```
+
+Three wrappers, not 918, but the same shape and the same file family — and
+`seon.cluster.agent-test` is where the aliased-Var defect
+(`(def real-evaluate sci.eval/evaluate)`) was found during
+`instrumented-gate-backlog-2`. Same fix.
 
 **Why this is `cleanup` and not a blocker.** `seon.test.runner/reassert-contracts!`
 already derives the worker's armed state before admitting each task and
