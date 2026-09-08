@@ -28,7 +28,7 @@ A new required config fact (two landed today: `:seon.config.eval.result/max-byte
 at instrumentation; `config apply` is the non-destructive way to converge a
 live cluster's config and it is broken, so the only path is a full reset.
 
-## To do
+## Required repair
 
 Make the prepl form reference public entry points only (or move the
 reconciliation into one public function the operator calls), resolve the
@@ -44,7 +44,7 @@ be private — a public one would silently store the function object as a
 config fact. The fix is the same as above: send data, resolve nothing on the
 operator side.
 
-## 2026-09-08 — implementation, verification incomplete
+## 2026-09-08 — implementation
 
 The operator now sends an absolute path string to the public `seon.config/apply!`
 file arity and gets the connection through public `seon.operator/connection`.
@@ -59,10 +59,8 @@ other selected files retain sparse-overlay admission.
 
 The recurring live operator drill now applies `config/default.edn`, reads back
 the complete desired config row, and checks development adoption convergence.
-It has NOT run: the subject gate exited 1 before launching tests during concurrent
-runner-paths edits. Development adoption independently refused because source
-changed during adoption. Keep this issue open until the required gates and live
-apply/adopt proof pass. Evidence and unfinished work:
+The first gate attempt could not launch tests during concurrent runner changes;
+subsequent execution and repairs are recorded below. Complete evidence:
 [config-apply landing](../../../prds/context-generation/research/config-apply-landing-2026-09-08.md).
 
 ## Resolution — 2026-09-08

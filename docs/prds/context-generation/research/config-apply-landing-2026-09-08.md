@@ -1,20 +1,63 @@
 ---
 type: research
 date: 2026-09-08
-status: incomplete
+status: complete
 tags: [config, operator, test]
 ---
 
 # Config apply landing — 2026-09-08
 
-## Resumed verification under the owner's restart rule
+The config apply defect is fixed and proven on `default`. The final owned-file
+gate completed with worker-exchange errors, detailed below. Read `AGENTS.md` and
+`docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md`
+end to end, including the lane rules and default-cluster requirement. No
+protected turn-cut file was edited.
 
-The owner superseded the stop rule: retry concurrent locks/cache collisions and
-development adoption until the assignment is complete. The lock cleared and
-implementation commit `eb66a4b12` landed path-limited.
+## Changes and dependency ledger
 
-The successful live sequence, after a refork removed a malformed temporary
-turn-cut program row and the supplied Juniper fixture was reseeded:
+- `script/seon/fresh_operator.clj` sends an absolute path string to public
+  `seon.config/apply!`, with public `seon.operator/connection` supplying custody.
+  Manifest symbols never enter executable prepl source. Config apply and
+  `start --config` resolve relative paths from the working directory.
+- `src/seon/config.clj` adds a contracted file arity to the existing `apply!`.
+  Its reader admits exactly one EDN map. A document equal to the shipped
+  document selects the existing defaults compiler and initialization; other
+  files retain sparse-overlay validation. No second reconciliation mechanism.
+- `test/seon/dev/fresh_operator_test.clj` covers relative/absolute file selection
+  and extends the real init/start drill with config apply, complete read-back,
+  and adoption convergence. Its prepl selectors use Datahike's `:*` wildcard,
+  which syntax quoting cannot qualify into `clojure.core/*`.
+- Gate repairs: stringify the operator's store path at the string-contract
+  caller; expect current instrumented config refusals and status diagnostics;
+  make the reload drill verify refusal of deliberately damaged call facts,
+  then reload their owner and verify publication; retain the original
+  instrumented root that `with-redefs` restores and restore schema registration.
+  The wrapper test took 611 ms, so its obsolete long-test classification was
+  removed and the bare gate now covers it.
+- Source-preparation prerequisite: `seon.id/symbol-in` now names
+  `:seon.id/character`, declared as Malli's built-in `char?` in EDN. Inline
+  metadata normalizes predicates to qualified symbols, while Malli registers
+  the unqualified built-in name. No new predicate or generator was needed.
+  Character acceptance, string refusal, and seeded character generation were
+  verified in the default JVM; `seon.id-test` is included in the subject gate.
+
+Read dependencies: `reference-code/babashka/fs/src/babashka/fs.cljc:179`
+(`absolutize` uses Java `Path.toAbsolutePath`),
+`reference-code/clojure/src/jvm/clojure/lang/Compiler.java:2456`
+(quoted constants),
+`reference-code/datalog-parser/src/datalog/parser/pull.cljc:65`
+(the three wildcard spellings),
+`reference-code/malli/src/malli/instrument.clj:18`
+(instrumentation replaces Var roots), and
+`reference-code/malli/src/malli/core.cljc:2930` (the character predicate).
+First-party owners remain `seon.config`'s reader/compiler/reconciler and
+`src/seon/operator.clj:154`'s public connection selector.
+
+## Live proof
+
+The default cluster was reforked after acquisition refused a malformed temporary
+turn-cut program row. The prescribed Juniper fixture was reseeded through MCP
+JVM mode. No provider call was made.
 
 ```text
 bin/seon config apply config/default.edn
@@ -24,10 +67,11 @@ bin/seon init --dev default
 ● :current-src commit 6aa04f2d-55d7-5cb0-8f09-cf9a2fd2e7c1 digest 417e207443e4d79a65cadc184cc267f7fa93e2633a90e62a4c0111118fceb1f9
 ```
 
-The recurring probe is
-`docs/prds/context-generation/research/config_apply_probe_2026_09_08.clj`.
-MCP JVM mode, with no root/cluster arguments, evaluated its `load-file` and
-returned in 691 ms:
+MCP JVM mode, with no root/cluster arguments, evaluated
+`(load-file "docs/prds/context-generation/research/config_apply_probe_2026_09_08.clj")`
+in 691 ms. It returned 77 desired entries, complete decision equality, a true
+symbol predicate for the search projection, and equal non-absent adopted and
+published commit IDs:
 
 ```clojure
 {:seon.config.probe/desired-count 77
@@ -38,134 +82,66 @@ returned in 691 ms:
  :seon.config.probe/converged? true}
 ```
 
-This is in-place development adoption, not just a hot-reloaded Var. All 77 desired
-row entries matched database read-back; the search projection remains a SYMBOL.
-The processor-count decision resolved to 18. No model call was made.
-Gates continue below this checkpoint; the earlier stop is historical evidence.
+The processor-count decision resolved to 18. This proves in-place development
+adoption, not just a reloaded Var. After the character repair, development
+adoption also converged at `6aa054d0-8169-50af-bf24-6e35714447e6`, digest
+`96e70458fc08c2d3674043c5ad550fb0d0c4933d58d52d958e51060947a813d5`.
 
-The first completed subject gate ran 53 tests / 311 assertions: 9 failures and
-1 error across five tests. Task completion messages do not report a verdict;
-the earlier 189,600 ms completion was NOT a passing regression. `6b54338fe`
-repairs the confirmed causes: syntax quoting had qualified the pull wildcard
-as `clojure.core/*` (use the parser's declared `:*` spelling); the operator's
-store-lock helper passed `Path` to a string contract (stringify at its caller);
-config refusal and status text tests expected older diagnostics; and the reload
-drill expected publication to accept deliberately removed call facts. That drill
-now verifies refusal, reloads the damaged owner, and then verifies publication.
-Dependency evidence: `reference-code/datalog-parser/src/datalog/parser/pull.cljc:65`
-declares all three wildcard spellings; the default JVM confirmed `[:*]` and
-`'[*]` produce equal config rows. `f1ebd4754` also repairs the observed wrapper
-fixture leak: `with-redefs` had restored the instrumented root before the
-fixture's extra `unstrument!` removed it. The fixture restores its schema
-registration and retains that original root. Its measured 611 ms execution
-also removed the obsolete long-test classification, so the bare gate covers it.
+## Gate evidence
 
-Verification stopped at the concurrent runner boundary, as the assignment requires.
-The implementation is in the working tree for review; the issue remains open. No protected
-turn-cut path was edited and no protected-path hunk is required.
+Initial subject run: 53 tests, 311 assertions, 9 failures and 1 error across
+five tests. Those failures produced the repairs above. A task completion line
+is not a verdict: the initial 189,600 ms config drill failed because syntax
+quoting changed its selectors; the independent live probe used ordinary quoting
+and passed. Full transient log: `tmp/config-apply-subject-retry.log`.
 
-Read `AGENTS.md` and
-`docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md`
-end to end, including the binding default-cluster and lane sections. Applied the
-data-oriented Clojure, config, and testing skills.
+The first gate attempt stopped at a concurrent cache-link collision. The owner
+superseded the original stop rule; index locks and adoption races were retried.
+The next preparation failure was the character schema, now fixed. An overlapping
+subject run later hit its 270-second drill bound; the overlapping subject and
+platform runs were terminated and reaped, and a process census found no surviving
+JVMs for their roots. The bare run reached and passed its 73-test platform tier,
+then widened to 1,405 bulk tests; it was terminated during confirmations and has
+no final suite tally. The standalone platform run was also interrupted, so it
+is not claimed green. No full-suite flags were used.
 
-## Change and dependency ledger
+The owner's final gating rule selected HEAD plus only owned files:
 
-- `script/seon/fresh_operator.clj`: config apply sends a path string to
-  `seon.config/apply!`, with public `seon.operator/connection` supplying the
-  connection. No manifest value is emitted as executable source. Both config
-  apply and the start command's manifest reader resolve paths from the working
-  directory. `bin/seon` preserves that directory.
-- `src/seon/config.clj`: adds a contracted file arity to the existing `apply!`.
-  Its existing EDN reader admits exactly one map. A document equal to the shipped
-  document selects the existing defaults compiler, including initialization;
-  other files use existing sparse-overlay validation. The one-argument API stays
-  intact. This deliberately does not admit arbitrary initialization in overlays.
-- `test/seon/dev/fresh_operator_test.clj`: a relative/absolute manifest read
-  regression and an extension of the existing real init/start operator drill.
-  The drill uses an isolated root and repository-relative `config/default.edn`,
-  reads back all expected config decisions, then verifies adopted/published commit
-  equality. It runs in the explicit subject namespace, including its long tests.
-- Path semantics: `reference-code/babashka/fs/src/babashka/fs.cljc:179`,
-  `absolutize` delegates to Java `Path.toAbsolutePath`.
-- Quoted data semantics: `reference-code/clojure/src/jvm/clojure/lang/Compiler.java:2456`,
-  `ConstantExpr` retains quoted values. The final design removes manifest values
-  from source entirely instead of quoting the expanded manifest.
-- Existing authorities: `src/seon/config.clj` owns `read-edn-map`,
-  `validate-layer`, `default-document`, `compile-manifest`, `apply-compiled!`;
-  `src/seon/operator.clj:154` owns public connection selection.
-
-## Evidence and tallies
-
-Initial `git status --short` was empty. `bin/seon status` reported default alive,
-PID 85105, web `http://127.0.0.1:7994`, store footprint 0.35 GiB. MCP JVM evaluation
-with no root/cluster returned 2 for `(+ 1 1)`.
-
-A live JVM probe evaluated quoted private/public symbol data and returned:
-
-```clojure
-{:source "(quote #:probe{:private seon.web.search/organic-results, :public clojure.core/inc})"
- :equal? true}
+```bash
+bin/test --paths script/seon/fresh_operator.clj src/seon/config.clj test/seon/config_test.clj test/seon/dev/fresh_operator_test.clj src/seon/id.clj resources/seon/schemas/seon.id.edn -- seon.config-test seon.dev.fresh-operator-test seon.id-test
 ```
 
-An intermediate quoted-manifest implementation reached `seon.config/apply!`
-but refused its input contract at
-`[:seon.config/manifest :seon.config.flow.compute/concurrency]`:
-`should be an integer`, offending `:seon.config/available-processors`.
-That explains why file admission belongs in the config owner and why the final
-file arity recognizes the shipped document separately from a sparse overlay.
-No successful final live config apply is asserted.
+Snapshot HEAD: `a6c4c8bd9b241a8d8c42bb4b2d1e81ca967fc954`; no owned-file
+differences from HEAD. Final result: **exit 1; 54 tests, 16 assertions,
+0 failures, 52 errors**, all classified by the runner as worker-exchange
+failures. The config-apply lifecycle task and cached-boot task reached the
+270-second completion bound; subsequent tasks report
+`:seon.test.runner/worker-retired`. Isolated confirmations ran, but the runner
+correctly retained the original exchange failures. This is not a green gate.
+The cause behind the missing completion events was not established; no foreign
+lane is blamed. Log: `tmp/config-apply-owned-gate.log`; retained failed root:
+`tmp/test-runs/run.l0Rg2N`. The launcher exited and a process census found no
+remaining JVMs belonging to this or the earlier interrupted gate roots.
 
-The edit hook published current-src commit
-`6aa04a50-36c5-5310-bad8-1816bdb4cae1`, digest
-`6285b86dea7f5f20f45d8e662f8dba294b76b01b8e22d5a71f9104f6829ed9bd`.
-The modified files have no blocking clj-kondo findings; existing shadowed-var and
-unused-binding warnings remain. `git diff --check` passed for the three code files.
+Unfinished: obtaining a green automated lifecycle/subject verdict. Implementation,
+issue resolution, and the independent live default apply/adopt proof are complete.
+No background shell from this lane remains. HTTP verification also observed
+`/agent/juniper` returning 200 and 97,775 bytes; no browser-paint claim is made.
 
-`bin/test seon.config-test seon.dev.fresh-operator-test` exited **1** during
-dependency preparation, before test launch: **0 tests ran; no pass/fail assertion tally**.
-Its root was `tmp/test-runs/run.dlkHIE`, launcher PID 92827, start
-`2026-09-08T17:48:17Z`, HEAD `42f1fcc6b2c3447971ecf1532a1c256d75f0549d`.
-The final output was exactly:
+## Commits and files
 
-```text
-ln: /Users/sean/src/seon/tmp/test-runs/run.dlkHIE/target/dev-dependency-classes/7ae7f2d588008f7a2045d325a853095c379ff09f65337924709255d5d5e593e3: File exists
-```
+- `eb66a4b12`: operator/config data boundary and recurring regression.
+- `8fb5365ec`: durable live probe and successful apply/adopt evidence.
+- `f1ebd4754`: original wrapper and schema-registration restoration.
+- `6b54338fe`: path contract, wildcard, and current diagnostic expectations.
+- `fa1c0bd47`: resolve config apply and record the gate repairs.
+- `bb82d1116`, `6502520f0`: character prerequisite, ending in the canonical EDN declaration.
 
-The preceding census reported tracked directories deleted and their linked
-replacements added. There was no `runner-pid` recorded. At observation,
-`bin/test:453-455` replaced the target link and created the dependency-classes link;
-`bin/test` and `src/seon/test/runner.clj` had concurrent runner-paths edits.
-This names the observed boundary without inferring which concurrent filesystem
-operation produced the existing link. Full transient output:
-`tmp/config-apply-subject-gate.log` (721,987 bytes, 8,341 lines).
-
-An already-running `bin/seon init --dev default` also exited **1**. It reached
-loaded definitions, SCI acquisition and JVM instrumentation, then refused:
-`Source changed during development adoption; the next edit must converge it.`
-Full transient output: `tmp/config-apply-adopt.log`. Adoption convergence and browser
-paint are therefore unproven. No refork or provider call was performed.
-
-## Unfinished and files
-
-Stop rule applied immediately on the subject gate failure. Bare `bin/test` and
-`bin/test --platform` were not run. No other lane was messaged, resumed, or edited.
-Both launched shell sessions exited; no lane-owned background shell remains.
-The holderless test root was removed without following its symlinks after recording
-its evidence here; the two output logs remain in project-local `tmp/`.
-
-Required next proof, after the runner boundary is repaired: run the explicit
-subject namespaces, bare gate and platform gate; adopt the current config owner;
-apply `config/default.edn` to default; run `bin/seon init --dev default`; observe
-equal adopted/published commit IDs and confirm symbol-valued config remains data.
-Then resolve/archive the config-apply issue. The config skill also contains stale
-line references and retired terminology; that documentation was not changed in
-this bounded lane.
-
-Files touched are the three code files above, this landing note, and
-`docs/seon/issues/config-apply-fails-on-a-private-var-in-its-prepl-form.md`.
-
-The path-limited commit attempt was blocked by an existing `.git/index.lock`.
-Three subsequent attempts to add only this landing note met the same lock; it
-was not removed and no other Git process was interrupted. **No commit was
-created by this lane.** All five paths remain available for the owner's commit.
+Files touched: `script/seon/fresh_operator.clj`, `src/seon/config.clj`,
+`test/seon/config_test.clj`, `test/seon/dev/fresh_operator_test.clj`,
+`src/seon/id.clj`, `resources/seon/schemas/seon.id.edn`, this landing note,
+`docs/prds/context-generation/research/config_apply_probe_2026_09_08.clj`,
+and the resolved issues under `docs/seon/issues/archive/`:
+`config-apply-fails-on-a-private-var-in-its-prepl-form.md` and
+`unregistered-char-schema-blocks-source-preparation.md` (moved from the open directory).
+The owner's issue index was not edited.
