@@ -47,3 +47,34 @@ value; the feed's first frame does not.
   silently.
 - Measure: first SSE event < 2 s with the basis moving (a write every
   second) and three debug tabs open.
+
+## Measured again 2026-09-08 16:20 on the reforked `default` — it is the whole page, not only the feed
+
+| request | time |
+|---|---|
+| `GET /ns/my.agents.juniper/debug` (warm) | 0.20 s |
+| `GET /ns/my.agents.juniper` | 8.8 s |
+| `GET /agent/juniper` | 9.9 s |
+
+Virtual-thread-aware samples (`jcmd Thread.dump_to_file -format=json`,
+four samples during the plain GET) show the request thread in
+`page-response → current-page → page-refresh → seon.await/await!`, and the
+render proc in `render-step → context-pass → walk/history`, while two agent
+turns sit in `loop/turn → call-turn → prompt → render/acquire-context!`
+waiting on the same proc's `::context` channel (`src/seon/render.clj:1389`).
+
+So ONE serial `:io` proc per cluster derives, in turn: every agent's
+context for its turn, every plain page GET (`page-refresh` is the proc's
+own state function, `web.clj:2003`), and every feed's first frame. The
+debug page is fast only because it renders on the request thread. A page
+waits behind whichever agent is turning; an agent waits behind whichever
+page is loading. That is the serialization point the owner asked about
+("why does it take 2.4 seconds? We are doing something wrong").
+
+## Fix, widened
+
+Pages and agent context are pure functions of a database value and the
+agent's SCI context: derive them on the caller's thread (request thread,
+feed thread, turn proc). The render proc keeps exactly one job — publishing
+deltas to open tabs after a wake — and never sits between a caller and its
+own result. Measure: plain page < 1 s warm while an agent turn is in flight.
