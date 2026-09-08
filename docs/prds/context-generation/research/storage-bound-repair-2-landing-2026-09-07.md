@@ -283,6 +283,16 @@ is the backlog the gate could not see, now visible, counted, and attributable
 one function at a time.
 
 
+### 8.3 The transcript namespace, after
+
+`bin/test seon.render.transcript-test`: **GREEN — 19 tests, 215 assertions,
+0 failures** under armed contracts (`d2c3fd8a3`). All eight reds the
+storage-bound repair inherited and could not attribute are dead: six were the
+missing driver (BR4), two were the superseded prose shape, and the last two
+were a `:summary` detail only the deleted ladder produced plus message
+positions located by prose where the transcript renders the form that reads
+the message.
+
 ## 9. What is unfinished
 
 - **314 bulk-tier reds** under armed contracts (§8.2). They are the visible
