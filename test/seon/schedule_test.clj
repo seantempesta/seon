@@ -67,11 +67,12 @@
    :seon.config.maintenance/log-max-bytes 1024
    :seon.config.maintenance/log-retained-files 2
    :seon.cluster.loop/cluster
-   {:seon.cluster/name "default"
-    :seon.cluster.run/process "schedule-test-process"
-    :seon.sci.admit/caps result-caps
-    :seon.config.error/recurrence-limit 3
-    :seon.config.error/escalate-to "root"}})
+   (test-support/cluster-handle
+    {:seon.cluster/name "default"
+     :seon.cluster.run/process "schedule-test-process"
+     :seon.sci.admit/caps result-caps
+     :seon.config.error/recurrence-limit 3
+     :seon.config.error/escalate-to "root"})})
 
 (defn- seed-task!
   [connection task-id handler]
@@ -219,11 +220,25 @@
                        @connection))))))))
 
 (deftest schedule-remains-the-third-proc-in-the-agent-graph
-  (let [environment (test-support/environment "seon.schedule-test")
-        handle (env/carry {:seon.schedule/channel ::channel} environment)
-        definition
-        (agent/graph-definition
-         {:seon.cluster.loop/cluster handle
-          :seon.cluster.agent/id "root"})]
-    (is (= #{::agent/mailbox ::agent/turn ::agent/schedule}
-           (set (keys (:procs definition)))))))
+  ;; THE BLUEPRINT'S REQUEST IS THE HANDLE A RUNNING CLUSTER OWNS, so the
+  ;; census hands every declared member the way `arm!` does rather than the
+  ;; two entries this assertion happens to read.
+  (test-support/with-database
+   (fn [connection]
+     (let [environment (test-support/environment "seon.schedule-test"
+                                                 connection)
+           handle (env/carry
+                   (test-support/cluster-handle
+                    {:seon.db/connection connection
+                     :seon.cluster/name "seon.schedule-test"
+                     :seon.cluster.run/process "schedule-test-process"
+                     :seon.sci.eval/ctx
+                     (test-support/fork-cluster-ctx connection)
+                     :seon.schedule/channel ::channel})
+                   environment)
+           definition
+           (agent/graph-definition
+            {:seon.cluster.loop/cluster handle
+             :seon.cluster.agent/id "root"})]
+       (is (= #{::agent/mailbox ::agent/turn ::agent/schedule}
+              (set (keys (:procs definition)))))))))

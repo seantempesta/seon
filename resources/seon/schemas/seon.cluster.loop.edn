@@ -22,6 +22,14 @@
                       :seon.config/on-core-error]
                      [:seon.config.error/recurrence-limit
                       :seon.config.error/recurrence-limit]
+                     ;; the fault family's own bound. `seon.cluster.loop`,
+                     ;; `seon.schedule` and `seon.cluster` all read it OFF
+                     ;; THIS HANDLE and hand it to `seon.error/prepare`,
+                     ;; whose contract requires an integer, so leaving it
+                     ;; undeclared made a handle without it look valid right
+                     ;; up to the moment a fault had to be recorded.
+                     [:seon.config.error/max-evidence-bytes
+                      :seon.config.error/max-evidence-bytes]
                      [:seon.config.message/max-chain
                       :seon.config.message/max-chain]
                      [:seon.config.error/escalate-to

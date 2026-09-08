@@ -148,6 +148,7 @@
        ;; run loop's second static-admission pass was deleted with the
        ;; minimal turn, so no lint bypass is needed.
        (with-render-context-proc
+         (test-support/cluster-handle
          {:seon.db/connection connection
           :seon.cluster/name "generate-code-v0"
           :seon.flow/work-launcher launcher
@@ -164,7 +165,7 @@
                  :seon.config.eval.result/max-depth 6
                  :seon.config.eval.result/max-collection 8
                  :seon.config.eval.result/max-string 4096
-                 :seon.config.eval.result/max-nodes 256)}
+                 :seon.config.eval.result/max-nodes 256)})
          body)
        (finally
          (seon.flow/stop-work-launcher! launcher)))))))

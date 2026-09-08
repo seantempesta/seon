@@ -29,8 +29,9 @@
   [connection evaluation]
   (let [staged
         (run/settlement-projection
-         {:seon.db/connection connection
-          :seon.sci.admit/caps caps}
+         (support/cluster-handle
+          {:seon.db/connection connection
+           :seon.sci.admit/caps caps})
          evaluation)
         receipt (nth staged 0)
         stages (nth staged 2)]

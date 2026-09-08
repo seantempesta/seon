@@ -221,6 +221,11 @@
                     :seon.cluster.message/at now}])
       (with-render-context-proc
          connection
+         ;; THE HANDLE IS THE PRODUCTION HANDLE: `test-support/cluster-handle`
+         ;; carries the declared channel members `seon.cluster.agent/arm!`
+         ;; creates for every armed agent, so `turn` is called with the shape
+         ;; its contract declares instead of one this suite happens to read.
+         (test-support/cluster-handle
          {:seon.env/environment @test-environment
                :seon.db/connection connection
                :seon.cluster/name "turn-test"
@@ -250,7 +255,7 @@
                       :seon.config.eval.result/max-depth 6
                       :seon.config.eval.result/max-collection 8
                       :seon.config.eval.result/max-string 4096
-                      :seon.config.eval.result/max-nodes 256)}
+                      :seon.config.eval.result/max-nodes 256)})
          (if evaluator
            (fn [cluster-handle]
              (with-redefs [sci.eval/evaluate evaluator]

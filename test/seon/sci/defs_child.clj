@@ -1,6 +1,7 @@
 (ns seon.sci.defs-child
   "Foreign-JVM halves of the W-A defs crash regression."
-  (:require [datahike.api :as d]
+  (:require [clojure.core.async :as async]
+            [datahike.api :as d]
             [sci.core :as sci]
             [seon.cluster :as cluster]
             [seon.cluster.loop :as loop]
@@ -36,11 +37,38 @@
     :seon.sci.eval/time-limit-ms 30000
     :seon.config/on-core-error :panic}))
 
+(defn- cluster-handle
+  "The declared cluster handle, from the shipped decisions.
+
+  `seon.cluster.run/settlement-projection` takes `:seon.cluster.loop/cluster`
+  — the handle an armed agent carries — so this child JVM hands the same
+  shape production hands rather than the one entry it happens to read. It
+  cannot use `seon.test-support`: that namespace stands up its own database
+  base, and this half runs in a foreign JVM against a real file store."
+  [connection ctx]
+  (let [decisions (config/defaults)]
+    {:seon.db/connection connection
+     :seon.cluster/name "defs-crash"
+     :seon.cluster.run/process "defs-crash-child"
+     :seon.sci.eval/ctx ctx
+     :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
+     :seon.render/context-channel (async/chan (async/sliding-buffer 1))
+     :seon.cluster.loop/completion (async/promise-chan)
+     :seon.sci.admit/caps (config/result-caps decisions)
+     :seon.config.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)
+     :seon.config/on-core-error (:seon.config/on-core-error decisions)
+     :seon.config.error/recurrence-limit
+     (:seon.config.error/recurrence-limit decisions)
+     :seon.config.error/max-evidence-bytes
+     (:seon.config.error/max-evidence-bytes decisions)
+     :seon.config.message/max-chain
+     (:seon.config.message/max-chain decisions)}))
+
 (defn- settle!
-  [connection ordinal evaluated]
+  [connection ctx ordinal evaluated]
   (let [stored (second
                 (run/settlement-projection
-                 {:seon.db/connection connection}
+                 (cluster-handle connection ctx)
                  evaluated))
         rows (#'loop/def-rows @connection agent-id stored ordinal)]
     (db/transact!
@@ -95,7 +123,7 @@
                    "(swap! scratch + 6)"
                    "(def lost (let [state (atom 1)] (fn [] @state)))"]]
       (doseq [[ordinal source] (map-indexed vector sources)]
-        (settle! connection ordinal (evaluation ctx source)))
+        (settle! connection ctx ordinal (evaluation ctx source)))
       (write-result! ready-path {:wrapper-calls @wrapper-calls}))
     @(promise)))
 

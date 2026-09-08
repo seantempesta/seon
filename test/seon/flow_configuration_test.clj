@@ -100,22 +100,17 @@
                   ;; declared request is the handle a running cluster owns.
                   (seon.cluster.agent/graph-definition
                    {:seon.cluster.loop/cluster
-                    {:seon.env/environment environment
-                     :seon.db/connection connection
-                     :seon.cluster/name "seon.flow-configuration-test"
-                     :seon.cluster.run/process "census-0"
-                     :seon.sci.eval/ctx
-                     (test-support/fork-cluster-ctx connection)
-                     :seon.cluster.wake/channel
-                     (async/chan (async/sliding-buffer 1))
-                     :seon.render/context-channel (async/chan)
-                     :seon.cluster.loop/completion (async/promise-chan)
-                     :seon.sci.admit/caps
-                     (config/result-caps (test-support/effective-config))
-                     :seon.config.eval/time-limit-ms 1000
-                     :seon.config/on-core-error :record
-                     :seon.config.error/recurrence-limit 3
-                     :seon.config.message/max-chain 64}
+                    (test-support/cluster-handle
+                     {:seon.env/environment environment
+                      :seon.db/connection connection
+                      :seon.cluster/name "seon.flow-configuration-test"
+                      :seon.cluster.run/process "census-0"
+                      :seon.sci.eval/ctx
+                      (test-support/fork-cluster-ctx connection)
+                      :seon.config.eval/time-limit-ms 1000
+                      :seon.config/on-core-error :record
+                      :seon.config.error/recurrence-limit 3
+                      :seon.config.message/max-chain 64})
                     :seon.cluster.agent/id "census"})]]
                 proc-facts
                 (into

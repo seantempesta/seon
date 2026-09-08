@@ -272,6 +272,73 @@
      (sci.eval/fork-cluster-ctx base-ctx @connection connection
                                 projection-state))))
 
+(defn agent-value
+  "Evaluate `source` at the boundary an AGENT actually calls, and return the
+  value the agent reads.
+
+  An agent never invokes a Var directly: its reply is read into forms and
+  each one crosses `seon.sci.eval/evaluate`, which is total by construction —
+  every failure, a violated contract included, comes back as a flat
+  `:seon.error` value in `:seon.sci.admit/value`. A test that calls an
+  agent-facing function directly with an argument its DECLARED CONTRACT
+  forbids is therefore not testing the agent's own boundary at all: under the
+  contracts every cluster arms, the contract refuses first and the direct
+  call throws (AGENTS §2.4, and the issue this helper closes). Drive the
+  form through here and the assertion is about the value an agent genuinely
+  receives.
+
+  `ctx` is a live SCI ctx (`fork-cluster-ctx`); the caps, the one time limit
+  and the error dial come from the shipped decisions."
+  ([ctx source] (agent-value ctx source nil))
+  ([ctx source namespace-name]
+   (let [decisions (config/defaults)]
+     (:seon.sci.admit/value
+      (sci.eval/evaluate
+       (cond-> {:seon.cluster.eval/source source
+                :seon.sci.eval/ctx ctx
+                :seon.sci.admit/caps (config/result-caps decisions)
+                :seon.sci.eval/time-limit-ms
+                (:seon.config.eval/time-limit-ms decisions)
+                :seon.config/on-core-error
+                (:seon.config/on-core-error decisions)}
+         namespace-name (assoc :seon.cluster.eval/ns
+                               [:seon.ns/name namespace-name])))))))
+
+(defn cluster-handle
+  "One agent's cluster handle, carrying every structural member production
+  arms and leaving the cluster's own identity to the caller.
+
+  `:seon.cluster.loop/cluster` declares three channels, the admission caps
+  and five dials; `seon.cluster/arm-agent-instance!` builds all of them from
+  the cluster's compiled decisions. A fixture that hands `turn`, `settle!`,
+  `evaluate-sources` or `terminal-data` a handful of the members it happens
+  to read hands a shape the declared contract forbids, and the members it
+  drops are exactly the ones the FAILURE paths need — the fault bound, the
+  recurrence limit — so the omission only ever shows up when something has
+  already gone wrong (AGENTS §5: supply every declared input).
+
+  Everything structural is defaulted here from the SHIPPED decisions, once,
+  so no suite carries constants of its own; the caller wins, so a fixture
+  that drives a channel or pins a dial supplies its own and keeps it. The
+  cluster's identity — connection, name, process, SCI ctx — is never
+  defaulted: those are the caller's world."
+  [handle]
+  (let [decisions (config/defaults)]
+    (merge {:seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
+            :seon.render/context-channel (async/chan (async/sliding-buffer 1))
+            :seon.cluster.loop/completion (async/promise-chan)
+            :seon.sci.admit/caps (config/result-caps decisions)
+            :seon.config.eval/time-limit-ms
+            (:seon.config.eval/time-limit-ms decisions)
+            :seon.config/on-core-error (:seon.config/on-core-error decisions)
+            :seon.config.error/recurrence-limit
+            (:seon.config.error/recurrence-limit decisions)
+            :seon.config.error/max-evidence-bytes
+            (:seon.config.error/max-evidence-bytes decisions)
+            :seon.config.message/max-chain
+            (:seon.config.message/max-chain decisions)}
+           handle)))
+
 (defn environment
   "One subset environment (store + facts, no graphs, no web) for a test.
 

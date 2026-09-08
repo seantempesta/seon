@@ -91,7 +91,8 @@
   [connection agent-id run-id ordinal evaluated]
   (let [stored (second
                 (run/settlement-projection
-                 {:seon.db/connection connection}
+                 (test-support/cluster-handle
+                  {:seon.db/connection connection})
                  evaluated))
         rows (#'loop/def-rows @connection agent-id stored ordinal)]
     (db/transact!
@@ -348,7 +349,8 @@
            store-values (fn [connection evaluation]
                           (second
                            (run/settlement-projection
-                            {:seon.db/connection connection}
+                            (test-support/cluster-handle
+                             {:seon.db/connection connection})
                             evaluation)))
            stored-ordinary (store-values connection ordinary)
            stored-atom (store-values connection atom-evaluation)

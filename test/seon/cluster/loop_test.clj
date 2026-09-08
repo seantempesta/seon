@@ -458,15 +458,17 @@
           (is (= ending-ns (:seon.sci.eval/ending-ns first-evaluation)))
           (db/transact!
            connection
+           ;; ABSENT MEANS NO KEY: the settle request marks every terminal
+           ;; fact optional, and an optional key present as nil fails its
+           ;; contract, so the request carries only the facts the
+           ;; evaluation actually produced.
            (run/receipt-settle-tx
-            {:seon.cluster.run/id run-id
-             :seon.cluster.eval/ordinal 0
-             :seon.cluster.eval/result-edn
-             (:seon.cluster.eval/result-edn first-evaluation)
-             :seon.cluster.eval/ns
-             (:seon.cluster.eval/ns first-evaluation)
-             :seon.sci.eval/ending-ns
-             (:seon.sci.eval/ending-ns first-evaluation)}))
+            (merge {:seon.cluster.run/id run-id
+                    :seon.cluster.eval/ordinal 0}
+                   (select-keys first-evaluation
+                                [:seon.cluster.eval/result-edn
+                                 :seon.cluster.eval/ns
+                                 :seon.sci.eval/ending-ns]))))
           (is (= ending-ns
                  (:seon.sci.eval/ending-ns
                   (db/pull @connection
@@ -598,7 +600,8 @@
            provider-calls (atom 0)
            refusal {:seon.error/kind :seon.cluster.prompt/budget-exceeded
                     :seon.error/message "The generated opening did not fit."}
-           cluster {:seon.db/connection connection
+           cluster (test-support/cluster-handle
+                   {:seon.db/connection connection
                     :seon.cluster/name cluster-name
                     :seon.cluster.run/process process
                     :seon.sci.eval/ctx
@@ -608,7 +611,7 @@
                     :seon.sci.admit/caps
                     (config/result-caps (config/defaults))
                     :seon.config.error/recurrence-limit 3
-                    :seon.config.message/max-chain 8}]
+                    :seon.config.message/max-chain 8})]
        (config/apply! {:seon.db/connection connection
                        :seon.boot/cluster-name cluster-name})
        (test-support/seed-cluster! connection cluster-name)
@@ -791,14 +794,12 @@
             (db/transact!
              connection
              (run/receipt-settle-tx
-              {:seon.cluster.run/id run-id
-               :seon.cluster.eval/ordinal 0
-               :seon.cluster.eval/result-edn
-               (:seon.cluster.eval/result-edn evaluation)
-               :seon.cluster.eval/ns
-               (:seon.cluster.eval/ns evaluation)
-               :seon.sci.eval/ending-ns
-               (:seon.sci.eval/ending-ns evaluation)}))
+              (merge {:seon.cluster.run/id run-id
+                      :seon.cluster.eval/ordinal 0}
+                     (select-keys evaluation
+                                  [:seon.cluster.eval/result-edn
+                                   :seon.cluster.eval/ns
+                                   :seon.sci.eval/ending-ns]))))
             (is (= assigned-namespace
                    (:seon.sci.admit/value evaluation)))
             (is (= assigned-namespace
@@ -823,7 +824,8 @@
            resolutions (atom [])
            overlays (atom [])
            requests (atom [])
-           cluster {:seon.db/connection connection
+           cluster (test-support/cluster-handle
+                   {:seon.db/connection connection
                     :seon.cluster/name cluster-name
                     :seon.cluster.run/process process
                     :seon.sci.eval/ctx
@@ -840,7 +842,7 @@
                      :seon.config.eval.result/max-source 1048576
                      :seon.config.eval.result/max-nodes 256)
                     :seon.config.error/recurrence-limit 3
-                    :seon.config.message/max-chain 8}
+                    :seon.config.message/max-chain 8})
            unpaid {:seon.error/kind :seon.ai/transport-failure
                    :seon.error/message "connection refused"
                    :seon.error/data
@@ -1134,7 +1136,8 @@
         (let [prepared
               (terminal-data
                {:seon.cluster.loop/cluster
-                {:seon.db/connection connection}
+                (test-support/cluster-handle
+                 {:seon.db/connection connection})
                 :seon.cluster.loop/now now
                 :seon.cluster.agent/id agent-id
                 :seon.cluster.run/id run-id
@@ -1383,11 +1386,10 @@
                     :planned? true})
       ;; The freeze already minted ordinal 0 with its start instant; there is
       ;; no separate receipt to start.
-      (let [cluster {:seon.db/connection connection
+      (let [cluster (test-support/cluster-handle
+                    {:seon.db/connection connection
                      :seon.cluster.run/process process
-                     :seon.sci.admit/caps
-                     (config/result-caps (config/defaults))
-                     :seon.config.error/recurrence-limit 3}
+                     :seon.config.error/recurrence-limit 3})
             gate-refusal
             ((private-loop-fn 'phase)
              #(throw
