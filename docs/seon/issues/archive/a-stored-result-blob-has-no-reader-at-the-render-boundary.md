@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, repl, storage, blob]
 ---
@@ -51,5 +51,15 @@ threshold in `seon.cluster.run/settlement-projection`:
    result renders the SAME bytes as the same value stored inline.
 
 Grounding:
-[the storage-bound landing note](../../prds/context-generation/research/storage-bound-landing-2026-09-07.md)
+[the storage-bound landing note](../../../prds/context-generation/research/storage-bound-landing-2026-09-07.md)
 §3.3.
+
+## Superseded — owner ruling, 2026-09-08
+
+§15 explicitly deletes result blobs, result-edn, and rehydration. A new result-blob reader would preserve a mechanism the owner removed. Evaluation history stores shown text; HTML may use the live object while it exists.
+
+Authority: [agent record and turn loop PRD §15](../../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md#15-results-objects-in-memory-shown-text-on-disk-owner-2026-09-08).
+This closes the old design proposal, not a claim that the protected turn and
+render implementation has finished. No regression for the deleted design is
+added. Implementation verification belongs to §12–§15’s live-object and
+shown-text proofs.

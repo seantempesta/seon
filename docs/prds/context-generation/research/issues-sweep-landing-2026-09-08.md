@@ -1,6 +1,6 @@
 ---
 type: research
-status: blocked
+status: active
 date: 2026-09-08
 tags: [research, verification, test]
 ---
@@ -72,7 +72,7 @@ inventory were not independently searched in the archive before the stop.
 | [a-failed-turn-wakes-itself-through-its-own-fault-message](../../../seon/issues/a-failed-turn-wakes-itself-through-its-own-fault-message.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [a-live-cluster-arms-ten-fewer-contracts-than-it-declares](../../../seon/issues/a-live-cluster-arms-ten-fewer-contracts-than-it-declares.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [a-mid-stream-provider-disconnect-discards-the-whole-turn](../../../seon/issues/a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
-| [a-missing-value-loses-the-class-it-could-not-serialize](../../../seon/issues/a-missing-value-loses-the-class-it-could-not-serialize.md) | Read completely; §15 supersedes the proposed serialization marker. Left open because the mandatory gate stop preceded archival. |
+| [a-missing-value-loses-the-class-it-could-not-serialize](../../../seon/issues/archive/a-missing-value-loses-the-class-it-could-not-serialize.md) | Superseded and archived: PRD §15 deletes result serialization and result blobs. |
 | [a-new-core-predicate-and-its-schema-cannot-be-adopted-in-place](../../../seon/issues/a-new-core-predicate-and-its-schema-cannot-be-adopted-in-place.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [a-platform-test-leaves-its-worker-stripped-of-every-contract](../../../seon/issues/a-platform-test-leaves-its-worker-stripped-of-every-contract.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [a-program-identity-row-pulls-nil](../../../seon/issues/a-program-identity-row-pulls-nil.md) | Read completely; needs a live writer/population reproduction. Not reproduced or changed. |
@@ -82,7 +82,7 @@ inventory were not independently searched in the archive before the stop.
 | [a-schema-resource-edit-bricks-value-admission-in-every-running-cluster](../../../seon/issues/a-schema-resource-edit-bricks-value-admission-in-every-running-cluster.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [a-search-contract-predicate-cannot-be-made-durable](../../../seon/issues/a-search-contract-predicate-cannot-be-made-durable.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [a-six-word-eval-error-renders-as-two-thousand-characters](../../../seon/issues/a-six-word-eval-error-renders-as-two-thousand-characters.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
-| [a-stored-result-blob-has-no-reader-at-the-render-boundary](../../../seon/issues/a-stored-result-blob-has-no-reader-at-the-render-boundary.md) | Read completely; §15 deletes result blobs. Left open because the mandatory gate stop preceded archival. |
+| [a-stored-result-blob-has-no-reader-at-the-render-boundary](../../../seon/issues/archive/a-stored-result-blob-has-no-reader-at-the-render-boundary.md) | Superseded and archived: PRD §15 deletes result serialization and result blobs. |
 | [a-throwable-fault-keeps-no-inline-evidence-at-any-plausible-bound](../../../seon/issues/a-throwable-fault-keeps-no-inline-evidence-at-any-plausible-bound.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [a-turn-that-dies-before-replying-still-answers-its-wakes](../../../seon/issues/a-turn-that-dies-before-replying-still-answers-its-wakes.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [activation-closure-records-no-schema-keys](../../../seon/issues/activation-closure-records-no-schema-keys.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
@@ -306,3 +306,35 @@ inventory were not independently searched in the archive before the stop.
 | [vendored-transit-clj-drifts-from-the-pinned-artifact](../../../seon/issues/vendored-transit-clj-drifts-from-the-pinned-artifact.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [walk-units-render-their-hiccup-as-escaped-edn-text](../../../seon/issues/walk-units-render-their-hiccup-as-escaped-edn-text.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
 | [within-run-schema-key-refinement-needs-an-owner-ruling](../../../seon/issues/within-run-schema-key-refinement-needs-an-owner-ruling.md) | Unreviewed or incomplete body read; unchanged after mandatory gate stop. |
+
+## Resumed under the owner’s paths-only gate — 2026-09-08
+
+The preceding stop is historical. The owner replaced it with
+`bin/test --paths <owned files> -- <namespaces>`, so foreign edits no longer
+block the sweep. The PRD was now read end to end through §17, as were the
+updated supplied AGENTS.md, issue README, and current Clojure/testing/Flow/REPL
+skills. The complete inventory remains work in progress.
+
+Default PID 14049 is alive, prepl 58925, HTTP advertised on 7994. MCP’s required
+code argument alone selected default and returned 2 in 1 ms. Status succeeded;
+store footprint was 6.89 GiB. The prior HTTP timeout is not reused as a current
+observation.
+
+### Oversight dependency ledger and reproduction
+
+- `reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:136`: ping returns only replying procs.
+- `reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:271`: a pong carries status/count; no pong supplies no state evidence.
+- `src/seon/oversight.clj`: existing `agent-story-text` and plumbing HTML are the presentation owners; no graph or new state mechanism is added.
+- `test/seon/oversight_test.clj`: existing instrumented presentation and real-cluster integration harness.
+
+Live JVM reproduction before editing: an agent row with no turn and no pong
+rendered exactly `delayed: mid-turn`. The fix maps it to `delayed: unknown`;
+open-turn facts still prove mid-turn, and a pong with no open turn proves parked.
+The new regression checks all four presence combinations in both AI and HTML,
+including zero passes, and requires missing plumbing replies to say unknown.
+It tests the pure inference for every cause of absence, rather than timing a
+scheduler and assuming that reproduced the intended absence.
+
+The edit hook’s static check found only shadowing warnings. Shared publication
+refused the concurrent misplaced `:seon.agent/plan` declaration in my.plan.edn;
+that protected schema is left to its owner. Paths-only gating proceeds.

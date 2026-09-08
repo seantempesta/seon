@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, sci, repl, storage]
 ---
@@ -51,3 +51,13 @@ opaque node had.
 
 The storage-bound lane did not coin it, because coining a key outside a
 bounded assignment is how vocabulary drifts; this note is the request.
+
+## Superseded — owner ruling, 2026-09-08
+
+The proposed missing-class serialization fact no longer belongs to the model. §15 keeps the actual object in the agent SCI context and stores the value renderer’s shown text, deleting the admission/serialization path this proposal would extend.
+
+Authority: [agent record and turn loop PRD §15](../../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md#15-results-objects-in-memory-shown-text-on-disk-owner-2026-09-08).
+This closes the old design proposal, not a claim that the protected turn and
+render implementation has finished. No regression for the deleted design is
+added. Implementation verification belongs to §12–§15’s live-object and
+shown-text proofs.
