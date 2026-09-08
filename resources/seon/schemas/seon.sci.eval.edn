@@ -166,6 +166,13 @@
                 :time-limit-ms [:int {:min 1}],
                 :install-mismatch [:= true]
                 :install-mismatch-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the function whose installed source or deletion mismatched"} [:seon.sci.eval/install-mismatch :seon.sci.eval/install-mismatch] [:seon.error/message :seon.error/message]]
+                :documentation-unavailable :symbol
+                :documentation-unavailable-error
+                [:map {:seon.error/class true
+                       :seon.render/ai seon.error/render-ai
+                       :seon.render/html seon.error/render-html}
+                 [:seon.sci.eval/documentation-unavailable :seon.sci.eval/documentation-unavailable]
+                 [:seon.error/message :seon.error/message]]
                 :missing-function-row :qualified-symbol
                 :missing-function-row-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the function with no admitted program row"} [:seon.sci.eval/missing-function-row :seon.sci.eval/missing-function-row] [:seon.error/message :seon.error/message]]
                 :namespace-binding-cycle [:= true]

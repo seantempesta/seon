@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.agent :as agent]
+            [my.agent :as my.agent]
             [seon.db :as db]
             [seon.config :as config]
             [seon.env :as env]
@@ -30,11 +31,7 @@
     (fn [connection]
       (let [unit {:seon.db/db @connection
                   :seon.cluster.agent/id agent-id}
-            source (agent/render-identity-ai unit)
             html (agent/render-identity-html unit)]
-        (is (= '(seon.cluster.agent/whoami) (read-string source)))
-        (is (not (str/includes? source agent-id))
-            "discovering identity cannot require already knowing it")
         (is (= "Agent     identity-root\nNamespace my.agents.identity-root\nCluster   identity-cluster"
                (agent/whoami {:seon.db/db @connection :seon.cluster.agent/id agent-id})))
         (is (str/includes? (pr-str html) agent-id))
@@ -51,8 +48,6 @@
   (testing "an id remains visible while optional connections are absent"
     (let [unit {:seon.cluster.agent/id agent-id
                 :seon.render/value {:seon.cluster.agent/id agent-id}}]
-      (is (= '(seon.cluster.agent/whoami)
-             (read-string (agent/render-identity-ai unit))))
       (is (str/includes? (pr-str (agent/render-identity-html unit)) agent-id))))
   (testing "a database refusal remains a typed rendered refusal"
     (let [database-error
@@ -110,6 +105,22 @@
             "the argumentless SCI call uses the one declared request-map arity")
         (is (every? :seon.fn.arity/output arities))
         (is (some? live))
+        (let [result (evaluate (agent/render-identity-ai
+                                {:seon.cluster.agent/id agent-id}))
+              value (:seon.sci.admit/value result)]
+          (is (= agent-id (:seon.cluster.agent/id value)))
+          (is (= namespace-name (get-in value [:seon.cluster.agent/namespace :seon.ns/name])))
+          (is (= agent-id (get-in value [:seon.cluster.agent/namespace :seon.ns/steward
+                                        :seon.cluster.agent/id])))
+          (is (empty? (:seon.cluster.eval/output result))))
+        (is (= {:seon.config.eval/time-limit-ms 1234}
+               (:seon.sci.admit/value
+                (evaluate "(my.agent/settings! {:seon.config.eval/time-limit-ms 1234})"))))
+        (is (= {:seon.config.eval/time-limit-ms 1234}
+               (:seon.sci.admit/value (evaluate "(my.agent/settings)"))))
+        (let [dials (:seon.sci.admit/value (evaluate (str "(do\n" (my.agent/render-settings-ai {}) "\n)")))]
+          (is (set? dials))
+          (is (get dials :seon.config.run/max-episode-runs)))
         (is (= expected (:seon.sci.admit/value (evaluate "(seon.cluster.agent/whoami)"))))
         (is (= "Agent     supplied\nCluster   identity-cluster"
                (:seon.sci.admit/value

@@ -34,3 +34,13 @@ Components lane, 2026-09-08: initial `runtime_status` selected default PID
 A subsequent MCP JVM `(+ 1 1)` returned 2 in 3 ms. The process is reachable;
 that arithmetic result does not establish Flow health. No default lifecycle
 operation was performed.
+
+
+Components checkpoint `e96001a7c`: development adoption reached JVM
+instrumentation and returned `:seon.instrument/registration-failed`, with
+Malli reporting `:malli.core/invalid-schema` for `:seon.render/cache`.
+The subsequent default debug navigation exceeded Playwright's 30-second
+bound. Page-feed then landed `985a830b5`, including the cache schema
+alias. No default restart or refork was attempted; final source adoption
+is the next authorized convergence boundary. Scoped component gates and
+scratch adoption remain independent of this failure.

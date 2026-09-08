@@ -17,7 +17,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.print :as print]
-            [seon.render.value :as value]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -1039,14 +1038,14 @@
                            (state-word state))}
      [:p {:class "my-plan-id"}
       [:span {:class "my-plan-state"} (state-label state)]
-      [:code (:my.plan.item/id step)]]
+      [:code {:style {:color "var(--color-text-300)"}} (:my.plan.item/id step)]]
      [:h3 (:my.plan.item/title step)]
      (into (if (= :current state)
              [:details {:open true} [:summary "Details"]]
              [:details [:summary "Details"]])
            (remove nil?)
            [(when-let [description (:my.plan.item/description step)]
-              [:p description])
+              [:p {:style {:color "var(--color-text-200)"}} description])
             (when-let [expected (:my.plan.item/expected-result step)]
               [:p {:class "my-plan-expected"}
                [:strong "Done when: "] expected])
@@ -1057,7 +1056,7 @@
               [:p {:class "my-plan-relation"}
                [:strong "Waiting for "]
                (str/join ", " (map :my.plan.item/id needs))])
-            [:p {:class "my-plan-reference"}
+            [:p {:class "my-plan-reference" :style {:color "var(--color-text-300)"}}
              [:strong "Reference "]
              [:code (pr-str [:my.plan.item/id (:my.plan.item/id step)])]]])]))
 
@@ -1140,13 +1139,13 @@
     view
     (let [steps (:my.plan/steps view)
           older (:my.plan/older-completions view)
-          objective (first steps)]
+          objective (:my.plan/objective view)]
       (str/join
        "\n\n"
        (cond->
         [(str "Plan for " (:seon.cluster.agent/id view)
               (when objective
-                (str "\nObjective: " (:my.plan.item/title objective)))
+                (str "\nObjective: " objective))
               (if-let [current (current-title view)]
                 (str "\nCurrent step: " current)
                 "\nCurrent step: none selected"))
@@ -1170,17 +1169,37 @@
     "; You have no plan yet.\n(dir my.plan)\n(doc my.plan/add!)"))
 
 (defn render-plan-html
-  "Show the plan data through the shared value renderer."
+  "Show the objective, current focus, progress, and every step with its state."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.render/hiccup :seon.error/value]]}
-  [view]
-  (let [rendered (value/render-html
-                  (assoc view
-                         :seon.render.value/options {:seon.render.value/structural? true}
-                         :seon.render/value
-                         (select-keys view [:my.plan/objective :my.plan/steps :my.plan/current-step])))]
-    (if (error-value? rendered)
-      rendered
-      [:section {:class "seon-family-entry my-plan"}
-       [:h3 "Plan"]
-       rendered])))
+  [unit]
+  (let [database (:seon.db/db unit)
+        component (or (:seon.render/value unit) unit)
+        agent-id (or (:seon.cluster.agent/id unit)
+                     (when (and database (:db/id component))
+                       (db/q '[:find ?id . :in $ ?plan
+                               :where [?agent :seon.agent/plan ?plan]
+                                      [?agent :seon.cluster.agent/id ?id]]
+                             database (:db/id component))))
+        view (if (and database agent-id)
+               (plan {:seon.db/db database :seon.cluster.agent/id agent-id})
+               component)]
+    (if (error-value? view)
+      view
+      (let [steps (:my.plan/steps view)
+            done (count (filter :my.plan.item/completed-at steps))]
+        [:section {:class "seon-family-entry my-plan"}
+         [:header [:p {:class "seon-kicker"} "Plan"]
+          [:h3 (get view :my.plan/objective "No objective set")]]
+         [:p [:strong "Current step: "]
+          (or (current-title view) "None selected")]
+         [:p (str done " of " (count steps) " steps completed")]
+         [:progress {:value done :max (max 1 (count steps))
+                     :aria-label "Plan progress"}]
+         (if (seq steps)
+           (into [:ol {:class "my-plan-steps"}]
+                 (map (fn [step]
+                        [:li {:style {:margin-left (str (* 1.25 (get step :my.plan/depth 0)) "rem")}}
+                         (render-item-html step)]))
+                 steps)
+           [:p "No steps yet."])]))))

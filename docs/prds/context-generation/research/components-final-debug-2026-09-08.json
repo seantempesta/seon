@@ -1,0 +1,40 @@
+{
+  "url": "http://127.0.0.1:7809/ns/my.agents.juniper/debug",
+  "blocks": [
+    {
+      "attribute": ":seon.cluster.agent/id",
+      "ai": "AI\n\"juniper\"",
+      "html": "HTML\n\"juniper\""
+    },
+    {
+      "attribute": ":seon.agent/plan",
+      "ai": "AI\n; Your plan. (dir my.plan) is its API; (doc my.plan/complete!) explains one form.\nmy.agents.juniper=> (my.plan/current)\n#:seon.repl{:value #:my.plan.item{:expected-result \"The AI plan is concise and actionable; the HTML plan shows progress and stable step references without numeric entity ids.\",\n  :id \"juniper/render-plan\", :title \"Render this plan clearly\"}, :ms 120}\n\nmy.agents.juniper=> (my.plan/ready)\n#:seon.repl{:value [#:my.plan.item{:expected-result \"The AI plan is concise and actionable; the HTML plan shows progress and stable step references without numeric entity ids.\",\n    :id \"juniper/render-plan\", :title \"Render this plan clearly\"}], :ms 125}\n\nmy.agents.juniper=> (my.plan/blocked)\n#:seon.repl{:value [#:my.plan.item{:expected-result \"The comparison shows the previous and refreshed results together, with the relevant changed input.\",\n    :id \"juniper/compare-changed-results\", :needs [\"juniper/render-plan\"],\n    :title \"Compare refreshed results\"} #:my.plan.item{:expected-result \"Juniper identifies the current step and records a truthful plan update from the assembled context.\",\n    :id \"juniper/try-live-turn\", :needs [\"juniper/compare-changed-results\"],\n    :title \"Try the assembled context in a live agent turn\"}], :ms 112}",
+      "html": "HTML\n\nPlan\n\nImprove Juniper context inspection\n\nCurrent step: Render this plan clearly\n\n1 of 4 steps completed\n\nCOMPLETED\njuniper/inspect-identity-messages\n\nInspect identity and messages\nDetails\n\nCURRENT STEP\njuniper/render-plan\n\nRender this plan clearly\nDetails\n\nReplace raw entity numbers and dense prose with a readable current focus, progress summary, stable dependencies, and expandable step evidence.\n\nDone when: The AI plan is concise and actionable; the HTML plan shows progress and stable step references without numeric entity ids.\n\nReference [:my.plan.item/id \"juniper/render-plan\"]\n\nBLOCKED\njuniper/compare-changed-results\n\nCompare refreshed results\nDetails\n\nBLOCKED\njuniper/try-live-turn\n\nTry the assembled context in a live agent turn\nDetails"
+    },
+    {
+      "attribute": ":seon.cluster.agent/namespace",
+      "ai": "AI\n(ns my.agents.juniper (:require my.message my.run seon.bootstrap seon.db))\n\n;; No definitions are indexed in this namespace yet; it belongs to agent juniper.\n;; Every `defn` evaluated here with a :malli/schema becomes one.",
+      "html": "HTML\nmy.agents.juniper\n\nRequires\n\nmy.message\nmy.run\nseon.bootstrap\nseon.db\n\nNo definitions are indexed in this namespace yet; it belongs to agent juniper. Every contracted `defn` evaluated here becomes one.\n\nnamespace source"
+    },
+    {
+      "attribute": ":seon.agent/settings",
+      "ai": "AI\n; Your overrides inherit omitted defaults; change one with (my.agent/settings! {:seon.config.eval/time-limit-ms 5000}).\nmy.agents.juniper=> (my.agent/settings)\n#:seon.repl{:value {:seon.config.eval/time-limit-ms 2500, :seon.config.run/max-episode-runs\n  4}, :ms 122}\n\nmy.agents.juniper=> (seon.ai/agent-setting-attributes)\n#:seon.repl{:value #{:seon.config.agent/turn-completion-backstop-ms :seon.config.ai.backup/api-key-variable\n  :seon.config.ai.backup/endpoint :seon.config.ai.backup/model :seon.config.ai.backup/timeout-ms\n  :seon.config.ai.retry/base-delay-ms :seon.config.ai.retry/jitter-fraction\n  :seon.config.ai.retry/maximum-delay-ms :seon.config.ai.retry/maximum-retries\n  :seon.config.ai.retry/maximum-total-delay-ms :seon.config.ai.retry/multiplier\n  :seon.config.ai/api-key-variable :seon.config.ai/chars-per-token-prior\n  :seon.config.ai/endpoint :seon.config.ai/extra-body-edn :seon.config.ai/frequency-penalty\n  :seon.config.ai/max-tokens :seon.config.ai/model :seon.config.ai/no-auth\n  :seon.config.ai/presence-penalty :seon.config.ai/prompt-token-budget :seon.config.ai/response-format\n  :seon.config.ai/stop :seon.config.ai/temperature :seon.config.ai/thinking\n  :seon.config.ai/timeout-ms :seon.config.ai/top-p :seon.config.eval/time-limit-ms\n  :seon.config.run/max-episode-runs}, :ms 123}",
+      "html": "HTML\nSettings\n\nAgent overrides take precedence over cluster defaults.\n\nSETTING\tVALUE\tSOURCE\n:seon.config.agent/turn-completion-backstop-ms\t600000\tCluster default\n:seon.config.ai/api-key-variable\t\"DEEPSEEK_API_KEY\"\tCluster default\n:seon.config.ai/chars-per-token-prior\t3.2\tCluster default\n:seon.config.ai/endpoint\t\"https://api.deepseek.com/chat/completions\"\tCluster default\n:seon.config.ai/extra-body-edn\tNot set\tNot set\n:seon.config.ai/frequency-penalty\tNot set\tNot set\n:seon.config.ai/max-tokens\t65536\tCluster default\n:seon.config.ai/model\t\"deepseek-v4-flash\"\tCluster default\n:seon.config.ai/no-auth\tNot set\tNot set\n:seon.config.ai/presence-penalty\tNot set\tNot set\n:seon.config.ai/prompt-token-budget\t32768\tCluster default\n:seon.config.ai/response-format\tNot set\tNot set\n:seon.config.ai/stop\tNot set\tNot set\n:seon.config.ai/temperature\tNot set\tNot set\n:seon.config.ai/thinking\t:disabled\tCluster default\n:seon.config.ai/timeout-ms\t180000\tCluster default\n:seon.config.ai/top-p\tNot set\tNot set\n:seon.config.ai.backup/api-key-variable\tNot set\tNot set\n:seon.config.ai.backup/endpoint\tNot set\tNot set\n:seon.config.ai.backup/model\t\"deepseek/deepseek-v4-flash-20260731\"\tCluster default\n:seon.config.ai.backup/timeout-ms\tNot set\tNot set\n:seon.config.ai.retry/base-delay-ms\t500\tCluster default\n:seon.config.ai.retry/jitter-fraction\t0.25\tCluster default\n:seon.config.ai.retry/maximum-delay-ms\t4000\tCluster default\n:seon.config.ai.retry/maximum-retries\t2\tCluster default\n:seon.config.ai.retry/maximum-total-delay-ms\t3000\tCluster default\n:seon.config.ai.retry/multiplier\t2.0\tCluster default\n:seon.config.eval/time-limit-ms\t2500\tAgent override\n:seon.config.run/max-episode-runs\t4\tAgent override\n\nChange an override:\n\n(my.agent/settings! {:seon.config.eval/time-limit-ms 5000})"
+    },
+    {
+      "attribute": ":seon.cluster.message/inbound-content",
+      "ai": "AI\n\nNo value is stored or connected for this attribute.",
+      "html": "HTML\n\nNo value is stored or connected for this attribute."
+    },
+    {
+      "attribute": ":seon.cluster.message/_to",
+      "ai": "AI\n[(seon.cluster.message/format-ai (seon.db/pull [:seon.cluster.message/id :seon.cluster.message/content {:seon.cluster.message/from [:db/id :seon.cluster.agent/id]} {:seon.cluster.message/to [:db/id :seon.cluster.agent/id]}] [:seon.cluster.message/id \"bootstrap-task:juniper\"]))\n  (seon.cluster.message/format-ai (seon.db/pull [:seon.cluster.message/id :seon.cluster.message/content {:seon.cluster.message/from [:db/id :seon.cluster.agent/id]} {:seon.cluster.message/to [:db/id :seon.cluster.agent/id]}] [:seon.cluster.message/id \"design-lab/root-to-juniper/1\"]))\n  (seon.cluster.message/format-ai (seon.db/pull [:seon.cluster.message/id :seon.cluster.message/content {:seon.cluster.message/from [:db/id :seon.cluster.agent/id]} {:seon.cluster.message/to [:db/id :seon.cluster.agent/id]}] [:seon.cluster.message/id \"design-lab/root-to-juniper/2\"]))]",
+      "html": "HTML\nvector 3 items, depth 0"
+    },
+    {
+      "attribute": ":seon.cluster.run/_agent",
+      "ai": "AI\n[]",
+      "html": "HTML\nvector 1 items, depth 0"
+    }
+  ]
+}

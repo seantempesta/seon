@@ -7,7 +7,10 @@ tags: [research, agent, render]
 
 # Agent components landing
 
-Work in progress. No implementation or gate completion is claimed.
+The retired-record cut is `67fe1675d`; settings is `e96001a7c`; this commit
+contains the useful render pairs and data-returning documentation. Identity
+aggregation in the protected debug-page loop remains an integration hunk,
+linked below. **RESET NEEDED: `67fe1675d`** for old default datoms.
 
 Read AGENTS.md and the turn PRD §0, §1a, §4/§4a, §13, and §17 end to end,
 plus the plan README and working edge. The AGENTS.md lane-rules preamble
@@ -154,3 +157,107 @@ page and inspected; useful presentation is the next cut.
 
 Settings platform gate: **82 tests / 486 assertions**, zero failures/errors
 (`run.oLleW9`, coordinator/test phase 112 s), with at most three workers.
+
+
+## Render evidence and remaining integration
+
+Scratch in-place adoption `6aa09f5e-142a-5348-9da2-55f436167566` loaded the
+final render functions. The final subject gate at HEAD `985a830b5` plus only
+owned paths passed **25 tests / 143 assertions**, zero failures/errors
+(`run.wdrYrQ`, coordinator/test phase 56 s). The first pass exposed old
+identity-string expectations; a later fixture incorrectly submitted two
+reader events to the one-event evaluator. The corrected test runs the forms
+in one `do`, and the actual browser independently exercises separate forms.
+The real SCI checks cover identity data, implicit settings arguments, and
+`doc`/`dir` data with no duplicate stdout. No mocked SCI context was used.
+
+The plan shows its own objective, current step, progress, and every derived
+step state. Settings shows all schema-declared dials, values, and inheritance;
+the table wraps within the debug column. Identity links its name, namespace,
+and steward. No whole-component generic-printer fallback remains in these
+functions. The old `whoami` text API remains callable; the identity renderer
+now generates the data query directly.
+
+Screenshots inspected by the components lane:
+
+- [Actual scratch debug page](components-final-debug-2026-09-08.png), with
+  [exact captured AI/HTML column bytes](components-final-debug-2026-09-08.json).
+- [Plan in the debug column](components-final-debug-plan-2026-09-08.png) and
+  [settings in the debug column](components-final-debug-settings-2026-09-08.png).
+- [Identity](components-final-identity-2026-09-08.png),
+  [plan](components-final-plan-2026-09-08.png), and
+  [settings](components-final-settings-2026-09-08.png) are the actual live
+  component-function results displayed in a standalone evidence document.
+  The [probe](components_probe_2026_09_08.clj) calls those functions against
+  the scratch database; it does not implement another renderer. The
+  [HTML](components-final-2026-09-08.html) uses a copied generated stylesheet
+  so it remains inspectable after scratch cleanup.
+
+The live debug page still displays id and namespace separately because its
+protected attribute loop never invokes the aggregate agent pair. The agent
+schema now points at the existing `seon.cluster.agent` identity owner. The
+[proposed web.clj hunk](components-web-proposed-2026-09-08.patch) groups this
+identity and derives component membership from installed `:db/isComponent`
+facts, retaining reverse concerns. **The hunk is not applied or claimed as
+verified.** It names a narrow agent integration; the renderer owner may
+apply the same rule generically. Delete the now-unreferenced identity pair
+and selector in protected `src/seon/render/ns.clj:17–41` when integrating,
+rather than retaining two owners.
+
+Protected `test/seon/sci/eval_test.clj` still asserts that `dir` prints names
+and `doc` prints formatted contract prose around line 1085. Replace that
+retired expectation with returned public rows and zero stdout; the owned
+`test/seon/sci/documentation_test.clj` verifies this behavior on the canonical
+armed SCI harness. That protected file was not edited.
+
+Default adoption after `e96001a7c` reached JVM instrumentation and failed
+with `:seon.instrument/registration-failed` / `:malli.core/invalid-schema`
+for `:seon.render/cache`. A following Playwright navigation timed out at
+30 seconds. The contemporaneous publication read from the hosting root,
+not the invoking worktree; `--changed` is not an isolated publication
+snapshot. Page-feed subsequently landed `985a830b5`, whose schema declares
+that key. No default lifecycle operation was performed. This is a measured
+integration boundary, not a failed component gate; final adoption will be
+attempted after this commit.
+
+## Exact generated AI sources
+
+These are the bytes returned by the live component functions. The debug
+JSON above additionally records evaluated plan/settings results, including
+their measured evaluation times. Identity's generated query is executed by
+the real SCI identity regression; its aggregate debug block awaits the
+protected web hunk. The [source artifact](components-final-2026-09-08-sources.edn)
+retains the strings losslessly.
+
+`:seon.cluster.agent/agent`
+
+```clojure
+; This is my identity and namespace; its steward is responsible for it.
+(seon.db/pull (quote [:seon.cluster.agent/id #:seon.cluster.agent{:namespace [:seon.ns/name #:seon.ns{:steward [:seon.cluster.agent/id]}]}]) [:seon.cluster.agent/id "juniper"])
+```
+
+`:seon.agent/plan`
+
+```clojure
+; Your plan. (dir my.plan) is its API; (doc my.plan/complete!) explains one form.
+(my.plan/current)
+(my.plan/ready)
+(my.plan/blocked)
+```
+
+`:seon.agent/settings`
+
+```clojure
+; Your overrides inherit omitted defaults; change one with (my.agent/settings! {:seon.config.eval/time-limit-ms 5000}).
+(my.agent/settings)
+(seon.ai/agent-setting-attributes)
+```
+
+
+Final platform gate: **82 tests / 486 assertions**, zero failures/errors
+(`run.91KD6h`, coordinator/test phase 113 s), at HEAD `985a830b5` plus owned
+paths. `SEON_TEST_WORKERS=3` and the previously documented processor-count
+workaround were used throughout. No full suite was run. Scratch source was
+HEAD `2531b2e70` plus the components files; the final isolated gates additionally
+include landed page-feed `985a830b5`. The proposed protected web hunk is not
+part of either proof.

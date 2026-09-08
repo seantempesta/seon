@@ -79,7 +79,7 @@
         (is (not (contains? current :my.plan/current-step)))
         (is (str/includes? ai "Steps: none yet."))
         (is (str/includes? ai "Current step: none selected"))
-        (is (str/includes? (pr-str html) "vector 0 items"))))))
+        (is (str/includes? (pr-str html) "No steps yet."))))))
 
 (deftest one-step-is-owned-by-the-agent-through-the-component-edge
   (with-plan
@@ -228,10 +228,11 @@
         (is (= 1 (count (re-seq #"my-plan\"" printed))))
         (is (str/includes? ai "1. Improve the plan"))
         (is (str/includes? ai "1.1 Inspect the facts"))
-        (is (str/includes? ai "Objective: Improve the plan"))
+        (is (not (str/includes? ai "Objective: Improve the plan"))
+            "a step title is not the plan objective")
         (is (str/includes? ai "Current step: Improve the plan"))
         (is (str/includes? printed "Inspect the facts"))
-        (is (str/includes? printed "#:my.plan.item{"))))))
+        (is (str/includes? printed "0 of 2 steps completed"))))))
 
 (deftest plan-source-selects-reads-from-current-data
   (with-plan
@@ -480,8 +481,8 @@
         (is (= "juniper/render-plan"
                (get-in current [:my.plan/current-step :my.plan.item/id])))
         (is (str/includes? ai "(my.plan/current)\n(my.plan/ready)\n(my.plan/blocked)"))
-        (is (str/includes? printed ":my.plan.item/completed-at"))
-        (is (str/includes? printed ":current-step"))
+        (is (str/includes? printed "1 of 4 steps completed"))
+        (is (str/includes? printed "Current step: "))
         (is (not (str/includes? printed ":open nil"))
             "no nil attribute reaches the rendered panel")))))
 

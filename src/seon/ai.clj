@@ -322,7 +322,7 @@
 
 (defn agent-setting-attributes
   "The override keys, queried from the installed overlay schema's references."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
+  {:malli/schema [:=> [:cat :seon.db/db]
                   [:or [:set :qualified-keyword] :seon.error/value]]}
   [database]
   (let [row (db/pull database '[{:seon.schema/references [:seon.schema/key]}]

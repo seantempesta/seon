@@ -1192,177 +1192,77 @@
            intern-map))))
 
 (def ^:private program-documentation-selector
-  [{:seon.fn/arities
-    [:seon.fn.arity/order
-     :seon.fn.arity/arity
-     {:seon.fn.arity/input-refs
-      [:seon.schema/key :seon.schema/form]}
-     {:seon.fn.arity/output-refs
-      [:seon.schema/key :seon.schema/form]}]}])
-
-(defn- program-documentation-config
-  [db]
-  (let [cluster-name
-        (db/q '[:find ?cluster .
-                :where [?config :seon.config/cluster ?cluster]]
-              db)
-        effective
-        (merge
-         (config/defaults)
-         (when cluster-name
-           (db/pull db
-                    [:seon.config/on-core-error
-                     :seon.config.eval.result/max-bytes
-                     :seon.config.eval.result/max-source
-                     :seon.config.eval.result/max-depth
-                     :seon.config.eval.result/max-collection
-                     :seon.config.eval.result/max-string
-                     :seon.config.eval.result/max-nodes
-                     :seon.print/length
-                     :seon.print/level]
-                    [:seon.config/cluster cluster-name])))]
-    {:seon.sci.admit/caps (config/result-caps effective)
-     :seon.config/on-core-error (:seon.config/on-core-error effective)
-     :seon.print/options
-     (select-keys effective [:seon.print/length :seon.print/level])}))
-
-(defn- schema-form-text
-  [configuration standard-error? schema-ref]
-  (let [form (edn/read-string (:seon.schema/form schema-ref))]
-    (when-not (and standard-error?
-                   (= :seon.error/value (:seon.schema/key schema-ref)))
-      (let [admitted
-            (admit/admit-value
-             {:seon.sci.admit/value form
-              :seon.sci.admit/interrupt-fn (constantly nil)
-              :seon.sci.admit/caps (:seon.sci.admit/caps configuration)
-              :seon.config/on-core-error
-              (:seon.config/on-core-error configuration)})]
-        (print/emit-text (:seon.sci.admit/print-node admitted)
-                         (:seon.print/options configuration))))))
-
-(defn- role-contract-lines
-  [configuration standard-error? label schema-refs]
-  (let [first-prefix (case label
-                       :input "  in:  "
-                       :output "  out: ")]
-    (mapv
-     (fn [index schema-ref]
-       (str (if (zero? index) first-prefix "       ")
-            (:seon.schema/key schema-ref)
-            (when-let [form-text
-                       (schema-form-text
-                        configuration standard-error? schema-ref)]
-              (str "  " form-text))))
-     (range)
-     (sort-by (comp str :seon.schema/key) schema-refs))))
-
-(defn- arity-contract-lines
-  [configuration standard-error? arities]
-  (let [ordered-arities (sort-by :seon.fn.arity/order arities)
-        multiple? (< 1 (count ordered-arities))
-        blocks
-        (keep
-         (fn [arity]
-           (let [lines
-                 (into
-                  (role-contract-lines
-                   configuration standard-error? :input
-                   (:seon.fn.arity/input-refs arity))
-                  (role-contract-lines
-                   configuration standard-error? :output
-                   (:seon.fn.arity/output-refs arity)))]
-             (when (seq lines)
-               (if multiple?
-                 (into [(str "  arity "
-                             (:seon.fn.arity/arity arity)
-                             ":")]
-                       lines)
-                 lines))))
-         ordered-arities)]
-    (vec (mapcat identity (interpose [""] blocks)))))
+  [:seon.fn/sym :seon.fn/doc :seon.fn/arglists :seon.fn/spec
+   {:seon.fn/arities
+    [:seon.fn.arity/order :seon.fn.arity/arity
+     {:seon.fn.arity/input-refs [:seon.schema/key :seon.schema/form]}
+     {:seon.fn.arity/output-refs [:seon.schema/key :seon.schema/form]}]}])
 
 (defn- program-documentation
-  "Public function documentation derived from one database value."
-  [db projection]
-  (let [configuration (program-documentation-config db)
-        standard-error?
-        (= :core
-           (get-in
-            projection
-            [:seon.schema.projection/schema-admissions
-             :seon.error/value
-             :seon.schema.admission/source]))]
-    (into {}
-          (map
-           (fn [[function-symbol doc arglists function]]
-             [function-symbol
-              {:seon.fn/doc doc
-               :seon.fn/arglists arglists
-               ::contract-lines
-               (arity-contract-lines
-                configuration standard-error?
-                (:seon.fn/arities function))}]))
-          (db/q '[:find ?function-symbol ?doc ?arglists
-                         (pull ?function selector)
-                  :in $ selector
-                  :where
-                  [?function :seon.fn/sym ?function-symbol]
-                  [?function :seon.fn/doc ?doc]
-                  [?function :seon.fn/arglists ?arglists]
-                  [?function :seon.fn/private? false]]
-                db program-documentation-selector))))
+  "Public documentation as program facts; presentation belongs to the renderer."
+  [database]
+  (into {}
+        (map (fn [row]
+               [(:seon.fn/sym row)
+                (cond-> row
+                  (:seon.fn/arities row)
+                  (update :seon.fn/arities
+                          #(mapv (fn [arity]
+                                   (reduce (fn [m k]
+                                             (if (get m k)
+                                               (update m k (fn [refs]
+                                                             (vec (sort-by :seon.schema/key refs))))
+                                               m))
+                                           arity
+                                           [:seon.fn.arity/input-refs
+                                            :seon.fn.arity/output-refs]))
+                                 (sort-by :seon.fn.arity/order %))))]))
+        (db/q '[:find [(pull ?function selector) ...]
+                :in $ selector
+                :where [?function :seon.fn/sym _]
+                       [?function :seon.fn/private? false]]
+              database program-documentation-selector)))
+
+(defn- documentation-unavailable
+  [requested]
+  {:seon.sci.eval/documentation-unavailable requested
+   :seon.error/kind :seon.sci.eval/documentation-unavailable
+   :seon.error/message (str "No public program documentation is available for " requested ".")})
 
 (defn- program-doc-var
-  "An SCI `doc` macro whose printed and returned facts came from acquisition."
+  "An SCI doc macro returning the acquired function facts without printing."
   [ctx documentation]
-  (let [repl-ns (sci/create-ns 'clojure.repl)
-        fallback @(sci/resolve ctx 'clojure.repl/doc)]
-    (sci/new-macro-var
-     'doc
-     (fn [form env function-symbol]
-       (if-let [{:seon.fn/keys [doc arglists]
-                 contract-lines ::contract-lines}
-                (get documentation (str function-symbol))]
-         (let [ordinary-lines ["-------------------------"
-                               (str function-symbol)
-                               arglists]
-               print-doc (list 'clojure.core/println " " doc)]
-           (cons 'do
-                 (concat
-                  (map #(list 'clojure.core/println %) ordinary-lines)
-                  [print-doc]
-                  (map #(list 'clojure.core/println %) contract-lines)
-                  [(list 'quote
-                         {:seon.fn/sym function-symbol
-                          :seon.fn/doc doc
-                          :seon.fn/arglists arglists
-                          :seon.fn/contract-lines contract-lines})])))
-         (fallback form env function-symbol)))
-     {:ns repl-ns})))
+  (sci/new-macro-var
+   'doc
+   (fn [_form _env function-symbol]
+     (let [resolved (sci/resolve ctx function-symbol)
+           qualified (when resolved
+                       (let [{:keys [ns name]} (meta resolved)]
+                         (symbol (str ns) (str name))))]
+       (list 'quote
+             (or (get documentation (str function-symbol))
+                 (get documentation (str qualified))
+                 (documentation-unavailable function-symbol)))))
+   {:ns (sci/create-ns 'clojure.repl)}))
 
 (defn- program-dir-var
-  "An SCI `dir` macro whose value introduces every acquired public symbol."
-  [ctx documentation]
-  (let [repl-ns (sci/create-ns 'clojure.repl)
-        fallback @(sci/resolve ctx 'clojure.repl/dir)
-        symbols-by-namespace
-        (reduce
-         (fn [by-namespace function-symbol]
-           (update by-namespace (symbol (namespace function-symbol))
-                   (fnil conj []) function-symbol))
-         {}
-         (sort (map symbol (keys documentation))))]
+  "An SCI dir macro returning public summaries with their input/output specs."
+  [_ctx documentation]
+  (let [by-namespace
+        (group-by (comp symbol namespace symbol :seon.fn/sym)
+                  (sort-by :seon.fn/sym (vals documentation)))]
     (sci/new-macro-var
      'dir
-     (fn [form env namespace-name]
-       (if-let [qualified-symbols (seq (get symbols-by-namespace namespace-name))]
-         (cons 'do
-               (concat
-                (map #(list 'clojure.core/println (name %)) qualified-symbols)
-                [(list 'quote (vec qualified-symbols))]))
-         (fallback form env namespace-name)))
-     {:ns repl-ns})))
+     (fn [_form _env namespace-name]
+       (list 'quote
+             (if-let [rows (get by-namespace namespace-name)]
+               (mapv (fn [row]
+                       (cond-> (dissoc row :seon.fn/arities)
+                         (:seon.fn/doc row)
+                         (update :seon.fn/doc #(first (str/split-lines %)))))
+                     rows)
+               (documentation-unavailable namespace-name))))
+     {:ns (sci/create-ns 'clojure.repl)})))
 
 (defn- install-program-doc!
   "Install one acquired program-doc projection without retaining the db."
@@ -1370,7 +1270,7 @@
   (schema/call-with-projection
    projection
    (fn []
-     (let [documentation (program-documentation db projection)
+     (let [documentation (program-documentation db)
            doc-var (program-doc-var ctx documentation)
            dir-var (program-dir-var ctx documentation)]
        ;; Preserve qualified `clojure.repl/doc`/`dir` and expose the same

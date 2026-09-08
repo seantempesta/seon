@@ -78,6 +78,7 @@
             [seon.env :as env]
             [seon.error :as error]
             [seon.schema :as schema]
+            [seon.render.route :as route]
             [seon.flow :as seon.flow]
             [seon.schedule :as schedule]
             [seon.schema.edn :as schema.edn])
@@ -160,7 +161,7 @@
   "Return the database read that reproduces an agent's identity."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
   [unit]
-  {:seon.repl/comment ";; Who am I?"
+  {:seon.repl/comment "; This is my identity and namespace; its steward is responsible for it."
    :seon.repl/form
    (list 'seon.db/pull
          (list 'quote identity-selector)
@@ -190,27 +191,18 @@
                 (when namespace-name (str "\nNamespace " namespace-name))
                 (when cluster-name (str "\nCluster   " cluster-name))))))))
 
-(def ^:private identity-source
-  "The identity unit's teaching comments and the one form that answers them."
-  (str "; Who am I? Read my identity and namespace from this database branch.\n"
-       (pr-str (list `whoami))))
-
 (defn render-identity-ai
-  "Render the ordinary query that returns an agent's identity text."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/source]]}
+  "Read identity, namespace, and stewardship as data in one block."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [unit]
-  (when (:seon.cluster.agent/id unit)
-    identity-source))
+  (let [form (identity-form unit)]
+    (str (:seon.repl/comment form) "\n" (pr-str (:seon.repl/form form)))))
 
 (defn render-id-ai
-  "Render the identity unit's source from the agent's own id attribute.
-
-  The unit's stored value is `:seon.cluster.agent/id` itself. The source runs
-  through the ordinary reply reader in the agent's fork, where call preparation
-  supplies both the database and the calling agent to [[whoami]]."
+  "Read the identity concern from its identifying attribute."
   {:malli/schema [:=> [:cat :seon.cluster.agent/id] :seon.render/source]}
-  [_agent-id]
-  identity-source)
+  [agent-id]
+  (render-identity-ai {:seon.cluster.agent/id agent-id}))
 
 (defn render-identity-html
   "Render an agent's id, namespace, and steward as an identity card."
@@ -237,15 +229,19 @@
           [:article {:class "seon-family-entry seon-agent-identity-entry"}
            [:header
             [:p {:class "seon-kicker"} "Identity"]
-            [:h3 [:code agent-id]]]
+            [:h3 [:a {:href (route/path :seon.render.route/agent {:id agent-id})}
+                  agent-id]]]
            (into [:dl]
                  (cond-> []
                    namespace-name
                    (conj [:div [:dt "Namespace"]
-                          [:dd [:code (str namespace-name)]]])
+                          [:dd [:a {:href (route/path :seon.render.route/namespace
+                                                     {:namespace (str namespace-name)})}
+                                [:code (str namespace-name)]]]])
                    steward
                    (conj [:div [:dt "Steward"]
-                          [:dd [:code steward]]])))])))))
+                          [:dd [:a {:href (route/path :seon.render.route/agent {:id steward})}
+                                steward]]])))])))))
 
 (defn render-id-html
   "Render the identity unit as a compact labeled card.
