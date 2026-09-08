@@ -1637,3 +1637,12 @@ deleted `capped?` was its refusal), StackOverflow at depth 2000,
 does not launch until the repair is re-verified. Ruling implied and being
 written into AGENTS.md §2.4: rendering limits are ON for the AI projection
 under the render profile; HTML unbounded; storage bounded per value.
+
+Repair landed `b6dd42ee0..9727c52df` (iterative admission; fault evidence
+bound 16,384 through the same admission; `fit` restored for `/ai` only,
+HTML whole; oversized effect refused; pull cut reported; AGENTS §2.4 = the
+three bounds). Dev root reset again (a new required config fact refuses
+adoption; `config apply` is broken — issue filed). Re-verification lane
+running; lane 2 still parked behind it. Open from the repair: the eight
+transcript reds survive restored limits (cause unknown, the verifier is
+diagnosing).
