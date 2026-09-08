@@ -1177,6 +1177,21 @@
                    "program-armable=" (count armable))))
       applied)))
 
+(defn- initialize-contracts!
+  "Load selected tests and acquire the one arming value for workers and test-fast."
+  [role namespaces]
+  (schema/call-with-projection
+   (packaged-test-projection role)
+   #(doseq [namespace-name namespaces] (require namespace-name)))
+  ;; Acquire after requires so declared predicate callables are present.
+  (let [projection (packaged-test-projection role)
+        decision (arming-decision)
+        applied (arm-contracts! decision projection role namespaces)]
+    {::projection projection
+     ::namespaces namespaces
+     ::decision decision
+     ::instrumented (:seon.instrument/instrumented applied)}))
+
 (defn- reassert-contracts!
   "Re-arm this worker JVM when a task left its contracts stripped.
 
@@ -1248,40 +1263,19 @@
       (let [command (edn/read-string line)]
         (case (::worker-command command)
           :initialize
-          (let [namespaces (mapv symbol (::worker-namespaces command))]
-            ;; LOADING IS AN OPERATION AND IT ASKS SCHEMA QUESTIONS, so it
-            ;; runs under a projection like every other operation.
-            (schema/call-with-projection
-             (packaged-test-projection worker-id)
-             (fn []
-               (doseq [namespace-name namespaces]
-                 (require namespace-name))))
-            ;; THE PROJECTION THE LOOP HOLDS IS ACQUIRED AFTER THE REQUIRES,
-            ;; exactly as a cluster acquires its own after loading: a
-            ;; predicate schema's callable is admitted only once the
-            ;; namespace declaring it is loaded, so a projection built
-            ;; earlier refuses four shipped contracts (`my.fs/content?`,
-            ;; `my.shell/stdin?`, `my.shell/output?`) that a live cluster
-            ;; resolves.
-            (let [projection (packaged-test-projection worker-id)
-                  decision (arming-decision)
-                  applied (arm-contracts!
-                           decision projection worker-id namespaces)]
+          (let [namespaces (mapv symbol (::worker-namespaces command))
+                arming (initialize-contracts! worker-id namespaces)]
               (write-protocol! writer
                                {::worker-event :initialized
                                 ::worker-id worker-id
                                 ::exchange-id (::exchange-id command)
                                 ::worker-namespace-count (count namespaces)
                                 ::worker-instrumented
-                                (:seon.instrument/instrumented applied)})
+                                (::instrumented arming)})
               (schema/call-with-projection
-               projection
+               (::projection arming)
                #(serve-worker-commands!
-                 worker-id reader writer
-                 {::projection projection
-                  ::namespaces namespaces
-                  ::decision decision
-                  ::instrumented (:seon.instrument/instrumented applied)}))))
+                 worker-id reader writer arming)))
 
           :run
           (do
