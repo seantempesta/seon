@@ -275,7 +275,8 @@
             :seon.program/row analyzed-row
             :seon.test.accretion/gate-set test-symbols
             :seon.config.test/auto-check-cases
-            (:seon.config.test/auto-check-cases cluster)
+            (:seon.config.test/auto-check-cases
+             (config/effective database (:seon.cluster/name cluster)))
             :seon.test.accretion/seed seed
             :seon.sci.eval/time-limit-ms
             (:seon.config.eval/time-limit-ms cluster)

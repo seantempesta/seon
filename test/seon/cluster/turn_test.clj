@@ -387,6 +387,32 @@
                          :seon.cluster.work/next work}
                         (:seon.cluster.work/now request)))))))))
 
+(deftest function-install-reads-the-case-count-from-cluster-facts
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            configured (db/transact!
+                        connection
+                        [{:seon.config/cluster "turn-test"
+                          :seon.config.test/auto-check-cases 3}])]
+        (is (nil? (:seon.error/kind configured)))
+        (with-redefs [ai/complete
+                      (fn [_]
+                        {:seon.ai/text
+                         (str "(defn configured-inc "
+                              "{:malli/schema [:=> [:cat :int] :int]} "
+                              "[x] (inc x))\n"
+                              "(my.run/complete \"Installed.\")")})]
+          (let [reports (drive! (dissoc cluster :seon.config.test/auto-check-cases) 10)
+                installed (db/pull @connection [:seon.fn/spec]
+                                   [:seon.fn/sym "my.agents.agent-a/configured-inc"])
+                cases (db/q '[:find [?n ...]
+                              :where [_ :seon.test.accretion/case-count ?n]]
+                            @connection)]
+            (is (= :closed (:seon.cluster.loop/outcome (last reports))))
+            (is (string? (:seon.fn/spec installed)))
+            (is (= [3] cases))))))))
+
 (deftest a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end
   ;; the injection seam, proven: the same qualified symbol the cluster
   ;; handle carries now points at seon.sci.eval, so this drives a real
