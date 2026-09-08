@@ -1569,3 +1569,27 @@ unit's value). Still queued: PRD step 3 (page evaluator bypass, twin caches,
 config-resolved evaluator), then steps 4–7 (agent record components); the
 six `prompt-test` reds belong to step 4 (a message's `/ai` emits source,
 not content).
+
+### Evening update
+
+Landed: form family deleted (`caef3850e`, 791 refs → 0, 33.75 → 26.75
+datoms per (run, ordinal)); print/admission lane (object face, elision
+identity, print-option carry); channel-leak diagnostic (`da76fb9bc`). Dev
+root reset, `juniper-context` reforked, Juniper reseeded; page renders 18
+responses, zero `#object[`, zero `system=>`. Running: schema-row
+convergence (platform-tier blocker: cardinality-many compared as a
+vector). Queued: step 3 (`tmp/lane-specs/one-eval-point-0907.md`).
+
+OWNER DECISIONS OPEN (asked 2026-09-07 evening):
+1. Elision seam. Today admission cuts at STORAGE (depth 64, collection
+   8192, string 256K, node budget) and render caps are disabled — the
+   inverse of the owner's model (store faithfully; limit only the AI
+   projection; HTML unlimited, paged). Recommended: faithful storage with
+   one realization bound for lazy/huge seqs; AI-only limits with requery;
+   HTML unlimited.
+2. `:seon.cluster.work/situation`. It is both the `:seon.cluster.work/next`
+   dispatch key (sealed `0e1e9dc01`) and a stored `:call`/`:generate` stamp;
+   authorship cannot replace it (a generated run and a call run both open
+   with zero evaluations). Recommended: delete the stored stamp, add a
+   `:seon.cluster.run/generator` ref read by presence (evaluation-merge
+   landing note §4, option 2).
