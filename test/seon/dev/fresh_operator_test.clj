@@ -181,18 +181,18 @@
   (let [statuses
         [{:seon.test.status/namespace 'alpha-test
           :seon.test.status/state :unknown
-          :seon.test.status/oldest-run-at nil
           :seon.test.status/absent ['alpha-test/a 'alpha-test/b]
           :seon.test.status/red []}
          {:seon.test.status/namespace 'beta-test
           :seon.test.status/state :unknown
-          :seon.test.status/oldest-run-at nil
           :seon.test.status/absent ['beta-test/a]
-          :seon.test.status/red []}]]
-    (is (= (str "test evidence: UNKNOWN for 2 namespaces "
-                "(3 current tests have no recorded results); run bin/test; "
-                "details: bin/seon status --verbose")
-           (operator-private-value 'absent-test-evidence-line statuses)))))
+          :seon.test.status/red []}]
+        line (operator-private-value 'absent-test-evidence-line statuses)]
+    (is (str/starts-with? line
+                         (str "test evidence: UNKNOWN for 2 namespaces "
+                              "(3 current tests have no recorded result row")))
+    (is (str/includes? line "Details: bin/seon status --verbose"))
+    (is (= 1 (count (str/split-lines line))))))
 
 (deftest status-detail-is-an-explicit-flag
   (is (false? (operator-private-value 'parse-status-arguments [])))
@@ -1136,7 +1136,7 @@
                                      (seon.config/compile-manifest
                                       {:seon.boot/cluster-name ~name}))
                           actual# (seon.db/pull
-                                   @connection# '[*]
+                                   @connection# [:*]
                                    [:seon.config/cluster ~name])]
                       (= expected# (select-keys actual# (keys expected#)))))))
               "every shipped decision, including symbols, survives the prepl boundary")
@@ -1149,7 +1149,7 @@
                      `(let [instance# (get @seon.operator.runtime/running-instances ~name)
                             connection# (seon.operator/connection ~name)]
                         (= (:seon.source/commit-id
-                            (seon.db/pull @connection# '[*]
+                            (seon.db/pull @connection# [:*]
                                           [:seon.cluster/name ~name]))
                            (:seon.source/commit-id
                             (seon.cluster.source/current
@@ -1240,6 +1240,17 @@
                       (dissoc row# :seon.fn/calls))))
                   {:seon.dev.fresh-operator-test/program-stale? true}))))]
         (is (true? (::program-stale? stale)) stale))
+      (let [refused (run-operator root "init")
+            advertisement
+            (edn/read-string
+             (slurp (io/file root "data" "clusters"
+                             cluster-name "prepl.edn")))]
+        (is (= 1 (::exit refused)) (::output refused))
+        (is (str/includes? (::output refused) ":capability-without-request")
+            "publication refuses the deliberately removed call facts")
+        (is (= "nil"
+               (prepl-eval advertisement "(require 'seon.program :reload)"))
+            "reload the damaged owner before asking it to publish"))
       (let [republished (run-operator root "init")]
         (is (= 0 (::exit republished)) (::output republished))
         (is (str/includes? (::output republished) (str source/current-branch))

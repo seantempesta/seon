@@ -331,9 +331,13 @@
            #(config/compile-manifest
              {:seon.config/environment
               {:seon.config.flow.compute/queue-depth 0}}))]
-      (is (= ::config/invalid-value (::config/rule data)))
-      (is (= :seon.config.flow.compute/queue-depth (::config/key data)))
-      (is (map? (::config/explanation data))))))
+      (is (= :seon.instrument/contract-violated (:seon.error/kind data)))
+      (is (= "seon.config/compile-manifest"
+             (:seon.instrument/contract-violated data)))
+      (is (= #{[:seon.config/environment
+                :seon.config.flow.compute/queue-depth]}
+             (set (get-in data [:seon.error/data
+                                :seon.instrument/problem-paths])))))))
 
 (deftest unreadable-manifest-refuses-by-name
   (let [data

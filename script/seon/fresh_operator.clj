@@ -127,7 +127,7 @@
 
 (defn- store-lock-path
   [root]
-  (operator.state/store-lock-path (store-directory root)))
+  (operator.state/store-lock-path (str (store-directory root))))
 
 (defn- advertisement-path
   [root name]
