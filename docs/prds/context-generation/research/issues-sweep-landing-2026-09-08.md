@@ -503,3 +503,38 @@ the zero-error summary. On default, hot reload plus re-arming followed by the
 five named source-file analysis returned `{:errors []}` in 5,191 ms. This is a
 hot-Var proof; hook publication convergence is still unknown after its missing
 completion advisory. Flow/analyzer iteration and the isolated gate are pending.
+
+## 2026-09-08 cache-completeness follow-up
+
+The orchestrator's 14:40 correction agrees with the live evidence: protocol
+aliases were never changed, and default MCP returned `identity-attr?` arglists
+`[[attr-key] [forms attr-key]]` and the resolved Flow launcher protocol in 1 ms.
+No reconcile arity change is justified.
+
+`script/seon/dev/clj_kondo.clj` replaces directory presence with a successful
+population record tied to resolved classpath inputs and cache-file hashes.
+The native command bypasses dependency skip markers and explicitly requests
+analysis while skipping lint. The regression creates an empty cache directory,
+then removes a recorded entry and verifies repair before linting Flow.
+Armed iteration: 1 test, 6 assertions, zero failures/errors; test duration
+51,450 ms. Whole-tree native lint: zero errors, 519 warnings, 16,269 ms.
+The three-file isolated Flow/cache gate is running. Launcher integration remains
+pending while `bin/test` carries its owner's concurrent changes.
+
+Flow fixture repairs use the canonical database with synthetic extra schema,
+real sparse configuration application, and a Channel observation wrapper.
+The previous armed iteration reached 21 tests / 191 assertions with zero
+failures and one child-JVM readiness timeout. It is not a green Flow result.
+
+Live follow-up: default status is alive under PID 36758, PREPL 51624, HTTP
+7994; root footprint 16.95 GiB. HTTP `/` timed out in 20.008842 seconds with
+zero bytes and curl exit 28. The existing default-web issue records this
+recurrence without attributing its cause. The isolated cache/Flow gate cleared
+static analysis and published its base in 71,173 ms before loading both subject
+namespaces; the complete test verdict is still pending.
+
+Isolated verdict: `run.AY96Oc`, base `b7e8a9143`, 22 tests / 201 assertions,
+zero failures and errors. All 21 Flow tests and the cache-completeness test ran;
+the latter took 36,028 ms. The runner removed its successful root. The Flow
+fixture and monitor-command notes are now resolved and archived. Default native
+cache population returned `:warmed`; launcher integration remains pending.

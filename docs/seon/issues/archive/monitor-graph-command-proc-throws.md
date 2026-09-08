@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, flow, class/n11, wave/flow-protocol]
 ---
@@ -45,3 +45,10 @@ The arity is deleted, or it returns a flat `:seon.error` value naming the
 unimplemented dependency method. A `reify` that must satisfy the protocol
 compiles either way; nothing first-party calls it, so deletion of the body in
 favour of an explicit refusal is the honest shape.
+
+## Verified resolution — 2026-09-08
+
+The isolated paths-only Flow/cache gate at HEAD `b7e8a9143` passed 22 tests
+with 201 assertions and zero failures/errors. All 21 Flow tests ran, including
+the command-protocol refusal and fault lifecycle classes. The gate removed its
+successful root `tmp/test-runs/run.AY96Oc`.

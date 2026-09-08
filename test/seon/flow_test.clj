@@ -4,6 +4,7 @@
             [clojure.core.async.flow :as flow]
             [clojure.core.async.flow.impl.graph :as flow.graph]
             [clojure.core.async.flow-monitor :as flow-monitor]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -203,21 +204,14 @@
 
 (defn- with-fault-database
   [body]
-  (let [configuration
-        {:store {:backend :memory :id (random-uuid)}
-         :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (db/transact! connection fault-schema)
+  (test-support/with-database
+    {::test-support/extra-schema fault-schema}
+    (fn [connection]
       (db/transact!
        connection
        [{::core-error-config-id "testbed"
          ::on-core-error :record}])
-      (body connection)
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
+      (body connection))))
 
 (defn- core-error-mode
   [connection]
@@ -987,15 +981,20 @@
         {::flow/pid :eval
          ::flow/op :step
          ::flow/ex (IllegalStateException. "a distinct cause")}
-        effective
-        (fn [_database _cluster-name]
-          {:seon.config.error/recurrence-limit 3
-           :seon.config.eval.result/blob-threshold inline-ceiling})]
+        configure!
+        (fn [connection]
+          (config/apply!
+           {:seon.db/connection connection
+            :seon.boot/cluster-name "fault-test"
+            :seon.config/manifest
+            {:seon.config.error/recurrence-limit 3
+             :seon.config.error/max-evidence-bytes inline-ceiling
+             :seon.config.eval.result/blob-threshold inline-ceiling}}))]
     (testing "132 equal faults produce 132 facts and one whole stderr face"
       (test-support/with-database
         (fn [connection]
-          (with-redefs [config/effective effective]
-            (let [initial-state
+          (configure! connection)
+          (let [initial-state
                   (committer-step
                    {::sut/fault-channel (async/chan 1)
                     ::sut/completion (async/promise-chan)
@@ -1040,21 +1039,22 @@
               (is (= 132 (::sut/committed final-state)))
               (is (= 1 (::sut/panicked final-state)))
               (is (= 1 (count (::sut/seen-signatures final-state))))
-              (is (= repeated-message message))
+              (is (= :over-bound (:seon.eval/missing (edn/read-string message))))
+              (is (<= (count repeated-message)
+                      (:seon.eval/size (edn/read-string message))))
               (is (true? capped?))
               (is (< (count data-edn) 10000)
                   "the normalizer caps the retained stack and ex-data")
               (is (= 1 (count lines))
                   "all 132 equal envelopes own one emitted face")
-              (is (str/includes? (first lines)
-                                 (apply str (repeat 10000 "x")))
-                  "the stderr sink receives the whole normalized message"))))))
+              (is (str/includes? (first lines) message)
+                  "the stderr sink receives the whole normalized message")))))
 
     (testing "a rebuilt proc does not print a signature already durable"
       (test-support/with-database
         (fn [connection]
-          (with-redefs [config/effective effective]
-            (let [[durable-fact durable-outcome _]
+          (configure! connection)
+          (let [[durable-fact durable-outcome _]
                   (commit-core-fault! connection "fault-test" "process-3"
                                       caps repeated-fault)
                   initial-state
@@ -1102,12 +1102,20 @@
               (is (= 1 (::sut/panicked final-state)))
               (is (= 1 (count lines))
                   "one genuinely new signature remains visible")
-              (is (str/includes? (first lines) "a distinct cause"))))))
+              (is (str/includes?
+                   (first lines)
+                   (db/q '[:find ?message .
+                           :where
+                           [?error :seon.error/throwable-class "java.lang.IllegalStateException"]
+                           [?error :seon.error/message ?message]]
+                         @connection))))))
 
     (testing "a dead writer still emits each signature only once"
       (test-support/with-database
         (fn [connection]
-          (let [writer-refusal
+          (configure! connection)
+          (let [emitted-facts (atom [])
+                writer-refusal
                 {:seon.error/message
                  "Writer is shut down; release and reconnect."}
                 initial-state
@@ -1119,16 +1127,17 @@
                   #(commit-core-fault! connection "fault-test" "process-2"
                                        caps %)
                   ::sut/panic!
-                  #(emit-core-fault!
-                    {:seon.config.eval.result/blob-threshold inline-ceiling}
-                    %)})
+                  (fn [fact]
+                    (swap! emitted-facts conj (::sut/fault-fact fact))
+                    (emit-core-fault!
+                     {:seon.config.eval.result/blob-threshold inline-ceiling}
+                     fact))})
                 transaction-attempts (atom 0)
                 final-state (atom nil)
                 stderr-writer (java.io.StringWriter.)
                 _
                 (binding [*err* stderr-writer]
-                  (with-redefs [config/effective effective
-                                db/transact! (fn [_connection _transaction-data]
+                  (with-redefs [db/transact! (fn [_connection _transaction-data]
                                                (swap! transaction-attempts inc)
                                                writer-refusal)]
                     (reset!
@@ -1149,8 +1158,10 @@
             (is (= 2 (::sut/panicked @final-state)))
             (is (every? #(str/includes? % "durable record refused") lines))
             (is (every? #(str/includes? % "signature ") lines))
-            (is (str/includes? stderr (apply str (repeat 10000 "x")))
-                "the last-resort sink receives the whole fault message")
+            (is (= 2 (count @emitted-facts)))
+            (is (every? #(str/includes? stderr (:seon.error/message %))
+                        @emitted-facts)
+                "the last-resort sink receives each whole normalized message")
             (is (empty?
                  (db/q '[:find ?error
                          :where [?error :seon.error/signature _]]
@@ -1186,7 +1197,10 @@
             (reify async.impl/ReadPort
               (take! [_ handler]
                 (.countDown awaiting-completion)
-                (async.impl/take! completion handler)))
+                (async.impl/take! completion handler))
+              async.impl/Channel
+              (close! [_] (async.impl/close! completion))
+              (closed? [_] (async.impl/closed? completion)))
             stopped
             (future
               (sut/stop-error-fanout!
@@ -1343,10 +1357,13 @@
                           :seon.config.eval.result/max-string 64
                           :seon.config.eval.result/max-source 1048576
                           :seon.config.eval.result/max-nodes 64)
-              effective
-              (fn [_database _cluster-name]
-                {:seon.config.error/recurrence-limit 3
-                 :seon.config.eval.result/blob-threshold 256})
+              _ (config/apply!
+                 {:seon.db/connection connection
+                  :seon.boot/cluster-name "fault-test"
+                  :seon.config/manifest
+                  {:seon.config.error/recurrence-limit 3
+                   :seon.config.error/max-evidence-bytes 256
+                   :seon.config.eval.result/blob-threshold 256}})
               {::keys [graph started] :as testbed} (source-testbed)
               fanout
               (sut/start-error-fanout!
@@ -1370,8 +1387,7 @@
               fault-graph (::sut/fault-graph fanout)
               transactions (database-events connection)]
           (try
-            (with-redefs [config/effective effective]
-              (flow/pause-proc fault-graph ::sut/fault-committer)
+            (flow/pause-proc fault-graph ::sut/fault-committer)
               (is (= :paused
                      (::flow/status
                       (flow/ping-proc
@@ -1403,7 +1419,8 @@
                 (is (= 3 drop-count))
                 (is (= 64 (count digest)))
                 (is (= :source proc))
-                (is (str/includes? message "dropped 3 faults"))))
+                (is (= :over-bound (:seon.eval/missing (edn/read-string message))))
+                (is (pos? (:seon.eval/size (edn/read-string message)))))
             (finally
               (stop-database-events! connection transactions)
               (sut/stop-error-fanout! fanout)
