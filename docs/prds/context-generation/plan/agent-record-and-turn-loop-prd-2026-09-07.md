@@ -1,6 +1,6 @@
 ---
 type: prd
-status: draft r6 — both reviews integrated (research/prd-review-turn-loop-{opus,astra}-2026-09-07.md); REPL prototype of every claim running (research/prototype-turn-loop-in-repl-2026-09-07.md)
+status: r7 — every claim REPL-prototyped (research/prototype-turn-loop-in-repl-2026-09-07.md): all hold with the amendments below; ready for the owner's go
 date: 2026-09-07 (evening)
 supersedes: the record (§2, §3) and loop (§6) sections of agent-record-and-repl-response-prd-2026-09-07.md
 tags: [prd, agent, wake, storage, runtime]
@@ -46,6 +46,42 @@ otherwise it is **unanswered**. A turn **stores** the reply's forms, then
 pending, inbox, mailbox, trigger, freeze, settle, episode, wake item, wake
 source, situation.
 
+## 0b. What the REPL prototype changed (commit `8d3745a04`)
+
+1. **The basis is the turn's own transaction.** The `:t` of the transaction
+   that opened the turn — the `:t` on its identity datom — reproduced a
+   real 345,439-character stored prompt EXACTLY at `(as-of db t)`; the
+   pre-open commit today's `opening-commit-id` records is off by one every
+   turn and swallows a wake transacted with its own turn (a fresh agent's
+   first wake was unanswerable forever). So `:seon.turn/basis-t` is NOT
+   stored: it is the turn's own `:t`. `opening-commit-id` is deleted and
+   nothing replaces it.
+2. **A wake datom is asserted once.** Retract-then-reassert moves its `:t`
+   forward and re-opens a paid turn. Message, fault, and firing entities are
+   immutable facts; the rule is stated on every listened attribute.
+3. **Two wakes in one transaction are one turn — and that deletes a live
+   defect**: the fixture's two messages share one `:t`; today's loop opened
+   two runs and paid twice.
+4. **Attribute properties already reach schema rows** through one general
+   mechanism (25 distinct `seon.*` properties across 2,459 rows), so the
+   Opus review's B4/S3 is refuted and §8 step 2 shrinks to: declare
+   `:seon.wake/listen`, derive `route!`'s set from it, delete the two hand
+   lists. Today's hand list also includes `:seon.effect/to` (an effect's
+   settlement wakes the requester — a listened attribute this PRD adds) and
+   `:seon.cluster.agent/id` (a STRING identity used to wake a freshly created
+   agent; deleted — the agent's first message is its first wake).
+5. **The turn bound derived by `:t` costs 0.115 ms** against 0.134 ms for
+   today's derivation, same answer. No counter. The anchor is the OUTSIDE
+   wake's `:t`: `turns = count of turns whose :t ≥ that wake's :t` (the
+   answering turn counts as one).
+6. **`:seon.render/distance` is a projection input** the PRD had not listed:
+   distance 2 reproduced the capture, distance 1 gave 51,561 characters. It
+   belongs to the render profile, so "same db, same adopted commit, same
+   profile" stays the whole qualification.
+7. The two-arm `step` returned `:evaluate` / `:reply` / `:idle` from one
+   database value on the three fixtures; one JVM per operator root and one
+   root-scoped flock confirmed (pid equality across two clusters).
+
 ## 1. The loop, as the owner stated it, plus exactly what a crash forces
 
 ```
@@ -82,8 +118,8 @@ unrepresentable, so at boot every open turn is dead by construction.
 | stored today | verdict | reason |
 |---|---|---|
 | run id, agent, opened-at, closed-at | KEEP as the turn | open = no closed-at |
-| run trigger ref | DELETE | answered is derived: the wake's `:t` ≤ a turn's `basis-t` (§3). Datahike already stamps every datom with its `:t` |
-| run opening basis (`opening-commit-id`) | KEEP as `:seon.turn/basis` | the entire record of the context: projection is deterministic |
+| run trigger ref | DELETE | answered is derived: the wake's `:t` ≤ a turn's own `:t` (§3). Datahike already stamps every datom with its `:t` |
+| run opening basis (`opening-commit-id`) | DELETE — the basis is the turn's own `:t` | the transaction that opened the turn is the basis the context projected from (prototype 0b.1); nothing to store |
 | run reply text / blob / size | KEEP under the storage bound | without it an interrupted turn's history cannot say what the model said |
 | run `process` custody | DERIVE, delete the stamp | at boot every open turn in this cluster belongs to a dead process by construction; within a JVM the permit prevents a second turn. Deletes the stamp, the holder check, dead-holder takeover, holder-only close |
 | agent run pointer | DERIVE: the agent's turn with no closed-at | its busy-fence role is the permit's |
@@ -117,8 +153,8 @@ interrupted turn. What dies is the custody predicate — the process stamp,
 `claim-call`'s takeover, `release-call`, holder-only close — not the
 evaluate arm, which §7 keeps for turns this JVM opened.
 
-**Writes per turn: three.** Open (record the basis `:t` — the one fact
-that answers every wake the context contained) → store the reply, the
+**Writes per turn: three.** Open (the turn entity; its own `:t` is the
+basis that answers every wake the context contained) → store the reply, the
 attempts, and the forms as evaluation entities → store the results and
 close. The middle write survives because without it a crash loses the paid
 reply AND the record that side-effecting forms ran.
@@ -174,24 +210,28 @@ Questioned and REMOVED from the record:
 - **A listened attribute** is a ref attribute whose schema row carries
   `:seon.wake/listen true`; its value is the agent to wake. Today:
   `:seon.message/to`, `:seon.error/steward`, `:seon.schedule.firing/agent`
-  (one firing entity per firing; a recurrence definition asserts no datom).
-  Declaring one is one schema property — which requires attribute
-  properties to become schema ROW facts (today only three render properties
-  are lifted, from a hand list at `schema.clj:1419-1420`; review B4/S3), so
-  "which attributes wake an agent" is one Datalog query and
-  `seon.cluster.wake/route!` derives its set and dispatch from it instead of
-  two hand lists (`wake.clj:78-93`, `:232-250`).
+  (one firing entity per firing; a recurrence definition asserts no datom),
+  and `:seon.effect/to` (an effect's settlement wakes the agent that
+  requested it — in today's hand list, missing from earlier drafts).
+  Declaring one is one schema property: attribute properties already reach
+  schema rows through one general mechanism (prototype 0b.4), so "which
+  attributes wake an agent" is one Datalog query over `:seon.wake/listen`,
+  and `seon.cluster.wake/route!` derives its set and dispatch from it
+  instead of two hand lists (`wake.clj:78-93`, `:232-250`).
 - **A wake** is a datom asserted on a listened attribute. Datahike `listen`
   reports the transaction; `route!` offers one payload-free value into the
   agent's sliding-1 channel. The entity carrying the datom (a message, a
   fault, a schedule row) is ordinary data; nothing is copied, nothing is
   written back onto it.
 - **Answered is derived from `:t`, nothing is stored.** Every datom carries
-  its transaction `:t`; a turn records the basis `:t` it projected from. A
-  wake is answered iff a turn of that agent has `basis-t ≥` the wake's `:t`
-  — the context projected at that basis contained it. Unanswered wakes are
+  its transaction `:t`; the turn's own `:t` is the basis it projected from
+  (the context is projected on the opening transaction's database,
+  `loop.clj:1375`, and the prototype reproduced a stored prompt exactly at
+  that `:t`). A wake is answered iff a turn of that agent has `:t ≥` the
+  wake's `:t`. A wake datom is asserted once and never retracted-and-
+  reasserted (prototype 0b.2). Unanswered wakes are
   the datoms on listened attributes for this agent with `:t` greater than
-  the agent's latest `basis-t`:
+  the agent's latest turn's `:t`:
 
   ```clojure
   [:find ?wake :in $ ?agent :where
@@ -242,7 +282,7 @@ what the model call cost. Every attribute questioned:
 | `:seon.turn/id` | identity for evaluations and attempts to reference |
 | `:seon.turn/agent` | ref; whose turn |
 | `:seon.turn/opened-at`, `/closed-at` | the bound; open = no closed-at |
-| `:seon.turn/basis-t` | the basis transaction `:t` the context was projected from — Datahike's `as-of` input, AND the fact that answers every wake with `:t ≤` it (§3). "Why this turn" is the query for wakes between the previous basis and this one |
+| (no basis attribute) | the turn's own transaction `:t` — the `:t` on its identity datom — is the basis: Datahike's `as-of` input, and the fact that answers every wake with `:t ≤` it (§3). "Why this turn" is the query for wakes between the previous turn's `:t` and this one's |
 | `:seon.turn/reply` (+ blob over the bound; `reply-missing` when the blob was reclaimed) | the model's bytes, under the storage bound; stored before evaluation; a reclaimed blob is marked like a missing value |
 | `:seon.turn/attempts` | component set of `:seon.ai.attempt` entities — the AI owner's existing family, referenced, not re-homed (review F6); one per attempt; a paid call is a fact |
 
@@ -336,7 +376,6 @@ ns/symbol) and coin nothing that a query could express.
             :agent     [:seon.db/ref {:description "Whose turn."}]
             :opened-at [:inst {:description "When the turn opened; open = no closed-at."}]
             :closed-at [:inst {:description "When the turn settled or was closed as interrupted at boot."}]
-            :basis-t   [:int {:min 0 :description "The basis transaction :t the context was projected from; `as-of` this t plus the adopted program commit and the render profile reproduce the prompt byte for byte."}]
             :reply     [:string {:description "The model's reply under the storage bound; storing the forms evidence."}]
             :reply-blob [:seon.blob/digest {:description "The reply's blob when it exceeds the inline bound."}]
             :reply-missing [:enum {:description "Why no reply text is available: the blob was reclaimed."} :lost]
@@ -346,7 +385,6 @@ ns/symbol) and coin nothing that a query could express.
                         [:seon.turn/agent :seon.turn/agent]
                         [:seon.turn/opened-at :seon.turn/opened-at]
                         [:seon.turn/closed-at {:optional true} :seon.turn/closed-at]
-                        [:seon.turn/basis-t :seon.turn/basis-t]
                         [:seon.turn/reply {:optional true} :seon.turn/reply]
                         [:seon.turn/reply-blob {:optional true} :seon.turn/reply-blob]
                         [:seon.turn/reply-missing {:optional true} :seon.turn/reply-missing]
@@ -431,8 +469,9 @@ incomplete?
   `:seon.repl/value` says the result is unavailable and why. A later form
   naming a dead handle gets an ordinary unresolved-symbol error.
 - **Byte identity is the regression**, qualified exactly: same database
-  value (`as-of` the turn's `basis-t`), same adopted program commit, same
-  render profile ⇒ same bytes; the bytes' digest is `:seon.ai.attempt/prompt-digest`.
+  value (`as-of` the turn's own `:t`), same adopted program commit, same
+  render profile (which includes `:seon.render/distance`, prototype 0b.6)
+  ⇒ same bytes — REPL-proven on a 345,439-character capture; the bytes' digest is `:seon.ai.attempt/prompt-digest`.
   Two things make it unreachable today and are in scope (review B5): a
   render producer runs under a wall-clock time limit (`render.clj:725-756`)
   and its refusal contributes ABSENCE (`walk.clj:764-766`). A refused render
@@ -482,11 +521,12 @@ receipt-exists call.
 
 1. Storage bound + missing marker + AI-boundary elision (`seon.sci.admit`,
    `seon.print/fit`, `seon.repl`).
-2. Listened attributes: lift every `seon.*` attribute property onto the
-   schema row; declare `:seon.wake/listen` on the three attributes; derive
-   `route!`'s set and dispatch from one query; answered by `:t` replaces the
-   trigger ref; the steward computed inside the fault committer's
-   transaction; delete message `to` reverse units.
+2. Listened attributes: declare `:seon.wake/listen` on the four attributes
+   (message `to`, error `steward`, schedule firing `agent`, effect `to`);
+   derive `route!`'s set and dispatch from one query; answered by `:t`
+   replaces the trigger ref and `opening-commit-id`; the steward computed
+   inside the fault committer's transaction; delete message `to` reverse
+   units and the agent-id wake.
 3. The turn: rename/trim `seon.cluster.run` to §4; delete generated runs,
    situation, captures; the two-arm loop; one db value per pass.
 4. The record: `:seon.agent/*` keys, delete `:seon.def`, cluster, pointer,
