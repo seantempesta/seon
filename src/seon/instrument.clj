@@ -513,14 +513,29 @@
    contract))
 
 (defn wrap-interpreted
-  "Apply one committed agent function contract under the core-error dial."
+  "Apply one committed agent function contract under the core-error dial.
+
+  `caps` is EITHER the admission caps or the bounded refusal
+  `seon.config/result-caps` builds when a database carries no config the
+  caps could be derived from. `:record` — which instruments nothing and
+  undoes what is there — never reads them, so a database with no config
+  still gets its uninstrumented function. `:panic` DOES read them, and
+  arming a panic contract whose violation reporter has no bound is the
+  unbounded-execution shape this project refuses: the refusal is raised
+  here, naming the function and the config key that was missing."
   {:malli/schema
    [:=>
     [:cat :symbol :string :map :seon.config/on-core-error
-     :seon.sci.admit/caps [:fn clojure.core/ifn?]]
+     [:or :seon.sci.admit/caps :seon.error/value] [:fn clojure.core/ifn?]]
     [:fn clojure.core/ifn?]]}
   [function-symbol spec-edn projection mode caps f]
   (let [original (original-interpreted f)]
+    (when (and (= :panic mode) (:seon.error/kind caps))
+      (throw
+       (ex-info
+        (str "Cannot arm the contract of " function-symbol
+             " under :panic: " (:seon.error/message caps))
+        (assoc caps :seon.instrument/fn (str function-symbol)))))
     (case mode
       :panic
       (let [contract (->> (edn/read-string spec-edn)

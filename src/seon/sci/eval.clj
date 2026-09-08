@@ -648,7 +648,13 @@
   projection)
 
 (defn- database-effective-config
-  "The selected cluster's effective config in this database value, or nil."
+  "The selected cluster's effective config, or the refusal naming its absence.
+
+  NEVER NIL. `config/effective` declares its output as the config or one
+  bounded `:seon.config/missing-effective-error`, and `config/result-caps`
+  declares exactly that pair as its input; handing it the `nil` a database
+  carrying no config singleton used to produce violated that contract at
+  every SCI contract install."
   [db]
   (let [cluster-name
         (db/q '[:find ?cluster .
@@ -656,10 +662,22 @@
                [?config :seon.config/cluster ?cluster]
                [?config :seon.config/on-core-error _]]
              db)]
-    (when cluster-name (config/effective db cluster-name))))
+    (if cluster-name
+      (config/effective db cluster-name)
+      ;; The default arity names the cluster it looked for and lists the
+      ;; clusters this database actually carries — a typed unknown, not an
+      ;; absence downstream has to guess about.
+      (config/effective db))))
 
 (defn- instrumentation-config
-  "Read the contract dial and admission caps from this database value."
+  "Read the contract dial and admission caps from this database value.
+
+  A database with no admissible caps cannot arm a `:panic` contract, and
+  `:record` — the shipped default, which instruments nothing and undoes what
+  is there — does not read caps at all. So the caps member is whatever
+  `result-caps` returned: the caps map, or the refusal naming the first
+  config key it wanted. `instrument/wrap-interpreted` is the one seam that
+  decides what to do with each."
   [db]
   (let [effective (database-effective-config db)]
     {:seon.config/on-core-error

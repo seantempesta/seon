@@ -542,6 +542,50 @@
             "contract installation copies the inherited candidate Var")
         (is (= 42 (sci/eval-string* candidate "(contracted 42)")))))))
 
+(deftest a-configless-database-refuses-caps-by-name-and-still-installs
+  ;; THE CLASS: an absence handed into a contract that forbids it.
+  ;; `database-effective-config` answered nil for a database carrying no
+  ;; config singleton, and `instrumentation-config` passed that straight to
+  ;; `seon.config/result-caps`, whose declared input is the effective config
+  ;; OR the missing-effective refusal. Under armed contracts every SCI
+  ;; contract install against such a database died inside the installer.
+  ;;
+  ;; `:record` — the shipped default, which instruments nothing and undoes
+  ;; what is there — does not read caps at all, so the install still
+  ;; happens; what changes is that the unavailable observation is the TYPED
+  ;; UNKNOWN naming the first config key it wanted, never nil.
+  (test-support/with-database
+    (fn [connection]
+      (let [database @connection
+            configured
+            (db/q '[:find ?cluster .
+                    :where
+                    [?config :seon.config/cluster ?cluster]
+                    [?config :seon.config/on-core-error _]]
+                  database)
+            {mode :seon.config/on-core-error caps :seon.sci.admit/caps}
+            (#'eval/instrumentation-config database)]
+        (is (nil? configured)
+            "this database genuinely carries no config singleton, which is
+             the case that produced the nil")
+        (is (= :record mode))
+        (is (= :seon.config/missing-result-cap (:seon.error/kind caps))
+            "the caps are the refusal NAMING the key, not an absence")
+        (is (= :seon.config.eval.result/max-bytes
+               (:seon.config/key (:seon.error/data caps)))
+            "and the key it names is the one a caller has to supply")
+        (let [ctx (eval/build-base-ctx)]
+          (sci/eval-string* ctx "(defn configless-contracted [x] x)")
+          (#'eval/install-function-contract!
+           ctx
+           {:seon.fn/sym "user/configless-contracted"
+            :seon.fn/spec "[:=> [:cat :int] :int]"}
+           (schema/projection-from-database database)
+           database)
+          (is (= 42 (sci/eval-string* ctx "(configless-contracted 42)"))
+              "and the install completes rather than dying inside the
+               installer's own contract"))))))
+
 (deftest require-context-rows-persist-namespace-lookup-refs
   (let [ctx (eval/build-base-ctx)
         evaluation (run-in ctx "(require 'clojure.set)" 2000)]
