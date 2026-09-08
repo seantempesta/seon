@@ -225,22 +225,33 @@
         arms (atom [])
         arming {:seon.test.runner/projection {:seon.schema.projection/forms {}}
                 :seon.test.runner/namespaces '[seon.db]
+                ;; THE DECISION IS CARRIED, NOT RE-DERIVED. Asking
+                ;; `config/result-caps` again under the contracts the first
+                ;; arm installed killed the worker outright, and every
+                ;; namespace it held was reported red against its own owner.
+                :seon.test.runner/decision {:seon.test.runner/decisions {}
+                                            :seon.test.runner/caps {}
+                                            :seon.test.runner/program '[seon.db]}
                 :seon.test.runner/instrumented 3}
         re-arm-with
         (fn [installed]
           (with-redefs-fn
-            {arm-var (fn [projection worker-id namespaces]
+            {arm-var (fn [decision projection worker-id namespaces]
                        (swap! arms conj [worker-id (count namespaces)
                                          (contains?
                                           projection
-                                          :seon.schema.projection/forms)])
+                                          :seon.schema.projection/forms)
+                                         (contains?
+                                          decision
+                                          :seon.test.runner/caps)])
                        {:seon.instrument/instrumented 3})
              #'instrument/instrumented (constantly (set (range installed)))}
             #(reassert! arming "pool-1")))]
     (testing "a stripped worker re-arms before the next task"
       (re-arm-with 0)
-      (is (= [["pool-1" 1 true]] @arms)
-          "re-armed once, with the worker's own projection and namespaces"))
+      (is (= [["pool-1" 1 true true]] @arms)
+          "re-armed once, with the worker's own projection, namespaces and
+           the arming decision it made BEFORE any contract was installed"))
     (testing "an intact worker does not re-arm"
       (re-arm-with 3)
       (is (= 1 (count @arms))))

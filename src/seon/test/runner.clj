@@ -880,6 +880,32 @@
         (sort-by (fn [^java.io.File file] (.getPath file))
                  (file-seq (io/file program-source-root)))))
 
+(defn- arming-decision
+  "The shipped decisions, admission caps and program namespaces one arm needs.
+
+  DECIDED ONCE, BEFORE THE FIRST ARM, AND CARRIED. Deriving it again for a
+  mid-run re-arm asks `seon.config/result-caps` its own question under the
+  contracts the first arm installed, and the compiled shipped effective config
+  does not satisfy `:seon.config/effective` — eighteen optional dials it
+  legitimately leaves absent. On the first arm nothing is instrumented so the
+  call answers; on a re-arm the worker died, and the namespaces it held were
+  reported red as `confirmation parallel-only`, which mis-attributed a day of
+  someone else's diagnosis (`docs/seon/issues/the-test-runners-re-arm-kills-
+  the-worker-under-its-own-contract.md`).
+
+  That the effective config fails its own key's schema is a separate defect,
+  filed there; the arming path must not be the thing that discovers it."
+  []
+  (let [decisions (config/defaults)
+        caps (config/result-caps decisions)]
+    (when (:seon.error/kind caps)
+      (throw
+       (ex-info (:seon.error/message caps)
+                (assoc caps ::instrumentation-unavailable true))))
+    {::decisions decisions
+     ::caps caps
+     ::program (declared-program-namespaces)}))
+
 (defn- arm-contracts!
   "Instrument this worker JVM's loaded contracts exactly as boot does.
 
@@ -892,21 +918,8 @@
   cannot drift from boot by carrying constants of its own, and an absent
   cap refuses NAMING the key rather than instrumenting under a partial
   world."
-  [projection worker-id namespaces]
-  ;; The COMPILED shipped effective config, not the raw decision document:
-  ;; `default-decisions` carries `:seon.config/absent` sentinels for optional
-  ;; dials, and `result-caps` declares `:seon.config/effective`. It answered
-  ;; correctly anyway because the cap keys it reads are all decided — so the
-  ;; disagreement was invisible for exactly as long as arming happened before
-  ;; contracts existed to observe it, and surfaced the moment a worker had to
-  ;; re-arm mid-run.
-  (let [decisions (config/defaults)
-        caps (config/result-caps decisions)
-        program (declared-program-namespaces)]
-    (when (:seon.error/kind caps)
-      (throw
-       (ex-info (:seon.error/message caps)
-                (assoc caps ::instrumentation-unavailable true))))
+  [decision projection worker-id namespaces]
+  (let [{::keys [decisions caps program]} decision]
     ;; THE PROGRAM IS LOADED BEFORE IT IS ARMED. Instrumentation selects
     ;; loaded vars carrying `:malli/schema`, so a namespace nothing required
     ;; contributes nothing and the gate silently arms a smaller world than
@@ -964,7 +977,7 @@
   to be declared, so nothing can drift — a new suite that strips contracts
   costs one re-arm rather than a silently unarmed remainder."
   [arming worker-id]
-  (when-let [{::keys [projection namespaces instrumented]} arming]
+  (when-let [{::keys [projection namespaces instrumented decision]} arming]
     (let [live (count ((requiring-resolve 'seon.instrument/instrumented)))]
       ;; LESS than the worker armed means a task STRIPPED wrappers, which is
       ;; the hazard. More means a test armed something extra of its own and is
@@ -975,7 +988,27 @@
                    "worker=" worker-id
                    "installed=" live
                    "armed-at-initialization=" instrumented))
-        (arm-contracts! projection worker-id namespaces)))))
+        ;; A RE-ARM THAT DIES IS A LOUD VERDICT ABOUT THE RE-ARM, never a
+        ;; per-namespace red: a worker that exits here takes every namespace
+        ;; it held down with it, and those were reported `parallel-only`
+        ;; against their own owners for a day.
+        (try
+          (arm-contracts! decision projection worker-id namespaces)
+          (catch Throwable failure
+            (binding [*out* *err*]
+              (println "bin/test: RE-ARM FAILED worker=" worker-id
+                       "—" (ex-message failure))
+              (flush))
+            (throw
+             (ex-info
+              (str "bin/test could not re-arm worker " worker-id
+                   " after a task stripped its contracts: "
+                   (ex-message failure))
+              {:seon.error/kind ::re-arm-failed
+               ::worker-id worker-id
+               ::installed live
+               ::armed-at-initialization instrumented}
+              failure))))))))
 
 (defn- write-protocol!
   [^PrintWriter writer value]
@@ -1012,7 +1045,9 @@
             ;; `my.shell/stdin?`, `my.shell/output?`) that a live cluster
             ;; resolves.
             (let [projection (packaged-test-projection worker-id)
-                  applied (arm-contracts! projection worker-id namespaces)]
+                  decision (arming-decision)
+                  applied (arm-contracts!
+                           decision projection worker-id namespaces)]
               (write-protocol! writer
                                {::worker-event :initialized
                                 ::worker-id worker-id
@@ -1026,6 +1061,7 @@
                  worker-id reader writer
                  {::projection projection
                   ::namespaces namespaces
+                  ::decision decision
                   ::instrumented (:seon.instrument/instrumented applied)}))))
 
           :run
