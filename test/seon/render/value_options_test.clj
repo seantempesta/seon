@@ -20,8 +20,12 @@
       (support/seed-cluster! connection "options-test")
       (let [response
             (#'web/data-response
+             ;; SUPPLY EVERY DECLARED INPUT, exactly like production: the
+             ;; render service carries the cluster's SCI context, and the
+             ;; projection every `/data` response reads comes from it.
              {:seon.store/connection-object connection
               :seon.cluster.agent/id "root"
+              :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
               :seon.sci.admit/caps caps}
              {:query-string ""})]
         (is (= 200 (:status response)))

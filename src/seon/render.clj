@@ -171,6 +171,23 @@
     ;; with unqualified keys unconstructable at the one total floor.
     (assoc context :seon.render/value value)))
 
+(defn- transaction-shape
+  "The transaction shape of a pulled entity, with database custody when the
+  request carries it.
+
+  `seon.render.value/transacted` declares two arities for exactly this: with a
+  database value the installed value type and cardinality are the authority,
+  and WITHOUT one the shape-only behaviour is the declared answer. Reading
+  `:seon.db/db` and handing the absence to the two-argument arity asked a
+  contract that requires a database value to accept that there was none, so
+  every render whose request carries no database died at the one boundary
+  §2.4 requires a value from — a `/data` page answered 500 with the violation
+  as its body."
+  [value request]
+  (if-let [database (:seon.db/db request)]
+    (render.value/transacted value database)
+    (render.value/transacted value)))
+
 (defn- producer-argument
   [request]
   ;; Existing declared producers accept the qualified attributes of the value
@@ -180,8 +197,7 @@
   (let [argument (render-argument request)
         value (:seon.render/value argument)
         producer-value (if (map? value)
-                         (cond-> (render.value/transacted
-                                  value (:seon.db/db request))
+                         (cond-> (transaction-shape value request)
                            (find value :db/id)
                            (assoc :db/id (:db/id value)))
                          value)]
@@ -277,7 +293,7 @@
      (when (map? value)
        (let [transacted-matches
              (schema/matching-shapes-in
-              projection (render.value/transacted value (:seon.db/db request)))
+              projection (transaction-shape value request))
              ;; A pull has two honest shapes. Refs and cardinality-many values
              ;; validate in transaction form, while tuple/vector value attributes
              ;; validate exactly as pulled. A pulled entity admits only shapes
@@ -700,7 +716,7 @@
         matches (concat
                  (schema/matching-shapes-in
                   projection
-                  (render.value/transacted value (:seon.db/db request)))
+                  (transaction-shape value request))
                  (schema/matching-shapes-in projection value))]
     (or (->> matches
              (filter #(= selected (get % output)))

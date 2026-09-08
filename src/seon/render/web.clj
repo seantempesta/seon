@@ -3578,6 +3578,13 @@
                :seon.render.value/options options
                :seon.render.data/cursor cursor
                :seon.sci.admit/caps caps
+               ;; THE UNIT CARRIES ITS WORLD (AGENTS §2.1). The response
+               ;; already holds the database value it derived every part of
+               ;; this unit from, and producer selection needs it: installed
+               ;; value type and cardinality are what decide a pulled
+               ;; entity's transaction shape. Omitting it made every `/data`
+               ;; page answer 500 with a contract refusal as its body.
+               :seon.db/db db
                :seon.sci.eval/ctx (:seon.sci.eval/ctx service)
                :seon.sci.eval/time-limit-ms
                (:seon.config.eval/time-limit-ms service)
