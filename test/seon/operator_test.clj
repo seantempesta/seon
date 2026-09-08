@@ -1137,7 +1137,15 @@
 
 (deftest public-contracts-refuse-invalid-input-and-output
   (let [delegate-calls (atom 0)
-        start-filter (mi/-filter-var #{#'operator/start!})]
+        start-filter (mi/-filter-var #{#'operator/start!})
+        ;; THE WORKER'S ENTERING WRAPPER, RESTORED BELOW. `mi/unstrument!`
+        ;; strips whatever is there, so a test arming its own narrow filter
+        ;; also removes the wrapper the WORKER armed — and every later task
+        ;; in that pooled JVM then asserts this test's timing rather than its
+        ;; own subject (AGENTS §5.7: own nothing global). The runner's drift
+        ;; report named this test.
+        entering-root (when (some-> #'operator/start! deref meta ::mi/original)
+                        @#'operator/start!)]
     (try
       (mi/clj-collect! {:ns ['seon.operator]})
       (mi/instrument!
@@ -1161,4 +1169,6 @@
                    (:seon.error/kind (ex-data failure))))
             (is (= 1 @delegate-calls)))))
       (finally
-        (mi/unstrument! {:filters [start-filter]})))))
+        (mi/unstrument! {:filters [start-filter]})
+        (when entering-root
+          (alter-var-root #'operator/start! (constantly entering-root)))))))

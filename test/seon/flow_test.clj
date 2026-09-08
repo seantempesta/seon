@@ -839,6 +839,14 @@
         (var-get (ns-resolve 'seon.cluster 'commit-fault!))
         resolve-var #'schema.datahike/resolve-datahike-form-in
         resolve-filter (mi/-filter-var #{resolve-var})
+        ;; THE WORKER'S ENTERING WRAPPER, RESTORED BELOW. `mi/unstrument!`
+        ;; strips whatever is there, so arming a narrow filter of this test's
+        ;; own also removes the wrapper the WORKER armed — and every later
+        ;; task in that pooled JVM then asserts this test's timing rather
+        ;; than its own subject (AGENTS §5.7: own nothing global). The
+        ;; runner's drift report named this test.
+        entering-root (when (some-> resolve-var deref meta ::mi/original)
+                        @resolve-var)
         caps (assoc (config/result-caps
                      (test-support/effective-config))
                     :seon.config.eval.result/max-depth 8
@@ -909,6 +917,8 @@
               (is (boolean? (:seon.error/capped? stored))))
             (finally
               (mi/unstrument! {:filters [resolve-filter]})
+              (when entering-root
+                (alter-var-root resolve-var (constantly entering-root)))
               (stop-database-events! connection transactions)
               (sut/stop-error-fanout! fanout)
               (stop-source-testbed! testbed))))))))

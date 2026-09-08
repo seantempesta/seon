@@ -5,7 +5,7 @@ severity: cleanup
 tags: [issue, test, runtime, wave/contract-gate]
 ---
 
-# Three tests leave their worker stripped of contracts they did not restore
+# Five tests leave their worker stripped of contracts they did not restore
 
 Found 2026-09-08 by `test-harness`, on the FIRST `bin/test --platform` run
 after the runner learned to measure what a task leaves behind
@@ -56,6 +56,22 @@ also a CAUSE — exactly what that note's resolution predicted: "`seon.db-test`
 is BOTH a mutator and a victim of the class". **Fixed 2026-09-08** by
 `test-harness`, since `test/seon/db_test.clj` was in its owned paths.
 
+And two of a second shape — a test arming its OWN narrow filter, whose
+`mi/unstrument!` then strips the wrapper the WORKER armed for that same var:
+
+```text
+seon.flow-test/fault-committer-runs-with-the-projection-handed-at-construction
+  worker= pool-2  {:snapshot-instrumented {:drift-removed-count 1}}
+seon.operator-test/public-contracts-refuse-invalid-input-and-output
+  worker= pool-5  {:snapshot-instrumented {:drift-removed-count 1}}
+```
+
+This is the case `seon.test.runner/reassert-contracts!`'s own docstring
+predicted — "one arming a narrow filter and stripping everything in its
+`finally`" — observed for the first time. Both were in this lane's owned paths
+and are **fixed**: each captures the entering wrapper for the one var it arms
+and restores it.
+
 ## The census
 
 Every `instrument/remove!` outside `seon.instrument-test` (whose subject IS
@@ -67,6 +83,8 @@ removal) and `seon.test-runner-test`:
 | `test/seon/sci/eval_test.clj:197` | yes |
 | `test/seon/sci/eval_test.clj:1481` | yes |
 | `test/seon/db_test.clj:311` | **now yes** (was the 926) |
+| `test/seon/flow_test.clj` narrow `mi/unstrument!` | **now yes** (was 1) |
+| `test/seon/operator_test.clj` narrow `mi/unstrument!` | **now yes** (was 1) |
 | `test/seon/cluster/cohost_boot_test.clj:161` | **no** — the 918 |
 | `test/seon/cluster/agent_test.clj` | **no** — the 3 |
 | `test/seon/sci/eval_test.clj:1050` | **no** |
@@ -111,5 +129,9 @@ Not applied here: `test/seon/cluster/*` was held by the `turn-loop` lane.
 
 ## Acceptance criteria
 
-- `bin/test --platform` reports no `Tasks that changed worker-global state`
+- `bin/test --all` reports no `Tasks that changed worker-global state`
   section, and no `RE-ARMING CONTRACTS` line appears in any worker's stderr.
+  Three of the five are fixed; the two remaining are
+  `seon.cluster.cohost-boot-test` and `seon.cluster.agent-test`, plus the two
+  unrestored `remove!` sites in `test/seon/sci/eval_test.clj:1050` and
+  `test/seon/sci/eval_instrumentation_test.clj:69`.
