@@ -538,3 +538,16 @@ zero failures and errors. All 21 Flow tests and the cache-completeness test ran;
 the latter took 36,028 ms. The runner removed its successful root. The Flow
 fixture and monitor-command notes are now resolved and archived. Default native
 cache population returned `:warmed`; launcher integration remains pending.
+
+Final cache/maintenance snapshot: `371a50dba`, root `run.R09568`, four owned
+source/test paths, 9 tests / 69 assertions, zero failures/errors. Published-base
+preparation took 90,941 ms; coordinator/tests took 121 seconds. The runner
+removed its successful root. Cache hashing reuses `seon.id/sha-256` and derives
+project source exclusions from `deps.edn`. The cache issue remains open only
+where its remaining acceptance has not been established, including automatic
+launcher preparation in concurrently edited `bin/test`.
+
+Maintenance live proof: default MCP hot-reloaded `seon.schedule`, re-armed its
+contracts from the database projection, and returned error id `9246b3fdc7b8`,
+length 12, valid hex. The complete reload/re-arm/probe took 21,829 ms. This is
+a hot-Var proof; it does not claim full development adoption or browser paint.

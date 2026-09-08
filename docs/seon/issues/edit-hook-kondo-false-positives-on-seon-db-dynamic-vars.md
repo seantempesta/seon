@@ -100,3 +100,24 @@ Armed analyzer iteration passed; the normal cached CLI then reported zero
 errors (6,213 ms). Reloaded and re-armed default analysis returned `{:errors []}`
 in 5,191 ms. Isolated Flow/analyzer gate pending; this note remains open until
 that result is recorded.
+
+## Dependency completeness — 2026-09-08
+
+The native cache owner also accepted a populated directory as proof of complete
+analysis. `seon.dev.clj-kondo/ensure-dependency-cache!` now records the resolved
+classpath and its source/archive/configuration bytes in its input digest, plus
+the hashes of the cache files actually produced by a successful parse. Missing
+or changed recorded files force population. Population uses `--skip-lint` with
+explicit analysis, without `--dependencies`, so old JAR skip markers cannot
+suppress the repair (`reference-code/clj-kondo/src/clj_kondo/impl/core.clj`,
+`process-file`). The armed empty/partial-cache regression passed 1 test and 6
+assertions, including an error-free native lint of `src/seon/flow.clj`.
+The isolated gate and launcher integration are pending; `bin/test` has concurrent
+owner edits and has not been changed by this lane.
+
+Final cache-owner bytes passed the paths-only gate at `371a50dba`: 9 tests,
+69 assertions, zero failures/errors (cache and schedule namespaces). The
+input digest uses `seon.id/sha-256`, includes dependency source/archive bytes,
+and excludes the project source roots declared by `deps.edn`, which ordinary
+source analysis owns. Recorded cache contents must match exactly. Launcher
+integration remains outstanding in concurrently edited `bin/test`.
