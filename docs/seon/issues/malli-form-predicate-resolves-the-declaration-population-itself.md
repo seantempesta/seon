@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, performance, class/p1, wave/seon-env-p3]
 ---
@@ -88,3 +88,22 @@ acceptance case: when the environment carries the projection, the
 - `seon.config/admit-initialization` no longer needs its `call-with-forms`
   wrapper, and deleting that wrapper leaves the measured cost unchanged.
 - No process-global cache of declaration facts is introduced.
+
+## Resolved 2026-09-08 (`instrumented-gate-backlog-2`)
+
+The acceptance criteria asked for the predicate to read the projection its
+environment carries. The repair went one step further and deleted the need:
+the predicate never resolves a declaration population at ALL, in any
+environment. It compiles the form against one structural registry (Malli's
+default schemas plus an opaque placeholder for every keyword or
+qualified-symbol reference) and answers the structural question it documents.
+Whether a reference RESOLVES is decided at the authority that holds the
+projection, which was already doing exactly that.
+
+So: no resource read on any path (not merely none when a projection is
+supplied), no process-global cache, and the pre-read that made an incremental
+projection build refuse the key it had just added is gone with it
+([that issue](an-incremental-projection-build-refuses-the-key-it-just-added.md)).
+`seon.config/admit-initialization`'s `call-with-forms` containment is still in
+place and is now a plain population hand-off rather than a cost defence;
+removing it is ordinary follow-up, not a correctness question.

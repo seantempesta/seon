@@ -139,6 +139,45 @@
        (is (nil? (find-ns 'seon.schema-test.no-such-probe))
            "and asking the question did not load it either")))))
 
+(deftest an-incremental-build-resolves-against-the-projection-in-hand
+  ;; CLASS: a definition contract that pre-reads the AMBIENT declaration
+  ;; population while the authority holds the projection being extended. The
+  ;; two worlds disagree by construction — the second key of an incremental
+  ;; build references the first, which the projection in hand resolves and the
+  ;; ambient population does not — so `projection-with-schema` was refused for
+  ;; a reference it had itself just added. With no projection bound at all the
+  ;; ambient read does not merely disagree, it throws, and the predicate
+  ;; answered false for every form.
+  ;;
+  ;; The repair is the owner law: the predicate answers the STRUCTURAL
+  ;; question and the authority re-decides resolution against what it holds.
+  (let [base-key :seon.schema-test/incremental-base
+        direct-key :seon.schema-test/incremental-direct
+        admission {:seon.schema.admission/source :core}]
+    (testing "the definition contract never asks the ambient population"
+      (is (true? (schema/malli-form? [:and {:seon.db/index true} base-key]))
+          "a reference no population in hand defines is still a Malli form")
+      (is (false? (schema/malli-form? "not a form")))
+      (is (false? (schema/malli-form? [:map [:only-a-key]]))
+          "a form Malli cannot parse is still refused"))
+    (testing "each step resolves the key the step before it added"
+      (let [built (reduce-kv
+                   (fn [current schema-key definition]
+                     (schema/projection-with-schema
+                      current schema-key definition admission))
+                   (schema/build-projection {})
+                   (array-map
+                    base-key [:int {:seon.db/index true}]
+                    direct-key [:and {:seon.db/index true} base-key]))]
+        (is (= [:int {:seon.db/index true}]
+               (get-in built [:seon.schema.projection/forms base-key])))
+        (is (= #{base-key}
+               (get-in built [:seon.schema.projection/schema-dependencies
+                              direct-key])))
+        (let [valid? (schema/projection-validator built direct-key)]
+          (is (true? (valid? 7)))
+          (is (false? (valid? "seven"))))))))
+
 (deftest two-projections-never-exchange-a-compiled-validator
   ;; CLASS: compiled validators and explainers are a pure function of the
   ;; projection they were compiled from, but they used to live in ONE

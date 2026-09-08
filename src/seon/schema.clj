@@ -1090,12 +1090,45 @@
   (mr/set-default-registry! seon-registry)
   true)
 
-(defn malli-form?
-  "True when `value` is readable EDN and Malli can parse it.
+;; THE structural registry: Malli's own default schemas, plus one opaque
+;; placeholder for every other type. It resolves nothing from any declaration
+;; population, because whether a reference RESOLVES is not this question.
+;;
+;; Reading the ambient population here was the pre-read the owner law forbids.
+;; The authority that holds the projection — `projection-with-schema`, the
+;; admission path, `validate-one-contract!` — compiles the same form against
+;; the projection in its hand and refuses there, naming the key. Asking a
+;; second, ambient world first produced exactly the two defects filed against
+;; it: an incremental build was refused for a reference the projection it was
+;; extending already resolved, and a call with no projection bound re-read
+;; every schema resource on the classpath (152 reads, ~14 ms) only to answer
+;; false. A placeholder with no child bound admits a reference used as a type.
+(defonce ^:private structural-registry
+  (let [defaults (mr/fast-registry (m/default-schemas))
+        opaque (m/-simple-schema {:type ::opaque-reference
+                                  :pred any?
+                                  :min 0
+                                  :max nil})]
+    (reify
+      mr/Registry
+      (-schema [_ type]
+        (or (mr/-schema defaults type)
+            ;; A REFERENCE is a keyword or a qualified symbol — the two
+            ;; shapes a declaration population is keyed by (unqualified keys
+            ;; are real: `resources/seon/schemas/malli.edn` declares `:inst`).
+            ;; Anything else — a string, a number, an unqualified symbol Malli
+            ;; itself does not know — is not a reference and stays a refusal.
+            (when (or (keyword? type) (qualified-symbol? type))
+              opaque)))
+      (-schemas [_] (mr/-schemas defaults)))))
 
-   Uses Seon's current
-   candidate registry. This is intentionally structural; validation remains a
-   separate operation."
+(defn malli-form?
+  "True when `value` is readable EDN and Malli can parse its STRUCTURE.
+
+   References are opaque here: this predicate never asks whether a declaration
+   population defines them, because the authority extending the projection
+   re-decides that against the projection it holds. Validation, reference
+   resolution, and acyclicity remain separate operations at that authority."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (try
@@ -1104,7 +1137,7 @@
       (and (= value decoded)
            (some? (m/schema
                    (compilable-form decoded {})
-                   {:registry (candidate-registry)}))))
+                   {:registry structural-registry}))))
     (catch Exception _ false)))
 
 (register-core-predicate! 'seon.schema/malli-form? malli-form?)
@@ -2160,8 +2193,12 @@
 
 (defn- predicate-functions-with
   [projection definitions]
+  ;; A projection carrying no bound predicates has NO KEY, never a stored nil
+  ;; (`declaration-projection` builds exactly that shape), so the accumulator
+  ;; is seeded with the empty map the absence means. Returning the absence
+  ;; itself handed nil to `compilable-form`, whose declared input is a map.
   (let [existing
-        (:seon.schema.projection/predicate-functions projection)]
+        (get projection :seon.schema.projection/predicate-functions {})]
     (reduce
      (fn [bindings predicate]
        (if (contains? bindings predicate)

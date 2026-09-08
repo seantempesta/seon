@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, contract, test]
 ---
@@ -68,3 +68,34 @@ call is exactly the incremental build the function exists for.
    calls a defect on sight.
 
 Option 2 is the one that matches the ruled repair already in the tree.
+
+## Resolved 2026-09-08 (`instrumented-gate-backlog-2`)
+
+Neither of the filed options: the owner's law dissolved the question instead.
+`malli-form?` no longer asks ANY declaration population whether a reference
+resolves, because that is not the question a definition contract is for. It
+compiles against one structural registry — Malli's own default schemas, plus
+an opaque placeholder for every keyword or qualified-symbol reference — and
+answers whether the form PARSES. Resolution, acyclicity, and validation stay
+where the projection is: `projection-with-schema` compiles the same form
+against the registry it is extending and refuses there, naming the key.
+
+The same edit closes
+[malli-form-predicate-resolves-the-declaration-population-itself](malli-form-predicate-resolves-the-declaration-population-itself.md):
+with nothing to resolve, the classpath re-read it was filed for cannot happen.
+
+One production defect fell out of the repair, because the incremental build
+now reaches code it used to be refused before: `predicate-functions-with`
+seeded its reduce with `(:seon.schema.projection/predicate-functions
+projection)`, which is ABSENT on a projection carrying no bound predicates
+(`declaration-projection` builds exactly that shape), so it returned nil into
+`compilable-form`, whose declared input is a map. It now seeds with the empty
+map the absence means.
+
+Regression:
+`seon.schema-test/an-incremental-build-resolves-against-the-projection-in-hand`.
+
+Gate: `bin/test seon.schema-test seon.schema-usage-guard-test
+seon.schema.datahike-test seon.schema.edn-test seon.fn-test` went from 38
+failing to 6, all six `seon.fn-test` reds present at the baseline commit;
+`bin/test --platform` GREEN 73/398/0.
