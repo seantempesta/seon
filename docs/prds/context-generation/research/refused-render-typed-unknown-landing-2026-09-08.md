@@ -156,3 +156,53 @@ with `instrument/wrap-interpreted` under `:panic`, the same call
 
 Gates: `bin/test seon.render-coverage-test seon.render-simplification-test
 seon.render.value-options-test seon.repl-test` and `bin/test --platform`.
+
+## 6. Gate results, and the pre-existing reds this lane did NOT cause
+
+`bin/test --platform` — **73 tests, 398 assertions, 0 failures, 0 errors.**
+
+`bin/test seon.render-coverage-test` — 7 tests, 108 assertions, 9 failures,
+all 9 in two tests. `bin/test seon.render-simplification-test
+seon.render.value-options-test seon.repl-test` — 36 tests, 168 assertions,
+4 failing tests.
+
+Every one of those six failing tests is **red at clean HEAD** (`31fb0b0b4`),
+proven by running the same selections in a detached worktree of that commit
+with this lane's changes absent:
+
+| test | HEAD | with this lane |
+|---|---|---|
+| `render-coverage/effect-receipts-render-state-from-attribute-presence` | 8 failures | 8 failures |
+| `render-coverage/important-runtime-entities-declare-and-use-readable-faces` | 1 failure | 1 failure |
+| `render-simplification/authored-source-invocation-reuses-one-stored-run-across-presentations` | red | red |
+| `render-simplification/nested-values-render-their-declared-faces` | red | red |
+| `render-simplification/non-rendering-more-specific-schema-does-not-shadow-agent-identity` | red | red |
+| `render.value-options/data-response-reads-the-presentation-window-per-request` | red | red |
+
+The coverage counts match exactly (9 and 9) at the same assertions, offset
+only by the three `require` lines this lane added. `seon.repl-test` is green.
+
+Two of those reds are worth naming because the typed unknown changed how they
+READ, not whether they fail:
+
+- `nested-values-render-their-declared-faces` now shows
+  `:seon.render.unknown/producer seon.render.value/render-database-identity-ai`
+  with `:refusal :seon.instrument/contract-violated` where the old code
+  silently substituted the unprojected print node. The refusal is real and
+  pre-existing: `render-database-identity-ai` declares
+  `[:=> [:cat :seon.render/unit] :string]`, `:seon.render/unit` is
+  `[:map-of :qualified-keyword …]`, and the identity unit it is actually
+  handed carries Datahike's own unqualified `:db-name` and `:t`. A declared
+  contract that its only real caller cannot satisfy is the defect; making the
+  refusal visible is this lane's point, and fixing that contract belongs to
+  whoever owns `seon.render.value`'s identity face.
+- `non-rendering-more-specific-schema-does-not-shadow-agent-identity` fails on
+  authored comment prose now prefixed to `seon.cluster.agent/render-identity-ai`
+  — another lane's edit, unrelated to this one.
+
+One advisory in the platform run, `persistent results NOT recorded:
+:seon.instrument/contract-violated seon.schema.datahike/resolve-datahike-form-in`,
+is the test runner's own persistence path (a lane is editing
+`src/seon/test/runner.clj` right now). The three schemas this lane added
+resolve: `:seon.render/unknown`, `/unknown-request` and `/unknown-reason` are
+all present in the packaged forms, and none is a storable attribute family.
