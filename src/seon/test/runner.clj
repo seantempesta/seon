@@ -2352,11 +2352,19 @@
                "these reds belong to the exchange, not to the tests:")
       (doseq [task-result worker-deaths]
         (let [exchange (::worker-exchange-result task-result)]
-          (println " -" (str/join "," (::task-symbols task-result))
-                   "worker=" (::worker-id exchange)
-                   "kind=" (:seon.error/kind exchange)
-                   (str "exit=" (::worker-exit exchange))
-                   (str "log=" (::worker-error-log exchange)))))))
+          ;; ABSENT IS NO KEY, in the tally too: a retired worker never
+          ;; published an exit code and never opened a log, and printing
+          ;; `exit= log=` claims two facts the runner does not have.
+          (println (str/join
+                    " "
+                    (into [" -" (str/join "," (::task-symbols task-result))
+                           (str "worker=" (::worker-id exchange))
+                           (str "kind=" (:seon.error/kind exchange))]
+                          (remove nil?)
+                          [(when-let [exit (::worker-exit exchange)]
+                             (str "exit=" exit))
+                           (when-let [log (::worker-error-log exchange)]
+                             (str "log=" log))])))))))
   (let [exhausted (sort-by ::task-ordinal
                            (filter ::worker-pool-exhausted task-results))]
     (when (seq exhausted)

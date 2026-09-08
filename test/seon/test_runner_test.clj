@@ -1648,8 +1648,8 @@
     (let [tally
           (with-out-str
             (#'runner/print-final-tally!
-             {::runner/test-count 3 ::runner/pass-count 0
-              ::runner/fail-count 0 ::runner/error-count 3}
+             {::runner/test-count 4 ::runner/pass-count 0
+              ::runner/fail-count 0 ::runner/error-count 4}
              [{::runner/task-ordinal 1
                ::runner/task-symbols ["seon.a/one"]
                ::runner/worker-exchange-result
@@ -1660,6 +1660,12 @@
               {::runner/task-ordinal 2
                ::runner/task-symbols ["seon.b/two"]
                ::runner/worker-pool-exhausted true}
+              ;; a RETIRED worker never published an exit code or a log
+              {::runner/task-ordinal 5
+               ::runner/task-symbols ["seon.d/four"]
+               ::runner/worker-exchange-result
+               {:seon.error/kind ::runner/worker-retired
+                ::runner/worker-id "serial"}}
               {::runner/task-ordinal 3
                ::runner/task-symbols ["seon.c/three"]
                ::runner/executed-by "pool-2"
@@ -1673,6 +1679,10 @@
       (is (str/includes? tally "Worker exchange failures"))
       (is (str/includes? tally "seon.a/one"))
       (is (str/includes? tally "/tmp/pool-1.log"))
+      (is (not (str/includes? tally "exit= "))
+          "absent is no key in the tally too: a retired worker published no
+           exit code and opened no log, and `exit= log=` claims two facts the
+           runner does not have")
       (is (str/includes? tally "Unlaunchable tasks"))
       (is (str/includes? tally "seon.b/two"))
       (is (str/includes? tally "Parallel-only tasks"))

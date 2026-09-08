@@ -224,6 +224,40 @@ a dead worker took every namespace it held down with it, and each was reported
 RED — a dead worker is never quietly green — and it stays named as an exchange
 failure.
 
+### A really dying worker, observed
+
+Not a fixture: while `resolve-loaded` was still missing its guard, three real
+worker JVMs died at `exit 1` mid-task inside a nested `bin/test seon.fs-test`.
+The tally said what happened, in the words it is supposed to:
+
+```text
+Ran 3 tests containing 0 assertions.
+0 failures, 3 errors.
+
+Worker exchange failures — 3 task(s) whose worker died, was bounded, or
+refused; these reds belong to the exchange, not to the tests:
+ - seon.fs-test/concurrent-deletions-treat-a-vanished-path-as-success
+     worker= pool-1 kind= :seon.test.runner/worker-exited exit=1
+     log=…/workers/pool-1/logs/worker-stderr.log
+ - seon.fs-test/recursive-deletion-never-crosses-a-symlink
+     worker= serial kind= :seon.test.runner/worker-exited exit=1  log=…
+ - seon.fs-test/recursive-deletion-publishes-rate-bounded-progress
+     worker= serial kind= :seon.test.runner/worker-retired
+```
+
+and each confirmation read `confirmation worker-exchange seon.fs-test/…`, not
+`parallel-only`. The named log held the actual cause in one line
+(`No such namespace: seon.test-support` from an unguarded `find-var`), which
+is the whole point: three `seon.fs-test` reds that belong to `seon.fs-test`
+in no way whatsoever, and a path straight to the thing that was broken. Before
+this change the same event produced three per-namespace reds and, on
+confirmation, three `parallel-only` verdicts against `seon.fs-test`'s owner.
+
+One thing that run exposed and this note's own §2.4 standing order demands
+reporting: the retired worker's line printed `exit= log=` with nothing after
+them, claiming two facts the runner does not have. Absent is no key in the
+tally too; fixed, with the assertion added to the regression.
+
 **Regression.** `seon.test-runner-test/a-dead-workers-task-is-never-classified-parallel-only`,
 which drives the classification directly and asserts the tally names every one
 of the five sections. The existing deliberately-dying-worker fixtures
