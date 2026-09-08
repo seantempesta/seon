@@ -277,3 +277,25 @@ system/virtual/compact requests through the existing context channel.
 It is NOT section 16 completion: ordered stored bytes, last-turn basis,
 as-of checks, prompt digest, derived concern blocks, and the full lifecycle
 proof remain unfinished. No green page test tally is claimed here.
+
+
+Gate6 reached the canonical SCI fixture and exposed an owned load-time
+blocker in `test/seon/render/web_prompt_test.clj`: its two `with-redefs-fn`
+tests refer to the deleted private `prospective-prompt` Var. The JVM refused
+that test namespace, so the worker could not run assertions. Gate6 was
+terminated and reaped after preserving the exact cause. The obsolete mocked
+capture-comparison tests are removed; the real-socket algorithm-page
+regression in `web_test.clj` remains. This is not a foreign-lane attribution.
+
+A native Safari fallback subsequently rendered the Juniper debug page,
+including Context now, Would-be system turn, all three controls, and typed
+messages naming `seon.eval/of-agent` and `seon.turn/system-turn`. The entity
+and graph regions still showed loading placeholders; a complete feed/HTML
+block proof is not claimed. HTTP GET was independently 200 again.
+
+Additional positive live writer observations on default: two `add!` calls
+on `record-render-fixed` returned their own item maps and `steps` returned
+first then second. On a new `record-render-reconcile` agent, `plan!` returned
+one added step; repeating the same authored input returned converged true
+and a zero diff. These exercised the loaded definitions after development
+adoption reload work; source-commit convergence has not yet been established.
