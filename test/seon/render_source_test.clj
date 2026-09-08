@@ -30,18 +30,27 @@
   "(seon.db/pull [:my.plan.item/title] [:my.plan.item/id \"preview-item\"])")
 
 (defn- cluster-handle
+  "This suite's cluster identity, through the ONE canonical handle fixture.
+
+  The structural members and the shipped dials are the fixture's; only the
+  cluster's own identity and this suite's pinned channel and limit are the
+  caller's. This used to be `(merge (config/defaults) …)` — a SECOND
+  mechanism for the same shape (§2.5), and one that pours every effective
+  config dial into the handle rather than the members
+  `:seon.cluster.loop/cluster` declares, so a renamed dial would leave the
+  fixture working while production broke."
   [connection ctx channel cluster-name]
-  (merge (config/defaults)
-         {:seon.db/connection connection
-          :seon.cluster/name cluster-name
-          :seon.cluster.run/process "preview-test"
-          :seon.sci.eval/ctx ctx
-          :seon.cluster.wake/channel channel
-          :seon.render/context-channel channel
-          :seon.cluster.loop/completion channel
-          :seon.sci.admit/caps caps
-          :seon.config.eval/time-limit-ms 2000
-          :seon.config/on-core-error :panic}))
+  (support/cluster-handle
+   {:seon.db/connection connection
+    :seon.cluster/name cluster-name
+    :seon.cluster.run/process "preview-test"
+    :seon.sci.eval/ctx ctx
+    :seon.cluster.wake/channel channel
+    :seon.render/context-channel channel
+    :seon.cluster.loop/completion channel
+    :seon.sci.admit/caps caps
+    :seon.config.eval/time-limit-ms 2000
+    :seon.config/on-core-error :panic}))
 
 (deftest preview-cache-is-memory-only-and-context-add-saves-the-captured-result
   (support/with-database

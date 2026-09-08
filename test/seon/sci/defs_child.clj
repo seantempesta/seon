@@ -1,14 +1,14 @@
 (ns seon.sci.defs-child
   "Foreign-JVM halves of the W-A defs crash regression."
-  (:require [clojure.core.async :as async]
-            [datahike.api :as d]
+  (:require [datahike.api :as d]
             [sci.core :as sci]
             [seon.cluster :as cluster]
             [seon.cluster.loop :as loop]
             [seon.cluster.run :as run]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.sci.eval :as eval])
+            [seon.sci.eval :as eval]
+            [seon.test-support :as test-support])
   (:import [java.nio.file Files Path]))
 
 (def ^:private agent-id "defs-crash-agent")
@@ -38,31 +38,22 @@
     :seon.config/on-core-error :panic}))
 
 (defn- cluster-handle
-  "The declared cluster handle, from the shipped decisions.
+  "The declared cluster handle, through the ONE canonical handle fixture.
 
   `seon.cluster.run/settlement-projection` takes `:seon.cluster.loop/cluster`
-  — the handle an armed agent carries — so this child JVM hands the same
-  shape production hands rather than the one entry it happens to read. It
-  cannot use `seon.test-support`: that namespace stands up its own database
-  base, and this half runs in a foreign JVM against a real file store."
+  — the handle an armed agent carries — so this child JVM hands the same shape
+  production hands rather than the one entry it happens to read. It used to
+  re-roster every structural member here, under a docstring claiming
+  `seon.test-support` could not be used because it stands up its own database
+  base. IT DOES NOT: that base is a `delay`, forced by `with-database` and by
+  nothing else, so a foreign JVM against a real file store may take the
+  fixture and leave the base unrealized. One mechanism, not two."
   [connection ctx]
-  (let [decisions (config/defaults)]
-    {:seon.db/connection connection
-     :seon.cluster/name "defs-crash"
-     :seon.cluster.run/process "defs-crash-child"
-     :seon.sci.eval/ctx ctx
-     :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
-     :seon.render/context-channel (async/chan (async/sliding-buffer 1))
-     :seon.cluster.loop/completion (async/promise-chan)
-     :seon.sci.admit/caps (config/result-caps decisions)
-     :seon.config.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)
-     :seon.config/on-core-error (:seon.config/on-core-error decisions)
-     :seon.config.error/recurrence-limit
-     (:seon.config.error/recurrence-limit decisions)
-     :seon.config.error/max-evidence-bytes
-     (:seon.config.error/max-evidence-bytes decisions)
-     :seon.config.message/max-chain
-     (:seon.config.message/max-chain decisions)}))
+  (test-support/cluster-handle
+   {:seon.db/connection connection
+    :seon.cluster/name "defs-crash"
+    :seon.cluster.run/process "defs-crash-child"
+    :seon.sci.eval/ctx ctx}))
 
 (defn- settle!
   [connection ctx ordinal evaluated]
