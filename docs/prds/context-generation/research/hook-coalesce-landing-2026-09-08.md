@@ -342,3 +342,33 @@ successful before/after one/five-editor convergence measurements. The log
 cannot recover unrecorded historical fallback decisions. Shared compiled
 JVM Vars are not sovereign per-cluster behavior; beta's unchanged program
 facts do not prove that stronger guarantee.
+
+## Cleanup and touched paths
+
+The last beta graceful-stop request exceeded the 30-second operator silence
+bound, and the operator refused to signal a JVM with default still running.
+Beta subsequently completed its stop. A follow-up explicit forced-stop
+command found no reachable beta and made no change; MCP then returned
+exactly `["default"]` from the live instance registry in 2 ms. Default
+remains running. Every test/probe shell was awaited to its exit; obsolete
+owned test roots were already absent at cleanup. The local probe scratch
+directory was removed after these results were recorded.
+
+Dated union of touched paths in `4bd2116a2`, `81575eb5c`, and `d756a09d4`:
+
+```text
+.claude/seon-hook.edn
+bin/seon
+bin/seon-hook
+docs/prds/context-generation/research/hook-coalesce-landing-2026-09-08.md
+docs/prds/context-generation/research/hook-coalesce-live-probe-2026-09-08.clj
+docs/seon/issues/development-adoption-drops-the-web-server.md
+docs/seon/issues/stop-contract-rejects-stopped-instances.md
+src/seon/cluster.clj
+src/seon/cluster/source.clj
+src/seon/sci/eval.clj
+test/seon/cluster/boot_test.clj
+test/seon/cluster/source_test.clj
+test/seon/dev/edit_feedback_test.clj
+test/seon/dev/hook_convergence_probe.py
+```
