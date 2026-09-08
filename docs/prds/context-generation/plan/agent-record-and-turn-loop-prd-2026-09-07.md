@@ -923,3 +923,14 @@ every cluster a JVM ever holds shares one memory map with no collision. No count
 ids (entity ids are a per-branch counter and repeat across clusters and
 resets). The (turn, ordinal) pair stays as the ORDER, never as the name.
 
+### The history is a render function like everything else (owner, 2026-09-08)
+
+"NO HAND MADE SHIT. Turtles all the way down." The evaluation schema
+declares its pair (`seon.repl/render-ai`, `render-html`); the history is the
+walk rendering each of the agent's evaluation entities through that pair,
+in order, from the STORED shown text — never re-running a form. HTML may
+reach the live result object from the in-memory map while it exists. The
+transcript namespace's hand-assembled entries, entry kinds, and any
+history-specific formatting are deleted; nothing assembles the history but
+the walk.
+
