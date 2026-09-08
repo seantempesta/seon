@@ -1,5 +1,7 @@
 ---
 name: repl
+type: skill
+status: active
 description: "Distinguish the agent reply reader, persistent agent SCI context, MCP JVM evaluation, and raw JVM REPL. Use for source fidelity, read evidence, result inspection, private state, or reload verification."
 ---
 
