@@ -829,7 +829,12 @@
                            ::drift-removed-count (count removed)))))
 
 (defn- ambient-drift
-  "What one task changed in the worker's process-global state, or nothing."
+  "What one task changed in the worker's process-global state, or nothing.
+
+  A member the worker could not see BEFORE and can see after is not drift: the
+  shared SCI base is a delay, and the first database test in each worker is the
+  one that realizes it. Only a change to a member present on both sides is a
+  task changing something another task can already read."
   [before after]
   (let [set-drift
         (into {}
