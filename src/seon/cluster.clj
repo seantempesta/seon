@@ -2361,7 +2361,8 @@
                         :seon.cluster.agent/id root-agent-id
                         :seon.sci.admit/caps (config/result-caps dials)}
                        (select-keys view
-                                    [:seon.render.web/pages-mult
+                                    [:seon.cluster.loop/cluster
+                                     :seon.render.web/pages-mult
                                      :seon.render.web/registration
                                      :seon.render.web/latest-packages
                                      :seon.render.web/render-channel
@@ -2973,7 +2974,9 @@
                             (arm-agents! instance connection cluster-name)))
            dials (config/effective @connection cluster-name)
            served (serve! connection cluster-name dials
-                          (:seon.render.web/view instance))
+                          (assoc (:seon.render.web/view instance)
+                                 :seon.cluster.loop/cluster
+                                 (:seon.cluster.loop/cluster instance)))
            advertisement (assoc (:seon.boot/advertisement instance)
                                 :seon.render.web/url
                                 (:seon.render.web/url served)

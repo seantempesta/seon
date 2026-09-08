@@ -319,3 +319,26 @@ Source convergence, Juniper reseeding, complete page blocks, the stored
 prefix/as-of/digest checks, and the fresh→system→virtual→compact proof remain
 unfinished. The missing turn/evaluation APIs and their storage contracts
 remain integration dependencies; typed unavailability is visible in Safari.
+
+
+### 2026-09-08 20:10 UTC — HTTP system-turn handle repair
+
+The owner resumed this lane for the new system-turn input refusal. The
+HTTP construction in `src/seon/cluster.clj` selected the render view without
+the instance's cluster handle. It now carries that exact handle to the web
+service; `src/seon/render/web.clj` uses the landed namespaced
+`:seon.turn/write?` flag for both preview and explicit execution. The narrow
+HTTP construction hunk is outside the original render files, but is the
+necessary caller change for the owner's explicit handle repair; no files
+under the protected `src/seon/cluster/` directory were changed.
+
+Live proof: MCP JVM arithmetic returned 2 on default. Publication refused
+because it could not locate `seon/test_support` on the live classpath.
+The existing default instance's HTTP service alone was rebound with its
+actual handle after re-evaluating the changed private functions from source.
+GET `http://127.0.0.1:7994/ns/my.agents.juniper/debug` changed from HTTP 500
+to HTTP 200. Response bytes are in `tmp/record-render-handle-debug.html`.
+This proves hot-reloaded HTTP reachability, not source convergence or full
+§16 behavior: `seon.eval/of-agent` remains visibly unavailable, and the
+would-be value is currently rendered as an elision. No new test tally is
+claimed at this checkpoint.

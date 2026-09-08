@@ -716,7 +716,7 @@
   (let [request (debug-turn-request database connection agent-id caps render-context)
         evaluations (turn-function-result 'seon.eval/of-agent [database agent-id])
         prospective (turn-function-result 'seon.turn/system-turn
-                                         [(assoc request :write? false)])]
+                                         [(assoc request :seon.turn/write? false)])]
     {:seon.render.debug/request request
      :seon.render.debug/agent agent-id
      :seon.render.debug/evaluations evaluations
@@ -2396,7 +2396,7 @@
                          (:seon.cluster.agent/routing cluster)})
         result (turn-function-result
                 function [(cond-> prepared
-                            (= action :system-turn) (assoc :write? true))])]
+                            (= action :system-turn) (assoc :seon.turn/write? true))])]
     [state (if (:seon.error/kind result) result {:seon.db/db @connection})]))
 
 (defn- context-pass
