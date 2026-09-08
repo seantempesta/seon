@@ -8,7 +8,8 @@
            [java.nio.file AtomicMoveNotSupportedException DirectoryNotEmptyException
             FileAlreadyExistsException
             Files StandardCopyOption]
-           [java.security MessageDigest]))
+           [java.security MessageDigest]
+           [java.util.concurrent TimeUnit]))
 
 (def cache-root "target/dev-dependency-classes")
 (def staging-root "target/dev-dependency-classes.next")
@@ -17,7 +18,7 @@
 (def process-reference-root "target/dev-dependency-cache-processes")
 (def lock-file "target/dev-dependency-cache.lock")
 (def manifest-file "META-INF/seon-dev-cache.edn")
-(def cache-version 3)
+(def cache-version 4)
 
 (defn- canonical-file
   [path]
@@ -196,26 +197,33 @@
             (recur))))))
   (.update digest (byte-array [(byte 0)])))
 
-(defn- project-input-files
-  []
-  (let [source-root (io/file "src")]
-    (->> (concat [(io/file "deps.edn")]
-                 (file-seq source-root))
-         (filter #(.isFile ^java.io.File %))
-         (filter (fn [file]
-                   (let [filename (.getName ^java.io.File file)]
-                     (or (= "deps.edn" filename)
-                         (str/ends-with? filename ".clj")
-                         (str/ends-with? filename ".cljc")))))
-         (map canonical-file)
-         (sort-by #(.getCanonicalPath ^java.io.File %))
-         vec)))
+(defn- dependency-pins
+  [root]
+  (let [command ["git" "-C" (str root) "ls-files" "--stage" "--" "reference-code"]
+        child (.start (doto (ProcessBuilder. ^java.util.List command)
+                        (.redirectErrorStream true)))
+        output (future (slurp (.getInputStream child)))]
+    (try
+      (when-not (.waitFor child 10 TimeUnit/SECONDS)
+        (throw (ex-info "Dependency pin query exceeded its execution bound."
+                        {:seon.dev-cache/command command})))
+      (let [text (deref output 1000 ::unavailable)]
+        (when (or (not (zero? (.exitValue child))) (= ::unavailable text))
+          (throw (ex-info "Dependency pins could not be read."
+                          {:seon.dev-cache/command command :seon.dev-cache/output text})))
+        text)
+      (finally
+        (when (.isAlive child)
+          (.destroyForcibly child)
+          (.waitFor child 10 TimeUnit/SECONDS))))))
 
-(defn- project-digest
-  []
+(defn- dependency-configuration-digest
+  [root]
   (let [digest (MessageDigest/getInstance "SHA-256")]
-    (doseq [file (project-input-files)]
-      (digest-file! digest file))
+    (digest-file! digest (io/file root "deps.edn"))
+    (digest-bytes! digest (dependency-pins root))
+    (doseq [property ["java.runtime.version" "java.vendor" "java.vm.name" "os.arch"]]
+      (digest-bytes! digest (System/getProperty property)))
     (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
 
 (defn- sha-256
@@ -253,14 +261,14 @@
                       {:seon.dev-cache/rejected directory})))))
 
 (defn- write-manifest!
-  [directory rows digest cache-digest project-source-digest duration-ms]
+  [directory rows digest cache-digest dependency-input-digest duration-ms]
   (let [manifest (io/file directory manifest-file)]
     (.mkdirs (.getParentFile manifest))
     (spit manifest
           (str (pr-str {:seon.dev-cache/version cache-version
                         :seon.dev-cache/digest digest
                         :seon.dev-cache/cache-digest cache-digest
-                        :seon.dev-cache/project-digest project-source-digest
+                        :seon.dev-cache/input-digest dependency-input-digest
                         :seon.dev-cache/namespaces
                         (mapv :seon.dev-cache/namespace rows)
                         :seon.dev-cache/sources rows
@@ -284,22 +292,22 @@
     (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
 
 (defn- cache-identity
-  [dependency-digest project-source-digest]
-  (hex-digest [cache-version dependency-digest project-source-digest]))
+  [dependency-digest dependency-input-digest]
+  (hex-digest [cache-version dependency-digest dependency-input-digest]))
 
 (defn- cache-directory
   [cache-digest]
   (canonical-file (io/file cache-root cache-digest)))
 
 (defn- valid-cache
-  [directory expected-project-digest]
+  [directory expected-input-digest]
   (when-let [manifest (read-manifest directory)]
     (try
       (when (and (= cache-version (:seon.dev-cache/version manifest))
                  (= (.getName ^java.io.File (canonical-file directory))
                     (:seon.dev-cache/cache-digest manifest))
-                 (= expected-project-digest
-                    (:seon.dev-cache/project-digest manifest))
+                 (= expected-input-digest
+                    (:seon.dev-cache/input-digest manifest))
                  (= (sha-256 (:seon.dev-cache/sources manifest))
                     (:seon.dev-cache/digest manifest))
                  (every?
@@ -345,9 +353,9 @@
 
 (defn- current-cache
   []
-  (let [project-source-digest (project-digest)]
+  (let [dependency-input-digest (dependency-configuration-digest ".")]
     (some (fn [directory]
-            (when-let [manifest (valid-cache directory project-source-digest)]
+            (when-let [manifest (valid-cache directory dependency-input-digest)]
               {:seon.dev-cache/directory directory
                :seon.dev-cache/manifest manifest}))
           (distinct
@@ -397,16 +405,21 @@
   [transition]
   (let [lock-path (canonical-file lock-file)]
     (.mkdirs (.getParentFile lock-path))
-    (with-open [file (RandomAccessFile. lock-path "rw")
-                channel (.getChannel file)
-                _ (.lock channel)]
-      (transition))))
+    (let [requested (System/nanoTime)]
+      (with-open [file (RandomAccessFile. lock-path "rw")
+                  channel (.getChannel file)
+                  _ (.lock channel)]
+        (let [acquired (System/nanoTime)]
+          (try (transition)
+               (finally
+                 (println "seon cache: lock wait-ms=" (quot (- acquired requested) 1000000)
+                          "held-ms=" (quot (- (System/nanoTime) acquired) 1000000)))))))))
 
 (defn- refresh!
   []
   (let [started (System/nanoTime)
         basis (b/create-basis {:project "deps.edn" :aliases [:dev]})
-        project-source-digest (project-digest)
+        dependency-input-digest (dependency-configuration-digest ".")
         staging (str staging-root "/" (random-uuid))]
     (b/delete {:path result-file})
     (.mkdirs (io/file staging))
@@ -416,16 +429,16 @@
       (let [rows (run-build! basis staging)
             dependency-digest (sha-256 rows)
             cache-digest (cache-identity dependency-digest
-                                         project-source-digest)
+                                         dependency-input-digest)
             directory (cache-directory cache-digest)
             duration-ms (long (/ (- (System/nanoTime) started) 1000000))]
         (println "seon cache: compiled" (count rows) "dependency namespaces")
         (flush)
         (validate! staging rows)
         (write-manifest! staging rows dependency-digest cache-digest
-                         project-source-digest duration-ms)
+                         dependency-input-digest duration-ms)
         (admit! staging directory)
-        (let [manifest (or (valid-cache directory project-source-digest)
+        (let [manifest (or (valid-cache directory dependency-input-digest)
                            (throw
                             (ex-info
                              "The immutable dependency cache is invalid."

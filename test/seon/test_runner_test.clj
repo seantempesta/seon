@@ -70,6 +70,28 @@
 
 (declare stop-process-tree!)
 
+(deftest ^{:seon.test/platform "Source edits do not rebuild dependency classes."}
+  dependency-configuration-excludes-first-party-source
+  (let [root (doto (io/file project-root "tmp" (str "dependency-inputs-" (random-uuid))) .mkdirs)
+        log (io/file root "git.log")
+        child (.start (doto (ProcessBuilder. ^java.util.List ["git" "init" "-q" (str root)])
+                        (.redirectErrorStream true) (.redirectOutput log)))]
+    (try
+      (is (.waitFor child test-support/event-backstop-seconds TimeUnit/SECONDS))
+      (when-not (.isAlive child)
+        (is (zero? (.exitValue child)) (slurp log))
+        (spit (io/file root "deps.edn") "{:deps {}}")
+        (.mkdirs (io/file root "src"))
+        (spit (io/file root "src/fixture.clj") "(ns fixture)")
+        (let [before (#'dev-cache/dependency-configuration-digest root)]
+          (spit (io/file root "src/fixture.clj") "(ns fixture) (def changed true)")
+          (is (= before (#'dev-cache/dependency-configuration-digest root)))
+          (spit (io/file root "deps.edn") "{:deps {} :aliases {:test {}}}")
+          (is (not= before (#'dev-cache/dependency-configuration-digest root)))))
+      (finally
+        (stop-process-tree! child)
+        (test-support/delete-recursively! root)))))
+
 (deftest ^{:seon.test/platform "Consecutive launchers reuse the immutable published base."}
   consecutive-cache-invocations-reuse-the-published-base
   (let [root (doto (io/file project-root "tmp" (str "base-reuse-" (random-uuid))) .mkdirs)
@@ -1395,7 +1417,7 @@
              (ProcessBuilder.
               ^java.util.List
               [(str (io/file project-root "bin" "test"))
-               "seon.test-runner-test"])
+               "--paths" "bin/test" "--" "seon.test-runner-test"])
               (.directory project-root)
               (.redirectErrorStream true))
             _ (.put (.environment builder)
@@ -1423,7 +1445,7 @@
              (ProcessBuilder.
               ^java.util.List
               [(str (io/file project-root "bin" "test"))
-               "seon.test-runner-test"])
+               "--paths" "bin/test" "--" "seon.test-runner-test"])
               (.directory project-root)
               (.redirectErrorStream true))
             _ (.put (.environment builder)
