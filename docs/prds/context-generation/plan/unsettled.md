@@ -6,1792 +6,244 @@ tags: [prd, agent, context, architecture]
 
 # The working edge — context-generation program
 
+The latest dated section is the working edge. Earlier sections are historical
+summaries; their full evidence remains in Git history and the dated research
+notes. The binding design is [the turn-loop PRD](agent-record-and-turn-loop-prd-2026-09-07.md),
+§0 and §§14–17. Historical lane status never authorizes operating a session.
+
 ## Morning review and the one design document — 2026-09-07
 
-The owner reviewed the overnight page and reframed the target: the REPL reply
-becomes data the agent never writes; the agent's record becomes deliberate
-one-hop components; wake sources are separate components; history and context
-are derived; one eval point and one cache; keep the hard-won runtime and fix
-its measured cost first. Three research notes were written before designing
-([eval points and caches](../research/eval-points-and-caches-census-2026-09-07.md),
-[cluster, branch, SCI, wake](../research/cluster-branch-sci-wake-model-2026-09-07.md),
-[run loop unpacked](../research/run-loop-unpacked-2026-09-07.md)) and the
-design is
-[agent-record-and-repl-response-prd-2026-09-07.md](agent-record-and-repl-response-prd-2026-09-07.md),
-rulings 69–72 in the ledger. Nothing is deleted until the owner accepts it.
+The record and REPL response proposal became the review entry after the evaluation/cache, branch/SCI/wake, and loop investigations. The turn-loop PRD now supersedes that entry and its curation model.
 
 ## Morning handoff — 2026-09-07 07:10Z
 
-**Live example:** `http://127.0.0.1:7766/ns/my.agents.juniper/debug?subject=33770`
-(cluster `juniper-context` under `tmp/juniper-context-live`, reset and
-reseeded at 06:38Z; Juniper is entity 33770). The page paints on the initial
-GET in about 0.5 s and shows the ten declared units in declared order, each
-with its description, an executed AI source (namespace prompt, teaching
-comment, form, printed result) and an HTML panel; undeclared incoming refs
-sit under "Other references". Ten loads move no run count (3 → 3).
-
-**Proven on the page:** identity (`whoami`), namespace (empty state as a
-comment, bindings in Clojure's words), cluster, plan (one component tree:
-objective, current step, 1 of 5 completed, tree with states and an update
-form), current step, messages (`(my.message/inbox {})`, three messages),
-history (three runs newest first, real run-loop bytes), selected context
-(empty, with actions), faults (six credential refusals as cards).
-Screenshots: `tmp/debug-units-shots/desktop-1440.png`, `narrow-700.png`.
-Exact AI text per unit: the three landing notes under
-`docs/prds/context-generation/research/` (`plan-component-landing…`,
-`debug-units-landing…`, `agent-units-landing…`).
-
-**Proven by tests only:** plan writers' refusals (17/146), reverse-unit
-regressions (web-test 60/441 with five pre-existing stale reds enumerated),
-unit renderers (message 19/126, run 22/231 with one pre-existing red).
-
-**Not proven / open, by owner:**
-- reverse units are pulled unbounded before rendering: at 609 runs the
-  history unit refused on the query-work budget (page owner; needs a
-  bounded acquisition, newest-first);
-- a declared reverse relationship has no schema key of its own, so its
-  producers declare `:seon.schema/value` (render + schema owners; the units
-  lane's note has the exact request);
-- one render exception ends the render proc and every page hangs (blocker
-  issue filed);
-- the debug HTML render has no viewer-scoped fork (issue filed; the plan
-  renderer now derives its owner from the value instead);
-- retired `:seon.render/form` leftovers in code (issue filed);
-- root's turns on a fresh cluster hit the 30 s context-acquisition backstop
-  (issue filed);
-- `render-run-html` re-parses every form per call (units lane note);
-- adding a request-map arity beside a positional one removes the argless
-  call (`my.message/inbox` now needs `{}`; general lesson recorded).
-
-**Next design questions (two to four options each in the morning):**
-1. Should a reverse unit be its own registered schema key (e.g.
-   `:seon.cluster.message/_to` as a collection form) so coherence and
-   instrumentation check what is handed over?
-2. Should the debug page fork once per derivation for the viewer so both
-   projections share one environment, or keep HTML producers value-derived
-   only?
-3. Which units go into the real provider prompt first, and in what order —
-   the declared-units vector is already the candidate ordering.
+The Juniper debug page showed the then-declared units and exposed query-work, render-proc liveness, and viewer-context defects. Its scratch-cluster address, entity id, counts, and gate results were observations from that morning, not a development-environment prescription.
 
 ## Integration rulings by the render owner — 2026-09-07 05:30Z
 
-Three seams surfaced when the lanes' slices met on the live page, each
-settled in `src/seon/render.clj` with a regression in
-`seon.render-simplification-test`:
-
-- An attribute-declared producer is selected for AI and HTML when a request
-  names the attribute (`:seon.render.walk/attribute`) and receives the
-  attribute's value in its TRANSACTION shape, whether the caller handed the
-  owning entity or the pulled connected entities (`b14983546`, `43a80d881`).
-- An entity map lacking the attribute is a neighbour the walk reached
-  through it, never the attribute's value; it renders by its own shape
-  (`4d7bac8fa`).
-- An agent-owned attribute's HTML producer derives the owner from the value
-  through the reverse component edge; only the database is call-prepared.
-  The AI source legitimately resolves to the calling agent because it runs
-  in that agent's turn (`4a14f3058`, `my.plan/render-plan-html`). The
-  page-wide viewer fork stays filed as
-  [an issue](../../../seon/issues/debug-html-render-carries-no-agent-scoped-environment.md).
-
-Lane results: plan component landed (`90dce20b0`, 17 tests / 146
-assertions; fixture rewritten; Juniper migrated in place, 5 old items
-retracted); page as declared units landed (`6a4989c51`…`b9cf09d9d`, ten
-loads write no run/evaluation/fault facts: 609/606/606/5 held); the render
-proc wedge on one render exception is filed as a blocker. The units lane
-(messages, history, faults, namespace, identity) was still running.
+The render owner reconciled component rendering, plan ownership, and integration expectations against the page. Those unit-era decisions are historical; the final block and component rules are PRD §§13–17.
 
 ## Owner confirmations and lane switch — 2026-09-07 04:00Z
 
-Owner: `:seon.render/form` is removed as a concept; `:seon.render/ai` is
-source (comments that teach the agent, then forms executed by the ordinary
-reply reader, results printed usefully for the agent); HTML is the same facts
-structured for a person. Docs updated in `9d80fc5d4`; the code leftovers are
-[an open issue](../../../seon/issues/retired-form-projection-still-declared-and-selected.md)
-for one orchestrator commit after the lanes land. The render owner now selects
-attribute-declared producers for AI and HTML (a cardinality-many component
-attribute renders as one unit); regression written, proof pending on a
-loadable schema population. Codex lanes were stopped at the owner's request
-(credits) and relaunched as Opus agents continuing from the uncommitted tree.
-A lane's hook publication had made the dev root ephemeral; fixed in
-`a0339ce0d`. Live page at 04:14Z shows the page lane's in-progress layout
-stuck at "Loading declared units…".
+The owner confirmed the record/render direction and changed lane assignments. The assignments applied to that checkpoint only.
 
 ## Overnight plan and dev loop — 2026-09-06 late evening
 
-The owner reframed the debug work: every attribute on the agent entity is one
-self-contained unit rendered into context (AI) and into an HTML panel; data
-from messages, the run loop, and evaluation results moves onto agent-owned
-relationships. The PRD was rewritten as the plan
-([entity-debug-curation-prd-2026-09-06.md](entity-debug-curation-prd-2026-09-06.md)):
-database-derived inventory, target units, four stated assumptions, six
-migration steps, three file-disjoint lanes. The dev loop is proven end to end
-after two fixes (reload order by `:seon.ns/requires`; sparse
-`:seon.source/upsert-rows` contract): an edit published, the cluster adopted
-the same commit, the open page repainted without navigation. Juniper's run
-count rose 548 → 609 during page inspection, confirming previews still
-persist runs; that is migration step 3.
+The overnight work joined the plan model to development publication and browser repaint evidence. The current development target is default, not the scratch deployment used for that proof.
 
 ## Owner correction — selected entity and attributes, 2026-09-06 evening
 
-The debug page clearly identifies one selected entity, then details each of its
-attributes once. Each section has the exact key, its Malli `:description`, and
-paired AI/HTML renders. Raw data and schema remain expandable. References are
-links to select another entity. Direct attributes come first; incoming
-references belong at the bottom and may gain renderings as we iterate.
-Cardinality-many values belong in one section.
-
-The agent owns one plan component ref; that component owns its plan items.
-The full plan renders once, including its hierarchy, progress and update forms.
-Separate reverse-linked plan-item sections are not the requested presentation.
-Default render functions belong to shared schema/domain owners, never Juniper.
-
-Do not label this surface “Assembled context”, “locked”, or numbered blocks.
-Context selection and evaluation reuse remain required behavior, but do not
-replace the entity/attribute layout. Earlier vocabulary below is superseded.
+The owner required selected entities and declared attributes instead of an extra instruction or context-storage mechanism. Later PRD §§14–17 replace manual selection with additive evaluations and component blocks.
 
 ## Integration checkpoint — 2026-09-06, provider-bound context
 
-The shared `transcript/history-entries` now also accepts the execution reducer's
-`:seon.cluster.loop/evaluated-sources` in memory. It uses the same result printer
-as persisted evaluations; no source evaluation or persistence occurs there.
-Focused proof passed 1 test / 86 assertions including fixture assertions: stored
-and in-memory text agree, including original comments, stdout, and result.
-The earlier full transcript gate exposed existing output/budget expectation
-failures plus two incorrect expectations added here; those two expected a bare
-sum but the fixture correctly retained its comments and println form. They are
-corrected. The full namespace is not claimed green. Web cache integration is
-still pending.
-
-The owner reiterated that the debug UI is an iteration surface for the actual
-context sent through the agent loop. Completion requires a real context request
-containing the selected structured evaluations, followed by a live agent using
-that context; paired previews alone are insufficient.
-
-Root found that `transcript/history-entries` ignored selected evaluation refs
-while `transcript/render-ai` honored them. Both now pass the same selection to
-the existing history query. The selected-evaluation regression also checks the
-structured source/result entries and an explicitly empty selection. Its focused
-gate is running; provider composition and memory-only preview integration are
-still unfinished. The edit-hook diagnostic gate passed 8 tests / 43 assertions.
-
-Personal browser inspection of the updated fixture found the new plan tasks in
-paired previews, but parent/dependency labels still expose numeric entity refs.
-Source adoption currently refuses a manifest contract; the operator lane is
-investigating. Do not infer that a file edit has reached the live cluster.
+The provider-bound history projection was repaired to honor selected evaluation references. Selection and repeated history assembly were subsequently retired by PRD §§14–15.
 
 ## Owner ruling — previews remain in memory, 2026-09-06
 
-The owner clarified that preview results are cached in memory, not persisted.
-This supersedes the durable preview-run implementation described in the older
-checkpoints below. Inspecting a renderer must not create durable run, form,
-evaluation, or preview-error records. Reuse the existing parser, SCI evaluator,
-result binding, transcript projection, and invocation cache; separate evaluation
-from persistence within those owners instead of adding a second execution path.
-
-Locking persists the exact cached source, namespace, results, and database basis
-without re-executing, and attaches the ordered evaluation refs to the agent's
-context selection. Relevant data changes replace the current cached preview;
-the locked evaluations remain the comparison baseline. Appending and compacting
-use those same persisted facts. Cache eviction or restart before lock loses only
-an unselected preview; a lock whose cached result is unavailable must explain
-that fact rather than silently evaluate a different result.
-
-No persisted preview-purpose flag is needed. The pending question about how to
-classify durable preview runs is superseded by this ruling. Ordinary agent
-executions remain durable; only selected preview evaluations join their context.
-Implementation is in progress: the live UI still uses durable preview runs as
-of this ruling, despite its lock/change/append/compact browser proofs. Source
-update delivery was separately proven in `f97588da8`.
+The owner kept preview computation in memory rather than writing preview evaluations. PRD §16 retains a non-writing preview of the next system turn, alongside explicit write controls.
 
 ## Design-lab planning checkpoint — 2026-09-06
 
-Live acceptance is currently blocked by a reproduced preview feedback loop,
-recorded in [the execution identity issue](../../../seon/issues/debug-source-execution-invalidates-its-own-preview.md).
-The isolated current-source browser created at least 49 identical identity
-source runs in 19 seconds; its cluster is stopped and its database retained.
-The existing shared user page was not changed. The focused cache test below
-did not model run writes changing the acquired agent argument, so it cannot
-establish safe live reuse. Correct the existing retained execution identity
-before exposing this source path on the shared page or broadening it to all
-found values. Pending and terminal transaction wakes both belong in the proof.
-
-Current integration checkpoint: `5083a373e` retains the selected debug AI
-candidate's ordinary submitted run identity in the existing invocation cache
-(one focused test, 79 assertions). This is selected-preview coverage only:
-found-value candidates and context assembly still require the shared ordered
-source integration. `c1b1996f6` makes the default source read the exact entity
-or cursor value, with actual SCI execution proof (3 tests, 82 assertions).
-`fa492a172` renders top-level multiline result strings directly while keeping
-nested strings structured. `d020f547e` preserves database errors in plan and
-message formatters and gives plan updates a real present item id.
-
-The owner requires omitted database arguments to work in the common execution
-machinery for every caller. Live elided `seon.db/q`, `pull`, and `pull-many`
-succeed, but a fresh SCI fixture calling `(my.plan/plan "alice")` reports an
-arity error despite the declared database-value argument. The existing call
-preparation and indexed argument facts are being investigated; explicit
-`(seon.db/db)` in that generated form is not proof that general supply works.
-An isolated current-source browser proof is underway. The shared 7773 page has
-not yet been claimed to show the newly executed source previews.
-
-Owner reminder: renderer functions can declare a database argument. Existing
-SCI call preparation supplies the current database value when that argument is
-omitted; an explicit caller-supplied database wins. Reuse and verify that
-mechanism for generated forms. A free lexical `db` symbol is not argument
-injection, and no separate injection implementation belongs in rendering.
-
-Execution prerequisite now verified (`f93dae52f`): the final focused source
-submission checks pass 2 tests / 83 assertions. An isolated ordinary boot
-submitted two commented forms, closed their run, stored both numeric results,
-and consumed `result/e0` with zero provider attempts. Shared source preparation
-is committed in `423d46b1c`. Terminal transcript formatting is direct and
-metadata-free in `570a18f48` (1 focused test / 77 assertions). Identity source
-generation is separated from its ordinary result formatter in `e8d73e9d5`;
-this new source path is not yet exposed as an evaluated browser preview.
-The active integration adds stored evaluation identities to the existing
-invocation cache and uses ordinary transaction wakes for pending/completed
-candidate display. No second evaluator, cache, or inclusion registry is planned.
-
-Live checkpoint: `75d6c3787` and `12aeef5de` improve the existing message
-HTML and plan CSS. Root personally inspected both crops after host Var reload:
-message attribution and compact UTC timestamp sit above the authored content;
-plan description and expected result are distinct. The browser proof at
-`152fab80d` passes with 12 paired rows, 293 ms readiness, and no page errors.
-This does not establish the AI execution/cache integration. `671657d51` commits
-the source-submission authority fix and real-evaluator regression, but final
-verification is still pending: setup failed while loading the transcript test
-namespace, which subsequently loaded on its own. No passing execution claim
-is inferred from that standalone load.
-
-Owner clarification, 2026-09-06: debug outputs are possible transcript values,
-not automatically the agent's actual history. Connect the agent's run-loop
-data, submitted forms, and evaluated results to its entity and render them
-alongside generated context forms. Preserve source provenance: evaluating a
-candidate does not mean the agent submitted it or that it belongs in the
-agent's historical exchanges. Reuse one execution and rendering mechanism;
-candidate inspection and actual history are different data, not parallel
-implementations. Inspect existing refs before relocating facts.
-
-Candidate reuse is required: once the debug view evaluates a candidate,
-assembling that same candidate into context and preparing the provider request
-reuse its exact stored source and results without another execution. Presentation
-identity is not execution identity. Verify with an execution count across all
-three consumers; equal displayed strings alone do not prove reuse.
-
-Active goal renewed 2026-09-06: finish the common source → existing reader →
-ordinary SCI execution → stored result → transcript path for AI rendering,
-then compose those blocks into agent context. Completion requires personally
-inspecting live identity, plan, and message data and both output projections;
-useful output, faithful namespace prompts and values, shared result reuse,
-concatenation, and live updates must all be demonstrated. Passing isolated
-tests or improving the preview layout alone is insufficient.
-
-Current implementation work: source submission's transaction namespace check
-and unarmed execution proof; source/result composition research at the existing
-render and prompt boundaries; live HTML/data quality inspection. The prior
-paused submission changes are being reviewed for adoption, not assumed correct.
-Live `pull` confirms Juniper 32120 has its namespace and cluster refs, two
-plan-item reverse refs, a plan anchor, and two sample root messages plus the
-system bootstrap task. The current identity AI output is still comment-wrapped
-data plus source, and message HTML shares a single sentence with its AI output.
-
-Owner transcript direction, 2026-09-06: renderer metadata belongs outside the
-AI output box. That box must show the actual agent-visible text: authored
-thought comments, executable forms, and their actual stored outputs. Use the
-ordinary namespace prompt (`my.agents.juniper=>`) from each execution entry,
-including namespace changes. Returned values and formatted prose are never
-comment-prefixed. Renderer identity, priority, contracts, read evidence, and
-definition source belong in separate inspection details. Reuse the existing
-reader, run execution, result storage, and transcript renderer; a generated
-query beside acquired data is not evidence that the query executed. Metadata
-separation is implemented in `90b46572a`; the identity renderer still emits
-source text and needs the existing source/run integration before its preview
-can honestly show an executed form and result.
-
-Owner's current visual iteration: show found values as paired AI/HTML previews
-first. Clicking a value exposes other applicable renderers in priority order;
-absent renderers and empty stages do not appear. Actual rendering errors remain
-visible. Establish one default agent identity block with a database "who am I"
-query, agent id, assigned namespace, and cluster before proceeding to distance
-rendering. Data attributes, values, refs, and renderer functions are all open to
-revision during these experiments. The live Juniper fixture and reproducible
-seed are recorded in [the example state](../research/juniper-example-state-2026-09-06.md).
-Paired previews are browser-verified on Juniper's current entity 32120: identity
-query/card, plan and message rows, and collapsed applicable alternatives. Focused
-identity and web checks passed. Generated bootstrap still rejects a nil entry at
-`seon.bootstrap/entry-source`; the preview milestone does not establish healthy
-agent execution. First-party loading remains unresolved: see
-[the version-aware loader audit](../research/first-party-function-loading-audit-2026-09-06.md).
-
-Inline definition inspection is verified (`809e726d9`, corrected `93cc6bab0`):
-candidate cards expose the retained SCI function source without leaving the
-input. A live mismatch exposed a fixture using the raw DB key instead of
-`:seon.sci.eval/function-source`; the correction has five passing focused
-assertions, including an actual acquired program record. The browser opens the
-definition without changing subject/URL and retains paired output. This is
-function definition evidence, not an executed producing form. The full goal
-remains active; source-run submission and producing-form integration are not
-claimed complete by these visualization improvements.
-
-Selected-value inspection correction: the existing URL cursor now selects the
-input for structural display, actual output and both candidate experiments.
-Previously only the structural display followed that path. Browser proof clicks
-the stored title, observes its scalar floor outputs in AI and HTML, returns to
-the unchanged entity and graph, and verifies a missing-path diagnostic. Basis
-536871436 stayed unchanged. The header labels configured query bounds honestly.
-See `../research/debug_selected_value_probe_2026_09_06.cjs` and the resolved
-`debug-selected-value-keeps-entity-renderers` issue.
-
-Stored-run visualization now uses the existing transcript renderers by default
-(`a34f91ae5`). The focused test passed 89 assertions; a fresh branch's browser
-shows stored forms and results in both AI and HTML without changing its basis
-transaction or evaluation count. Generic function invocation evidence is still
-not an executed source string. Source submission work remains separate.
-The edit-hook publication and exact fresh-fork checks are recorded in
-`../research/edit-hook-publication-proof-2026-09-06.md`.
-
-Live cache integration verification, 2026-09-06: with the shared cache active,
-a title transaction at basis 536871429 changed both candidate projections and
-the selected output in the already-open page. Restoring the original renderer
-through SCI changed HTML at unchanged basis 536871430. Both checks retained the
-same Cytoscape instance, container, zoom and pan with one initial navigation
-and no JavaScript errors. The title and renderer were restored. The browser
-probe compares graph snapshot identity rather than the entire header, whose
-measured acquisition duration can legitimately change.
-
-Owner cache direction, 2026-09-06: evaluating a renderer for visualization
-must populate the same invocation cache later consumers use. Presentation
-call IDs are not invocation identity. Reuse requires the same actual function,
-output, prepared inputs and program world, with current database read evidence;
-do not scan every retained call to discover a hit. The existing render proc
-owns this cache. Executed source forms use their ordinary stored results;
-opening an inspection must not rerun them. Cross-surface reuse is implemented
-in the existing render proc. The focused
-regression counts actual SCI invocations: two presentation IDs reuse one
-invocation, an unrelated transaction reuses it, and a changed queried fact
-invokes again. Eight focused checks passed with 131 assertions and no failures
-or errors. This is not a claim that the entire web suite is green.
-
-Rendering-limit checkpoint, 2026-09-06: `cc667a426` disables the formatter,
-prompt, and render-admission cuts; `f48d27012` renders all namespace/transcript
-data admitted by their query bounds. Focused admission/print gate: 25 tests,
-111 assertions, zero failures/errors. A live hot-reload probe preserved full
-data under depth/width/string caps of 1 and a two-node cap. The actual
-`/ns/seon.flow/debug` browser now contains both AI and HTML function summaries
-through the final output path (308 ms observed ready time, no JavaScript
-errors); `debug_complete_render_probe_2026_09_06.cjs` preserves the check.
-A later browser pass exposed missing function summaries: generic producer
-preparation dropped the entity `:db/id` before the namespace renderer queried
-its functions. The live database has 50 matching functions; the prepared
-argument lacked the id. Restoring the acquired root id at generic producer
-preparation restores the
-actual namespace outputs in both projections. The browser probe checks the
-qualified HTML summary and the actual AI namespace plus unqualified `defn`;
-these are intentionally different outputs. The final browser pass passed at
-1440 and 390 pixels with no JavaScript errors
-and 161 ms observed completion. The graph library already resizes its canvas;
-the probe now waits for that observable result instead of assuming two animation
-frames suffice. The actual plan entity 32011 also appears in both projections.
-These observations exercise hot-loaded JVM Vars
-on `lab-browser-0906`, not a fresh fork's indexed source. Initial source hook
-publication encountered concurrent initialization lock contention; subsequent
-publication succeeded.
-
-Owner clarification — all rendering limits, 2026-09-06: disable presentation
-size, depth, child-count, and token-budget enforcement for experimentation.
-Keep measured costs visible; query execution bounds and evaluation deadlines
-are separate from rendering. Do not replace limits with enormous constants.
-Implementation and live verification are in progress, not yet complete.
-
-Owner visualization direction, 2026-09-06: show both `:seon.render/ai` and
-`:seon.render/html` outputs in each ordered renderer comparison. The list runs
-from most specific to least specific and distinguishes the current selection,
-lower-priority alternatives, rejected contracts, and missing projections.
-Derive ordering from the existing selection owner and pair projections through
-declarations or their selection stage, never function-name guesses. Actual
-candidate previews must reuse the existing invocation and retained-call path.
-
-Owner steering — visualization and design iteration, 2026-09-06: stop trying
-to solve namespace rendering or the entire platform before experimentation.
-Implementation agents are paused and their unfinished shared-tree edits are
-preserved. The next work is feedback-driven iteration on the visualization,
-using the default renderer and inspectable candidates; specialized-renderer
-perfection is not a prerequisite. Automatic goal continuations do not override
-this direction or authorize restarting paused implementation lanes.
-
-An interactive design example was shown in the conversation at
-`/Users/sean/.codex/visualizations/2026/09/05/01a072a8-9fd1-7863-b8c1-34b2c3d9e577/seon-inspection-layout.html`.
-It compares sidebar versus inline inspection and simulates attribute selection
-and renderer previews. Browser checks verified these local interactions and
-360-pixel containment. Its data, ranking, and producing forms are illustrative,
-not evidence of executed forms or adopted renderer precedence. It is not the
-completed production lab. Await owner feedback before choosing its layout or
-resuming the platform changes.
-
-Candidate and prompt UI integration checkpoint, 2026-09-06: retained arguments
-and Malli contracts now have disclosures; candidate/selected function links
-navigate to their actual database entities, and AI/HTML links preserve viewer
-and subject. Browser clicks proved the round trip and definition navigation
-with no JavaScript errors. Candidate focused checks: 84 assertions passed.
-Prompt comparison separately displays historical capture and current preview;
-83 focused assertions and actual browser comparison passed. Browser scripts
-`debug_candidate_controls_probe_2026_09_06.cjs` and
-`debug_prompt_browser_probe_2026_09_06.cjs` preserve those checks. The goal remains
-open: normal durable source submission and namespace-output readability are
-being improved at their existing owners, with no per-render interpreter.
-
-Owner clarification, 2026-09-06: reuse the normal source execution and
-settlement mechanism for lab comments/forms/results. The parser does not own
-SCI context creation: `reply/sources` parses source, while the existing run
-loop freezes intent, `resume-turn` obtains `sci.eval/fork-for-turn`, evaluates
-ordered forms and binds their results, then settles the batch. The lab should
-use that complete path and its ordinary stored results. Do not replace each
-renderer invocation with a separately invented parser/fork mechanism. The
-previous fork-per-render design question is superseded by this clarification;
-trace the smallest existing entry seam for system-authored source without a
-paid model call. Read-only inspection itself must remain read-only.
-
-Two-viewer and reopen checkpoint, 2026-09-06: actual browser inspection of
-the same plan entity now selects at namespace stage for `my.plan` and schema
-stage for `seon.flow`, with the same database snapshot, graph, and actual output.
-No agents or transactions were created by opening those agentless debug routes.
-Both headers show the sovereign indexed-source digest and handed projection
-fingerprint. Browser-discovered namespace return-contract mismatch and stale
-closed-viewer runtime caches were fixed in `f4b08e7c5` and `289c9913f`
-(79 and 77 focused assertions). Stronger browser assertions pass after the
-existing runtime-eval event; no cache-busting URL or reset is used.
-
-Live delivery checkpoint, 2026-09-06: the isolated `lab-browser-0906` probe
-now passes a real database transaction through SSE into the same open browser.
-A plan title changed and a new dependency ref appeared; basis advanced
-536870953→536870954, nodes/edges changed 2/1→3/2, and container, Cytoscape
-instance, zoom, and pan survived without navigation or JavaScript errors.
-The initial attempt exposed selection/invocation using different pulled-ref
-shapes; `f609acb71` fixes the shared argument preparation (76 focused assertions
-passed). Reproducible fixture, exact transaction, and proof limits are in
-[live feed proof](../research/debug-live-feed-proof-2026-09-06.md).
-The subsequent SCI definition-only probe also passed: an MCP redefinition of
-`my.plan/render-item-html` changed the open browser output at the unchanged
-database basis, preserving graph/container/viewport without navigation. The
-original definition was restored immediately from the scratch database's exact
-source. Actual producing-form display and the remaining audited inspection
-requirements remain open; the complete goal is not yet achieved.
-
-Browser checkpoint, 2026-09-06: the live debug page now draws the actual
-34-node/33-reference graph alongside selected output. Browser-discovered
-container, event namespace, status replacement, and parent-selector defects
-were fixed (see `docs/seon/issues/debug-graph-model-did-not-prove-visible-interaction.md`).
-The committed browser probe verifies preserved instance/viewport/selection on
-client reconciliation, edge detail, physical node-click navigation retaining
-the viewing namespace, and no horizontal overflow at 390 px after native
-resize. No JavaScript errors. Warm local ready samples ranged from roughly
-56 to 686 ms; these are observations, not a latency guarantee. Proof used
-hot-reloaded JVM web Vars and current static assets on default PID 14798,
-not a freshly forked cluster's indexed program. Actual database-change→SSE→
-browser update remains unproven by this probe. The complete goal remains open.
-
-Owner decision, 2026-09-06 (supersedes the thinking-field experiment below):
-drop `:seon.render/thinking` for now. Author ordinary source containing thinking
-comments and executable forms; reuse the existing reader and evaluation path,
-and render the ordered source plus actual results. Results never become
-executable source merely because their printed representation contains forms.
-Keep this structure available for graph coverage and dependency analysis.
-
-Owner coverage objective, 2026-09-06: efficiently explain the data within N
-hops of the agent entity using knowledge of the actual graph and the queries
-that generated each block. Define the neighborhood from one immutable database
-value with explicit reference directions. Measure attribute/value coverage,
-not merely visited entity IDs. Query/pull selection identifies source data;
-rendering and final fitting determine what was actually displayed, summarized,
-or elided. Compare candidate blocks by additional coverage, repetition, complete
-context tokens, and database work. Encourage ordinary agent-authored functions
-over these facts; derive provenance at existing read/render seams rather than
-requiring agents to hand-maintain coverage lists. This is the proposed
-experiment; exact displayed-fact provenance is not implemented yet.
-
-Owner proposal, 2026-09-06: let an AI render produce source for the existing
-reply reader, forming blocks of explanation, executable forms, and evaluated
-results. Analyze the source with the existing clj-kondo owner; combine those
-references with actual database-read and displayed-value provenance to select
-and order explanations across blocks. This is an experiment, not a changed
-render contract. Source references, facts read, facts displayed after fitting,
-and concepts explained are distinct observations. `seon.print/references`
-already discovers symbols and schema-derived identities in structured print
-nodes, but does not prove which attributes were visibly explained. Never
-reparse evaluated output as executable source or infer database identities
-from arbitrary prose/numbers. Preserve actual history and effect order;
-compare dependency ordering of independent generated explanation reads.
-
-Owner direction, 2026-09-06: context discovery must start from the database,
-including the agent entity and its related entities. The plan should introduce
-current work and teach direct queries and transactions over those same facts,
-including creating related data. Inspect and improve `my.plan` in place. Current
-source already declares an optional `:my.plan/anchor` on agent state and
-`:my.plan.item/agent`, `/parent`, and `/needs` refs on items; do not add a
-mirrored plan population merely to make the connection visible. Verify actual
-population, reverse-pull discovery, and direct transaction semantics before
-claiming this works end to end.
-
-The owner rejects hand-written layout as the general solution. The fixed
-three-entry primer below is a return-shape experiment, not the proposed
-composition algorithm. Its latest third form returns thinking conditional on
-the actual plan plus its AI rendering; all three evaluations succeeded, but
-this still does not establish general discovery, ordering, or composition.
-Current ordering is owned by `seon.render.walk/ordered-episode`, while
-`my.plan/render-plan-ai` and `/render-plan-html` manually assemble sections.
-Evaluate recursive rendering of ordinary data and forms through the existing
-selection/floor mechanism; distinguish executable dependencies, explanatory
-ordering, and visual layout rather than assuming one graph order solves all
-three. The Datahike findings are in
-[context-query generation](../research/datahike-context-query-generation-2026-09-06.md).
-
-Temporal teaching experiment, owner discussion 2026-09-06: compare compact
-forms with a useful mix of `pull`, `q`, `since`, `as-of`, and `history` when
-those operations answer a relevant question. Do not require all operations in
-every primer. Keep information/concept coverage, duplicate information,
-complete context tokens, database work/latency, and source characters as
-separate measurements; shortest source is not yet a ruled optimization target.
-The Datahike source research owns the exact temporal semantics and query
-examples. Receiving a message, processing it, and actually including it in an
-agent context must not be conflated when deriving what is new.
-
-Executed primer experiment is persisted in
-`../research/thinking_primer_probe_2026_09_06.clj`: three forms in a disposable
-SCI turn fork (`dir my.plan`, one bounded query for two function docs/arglists,
-and `render-plan-ai` composed with `plan`). All three returned without eval
-errors; observed evaluations were 14.4, 11.8, and 9.3 ms respectively, one
-sample only. `dir` produced 12 public names; the batched query produced two
-function maps; root's plan output had zero obligations, ready items, blocked
-items and recent completions. The admitted values were inspected directly;
-the file now emits their ordinary printed representation. Its thinking text
-is still authored per example, so it does not yet prove data-dependent thinking
-or minimal-form selection. Live macro expansion also proved `doc` and `dir`
-are single-argument, contrary to the suspected completed bulk extension.
-
-Owner display direction, 2026-09-06: keep the clean layout, warm the palette
-to complement the existing Phosphor Terminal theme, and avoid excessive orange.
-The updated mockup uses warm charcoal/cream, muted sage selections and sparse
-amber. The default inspection should show the rendered value plus its producing
-Clojure form, with raw stored attributes/datoms behind disclosure. A short
-description may come from the selected function's docstring.
-
-Open design experiment from the owner: optional `:seon.render/thinking` for a
-data-dependent explanation. Proposed interpretation is authored explanation
-metadata computed alongside a render result, sharing its input snapshot and
-read dependencies; it is not a third output projection or a new stored mirror.
-Docstring text describes the function generally and must not be presented as
-a data-dependent explanation. The producing form must come from actual
-acquisition/invocation evidence; never fabricate a replayable query from only
-the printed result. This is a design proposal, not an installed schema or a
-settled return-contract change.
-
-The owner approved the planning approach and requested research agents plus
-a mockup. Research is committed: [graph source review](../research/graph-visualization-source-review-2026-09-05.md)
-(`70ea7a53c`) and [interaction semantics](../research/inspection-interaction-review-2026-09-06.md)
-(`2244b15a4`). Cytoscape 3.30.4 is pinned under `reference-code/cytoscape`.
-The interactive conversation mockup was presented with explicit example data;
-it is not production evidence or approval of every interaction shown.
-
-The implementation dependencies are: correct linked datoms and distinct
-subject/viewer first; one persistent graph of that same bounded observation
-second; same-snapshot multi-subject composition before accumulated expansion;
-candidate source/contracts from actual selection evidence alongside that work.
-Alternative renderer execution remains a separately labelled experiment; the
-mockup's local preview must not become an implicit production invocation.
-
-| Work / uncertainty | Smallest decisive verification | Stop / reuse rule |
-|---|---|---|
-| Reference navigation | One focused case covering outgoing ref, incoming source, attribute identity, scalar non-ref, and retained viewer | No namespace-wide suite; reuse this proof until navigation inputs change. |
-| Unrelated transactions rerender | `unrelated-transaction-reuses-debug-observation-and-render-call` is the retained proof | Resolved after `b080f42d1`: observation/discovery/invocation remained 1/1/1 after an unrelated transaction and became 2/2/2 only after selected data changed. Focused result: 76/0/0. |
-| Useful bounded HTML | Finish the existing preview-focused cases and inspect actual HTML once | Do not rerun the long grammar property while iterating on preview presentation. |
-| Graph identity and lifecycle | One directed multiedge/self-loop specimen; ten model patches, then remove the graph element | One instance, preserved positions, exact qualified attributes, destruction on removal. No new backend or layout benchmark until this passes. |
-| Accumulated exploration | Expand two subjects and transact a connecting ref; assert every returned page has one database identity | Client-only unions fail this requirement. Compose bounded existing observations server-side before claiming live accumulated exploration. |
-| Actual output and updates | One already-open page; selected-data change and rendering-helper change, then restore both | Same captured render-call supplies explanation and output. Measure complete paint, not only loading-shell HTTP latency. |
-
-Current runtime evidence: MCP answers on PID 14798, start
-2026-09-06T00:19:25Z, prepl 55586. Publication succeeded after removing the
-proven stale kondo CLJ cache entry; default was reforked from
-`6a9cb133-e5c9-50d3-ae7c-b373eac32476`. This does not certify the runtime clean:
-MCP reports one `seon.fn/analyze-forms` invalid-output core fault, one
-maintenance settlement refusal, and one failed root run. These are tracked
-in the existing fault-storage issue pending cause inspection; do not start
-another broad repair campaign unless one blocks the decisive UI proof.
-
-Historical pre-fix verification: DB semantic replay 78/0/0, bounded/opaque
-request refusal 1/0/0, lazy/opaque safety 4/0/0, runtime-evaluation wake 8/0/0;
-web unrelated-transaction reuse 2/2/0. Counts are pass/fail/error, from
-`tmp/design-lab-cache-final.log`. The later `b080f42d1` focused proof resolved
-that web failure: 76/0/0, with 1/1/1 initial calls, unchanged 1/1/1 after an
-unrelated transaction, and 2/2/2 after selected data changed.
+The design lab accumulated renderer, source-fidelity, plan, publication, and browser evidence while the record model was still changing. Its disabled caps, stored-result proposals, and unit-by-unit curation are superseded by PRD §§14–17; the dated research notes retain the measurements.
 
 ## Active execution goals — dinner continuation, 2026-09-05
 
-**Owner correction: planning before further implementation (2026-09-05).**
-The immediate deliverable is a source-grounded UI design and an efficient
-execution plan, not another round of reactive repairs. Preserve the complete
-debug-UI objective below, but defer its implementation sequence until this
-planning checkpoint is recorded:
-
-- Specify what each screen region displays, what each click does, and how
-  graph selection, stored datoms, renderer ranking, and actual output stay
-  connected. Distinguish existing behavior from proposed behavior.
-- Use the graph research agent's pinned Cytoscape source review to choose
-  navigation, incoming/outgoing expansion, large-data limits, incremental
-  updates, and lifecycle handling. Produce a concrete visual proposal before
-  spending more time polishing the current layout.
-- Classify each remaining defect as blocking that experience or independently
-  deferrable. Work only on the critical path; keep unrelated platform findings
-  in their existing issue notes rather than expanding the implementation.
-- For each uncertainty, name the smallest falsifying REPL probe or focused
-  test, its expected result, its bound, and the decision it will resolve.
-  Preserve successful evidence with its code basis; repeat only after a
-  relevant change or a new counterexample.
-- The orchestrator owns one serial integration gate. Agents may run only the
-  explicitly assigned focused tests; namespace-wide/full suites, automatic
-  confirmation fanout, repeated source publication, and independent resets
-  are not default lane work. Inspect live process ownership before stopping
-  an existing run; never infer completion from silence.
-- Delegate bounded source research and disjoint implementation only after
-  inputs, outputs, ownership, and acceptance are written. Before each launch,
-  explain how its result changes the next decision. Stop obsolete work.
-
-Completion of this checkpoint means a reviewable visual proposal, an ordered
-implementation dependency list, and a bounded verification matrix. It does
-not mark the full active debug-UI goal complete. The owner asked to discuss
-the display, so do not treat an unanswered layout preference as approval.
-
-The owner asked for continued autonomous progress while away. This ordering
-supersedes the older session checkpoints below for the current design-lab work.
-The existing active goal remains incomplete; source edits, delegation, an HTTP
-loading shell, and tests alone are not completion evidence.
-
-1. **Run a coherent current program.** Resolve the reproducible source-analysis
-   arity discrepancy, finish and commit the bounded HTML preview, then publish,
-   refork and start the shared default cluster. Verify that `1f3c099d2` is
-   included, record the published source identity and process identity, and
-   prove a clean generated opening, including the previously missing empty
-   agent namespace. The cluster is stopped at this checkpoint.
-2. **Complete the first usable debug inspection.** Show actual entity datoms
-   and reference navigation, the real ranked render selection, and useful
-   bounded AI/HTML output. Verify arbitrary subjects and distinct viewers,
-   pagination, missing-data diagnostics, and a readable wide/narrow layout.
-   Use an isolated headless browser if the desktop remains locked.
-3. **Prove live updates and bounded work.** On an already-open view, change and
-   restore relevant data and a rendering helper through the MCP evaluation
-   tools. Verify automatic repaint, unchanged-input reuse, unrelated-transaction
-   reuse before discovery/invocation, and recovery by a late-joining feed.
-   Record cold/warm complete-render timings and actual work counts; investigate
-   surprising cost instead of hiding it behind delivery suppression.
-4. **Close the storage and recovery defects needed for reliable experiments.**
-   Confirm bounded fault facts on the fresh cluster and measure store growth.
-   Check the existing garbage collector before adding machinery; reclaim only
-   proven inactive disposable test roots. Coordinate the global write bound and
-   missing-result recovery with the other agent's already-owned work.
-5. **Simplify evaluation bookkeeping from the completed audit.** Prototype the
-   one-form-entity model and recovery ordering against actual transactions,
-   including newly appended forms after an interrupted generated run. Delete
-   redundant state only after those invariants are proven. If a cross-owner
-   design decision is still necessary, persist concrete alternatives and keep
-   advancing independent work; do not invent a choice for the absent owner.
-
-At every coherent checkpoint: run the relevant focused checks, verify the live
-behavior, commit explicit owned paths, push, and update the linked
-[inspection evidence](../research/design-lab-inspection-slice-2026-09-05.md).
-Report failures and limits honestly. No paid model calls are needed for these
-checks. The first inspection milestone may complete before the wider storage
-and simplification work; do not report the whole platform finished on that basis.
-
-*THE one live record of current state and ordering (owner ruling,
-2026-08-29): write-through in the session it changes, path-limited
-commits. The sci-execution-runtime `unsettled.md` is tombstoned and
-historical. Dates are absolute; a stale claim here is a defect.*
+The dinner continuation prioritized getting the existing platform running and removing known defects before more presentation work. This is a historical ordering, not a second active schedule.
 
 ## Current state (2026-09-02, afternoon)
 
-**Owner reframe (2026-09-02, conversational, supersedes the reader-centric
-spelling of 53–55):** the agent is dropped into a Clojure REPL in its own
-namespace. Context = the data discovered from the agent's entity outward
-+ the BEST render function for each value (priority chain: an inline
-render on the value → a function in the agent's own namespace whose input
-schema is the data's schema and whose output schema is `:seon.render/ai`
-→ the family's schema-declared face → the floor) + the teaching needed to
-explain what was shown, derived by walking back from the render/query
-functions used: `doc` and `dir`, never prose walls. `doc` becomes
-polymorphic — anything, or a list of anythings (namespace, function,
-test, schema, value) — showing the relevant parts; we own every tool and
-tailor it to the system while keeping its Clojure spirit. Queries stay
-legit Datalog/pull with good examples: easy first query, then "what is
-new" via `since`/`as-of`/tx-meta conventions. Every agent in every
-namespace is tutorialized on ITS neighbourhood and encouraged to write
-its own render functions, which also become HTML interfaces. Delta
-mechanism: OPEN — probe in the REPL first (evidence:
-[repl-first-probes-2026-09-02.md](../research/repl-first-probes-2026-09-02.md)).
-Budget: compaction over evals (ruled). Sequencing: reds first, then the
-generator concurrent with the bridge lane (ruled).
-
-**Platform (derived 2026-09-02, `bin/test --all` at 43e5e2fff,
-tmp/gate-all-2026-09-02.log):** platform tier 72 tests, 1 error —
-`cohost-boot-test/a-second-cluster-boots-…` hit the 270 s exchange bound
-under heavy load and passed its isolated confirmation (202 s); five
-platform tests take 200–244 s each (slow-is-a-bug, unmeasured cause).
-The bulk tier did not run. NEW DEFECTS this session, lanes launched (all
-six first launches died to intermittent DNS failures reaching the Codex
-endpoint; relaunched under `-2` names): bare `bin/test` cannot record
-persistent results while any cluster holds the store AND the refusal
-throws before the tally (`gate-evidence-2`); `runtime_status`
-missing-projection (`mcp-status-2`); `/agent/<id>/debug` swallows the
-prospective-context cause (`debug-page`, relaunch owed); two
-`gen.loop-test` census errors (`gen-loop-2`); the two armed reds
-(`armed-reds-2`); the attempt-traces blocker (`attempt-traces-2`). Filed
-without a lane yet: `seon.db` reads rebuild the projection per call when
-none is handed — 2.4 s vs 0.1 ms raw
-([issue](../../../seon/issues/seon-db-reads-rebuild-the-projection-per-call-when-none-is-handed.md),
-class/p1, blocker for "context is queries"); `doc` contract lines print
-schema bodies and flatten arities
-([issue](../../../seon/issues/doc-contract-lines-print-schema-bodies-and-flatten-arity-alternatives.md),
-now critical-path teaching work).
+The September 2 checkpoint recorded the program-graph and armed-runtime baseline and outstanding integration work. Its lane and test counts are point-in-time evidence.
 
 ## Session resumed (2026-09-02, evening) — lane round 1 outcome, round 2 launched
 
-**Landed (reviewed):** `3c162853f` armed-reds — both armed reds green; the
-fault WAS committed as a fact all along: core.async.flow retains a proc's
-pre-transition `:paused` status after a throwing transition
-(`reference-code/core.async/.../flow/impl.clj:282`), so the test wedged in
-teardown's armer-quiescence wait, not in the fact await; the boot-window
-test now awaits the run whose trigger is the boot-window message.
-`927229929` gen-loop — the fixture treated receipt-row presence after a
-fixed drive loop as settlement; it now awaits the exact terminal census
-through the bounded event boundary (production settlement is synchronous
-and atomic, `loop.clj:682`/`run.clj:1108`; a writer race was REFUTED).
-`fb3a61abe` gate-evidence — bare-gate evidence routes through the live
-store holder's advertised prepl (offline when no holder), the tally
-prints BEFORE persistence and the exit code derives from tests alone,
-recording failure is one loud typed line. `ab9559929` attempt-traces —
-the fixture's no-backup world made explicit; whether the seed is green at
-HEAD is UNVERIFIED (lane round 2). `612122fa6` issue: the preflight sweep
-race.
-
-**New blockers found by the lanes:** the evidence write through the live
-holder is REFUSED because instrumentation installs the SIBLING's contract
-on `seon.schema.datahike/resolve-datahike-form`
-([issue](../../../seon/issues/instrumentation-installs-sibling-contract-on-datahike-resolver.md),
-class/p1 — stale-green stays UNKNOWN until fixed); `bin/test`'s preflight
-sweep races concurrent invocations and aborts gates
-([issue](../../../seon/issues/bin-test-preflight-sweep-races-concurrent-invocations.md)).
-Diagnosed without landing: `runtime_status` (cluster.clj:509 lacks the
-projection; fix pattern = `mcp-effective`), `/agent/<id>/debug` (page
-renders only the message; suspected missing `:seon.render/profile`).
-
-**Round 2 lanes (launched ~21:30Z, tree quiet):** `mcp-status-3`,
-`debug-page-3`, `sibling-contract`, `sweep-race`, `db-projection`
-(the class/p1 per-call projection rebuild), `attempt-traces-3`. Exhaust:
-six returned lane roots swept; one orphan runner-exchange helper reaped;
-`tmp/test-runs` holds 1.0 GB of retained roots (holderless; sweep after
-the sweep-race lane lands).
-
-**Design (2026-09-03):** the owner ruled the four forks (ledger 56) and set the phase rule — BEHAVIORS FIRST: [repl-first-behavior-2026-09-03.md](repl-first-behavior-2026-09-03.md) is the behavior spec under markup (B1–B12, 19 ❓ each with a recommendation); implementation talk only after every ❓ is gone. The `doc-polymorphic` lane was stopped for that reason (resume when B6 settles). Earlier text: the [design draft](repl-first-context-design-2026-09-02.md) §9 carried four forks for the owner (faces as contracted functions vs the
-schema property; since-shaped delta vs revision diff; implicit printer vs
-an explicit agent-callable; identities on `[*]` ref leaves). Generator
-work starts only after his answers and the platform items above.
+The first lane round landed fixes and launched a second round; one fixture had mistaken evaluation-row presence for a successful outcome. Subsequent checks must observe terminal facts rather than absence of an error signal.
 
 ## 2026-09-03 (afternoon) — round 2 outcome, round 3, the behavior spec
 
-**Landed:** `1b22034b6` sweep-race (claim-before-sweepable + vanished path
-= success); `768c6a0e0` db-projection (projection cached by exact
-committed identity: wrapper 0.220 → 0.048 ms; issue stays open only for
-the literal 2× ratio — owner decision on a decoded-result cache);
-`8fa146805` sibling-contract REFUTED (the 1-arg resolver's body calls the
-2-arg sibling, which truthfully names itself; the real defect is the
-projectionless naked call — owned by
-`malli-form-predicate-resolves-the-declaration-population-itself`);
-`98b6175be` attempt-traces closed (fixture-side, seed proof recorded);
-`1ecd7054e` mcp-status landed by the orchestrator from lane -3's draft
-(issue archived). Still running: `debug-page-3`, `parallel-paths-census`
-(research: the refactor/merge/delete register the owner asked for),
-`analyze-form-row` (BLOCKER: root's contracted defn never settled —
-analyze-form returned `{:seon.ns/name nil}`; root burned a 44-form paid
-run), `reap-nil-path`.
-
-**Behavior spec:** [repl-first-behavior-2026-09-03.md](repl-first-behavior-2026-09-03.md)
-now carries §G (the walk as forms), B4 with the MEASURED fit ladder
-(strings halve to zero first — the dumb clipping), B5 with real diff
-bytes and the `since` lookup-ref trap, G6 render provenance (cost fact
-lacks the render function symbol). Rulings 56–57 sealed. Open ❓ listed at its
-foot; the owner rules them, then implementation talk begins.
-
-**Tool defects this round:** `get_value` elides large strings with no
-paging ([issue](../../../seon/issues/mcp-get-value-elides-large-strings-with-no-way-to-page-them.md));
-MCP result projection prints zero-character strings above the blob threshold (same
-issue). `runtime_status` fix landed but the live `ctxprobe` JVM serves
-pre-fix code until restart.
+The second round fed a third round and the behavior specification. That specification remains historical evidence where the turn-loop PRD changes its model.
 
 ## 2026-09-03 (late afternoon) — round 3 landed, round 4 launched, ruling 58
 
-**Landed:** `ee11cfa45`/`ba94d7b3c` analyze-form-row — a nil namespace pull
-now returns a typed `:seon.fn/namespace-unresolvable` error, never a
-partial row; the exact prose-prefixed defn settles at HEAD (real run-loop
-regression added; the historical cause on ctxprobe is attributed to that
-JVM's age, not the current path); `b136f574f` reap-nil-path — malformed
-claims are named refusals in the reap result (the nil was NOT a root path,
-see the new class below); `78cee3fea` debug-page-3 — debug requests carry
-the agent profile and the page renders the diagnostic. Research landed:
-[parallel-paths-register-2026-09-03.md](../research/parallel-paths-register-2026-09-03.md)
-(three semantic context assemblers, two prompt glue paths; the
-refactor/merge/delete register for the implementation phase).
-
-**New class found by two lanes independently — instrumented Vars refuse
-values their own declarations allow:** `seon.fs/delete-recursively!`'s
-2-arity re-enters the wrapped 3-arity with nil options → every 2-arg
-deletion refuses under instrumentation
-([issue](../../../seon/issues/delete-recursively-two-arity-refuses-under-instrumentation.md));
-`seon.context/message-custody` declares `[:maybe run-id]` and is refused
-nil → the history walk fails for any message when the agent has no
-current run — a context-generation blocker between runs
-([issue](../../../seon/issues/instrumentation-rejects-message-custodys-declared-absent-run.md)).
-Lane `instrument-absent-args` owns the class. Also: the operator
-parked-collection regression no longer reaches its GC latch
-([issue](../../../seon/issues/parked-collection-regression-no-longer-reaches-gc-latch.md),
-lane `parked-collection`); lanes are not given the Seon MCP tools
-([issue](../../../seon/issues/lane-toolset-omits-required-seon-mcp-tools.md)).
-
-**Ruling 58 (owner):** `(help)` bootstraps generatively; render functions
-accrete ACROSS agent namespaces with the whole order as one query; render
-provenance rides the existing after-value comment; compaction = a fresh
-session that loses nothing, and the system is developed for FULL
-REGENERATION EVERY TURN first — incremental diffs (56b/B5) are a later
-wave. The behavior spec's B1/B3/B5/B8 carry it.
+The third round landed and ruling 58 set the next work. The reported message-custody attribution was later refuted rather than treated as an established cause.
 
 ## 2026-09-03 (evening) — rulings 58–59, the ONE-platform document
 
-Owner rulings 58 (help bootstraps generatively; cross-namespace render
-accretion with a single-query order; provenance on the result-handle
-line; full regeneration every turn first, diffs later) and 59 (NO
-DELETION before one design doc; floor-only provenance; `result/<id>`
-handles revived as real symbols; closest-then-newest) are in the ledger
-and the behavior spec (B1, B3, B5→later, B8, B13, G6). The one-platform
-document the owner required —
-[repl-first-one-platform-2026-09-03.md](repl-first-one-platform-2026-09-03.md):
-what survives, what we add (generator as generated evals, the
-render-selection query measured live, polymorphic doc/dir, smart fit,
-result handles via the def-restore seam, floor provenance), what we
-refactor in place (11 rows), what we delete (D1–D11, each with replacement
-and proof gate), six waves — is drafted for markup. Wave 1 (platform
-floor) is proposed to start now; nothing else before the behavior ❓
-list empties. Lanes running: `instrument-absent-args`,
-`parked-collection`.
+Rulings 58–59 consolidated the proposal into one platform document. The current single entry is the turn-loop PRD, not that earlier document.
 
 ## 2026-09-03 (night) — ruling 60, the document restructured for review, lanes quiet
 
-Owner ruling 60 (render function = any function whose inputs are
-satisfiable from the value + injectables and whose output is `/ai` string
-or `/html` hiccup; inline content or symbol allowed; handle ids derived;
-budget = config fact in TOKENS, 5k; NO CODING until the document
-convinces). The one-platform document now opens with the goal, what we
-have (register in one screen), and §0b TURTLES — the render-function
-dolls by family (layout → entry → value → floor), the transcript as a
-pull rendered, the no-hardcoding test. Landed: `5ec65c82c`
-instrument-absent-args (delete-recursively! arities share one
-implementation; the message-custody attribution was REFUTED — Malli
-honors `:maybe`; the debug page's real cause is a missing agent id,
-[issue](../../../seon/issues/prospective-debug-walk-omits-agent-id.md));
-`8a261c9c1`/`6e2fb68f7` parked-collection (production still collects;
-the regression now parks the direct seam; note: that lane amended the
-orchestrator's commit `d5889c194` → `f8bac9cd4`, content intact). No
-lanes running. Platform fixes continue only on code that stays (§4 of the
-one-platform doc names what does not).
+Ruling 60 restructured the proposal for review and lanes were quiet. A suspected custody cause was refuted by the dependency behavior.
 
 ## 2026-09-04 — ruling 61, the visual
 
-Owner: pivot away from custom reader functions toward generated,
-demonstrated queries (intent comment + real form); the WATCH is the delta
-driver. Verified at HEAD: Datahike `listen!` wrapped once by
-`seon.cluster.wake/route!` (payload-free, never throws/parks; ruling 41
-keeps listeners system-side) and per-query interest already derived from
-read-evidence attributes (`:seon.render.web/interest`). The reusable
-design language — GRAPH (live edge counts) → WALK (generated forms with
-derived intent comments) → TRANSCRIPT (rendered, `result/<id>`), the
-watch as a loop — is
-[repl-first-visual-2026-09-04.md](repl-first-visual-2026-09-04.md);
-behavior B14 added. Still NO CODING toward the design (ruling 60).
+Ruling 61 introduced the visual explanation of the then-current design. Its diagrams are dated design evidence, not an independent authority.
 
 ## 2026-09-04 (evening) — the Atlas
 
-The owner asked for ONE guiding, iterable visualization instead of temp
-diagrams: [repl-first-atlas.html](repl-first-atlas.html) — a single
-data-driven page (Cytoscape.js entity graph + native mermaid), published
-as an artifact and republished to the same link on every edit. Five
-views: the data model (target vs HEAD, click a family for attributes,
-writers, render fn, generated forms) with a SESSION PLAYER that steps
-through forms showing reads (blue), writes (instances appear under the
-record), pops (retract), and diffs; the walk → forms → transcript;
-the query language (when q, pull, pull-in-q, aggregates, recursion,
-diff, since, history, transact, retract, schema declaration — real forms
-+ the Datahike grammar each relies on); the watch; where code is indexed.
-Everything draws from the `MODEL` object at the top of the file; the open
-mark is a committed script that regenerates its edges from the live
-schema. The markdown visual stays as the printable twin.
+The Atlas gathered the record, evaluation, history, and rendering model. Later sections of the turn-loop PRD supersede its curation and storage assumptions.
 
 ## 2026-09-04 (night) — the condensed design and the second opinion
 
-The owner could not follow the trail and asked for a second opinion. THE
-ENTRY DOCUMENT for the design question is now
-[agent-centric-design-2026-09-04.md](agent-centric-design-2026-09-04.md):
-the goals in his words, the data model built AROUND the agent (an agent
-entity owning inbox/evals/defs/notes/plan/data as component collections;
-NO cluster-level message family — a message lives in one inbox and is
-popped; the sender keeps its eval; system facts point at the agent), how
-the context generates from it, the evidence table, the unknowns, and the
-orchestrator's own errors (chief among them: keeping
-`seon.cluster.message` in every draft). Lane `second-opinion` (Codex, no
-session context) critiques it into
-`research/second-opinion-2026-09-04.md`, re-running the probe scripts on
-its own scratch cluster. The atlas and the one-platform §0e still carry
-the old family names until the design is agreed. Ruling 66 (help =
-record summary via render fns + processing fns by contract) is in the
-ledger; tx provenance is test-proven (`receipt_write_carrier_test`); the
-`:seon.db/user` stamp is the gap.
+The condensed design received an independent review request. Transaction provenance had test evidence; the review still needed to distinguish that from broader runtime guarantees.
 
 ## 2026-09-04 (late night) — the second opinion landed: NOT READY
 
-[second-opinion-2026-09-04.md](../research/second-opinion-2026-09-04.md)
-(Codex, no session context, claims verified at the bytes, probes re-run
-on its own root): the agent-centric target is faithful to the wanted
-EXPERIENCE and wrong about what it forces the database to own. Refuted:
-"every identity attribute names one family" (41 pairs / 38 attrs); "one
-pull is the record" (Datahike pulls ≤1,000 children per attribute
-silently); "eval + process stamps" (the test proves receipt + user);
-components as universal ownership (one child under two owners, cascade
-measured); several agents per namespace (HEAD enforces one owner).
-Most likely failure: deleting the run/receipt authority. Three owner
-decisions before code (view vs ownership; turn authority; bounded
-collection contract) and the first build = a transaction-only crash
-falsifier, not `(help)`. The design doc's §4–§6 carry the corrections and
-§9 the verdict. Lanes quiet.
+The independent review found the proposal not ready, including unsafe claims about deleting execution authority. The later turn-loop PRD supplies the writer fence and crash model.
 
 ## 2026-09-05 — the graph perspective
 
-Owner: the model is agent-centric in the GRAPH sense — any attribute on
-any entity; the agent's plumbing (turn, process, trigger, context basis)
-are attributes ON the agent entity; evals, messages, faults, and domain
-rows point AT the agent by refs readable from both ends; no inbox table,
-no information hiding; refs to what it does not own (namespace, code,
-cluster). Context = discover the agent's attributes and connections →
-propose forms (intent comment + query WRAPPED in the render function it
-names) → derive the order → execute all in parallel → render; the
-transcript is discovery + wrapped queries + the agent's own forms. Root is
-the same discovery with a different projection (`agents-summary`).
-Written into the design doc §2–§3 with the inventory of what every agent
-cares about (§3.1) and root (§3.2); §9 records how this answers the
-reviewer's three decisions. Still no code; the crash falsifier is first.
+The graph perspective treated context as derived data and forms rather than a parallel stored prompt. PRD §§14–15 now specifies which generated evaluations are durable and which objects are private.
 
 ## 2026-09-05 (later) — three projections of one record
 
-Design doc §3.3: the transcript is a projection of the agent's data
-(comments, forms, results by execution time) with THREE consumers and
-formats — the SCI environment (installers: require, install-def,
-bind-result, wrap-contract; dependency order), the completion prompt
-(`/ai` functions; the layout order; teaching pre-requisites as a demand
-DAG), the page (`/html` functions; header · transcript blocks with
-highlighted source, markdown prose, handle chips · panels = any function
-returning hiccup over the agent's data, requested by evaluating it). One
-composition rule; pre-requisites derived per consumer; compaction touches
-no fact. Atlas v4 adds the "Three projections" view (raw datum → entity
-and links → the function and order each projection gives it).
+The design described three projections of one record. Additive shown-text history later replaced repeated full prompt projection.
 
 ## 2026-09-05 (evening) — the Design Lab PRD
 
-Owner: the atlas is made-up data; he wants the real thing — a
-programmatically driven visualization of ACTUAL entities (all attributes
-namespaced, actual values, links both ways) where clicking shows the
-render candidates, their outputs on that data, and the assembly into the
-SCI environment, the completion prompt, and the page; Clojure against the
-real database so schemas and designs can be tried on branches before any
-production code. PRD:
-[design-lab-prd-2026-09-05.md](design-lab-prd-2026-09-05.md) — Cytoscape.js
-inside the existing Datastar page, one dev namespace `seon.dev.lab`, four
-waves (graph of real data → candidates + outputs → scenarios incl. diff
-against the real captured prompt → experiment branches + decision log).
-"Family" is retired as a word; the PRD says "entity schema". The atlas's
-hand-typed MODEL retires when W1 lands.
+The Design Lab PRD became the review artifact for comparing candidate context. PRD §16 now owns the debug algorithm and controls.
 
 ## 2026-09-05 (night) — the Design Lab, ruled shape
 
-Owner rulings on the lab (PRD §9): a dev route in the existing server; the
-lab IS `/agent/{id}/debug` (no new names, no new infrastructure — the lab
-is a cluster run by the existing operator); fresh environments from a
-load definition kept as real Clojure; everything real (functions are
-program rows; agent functions via real turns); visualize the context to be
-sent through the existing debug machinery (no paid runs); ordering is
-algorithmic and live, local to each projection (context = logical order,
-page = layout); the first steward works `my.note`; depth one hop, expand
-on click; trying a storage format = a code branch + reset. Agent creation
-is the existing route (the manifest declares no agents — corrected).
+The owner ruled the lab shape before implementation. Those decisions are historical where the final turn model differs.
 
 ## 2026-09-05 (late) — the Lab PRD rewritten whole; review running
 
-The PRD accreted rulings into contradictions; rewritten as one document
-([design-lab-prd-2026-09-05.md](design-lab-prd-2026-09-05.md)): why, one
-sentence, the rulings as constraints (no new infra/names — the lab IS
-`/agent/{id}/debug`; everything real; fresh envs from real Clojure;
-visualize the context to be sent; ordering algorithmic and local; agents
-have a home namespace and may steward others; first world = a steward of
-`my.note`), the page, what it computes, waves with acceptance, the
-questions it answers, risks. Owner is reading; lane `prd-review` (no
-session context) critiques it into
-`research/design-lab-prd-review-2026-09-05.md` and measures init/start
-timing on its own root. The agent-centric design §2.1 now carries
-`:namespace` (home) + `:stewards`.
+The lab PRD was rewritten as a whole and sent for review. This records review state, not a currently running lane.
 
 ## 2026-09-05 (night, later) — the PRD review landed; PRD revised
 
-[design-lab-prd-review-2026-09-05.md](../research/design-lab-prd-review-2026-09-05.md):
-"do not start wave 1 from this PRD yet" — the PRD specified a UI without
-first specifying the bounded observation VALUES it consumes, so empty
-graphs and unavailable prompts could pass acceptance. Measured: full
-publication 60.6 s + start 11.3 s (the 15 s reset was a target, not a
-fact); the fresh debug page returns HTTP 200 with an UNAVAILABLE
-prospective prompt while its test passes on a fixture that supplies what
-production omits; `producer`/`candidates` are private; no stewardship
-attribute; Cytoscape not vendored; the web service owns one connection.
-PRD revised: wave 1 split into 1A (pure `neighbourhood-page` contract) and
-1B (graph); public `candidate-explanation` + read-only diagnostic boundary
-named for wave 2; a shared entry value + an SCI-description owner for
-wave 3; connection owner + compatibility fence + same-origin POSTs for
-wave 4; decisions recorded in the design doc, never on the disposable
-cluster; the decision procedure ("best", "done") written into §0.
-Precondition lane launched: fix the prospective prompt through the
-production request shape. Nothing else coded.
+The review landed and revised the lab proposal. Its curation workflow is superseded by compaction and system turns in PRD §14.
 
 ## 2026-09-05 (night, platform round) — "get it running and fix what we know"
 
-Owner: fix the baseline and every known issue on code that stays; reset
-is too slow ("deleting info and reloading — make sure we aren't doing dumb
-shit"); `defn-` is a convention, not a restriction (the review's "private
-API" objection is void); no stewardship attribute now; the lab is not a
-separate system — the same machinery at the global (`/`), namespace
-(`/ns/{ns}/debug`), and agent (`/agent/{id}/debug`) levels; make
-iterating on the data and previewing its assembly easy. PRD simplified
-accordingly. Honest state: the platform TIER is green but the issue index
-carries ~50 open blockers, many in render/context code the redesign
-replaces (left alone); the ones that tax every loop are in flight. Lanes
-running: `prospective-prompt` (the fresh debug page's unavailable prompt;
-its test passes on a fixture that supplies what production omits),
-`init-speed` (publication 60.6 s measured — profile the phases, remove
-the dumb work), `print-floor-strings` (zero-character string windows +
-`get_value` paging + unconditional fit at the MCP result projection), `status-face`
-(bound the 100 KB UNKNOWN wall + PROVE stale-green live end to end),
-`run-loop-velocity` (2.4 s between every form). Queued behind
-loop.clj: reply durability (prose-only replies as facts; no-forms
-replies get a correction turn), message completion from the wrong agent.
-Also to fix: Codex lanes are not given the Seon MCP server (Claude
-launches `bin/mcp-server` via `.mcp.json`; `~/.codex/config.toml` has no
-`[mcp_servers.seon]`).
+The owner directed platform repair and live operation before more speculative work. The listed lanes and failures belonged to that round.
 
 ## 2026-09-05 (night, later) — status-face collided; relaunch after init-speed
 
-`status-face` stopped without committing: `init-speed` (granted
-`fresh_operator.clj` "for the init command's own steps" — the
-orchestrator's ownership mistake) edited the same file mid-lane. Its
-uncommitted work sits in the tree (fresh_operator.clj, runner.clj, the two
-test files): one aggregate loud UNKNOWN line by default, bounded
-per-namespace summaries with evidence, details behind `status --verbose`,
-and a real finding — bare `bin/test` hard-wires persistent evidence to the
-checkout root despite `SEON_TEST_RESULT_ROOT`, so the isolated stale-green
-proof was impossible without their routing fix. Relaunch as
-`status-face-2` once `init-speed` has committed its `fresh_operator.clj`
-hunks; the proof of stale-green live is still owed.
+A status-rendering change collided with initialization work and was scheduled for relaunch after that integration. This is not an instruction to resume another session.
 
 ## 2026-09-05 (night) — run-loop velocity: one term removed, gate blocked by the in-flight tree
 
-`4e68150f5` (lane `run-loop-velocity`): receipt settlement rebuilt the
-COMPLETE schema projection inside every settlement transaction
-(`run.clj:1596`) although the outer `:db.fn/call` codec already carries it
-— 360–550 ms per form, removed; regression asserts settlement never
-re-enters `projection-from-database`. Measured per-form table: evaluation
-47–60 ms; `runtime-analysis` 227–309 ms (the cached prelude is reached but
-the form is reparsed — the next term); settle call 414–629 ms before the
-fix. The focused gate could not run: the shared test base's indexer
-refused `Conflicting upsert: "seon.fn.index/10477" resolves both to 593
-and 2994` — the test base compiles the WORKING TREE, which carried
-`init-speed`'s uncommitted `fn.clj` edits; a lane's gate is hostage to
-another lane's half-edit (the torn-tree class). Remeasure + the 200 ms
-target relaunch as `run-loop-velocity-2` after `init-speed` lands, together
-with `status-face-2`.
+The run-loop velocity work removed repeated schema projection during evaluation settlement. An in-flight tree blocked its gate; that checkpoint did not establish a green integration.
 
 ## 2026-09-05 (night) — three verified fixes parked by the torn tree
 
-`prospective-prompt` verified its root cause and fix (the shared
-`walk-request` now carries `:seon.cluster.agent/id`; the debug page went
-from `unavailable` to a non-empty prospective prompt on a hot-reloaded
-isolated cluster; regressions go through the production route) but could
-not run its gate; same for `run-loop-velocity`'s remeasure and
-`status-face`. Cause, filed as a blocker:
-[bin-test-shared-base-compiles-other-lanes-half-edits](../../../seon/issues/bin-test-shared-base-compiles-other-lanes-half-edits.md)
-— the shared test base compiles the WORKING TREE, so `init-speed`'s
-in-flight `fn.clj` edit refused every other lane's base. Relaunch the
-three (`-2` names) the moment `init-speed` commits; then decide the
-`bin/test` base option (recommended: HEAD + the lane's own files).
+Three fixes had local evidence but remained unlanded while the tree was torn. The later landing checkpoints, not this note, record integration.
 
 ## 2026-09-05 (night) — print floor fixed in the tree, parked too
 
-`print-floor-strings`: root causes verified (fit reduced strings before
-breadth and depth to zero; `mcp-project` fitted only above the blob
-threshold; `mcp-get-value` treated strings as unpaged scalars); fix
-implemented — breadth → depth → strings with the existing 72-character
-print-width floor, unconditional fitting through a `:seon.render.profile/mcp`
-profile, character-offset string paging — with a GREEN focused tally
-(29 tests / 136 assertions) before a fixture refinement; the rerun was
-refused by the torn base like the others. Four lanes' verified changes now
-sit uncommitted in the tree on their owned paths; relaunch specs prepared
-(`tmp/lanes/*-2.md` + `_relaunch.md`) to fire when `init-speed` commits.
+The print-floor repair was in the tree but unverified against the blocked gate. Later evidence resolved that checkpoint.
 
 ## 2026-09-05 (afternoon, day 2) — publication: dumb work removed, the Datahike floor found
 
-`f557c3a17` (lane `init-speed`): source bytes/line offsets/ns forms derived
-ONCE per population (were re-derived per row); program references compiled
-to transaction-local tempids; namespaces, declarations, keyword facts, and
-calls enter Datahike in ONE population transaction (were five dependent
-ones). Instrumented publication 56.3 → 38.4 s; kondo 7.1 → 2.5 s (it
-analyzes only src/ + test/, 236 files, cache already used). Cold `init`
-68.4 → 63.3 s only, because the floor moved: ONE Datahike commit of
-207,915 datoms takes 26.0 s (~8k datoms/s) and JVM + operator load is the
-rest. Lane `datahike-bulk-commit` decomposes that commit (index type,
-`:keep-history?` on the publication branch, tempid/lookup resolution,
-derivable attributes ruled dead by 50, chunking, konserve flush). The
-four parked lanes relaunched as `-2` on the whole tree.
+Publication work removed redundant computation and measured a remaining Datahike persistence cost. The subsequent fsync investigation refined that diagnosis.
 
 ## 2026-09-05 (day 2, afternoon) — the lab's precondition is green
 
-`e28de63bc`/`524c4cd08` (lane `prospective-prompt-2`): the shared
-`walk-request` carries `:seon.cluster.agent/id`, so a fresh cluster's
-`/agent/{id}/debug` renders a real prospective prompt (cold isolated proof
-pasted in the summary); regressions go through the production request
-constructor, require a non-empty prompt, verify custody inputs, and prove
-no render-cost facts are written; an unavailable pane keeps HTTP 200 (the
-page is composite) but must show its diagnostic and no healthy `<pre>`.
-Issue archived. `bin/test seon.render.web-test`: 40 / 330 / 0. The Design
-Lab PRD's precondition (§6) is met; wave 1A waits only on the owner's go.
-Shared root reset to HEAD and `default` running at http://127.0.0.1:7994
-(this fix lands there on the next restart).
+The lab precondition reached a green checkpoint after fixture and boot corrections. This does not make later working-tree revisions green.
 
 ## 2026-09-05 (day 2, late afternoon) — run-loop velocity and the print floor landed
 
-`run-loop-velocity-2`: gate `bin/test seon.cluster.loop-test
-seon.cluster.turn-test` 80 / 500 / 0; the redundant settlement projection
-build (360–550 ms per form) is gone (`4e68150f5`), fixtures repaired
-(`25adaeaf8`), the issue updated with the measured table (`c2cc606d0`).
-Remaining floor per form: `analyze-form` 228–311 ms — the cached prelude is
-reached but the form is REPARSED; next lane `analyze-form-speed` (fn.clj)
-once `datahike-bulk-commit` releases fn.clj. Also open from that drive: the
-scripted terminal `my.run/complete` form hits an admission refusal.
-`print-floor-strings-2`: `d5b212f88` (breadth → depth → strings, one-line
-floor; the MCP result projection fits every result under a `:seon.render.profile/mcp`)
-and `ba3518afb` (`get_value` pages strings by character offset; never an
-empty window) — issue archived. Owner asked for a clean tree: two lanes'
-in-flight work committed path-limited (`b3ba7d998`, `25adaeaf8`), tool
-caches ignored. Lanes reported the MCP tools "unavailable" during the
-window when the shared root was being reset (ctxprobe down, default
-starting) — not a config regression.
+The run-loop velocity and print-floor changes landed with their scoped evidence. They are historical implementation results, not a new execution model.
 
 ## 2026-09-05 (day 2, evening) — status face landed; the silence backstop now blocks gates
 
-`status-face-2`: gate `bin/test seon.test-runner-test
-seon.dev.fresh-operator-test` 60 / 447 / 2 failures / 0 errors — the two
-failures are ONE class: the isolated confirmation of
-`live-init-reloads-schema-runtime-and-moved-predicate-owners-before-admission`
-trips the prepl silence backstop (30 s) while the population commit runs
-silent (`fn.clj:1965`) — the already-filed blocker
-[init-program-population-can-still-trip-the-silence-backstop](../../../seon/issues/init-program-population-can-still-trip-the-silence-backstop.md).
-The status-face code itself (bounded default face, `status --verbose`,
-`SEON_TEST_RESULT_ROOT` precedence, regressions) is committed
-(`b3ba7d998`) and its own regressions passed. STILL OWED: the after-status
-output and the isolated stale-green live proof — both blocked by the same
-backstop. Priority: the population commit must report progress inside the
-transaction (or be split/fast) — owner `seon.fn/index!`'s progress path;
-lane `datahike-bulk-commit` (running) owns that seam and gets the note on
-its return.
+The status renderer landed, while the liveness backstop exposed a gate boundary. Silence was treated as unavailable evidence rather than success.
 
 ## 2026-09-05 (day 2, evening) — a second session is working in the tree
 
-Uncommitted edits from another session (not this orchestrator's lanes):
-the Design Lab PRD rewritten (−296/+278 lines, uncommitted), four rows
-added to `docs/seon/issues/index.md`, a new research doc
-`research/design-lab-investigation-2026-09-05.md` ("the owner explicitly
-reopened the design: defaults bootstrap every namespace's agent, each agent
-may query any connected data and define its own render functions, and the
-current UI is not the desired design"), and three new render issues
-(candidate checks mix arities; selection loses the viewing namespace;
-namespace layout confines content to scroll boxes). This orchestrator
-PRESERVES them untouched and does not edit the PRD until the owner says
-which session's version is authoritative. `store.clj`/`fn_test.clj`
-modifications are lane `datahike-bulk-commit`'s in-flight work.
+A second session was editing the shared tree. The checkpoint required preserving unrelated work and separating ownership.
 
 ## 2026-09-05 (day 2, night) — the publication floor was fsync amplification
 
-`e8d218690` (lane `datahike-bulk-commit`): the 26.0 s population commit was
-konserve forcing EVERY index file to disk — persistent-set's default
-branching factor 512 produced 3,029 durable index writes for 207,915
-datoms (pure Datahike work 2.73 s; with force barriers off 2.62 s).
-Branching factor 4,096 at `store.clj:168` → 357 writes, commit 4.87 s
-(−81%); fresh `init` 39.6 s (from 63; JVM + operator load is the rest).
-Gate `seon.fn-test seon.cluster.source-test` 38 / 307 / 0. Decomposition,
-rejected levers (history on the publication branch, chunking, tempids),
-and the top-ten attribute census are in the publication issue. Fallout:
-`store_test.clj:85` kept the old literal (lane `store-config-expectation`
-fixes it and CONFIRMS the silence-backstop blocker is cleared by
-consequence); existing stores keep 512 until reset — the shared root was
-reset and `default` restarted on HEAD (all of today's fixes live at
-http://127.0.0.1:7994). The other session committed its PRD rewrite
-(`c965333cf`); this orchestrator has not read it yet.
+The publication investigation identified fsync amplification as the measured floor. The dated implementation evidence replaced the earlier attribution.
 
 ## 2026-09-05 (day 2, night) — ruling 67: batch the turn
 
-The owner called the per-form bookkeeping an algorithmic failure and ruled
-the shape: evaluate every form of a reply quickly (fixup on failure; the
-parser never crashes the turn), bind results as real `result/<id>`
-symbols in the fork, write the results in ONE transaction. Lane
-`turn-batch` (relaunch of `per-form-overhead`, stopped after its brief):
-intent tx at reply arrival (raw reply + eval rows with source — durable
-prose-only replies included), evaluation in memory with handle binding,
-one kondo batch for defining forms, one settlement tx (values not print
-nodes; read-evidence = plans + revisions, no stored read-result), render
-once; crash falsifier as the regression. Confirmed today by lane
-`store-config-expectation`: the silence-backstop blocker is gone by
-consequence (`seon.dev.fresh-operator-test` 34 / 219 / 0; fresh init 38.9 s,
-no trip); `store_test` derives the index config from the declaration
-(`ab813db44`, `770de4c8b`). The other session keeps committing lab PRD work
-(`ffdd7a308`).
+Ruling 67 required batching the turn rather than persisting each intermediate operation separately. The final three-write turn protocol is specified in the turn-loop PRD.
 
 ## 2026-09-05 (day 2, late night) — indexing settled; usage and error facts
 
-Owner rulings in dialogue: (1) only DEFINITIONS index (function, test,
-schema, agent def); their facts come from the var after evaluation, the
-Malli form, and ONE kondo batch per turn over the defining forms with the
-real `ns` form and no stub prelude (verified: ~10 ms; a let-bound `map` is
-not recorded; a qualified ref to a namespace absent from the `ns` form IS
-dropped, so the ns form must require every namespace the source mentions).
-Ordinary forms record nothing static. (2) Owner wants every downstream
-question answerable (callers, tests reaching, schemas to explain, usage by
-other agents, errors while using a function, hotspots, dead weight) and
-stewards/root woken on problems with the erroring agent's context pulled
-in → design §2.4b (`:called`, `:failed-call` on the eval row from the
-call-preparation hook) and §2.4c (the steward's wake: one `route!` case +
-the existing watch + render fns following refs). Lane `turn-batch`
-resumed twice: once for the indexing correction, once refuting its
-"another lane's change" attribution (runner.clj:1057 auto-gensym is HEAD
-code; the reader test asserted form-equality Clojure never promised).
-Follow-up for the lane once its gate is green: §2.4b's two attributes +
-hook accumulator in the settlement tx. Owner: NO automatic wakes or
-agents reacting to these facts yet (§2.4c marked LATER) — capability only. bin/codex-agent resume now names
-the model (`4a683cd6b`).
+Indexing work settled and the review moved to usage and error facts. Counts and lane status in that checkpoint were observations only.
 
 ## 2026-09-05 (day 2, late night, 2) — ruling 68: the forgiving parser returns
 
-Owner: restore all the forgiving-parser behaviour; repair delimiters
-before reading and store the FIXED source (no repaired flag; the raw reply
-in the intent tx is the provenance); show an error only when repair
-cannot make the form read. Lane `turn-batch` redirected a third time
-(reader recovery invariants + old corpus, ruling 68 repair in the turn).
-clojure-mcp pulled to v0.4.0; its ideas summarised to the owner (repair
-before eval, Edamame structured delimiter errors, error-flag discipline,
-clojure-mcp-light hook-based repair for CLI assistants).
+Ruling 68 restored the forgiving parser through the existing reply reader. The turn-loop design keeps source and reader evidence rather than introducing a second parser.
 
 ## 2026-09-05 (night, 3) — batched turn LANDED (`1f3c099d2`); the 191 GiB incident
 
-- **Landed:** rulings 67/68 as code — intent tx + in-memory eval with
-  `result/eN` + one settlement tx; definitions-only kondo batch without the
-  stub prelude; `:seon.db/read-result` retired; reader recovery invariants
-  and nine old regressions; span-local parinferish repair before reading
-  (fixed source stored, no flag). Six-form bookkeeping 9.9 s → 196 ms.
-  The orchestrator finished the last two regressions after stopping the
-  lane (owner: "kill the agent, make the changes yourself"). Left behind:
-  `seon.cluster.work` still derives retired E3 routing states (noted in the
-  velocity issue); the evaluator now refuses recovered error events.
-- **Incident:** `data/store` 0.29 → 191 GiB in 36 min (issue
-  `fault-facts-store-megabyte-evidence-inline-and-rewrite-gigabyte-leaves`):
-  fault facts inline 4.3 MB proc-state evidence × persistent-set leaf
-  copy-on-write at branching 4096 × history. Reset reclaimed it; the fresh
-  default then refilled 0.5 GiB in 3 min because `bin/seon reset` published
-  the TORN working tree (lane's half-done loop) — torn-tree class, second
-  bite today. The lab session owns the committer fix (`error/prepare` with
-  an inline limit is in its tree); owner: NO automatic wakes on these facts
-  yet. Follow-ups owed: a byte guard at the one `seon.db` write seam;
-  reset/init from committed HEAD; re-measure branching 4096 against leaf
-  bytes.
-- Lane orchestration lesson (owner, "2+ hours for this?"): four redirects
-  and a gate-everything-then-commit rule cost the afternoon; commit
-  coherent slices, name foreign breakage, redirect at most once.
+The batched turn landed in `1f3c099d2`; the 191 GiB incident exposed retained disposable test data. Session-start cleanup must establish that no live runner holds a root before deleting it.
 
 ## Previous state (2026-08-29, evening)
 
-**Design track (owner still forming — NO implementation until he says):**
-rulings 47–55 sealed in the [ledger](design-ideas-ledger-2026-08-13.md):
-the population invariant + symbol identities (47), scalar identity +
-result projections + the rename pass scope (48), keys-law as amended
-(49), the full-parse bridge (50, design verified against kondo:
-[full-parse-bridge-design-2026-08-29.md](full-parse-bridge-design-2026-08-29.md)),
-graph closure + settled-form usages + derived self-improvement (51),
-VIEW-1-ONLY stable regeneration + coverage-set help + backward
-demand-driven generation (52/52a/52b), faces return forms (53), the
-database transaction function + missile rule + steward drive scenario (54), instance
-args (55). The consolidation of 47–55 + the
-[render-data plan](render-data-plan-2026-08-28.md) into one
-implementable generator spec is OFFERED, awaiting the owner's go.
-
-**Base-system track (active):** platform tier GREEN; bulk tier legible
-(runner: serialized loads, bounded exchanges, one-retirement-one-
-failure); walk acquisition 8.5 ms; hook feedback restored after a
-15-day silent outage; fixture derivation primitive + 53-site sweep
-landed; five graph-consequence regressions fixed; schema lifecycle
-over persisted references repaired; the bare-remainder singletons
-landed (`c5036aaa2`) — and their one refused red exposed the
-25-minute curation replay storm, killed by the population-revision
-prelude cache (`e8c8ea6d0`: the prelude derives once per program
-population, not once per settled form). The masking meta-lesson:
-four Aug-14 breakages hid behind the 12-day bulk blackout.
+The August 29 checkpoint recorded the preceding program state. It is retained only as the baseline for later rulings.
 
 ## The ordering (owner rulings, 2026-08-29 question round)
 
-1. **Doomed-nine deletion pass** (owner: bare reads fully green before
-   any rename): delete dead `walk/prose` + `effect/context-suffix` (+
-   their tests); neutralize the 6 `render.web-test` + 3
-   `render.value/ns-test` reds with wave-G/S2-F issue links — never
-   polish, delete or park with a named replacement.
-2. **Stale-green visibility lane** (before the freeze): persistent
-   operator-owned bare-gate results branch; `bin/seon status` derives
-   per-namespace "all current tests last known green; oldest proof
-   basis T, N days ago"; unknown ≠ green. Bundles the dev-cache
-   `ensure-cache` wiring (same never-stale-silently class).
-3. **The atomic identity freeze** (orchestrator, quiet tree):
-   `:seon.fn/sym`/`:seon.test/sym` string→symbol + the sym↔`/ns` drift
-   regression (47/48a) + receipts→evals rename (48c). Retype + reset,
-   never migrate. `bin/seon init` + full gates close it.
-4. **The full-parse bridge lane** (50, born compliant on the clean
-   identities) — then result projections at settlement (48b).
-5. Then the generator work — gated on the owner's context-design go.
+The August 29 owner questions established that day's ordering. It is superseded as a work queue by the latest section below.
 
 ## The armed-boot regression round (2026-08-29 night, lane running)
 
-The distance-2 bootstrap fix (28 s -> 1.2 s per advance, measured
-live) unstarved the armed backstops and exposed three REAL
-regressions from the day's landed work, now with the
-`armed-regressions` lane: (1) BOOT SPENDS A MODEL CALL — the
-no-model-at-boot gate broke (`booting-spends-no-model-call` red,
-`:seon.ai/no-credential` where an injected kind belonged); (2) a
-boot-window message's run opens with trigger `bootstrap-task:root`
-instead of the message; (3) an agent's own def fails to resolve in
-its live ctx across cohosted clusters. Evidence root:
-`tmp/test-runs/run.FiH5MT`. ROUND OUTCOME: the armed-regressions lane
-closed the model-call gate (bootstrap closes atomically before the
-model boundary, `108b753ca`) and grounded the cross-cluster fixture
-(`801347921`); the orchestrator fixed the backup-target expectation
-(402-failover config), and the exchange-vs-watchdog horizon collision
-(exchange bounds now fire strictly inside the silence horizon). THE
-FREEZE REMAINDER IS EXACTLY THREE: (1)
-`the-first-cluster-proc-fault-at-resume-becomes-a-fact` — the injected
-first resume fault never reaches its terminal worker event (real
-behavior question in the fault-at-resume path); (2)
-`a-message-committed-during-boot-arming-is-conserved` — the test
-conflates run opening with downstream provider progress and needs its
-await reworked onto the run-open fact; (3) the standing seed-recorded
-generated-attempt-traces blocker.
+The August 29 armed-boot round exercised real contracts and exposed fixture or boot failures. Its lane status is historical.
 
-## Open blockers the edge tracks
+## Open blockers the edge tracks — historical summary, 2026-08-29
 
-- [generated-model-attempt-traces-diverge-from-durable-facts](../../../seon/issues/generated-model-attempt-traces-diverge-from-durable-facts.md)
-  — exact seed `202607280402` + shrunk case recorded; the one
-  legitimate red expected in bare until fixed.
-- The 69-GB store-growth class (exclusive-sweep wave) and the
-  dev-cache staleness issue (rides item 2).
-- `effective-config` deferred census rows in lane-protected files
-  (effect_test launcher rows 2–3) — sweep them when those files quiet.
-- `seon.cluster.curate-test` re-verify after the visibility lane
-  lands: its residual red ("first-party program namespace
-  seon.dev.fresh-operator-test could not be loaded") coincides with
-  that lane's in-flight edits to exactly that file — torn-snapshot
-  suspicion, not yet attributed.
+The earlier edge collected unresolved blockers rather than declaring missing evidence healthy. Current blockers must be re-observed and recorded at the latest edge.
 
-## Standing session-start line
+## Standing session-start line — historical summary, 2026-08-29
 
-Read the
-[context-as-queries handoff](context-as-queries-handoff-2026-08-29.md)
-first — it is the entry document for the next session (the goal, the
-owner's "it's all queries" idea to explore WITHOUT rushing, the trials,
-and the platform gate). Then THIS file end to end, then the ledger's
-newest rulings, then `bin/seon status` + `git log --oneline -15`.
+The earlier session-start instructions called for checking the live process and shared tree before work. AGENTS.md and the transfer manual now own those instructions.
 
 ## Design lab implementation resumed — 2026-09-05
 
-The owner authorized implementation and smaller models for simple delegated
-work. The current checklist and visual sequence live in the
-[design lab PRD](design-lab-prd-2026-09-05.md#visual-overview); ownership and
-REPL evidence live in its linked investigation. Terminology review is complete.
-The same-arity renderer selection fix is in progress in `seon.schema` and
-`seon.render`, with schema and candidate-selection regressions. Candidate SCI
-metadata isolation must integrate with the concurrent turn-batching edits in
-`seon.sci.eval`; preserve that work. No milestone is complete merely because
-the helper exists: focused tests and a named live proof remain required.
-
-At this checkpoint MCP `runtime_status` answered for `default` (PID 94171,
-start 2026-09-05T19:02:38Z), reporting eight stale Vars and four errored
-receipts. This is connectivity evidence, not a clean runtime baseline.
+The lab implementation resumed with MCP connectivity but an unhealthy runtime baseline. Connectivity alone was explicitly not proof of runtime health.
 
 ## Juniper renderer inspection — 2026-09-06
 
-Root personally inspected the existing Juniper browser page on cluster
-`lab-run-inspection`, port 7773, subject 32120. The plan HTML did not identify
-ownership/current focus and foregrounded raw item ids. The general
-`my.plan/render-item-html` now derives the owner and current focus from the
-supplied database, explains that the agent maintains its plan, and presents
-expected outcomes as “Done when.” References remain in a disclosure.
-`render-plan-html` uses human explanations instead of schema prose, and
-`seon.cluster.agent/render-identity-html` explains namespace/cluster meaning.
-
-The existing Vars were hot-reloaded through MCP, instrumentation restored,
-and the already-open browser updated through its existing feed. Root verified
-“juniper’s plan · Current focus” and the second open step in the actual page.
-The edit hook also published source; this live proof exercises hot-reloaded
-Vars, not a newly forked cluster. AI previews on this older cluster still use
-old output and the full context lock/diff integration remains unfinished.
-
-The owner now requires pure render semantics: unchanged inputs reuse results;
-relevant changed inputs automatically re-execute. Locked form/result references
-remain the baseline for derived diffs; appending changes or compacting changes
-the agent's ordered context selection. Earlier explicit-rerun-only research is
-superseded by this instruction. Context authority must be structured references
-to existing forms/evaluations, with text and HTML projected at the boundary.
-
-Context contribution records now admit `:seon.context.contribution/evaluations`
-as ordinary refs. The existing capture writer retains these refs without
-copying source or result values. Contribution position orders blocks;
-evaluation ordinals order the forms within each execution. This is the data
-foundation only: agent selection, lock controls, diff projection, and prompt
-assembly from selected executions remain unfinished. The owner explicitly
-requires accumulating facts and sharing them by reference, including when
-context is appended or compacted.
-
-The debug related-entity batch exceeded a hardcoded result-weight limit and
-hid all found-value previews. Pull and pull-many acquisition now omit result
-count/weight limits; their work bound and the separate graph index pagination
-remain. This does not establish that discovery is fast: live measurement and
-the end-to-end refresh proof are still required.
-
-The owner now explicitly requires an automatically updated development branch.
-The existing hook invokes `bin/seon init --changed` only on the shared root;
-it publishes `current-src` but does not update a running cluster. Manual
-refork/restart is not the desired development workflow. The dedicated live
-cluster must receive admitted indexed changes, update loaded behavior, and
-refresh the existing UI while retaining agent facts and context selections.
-This intentionally supersedes sovereign-old-program behavior for the opted-in
-development cluster only. The automatic workflow is not yet implemented.
-
-Root verified the refreshed Juniper page on port 7766 after publishing digest
-`2e2301360d913ca35a1c64f93291f3c33924c32c883c3fcfed2d781c443e6e5c`:
-attribute/value cards identify stored values and referenced entities, and the
-selected identity transcript evaluates `(seon.cluster.agent/whoami)` without
-embedding the agent id. A separate fresh Juniper SCI fork returned the correct
-identity in 73 ms. Found-value AI cards still display source without evaluated
-results; these are not complete context blocks yet.
-
-Identity refinement, 2026-09-06: the owner rejected the extra public
-`render-identity-text` wrapper. `whoami` now queries the supplied database and
-returns the concise identity display itself; raw attributes remain queryable
-with `seon.db/pull`. Generated source is one qualified `whoami` call with no
-agent-id argument. Bare-symbol resolution is not yet installed, and must use
-the existing namespace/program mechanisms rather than another injection list.
-The live host-JVM probe returned the new three-line identity; this is not yet
-proof of indexed SCI or browser convergence. The earlier page proof above
-still included the now-retired formatting wrapper around `whoami`.
-
-The owner refined `whoami` to accept either supplied agent data (one map) or
-no visible arguments in SCI. It now has a map arity and the database/agent-id
-arity used by supplied defaults; both use the same formatting implementation.
-A regression now exercises both calls in the real acquired SCI turn fork.
-The previous single-arity identity gate passed 2 tests / 83 assertions; that
-result does not cover the new arity. Context selection transcript projection
-and lock route remain unverified in the browser. Review caught and corrected
-the lock handler's incorrect service connection key before deployment.
-
-Gate `run.GU24ot` completed: 20 tests, 246 assertions, 18 failures and one
-error. Exact selected-evaluation projection passed. The new argless SCI test
-refused zero args; inspection found its fixture omitted the initialization
-facts declaring supplied arguments. The fixture now derives those rows from
-canonical `config/compile-manifest`; re-verification is pending. Transcript
-failures include obsolete token-elision expectations after the owner's removal
-of rendering limits, plus other output expectations still to inspect. Do not
-report this gate green or restore removed limits to satisfy old tests.
-
-Exact source fix, personally probed 2026-09-06: source run
-`source:419ae083-201e-44fc-b6c1-dc2a3e054d61` in `juniper-context` stored the
-47-character submitted text byte-for-byte, including CRLF, comment, and blank
-line. Its two evaluations settled with 3 and "second". Rendering its stored
-transcript twice returned equal text and retained exactly the same two eval
-identities. A whole-cluster basis comparison changed during the first probe;
-it cannot isolate writes by this read amid other active graphs. The scoped
-identity comparison is the valid observation. This proves the live host path,
-not restart or browser lock/diff completion.
-
-Both model replies and renderer submissions now share `run/stage-reply!` and
-`blob/with-publication!`; the system-run request schema admits the existing
-reply/reply-blob/reply-size facts, forwarded into the existing plan transaction.
-No new source or result family was introduced. The existing agent submission
-regression now checks exact stored reply. Its gate is pending.
-
-Component modeling review (owner request, 2026-09-06): run/forms already owns
-form entities as components. Research found duplicate forward/back relationships
-and repeated form source/ns/run/ordinal on evaluations; the exact inventory and
-candidate consolidation are in context-selection-diff-integration-2026-09-06.md.
-Do not add a parallel agent form store or persist result/eN as another identity:
-that name is derived from ordinal within its run. A coherent writer/reader
-refactor is still required before changing these ownership relationships.
-
-Live selection proof: contribution `juniper-source-fidelity-lock` references
-original evaluations 53600 and 53601. `context/comparison` against the same
-source run returned :ready with identical baseline/refreshed refs. The browser
-remains stopped because source runs were being regenerated every 1–2 seconds;
-run count reached 1610 before the stopped web settled. Do not restart the UI
-until that invalidation defect and incomplete dev-source adoption are resolved.
+The renderer inspection verified the actual Juniper page and source-fidelity examples while rejecting a stored context-selection authority. Those fixture ids and ports are dated evidence; default is now the development environment.
 
 ## 2026-09-07 afternoon — audit closure wave
 
-Audit (`research/audit-repl-and-record-2026-09-07.md`) read in full; every
-ranked item assigned. Landed: B1 (page), B2 (`result/e<entity-id>`, bound
-across the agent's evaluations, `57c40fbac`), B3 (prompt through
-`seon.repl/text`, `6f00d3050`), F2/F3/F4/F5/F6/F8, C1–C5,
-`unowned-namespaces` on `:seon.ns/steward`. Dev cluster converged at
-`6a9f336e`. Refuted with evidence: the form→evaluation merge is 791
-references / 74 files and `:seon.cluster.work/situation` is a multi-schema
-dispatch key — running now as its own program-step lane with broad
-ownership (`tmp/lane-specs/evaluation-merge-program-step-0907.md`).
-Running in parallel, file-disjoint: print/admission lane (F1 elision
-identity, `#object[]`, print-length carry, channel spliced into the run
-unit's value). Still queued: PRD step 3 (page evaluator bypass, twin caches,
-config-resolved evaluator), then steps 4–7 (agent record components); the
-six `prompt-test` reds belong to step 4 (a message's `/ai` emits source,
-not content).
-
-### Evening update
-
-Landed: form family deleted (`caef3850e`, 791 refs → 0, 33.75 → 26.75
-datoms per (run, ordinal)); print/admission lane (object face, elision
-identity, print-option carry); channel-leak diagnostic (`da76fb9bc`). Dev
-root reset, `juniper-context` reforked, Juniper reseeded; page renders 18
-responses, zero `#object[`, zero `system=>`. Running: schema-row
-convergence (platform-tier blocker: cardinality-many compared as a
-vector). Queued: step 3 (`tmp/lane-specs/one-eval-point-0907.md`).
-
-OWNER DECISIONS OPEN (asked 2026-09-07 evening):
-1. Elision seam. Today admission cuts at STORAGE (depth 64, collection
-   8192, string 256K, node budget) and render caps are disabled — the
-   inverse of the owner's model (store faithfully; limit only the AI
-   projection; HTML unlimited, paged). Recommended: faithful storage with
-   one realization bound for lazy/huge seqs; AI-only limits with requery;
-   HTML unlimited.
-2. `:seon.cluster.work/situation`. It is both the `:seon.cluster.work/next`
-   dispatch key (sealed `0e1e9dc01`) and a stored `:call`/`:generate` stamp;
-   authorship cannot replace it (a generated run and a call run both open
-   with zero evaluations). Recommended: delete the stored stamp, add a
-   `:seon.cluster.run/generator` ref read by presence (evaluation-merge
-   landing note §4, option 2).
-
-### Late evening
-
-Landed: step 3 (`3b6ca07e9`, one evaluation point — `loop/preview-sources`;
-evaluator is a Var; invocation cache is the one store; ten loads write
-nothing, live). PRD `agent-record-and-turn-loop-prd-2026-09-07.md` at r6:
-the record is identity + namespace + plan; history is a query; wakes are
-datoms on listened attributes, answered by basis `:t` (REPL-verified on
-live data: same sets as the trigger ref); no claims, no resume, three
-writes per turn; both independent reviews integrated. Running: the REPL
-prototype lane (`research/prototype-turn-loop-in-repl-2026-09-07.md`) —
-NO code is rewritten until it reports (owner: "test out the ideas first in
-the repl"). Open split for the owner: turn bound derived (Opus, PRD) vs one
-explicit allowance (astra).
-
-### Owner go (late evening)
-
-"Okay go for it." PRD r7 sealed for implementation; §8 in order, one lane
-each, serial: 1 storage bound + AI-boundary elision (running,
-`tmp/lane-specs/storage-bound-0907.md`) → 2 listened attributes +
-answered-by-`:t` → 3 the turn + two-arm loop (+ the `seon.turn` rename) →
-4 the record + page → 5 byte identity → 6 reset, reseed, docs. Names table
-in PRD §0c. Simulated turns only.
-
-Owner: "make sure this is done right. the agent's loop is the core of the
-system." Integration gate for every lane in this wave: (1) the orchestrator
-reads the full diff, not the report; (2) an independent verification lane
-(read-only, own scratch cluster) re-proves the lane's claims and hunts for
-absence-reads-as-health before the next lane launches; (3) the turn-loop
-step (§8 step 3) additionally gets a design verifier against PRD §1, §1a,
-§7 and the run-loop-unpacked §5.6 behaviours, and the platform tier plus a
-full `bin/test --all` at its landing.
-
-Lane 1 (storage bound) landed `3518903dd..8f22125ad` and was VERIFIED
-(`research/verify-storage-bound-2026-09-07.md`): the bound, interrupt,
-faithful storage, ablated handles and byte identity hold; FIVE blockers
-found — faults unbounded (915 KB fact), no string elision at the AI
-boundary (`print/fit` identity), effect requests dispatched as nil (the
-deleted `capped?` was its refusal), StackOverflow at depth 2000,
-`connection-width` hiding the pull cut. Repair lane running
-(`tmp/lane-specs/storage-bound-repair-0907.md`); the gate held — lane 2
-does not launch until the repair is re-verified. Ruling implied and being
-written into AGENTS.md §2.4: rendering limits are ON for the AI projection
-under the render profile; HTML unbounded; storage bounded per value.
-
-Repair landed `b6dd42ee0..9727c52df` (iterative admission; fault evidence
-bound 16,384 through the same admission; `fit` restored for `/ai` only,
-HTML whole; oversized effect refused; pull cut reported; AGENTS §2.4 = the
-three bounds). Dev root reset again (a new required config fact refuses
-adoption; `config apply` is broken — issue filed). Re-verification lane
-running; lane 2 still parked behind it. Open from the repair: the eight
-transcript reds survive restored limits (cause unknown, the verifier is
-diagnosing).
-
-Re-verification (`research/verify-storage-repair-2026-09-07.md`): B1, B3,
-B5 hold; B2 and B4 REFUTED on a live cluster, and the reason is the gate
-itself — `bin/test` arms no contract instrumentation, only the operator
-does, so contract violations invisible to every green test fail live. Root
-cause of B2: `print/elision-node` merges stored nils into a contract that
-marks them optional. Root cause of B4: Malli validating the recursive
-`:seon.print/node` per level at the contract boundary. Six of the eight
-transcript reds are one dead driver (`best-summary`, no caller). Repair 2
-running (`tmp/lane-specs/storage-bound-repair-2-0907.md`): instrument the
-gate FIRST, then fix what it exposes. Lane 2 still parked.
+The audit closure wave advanced into the accepted turn-loop design and revised wake semantics. Temporary disabled presentation limits and attempted-only wake answering were superseded by PRD §§14–15.
 
 ## 2026-09-08 early
 
-Repair 2 landed `07394e485..4fbd3fdd3`: THE GATE IS INSTRUMENTED (worker
-JVMs arm `seon.instrument/apply!` like boot); elision requests carry no
-nils; `:seon.print/node` validated iteratively (`seon.print/node?`);
-transcript elides once at the AI boundary — all eight transcript reds dead;
-platform tier green under contracts. Honest `--all`: 1,439 tests / 314 red,
-one class (tests pinning a function's own refusal where the contract now
-refuses first; fixtures handing forbidden shapes). Dev JVM restarted (a new
-core predicate cannot be adopted in place — issue filed) and converged.
-Running in parallel: `verify-repair-2` (read-only, live scratch) and
-`instrumented-gate-backlog` (drive the 314 to zero by class; production
-defects listed separately). Lane 2 (listened attributes) launches after
-both.
+The early September 8 wave repaired clipping and exposed more integration boundaries. Its lane assignments and failures precede the afternoon checkpoint; the final result model deletes result serialization rather than hardening it.
 
-`verify-repair-2` (`research/verify-repair-2-2026-09-08.md`): BR1/BR3/BR4
-hold to the byte; BR2 holds with a 3-var gap; SIX production defects the
-honest gate exposed — P1 every core fault unrecordable (`commit-fault!`
-drops the required evidence bound), P2/P3 a >4 KB `def` wedges the agent
-(`settle-batch!` hands a seq where a vector is declared; the fault cannot
-commit; the run never closes), P4 MCP enrichment throws on a raw string,
-P5 nil into `result-caps`, P6 set-node generator duplicates. Fix lane
-running (`production-defects-p1-p6`) alongside the backlog lane. Also:
-the `--all` log lists 260 red names, not 314.
+## 2026-09-08 afternoon — current working edge
 
-`instrumented-gate-backlog` landed (`2fa2e1e17..05c5556d2`): --all reds 260
-→ 190, contract violations 266 → 108; one fixture choke point
-(`test-support/cluster-handle`); agent-facing refusals cross the SCI kernel
-(`test-support/agent-value`); six production defects fixed; filed
-`an-incremental-projection-build-refuses-the-key-it-just-added` (~15 reds,
-three priced options — OWNER DECISION). Remaining ~190: that class, ~35
-live-boot/operator suites, 5 repl-parity, singletons. `production-defects-
-p1-p6` still running.
+The binding design is the [turn-loop PRD](agent-record-and-turn-loop-prd-2026-09-07.md):
+additive system and agent turns (§14), live results plus saved shown text
+(§15), the debug algorithm (§16), and plan/settings components (§17).
+`default` is the development environment (`.claude/seon-hook.edn:23–26`).
 
-`production-defects-p1-p6` landed (`cbc35a5f8..2d5430992`): all six fixed
-and proven live (10 KB def settles, next turn runs; core faults stored);
-contract violations name every problem path + caller; the worker loads the
-program before arming and refuses when it armed nothing; platform green.
-Filed: `an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker`.
-NOW RUNNING in parallel, file-disjoint: lane 2 `listened-attributes`
-(cluster/* + wake/work/loop/run/agent, bootstrap, schedule, effect, error);
-`instrumented-gate-backlog-2` (projection class per law 2.1, worker-group
-scheduling, unreached suites); `verify-p1-p6-and-backlog` (read-only).
+The afternoon checkpoint recorded ids (`628025af6`), read evidence
+(`823569cd3`), components (`74b5b4b05`), compact plan reads (`080628130`),
+runner work (`cd42689b2..e33a887fe`), config (`fa1c0bd47`), blob retention
+(`e9e15a585`), and pool sizing (`90170c3c8`). These are historical landing
+references, not verification of the current working tree. The checkpoint
+also reported a default-page failure and adoption lock contention.
 
-`verify-p1-p6-and-backlog` (`research/verify-p1-p6-and-backlog-2026-09-08.md`):
-P1–P6 genuinely fixed (P6: 3,000 property trials green); --all now 156
-distinct reds, errors 244 → 83; 20-red sample: 9 production, 4 fixture, 3
-stale. New: `with-publication!` class fixed at the callee (`[:sequential]`,
-orchestrator); cross-cluster writes not refused (BLOCKER, lane
-`custody-isolation` running); identity row pulls nil; config apply splices
-symbols; `declared-program-namespaces` silent `[]`; the P1 dial refusal
-takes down the whole MCP surface (seam too wide — for the turn lane); the
-`phase` close-on-refusal claim is UNPROVEN (the turn lane must prove it).
+The subsequent multi-cluster proof (`e4da59a88`) recorded distinct cluster
+connections, SCI contexts, projections, routing, and render graphs in one
+JVM, with 39 virtual flow-stack threads. It reported two defects: adoption
+refused with multiple running instances, and scoped gates built their base
+from the working tree rather than the snapshot. The assigned repairs and
+`bin/test-fast` work were in flight at that checkpoint; derive their present
+status before claiming they are fixed. Second deployments use `--root`.
 
-Lane 2 `listened-attributes` LANDED (`c04765e10..c3ea827db`): wake set
-derived from `:seon.wake/listen|opens-turn?|inside` schema-row facts;
-both hand lists and the agent-id wake deleted; answered-by-`:t` live
-(double-pay dead); `seon.schedule.fire` accreted with `opens-turn? false`;
-trigger/opening-commit-id left as provenance for step 3 (seven readers).
-Filed: a turn that dies before replying still answers its wakes → PRD r8:
-ONLY A TURN HOLDING A REPLY ANSWERS. Custody lane refuted its premise
-(writes were refused; the runner's re-arm killed the worker — blocker
-filed). Dev JVM restarted + converged. Running: `verify-listened-attributes`
-(read-only), `instrumented-gate-backlog-2`. Step 3 (turn + loop + rename)
-launches ALONE after both.
+Documentation reconciliation observed the component refs in
+`resources/seon/schemas/seon.agent.edn:1`, `seon.id/evaluation` in
+`src/seon/id.clj:50`, and `seon.turn/system-turn` in `src/seon/turn.clj:137`.
+The persistent-context and full evaluation-history integration remain
+[TARGET] until live proof: `src/seon/sci/eval.clj:1821` still exposes
+`fork-for-turn`, and `src/seon/eval.clj` was absent at this check. The MCP
+status call answered on `default` but reported render health unknown;
+connectivity is not a clean runtime or browser proof.
 
-Owner (2026-09-08 morning): "You are making very slow progress. Figure out
-what the hold up is and press the gas." The holdup was serialization: each
-lane waited for a verifier AND for the backlog lane's repeated 20-minute
-full-suite runs. Changed: the turn-loop lane (step 3) launched NOW,
-concurrently with backlog 2, ownership split by file; verifiers run
-concurrently with the next lane instead of gating it; `--all` runs once
-per lane, at the end. PRD r9 folds lane 2's verifier blockers into step 3.
-
-Docs lane landed (7 commits: architecture docs at the PRD target; curation
-ref = later accretion, recorded in PRD §4). Backlog 2 landed
-(`d2793c0ba..c8db5b649`): projection class dissolved (`malli-form?` asks
-the projection in hand; 38 → 6), worker armed state derived per task,
-repl-parity/db/data reds cured, 8 production defects fixed; `--all` 158
-distinct red of which 62 sit in the turn-loop lane's files (it inherits
-them), 20 `parallel-only` (13 sci.eval — filed, unattributed). NOTE:
-`--all` skips 54 declared-long live-boot/operator tests — the wave's final
-gate is `--full`. Running: `turn-loop` (step 3), `refused-render-typed-
-unknown` (step 5 render half). Step 4 spec drafted (`agent-record-0908.md`).
-
-Owner: "make sure the test harness is doing the right thing as that often
-fixes entire classes of problems." Lane `test-harness` launched
-(concurrent): parity with boot as set equality, worker-isolation detector
-(the 20 `parallel-only` verdicts, 13 sci.eval), totality of every tally,
-hand-rostered fixtures routed through the canonical ones, selection by
-`:seon.fn/calls` proven, bounds/watchdog/reaping probed, `:test-results`
-evidence made real. Three lanes live: turn-loop, refused-render,
-test-harness.
-
-Owner (2026-09-08): "Why not just have the agents do more focused testing.
-It's a waste of time to run the entire test suite for every change." Lane
-gate = bare `bin/test` (reach-selected by `:seon.fn/calls`) + explicit
-subject namespaces + `--platform`; NEVER `--all`/`--full` in a lane — full
-suites are the orchestrator's integration checkpoints only (the standing
-rule from 2026-08 that I had drifted from). Applied to every spec from now.
-
-Owner (2026-09-08): "the ai projection is supposed to be handled by the ai
-render functions or the value renderer. DO NOT INTRODUCE MORE spots where
-clipping occurs." The repair lanes put `fit` at the transcript, the walk's
-connection width, and a render terminal — three spots. Astra lane
-`one-clipping-spot` launched: census every clip/elide site, collapse into
-the value renderer's AI projection + declared AI render functions.
-Also: Opus lanes winding down (harness stopped clean at 14 commits; turn-
-loop and render-value finish their in-flight slice); all new lanes = astra.
-
-### 2026-09-08 afternoon — astra wave
-
-Dev env = `default` in the main root (hook, MCP, bin/seon, all argument-
-free). PRD r11 → §17: additive context (§14), results in memory / shown
-text on disk (§15), the debug page shows the algorithm (§16), plan and
-settings as components (§17), ids via `seon.id` (landed `628025af6`). Landed
-today by astra lanes: read-evidence exactness with both-direction proofs
-(`823569cd3`), plan/settings components (`74b5b4b05`), compact plan reads
-(`080628130`), runner `--paths` + re-arm (`cd42689b2..e33a887fe`), config
-apply (`fa1c0bd47`), blob retention (`e9e15a585`), docs/skills (40+).
-Orchestrator: clipping collapsed, def note, seon.id, pool sizing
-(`90170c3c8`). Running: turn-cut (seon.turn + §16 functions), record-
-render (page 500 first, then §16 page), blob-retention (gates), issues-
-sweep, runner-base-cache (6–8 min fixed cost per gate → seconds),
-hook-coalesce (one publication per quiet window). Known: page 500 on
-default (time-limit dropped on the page path, assigned); the operator
-lifecycle lock contended by per-edit adoptions (assigned).
-
-Multi-cluster proof (`e4da59a88`): two clusters in one JVM hold distinct
-connections, SCI contexts, projection states, routing, render graphs; all
-39 flow-stack threads virtual. TWO DEFECTS: development adoption REFUSES
-with more than one running instance (→ hook-coalesce, refresh path); the
-shared test base is built from the working tree, so `--paths` gates still
-compile other lanes' half-edits (→ runner-base-cache: build the base from
-the snapshot). `bin/test-fast` in flight (armed one-JVM inner loop; arming
-extracted to `seon.test.arm`). Lanes gate per commit with `--paths`, per
-lane with `--platform`; the suite is the orchestrator's only.
+No documentation change here authorizes operating another lane. If a scoped
+gate encounters another lane's in-flight failure, stop at the exact boundary
+when the assignment requires it. Re-observe the current source before
+attributing the cause. The 48-bit identity claim cannot promise collision
+freedom; §0 records that limit without changing the chosen id format.
