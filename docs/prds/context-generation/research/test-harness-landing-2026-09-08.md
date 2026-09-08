@@ -180,6 +180,23 @@ that shape; if they survive §2.1's fix, the detector needs a metadata member.
 
 **Regression.** `seon.test-runner-test/a-task-that-changes-worker-global-state-is-named-as-the-leaker`.
 
+### The verdict, on `--all`, naming a leaker for the first time
+
+```text
+bin/test: confirmation parallel-only
+  seon.cluster.loop-test/a-refused-terminal-commit-still-closes-the-run
+  worker=pool-1
+bin/test:   suspected leakers, earlier in worker pool-1 —
+bin/test:     seon.cluster.agent-test/routing-conservation-waits-for-terminal-evidence
+              [:seon.test.runner/snapshot-instrumented]
+```
+
+That is the whole point of the mechanism: before it, this line read
+`confirmation parallel-only seon.cluster.loop-test/a-refused-terminal-commit-still-closes-the-run`
+and stopped, sending the reader to the run loop's owner. The cause was two
+namespaces away, in a test that stripped three wrappers and did not put them
+back.
+
 ### It found one on its first run
 
 The FIRST `bin/test --platform` after the detector landed printed:
