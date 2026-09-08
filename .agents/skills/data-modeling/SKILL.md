@@ -1,7 +1,5 @@
 ---
 name: data-modeling
-type: skill
-status: active
 description: "Design Seon attributes, identities, refs, components, and function contracts in the canonical schema population. Use for schema EDN and domain-model changes; database operations belong to datahike."
 ---
 
