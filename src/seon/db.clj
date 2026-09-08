@@ -26,7 +26,7 @@
             [seon.schema.form :as schema.form])
   (:import [datahike.db AsOfDB DB]
            [datalog.parser.type BindScalar Constant FindColl FindRel FindScalar
-            FindTuple Pattern Variable]))
+            FindTuple Pattern Pull Variable]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Ambient custody and optional read evidence
@@ -332,6 +332,96 @@
             nil
             (throw cause)))))))
 
+(defn- query-index-patterns
+  "Retain scalar input and constant constraints from parsed datom patterns.
+  Other query constructs retain their general dependency evidence."
+  [request source-position]
+  (let [parsed (query/memoized-parse-query (:query request))
+        bindings (into {}
+                       (keep (fn [[input value]]
+                               (when (and (instance? BindScalar input)
+                                          (instance? Variable (:variable input)))
+                                 [(get-in input [:variable :symbol]) value])))
+                       (map vector (:qin parsed) (:args request)))
+        source (get-in parsed [:qin source-position :variable :symbol])
+        database (nth (:args request) source-position)
+        value-of (fn [argument]
+                   (cond
+                     (instance? Constant argument) [:bound (:value argument)]
+                     (instance? Variable argument) (find bindings (:symbol argument))))]
+    (when (and (every? #(instance? Pattern %) (:qwhere parsed))
+               (not-any? #(instance? Pull %) (parser/find-elements (:qfind parsed))))
+      (into []
+            (comp
+             (filter #(= source (or (get-in % [:source :symbol]) '$)))
+             (map
+              (fn [clause]
+                (let [[e a v] (:pattern clause)
+                      entity (value-of e)
+                      attribute (second (value-of a))
+                      value (value-of v)
+                      resolved-entity (when entity (db.utils/entid database (second entity)))
+                      resolved-value (when value
+                                       (if (and attribute (db.utils/ref? database attribute))
+                                         (db.utils/entid database (second value))
+                                         (second value)))]
+                  (cond-> {}
+                    resolved-entity (assoc :seon.db/pattern-entity resolved-entity)
+                    (keyword? attribute) (assoc :seon.db/pattern-attribute attribute)
+                    (some? resolved-value) (assoc :seon.db/pattern-value resolved-value))))))
+            (:qwhere parsed)))))
+
+(defn- pull-index-patterns
+  "Bind finite explicit pull dependencies to their selected entities.
+  General selectors retain their existing semantic read evidence."
+  [database arguments operation plan]
+  (let [options (when (map? (first arguments)) (first arguments))
+        references (if (= :pull operation)
+                     [(if options (:eid options) (second arguments))]
+                     (if options (:eids options) (second arguments)))]
+    (letfn [(patterns [spec reference]
+              (let [eid (db.utils/entid database reference)
+                    identity-pattern
+                    (cond
+                      (keyword? reference)
+                      {:seon.db/pattern-attribute :db/ident :seon.db/pattern-value reference}
+                      (sequential? reference)
+                      {:seon.db/pattern-attribute (first reference)
+                       :seon.db/pattern-value (second reference)})]
+                (when-not (:wildcard? spec)
+                  (reduce-kv
+                   (fn [result display options]
+                     (let [attribute (:attr options)
+                           nested (:subpattern options)
+                           forward? (= display attribute)]
+                       (if (or (not (keyword? attribute))
+                               (:recursion options)
+                               (and (not= :db/id attribute) (not nested)
+                                    (db.utils/component? database attribute)))
+                         (reduced nil)
+                         (if-not eid
+                           result
+                           (let [pattern (cond
+                                           (= :db/id attribute) {:seon.db/pattern-entity eid}
+                                           forward? {:seon.db/pattern-entity eid
+                                                     :seon.db/pattern-attribute attribute}
+                                           :else {:seon.db/pattern-attribute attribute
+                                                  :seon.db/pattern-value eid})
+                                 children
+                                 (when nested
+                                   (mapv #(patterns nested (if forward? (:v %) (:e %)))
+                                         (if forward?
+                                           (d/datoms database :eavt eid attribute)
+                                           (d/datoms database :avet attribute eid))))]
+                             (if (some nil? children)
+                               (reduced nil)
+                               (into (conj result pattern) (mapcat identity) children)))))))
+                   (cond-> [] identity-pattern (conj identity-pattern))
+                   (:attrs spec)))))]
+      (let [groups (mapv #(patterns (:spec plan) %) references)]
+        (when-not (some nil? groups)
+          (into [] (distinct) (mapcat identity groups)))))))
+
 (defn- append-query-evidence!
   [request response result]
   (when *read-evidence-sink*
@@ -360,12 +450,15 @@
                  (:datahike.query.dependency/sources plan)))]
       (doseq [position (distinct positions)
               :let [database (nth arguments position nil)]
-              :when (db.utils/db? database)]
+              :when (db.utils/db? database)
+              :let [patterns (when (instance? DB database)
+                               (query-index-patterns request position))]]
         (append-read-evidence!
          (cond->
           {:seon.db/db database
            :seon.db/source-argument-position position
            :datahike.read/dependency-plan plan}
+           patterns (assoc :seon.db/read-index-patterns patterns)
            replayable?
            (assoc :seon.db/read-request
                   {:seon.db/read-operation :q
@@ -383,14 +476,18 @@
           (assoc arguments 0 (-> (first arguments)
                                  (assoc :selector selector)
                                  (dissoc :datahike.pull/plan)))
-          (assoc arguments 0 selector))]
+          (assoc arguments 0 selector))
+        patterns (when (instance? DB database)
+                   (pull-index-patterns database arguments operation-key
+                                        (:datahike.pull/plan response)))]
     (append-read-evidence!
-     {:seon.db/db database
+     (cond-> {:seon.db/db database
       :seon.db/source-argument-position 0
       :datahike.read/dependency-plan (:datahike.read/dependency-plan response)
       :seon.db/read-request {:seon.db/read-operation operation-key
                              :seon.db/pull-arguments replay-arguments}
-      :seon.db/read-result result})))
+      :seon.db/read-result result}
+       patterns (assoc :seon.db/read-index-patterns patterns)))))
 
 ;;; The committed identity a retained read's revision is keyed on. Datahike
 ;;; derives its OWN query-cache key exactly this way
@@ -495,7 +592,18 @@
                    (read-result-digest (:seon.db/read-result entry)))]
            (cond->
             {:seon.db/source-argument-position source-position
-             :datahike.read/dependency-plan plan
+             :datahike.read/dependency-plan
+             (if-let [patterns (:seon.db/read-index-patterns entry)]
+               (update plan :datahike.query.dependency/sources
+                       (fn [sources]
+                         (mapv (fn [source]
+                                 (cond-> source
+                                   (= source-position
+                                      (:datahike.query.source/argument-position source))
+                                   (assoc :seon.db/read-index-patterns patterns
+                                          :seon.db/read-basis-t (basis-t database))))
+                               sources)))
+               plan)
              :datahike.read/revision
              (dependency-revision database plan source-position)}
              (:seon.db/read-request entry)
@@ -558,6 +666,39 @@
                        (d/index-page database
                                      (:seon.db/index-page-options request)))))
 
+(defn- index-pattern-changed?
+  [changes pattern]
+  (let [entity (:seon.db/pattern-entity pattern)
+        attribute (:seon.db/pattern-attribute pattern)
+        value (find pattern :seon.db/pattern-value)
+        [index components]
+        (cond
+          entity [:eavt (cond-> [entity] attribute (conj attribute))]
+          (and attribute value) [:avet [attribute (val value)]]
+          attribute [:aevt [attribute]]
+          :else [:eavt []])]
+    (boolean
+     (some #(or (nil? value) (= (val value) (:v %)))
+           (apply d/datoms changes index components)))))
+
+(defn- index-evidence-current
+  "An exact index check when historical datoms retain the read's dependencies.
+  Return no decision for a different database origin or discarded history."
+  [database source revision]
+  (let [patterns (:seon.db/read-index-patterns source)
+        basis (:seon.db/read-basis-t source)
+        context (:cache-context database)]
+    (when (and patterns basis
+               (instance? DB database)
+               (= (select-keys revision [:datahike.cache/connection-id :datahike.cache/generation])
+                  (select-keys context [:datahike.cache/connection-id :datahike.cache/generation]))
+               (every? (fn [pattern]
+                         (when-let [attribute (:seon.db/pattern-attribute pattern)]
+                           (not (:db/noHistory (get (dbi/-schema database) attribute)))))
+                       patterns))
+      (let [changes (d/since (d/history database) basis)]
+        (not-any? #(index-pattern-changed? changes %) patterns)))))
+
 (defn read-evidence-current?
   "True when `database` still satisfies every retained dependency revision."
   {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.error/value]
@@ -571,7 +712,12 @@
            plan :datahike.read/dependency-plan
            revision :datahike.read/revision
            :as evidence}]
-       (or (and (not (false? (:datahike.read/cache-eligible? revision)))
+       (let [source (some #(when (= source-position (:datahike.query.source/argument-position %)) %)
+                          (:datahike.query.dependency/sources plan))
+             indexed (index-evidence-current database source revision)]
+        (if (some? indexed)
+          indexed
+          (or (and (not (false? (:datahike.read/cache-eligible? revision)))
                 (= revision (dependency-revision database plan source-position)))
            (when (and (find evidence :seon.db/read-request)
                       (or (find evidence :seon.db/read-result)
@@ -591,7 +737,7 @@
                        (when-let [actual
                                   (read-result-digest replayed)]
                          (= expected actual)))))
-               (catch Throwable _ false)))))
+               (catch Throwable _ false)))))))
      retained)))
 
 ;;; THE declaration population for ONE read operation. Every decode walker
@@ -1428,7 +1574,36 @@
       (let [declarations (read-declarations database)
             result (mapv #(datom->data declarations database %)
                          (apply d/datoms database arguments))]
-        (append-database-evidence! database :all)
+        (let [options (first arguments)
+              index (if (map? options) (:index options) options)
+              components (if (map? options) (:components options) (rest arguments))
+              pattern-keys (case index
+                     :eavt [:seon.db/pattern-entity :seon.db/pattern-attribute :seon.db/pattern-value]
+                     :aevt [:seon.db/pattern-attribute :seon.db/pattern-entity :seon.db/pattern-value]
+                     :avet [:seon.db/pattern-attribute :seon.db/pattern-value :seon.db/pattern-entity])
+              supplied (zipmap pattern-keys components)
+              attribute (some->> (:seon.db/pattern-attribute supplied)
+                                 (db.utils/attr-info database) :ident)
+              entity (some->> (:seon.db/pattern-entity supplied)
+                              (db.utils/entid database))
+              value (:seon.db/pattern-value supplied)
+              value (if (and attribute (db.utils/ref? database attribute) (some? value))
+                      (db.utils/entid database value)
+                      value)
+              pattern (cond-> {}
+                        attribute (assoc :seon.db/pattern-attribute attribute)
+                        entity (assoc :seon.db/pattern-entity entity)
+                        (some? value) (assoc :seon.db/pattern-value value))
+              plan {:datahike.query.dependency/sources
+                    [{:datahike.query.source/symbol '$
+                      :datahike.query.source/argument-position 0
+                      :datahike.query.source/attributes (if attribute #{attribute} :all)}]}]
+          (append-read-evidence!
+           (cond-> {:seon.db/db database
+                    :seon.db/source-argument-position 0
+                    :datahike.read/dependency-plan plan}
+             (instance? DB database)
+             (assoc :seon.db/read-index-patterns [pattern]))))
         result)
       (catch Throwable cause
         (append-database-evidence! database :all)

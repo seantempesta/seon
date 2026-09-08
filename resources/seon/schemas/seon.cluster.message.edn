@@ -15,7 +15,6 @@
                        :content
                        [:string
                         {:min 1,
-                         :seon.db/no-history? true,
                          :seon.search/index :text}],
                        :delivery
                        [:map

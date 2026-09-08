@@ -1,11 +1,19 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, history, agent, class/present-nil]
 ---
 
 # An inbox entry carries a nil for the content history deliberately discards
+
+Resolved 2026-09-08 by turn-cut: the §14/§15 since-query and as-of requirements
+require message content history. Its no-history declaration is removed, and
+the historical inbox regression asserts the actual earlier content. The
+owned-path `seon.db-test seon.read-evidence-test` gate passed 42 tests and 277
+assertions with no failures/errors. An existing live database needs reforking
+to discard its old physical no-history facet. The following is discovery
+history, superseded by that requirement.
 
 Found 2026-09-08 by `instrumented-gate-backlog-2` under the armed gate
 ([landing note](../../prds/context-generation/research/instrumented-gate-backlog-2-landing-2026-09-08.md)).

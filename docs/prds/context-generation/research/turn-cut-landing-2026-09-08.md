@@ -7,6 +7,42 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
+## Read-evidence exactness landed, 2026-09-08 18:59 UTC
+
+The owned-path gate passed: `seon.read-evidence-test seon.db-test`, 42 tests,
+277 assertions, zero failures/errors. Two new real-SCI tests (14 assertions)
+prove both recipient directions with replay requests/results removed from
+the retained evidence. The 40 inherited database tests also pass.
+
+`seon.db` now retains bound E/A/V index patterns for simple datom queries,
+finite explicit pulls (including nested selected entities), and datoms reads.
+Its existing validity function matches historical datoms since the captured
+basis against those patterns. General query/pull constructs and databases
+without the necessary history keep their existing conservative/replay path;
+this commit does not claim exact patterns for every Datalog construct.
+Message content retains history so retractions and historical inbox reads
+remain observable. The existing historical inbox regression now expects its
+actual prior content, rather than a nil that violated its contract.
+
+Before: the inbox query retained only `#{:seon.cluster.message/to}`.
+After: it also retains the bound recipient value; each selected message pull
+retains its entity plus attribute. On live default, MCP JVM evaluation observed
+the recipient pattern for Juniper and actual SCI evaluation returned its three
+messages. Live physical message history still needs a refork; the old database
+retains its former no-history facet. No provider was called.
+
+Gate paths: `src/seon/db.clj`, `resources/seon/schemas/seon.db.edn`,
+`resources/seon/schemas/seon.cluster.message.edn`, `test/seon/db_test.clj`,
+`test/seon/read_evidence_test.clj`. Log: `tmp/turn-cut-exactness-test-4.log`.
+Earlier interrupted/red attempts are superseded by this completed gate.
+All seven original deletion rows and the §16 turn functions remain pending;
+their reference-count table below is unchanged. Datoms per turn are not yet
+measured. The latest owner gate is the owned-path explicit namespace gate.
+
+The zero-argument inbox call is ambiguous between its two derived arities on
+live SCI. The exactness proof uses its declared full argument list. Generated
+source must use an unambiguous declared call shape.
+
 ## Latest attempt: §15 and read-evidence exactness
 
 Read §15 and the current §14 addendum in the working tree. The latest ID ruling

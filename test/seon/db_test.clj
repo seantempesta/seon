@@ -1015,7 +1015,7 @@
                      :my.message/from "db-diff-alice"
                      :my.message/at
                      #inst "2026-08-13T20:00:00.000-00:00"
-                     :my.message/content nil}
+                     :my.message/content "hello"}
                     :seon.db.diff/after
                     {:my.message/id "db-diff-m1"
                      :my.message/from "db-diff-alice"
