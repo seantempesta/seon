@@ -401,6 +401,34 @@
             "the MCP projection retained no stable identity for this cut"}
            elision))))
 
+(deftest a-raw-prepl-ret-value-passes-the-enrichment-untouched
+  ;; THE CLASS: an enrichment that assumes the shape it knows. A `:ret`
+  ;; event's `:val` is a PRINTED STRING on the raw io-prepl path — the
+  ;; projection map only exists after `decoded-projection-event` — and
+  ;; `update-in` on a string threw `String cannot be cast to Associative`,
+  ;; failing the whole transport rather than the one value it could not
+  ;; enrich. Only a map carries the projection; every other `:val` is data
+  ;; this walk has nothing to say about.
+  (let [raw {:tag :ret :val "42" :ns "user" :ms 1 :form "(+ 40 2)"}
+        vector-val {:tag :ret :val [:not :a :projection]}
+        other-tag {:tag :out :val "printed"}
+        enrich (bridge-var 'enrich-projection-elisions)]
+    (is (= raw (enrich raw))
+        "a raw io-prepl :ret carries its printed string through unchanged")
+    (is (= vector-val (enrich vector-val))
+        "and so does any other non-map :val")
+    (is (= other-tag (enrich other-tag))
+        "and an event that is not a :ret at all")
+    (let [decoded ((bridge-var 'decoded-projection-event)
+                   {:tag :ret
+                    :val (pr-str {:seon.dev.mcp/value
+                                  '(0 1 :seon.sci.admit/elided)})})]
+      (is (= :seon.print/elided
+             (:seon.print/face
+              (last (get-in (enrich decoded)
+                            [:val :seon.dev.mcp/value]))))
+          "while a decoded map projection still reaches the walk"))))
+
 (deftest endpoint-selection-is-root-scoped-and-reaches-degraded-registrations
   (let [fixture-root (io/file project-root "tmp"
                               (str "mcp-root-" (random-uuid)))

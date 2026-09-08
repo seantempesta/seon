@@ -530,8 +530,14 @@
   ;; became faithful-or-missing (2026-09-07); the read then answered nil
   ;; forever and the tail sentinel reached the tool unenriched. The walk is
   ;; a no-op when no sentinel is present, so the positive signal is enough.
+  ;;
+  ;; ONLY A MAP `:val` CARRIES THE PROJECTION. A raw io-prepl `:ret` carries
+  ;; the printed STRING there; `update-in` cast it to `Associative` and threw,
+  ;; which is the whole transport failing on a shape it was never handed
+  ;; before. The enrichment is for the projection it knows, and every other
+  ;; `:val` passes through untouched.
   [event]
-  (if (= :ret (:tag event))
+  (if (and (= :ret (:tag event)) (map? (:val event)))
     (update-in event [:val :seon.dev.mcp/value]
                enrich-collection-tail-elisions [])
     event))
