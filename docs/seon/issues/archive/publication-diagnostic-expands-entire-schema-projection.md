@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, operator, render, wave/error-face-budget]
 ---
@@ -23,7 +23,7 @@ add a second clipping mechanism. The underlying acquisition refusal is a
 separate fact and was not diagnosed by this observation.
 
 Evidence is recorded with
-[the test-fast landing note](../../prds/context-generation/research/test-fast-landing-2026-09-08.md).
+[the test-fast landing note](../../../prds/context-generation/research/test-fast-landing-2026-09-08.md).
 The oversized scratch log is disposable; its measured size is retained here.
 
 ## 2026-09-08 typed adoption refusal repair
@@ -41,4 +41,6 @@ diagnostic; the real-prepl operator regression measures 159 bytes. A live
 source-changed refusal after acquisition measured 151 terminal bytes.
 These prove the typed adoption-refusal path; arbitrary untyped prepl
 exceptions still use the general transport diagnostic.
-See [the adoption landing note](../../prds/context-generation/research/adoption-rows-landing-2026-09-08.md).
+Repair commit: `4d47b62d0`. Final in-place adoption converged and the
+adopted helper was probed directly through MCP.
+See [the adoption landing note](../../../prds/context-generation/research/adoption-rows-landing-2026-09-08.md).

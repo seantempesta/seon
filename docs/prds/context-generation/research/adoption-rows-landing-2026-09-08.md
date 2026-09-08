@@ -126,3 +126,57 @@ The second explicit live adoption reached SCI acquisition and JVM
 instrumentation, then refused to stamp the commit because source changed
 during adoption. Its terminal refusal measured **151 bytes**, two lines;
 the full progress/warning log was 63,670 bytes. A convergence retry follows.
+
+## Slice 3 — projection-aware contract census
+
+`every-public-schedule-contract-compiles` uses the canonical fixture's
+projection compile options and requires a nonempty subject census.
+`SEON_TEST_WORKERS=3 bin/test --paths test/seon/schedule_test.clj --
+seon.schedule-test` passed **8 tests, 64 assertions, 0 failures, 0 errors**;
+the fast suite had the same tally. Gate coordinator/test phase: 61 seconds.
+
+Audited `rg -n '\(m/(function-schema|schema)' test/`. Other first-party
+schema compilations already supply projection options. The remaining
+unqualified calls are intentional: `program_test.clj` compiles generated
+built-in-only shapes; `search_test.clj` compiles an explicit `:fn` predicate;
+`registry_isolation_test.clj` asserts a private named schema is unavailable
+in Malli's default registry. Calls to `function-schemas` inspect the global
+registry and do not compile contracts.
+
+## Final live verification and platform boundary
+
+The final explicit `bin/seon init --dev default --changed
+src/seon/sci/eval.clj` exited **0** and printed `development cluster
+converged`. Its log measured 56,660 bytes including ordinary warnings and
+progress. MCP independently read both commit IDs as
+**`6aa08a34-675a-5c0b-b268-afdbf5d35d21`**, convergence **true**. A direct
+probe of the in-place-adopted `acquisition-refusal` with the same
+99,000-byte projection payload returned **1,162 bytes** (without the boot
+wrapper; its cause text differs from the test). No default stop, refork or
+restart occurred. This proves in-place adoption and the diagnostic helper;
+it is not an atomic-generation or browser-paint claim.
+
+The first platform attempt failed before worker readiness: its HEAD runner
+launched `pool-4` although `SEON_TEST_WORKERS=3` prepared only three
+checkouts. The missing checkout could not load `seon.test.runner`. See
+[the worker-count issue](../../../seon/issues/platform-worker-count-exceeds-prepared-checkouts.md).
+
+The retry supplied `JAVA_TOOL_OPTIONS=-XX:ActiveProcessorCount=6` and
+`SEON_TEST_WORKERS=3` to the same `bin/test --paths … --platform` gate,
+including all owned production and test paths. It reported **workers=3**,
+**81 tests, 448 assertions, 1 failure, 0 errors** in a 184-second
+coordinator/test phase. Its independent confirmation reproduced
+`seon.test-support-test/an-instrumentation-test-restores-the-entering-contracts-on-failure`
+at `test_support_test.clj:74`: the test expects all instrumentation to be
+removed. Separately, the cohost boot test added eight instrumented fixture
+Vars to its worker. The existing
+[instrumentation-fixture issue](../../../seon/issues/a-platform-test-leaves-its-worker-stripped-of-every-contract.md)
+tracks that family. Both test files and the runner contained unrelated
+uncommitted edits on entry and remain untouched by this lane. These are the
+exact platform verification boundaries, not green platform evidence.
+
+Commits: acquisition **`152f11a68`**; diagnostics **`4d47b62d0`**; the final
+path-limited commit contains the schedule census and this verification note.
+No `--all` or `--full` run was used. The owned failed roots were checked
+for live JVM holders before deletion; successful scoped roots were removed
+by the gate. No scratch cluster or worktree was created.

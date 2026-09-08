@@ -1,6 +1,6 @@
 ---
 type: defect
-status: open
+status: resolved
 severity: blocker
 tags: [dev-cluster, adoption, sci, acquisition, class/p1]
 ---
@@ -47,4 +47,7 @@ development acquisition. The scoped gate passed 1 test / 10 assertions,
 including a source snapshot without the agent namespace, one durable fault,
 and a callable valid sibling. Full live convergence remains to be verified;
 the first explicit adoption attempt failed earlier at `seon.fn/exact-source`.
-Evidence: [adoption landing note](../../prds/context-generation/research/adoption-rows-landing-2026-09-08.md).
+Final in-place adoption converged on commit
+`6aa08a34-675a-5c0b-b268-afdbf5d35d21`; both source and cluster commit IDs
+were independently read equal. Repair commit: `152f11a68`.
+Evidence: [adoption landing note](../../../prds/context-generation/research/adoption-rows-landing-2026-09-08.md).

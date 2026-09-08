@@ -7,6 +7,7 @@
             [seon.env :as env]
             [seon.id :as id]
             [seon.schedule :as schedule]
+            [seon.schema :as schema]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
             [seon.test-support :as test-support])
@@ -101,11 +102,18 @@
       0))
 
 (deftest every-public-schedule-contract-compiles
-  (doseq [[function-name function-var] (ns-publics 'seon.schedule)
-          :let [contract (:malli/schema (meta function-var))]
-          :when contract]
-    (is (some? (m/function-schema contract))
-        (str "invalid contract on seon.schedule/" function-name))))
+  (test-support/with-database
+    (fn [connection]
+      (let [projection (schema/projection-from-database @connection)
+            options (:seon.schema.projection/compile-options projection)
+            contracts (keep (fn [[function-name function-var]]
+                              (when-let [contract (:malli/schema (meta function-var))]
+                                [function-name contract]))
+                            (ns-publics 'seon.schedule))]
+        (is (seq contracts) "the contract census must not pass an absent subject")
+        (doseq [[function-name contract] contracts]
+          (is (some? (m/function-schema contract options))
+              (str "invalid contract on seon.schedule/" function-name)))))))
 
 (deftest nominal-instants-obey-gap-and-overlap-rules
   (testing "a nonexistent spring-forward minute is skipped"
