@@ -1610,3 +1610,115 @@
         (is (inst? (closed-at connection))
             "AND THE RUN IS CLOSED: a settlement that cannot commit may not
              leave the agent holding a run no later turn can take")))))
+
+;;; ---------------------------------------------------------------------------
+;;; A refused BATCH settlement closes the turn, and the agent turns again
+;;; ---------------------------------------------------------------------------
+
+;; THE CLASS the reviews name (astra B4): one settlement per identity does
+;; not imply one execution. After the forms have run, a refused terminal
+;; transaction leaves no terminal fact — and re-entering the evaluate arm
+;; would execute the same side effects again before the identity refused the
+;; second settlement. The refusal arm is what stops that: it settles every
+;; begun ordinal with the failure and CLOSES the turn in the same
+;; transaction, so there is no open turn to re-enter and the agent's next
+;; wake opens a new one.
+;;
+;; The single-form path is proven above; this is the BATCH path, which the
+;; independent verification could not prove and which is the one the
+;; ordinary fold takes.
+
+(defn- commit-agent-receipts!
+  "Two agent-authored evaluations, the shape a stored reply leaves."
+  [connection]
+  (db/transact!
+   connection
+   (mapv (fn [ordinal]
+           {:seon.cluster.eval/id (run/receipt-identity "run-1" ordinal)
+            :seon.cluster.eval/run [:seon.cluster.run/id "run-1"]
+            :seon.cluster.eval/ordinal ordinal
+            :seon.cluster.eval/at now
+            :seon.cluster.eval/author :agent
+            :seon.cluster.eval/source (str "(+ " ordinal " 1)")
+            :seon.cluster.eval/ns [:seon.ns/name 'user]})
+         [0 1])))
+
+(deftest a-refused-batch-settlement-closes-the-turn-and-the-agent-turns-again
+  (with-database
+    (fn [connection]
+      (config/apply! {:seon.db/connection connection
+                      :seon.boot/cluster-name "loop-batch-refused"})
+      (commit-run! connection {:held? true})
+      (commit-agent-receipts! connection)
+      (let [ctx (test-support/fork-cluster-ctx connection
+                                               "loop-batch-refused")
+            cluster (test-support/cluster-handle
+                     {:seon.db/connection connection
+                      :seon.cluster/name "loop-batch-refused"
+                      :seon.sci.eval/ctx ctx
+                      :seon.cluster.run/process process})
+            decisions (config/defaults)
+            evaluate
+            (fn [ordinal]
+              (sci.eval/evaluate
+               {:seon.cluster.eval/source (str "(+ " ordinal " 1)")
+                :seon.sci.eval/ctx ctx
+                :seon.cluster.eval/ns [:seon.ns/name 'user]
+                :seon.sci.admit/caps (config/result-caps decisions)
+                :seon.sci.eval/time-limit-ms
+                (:seon.config.eval/time-limit-ms decisions)
+                :seon.config/on-core-error
+                (:seon.config/on-core-error decisions)
+                :seon.db/connection connection}))
+            requests
+            (mapv (fn [ordinal]
+                    {:seon.cluster.loop/cluster cluster
+                     :seon.cluster.loop/now now
+                     :seon.cluster.agent/id "agent-a"
+                     :seon.cluster.run/id "run-1"
+                     :seon.cluster.eval/ordinal ordinal
+                     :seon.sci.eval/evaluation (evaluate ordinal)})
+                  [0 1])
+            attempts (volatile! 0)
+            publish (var-get #'blob/with-publication!)
+            settled
+            (with-redefs [blob/with-publication!
+                          (fn [conn staged-writes commit-roots!]
+                            (vswap! attempts inc)
+                            (if (= 1 @attempts)
+                              (throw (ex-info "the batch commit went away"
+                                              {:seon.test/commit-broke true}))
+                              (publish conn staged-writes commit-roots!)))]
+              ((private-loop-fn 'settle-batch!) cluster requests))
+            database @connection
+            evaluations
+            (db/q '[:find ?ordinal ?error
+                    :in $ ?run-id
+                    :where
+                    [?run :seon.cluster.run/id ?run-id]
+                    [?evaluation :seon.cluster.eval/run ?run]
+                    [?evaluation :seon.cluster.eval/ordinal ?ordinal]
+                    [?evaluation :seon.cluster.eval/error ?error]]
+                  database "run-1")]
+        (is (= :seon.cluster.loop/phase-failed
+               (:seon.error/kind (:refused-outcome settled)))
+            "a host failure in the batch commit is a refused phase")
+        (is (= #{0 1} (into #{} (map first) evaluations))
+            "every begun ordinal settled, so no form can execute twice")
+        (is (inst? (closed-at connection))
+            "and the turn closed in the refusal path itself")
+        (is (nil? (work/interruption database "agent-a"))
+            "the agent holds no wreckage")
+        (db/transact! connection
+                      [{:seon.cluster.message/id "m-after-refusal"
+                        :seon.cluster.message/to
+                        [:seon.cluster.agent/id "agent-a"]
+                        :seon.cluster.message/content "again"
+                        :seon.cluster.message/at now}])
+        (is (= :open
+               (:seon.cluster.work/situation
+                (work/next-agent-work
+                 @connection
+                 {:seon.cluster.agent/id "agent-a"
+                  :seon.cluster.run/process process})))
+            "AND THE AGENT TAKES ITS NEXT TURN")))))

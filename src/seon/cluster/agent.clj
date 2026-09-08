@@ -474,15 +474,23 @@
        ::fault-channel fault-channel
        ::backstop-state backstop-state
        ::agent-id agent-id
-       ::timeout-ms timeout-ms}
+       ::timeout-ms timeout-ms
+       ;; WHAT THE BOUND IS ARMED AGAINST, carried. The run this pass is
+       ;; about is not known until the pass derives its work, so the
+       ;; subject is published here and set there — never re-read when
+       ;; the bound FIRES, which is the owner law's pre-read: custody is
+       ;; legitimately released in between, so two firings described two
+       ;; different worlds and a sliding-1 fault channel kept whichever
+       ;; arrived last.
+       ::run-id (atom run-id)}
       (throw
        (turn-completion-backstop-failure
         agent-id run-id timeout-ms ::turn-start ::turn-permit
         [:seon.cluster.loop/completion])))))
 
 (defn- offer-turn-backstop-fault!
-  [{::keys [connection process fault-channel agent-id timeout-ms]}]
-  (let [run-id (held-run-id @connection agent-id process)
+  [{::keys [fault-channel agent-id timeout-ms] armed-run ::run-id}]
+  (let [run-id @armed-run
         failure
         (turn-completion-backstop-failure
          agent-id run-id timeout-ms ::turn-transform ::turn-terminal
@@ -598,14 +606,22 @@
                       request {:seon.cluster.agent/id agent-id
                                :seon.cluster.run/process process}
                ;; ONE database value for the derivation
-                      next (work/next-agent-work @connection request)]
+                      next (work/next-agent-work @connection request)
+                      ;; THE BOUND LEARNS ITS SUBJECT HERE, once, from
+                      ;; the derivation that decided it. `:open` mints
+                      ;; its run inside the turn, so the report supplies
+                      ;; it below; every other situation names it now.
+                      _ (when-let [derived (:seon.cluster.run/id next)]
+                          (reset! (::run-id turn-bound) derived))]
                   (if (nil? next)
                     [(dissoc state :seon.cluster.run/id)
                      nil]
                     (let [report (cluster.loop/turn
                                   {:seon.cluster.loop/cluster cluster
                                    :seon.cluster.work/next next}
-                                  now)]
+                                  now)
+                          _ (when-let [opened (:seon.cluster.run/id report)]
+                              (reset! (::run-id turn-bound) opened))]
                ;; Run closure is an armer wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.
                ;; The signal is disposable: the armer re-derives the complete
@@ -622,8 +638,12 @@
                       (when (work/more-agent-work? @connection request)
                         (async/offer!
                          (:seon.cluster.wake/channel cluster) ::wake))
-                      [(let [run-id
-                             (held-run-id @connection agent-id process)]
+                      ;; THE PASS REPORTS THE RUN IT TURNED, not whatever
+                      ;; the database says is held now: the turn may have
+                      ;; closed and released custody, and re-deriving here
+                      ;; made the ping state disagree with the report in
+                      ;; exactly that ordinary case.
+                      [(let [run-id (:seon.cluster.run/id report)]
                          (cond-> (dissoc state :seon.cluster.run/id)
                            run-id (assoc :seon.cluster.run/id run-id)))
                 ;; flow's own report channel: observation, never a dependency

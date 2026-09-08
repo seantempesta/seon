@@ -398,6 +398,52 @@
           (print/emit-text (:seon.sci.admit/print-node admitted)
                            (print/default-options)))))))
 
+(def ^:private machinery-namespace-prefixes
+  ;; DERIVED FROM WHAT THESE FRAMES ARE, exactly as
+  ;; `seon.instrument/caller-frame` derives its own: the host, the
+  ;; language, the contract library, core.async's dispatch, and the fault
+  ;; machinery are what CAUGHT the failure. None of them is a place to go
+  ;; and edit, and naming one routes the fault to the steward of the
+  ;; checker instead of the steward of the code that broke.
+  ["clojure." "java." "jdk." "sun." "malli." "seon.error" "seon.instrument"])
+
+(defn- stack-failing-function
+  "The first first-party function on the Throwable's stack, as `ns/name`.
+
+  THE ONE SEAM WHERE THE FRAME IS KNOWN. Only
+  `:seon.instrument/contract-violated` faults arrived carrying
+  `:seon.instrument/fn`, so `:seon.error/steward` — which routes
+  fn -> `:seon.fn/ns` -> `:seon.ns/steward` — routed exactly nothing in
+  production: 23 of 23 faults on a live cluster carried no failing
+  function (verify-listened-attributes-2026-09-08 §4b). The Throwable
+  itself knows; every other fault class arrives with a proc name, which
+  is not a function and resolves no steward.
+
+  Demunged Clojure frames read `ns/fn`, `ns/fn--1234` for a compiled
+  arity and `ns/outer/fn` for a closure, so the failing function is the
+  first two segments with the compiler's suffix dropped. A frame that
+  demunges to no `/` is a host class and is not a function at all."
+  [^Throwable failure]
+  (when failure
+    (some (fn [^StackTraceElement frame]
+            (let [demunged (clojure.lang.Compiler/demunge
+                            (.getClassName frame))
+                  separator (.indexOf demunged "/")]
+              (when (pos? separator)
+                (let [frame-ns (subs demunged 0 separator)
+                      simple (subs demunged (inc separator))
+                      simple (if-let [nested (.indexOf simple "/")]
+                               (if (neg? nested) simple (subs simple 0 nested))
+                               simple)
+                      simple (let [suffix (.indexOf simple "--")]
+                               (if (neg? suffix) simple (subs simple 0 suffix)))]
+                  (when (and (seq simple)
+                             (not (some #(.startsWith ^String frame-ns
+                                                      ^String %)
+                                        machinery-namespace-prefixes)))
+                    (str frame-ns "/" simple))))))
+          (.getStackTrace failure))))
+
 (defn- projected-instrument-data
   [source]
   (let [projected-error (if (map? (::flow/ex source))
@@ -497,8 +543,15 @@
           (and flow? (::flow/op source)) (assoc :seon.error/op (::flow/op source))
           (and flow? (::flow/cid source))
           (assoc :seon.error/cid (::flow/cid source))
-          (:seon.instrument/fn instrument-data)
-          (assoc :seon.instrument/fn (:seon.instrument/fn instrument-data))
+          ;; THE FAILING FUNCTION IS RECORDED FOR EVERY CLASS. The
+          ;; contract reporter knows it by name; every other class knows
+          ;; it by the frame that threw, and a fault carrying neither
+          ;; routes to no steward at all.
+          (or (:seon.instrument/fn instrument-data)
+              (stack-failing-function failure))
+          (assoc :seon.instrument/fn
+                 (or (:seon.instrument/fn instrument-data)
+                     (stack-failing-function failure)))
           (:seon.instrument/arm instrument-data)
           (assoc :seon.instrument/arm (:seon.instrument/arm instrument-data))
           basis-t (assoc :seon.error/basis-t basis-t)

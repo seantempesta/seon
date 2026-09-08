@@ -588,6 +588,67 @@
                (mapv :seon.cluster.message/id
                      (work/unanswered-triggers (db/db connection) agent-id))))))))
 
+(deftest only-a-turn-whose-reply-came-from-a-model-attempt-answers
+  ;; THE CLASS, measured live before it was fixed: a turn that never
+  ;; showed the wakes to a model still consumed them, and nothing said
+  ;; so — no refusal, no fault, no log line. Three turns produce the
+  ;; three shapes, all with a `:t` after the wake:
+  ;;
+  ;;   no attempts at all  — a source submission, which also STORES a
+  ;;                         reply, so a reply-join would admit it;
+  ;;   a failed attempt    — the provider never answered;
+  ;;   a successful one    — the model saw the context.
+  ;;
+  ;; Only the third answers. The turn bound is what keeps the reopening
+  ;; finite; it counts turns TAKEN, so all three spend it.
+  (with-database
+    (fn [connection]
+      (configure-cap! connection 100)
+      (add-trigger! connection)
+      (testing "a turn with no attempts — a source submission — answers nothing"
+        (db/transact!
+         connection
+         [{:seon.cluster.run/id "source-run"
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/opened-at now
+           ;; a source submission stores the submitted text as the reply
+           :seon.cluster.run/reply "(+ 1 1)"
+           :seon.cluster.run/closed-at now}])
+        (is (= [message-id]
+               (mapv :seon.cluster.message/id
+                     (work/unanswered-triggers (db/db connection) agent-id)))
+            "the message it had nothing to do with is still unanswered")
+        (is (zero? (work/latest-answering-turn-t (db/db connection)
+                                                 agent-id))))
+      (testing "a turn whose only attempt failed answers nothing"
+        (db/transact!
+         connection
+         [{:seon.error/id "provider-failure"
+           :seon.error/kind :seon.ai/no-credential
+           :seon.error/message "no credential"
+           :seon.error/at now}
+          {:seon.cluster.run/id "failed-run"
+           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
+           :seon.cluster.run/opened-at now
+           :seon.cluster.run/closed-at now}
+          (assoc (model-attempt "failed-run" now)
+                 :seon.ai.attempt/error [:seon.error/id "provider-failure"])])
+        (is (= [message-id]
+               (mapv :seon.cluster.message/id
+                     (work/unanswered-triggers (db/db connection) agent-id)))
+            "the wake was never shown to a model")
+        (is (zero? (work/latest-answering-turn-t (db/db connection)
+                                                 agent-id))))
+      (testing "and the wakes still open the next turn"
+        (is (= :open
+               (:seon.cluster.work/situation
+                (work/next-agent-work (db/db connection) request)))))
+      (testing "a turn whose attempt succeeded answers"
+        (open-run! connection {:holder process})
+        (let [database (db/db connection)]
+          (is (empty? (work/unanswered-triggers database agent-id)))
+          (is (pos? (work/latest-answering-turn-t database agent-id))))))))
+
 (deftest two-wakes-in-one-transaction-are-one-turn
   ;; THE CLASS: selecting ONE unanswered item per turn paid the model
   ;; twice for a context that already contained both. Measured live on
