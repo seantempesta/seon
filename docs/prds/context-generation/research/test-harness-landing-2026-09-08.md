@@ -180,6 +180,28 @@ that shape; if they survive §2.1's fix, the detector needs a metadata member.
 
 **Regression.** `seon.test-runner-test/a-task-that-changes-worker-global-state-is-named-as-the-leaker`.
 
+### It found one on its first run
+
+The FIRST `bin/test --platform` after the detector landed printed:
+
+```text
+bin/test: WORKER-GLOBAL STATE CHANGED by
+  seon.cluster.cohost-boot-test/a-second-cluster-boots-under-the-first-cluster-s-instrumentation
+  worker= pool-1
+  {:snapshot-instrumented {:drift-removed-count 918}
+   :snapshot-registered   {:drift-added-count 8}}
+```
+
+`test/seon/cluster/cohost_boot_test.clj:161` ends its `finally` with a bare
+`(instrument/remove!)`, which is total by design: the worker leaves that task
+with **918 wrappers gone**, and every later task in `pool-1` runs unarmed
+against this test's timing rather than its own subject. That is precisely the
+class [an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker](../../../seon/issues/an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker.md)
+named — now with a culprit rather than a victim. `reassert-contracts!` already
+makes the gate correct despite it, which is why the note is `cleanup` and not
+a blocker; the file belongs to another lane, so the fix hunk is in
+[the issue](../../../seon/issues/a-platform-test-leaves-its-worker-stripped-of-every-contract.md).
+
 ## 3. Totality — every non-test verdict is typed, counted, and named
 
 `print-final-tally!` printed one extra section ("Unconfirmed tasks"). It now
