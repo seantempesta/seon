@@ -167,15 +167,27 @@ and `seon.instrument-test/many-problem-contract-violations-have-bounded-headline
 are behavioural failures in exactly those files' subjects (arm counts,
 `eval-form` call counts, headline bounds) with no contract violation in them.
 
-Four ARE this lane's and are fixed in `1b2ac7c9`-adjacent follow-up:
-declaring `:seon.config.error/max-evidence-bytes` on the handle meant
+Four WERE this lane's, and are fixed: declaring
+`:seon.config.error/max-evidence-bytes` on the handle meant
 `seon.cluster.agent-test`'s hand-built handle no longer satisfied `arm!`, so
-four of its previously green tests turned red. That suite now uses
-`test-support/cluster-handle` like the others.
+four of its previously green tests turned red
+(`custody-mismatch-regression`, `disarm-has-a-declared-loud-turn-completion-backstop`,
+`hot-reload-var-test`, `wait-closes-in-terminal-tx-test`). That suite now uses
+`test-support/cluster-handle` like the others, and a targeted re-run
+(`bin/test seon.cluster.agent-test seon.render.web-test seon.cluster.turn-test
+seon.cluster-test`, `tmp/backlog/g4.log`: 147 tests, 794 assertions, 47
+failing) shows all four green again and `arm!` refused only for the
+long-standing `:seon.render/context-channel` omission.
 
-The remaining seven (`seon.cluster.turn-test` ×2, `seon.fn-test` ×2,
-`seon.render.web-test` ×2, `seon.cluster-test` ×1) carry no contract
-violation and are unattributed at the time of writing.
+Five remain newly red in that same re-run — `seon.cluster-test` ×1,
+`seon.cluster.turn-test` ×2, `seon.render.web-test` ×2 — and every contract
+violation in them names `seon.sci.eval/evaluate-candidate`
+(`:seon.config.test/auto-check-cases`), `seon.render.value/transacted`,
+`seon.cluster.run/receipt-identity` or `seon.program/changed-attributes`:
+subjects of the foreign lane's uncommitted `src/seon/sci/eval.clj` and
+`src/seon/cluster/loop.clj`, not of anything this lane touched. They are
+named here rather than attributed, because an attribution is a hypothesis
+until a probe confirms it.
 
 ## 5. What remains red, by class
 
