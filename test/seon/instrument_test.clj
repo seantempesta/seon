@@ -63,6 +63,14 @@
 (use-fixtures :each preserving-instrumentation-state)
 
 (deftest an-invalid-core-error-mode-is-an-evidence-complete-value
+  ;; `apply!` IS THE ARM. Boot calls it on a JVM whose contracts are not
+  ;; installed yet, and that is the only state in which its own typed refusal
+  ;; is reachable: once the contracts are armed, `:seon.instrument/request`
+  ;; refuses a bad dial first, at the same crossing, naming the same
+  ;; function. So the subject is reproduced in boot's state rather than in
+  ;; one no caller is ever in; `preserving-instrumentation-state` puts this
+  ;; worker's wrappers back afterwards.
+  (instrument/remove!)
   (let [result (instrument/apply! {:seon.config/on-core-error nil})]
     (is (= :seon.instrument/invalid-mode (:seon.error/kind result)))
     (is (= {:seon.error/diagnostic-layer :instrumentation
@@ -83,7 +91,14 @@
              :seon.error/diagnostic-offending
              :seon.error/diagnostic-cause
              :seon.error/diagnostic-evidence-availability
-             :seon.error/diagnostic-evidence])))))
+             :seon.error/diagnostic-evidence]))))
+  ;; and armed, the contract owns the same refusal at the same crossing
+  (instrument/apply! {:seon.config/on-core-error :panic})
+  (let [refusal (test-support/refusal-data
+                 #(instrument/apply! {:seon.config/on-core-error :degrade}))]
+    (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+    (is (= 'seon.instrument/apply!
+           (:seon.error/diagnostic-operation (:seon.error/data refusal))))))
 
 (defn- instrumented!
   "Run `body` with instrumentation on, and always take it back off."
@@ -269,7 +284,11 @@
            wrapped (instrument/wrap-interpreted
                     function-symbol
                     "[:=> [:cat [:vector :map]] :map]"
-                    projection :panic nil identity)
+                    projection :panic
+                    ;; the declared admission caps, like every production
+                    ;; caller hands
+                    (config/result-caps (test-support/effective-config))
+                    identity)
            environment (env/environment
                         {:seon.boot/cluster-name "instrument-test"
                          :seon.db/connection connection})
@@ -523,8 +542,9 @@
               identity)
       (let [failure
             (try
-              (instrument/apply! {:seon.config/on-core-error :panic
-                                  :seon.sci.admit/caps nil})
+              ;; ABSENT MEANS NO KEY: the admission caps are optional here
+              ;; and a nil in an optional key fails its contract.
+              (instrument/apply! {:seon.config/on-core-error :panic})
               (catch clojure.lang.ExceptionInfo thrown thrown))
             diagnostic (ex-data failure)]
         (is (= function-symbol
@@ -597,8 +617,11 @@
 (deftest applying-without-a-handed-projection-refuses-before-collection
   (let [collected? (atom false)
         result
-        (schema/call-with-projection-state
-         (atom nil)
+        ;; A PROJECTION STATE IS A REFERENCE HOLDING ONE ENVIRONMENT, and
+         ;; the declared contract says so; the missing-projection subject is
+         ;; the redefined `handed-projection` below, not a nil in the state.
+         (schema/call-with-projection-state
+         (atom {})
          (fn []
            (with-redefs-fn
             {#'schema/handed-projection (fn [] nil)

@@ -475,12 +475,34 @@
              (is (some? invocation))
              (is (= [] (cp/prepare current (environment-for connection)
                                    invocation [])))))
+         ;; CALLER WINS IS PROVEN BY WHAT ARRIVED, and under the contracts
+         ;; every cluster arms the arrival is observed one frame earlier: the
+         ;; callee's own declared contract refuses the caller's `1` and names
+         ;; it as the offending argument, which says the supplier did not
+         ;; replace it more directly than a boolean computed inside the body
+         ;; could. The callee is never entered either way.
          (testing "explicit caller wins, at a map key"
-           (is (false? (probe ctx
-                              "probe-received-connection? {:seon.db/connection 1}"))
-               "the caller's 1 reached the body unreplaced"))
+           (let [refusal (test-support/refusal-data
+                          #(probe ctx
+                                  "probe-received-connection? {:seon.db/connection 1}"))]
+             (is (= :seon.instrument/contract-violated
+                    (:seon.error/kind refusal)))
+             (is (= 'seon.call-preparation-test/probe-received-connection?
+                    (:seon.error/diagnostic-operation
+                     (:seon.error/data refusal))))
+             (is (= [{:seon.db/connection 1}]
+                    (:seon.error/diagnostic-offending
+                     (:seon.error/data refusal)))
+                 "the caller's 1 reached the callee unreplaced")))
          (testing "explicit caller wins, at an exact full arity"
-           (is (false? (probe ctx "probe-received-database? \"a\" 1"))))
+           (let [refusal (test-support/refusal-data
+                          #(probe ctx "probe-received-database? \"a\" 1"))]
+             (is (= :seon.instrument/contract-violated
+                    (:seon.error/kind refusal)))
+             (is (= ["a" 1]
+                    (:seon.error/diagnostic-offending
+                     (:seon.error/data refusal)))
+                 "the caller's 1 reached the callee unreplaced")))
          (testing "supplied nil is a supplied value, never an absence"
            (is (true? (probe ctx "probe-nilable-second \"a\" nil"))
                "nil occupied the slot, so nothing was supplied over it"))

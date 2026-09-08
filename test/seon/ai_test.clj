@@ -178,10 +178,15 @@
 
 (deftest a-no-auth-config-row-assembles-and-sends-without-authorization
   (let [requests (atom [])
+        ;; THE ROW IS COMPILED, NOT EDITED: `:seon.config/effective` declares
+        ;; the credential variable, so `dissoc`ing it handed `targets` a
+        ;; shape its contract forbids. `config/absent` is the one explicit
+        ;; retraction a manifest has, and compiling with it is exactly how a
+        ;; no-auth cluster's effective map comes to be.
         targets (ai/targets
-                 (-> @dials
-                     (dissoc :seon.config.ai/api-key-variable)
-                     (assoc :seon.config.ai/no-auth true)))
+                 (assoc (test-support/effective-config
+                         {:seon.config.ai/api-key-variable config/absent})
+                        :seon.config.ai/no-auth true))
         target (:seon.ai/primary targets)
         outcome
         (with-redefs-fn
@@ -272,11 +277,15 @@
   (test-support/with-database
     (fn [connection]
       (seed-registry! connection)
-      (let [settings (-> @dials
-                         (assoc :seon.config.ai/model "registered-model"
-                                :seon.config.ai/max-tokens 500
-                                :seon.config.ai/thinking :disabled)
-                         (dissoc :seon.config.ai/api-key-variable))
+      ;; THE ROW IS COMPILED, NOT EDITED: `:seon.config/effective` declares
+      ;; the credential variable, and `config/absent` is the one explicit
+      ;; retraction a manifest has, so this is the effective map a cluster
+      ;; selecting no credential actually gets.
+      (let [settings (test-support/effective-config
+                      {:seon.config.ai/model "registered-model"
+                       :seon.config.ai/max-tokens 500
+                       :seon.config.ai/thinking :disabled
+                       :seon.config.ai/api-key-variable config/absent})
             target (:seon.ai/primary (ai/targets @connection settings))
             body (ai/request-body (assoc target :seon.ai/prompt "hello"))]
         (is (= "https://example.invalid/v1/chat/completions"
@@ -333,18 +342,18 @@
   (test-support/with-database
     (fn [connection]
       (seed-registry! connection)
-      (let [settings (-> @dials
-                         (assoc :seon.config.ai/model "registered-model")
-                         (dissoc :seon.config.ai/api-key-variable))
+      (let [settings (test-support/effective-config
+                      {:seon.config.ai/model "registered-model"
+                       :seon.config.ai/api-key-variable config/absent})
             target (:seon.ai/primary (ai/targets @connection settings))]
         (is (= "TEST_PROVIDER_KEY" (:seon.ai/api-key-variable target)))))))
 
 (deftest a-missing-registry-row-leaves-the-working-call-target-unchanged
   (test-support/with-database
     (fn [connection]
-      (let [settings (-> @dials
-                         (assoc :seon.config.ai/model "unregistered-model")
-                         (dissoc :seon.config.ai.backup/model))]
+      (let [settings (test-support/effective-config
+                      {:seon.config.ai/model "unregistered-model"
+                       :seon.config.ai.backup/model config/absent})]
         (is (= (ai/targets settings)
                (ai/targets @connection settings)))))))
 
@@ -1356,6 +1365,9 @@
   ;; which PROVES nothing was transmitted.
   (let [value (ai/complete {:seon.ai/endpoint (refused-loopback-endpoint)
                             :seon.ai/model "probe"
+                            ;; the declared call target carries its output
+                            ;; bound like every assembled one
+                            :seon.ai/max-tokens 32
                             :seon.config.ai/no-auth true
                             :seon.ai/prompt "hello"
                             :seon.ai/timeout-ms 500})]
@@ -1379,6 +1391,7 @@
 (deftest a-missing-credential-is-provably-free
   (let [value (ai/complete {:seon.ai/endpoint "http://127.0.0.1:1/v1"
                             :seon.ai/model "probe"
+                            :seon.ai/max-tokens 32
                             :seon.ai/api-key-variable "SEON_AI_ABSENT_KEY_PROBE"
                             :seon.ai/prompt "hello"
                             :seon.ai/timeout-ms 500})]

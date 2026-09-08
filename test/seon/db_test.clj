@@ -1057,11 +1057,24 @@
 (deftest malformed-reads-return-flat-errors
   (test-support/with-database
    (fn [connection]
-     (doseq [result [(db/q @connection '[:find])
-                     (db/pull-many @connection schema-pattern ["not-an-eid"])]]
+     ;; A QUERY VECTOR IS A QUERY VECTOR to the declared contract, so a
+     ;; `:find` with no bindings reaches the read and `seon.db`'s own typed
+     ;; refusal is what an agent gets.
+     (let [result (db/q @connection '[:find])]
        (is (= :seon.db/invalid-read (:seon.error/kind result)))
        (is (string? (:seon.error/message result)))
-       (is (map? (:seon.error/data result)))))))
+       (is (map? (:seon.error/data result))))
+     ;; AN ENTITY IDENTIFIER IS NOT A BARE STRING, and the declared contract
+     ;; says so, so under the contracts every cluster arms the contract
+     ;; refuses first — same crossing, same function named, and the agent
+     ;; still reads a flat value because its forms cross the SCI kernel
+     ;; (`my.run-test`, `my.message-test` prove that boundary).
+     (let [refusal (test-support/refusal-data
+                    #(db/pull-many @connection schema-pattern ["not-an-eid"]))]
+       (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+       (is (= 'seon.db/pull-many
+              (:seon.error/diagnostic-operation (:seon.error/data refusal))))
+       (is (string? (:seon.error/message refusal)))))))
 
 (deftest invalid-read-identities-are-diagnostics-never-absence
   (test-support/with-database

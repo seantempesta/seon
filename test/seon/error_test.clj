@@ -148,55 +148,48 @@
         "unavailable evidence is typed and boundary context cannot replace it")))
 
 (deftest exact-dispatch-producers-carry-their-class-markers
+  ;; THE SUBJECT IS THE CLASS MARKER, not the diagnostic constructor.
+  ;; `seon.error/diagnostic` declares every diagnostic field required, so
+  ;; building these representatives through it handed it a shape its contract
+  ;; forbids; each is an ordinary flat error value carrying one class marker,
+  ;; which is exactly what `error?` dispatches on.
   (let [representatives
-        [(error/diagnostic
-          {:my.fs/stale-digest "tmp/stale"
+        [ {:my.fs/stale-digest "tmp/stale"
           :seon.error/kind :my.fs/stale-digest
-           :seon.error/message "stale"})
-         (error/diagnostic
+           :seon.error/message "stale"}
           {:my.fs/invalid-utf8-window "tmp/not-utf8"
           :seon.error/kind :my.fs/invalid-utf8-window
-           :seon.error/message "not UTF-8"})
-         (error/diagnostic
+           :seon.error/message "not UTF-8"}
           {:seon.cluster.reply/refused-tag 'secret/tag
           :seon.error/kind :seon.cluster.reply/refused-tag
-           :seon.error/message "tag refused"})
-         (error/diagnostic
+           :seon.error/message "tag refused"}
           {:seon.db/transaction-outcome-unknown true
           :seon.error/kind :seon.db/unknown-failure
-           :seon.error/message "outcome unknown"})
-         (error/diagnostic
+           :seon.error/message "outcome unknown"}
           {:seon.instrument/contract-violated "sample/fn"
           :seon.error/kind :seon.instrument/contract-violated
-           :seon.error/message "contract violated"})
-         (error/diagnostic
+           :seon.error/message "contract violated"}
           {:seon.render.walk/elided true
           :seon.error/kind :seon.render.walk/elided
-           :seon.error/message "elided"})
-         (error/diagnostic
+           :seon.error/message "elided"}
           {:seon.ai/stream-truncated true
           :seon.error/kind :seon.ai/stream-truncated
-           :seon.error/message "stream truncated"})
-         (error/diagnostic
+           :seon.error/message "stream truncated"}
           {:seon.cluster.loop/trigger-already-answered true
           :seon.error/kind :seon.cluster.loop/trigger-already-answered
-           :seon.error/message "already answered"})
-         (error/diagnostic
+           :seon.error/message "already answered"}
           {:seon.cluster.reply/unreadable "["
           :seon.error/kind :seon.cluster.reply/unreadable
-           :seon.error/message "unreadable"})
-         (error/diagnostic
+           :seon.error/message "unreadable"}
           {:seon.cluster.loop/phase-failed true
           :seon.error/kind :seon.cluster.loop/phase-failed
-           :seon.error/message "phase failed"})
-         (error/diagnostic
+           :seon.error/message "phase failed"}
           {:seon.cluster.loop/lint-rejected true
           :seon.error/kind :seon.cluster.loop/lint-rejected
-           :seon.error/message "lint rejected"})
-         (error/diagnostic
+           :seon.error/message "lint rejected"}
           {:seon.operator/collection-incomplete true
           :seon.error/kind :seon.operator/collection-incomplete
-           :seon.error/message "collection incomplete"})]
+           :seon.error/message "collection incomplete"}]
         projection (schema/build-projection (schema/registered-schemas))]
     (with-redefs [schema/current-projection (constantly projection)]
       (doseq [value representatives]
@@ -848,20 +841,29 @@
         (is (every? (complement :seon.error/value) html-units)
             "pulled error entities render cards instead of renderer failures")))))
 
-(deftest a-missing-recurrence-limit-records-and-stays-silent
-  ;; the recursion fence extended to OUR bugs: requiredness is a
-  ;; contract, contracts are unenforced until instrumentation is on, and
-  ;; `(> 1 nil)` thrown out of the recorder would mean an error that
-  ;; destroyed its own record. No invented default — the conservative
-  ;; half of the storm fence.
+(deftest a-missing-recurrence-limit-refuses-at-the-declared-contract
+  ;; the recursion fence extended to OUR bugs: `(> 1 nil)` thrown out of
+  ;; the recorder would mean an error that destroyed its own record. The
+  ;; fence is now the DECLARED CONTRACT — `:seon.config.error/recurrence-limit`
+  ;; is a required member of `:seon.error/commit-tx-request` — and under the
+  ;; contracts every cluster arms it refuses first, at the same crossing,
+  ;; naming the same function and the offending argument. This asserts that
+  ;; refusal as the value it is; nothing invents a default and nothing
+  ;; reaches the recorder's comparison.
   (with-db
     (fn [connection]
-      (let [[facts messages]
-            (commit! connection
-                     (transform-error (ex-info "boom" {}))
-                     {:seon.config.error/recurrence-limit nil})]
-        (is (= 1 facts) "the fact is committed exactly as always")
-        (is (= {} messages) "and nobody is mailed on a caller we cannot trust")))))
+      (let [refusal
+            (test-support/refusal-data
+             #(error/commit-tx
+               @connection
+               (dissoc (commit-request (transform-error (ex-info "boom" {})) {})
+                       :seon.config.error/recurrence-limit)))]
+        (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+        (is (= 'seon.error/commit-tx
+               (:seon.error/diagnostic-operation
+                (:seon.error/data refusal))))
+        (is (empty? (db/q '[:find ?e :where [?e :seon.error/id _]] @connection))
+            "and the refused call committed nothing")))))
 
 (deftest only-a-throwable-tells-the-attributed-agent
   (with-db

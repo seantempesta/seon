@@ -32,19 +32,38 @@
          :my.run/value (run/complete "done")))))
 
 (deftest a-blank-completion-is-an-error-value-not-a-throw
-  (doseq [blank ["" "   " "\n\t"]]
+  ;; `:my.run/result` admits any non-empty string, so whitespace reaches the
+  ;; function and its own refusal is the subject here. The empty string and
+  ;; every wrong type are what the DECLARED CONTRACT forbids, and those are
+  ;; asserted below at the boundary an agent actually calls.
+  (doseq [blank ["   " "\n\t"]]
     (let [value (run/complete blank)]
       (is (string? (:seon.error/message value))
           "the agent gets something it can read and correct")
       (is (not (seon.schema/valid-candidate-value? :my.run/value value))
           "and the loop cannot mistake it for a disposition"))))
 
-(deftest a-wrong-type-is-the-same-error-value-never-a-throw
-  ; agent-facing boundary: (complete 123) must answer, not
-  ; ClassCastException out of str/blank?
-  (doseq [wrong [123 :kw {:a 1} nil [""]]]
-    (is (string? (:seon.error/message (run/complete wrong))))
-    (is (string? (:seon.error/message (run/wait wrong))))))
+(deftest a-contract-forbidden-argument-is-a-value-the-agent-reads
+  ;; AN AGENT NEVER INVOKES THE VAR. Its reply is read into forms and each
+  ;; one crosses `seon.sci.eval/evaluate`, so the claim under test — a bad
+  ;; argument comes back as something the agent can read and correct, never
+  ;; a throw — is a claim about THAT boundary. Under the contracts every
+  ;; cluster arms, the declared contract refuses these arguments before the
+  ;; function body runs; the kernel still hands the agent a flat value, which
+  ;; is what this asserts. A direct call here would assert an unreachable
+  ;; branch of the function instead.
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)]
+       (doseq [wrong ["\"\"" "123" ":kw" "{:a 1}" "nil" "[\"\"]"]
+               call ["my.run/complete" "my.run/wait"]]
+         (let [source (str "(" call " " wrong ")")
+               value (support/agent-value ctx source)]
+           (is (map? value) source)
+           (is (string? (:seon.error/message value)) source)
+           (is (keyword? (:seon.error/kind value)) source)
+           (is (not (seon.schema/valid-candidate-value? :my.run/value value))
+               "and the loop cannot mistake it for a disposition")))))))
 
 (deftest the-lifecycle-surface-has-two-actions-and-its-own-presentation
   (is (= #{'wait 'complete 'render-namespace-ai 'walkthrough 'usage-form}

@@ -107,7 +107,12 @@
         "one form may return messages and declinations together")))
 
 (deftest a-bad-argument-is-an-error-value-never-a-throw
-  (doseq [bad [nil "" "   " "\n\t" 123 :bob {:a 1} ["bob"]]]
+  ;; `:my.message/to`, `/content`, `/about` and `/reason` all admit any
+  ;; non-empty string, so a BLANK one reaches the function and its own typed
+  ;; refusal is the subject here. Everything the declared contract forbids —
+  ;; the empty string and every wrong type — is asserted at the boundary an
+  ;; agent actually calls, below.
+  (doseq [bad ["   " "\n\t"]]
     (testing (str "recipient " (pr-str bad))
       (let [value (message/send bad "content")]
         (is (string? (:seon.error/message value)))
@@ -115,8 +120,7 @@
                   :my.message/value value))
             "and the loop cannot mistake it for a delivery")))
     (testing (str "content " (pr-str bad))
-      (is (string? (:seon.error/message (message/send "bob" bad))))))
-  (doseq [bad [nil "" "   " "\n\t" 123 :failure {:id 1}]]
+      (is (string? (:seon.error/message (message/send "bob" bad)))))
     (testing (str "about " (pr-str bad))
       (is (string? (:seon.error/message
                     (message/send "bob" "content" bad))))))
@@ -130,7 +134,7 @@
            ["reason"
             #(message/decline "planner" "failure-17" %)
             :my.message/no-reason]]
-          bad [nil "" "   " "\n\t" 123 :failure {:id 1}]]
+          bad ["   " "\n\t"]]
     (testing (str "declination " label " " (pr-str bad))
       (let [value (invoke bad)]
         ;; the class IS the marker's presence — no exact key census
@@ -138,6 +142,35 @@
         (is (true? (get value expected-kind ::absent)))
         (is (string? (:seon.error/message value)))
         (is (seon.schema/valid-candidate-value? :seon.error/value value))))))
+
+(deftest a-contract-forbidden-argument-is-a-value-the-agent-reads
+  ;; AN AGENT NEVER INVOKES THE VAR. Its reply is read into forms and each
+  ;; one crosses `seon.sci.eval/evaluate`, so the claim under test — a bad
+  ;; argument comes back as something the agent can read, never a throw — is
+  ;; a claim about THAT boundary. Under the contracts every cluster arms the
+  ;; declared contract refuses these arguments before the function body runs,
+  ;; and the kernel still hands the agent a flat value. A direct call here
+  ;; would assert a branch the contract makes unreachable.
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)]
+       (doseq [bad ["nil" "\"\"" "123" ":bob" "{:a 1}" "[\"bob\"]"]
+               source [(str "(my.message/send " bad " \"content\")")
+                       (str "(my.message/send \"bob\" " bad ")")
+                       (str "(my.message/send \"bob\" \"content\" " bad ")")
+                       (str "(my.message/decline " bad
+                            " \"failure-17\" \"Cannot repair.\")")
+                       (str "(my.message/decline \"planner\" " bad
+                            " \"Cannot repair.\")")
+                       (str "(my.message/decline \"planner\" \"failure-17\" "
+                            bad ")")]]
+         (let [value (support/agent-value ctx source)]
+           (is (map? value) source)
+           (is (keyword? (:seon.error/kind value)) source)
+           (is (string? (:seon.error/message value)) source)
+           (is (not (seon.schema/valid-candidate-value?
+                     :my.message/value value))
+               "and the loop cannot mistake it for a delivery")))))))
 
 (deftest the-error-value-is-the-registered-one
   ;; `:seon.error/value` REQUIRES a kind. A function whose declared
@@ -147,12 +180,12 @@
   ;; own error values now satisfy the same schema (the canary that
   ;; deliberately asserted its defect fired when 932ff55fb fixed it,
   ;; exactly as designed, and was deleted with the issue's archival).
-  (doseq [value [(message/send "" "content") (message/send "bob" "")
-                 (message/send "bob" "content" "")
-                 (message/decline "" "failure-17" "Cannot repair.")
-                 (message/decline "planner" "" "Cannot repair.")
-                 (message/decline "planner" "failure-17" "")
-                 (run/complete "")]]
+  (doseq [value [(message/send "   " "content") (message/send "bob" "   ")
+                 (message/send "bob" "content" "   ")
+                 (message/decline "   " "failure-17" "Cannot repair.")
+                 (message/decline "planner" "   " "Cannot repair.")
+                 (message/decline "planner" "failure-17" "   ")
+                 (run/complete "   ")]]
     (is (seon.schema/valid-candidate-value? :seon.error/value value)
         "the error path keeps the output schema too")))
 

@@ -5,6 +5,7 @@
             [my.message :as my.message]
             [seon.cluster.message :as message]
             [seon.cluster.work :as work]
+            [seon.print :as print]
             [seon.problems :as problems]
             [seon.schema :as schema]
             [seon.test-support :as test-support])
@@ -92,6 +93,10 @@
                              (str "problem-" ordinal))))
 
 (defn- evaluation-error
+  "One failed evaluation, carrying every member `:seon.sci.eval/evaluation`
+  declares — the namespaces it started and ended in, its print options and
+  its complete arm record — exactly as the evaluator returns them. A partial
+  stand-in is a shape the declared contract forbids."
   [message]
   {:seon.sci.admit/value
    {:seon.error/kind :seon.sci.eval/evaluation-failed
@@ -102,8 +107,12 @@
             :seon.error/message message
             :seon.error/data {}})
    :seon.cluster.eval/error message
+   :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]
+   :seon.sci.eval/ending-ns 'my.gen.alpha
+   :seon.print/options (print/default-options)
    :seon.sci.admit/record
    {:seon.eval/fn-entries 1
+    :seon.eval/host-interop-count 0
     :seon.eval/duration-ms 1
     :seon.eval/allocated-bytes 1
     :seon.eval/outcome :error}})

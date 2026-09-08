@@ -156,16 +156,22 @@
   (let [root (owned-root)
         cluster-root (str (io/file root "data" "clusters"))]
     (try
+      ;; THE NARROWING IS THE DECLARATION. `:seon.boot/cluster-name` is one
+      ;; valid relative path segment (ruled 2026-08-13), so under the
+      ;; contracts every cluster arms the declared request refuses these
+      ;; names first — at the same crossing, naming the same function and the
+      ;; offending name. The filesystem collision below is a name the
+      ;; declaration ADMITS, and `start!`'s own refusal still owns it.
       (doseq [cluster-name ["." ".." "nested/name" "nested\\name"]]
-        (let [result (operator/start!
-                      {:seon.boot/cluster-name cluster-name
-                       :seon.boot/root cluster-root})]
-          (is (= :seon.boot/refused (:seon.error/kind result)))
-          (is (= cluster-name
-                 (get-in result
-                         [:seon.boot/offense
-                          :seon.boot/value
-                          :seon.boot/cluster-name])))))
+        (let [refusal (test-support/refusal-data
+                       #(operator/start!
+                         {:seon.boot/cluster-name cluster-name
+                          :seon.boot/root cluster-root}))]
+          (is (= :seon.instrument/contract-violated (:seon.error/kind refusal))
+              cluster-name)
+          (is (= 'seon.operator/start!
+                 (:seon.error/diagnostic-operation (:seon.error/data refusal)))
+              cluster-name)))
       (is (= "store"
              (:seon.boot/cluster-name
               (cluster/resolve-bootstrap
@@ -772,28 +778,67 @@
         (is (empty? @stop-calls)
             "a refused or degraded boot is left up for diagnosis")))))
 
+(defn- boot-instance
+  "One `:seon.boot/instance` carrying every member the declaration names.
+
+  `seon.operator/stop!` and `restart!` DECLARE this shape and `start!`
+  promises it, so a delegation proof hands the same value a real boot would:
+  a live prepl `ServerSocket`, the two workload executors, the advertisement
+  and the process config. Nothing here is started — a socket on port 0 and
+  two single-thread pools are the cheapest honest instances of each — and the
+  caller closes them."
+  [cluster-name]
+  (let [server (java.net.ServerSocket. 0)]
+    {:seon.boot/config
+     {:seon.boot/cluster-name cluster-name
+      :seon.boot/root "tmp/operator-test"
+      :seon.boot/prepl-host "127.0.0.1"
+      :seon.boot/prepl-port (.getLocalPort server)
+      :seon.boot/log-dir (str (io/file "tmp/operator-test" "logs"))
+      :seon.boot/store-dir (str (io/file "tmp/operator-test" "store"))}
+     :seon.boot/advertisement
+     {:seon.boot/cluster-name cluster-name
+      :seon.boot/prepl-host "127.0.0.1"
+      :seon.boot/prepl-port (.getLocalPort server)
+      :seon.boot/pid (.pid (ProcessHandle/current))
+      :seon.boot/start-instant (java.util.Date.)}
+     :seon.boot/prepl-server server
+     :seon.boot/executors
+     {:compute (java.util.concurrent.Executors/newSingleThreadExecutor)
+      :io (java.util.concurrent.Executors/newSingleThreadExecutor)}}))
+
 (deftest lifecycle-verbs-only-call-their-delegates
+  ;; THE STAND-INS RETURN THE DECLARED SHAPES. `start!` and `restart!`
+  ;; promise a `:seon.boot/instance` and `stop!` takes one, so a two-key
+  ;; stub is a shape the declared contract forbids — the verbs are proven to
+  ;; delegate with values a real boot would hand them.
   (let [request {:seon.boot/cluster-name "second"
                  :seon.boot/root "tmp/operator-test"}
-        original {:seon.boot/config request}
-        replacement {:seon.boot/config request :seon.boot/ready-ms 1}
+        original (boot-instance "second")
+        replacement (assoc (boot-instance "second") :seon.boot/ready-ms 1)
         calls (atom [])]
-    (with-redefs [cluster/start!
-                  (fn [value]
-                    (swap! calls conj [:start value])
-                    replacement)
-                  cluster/stop!
-                  (fn [value]
-                    (swap! calls conj [:stop value])
-                    nil)]
-      (is (identical? replacement (operator/start! request)))
-      (is (nil? (operator/stop! original)))
-      (is (identical? replacement (operator/restart! original)))
-      (is (= [[:start request]
-              [:stop original]
-              [:stop original]
-              [:start request]]
-             @calls)))))
+    (try
+      (with-redefs [cluster/start!
+                    (fn [value]
+                      (swap! calls conj [:start value])
+                      replacement)
+                    cluster/stop!
+                    (fn [value]
+                      (swap! calls conj [:stop value])
+                      nil)]
+        (is (identical? replacement (operator/start! request)))
+        (is (nil? (operator/stop! original)))
+        (is (identical? replacement (operator/restart! original)))
+        (is (= [[:start request]
+                [:stop original]
+                [:stop original]
+                [:start request]]
+               @calls)))
+      (finally
+        (doseq [instance [original replacement]]
+          (.close ^java.net.ServerSocket (:seon.boot/prepl-server instance))
+          (doseq [executor (vals (:seon.boot/executors instance))]
+            (.shutdownNow ^java.util.concurrent.ExecutorService executor)))))))
 
 (deftest status-banner-and-census-derive-current-runtime-values
   (let [instances-before @runtime/running-instances

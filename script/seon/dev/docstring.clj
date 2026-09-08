@@ -101,11 +101,16 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private rule-schema
+  ;; EVERY RULE THIS LINTER EMITS. `:comment-shaped-result` (ruling 45) was
+  ;; emitted by `glyph-findings` without ever being declared here, so
+  ;; `check-source` violated its own output contract on any source carrying
+  ;; one — invisible until the gate armed the contracts a live cluster arms.
   [:enum
    :missing-docstring
    :blank-first-line
    :first-line-too-long
    :no-terminal-punctuation
+   :comment-shaped-result
    :reserved-glyph-literal])
 
 (def ^:private finding-schema
