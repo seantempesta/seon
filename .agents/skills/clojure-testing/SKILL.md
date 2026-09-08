@@ -24,7 +24,10 @@ or writer test command to satisfy an old instruction.
 
 ```bash
 bin/test                        # platform tier, then tests reaching changed code
+bin/test --all                  # platform tier, then every non-long test
 bin/test --full                 # every *_test.clj / *_test.cljc under test/
+bin/test --platform             # the declared moving-part regressions alone
+bin/test --changed PATH         # platform tier, then the tests reaching PATH
 bin/test seon.cluster.run-test  # every test in exactly these namespaces
 ```
 
@@ -36,8 +39,11 @@ recorded green basis. A missing basis, removed file, or unmodeled gate input
 widens selection conservatively. `--all` runs every non-long test after the
 platform tier; `--full` also includes long tests, and `SEON_TEST_FULL=1` is its
 environment equivalent. Explicit namespace selections are always complete and
-record no green basis (`bin/test:1-24,43-57`;
-`src/seon/test/runner.clj:1-1200`).
+record no green basis (`bin/test:1-26,46-58`;
+`src/seon/test/runner.clj:2469-2671`). Every tiered invocation also replaces
+the per-test result facts of the tests it ran on the operator-owned
+`:test-results` branch, which is what `bin/seon status` reads
+(`bin/test:240-249`; `src/seon/test/runner.clj/record-persistent-results!`).
 
 `bin/test` discovers a namespace by file name: a test file must end in
 `_test.clj` or `_test.cljc` under `test/`, mirroring its `src/` namespace. A
@@ -76,6 +82,33 @@ Run the root test to prove Seon pins the behavior it depends on; run the fork
 focus to prove the implementation in its owning project. One does not replace
 the other.
 
+### Reading the tally — five sections that are not test failures
+
+A red tally names WHICH KIND of red it is, and only one of the five is a test
+saying something about its subject
+(`src/seon/test/runner.clj/print-final-tally!`):
+
+| section | what it means | where to look |
+|---|---|---|
+| `Failing tests` | a test failed or errored — the ordinary case | the test |
+| `Worker exchange failures` | the worker JVM died, was bounded, or refused; the per-test reds under it were MANUFACTURED by the exchange | the named `worker-stderr.log` |
+| `Unlaunchable tasks` | every pool worker had retired before the task ran | the earlier exchange failure |
+| `Unconfirmed tasks` | the isolated confirmation worker could not launch | its `confirmation-launch.edn` |
+| `Parallel-only tasks` | red in a pooled worker, green alone — the line NAMES the earlier tasks in that worker which changed process-global state | those tasks |
+
+A task whose worker died is classified `worker-exchange`, never
+`parallel-only`: a dead worker takes every namespace it held down with it, and
+reporting those against their own owners cost a day of one lane's diagnosis
+(`docs/seon/issues/the-test-runners-re-arm-kills-the-worker-under-its-own-contract.md`).
+
+**Own nothing global, and the worker now checks.** A pooled worker runs many
+tests per JVM and snapshots its process-global state either side of every
+task — installed contract wrappers, malli's function-schema registry, running
+clusters, and the shared test SCI base ctx. A task that changed any of them is
+printed as `WORKER-GLOBAL STATE CHANGED by <test>` and listed in the tally.
+That is a defect report about YOUR test even when your test is green: it is
+what makes some other test red later in the same worker.
+
 One honesty fact about the gate itself:
 
 - **A namespace with zero `deftest`s reports green.** `run-tests` returns
@@ -92,7 +125,8 @@ Use the production population owner through `seon.test-support/with-database`.
 It opens a fresh `:memory` store, calls `cluster/populate-source!` to install
 the current `resources/seon/schemas/` population and program rows, and
 releases and deletes it in a `finally`. There is no process-global connection
-(`test/seon/test_support.clj:379-475`).
+(`test/seon/test_support.clj:587-604`, over `with-branched-database:553` and
+`with-fresh-database:532`).
 
 ```clojure
 (ns seon.cluster.run-test
@@ -334,9 +368,15 @@ owner.
 Static indexing records direct first-party calls from each `:seon.test` row
 through the shared cardinality-many `:seon.fn/calls` attribute.
 `seon.fn/tests-reaching` derives direct and transitive dependent tests from
-facts rather than naming conventions (`src/seon/fn.clj:292-323,402-439`;
-`resources/seon/schemas/seon.test.edn:7-17`;
-`test/seon/fn_test.clj:716-770`).
+facts rather than naming conventions (`src/seon/fn.clj:823`;
+`resources/seon/schemas/seon.test.edn`; `test/seon/fn_test.clj:98-102`).
+
+`bin/test`'s bare tier reads the SAME edges from the manifest value before any
+cluster exists (`src/seon/test/selection.clj/reaching-tests`). Measured
+2026-09-08: a change to `src/seon/db.clj` selects 800 tests across 111
+namespaces, 107 of which share no name stem with it; touching a file without
+changing a byte selects nothing, because the basis compares SHA-256, never a
+modification time.
 
 ## Key test files
 
@@ -347,7 +387,7 @@ facts rather than naming conventions (`src/seon/fn.clj:292-323,402-439`;
 | `test/seon/cluster/store_test.clj` | cross-process falsifiers with a real child JVM, event-driven readiness, and the two-halves interaction test |
 | `test/seon/flow/loop_test.clj` | exercising a `core.async.flow` graph from a test |
 | `test/seon/concurrency_streams_test.clj` | latch-driven unique-namespace collision and 12-message ordering/loss proof (`:1-18,57-149`) |
-| `test/seon/concurrency_independence_test.clj` | long N-agent, one-cluster fact-space harness (`:1-35,508-527`); currently red for two harness defects and not yet a passing gate |
+| `test/seon/concurrency_independence_test.clj` | long N-agent, one-cluster fact-space harness (`:1-35,508-527`); was red for two harness defects as of 2026-08 — check the current tally rather than trusting this line |
 | `reference-code/datahike/` | the fork's source — read it, don't guess semantics |
 
 Full history — the buried harnesses, the eight root causes, and the testing

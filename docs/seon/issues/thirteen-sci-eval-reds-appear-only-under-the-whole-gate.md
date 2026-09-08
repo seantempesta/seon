@@ -63,3 +63,53 @@ An attribution is a hypothesis until a probe confirms it, so none is made.
 - `parallel-only` back to its previous floor, or each survivor explained: a
   red that depends on scheduling attributes to the wrong owner and the
   confirmation verdict is the only thing that says so.
+
+## 2026-09-08 (`test-harness`) — a named cause, awaiting its `--all`
+
+**The confirmation phase was not reproducing the pool worker's world.**
+`seon.test.runner/confirm-parallel-failure!` initialized its worker with ONE
+namespace — `[(symbol (::task-namespace task))]` — while every pool worker is
+initialized with the WHOLE selection (147 namespaces under `--all`). A test
+whose subject depends on what is LOADED — the program graph, the acquired SCI
+ctx's bindings, which capability namespaces resolve in the ctx — therefore
+answered a DIFFERENT QUESTION in the confirmation than in the pool.
+`parallel-only` meant "green in a smaller world", which is not evidence about
+scheduling at all.
+
+This fits every fact this note already records:
+
+- The thirteen names are exactly the load-sensitive kind —
+  `every-public-capability-function-in-the-graph-resolves-in-the-ctx`,
+  `bare-dir-and-program-derived-doc-are-repl-native`,
+  `compiled-runtime-roots-cannot-be-redefined-by-agent-code`,
+  `a-selected-render-inherits-the-live-arm-or-owns-one-when-unarmed`.
+- "The suite alone" ruled nothing out: `bin/test seon.sci.eval-test` loads ONE
+  namespace in both the pool and the confirmation, so the two worlds agree and
+  no `parallel-only` can be produced by this cause.
+- Likewise the three-namespace selection: three in both, worlds agree, zero
+  `parallel-only`.
+- `--all` runs a five-worker pool over 147 loaded namespaces against
+  one-namespace confirmations — the only configuration tried where the two
+  worlds differ, and the only one that produced the class.
+
+**Fix.** The confirmation worker now loads the same namespace set the pool
+worker loaded, leaving exactly ONE difference: the task runs alone. Regression:
+`seon.test-runner-test/a-confirmation-loads-the-pool-workers-world`.
+
+**Second half — the verdict now names a suspect.** Nothing declared which
+state is shared between tasks in a pooled worker, so the worker now DERIVES it:
+`ambient-snapshot` is taken either side of every task and the difference is
+reported as that task's own fact (instrumented wrappers, malli's function
+schema registry, running clusters, and the shared test SCI base ctx). A red
+task carries the earlier tasks in its worker that changed any of it, and a
+`parallel-only` line prints them — or says explicitly that nothing ambient
+changed before it.
+
+**Still open** until this note's own acceptance criterion is met: one
+`bin/test --all` at a frozen tree with `parallel-only` back at its floor, or
+each survivor explained. If the thirteen persist, the detector's known blind
+spot is the next place to look: the SCI-base member counts vars per namespace,
+so it sees a `def` into the base and does NOT see METADATA mutation of a shared
+SCI Var — and `agent-owned-sci-var-metadata-remains-mutable` and
+`compiled-runtime-metadata-cannot-be-changed-by-agent-code` are exactly that
+shape.
