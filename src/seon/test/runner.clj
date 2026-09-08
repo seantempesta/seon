@@ -3,9 +3,11 @@
   (:refer-clojure :exclude [run!])
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :as test]
             [clojure.test.check.generators :as gen]
+            [malli.core :as m]
             [sci.impl.utils :as sci.utils]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
@@ -747,6 +749,112 @@
                          :seon.test/sym test-symbol :seon.test.runner/unresolved-test-var true}))))
         (::task-symbols task)))
 
+(def ^:private ambient-drift-journal-limit
+  "How many recent drifting tasks one worker keeps as attribution evidence."
+  20)
+
+(defn- resolve-loaded
+  "The Var one qualified symbol names, or nothing when it is not loaded.
+
+  `find-var` THROWS on an absent namespace, so a snapshot must not use it to
+  ask whether something is loaded: a worker that has not loaded a namespace
+  has nothing there to leak, which is an answer, not an error."
+  [qualified-symbol]
+  (when (find-ns (symbol (namespace qualified-symbol)))
+    (find-var qualified-symbol)))
+
+(defn- sci-base-namespace-sizes
+  "Per-namespace var counts of the shared test SCI base ctx, when realized.
+
+  `seon.test-support` acquires ONE cluster SCI ctx per worker JVM and every
+  `fork-cluster-ctx` forks it, so a task that evaluates into the BASE rather
+  than into its own fork changes what every later task inherits. The delay is
+  never forced here: a worker that has not built the base has nothing to leak."
+  []
+  (when-let [base (some-> (resolve-loaded 'seon.test-support/database-base)
+                          var-get)]
+    (when (realized? base)
+      (when-let [env (some-> @base :seon.sci.eval/ctx :env)]
+        (into {}
+              (map (fn [[namespace-name bindings]]
+                     [namespace-name (count bindings)]))
+              (:namespaces @env))))))
+
+(defn- ambient-snapshot
+  "Facts about this worker JVM's process-global state, DERIVED.
+
+  AGENTS §5.7: a test owns nothing global. Nothing DECLARES which state that
+  is, and a declaration would be the maintained list §2.2 bans, so the worker
+  measures the shared state it can see and reports what a task changed.
+
+  Every member is a fact about the running process, not a count somebody kept:
+  the wrappers malli actually installed, the contracts it actually holds, the
+  clusters actually running, and the shared SCI base each fork inherits."
+  []
+  (let [snapshot
+        {::snapshot-instrumented
+         (into #{}
+               (map (fn [candidate]
+                      (let [{namespace-object :ns var-name :name}
+                            (meta candidate)]
+                        (symbol (str (ns-name namespace-object))
+                                (str var-name)))))
+               ((requiring-resolve 'seon.instrument/instrumented)))
+         ::snapshot-registered
+         (into #{}
+               (mapcat (fn [[namespace-symbol entries]]
+                         (map (fn [[name-symbol _]]
+                                (symbol (str namespace-symbol)
+                                        (str name-symbol)))
+                              entries)))
+               (m/function-schemas))
+         ::snapshot-live-clusters
+         (or (some-> (resolve-loaded 'seon.cluster/running-instances)
+                     var-get deref keys set)
+             #{})}]
+    (if-let [sizes (sci-base-namespace-sizes)]
+      (assoc snapshot ::snapshot-sci-base sizes)
+      snapshot)))
+
+(defn- bounded-drift
+  [before after]
+  (let [added (set/difference after before)
+        removed (set/difference before after)]
+    (cond-> {}
+      (seq added) (assoc ::drift-added
+                         (vec (take 10 (sort (map str added))))
+                         ::drift-added-count (count added))
+      (seq removed) (assoc ::drift-removed
+                           (vec (take 10 (sort (map str removed))))
+                           ::drift-removed-count (count removed)))))
+
+(defn- ambient-drift
+  "What one task changed in the worker's process-global state, or nothing."
+  [before after]
+  (let [set-drift
+        (into {}
+              (keep (fn [member]
+                      (let [drift (bounded-drift (get before member #{})
+                                                 (get after member #{}))]
+                        (when (seq drift) [member drift]))))
+              [::snapshot-instrumented ::snapshot-registered
+               ::snapshot-live-clusters])
+        sci-drift
+        (let [before-sizes (get before ::snapshot-sci-base)
+              after-sizes (get after ::snapshot-sci-base)]
+          (when (and before-sizes after-sizes (not= before-sizes after-sizes))
+            {::drift-changed
+             (vec (take 10
+                        (sort (for [[namespace-name size] after-sizes
+                                    :when (not= size
+                                                (get before-sizes
+                                                     namespace-name))]
+                                (str namespace-name " "
+                                     (get before-sizes namespace-name "absent")
+                                     "->" size)))))}))]
+    (cond-> set-drift
+      sci-drift (assoc ::snapshot-sci-base sci-drift))))
+
 (defn- run-task!
   "Run one worker task with all output captured as attributed data."
   [task]
@@ -856,6 +964,48 @@
   ;; here: a worker loads exactly the test namespaces its selection names.
   "src")
 
+(defn- program-source-files
+  [^java.io.File root]
+  (->> (file-seq root)
+       (filter (fn [^java.io.File file]
+                 (and (.isFile file)
+                      (or (.endsWith (.getName file) ".clj")
+                          (.endsWith (.getName file) ".cljc")))))
+       (sort-by (fn [^java.io.File file] (.getPath file)))))
+
+(defn- declared-namespace
+  "The namespace one first-party source file declares, or a typed refusal.
+
+  A file whose first form is not an `ns` form used to drop out of the derived
+  set with no report, so an unusual or malformed source file silently shrank
+  the world the worker armed."
+  [^java.io.File file]
+  (let [form (try
+               (with-open [source (java.io.PushbackReader. (io/reader file))]
+                 (read {:read-cond :allow :eof ::eof} source))
+               (catch Throwable failure
+                 {::unreadable (or (ex-message failure)
+                                   (.getName (class failure)))}))]
+    (cond
+      (and (map? form) (contains? form ::unreadable))
+      {:seon.error/kind ::unreadable-program-source
+       :seon.error/message
+       (str "A first-party source file could not be read: " (.getPath file)
+            " — " (::unreadable form) ".")
+       ::source-file (.getPath file)}
+
+      (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
+      (second form)
+
+      :else
+      {:seon.error/kind ::program-source-declares-no-namespace
+       :seon.error/message
+       (str "A first-party source file declares no namespace: "
+            (.getPath file)
+            " — its first form must be an `ns` form, or the worker arms a"
+            " smaller world than the cluster it claims to reproduce.")
+       ::source-file (.getPath file)})))
+
 (defn- declared-program-namespaces
   "Every namespace the first-party program declares, read from its own form.
 
@@ -865,20 +1015,42 @@
   cluster arms: a contract in a namespace no test happens to require —
   `seon.artifact/-main`, `seon.artifact/install-initialization-pages!`,
   `seon.test/run` were the three — is enforced on every live cluster and
-  was checked by nothing here."
+  was checked by nothing here.
+
+  TOTAL, AND LOUD ABOUT ABSENCE. This function's answer is the INPUT to the
+  worker's arming check, and it used to answer `[]` in silence whenever the
+  relative root did not resolve — a worker would then require nothing, its own
+  test vars would keep the instrumented count positive, and the gate would be
+  green about a question it never asked (the same disease one level up,
+  `docs/seon/issues/declared-program-namespaces-returns-empty-in-silence.md`).
+  An unresolvable root, an unreadable file, a file declaring no namespace, and
+  an empty derivation are each a typed refusal naming what was missing."
   []
-  (into []
-        (keep
-         (fn [^java.io.File file]
-           (when (and (.isFile file)
-                      (or (.endsWith (.getName file) ".clj")
-                          (.endsWith (.getName file) ".cljc")))
-             (with-open [source (java.io.PushbackReader. (io/reader file))]
-               (let [form (read {:read-cond :allow :eof nil} source)]
-                 (when (and (seq? form) (= 'ns (first form)))
-                   (second form)))))))
-        (sort-by (fn [^java.io.File file] (.getPath file))
-                 (file-seq (io/file program-source-root)))))
+  (let [root (io/file program-source-root)]
+    (when-not (.isDirectory root)
+      (throw
+       (ex-info
+        (str "The first-party program source root does not resolve: "
+             (.getPath root) " from working directory "
+             (.getCanonicalPath (io/file ".")) ".")
+        {:seon.error/kind ::program-source-root-unresolved
+         ::program-source-root (.getPath root)
+         ::working-directory (.getCanonicalPath (io/file "."))
+         ::instrumentation-unavailable true})))
+    (let [declared (mapv declared-namespace (program-source-files root))]
+      (when-let [refusal (first (filter map? declared))]
+        (throw
+         (ex-info (:seon.error/message refusal)
+                  (assoc refusal ::instrumentation-unavailable true))))
+      (when (empty? declared)
+        (throw
+         (ex-info
+          (str "The first-party program source root declares no namespaces: "
+               (.getCanonicalPath root) ".")
+          {:seon.error/kind ::program-declares-no-namespaces
+           ::program-source-root (.getCanonicalPath root)
+           ::instrumentation-unavailable true})))
+      declared)))
 
 (defn- arming-decision
   "The shipped decisions, admission caps and program namespaces one arm needs.
@@ -935,27 +1107,44 @@
         (throw
          (ex-info (:seon.error/message applied)
                   (assoc applied ::instrumentation-unavailable true))))
-      ;; ABSENCE IS NEVER HEALTH. A worker that armed nothing would have
-      ;; printed `instrumented= 0` and the gate would have been green about
-      ;; a question it never asked.
-      (when-not (pos-int? (:seon.instrument/instrumented applied))
-        (throw
-         (ex-info
-          (str "bin/test armed no contracts in worker " worker-id
-               ": instrumentation reports "
-               (pr-str (:seon.instrument/instrumented applied))
-               " instrumented vars across "
-               (count program) " program namespaces.")
-          (assoc applied
-                 ::instrumentation-unavailable true
-                 ::program-namespace-count (count program)))))
-      (binding [*out* *err*]
-        (println "bin/test: CONTRACTS ARMED"
-                 "worker=" worker-id
-                 "mode=" (:seon.config/on-core-error decisions)
-                 "namespaces=" (count namespaces)
-                 "registered=" (:seon.instrument/registered applied)
-                 "instrumented=" (:seon.instrument/instrumented applied)))
+      ;; ABSENCE IS NEVER HEALTH, AND A COUNT IS NOT THE QUESTION. A floor of
+      ;; zero was satisfied by the worker's OWN test vars, so a worker that
+      ;; armed none of the program still passed. The question is SET COVERAGE
+      ;; against the set a booted cluster arms, and both sides are derived the
+      ;; same way: `seon.instrument/armable` asks malli's own two questions
+      ;; (a declared function schema, a non-primitive value) over the program
+      ;; namespaces this worker just loaded, and `seon.instrument/instrumented`
+      ;; reads the wrappers actually installed. `seon.artifact/-main`,
+      ;; `seon.artifact/install-initialization-pages!` and `seon.test/run`
+      ;; were live on every cluster and armed by nothing here.
+      (let [armable ((requiring-resolve 'seon.instrument/armable) program)
+            installed ((requiring-resolve 'seon.instrument/instrumented))
+            unarmed (into (sorted-set)
+                          (map #(str (symbol %)))
+                          (set/difference armable installed))]
+        (when (seq unarmed)
+          (throw
+           (ex-info
+            (str "bin/test armed a smaller world than a cluster in worker "
+                 worker-id ": " (count unarmed) " of " (count armable)
+                 " declared program contracts across " (count program)
+                 " program namespaces carry no wrapper — "
+                 (str/join ", " (take 10 unarmed))
+                 (when (> (count unarmed) 10) ", ...") ".")
+            (assoc applied
+                   ::instrumentation-unavailable true
+                   ::program-namespace-count (count program)
+                   ::armable-count (count armable)
+                   ::unarmed-program-contracts (vec unarmed)))))
+        (binding [*out* *err*]
+          (println "bin/test: CONTRACTS ARMED"
+                   "worker=" worker-id
+                   "mode=" (:seon.config/on-core-error decisions)
+                   "namespaces=" (count namespaces)
+                   "program-namespaces=" (count program)
+                   "registered=" (:seon.instrument/registered applied)
+                   "instrumented=" (:seon.instrument/instrumented applied)
+                   "program-armable=" (count armable))))
       applied)))
 
 (defn- reassert-contracts!
@@ -1067,11 +1256,23 @@
           :run
           (do
             (reassert-contracts! arming worker-id)
-            (write-protocol! writer
-                             (assoc (run-task! (::worker-task command))
-                                    ::worker-event :task-complete
-                                    ::worker-id worker-id
-                                    ::exchange-id (::exchange-id command)))
+            ;; THE WORKER MEASURES WHAT A TASK LEAVES BEHIND. A pooled worker
+            ;; runs many tests per JVM, and the reds that only appear under
+            ;; the whole gate are tests asserting an EARLIER task's leftovers.
+            ;; Nothing declares which state is shared, so the seam that admits
+            ;; the work derives it either side of the task and reports the
+            ;; difference as that task's own fact.
+            (let [before (ambient-snapshot)
+                  result (run-task! (::worker-task command))
+                  drift (ambient-drift before (ambient-snapshot))]
+              (write-protocol! writer
+                               (cond-> (assoc result
+                                              ::worker-event :task-complete
+                                              ::worker-id worker-id
+                                              ::exchange-id
+                                              (::exchange-id command))
+                                 (seq drift)
+                                 (assoc ::task-ambient-drift drift))))
             (recur))
 
           :stop
@@ -1651,6 +1852,7 @@
                        ::worker-error-log (.getCanonicalPath error-log) :seon.test.runner/worker-launch-failure true}
                       failure))))
         worker {::worker-id worker-id
+                ::worker-journal (atom [])
                 ::worker-process process
                 ::worker-reader (io/reader (.getInputStream process))
                 ::worker-writer (PrintWriter. (.getOutputStream process) true)
@@ -1777,6 +1979,11 @@
       (recur (conj results (execute-task! task)))
       results)))
 
+(defn- task-red?
+  [task-result]
+  (pos? (+ (get-in task-result [::task-summary ::fail-count] 0)
+           (get-in task-result [::task-summary ::error-count] 0))))
+
 (defn- execute-worker-task!
   [progress worker task]
   (announce! progress
@@ -1790,6 +1997,26 @@
           ::expected-worker-event :task-complete
           ::task-symbols (::task-symbols task)
           ::completion-bound-seconds (exchange-bound-seconds)})
+        journal (::worker-journal worker)
+        _ (when-let [drift (::task-ambient-drift result)]
+            (when journal
+              (swap! journal
+                     (fn [entries]
+                       (vec
+                        (take-last
+                         ambient-drift-journal-limit
+                         (conj entries
+                               {::task-symbols (::task-symbols task)
+                                ::task-ambient-drift drift}))))))
+            (println "bin/test: WORKER-GLOBAL STATE CHANGED by"
+                     (str/join "," (::task-symbols task))
+                     "worker=" (::worker-id worker)
+                     (pr-str (into (sorted-map)
+                                   (map (fn [[member value]]
+                                          [member
+                                           (dissoc value ::drift-added
+                                                   ::drift-removed)]))
+                                   drift))))
         result
         (if (exchange-failure? result)
           (let [test-symbols (mapv str (::task-symbols task))
@@ -1821,12 +2048,15 @@
                (str "END worker=" (::worker-id worker)
                     " elapsed-ms=" (::task-elapsed-ms result)
                     " task=" (str/join "," (::task-symbols task))))
-    result))
-
-(defn- task-red?
-  [task-result]
-  (pos? (+ (get-in task-result [::task-summary ::fail-count] 0)
-           (get-in task-result [::task-summary ::error-count] 0))))
+    ;; A RED CARRIES ITS SUSPECTS. The tasks that ran EARLIER in this same
+    ;; worker and left process-global state behind are the only candidates
+    ;; for "green alone, red in the pool", so the verdict names them instead
+    ;; of leaving the reader with a victim and no leaker.
+    (cond-> (assoc result ::executed-by (::worker-id worker))
+      (and (task-red? result) journal (seq @journal))
+      (assoc ::prior-ambient-drift
+             (filterv #(not= (::task-symbols task) (::task-symbols %))
+                      @journal)))))
 
 (defn- run-task-pool!
   [progress workers serial-worker resolved-tasks unresolved-tasks]
@@ -1962,8 +2192,24 @@
            ::parallel-failure :unconfirmed
            ::confirmation-failure failure-fact)))
 
+(defn- parallel-failure-classification
+  "How one pool red is classified once it has been re-run in isolation.
+
+  A TASK WHOSE WORKER DIED IS NEVER `parallel-only`. Its pool \"result\" was
+  manufactured by the exchange, not produced by a test, so classifying it by
+  whether it passes in isolation attributes a dead worker to whichever
+  namespaces it happened to hold — which is exactly how the re-arm class cost
+  a day of someone else's diagnosis
+  (`docs/seon/issues/the-test-runners-re-arm-kills-the-worker-under-its-own-contract.md`).
+  It stays red, and it stays named as an exchange failure."
+  [task-result confirmation]
+  (cond
+    (::worker-exchange-result task-result) :worker-exchange
+    (task-red? confirmation) :reproducible
+    :else :parallel-only))
+
 (defn- confirm-parallel-failure!
-  [progress task-result]
+  [namespaces progress task-result]
   (let [task (select-keys task-result
                           [::task-id ::task-ordinal ::task-namespace
                            ::task-symbols ::task-long?])
@@ -1976,19 +2222,58 @@
                           " task=" (str/join "," (::task-symbols task))))
         worker (start-worker! (::worker-id launch) checkout root)]
     (try
-      (initialize-worker! worker [(symbol (::task-namespace task))])
+      ;; THE CONFIRMATION LOADS THE POOL WORKER'S WORLD. It used to load ONE
+      ;; namespace, so a test whose subject depends on what is LOADED — the
+      ;; program graph, the acquired SCI ctx's bindings, which capability
+      ;; namespaces resolve — was answering a different question in the
+      ;; confirmation than in the pool. `parallel-only` then meant "green in a
+      ;; smaller world", which is not evidence about scheduling at all, and
+      ;; thirteen `seon.sci.eval-test` verdicts read that way
+      ;; (`docs/seon/issues/thirteen-sci-eval-reds-appear-only-under-the-whole-gate.md`).
+      ;; Loading the same set leaves exactly ONE difference — the task runs
+      ;; alone — so the verdict is about the thing it names.
+      (initialize-worker! worker namespaces)
       (announce! progress
                  (str "CONFIRM isolated task="
-                      (str/join "," (::task-symbols task))))
+                      (str/join "," (::task-symbols task))
+                      " loaded-namespaces=" (count namespaces)))
       (let [confirmation (execute-worker-task! progress worker task)
-            classification (if (task-red? confirmation)
-                             :reproducible
-                             :parallel-only)]
+            ;; A TASK WHOSE WORKER DIED IS NEVER `parallel-only`. Its pool
+            ;; "result" was manufactured by the exchange, not produced by a
+            ;; test, so classifying it by whether it passes in isolation
+            ;; attributes a dead worker to whichever namespaces it held —
+            ;; which is exactly how the re-arm class cost a day of someone
+            ;; else's diagnosis. It stays red, and it stays named as an
+            ;; exchange failure.
+            classification (parallel-failure-classification
+                            task-result confirmation)
+            suspects (::prior-ambient-drift task-result)]
         (println "bin/test: confirmation" (name classification)
-                 (str/join "," (::task-symbols task)))
-        (assoc task-result
-               ::parallel-failure classification
-               ::confirmation-result confirmation))
+                 (str/join "," (::task-symbols task))
+                 (if (= :parallel-only classification)
+                   (str "worker=" (::executed-by task-result))
+                   ""))
+        ;; A `parallel-only` verdict that names only its victim sends the
+        ;; reader to the wrong owner: the class is an EARLIER task in the same
+        ;; worker leaving process-global state behind, so the verdict carries
+        ;; the tasks that actually changed it.
+        (when (and (= :parallel-only classification) (seq suspects))
+          (println "bin/test:   suspected leakers, earlier in worker"
+                   (::executed-by task-result) "—")
+          (doseq [{symbols ::task-symbols drift ::task-ambient-drift}
+                  suspects]
+            (println "bin/test:    " (str/join "," symbols)
+                     (pr-str (vec (sort (keys drift)))))))
+        (when (and (= :parallel-only classification) (empty? suspects))
+          (println "bin/test:   no worker-global state changed before this"
+                   "task in worker" (::executed-by task-result)
+                   "— the hazard is not ambient state this worker can see"))
+        (cond-> (assoc task-result
+                       ::parallel-failure classification
+                       ::confirmation-result confirmation)
+          (and (= :parallel-only classification) (seq suspects))
+          (assoc ::parallel-only-suspects
+                 (mapv ::task-symbols suspects))))
       (finally
         (stop-worker! worker)))))
 
@@ -2053,19 +2338,74 @@
            "assertions.")
   (println (::fail-count summary) "failures,"
            (::error-count summary) "errors.")
+  ;; EVERY TIER'S TALLY IS TOTAL. A worker that died, a bound that fired, a
+  ;; pool that emptied and a task nobody could confirm are each their own
+  ;; typed line naming the task — never a quiet per-namespace red that sends
+  ;; the reader to the wrong owner.
+  (let [worker-deaths
+        (sort-by ::task-ordinal
+                 (filter ::worker-exchange-result task-results))]
+    (when (seq worker-deaths)
+      (println)
+      (println "Worker exchange failures —" (count worker-deaths)
+               "task(s) whose worker died, was bounded, or refused;"
+               "these reds belong to the exchange, not to the tests:")
+      (doseq [task-result worker-deaths]
+        (let [exchange (::worker-exchange-result task-result)]
+          (println " -" (str/join "," (::task-symbols task-result))
+                   "worker=" (::worker-id exchange)
+                   "kind=" (:seon.error/kind exchange)
+                   (str "exit=" (::worker-exit exchange))
+                   (str "log=" (::worker-error-log exchange)))))))
+  (let [exhausted (sort-by ::task-ordinal
+                           (filter ::worker-pool-exhausted task-results))]
+    (when (seq exhausted)
+      (println)
+      (println "Unlaunchable tasks —" (count exhausted)
+               "task(s) never ran because every pool worker had retired:")
+      (doseq [task-result exhausted]
+        (println " -" (str/join "," (::task-symbols task-result))))))
   (let [unconfirmed
         (sort-by ::task-ordinal
                  (filter #(= :unconfirmed (::parallel-failure %))
                          task-results))]
     (when (seq unconfirmed)
       (println)
-      (println "Unconfirmed tasks:")
+      (println "Unconfirmed tasks —" (count unconfirmed)
+               "task(s) whose isolated confirmation could not run:")
       (doseq [task-result unconfirmed]
         (let [failure (::confirmation-failure task-result)]
           (println " -" (str/join "," (::task-symbols task-result))
                    "worker=" (::worker-id failure)
                    (when (::injected? failure) "[INJECTED FIXTURE]")
-                   "kind=" (:seon.error/kind failure)))))))
+                   "kind=" (:seon.error/kind failure))))))
+  (let [parallel-only
+        (sort-by ::task-ordinal
+                 (filter #(= :parallel-only (::parallel-failure %))
+                         task-results))]
+    (when (seq parallel-only)
+      (println)
+      (println "Parallel-only tasks —" (count parallel-only)
+               "task(s) red in a pooled worker and green in isolation;"
+               "each names the earlier tasks in its worker that changed"
+               "process-global state:")
+      (doseq [task-result parallel-only]
+        (println " -" (str/join "," (::task-symbols task-result))
+                 "worker=" (::executed-by task-result)
+                 "suspected-leakers="
+                 (if-let [suspects (::parallel-only-suspects task-result)]
+                   (pr-str (mapv #(str/join "," %) suspects))
+                   "none — no ambient state changed before it")))))
+  (let [drifting (sort-by ::task-ordinal
+                          (filter ::task-ambient-drift task-results))]
+    (when (seq drifting)
+      (println)
+      (println "Tasks that changed worker-global state —" (count drifting)
+               "(AGENTS §5.7: own nothing global):")
+      (doseq [task-result drifting]
+        (println " -" (str/join "," (::task-symbols task-result))
+                 (pr-str (vec (sort (keys (::task-ambient-drift
+                                           task-result))))))))))
 
 (defn- finish-run!
   [{summary ::summary
@@ -2107,7 +2447,7 @@
     (if green? 0 1)))
 
 (defn- run-parallel-stage!
-  [progress manifest workers serial-worker tasks]
+  [namespaces progress manifest workers serial-worker tasks]
   (let [{::keys [resolved unresolved]} (split-resolved-tasks manifest tasks)]
     (when (seq unresolved)
       (println "bin/test:" (count unresolved)
@@ -2121,7 +2461,7 @@
                      progress
                      (into #{} (map ::task-id) resolved)
                      initial
-                     confirm-parallel-failure!)]
+                     (partial confirm-parallel-failure! namespaces))]
       (print-task-failures! confirmed)
       {::task-results confirmed
        ::task-summary (summarize-task-results confirmed)})))
@@ -2233,7 +2573,7 @@
               _ (announce! progress
                            (str "TIER platform " (count platform) " tests"))
               platform-outcome
-              (run-parallel-stage! progress manifest pool-workers
+              (run-parallel-stage! namespaces progress manifest pool-workers
                                    serial-worker platform-tasks)
               platform-red? (pos? (+ (get-in platform-outcome
                                               [::task-summary ::fail-count])
@@ -2247,8 +2587,9 @@
                 (do
                   (announce! progress
                              (str "TIER bulk " (count selected) " tests"))
-                  (run-parallel-stage! progress manifest pool-workers
-                                       serial-worker selected-tasks)))
+                  (run-parallel-stage! namespaces progress manifest
+                                       pool-workers serial-worker
+                                       selected-tasks)))
               task-results (->> (concat (::task-results platform-outcome)
                                         (::task-results bulk-outcome))
                                 (sort-by ::task-ordinal)

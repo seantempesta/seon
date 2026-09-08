@@ -399,9 +399,10 @@
         "the typed launch failure carries the task known before readiness")
     (is (str/includes? output "Ran 2 tests containing 6 assertions."))
     (is (str/includes? output "1 failures, 0 errors."))
-    (is (str/includes?
-         output
-         "Unconfirmed tasks:\n - seon.example-test/unlaunchable"))
+    (is (str/includes? output "Unconfirmed tasks — 1 task(s)")
+        "the tally counts unconfirmed work rather than listing it silently")
+    (is (str/includes? output " - seon.example-test/unlaunchable")
+        "and names the task, so the reader is not left with a bare count")
     (is (str/includes? output "[INJECTED FIXTURE]")
         "fixture output cannot be mistaken for a production launch line")))
 
@@ -1450,3 +1451,267 @@
         (run! stop-process-tree! @processes)
         (when (.exists fixture-root)
           (test-support/delete-recursively! fixture-root))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The armed world is DERIVED, and its derivation refuses absence
+;;; ---------------------------------------------------------------------------
+
+(defn- program-root-fixture!
+  "One throwaway first-party source root holding exactly `files`."
+  [files]
+  (let [root (doto (io/file project-root "tmp" "test-runner-program"
+                            (str (random-uuid)))
+               .mkdirs)]
+    (doseq [[file-name content] files]
+      (spit (io/file root file-name) content))
+    root))
+
+(deftest the-armed-program-derivation-refuses-absence-instead-of-answering-empty
+  ;; CLASS: a check that reads ABSENCE OF SIGNAL as health. The worker refuses
+  ;; when it armed nothing, but the INPUT to that refusal answered `[]` in
+  ;; silence whenever its relative root did not resolve — and the worker's own
+  ;; test vars kept the instrumented count positive, so the gate stayed green
+  ;; about a question it never asked. Every way the derivation can come up
+  ;; empty is now a typed refusal naming what was missing.
+  (testing "an unresolvable program source root is a typed refusal"
+    (with-redefs-fn {#'runner/program-source-root
+                     "no-such-first-party-source-root"}
+      (fn []
+        (let [refusal (test-support/refusal-data
+                       #(#'runner/declared-program-namespaces))]
+          (is (= ::runner/program-source-root-unresolved
+                 (:seon.error/kind refusal))
+              "and it names the root and the working directory, rather than
+               answering the empty set the caller cannot distinguish from a
+               program with no namespaces")
+          (is (contains? refusal ::runner/working-directory))))))
+  (testing "a source file declaring no namespace is a typed refusal"
+    (let [root (program-root-fixture!
+                {"declares.clj" "(ns seon.probe.declares)\n"
+                 "silent.clj" "(+ 1 2)\n"})]
+      (try
+        (with-redefs-fn {#'runner/program-source-root (.getCanonicalPath root)}
+          (fn []
+            (let [refusal (test-support/refusal-data
+                           #(#'runner/declared-program-namespaces))]
+              (is (= ::runner/program-source-declares-no-namespace
+                     (:seon.error/kind refusal)))
+              (is (str/ends-with? (::runner/source-file refusal)
+                                  "silent.clj")
+                  "naming the exact file that would have dropped out of the
+                   armed set in silence"))))
+        (finally
+          (test-support/delete-recursively! (.getCanonicalPath root))))))
+  (testing "a root declaring no namespaces at all is a typed refusal"
+    (let [root (program-root-fixture! {"README.md" "not source\n"})]
+      (try
+        (with-redefs-fn {#'runner/program-source-root (.getCanonicalPath root)}
+          (fn []
+            (is (= ::runner/program-declares-no-namespaces
+                   (:seon.error/kind
+                    (test-support/refusal-data
+                     #(#'runner/declared-program-namespaces)))))))
+        (finally
+          (test-support/delete-recursively! (.getCanonicalPath root))))))
+  (testing "the real root derives the program, so the refusals are not vacuous"
+    (let [program (#'runner/declared-program-namespaces)]
+      (is (pos? (count program)))
+      (is (every? symbol? program))
+      (is (contains? (set program) 'seon.artifact)))))
+
+(deftest arming-refuses-when-a-program-contract-carries-no-wrapper
+  ;; CLASS: the same one. A floor of ZERO instrumented vars was satisfied by
+  ;; the worker's own test namespaces, so a worker that armed none of the
+  ;; PROGRAM still passed. The question is set coverage against the set a
+  ;; booted cluster arms, and both sides are derived the same way.
+  (let [armed (atom nil)
+        arm!
+        (fn [armable instrumented]
+          (with-redefs-fn
+            {#'instrument/apply!
+             (fn [_] {:seon.instrument/registered 2
+                      :seon.instrument/instrumented (count instrumented)})
+             #'instrument/armable (fn [_] armable)
+             #'instrument/instrumented (fn [] instrumented)}
+            (fn []
+              (test-support/refusal-data
+               #(reset! armed
+                        (#'runner/arm-contracts!
+                         {::runner/decisions {:seon.config/on-core-error :panic}
+                          ::runner/caps {}
+                          ::runner/program '[seon.db]}
+                         {:seon.schema.projection/forms {}}
+                         "pool-1"
+                         '[seon.db-test]))))))]
+    (testing "a program contract with no wrapper refuses, naming the contract"
+      (let [refusal (arm! #{#'seon.db/pull #'seon.db/q} #{#'seon.db/q})]
+        (is (= ::runner/instrumentation-unavailable
+               (first (keep #{::runner/instrumentation-unavailable}
+                            (keys refusal))))
+            "the refusal is the typed instrumentation-unavailable shape")
+        (is (= ["seon.db/pull"]
+               (::runner/unarmed-program-contracts refusal))
+            "and it names the exact declared program contract a cluster arms
+             and this worker did not")
+        (is (= 2 (::runner/armable-count refusal)))))
+    (testing "complete coverage arms without refusing"
+      (let [applied (arm! #{#'seon.db/q} #{#'seon.db/q})]
+        (is (= test-support/committed applied))
+        (is (= 1 (:seon.instrument/instrumented @armed)))))
+    (testing "a worker carrying MORE than the program is not a refusal"
+      ;; the worker also loads test namespaces; only the program side matters
+      (is (= test-support/committed
+             (arm! #{#'seon.db/q} #{#'seon.db/q #'runner/run-var!}))))))
+
+;;; ---------------------------------------------------------------------------
+;;; A pooled worker measures what a task leaves behind
+;;; ---------------------------------------------------------------------------
+
+(deftest a-task-that-changes-worker-global-state-is-named-as-the-leaker
+  ;; CLASS: `parallel-only` — a red that appears only under the whole gate,
+  ;; because an EARLIER task in the same worker left process-global state
+  ;; behind. The verdict used to name the victim and nothing else, so the
+  ;; reader was sent to the wrong owner. AGENTS §5.7: own nothing global.
+  ;; Nothing DECLARES which state is shared, so the seam that admits the work
+  ;; derives it either side of the task and reports the difference.
+  (testing "drift is derived per member, added and removed both"
+    (let [before {::runner/snapshot-instrumented '#{seon.db/q seon.db/pull}
+                  ::runner/snapshot-registered '#{seon.db/q}
+                  ::runner/snapshot-live-clusters #{}}
+          after {::runner/snapshot-instrumented '#{seon.db/q}
+                 ::runner/snapshot-registered '#{seon.db/q}
+                 ::runner/snapshot-live-clusters #{"scratch"}}
+          drift (#'runner/ambient-drift before after)]
+      (is (= ["seon.db/pull"]
+             (get-in drift [::runner/snapshot-instrumented
+                            ::runner/drift-removed]))
+          "a task that stripped a wrapper is named by the wrapper it stripped")
+      (is (= ["scratch"]
+             (get-in drift [::runner/snapshot-live-clusters
+                            ::runner/drift-added]))
+          "and a task that left a cluster running is named by the cluster")
+      (is (not (contains? drift ::runner/snapshot-registered))
+          "an unchanged member contributes nothing: only drift is reported")))
+  (testing "an unchanged world drifts not at all"
+    (let [snapshot (#'runner/ambient-snapshot)]
+      (is (empty? (#'runner/ambient-drift snapshot snapshot)))
+      (is (pos? (count (::runner/snapshot-instrumented snapshot)))
+          "and the snapshot is genuinely measuring an armed worker, so the
+           emptiness above is not the absence of a subject")))
+  (testing "a red task carries the earlier tasks that changed the world"
+    (let [worker (start-injected-worker! "write-failure-attributed"
+                                         "import sys; sys.exit(23)\n")
+          journal (::runner/worker-journal
+                   (assoc worker ::runner/worker-journal
+                          (atom [{::runner/task-symbols ["seon.leaker/strips"]
+                                  ::runner/task-ambient-drift
+                                  {::runner/snapshot-instrumented
+                                   {::runner/drift-removed ["seon.db/pull"]}}}])))
+          worker (assoc worker ::runner/worker-journal journal)]
+      (try
+        (.get (.onExit (.toHandle ^Process (::runner/worker-process worker)))
+              test-support/event-backstop-seconds TimeUnit/SECONDS)
+        (let [result (execute-injected-task!
+                      worker (exchange-task "write-failure-attributed"))]
+          (is (= "write-failure-attributed" (::runner/executed-by result))
+              "the red names the worker that produced it")
+          (is (= [["seon.leaker/strips"]]
+                 (mapv ::runner/task-symbols
+                       (::runner/prior-ambient-drift result)))
+              "and it carries its suspects, so the verdict names a leaker
+               rather than only a victim"))
+        (finally
+          (stop-injected-worker! worker))))))
+
+(deftest a-dead-workers-task-is-never-classified-parallel-only
+  ;; CLASS: the re-arm defect. A worker that died mid-task took every
+  ;; namespace it held down with it, and each was reported `confirmation
+  ;; parallel-only` against its own owner — a day of someone else's
+  ;; diagnosis. The pool "result" was manufactured by the exchange, so
+  ;; classifying it by whether it passes in isolation attributes a dead
+  ;; worker to whichever tests it happened to hold.
+  (let [green {::runner/task-summary {::runner/fail-count 0
+                                      ::runner/error-count 0}}
+        red {::runner/task-summary {::runner/fail-count 1
+                                    ::runner/error-count 0}}
+        dead {::runner/worker-exchange-result
+              {:seon.error/kind ::runner/worker-exited}}]
+    (is (= :worker-exchange
+           (#'runner/parallel-failure-classification dead green))
+        "green in isolation does NOT make a dead worker's task parallel-only")
+    (is (= :worker-exchange
+           (#'runner/parallel-failure-classification dead red)))
+    (is (= :parallel-only (#'runner/parallel-failure-classification {} green))
+        "an ordinary pool red that is green alone is still parallel-only")
+    (is (= :reproducible (#'runner/parallel-failure-classification {} red))))
+  (testing "and the final tally names every non-test verdict"
+    (let [tally
+          (with-out-str
+            (#'runner/print-final-tally!
+             {::runner/test-count 3 ::runner/pass-count 0
+              ::runner/fail-count 0 ::runner/error-count 3}
+             [{::runner/task-ordinal 1
+               ::runner/task-symbols ["seon.a/one"]
+               ::runner/worker-exchange-result
+               {:seon.error/kind ::runner/worker-exited
+                ::runner/worker-id "pool-1"
+                ::runner/worker-exit 1
+                ::runner/worker-error-log "/tmp/pool-1.log"}}
+              {::runner/task-ordinal 2
+               ::runner/task-symbols ["seon.b/two"]
+               ::runner/worker-pool-exhausted true}
+              {::runner/task-ordinal 3
+               ::runner/task-symbols ["seon.c/three"]
+               ::runner/executed-by "pool-2"
+               ::runner/parallel-failure :parallel-only
+               ::runner/parallel-only-suspects [["seon.leaker/strips"]]}
+              {::runner/task-ordinal 4
+               ::runner/task-symbols ["seon.leaker/strips"]
+               ::runner/task-ambient-drift
+               {::runner/snapshot-instrumented
+                {::runner/drift-removed ["seon.db/pull"]}}}]))]
+      (is (str/includes? tally "Worker exchange failures"))
+      (is (str/includes? tally "seon.a/one"))
+      (is (str/includes? tally "/tmp/pool-1.log"))
+      (is (str/includes? tally "Unlaunchable tasks"))
+      (is (str/includes? tally "seon.b/two"))
+      (is (str/includes? tally "Parallel-only tasks"))
+      (is (str/includes? tally "seon.leaker/strips")
+          "the parallel-only line names its suspected leaker")
+      (is (str/includes? tally "changed worker-global state")))))
+
+(deftest a-confirmation-loads-the-pool-workers-world
+  ;; CLASS: a verdict that does not mean what it says. The confirmation used
+  ;; to initialize its worker with ONE namespace, so a test whose subject
+  ;; depends on what is LOADED — the program graph, the acquired SCI ctx's
+  ;; bindings, which capability namespaces resolve — answered a different
+  ;; question there than in the pool. `parallel-only` then meant "green in a
+  ;; smaller world", which is no evidence about scheduling at all.
+  (let [initialized (atom nil)
+        namespaces '[seon.a-test seon.b-test seon.c-test]
+        task-result {::runner/task-id "confirm-world"
+                     ::runner/task-ordinal 1
+                     ::runner/task-namespace "seon.a-test"
+                     ::runner/task-symbols ["seon.a-test/one"]}]
+    (with-redefs-fn
+      {#'runner/start-worker! (fn [worker-id _ _] {::runner/worker-id worker-id})
+       #'runner/initialize-worker! (fn [worker _namespaces]
+                                     (reset! initialized _namespaces)
+                                     worker)
+       #'runner/stop-worker! (fn [_] nil)
+       #'runner/execute-worker-task!
+       (fn [_ _ _] {::runner/task-summary {::runner/fail-count 0
+                                           ::runner/error-count 0}})}
+      (fn []
+        (let [confirmed
+              (#'runner/confirm-parallel-failure!
+               namespaces
+               (atom {::runner/description "confirmation world"
+                      ::runner/at-nanos (System/nanoTime)
+                      ::runner/at (java.time.Instant/now)})
+               task-result)]
+          (is (= namespaces @initialized)
+              "the confirmation worker loads exactly the namespaces the pool
+               worker loaded, so the only remaining difference is that the
+               task runs alone")
+          (is (= :parallel-only (::runner/parallel-failure confirmed))))))))

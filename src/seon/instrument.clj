@@ -132,6 +132,46 @@
                              (some-> (deref candidate) meta ::mi/original)))))
         (m/function-schemas)))
 
+(defn- primitive-fn?
+  "Malli's own exclusion rule, read from its source rather than remembered.
+
+  `malli.instrument/-primitive-fn?` refuses to wrap a fn implementing one of
+  the `clojure.lang.IFn$` primitive-arity interfaces and prints a warning
+  instead (`reference-code/malli/src/malli/instrument.clj:16,24`). A var with
+  a `^long` hint therefore carries a declared contract that NOTHING can arm,
+  on a live cluster exactly as here. Asking the question with malli's rule is
+  what keeps `armable` and what `apply!` installs from ever disagreeing."
+  [candidate]
+  (and (fn? candidate)
+       (boolean
+        (some (fn [^Class interface]
+                (.startsWith (.getName interface) "clojure.lang.IFn$"))
+              (supers (class candidate))))))
+
+(defn armable
+  "The vars in `namespaces` malli WOULD instrument, derived from its own rules.
+
+  Two questions, both malli's: does the var carry a declared function schema
+  (`mi/-schema` — `:malli/schema`, or a complete set of arglist schemas), and
+  is its current value non-primitive. Nothing here is a list, a prefix, or a
+  count somebody kept, so this set and the set `apply!` installs cannot drift.
+
+  This is the parity question the gate asks: a worker whose armed set does not
+  cover this one is arming a smaller world than the cluster it claims to
+  reproduce, and every contract in the difference is enforced in production
+  and checked by nothing."
+  {:malli/schema [:=> [:cat [:sequential :symbol]] [:set :any]]}
+  [namespaces]
+  (into #{}
+        (comp (keep find-ns)
+              (mapcat ns-interns)
+              (map val)
+              (filter (fn [candidate]
+                        (and (mi/-schema candidate)
+                             (bound? candidate)
+                             (not (primitive-fn? (deref candidate)))))))
+        namespaces))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The reporter
 ;;; ---------------------------------------------------------------------------
