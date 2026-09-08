@@ -69,3 +69,40 @@ failures/errors**, exit 0; its successful root was removed by the runner.
 
 Pending: completed-adoption coverage, first-event
 load probe, and after screenshot. No completion claim is made yet.
+
+## Feed implementation and probes
+
+The first commit is `dd7fc589a`. A second 60-second curl sample during the
+explicit adoption path recorded **300/300 HTTP 200**, maximum **6.403608 s**.
+The listener's identity remained **254437913**, port **7994**. Adoption
+reached reload, SCI acquisition, and instrumentation, then refused its final
+publication marker with `Source changed during development adoption; the
+next edit must converge it.` This is availability through an adoption
+attempt, not a converged-source claim.
+
+GET and SSE now call `current-page`, using the existing page derivation on
+one captured database value. A connection taps before capture so it cannot
+miss a racing publication; its independent first paint does not acquire a
+proc revision. The first proc delivery therefore uses a complete keyframe;
+later contiguous revisions retain the existing delta/drain semantics.
+The proc no longer owns joins' first paint. The unbounded tap read and the
+old proc-settlement join mechanism are removed.
+
+The paused-proc real-socket regression passed under armed contracts:
+**1 test, 8 assertions, zero failures/errors**. It verifies first paint
+while the proc is paused and a `datastar-patch-signals` event containing
+`seon.error/kind = :seon.await/backstop-fired` before EOF. The JSON event
+preserves the namespace of the error kind and names the declared bound.
+The same test passed the isolated `bin/test --paths src/seon/render/web.clj
+test/seon/render/web_test.clj test/seon/render/web_feed_test.clj --
+seon.render.web-feed-test` gate with `SEON_TEST_WORKERS=3`: exit 0,
+**1 test, 8 assertions**. The runner removed its successful root.
+
+A hot reload followed by re-arming **909 functions** served the full GET
+in **1.119114 s**. A later three-tab probe timed out at **20 s** during
+navigation under write load. The live thread dump located both the proc
+and request in `seon.turn/system-plan` → `seon.db/read-evidence-changes` →
+Datahike historical datom merging. A subsequent GET took **2.618699 s**.
+These are failed latency probes, not evidence of a stopped HTTP listener.
+The debug page still attempted a prospective turn while its evaluation
+query was unavailable; the next UI slice handles that missing dependency.

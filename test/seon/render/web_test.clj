@@ -102,32 +102,6 @@
                            :seon.error/diagnostic-member])))
     (is (true? @closed?))))
 
-(deftest initial-package-publication-has-a-loud-render-backstop
-  (support/with-database
-    (fn [connection]
-      (let [pages (async/chan)
-            pages-mult (async/mult pages)
-            result
-            ((web-private 'settle-package!)
-             {:seon.store/connection-object connection
-              :seon.render.web/registration (atom {})
-              :seon.render.web/render-channel (async/chan 1)
-              :seon.render.web/pages-mult pages-mult
-              :seon.render.web/latest-packages (atom {})
-              :seon.config.eval/time-limit-ms 20}
-             ::missing-page)]
-        (is (= :seon.await/backstop-fired (:seon.error/kind result)))
-        (is (= ::missing-page
-               (get-in result [:seon.error/data
-                               :seon.error/diagnostic-member])))
-        (is (integer?
-             (get-in result
-                     [:seon.error/data
-                      :seon.error/diagnostic-evidence
-                      :seon.await/observation
-                      :seon.render.package/basis-transaction])))
-        (async/close! pages)))))
-
 (defn- with-server
   "The whole render pipeline on real sockets: the render proc in its own
   graph, the mult the tabs tap, the routing listener that wakes it.

@@ -14,8 +14,9 @@
 
   ONE MORPH PER BLOCK is preserved AT THE PROC: a contiguous revision
   sends the retained delta bytes and a gap sends the retained keyframe
-  bytes. A tab remembers only its delivered revision. DELETED: per-tab
-  page maps, per-connection rendering and serialization, the old
+  bytes. A new connection derives its first paint directly from current facts.
+  A tab then remembers only its delivered revision. DELETED: per-tab
+  page maps after first paint, the old
   `d/listen` registration, and the hand-rolled latest-wins mailbox.
 
   THE WAKE SOURCE is `wake/route!` — the cluster's ONE listener — which
@@ -334,7 +335,7 @@
 ;;; Painting
 ;;; ---------------------------------------------------------------------------
 
-(declare walk-request root-call-id acquire-root)
+(declare walk-request root-call-id acquire-root current-cluster-name)
 
 (defn- unit-id
   [agent-id unit]
@@ -413,9 +414,8 @@
 
   Derives the agent's flat HTML units at `db` and serializes each through
   `surface-html`. Root fleet oversight enters the same unit sequence before
-  ranking; it has no private fragment path. Only the render proc calls this
-  function. It retains equal fragment bytes, builds the package keyframe from
-  them, and gives initial paint and later joins those exact bytes.
+  ranking; it has no private fragment path. GET, first SSE paint, and the
+  render proc share this derivation. The proc retains fragments for deltas.
 
   THE LIVE SET RIDES IN, it is not defaulted here. `:seon.cluster.run/
   live-processes` is the one input no database value can answer, and
@@ -784,10 +784,6 @@
       [:section {:class "seon-debug-prompt-pane"}
        [:h3 "Would-be system turn"]
        (system-turn-html request prospective)]])))
-
-(defn- debug-html-id
-  [agent-id]
-  (str "debug-html-" agent-id))
 
 (defn- debug-value-html
   [value]
@@ -1483,16 +1479,11 @@
      :seon.render/previews previews
      :seon.render/entries entries}))
 
-(defn- debug-experiment-placeholder
-  [_output-id]
+(defn- debug-experiment-html
+  [page]
   [:div {:class "seon-debug-experiment"}
-   [:section {:id "debug-units" :class "seon-debug-found-values"}
-    [:h1 {:class "seon-debug-caption"} "Attributes of the selected entity"]
-    [:p {:class "seon-render-pending"} "Loading the entity's attributes…"]]
-   [:section {:id "debug-graph" :class "seon-debug-graph"}
-    [:h2 {:class "seon-debug-graph-heading"} "reference graph"]
-    [:p {:class "seon-debug-graph-status" :data-graph-status ""}
-     "Loading bounded reference graph…"]]])
+   (hiccup/raw (get page "debug-units"))
+   (hiccup/raw (get page "debug-graph"))])
 
 (defn- debug-data-call-id
   [debug-request]
@@ -1798,15 +1789,6 @@
           :seon.render.package/delta-size (package-bytes delta-bytes)}
          true]))))
 
-(defn- fresh-fact-package
-  [connection latest-packages registration-key]
-  (let [package (get @latest-packages registration-key)]
-    (when (and package
-               (not (:seon.render.package/streaming? package))
-               (= (db/basis-t @connection)
-                  (:seon.render.package/basis-transaction package)))
-      (join-package package))))
-
 (defn- package-patches
   "Select a contiguous smaller delta, otherwise the repair keyframe."
   [delivered-revision package]
@@ -2069,6 +2051,29 @@
             {::retained-only? true
              :seon.render/captured-calls calls
              :seon.render/captured-invocations retained-invocations}))))))
+
+(defn- current-page
+  "Derive a connection's first paint from one current database value.
+  GET and SSE use the same page derivation as the render proc."
+  [service database registration-key]
+  (let [projection (sci.kernel/context-projection (:seon.sci.eval/ctx service))
+        connection (:seon.store/connection-object service)]
+    (schema/call-with-projection
+     projection
+     (fn []
+       (let [effective (config/effective database (current-cluster-name database))
+             profile (render/agent-render-profile effective)]
+         (:seon.render.web/page
+          (page-refresh
+           {:seon.cluster.loop/cluster
+            (merge service (:seon.cluster.loop/cluster service)
+                   {:seon.db/connection connection})
+            :seon.render.web/root-agent-id
+            (:seon.render.web/root-agent-id service
+                                        (:seon.cluster.agent/id service))
+            :seon.cluster.agent/routing (:seon.cluster.agent/routing service)
+            ::invocations {}}
+           database {} profile registration-key true false)))))))
 
 (defn- watched-registration-keys
   [registration]
@@ -2702,86 +2707,48 @@
       (datastar/close-sse! generator)
       false)))
 
-(defn- settle-package!
-  "Tap first, request one proc-owned join publication, and consume its package."
-  [{registration :seon.render.web/registration
-    render-channel :seon.render.web/render-channel
-    pages-mult :seon.render.web/pages-mult
-    connection :seon.store/connection-object
-    latest-packages :seon.render.web/latest-packages
-    backstop-ms :seon.config.eval/time-limit-ms}
-   registration-key]
-  (let [tap (async/chan (async/sliding-buffer 1))]
-    (register-tab! registration registration-key)
-    (async/tap pages-mult tap)
-    (try
-      (or (fresh-fact-package connection latest-packages registration-key)
-          (do
-            (async/offer! render-channel {::join true})
-            (let [packages
-                  (await/await!
-                   {:seon.await/bound
-                    {:seon.await/config-attribute
-                     :seon.config.eval/time-limit-ms
-                     :seon.await/config-value backstop-ms}
-                    :seon.await/diagnostic
-                    {:seon.error/diagnostic-layer :web-delivery
-                     :seon.error/diagnostic-operation ::initial-package
-                     :seon.error/diagnostic-member registration-key
-                     :seon.error/diagnostic-expected ::registered-package
-                     :seon.error/diagnostic-offending ::pending
-                     :seon.error/diagnostic-evidence
-                     {:seon.render.package/basis-transaction
-                      (db/basis-t @connection)}}
-                    :seon.await/port-operations [tap]
-                    :seon.await/accept? #(get % registration-key)})]
-              (if (:seon.error/kind packages)
-                packages
-                (join-package (get packages registration-key))))))
-      (finally
-        (async/untap pages-mult tap)
-        (async/close! tap)
-        (deregister-tab! registration registration-key)))))
+(defn- await-feed-package!
+  "Wait for this page's next package under the carried delivery backstop."
+  [tap registration-key backstop-ms]
+  (await/await!
+   {:seon.await/bound
+    {:seon.await/config-attribute :seon.config.eval/time-limit-ms
+     :seon.await/config-value backstop-ms}
+    :seon.await/diagnostic
+    {:seon.error/diagnostic-layer :web-delivery
+     :seon.error/diagnostic-operation ::feed-delta
+     :seon.error/diagnostic-member registration-key
+     :seon.error/diagnostic-expected ::registered-package
+     :seon.error/diagnostic-offending ::pending
+     :seon.error/diagnostic-evidence {}}
+    :seon.await/port-operations [tap]
+    :seon.await/accept? #(get % registration-key)}))
 
 (defn feed
-  "Return the SSE response for one tab.
+  "Paint current facts on the connection's virtual thread, then consume deltas.
 
-  It owns a tap and a virtual thread — never a graph or a listener.
-
-  `on-open` registers interest for the agent, taps the mult with a
-  `(sliding-buffer 1)`, reuses the latest proc-owned keyframe when its
-  basis is current, or requests one proc pass when absent. It then loops
-  on packages, sending delta bytes for a contiguous revision and keyframe
-  bytes for a gap. The tab owns only its delivered revision.
-
-  Backpressure walk: after at most one Datastar event enters http-kit's
-  pending queue, this connection's `:io` writer parks on its exact
-  drain-or-close completion. The tap's sliding-1 keeps only the newest
-  complete package while the render proc continues; after drain the writer
-  takes that newest package instead of submitting every displaced value.
-
-  `on-close` untaps and deregisters. The connection owns exactly one
-  virtual thread and one revision number; nothing outlives the socket."
+  Tap before capturing the database so a concurrent write cannot be missed.
+  The first proc package is a keyframe because the direct paint has no proc
+  revision. Later contiguous packages may use deltas; gaps use keyframes.
+  A missing package reaches the client as a typed signal before close."
   {:malli/schema [:=> [:cat :any :seon.render.web/feed-request] :any]}
   [request {:keys [:seon.cluster.agent/id]
             connection :seon.store/connection-object
             pages-mult :seon.render.web/pages-mult
             registration :seon.render.web/registration
-            latest-packages :seon.render.web/latest-packages
             render-channel :seon.render.web/render-channel
             fault-channel :seon.render.web/fault-channel
-            backstop-ms :seon.config.eval/time-limit-ms}]
+            backstop-ms :seon.config.eval/time-limit-ms
+            :as service}]
   (let [query (query-params request)
         debug? (= "true" (get query "debug"))
-        viewer-namespace
-        (when debug?
-          (or (some-> (get query "viewer") route-namespace)
-              (agent-namespace @connection id)))
+        viewer-namespace (when debug?
+                           (or (some-> (get query "viewer") route-namespace)
+                               (agent-namespace @connection id)))
         registration-key
         (if debug?
           [::debug-tab
-           (debug-query query [:seon.cluster.agent/id id]
-                        viewer-namespace
+           (debug-query query [:seon.cluster.agent/id id] viewer-namespace
                         (when (agent-namespace @connection id) id))]
           id)
         channel (:async-channel request)
@@ -2792,104 +2759,65 @@
      request
      {datastar.http-kit/on-open
       (fn [generator]
-        ;; interest FIRST, so the pass a wake triggers derives this
-        ;; agent; the tap BEFORE the paint, so a package racing the
-        ;; proc-owned keyframe is observed rather than missed
         (register-tab! registration registration-key)
         (async/tap pages-mult tap)
-        (let [opening-basis (long (db/basis-t @connection))]
-          (.start
-           (Thread/ofVirtual)
-           (fn []
-             (try
-               (let [initial (fresh-fact-package connection latest-packages
-                                                 registration-key)
-                     delivered-revision
-                     (if initial
-                       (do
-                         (let [written
-                               (write-package!
-                                channel generator
-                                (:seon.render.package/keyframe-bytes initial)
-                                backstop-ms
-                                {:seon.render.web/tab-id tab-id
-                                 :seon.render.web/page registration-key})]
-                           (when (:seon.error/kind written)
-                             (throw
-                              (ex-info (:seon.error/message written)
-                                       written))))
-                         (:seon.render.package/revision initial))
-                       (do (async/offer! render-channel {::join true}) 0))]
-                 (loop [delivered-revision delivered-revision
-                        painted? (some? initial)]
+        (.start
+         (Thread/ofVirtual)
+         (fn []
+           (try
+             (let [database @connection
+                   opening-basis (long (db/basis-t database))
+                   page (current-page service database registration-key)
+                   written (write-package!
+                            channel generator (frame-bytes page) backstop-ms
+                            {:seon.render.web/tab-id tab-id
+                             :seon.render.web/page registration-key})]
+               (when (:seon.error/kind written)
+                 (throw (ex-info (:seon.error/message written) written)))
+               (when written
+                 (async/offer! render-channel {::join true})
+                 (loop [delivered-revision -1]
                    (when @painting
-                     (when-let [packages (async/<!! tap)]
-                       (if-let [package (some-> (get packages registration-key)
-                                                join-package)]
-                         (let [revision
-                               (:seon.render.package/revision package)]
-                           (cond
-                             ;; THE INITIAL PAINT MUST BE CURRENT. A pass
-                             ;; already in flight when this tab tapped was
-                             ;; derived at an EARLIER database value, and
-                             ;; its publication reaches the fresh tap
-                             ;; before the answer to this tab's own join
-                             ;; request. Painting it leaves a reconnect
-                             ;; showing a superseded page until the next
-                             ;; change — measured on 3 of 6 reconnects,
-                             ;; 2026-08-07. The package already carries
-                             ;; the fact that settles it, so compare
-                             ;; database bases rather than wait on a
-                             ;; clock, and ask the proc again for one
-                             ;; derived at or after the basis this tab
-                             ;; connected at.
-                             (and (not painted?)
-                                  (< (long (:seon.render.package/basis-transaction
-                                            package))
-                                     opening-basis))
-                             (do (async/offer! render-channel {::join true})
-                                 (recur delivered-revision painted?))
-
-                             (<= (long revision) delivered-revision)
-                             (recur delivered-revision painted?)
-
-                             :else
-                             (let [written
-                                   (write-package!
-                                    channel generator
-                                    (package-patches
-                                     delivered-revision package)
-                                    backstop-ms
-                                    {:seon.render.web/tab-id tab-id
-                                     :seon.render.web/page registration-key
-                                     :seon.render.package/revision revision})]
-                               (cond
-                                 (:seon.error/kind written)
-                                 (throw
-                                  (ex-info (:seon.error/message written)
-                                           written))
-
-                                 written
-                                 (recur revision true)))))
-                         (recur delivered-revision painted?))))))
-               (catch Throwable failure
+                     (let [packages (await-feed-package! tap registration-key backstop-ms)]
+                       (when (:seon.error/kind packages)
+                         (when @painting
+                           (datastar/patch-signals!
+                            generator
+                            (json/write-str
+                             {"seonFeedError"
+                              {"seon.error/kind" (str (:seon.error/kind packages))
+                               "seon.error/message" (:seon.error/message packages)}}
+                             :escape-slash false)))
+                         (throw (ex-info (:seon.error/message packages) packages)))
+                       (let [package (get packages registration-key)
+                             revision (:seon.render.package/revision package)]
+                         (if (or (< (long (:seon.render.package/basis-transaction package))
+                                    opening-basis)
+                                 (<= (long revision) delivered-revision))
+                           (recur delivered-revision)
+                           (let [written
+                                 (write-package!
+                                  channel generator (package-patches delivered-revision package)
+                                  backstop-ms
+                                  {:seon.render.web/tab-id tab-id
+                                   :seon.render.web/page registration-key
+                                   :seon.render.package/revision revision})]
+                             (when (:seon.error/kind written)
+                               (throw (ex-info (:seon.error/message written) written)))
+                             (when written (recur revision))))))))))
+             (catch Throwable failure
+               (when @painting
                  (async/offer!
                   fault-channel
                   {:clojure.core.async.flow/pid :seon.render.web/feed
                    :seon.cluster.agent/id id
                    :clojure.core.async.flow/ex
-                   (ex-info
-                    "The browser feed writer failed."
-                    {:seon.render.web/tab-id tab-id
-                     :seon.render.web/page registration-key
-                     :seon.render/output :seon.render/html}
-                    failure)}))
-               (finally
-                 ;; A writer exception or channel shutdown must not leave
-                 ;; the socket and its tap alive. Idempotent after a real
-                 ;; client close or the false-write path above.
-                 (datastar/close-sse! generator)))))))
-
+                   (ex-info "The browser feed writer failed."
+                            {:seon.render.web/tab-id tab-id
+                             :seon.render.web/page registration-key
+                             :seon.render/output :seon.render/html}
+                            failure)})))
+             (finally (datastar/close-sse! generator))))))
       datastar.http-kit/on-close
       (fn [_generator _status]
         (vreset! painting false)
@@ -3120,12 +3048,7 @@
    :seon.fn/projection-boundary :seon.render/html}
   [service
    agent-id]
-  (let [settled (settle-package! service agent-id)]
-    (if (:seon.error/kind settled)
-      {:status 503
-       :headers {"content-type" "text/plain; charset=utf-8"}
-       :body (:seon.error/message settled)}
-      (let [page (:seon.render.package/keyframe settled)
+  (let [page (current-page service @(:seon.store/connection-object service) agent-id)
             stream-html (get page stream-strip-id)
             unit-html (vals (dissoc page stream-strip-id))]
         {:status 200
@@ -3144,11 +3067,10 @@
                            unit-html)
                      (hiccup/raw stream-html)]]
                    :seon.render.web/feed-url
-                   (route/path ::route/feed {:id agent-id})})}))))
+                   (route/path ::route/feed {:id agent-id})})}))
 
 (defn- debug-response
   [{connection :seon.store/connection-object
-    caps :seon.sci.admit/caps
     :as service}
    viewer-namespace agent-id request]
   (let [db @connection
@@ -3166,17 +3088,14 @@
         render-context
         (assoc service :seon.render/profile
                (render/agent-render-profile effective))
-        prompt-result (when agent-id
-                        (debug-prompt db connection agent-id caps
-                                      render-context))
+        rendered-page (current-page render-context db [::debug-tab debug-request])
         feed-id (or agent-id (str viewer-namespace))
-        output-id (debug-html-id (or agent-id "inspection"))
         prompt-section
-        (if prompt-result
+        (if agent-id
           [:section {:class "seon-debug-prompt-detail"}
            [:h2 "Agent context"]
            [:section {:class "seon-debug-pane seon-debug-pane-ai"}
-            (hiccup/raw (debug-ai-html agent-id prompt-result))]]
+            (hiccup/raw (get rendered-page (str "debug-ai-" agent-id)))]]
           (when agent-id
             [:a {:class "seon-debug-prompt-link"
                  :href (debug-page-url
@@ -3196,7 +3115,7 @@
            [:div [:span "output"]
             [:code (pr-str (:seon.render/output debug-request))]]]
           [:div {:class "seon-debug-grid"}
-           (debug-experiment-placeholder output-id)
+           (debug-experiment-html rendered-page)
            prompt-section]]]]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
@@ -3281,19 +3200,10 @@
 (defn- feed-response
   [service request]
   (feed request
-        (merge {:seon.cluster.agent/id (get-in request [:path-params :id])
+        (merge service
+               {:seon.cluster.agent/id (get-in request [:path-params :id])
                 :seon.render.web/root-agent-id
-                (:seon.cluster.agent/id service)}
-               (select-keys service
-                            [:seon.store/connection-object
-                             :seon.sci.admit/caps
-                             :seon.config.eval/time-limit-ms
-                             :seon.cluster.run/process
-                             :seon.render.web/pages-mult
-                             :seon.render.web/registration
-                             :seon.render.web/latest-packages
-                             :seon.render.web/render-channel
-                             :seon.render.web/fault-channel]))))
+                (:seon.cluster.agent/id service)})))
 
 (defn- data-response
   [{connection :seon.store/connection-object
