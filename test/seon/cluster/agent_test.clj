@@ -182,7 +182,13 @@
             (seon.flow/stop-work-launcher! launcher))))))))
 
 (defn- handle
+  "The cluster handle `arm!` declares, from `test-support/cluster-handle`.
+
+  Every structural member and dial the declaration names is defaulted there
+  from the shipped decisions; this adds only what this suite's world supplies
+  or varies."
   [connection ctx]
+  (test-support/cluster-handle
   {:seon.env/environment @test-environment
    :seon.db/connection connection
    :seon.cluster/name
@@ -210,7 +216,7 @@
    (:seon.config.agent/turn-completion-backstop-ms (config/defaults))
    :seon.config/on-core-error :panic
    :seon.config.error/recurrence-limit 3
-   :seon.config.message/max-chain 16})
+   :seon.config.message/max-chain 16}))
 
 (defn- config-row
   [cluster-name overlay]
