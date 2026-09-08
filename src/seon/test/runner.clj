@@ -828,6 +828,22 @@
                            (vec (take 10 (sort (map str removed))))
                            ::drift-removed-count (count removed)))))
 
+(def ^:private drift-directions
+  "Which direction of change is a LEAK, per member — derived from what the
+  member means, not from a preference.
+
+  A wrapper that disappeared leaves every later task unarmed; a wrapper that
+  appeared is a test that armed something extra and did not undo it: both
+  matter. A malli function-schema REGISTRATION that disappeared is a real
+  loss, but registrations that appeared are ordinary accretion — a test
+  calling `apply!` collects every loaded namespace's contracts, including its
+  own, and reporting those 47 rows as a defect is noise that buries the one
+  line that matters. A cluster that appeared is one nobody stopped; a cluster
+  that disappeared is a test stopping something it did not start."
+  {::snapshot-instrumented #{::drift-added ::drift-removed}
+   ::snapshot-registered #{::drift-removed}
+   ::snapshot-live-clusters #{::drift-added ::drift-removed}})
+
 (defn- ambient-drift
   "What one task changed in the worker's process-global state, or nothing.
 
@@ -838,12 +854,20 @@
   [before after]
   (let [set-drift
         (into {}
-              (keep (fn [member]
-                      (let [drift (bounded-drift (get before member #{})
-                                                 (get after member #{}))]
+              (keep (fn [[member directions]]
+                      (let [drift (select-keys
+                                   (bounded-drift (get before member #{})
+                                                  (get after member #{}))
+                                   (into #{}
+                                         (mapcat (fn [direction]
+                                                   [direction
+                                                    (keyword
+                                                     (namespace direction)
+                                                     (str (name direction)
+                                                          "-count"))]))
+                                         directions))]
                         (when (seq drift) [member drift]))))
-              [::snapshot-instrumented ::snapshot-registered
-               ::snapshot-live-clusters])
+              drift-directions)
         sci-drift
         (let [before-sizes (get before ::snapshot-sci-base)
               after-sizes (get after ::snapshot-sci-base)]

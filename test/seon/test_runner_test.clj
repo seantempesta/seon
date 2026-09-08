@@ -1592,6 +1592,23 @@
           "and a task that left a cluster running is named by the cluster")
       (is (not (contains? drift ::runner/snapshot-registered))
           "an unchanged member contributes nothing: only drift is reported")))
+  (testing "only the LEAKING direction of each member is reported"
+    ;; a test calling `instrument/apply!` collects every loaded namespace's
+    ;; contracts, including its own; reporting those 47 accreted rows as a
+    ;; defect buries the one line that matters. A registration that
+    ;; DISAPPEARED is still a real loss and is still reported.
+    (let [added (#'runner/ambient-drift
+                 {::runner/snapshot-registered '#{seon.db/q}}
+                 {::runner/snapshot-registered '#{seon.db/q probe/added}})
+          removed (#'runner/ambient-drift
+                   {::runner/snapshot-registered '#{seon.db/q probe/lost}}
+                   {::runner/snapshot-registered '#{seon.db/q}})]
+      (is (empty? added)
+          "accreted malli registrations are ordinary, not a leak")
+      (is (= ["probe/lost"]
+             (get-in removed [::runner/snapshot-registered
+                              ::runner/drift-removed]))
+          "a LOST registration is still reported, and named")))
   (testing "an unchanged world drifts not at all"
     (let [snapshot (#'runner/ambient-snapshot)]
       (is (empty? (#'runner/ambient-drift snapshot snapshot)))
