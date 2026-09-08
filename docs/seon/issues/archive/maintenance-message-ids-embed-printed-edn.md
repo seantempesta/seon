@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, message, maintenance, render]
 ---
@@ -37,3 +37,14 @@ task and instant — the message can ref it), not a serialization.
 New maintenance messages carry short opaque ids; the structured
 task/instant lives on the referenced receipt fact; one regression on
 the constructor. Existing stored ids are disposable with the data.
+
+## Resolution — 2026-09-08
+
+The maintenance error constructor now derives its 12-character identity through
+`seon.id/digest`; the existing error-message owner appends only its bounded
+reason name. Task and nominal instant remain queryable through the evaluation
+and fire refs. The armed regression verifies both returned and thrown handler
+errors, stable short identities, and those structured refs. Fast loop: 8 tests,
+63 assertions, zero failures/errors. Isolated cache/schedule gate: 9 tests,
+69 assertions, zero failures/errors. Default hot-Var proof returned
+`9246b3fdc7b8` (12 valid hex characters).

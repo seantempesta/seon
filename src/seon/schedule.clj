@@ -22,6 +22,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
+            [seon.id :as id]
             [seon.maintenance :as maintenance]
             [seon.operator.runtime :as operator.runtime]
             [seon.schema.edn :as schema.edn])
@@ -276,7 +277,7 @@
 
 (defn- error-identity
   [claimed-receipt-id]
-  (str "maintenance-error/" claimed-receipt-id))
+  (id/digest 12 [::maintenance-error claimed-receipt-id]))
 
 (defn- request-entity
   [request task-eid function-eid fire-tempid request-tempid]

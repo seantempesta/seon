@@ -5,6 +5,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.id :as id]
             [seon.schedule :as schedule]
             [seon.cluster.wake :as wake]
             [seon.cluster.work :as work]
@@ -263,6 +264,22 @@
           (is (= 1 (count-with @connection :seon.maintenance.receipt/error)))
           (is (= 1 (count-with @connection :seon.error/id)))
           (is (= 1 (count-with @connection :seon.cluster.message/id)))
+          (let [[evaluation-id error-id task nominal]
+                (first (db/q '[:find ?evaluation-id ?error-id ?task ?nominal
+                        :where
+                        [?evaluation :seon.maintenance.receipt/id ?evaluation-id]
+                        [?evaluation :seon.maintenance.receipt/error ?error]
+                        [?error :seon.error/id ?error-id]
+                        [?evaluation :seon.maintenance.receipt/fire ?fire]
+                        [?fire :seon.schedule.fire/task ?task-row]
+                        [?task-row :seon.schedule.task/id ?task]
+                        [?fire :seon.schedule.fire/nominal-at ?nominal]]
+                             @connection))]
+            (is (id/valid? 12 error-id))
+            (is (= error-id (id/digest 12 [:seon.schedule/maintenance-error
+                                         evaluation-id])))
+            (is (= task-id task))
+            (is (inst? nominal)))
           (is (= expected-kind
                  (db/q '[:find ?kind .
                          :where [_ :seon.error/kind ?kind]]
