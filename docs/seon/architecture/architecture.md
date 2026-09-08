@@ -18,7 +18,7 @@ graph owns the live function, namespace, schema, and test catalog.
 ## Thesis
 
 Seon is a long-lived Clojure runtime where agents and one human build on the
-same durable world. Facts live in a temporal Datahike database. A run decision,
+same durable world. Facts live in a temporal Datahike database. A turn decision,
 agent context, human surface, and forensic view are derived from an explicit
 database value rather than synchronized copies. Code is data in that world too:
 contracted functions, namespaces, schemas, and tests form a queryable program
@@ -34,8 +34,9 @@ resources but never database branches or live program state.
 The database is durable coordination; channels are lossy in-flight transport.
 The agent and human see different projections of the same rendered values.
 External effects cross one guarded boundary and return ordinary admitted data.
-After a crash, the process reopens facts, records interrupted custody, and
-derives what can happen next; it does not replay uncertain work.
+After a crash, boot closes every open turn and stamps its unsettled
+evaluations interrupted, deriving what can happen next from that fact alone;
+it does not replay uncertain work, and no turn is ever resumed.
 
 ## Topology
 
@@ -120,15 +121,17 @@ Actual namespaces and contracts are always derived from the program graph.
 
 ### Bounded execution and recovery
 
-Detection is event-driven and every execution entrance carries a bound. Agent
-work is claimable database state; custody is the presence of the holding
-process ref. Settlement fences live in database transitions rather than caller
-pre-reads. A bound firing or dead process creates explicit interruption or
-fault evidence. Recovery closes or releases wreckage from facts and never
-re-executes an uncertain effect.
+Detection is event-driven and every execution entrance carries a bound. A
+turn is claimable database state; "custody" needs no stamp, because one
+lifetime filesystem lock per store plus one in-memory turn permit per agent
+make a second live opener of the same turn unrepresentable. Settlement fences
+live in database transitions rather than caller pre-reads. A bound firing
+creates explicit interruption or fault evidence at boot, closing every open
+turn. Recovery closes wreckage from facts and never re-executes an uncertain
+effect.
 
-[[agent-runtime]] owns generated and ordinary episodes, run and receipt
-transitions, per-agent graph behavior, and crash recovery.
+[[agent-runtime]] owns the agent record, the two-arm turn loop, waking,
+per-agent graph behavior, and crash recovery.
 
 ### Context, rendering, and the human surface
 
@@ -144,9 +147,9 @@ human-visible delivery guarantees.
 ### Errors and evidence
 
 Agent-facing failures are flat values. Core faults become durable facts with
-provenance. Prompt captures, provider attempts, forms, eval receipts, messages,
-and errors form one evidence spine, but each claim remains bounded: missing
-evidence is unknown, never health or proof that an effect did not happen.
+provenance. Turns, provider attempts, evaluations, messages, and errors form
+one evidence spine, but each claim remains bounded: missing evidence is
+unknown, never health or proof that an effect did not happen.
 
 [[observability]] owns the forensic questions and joins. Operational logs and
 process advertisements support operation; they do not replace durable agent
