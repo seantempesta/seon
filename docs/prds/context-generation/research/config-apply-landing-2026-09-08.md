@@ -7,6 +7,42 @@ tags: [config, operator, test]
 
 # Config apply landing — 2026-09-08
 
+## Resumed verification under the owner's restart rule
+
+The owner superseded the stop rule: retry concurrent locks/cache collisions and
+development adoption until the assignment is complete. The lock cleared and
+implementation commit `eb66a4b12` landed path-limited.
+
+The successful live sequence, after a refork removed a malformed temporary
+turn-cut program row and the supplied Juniper fixture was reseeded:
+
+```text
+bin/seon config apply config/default.edn
+● default config applied #:seon.reconcile{:converged? false, :operations 3}
+bin/seon init --dev default
+● current-src: development cluster converged
+● :current-src commit 6aa04f2d-55d7-5cb0-8f09-cf9a2fd2e7c1 digest 417e207443e4d79a65cadc184cc267f7fa93e2633a90e62a4c0111118fceb1f9
+```
+
+The recurring probe is
+`docs/prds/context-generation/research/config_apply_probe_2026_09_08.clj`.
+MCP JVM mode, with no root/cluster arguments, evaluated its `load-file` and
+returned in 691 ms:
+
+```clojure
+{:seon.config.probe/desired-count 77
+ :seon.config.probe/decisions-equal? true
+ :seon.config.probe/projection-symbol? true
+ :seon.config.probe/adopted #uuid "6aa04f2d-55d7-5cb0-8f09-cf9a2fd2e7c1"
+ :seon.config.probe/published #uuid "6aa04f2d-55d7-5cb0-8f09-cf9a2fd2e7c1"
+ :seon.config.probe/converged? true}
+```
+
+This is in-place development adoption, not just a hot-reloaded Var. All 77 desired
+row entries matched database read-back; the search projection remains a SYMBOL.
+The processor-count decision resolved to 18. No model call was made.
+Gates continue below this checkpoint; the earlier stop is historical evidence.
+
 Verification stopped at the concurrent runner boundary, as the assignment requires.
 The implementation is in the working tree for review; the issue remains open. No protected
 turn-cut path was edited and no protected-path hunk is required.
