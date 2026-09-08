@@ -396,7 +396,8 @@
           (when manifest
             (fn/index! {:seon.db/connection connection
                         :seon.fn/manifest manifest
-                        :seon.source/previous-database @connection}))
+                        :seon.source/previous-database @connection}
+                       (constantly nil)))
           (let [digest-entities
                 (db/q '[:find [?entity ...]
                        :where [?entity :seon.source/digest]]

@@ -18,7 +18,6 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
-            [sci.core :as sci]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent]
@@ -32,6 +31,7 @@
             [seon.db :as db]
             [seon.fn :as seon.fn]
             [seon.flow :as seon.flow]
+            [seon.render.route :as route]
             [seon.fs :as fs]
             [seon.operator :as operator]
             [seon.program :as program]
@@ -110,7 +110,7 @@
     (binding [*published-root* (atom nil)]
       (try
         (delete-process-store! process-root)
-        (body)
+        (test-support/preserving-instrumentation-state body)
         (finally
           (when-let [root @*published-root*]
             (delete-process-store! root)
@@ -154,36 +154,6 @@
     (.mkdirs (.getParentFile file))
     (spit file source)
     (.getCanonicalPath file)))
-
-(defn- initialization-function-symbols
-  []
-  (into
-   #{}
-   (keep
-    (fn [value]
-      (when (and (vector? value)
-                 (= 2 (count value))
-                 (= :seon.fn/sym (first value))
-                 (string? (second value)))
-        (symbol (second value)))))
-   (tree-seq coll? seq (config/default-population))))
-
-(defn- write-function-sources!
-  [source-root symbols]
-  (doseq [[ns-name-text ns-symbols]
-          (sort-by key (group-by namespace symbols))]
-    (write-source!
-     source-root
-     (str (str/replace ns-name-text "." "/") ".clj")
-     (str "(ns " ns-name-text ")\n"
-          (str/join
-           "\n"
-           (map (fn [qualified-symbol]
-                  (pr-str (list 'defn
-                                (symbol (name qualified-symbol))
-                                []
-                                nil)))
-                (sort ns-symbols)))))))
 
 (defn- activation-missing-member?
   [missing]
@@ -1004,6 +974,13 @@
         (delete-recursively! root)))))
 
 (deftest development-reload-follows-declared-requires
+  (let [namespace-name (symbol (str "reload-resource-probe-" (random-uuid)))]
+    (create-ns namespace-name)
+    (try
+      (is (not (#'cluster/reloadable-namespace? namespace-name))
+          "an existing namespace without classpath source cannot be required")
+      (is (#'cluster/reloadable-namespace? 'seon.cluster))
+      (finally (remove-ns namespace-name))))
   ;; The observed failure: alphabetical reload put seon.cluster.loop before
   ;; seon.cluster.run, and the reloaded loop failed on run's new Var.
   (testing "a changed callee reloads before every changed caller, ties by name"
@@ -1021,7 +998,7 @@
     (is (= [] (cluster/reload-order #{} {})))))
 
 (deftest ^{:seon.test/long
-           "Real source publication and two cohosted clusters verify named adoption and independent SCI programs."}
+           "Real source publication and two cohosted clusters verify named adoption and independent program facts."}
   development-adoption-targets-one-of-two-cohosted-clusters
   (let [root (bare-root)
         extra-root (doto (io/file root "source") .mkdirs)
@@ -1034,9 +1011,7 @@
         roots (conj seon.fn/source-roots (.getCanonicalPath extra-root))]
     (try
       (write-value! 1)
-      (test-support/preserving-instrumentation-state
-       (fn []
-         (with-redefs [seon.fn/source-roots roots
+      (with-redefs [seon.fn/source-roots roots
                        cluster/source-roots (conj roots "config/default.edn")]
            (let [fork (cluster/refresh-source! root)
                  default (cluster/start! {:seon.boot/root root
@@ -1046,29 +1021,58 @@
                                            :seon.boot/cluster-name "beta"})]
                  (try
                    (let [connection (:seon.boot/cluster-connection default)
-                         beta-connection (:seon.boot/cluster-connection beta)
+                         _ (await-bootstrap! connection "root")
+                         _ (await-bootstrap! (:seon.boot/cluster-connection beta) "root")
+                         responses (atom [])
+                         url (str (get-in default [:seon.render.web/served :seon.render.web/url])
+                                  (route/path ::route/agent-debug {:id "root"}))
+                         observe-page! (fn [phase]
+                                         (when (contains? #{"development schema declarations"
+                                                            "development loaded definitions"
+                                                            "development SCI acquisition"
+                                                            "development JVM instrumentation"} phase)
+                                           (let [request (.openConnection
+                                                          (.toURL (java.net.URI. url)))]
+                                             (.setConnectTimeout request 5000)
+                                             (.setReadTimeout request 15000)
+                                             (try (swap! responses conj (.getResponseCode request))
+                                                  (finally (.disconnect request))))))
+                         beta-digest (fn []
+                                       (db/q '[:find ?digest .
+                                               :where [_ :seon.source/digest ?digest]]
+                                             @(:seon.boot/cluster-connection beta)))
                          adopted (fn [conn name]
                                    (:seon.source/commit-id
                                     (db/pull @conn [:seon.source/commit-id]
                                              [:seon.cluster/name name])))
-                         evaluate (fn [instance]
-                                    (sci/eval-string* (:seon.sci.eval/ctx instance)
-                                                      "(adoption-probe/value)"))]
-                     (is (= (:seon.source/commit-id fork) (adopted beta-connection "beta")))
-                     (is (= 1 (evaluate default) (evaluate beta)))
+                         definition (fn [instance]
+                                      (:seon.fn/source
+                                       (db/pull @(:seon.boot/cluster-connection instance)
+                                                [:seon.fn/source]
+                                                [:seon.fn/sym "adoption-probe/value"])))]
+                     (is (= (:seon.source/digest fork) (beta-digest)))
+                     (is (= (definition default) (definition beta)))
+                     (is (str/includes? (definition beta) "[] 1"))
                      (write-value! 2)
-                     (let [published (cluster/refresh-source!
-                                      root [(.getCanonicalPath path)] "default")]
+                     (let [published (binding [cluster/*source-progress!* observe-page!]
+                                       (cluster/refresh-source!
+                                        root [(.getCanonicalPath path)] "default"))]
+                       (is (= [200 200 200 200] @responses)
+                           "the real debug page remains served during every adoption stage")
+                       (is (identical?
+                            (get-in default [:seon.render.web/served :seon.render.web/server])
+                            (get-in @@(ns-resolve 'seon.cluster 'running-instances)
+                                    ["default" :seon.render.web/served :seon.render.web/server])))
                        (is (not= (:seon.source/commit-id fork)
                                  (:seon.source/commit-id published)))
                        (is (= (:seon.source/commit-id published)
                               (adopted connection "default")))
-                       (is (= (:seon.source/commit-id fork)
-                              (adopted beta-connection "beta")))
-                       (is (= 2 (evaluate default)))
-                       (is (= 1 (evaluate beta)))))
+                       (is (= (:seon.source/digest fork) (beta-digest))
+                           "scheduled maintenance may advance beta's branch head, never its program")
+                       (is (str/includes? (definition default) "[] 2"))
+                       (is (str/includes? (definition beta) "[] 1"))))
                    (finally (cluster/stop! beta))))
-               (finally (cluster/stop! default)))))))
+               (finally (cluster/stop! default)))))
       (finally (delete-recursively! root)))))
 
 (deftest unchanged-complete-source-refresh-reuses-the-published-head
@@ -1220,13 +1224,9 @@
                               "(ns sample.a)\n(defn value [] 1)\n")
         b-path (write-source! source-root "sample/b.clj"
                               "(ns sample.b)\n(defn value [] 10)\n")
-        _ (write-function-sources!
-           source-root
-           (into #{'seon.cluster/populate-source!
-                   'seon.cluster/derive-activation}
-                 (initialization-function-symbols)))
-        roots (mapv #(.getCanonicalPath ^java.io.File %)
-                    [source-root test-root])
+        roots (into seon.fn/source-roots
+                    (map #(.getCanonicalPath ^java.io.File %)
+                         [source-root test-root]))
         all-roots (conj roots schema-path)]
     (.mkdirs test-root)
     (try

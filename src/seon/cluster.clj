@@ -1868,6 +1868,14 @@
             {}
             edges)))
 
+(defn- reloadable-namespace?
+  [namespace-name]
+  (let [resource (.. (str namespace-name) (replace \- \_) (replace \. \/))]
+    (boolean
+     (and (find-ns namespace-name)
+          (or (io/resource (str resource ".clj"))
+              (io/resource (str resource ".cljc")))))))
+
 (defn- development-source-refresh!
   [held-store instance before-publication published]
   (let [connection (:seon.boot/cluster-connection instance)
@@ -1960,7 +1968,7 @@
     ;; callee's new Var, so the order follows the declared requires facts.
     (doseq [namespace-name (reload-order namespaces
                                          (namespace-requires database namespaces))
-            :when (and (find-ns namespace-name)
+            :when (and (reloadable-namespace? namespace-name)
                        (:seon.ns/source
                         (db/pull database [:seon.ns/source]
                                  [:seon.ns/name namespace-name])))]

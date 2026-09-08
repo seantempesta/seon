@@ -795,7 +795,8 @@
 (defn- remaining-definition-facts
   [db [identity-attribute identity-value :as program-identity]]
   (let [committed
-        (dissoc (db/pull db '[*] program-identity) :db/id)
+        (dissoc (db/pull db '[*] program-identity)
+                :db/id :seon.schema.admission/source)
         namespace-attribute
         (get namespace-reference-attributes identity-attribute)
         identity-row

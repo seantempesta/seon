@@ -1198,7 +1198,7 @@
 
 (defn- publish-source-paths
   "Publish one admitted union of paths and return its terminal feedback."
-  [paths config]
+  [paths config publication-id]
   (try
         (let [child
               (process/process
@@ -1224,6 +1224,14 @@
                            @child
                            {:exit 124 :err "Publication did not finish within its declared bound."})
                        result)]
+          (doseq [line (str/split-lines (str (:out result) "\n" (:err result)))
+                  :when (and (str/starts-with? line "● current-src:")
+                             (or (str/includes? line "incremental scalar publication")
+                                 (str/includes? line "incremental manifest reconciliation")
+                                 (str/includes? line "complete publication:")
+                                 (str/includes? line "development reload ")))]
+            (log! "SOURCE_PROGRESS" (str "publication=" publication-id)
+                  (str "paths=" (pr-str paths)) line))
           (if (zero? (:exit result))
             (if-let [terminal (last (remove str/blank? (str/split-lines (:out result))))]
               (str (if (get-in config [:current-source :cluster]) "converged: " "published: ")
@@ -1295,7 +1303,7 @@
               (let [id (:seon.hook/publication batch)
                     paths (:seon.hook/paths batch)
                     feedback (or (:seon.hook/feedback batch)
-                                 (publish-source-paths paths config))
+                                 (publish-source-paths paths config id))
                     result (source-result-path id)]
                 (io/make-parents result)
                 ;; One newline terminates the result. Every editor tails this
@@ -1329,8 +1337,10 @@
           (with-open [reader (io/reader (:out child))]
             (try
              (let [line (future (.readLine reader))
+                  ; Queue and publication each have the configured bound;
+                  ; tail delivers the completed result on its next interval.
                   result (deref line
-                                (* 1000 (get-in config [:current-source :timeout-seconds] 180))
+                                (+ 1000 (* 2000 (get-in config [:current-source :timeout-seconds] 180)))
                                 ::timeout)]
               (if (or (= ::timeout result) (nil? result))
                 (str "ADVISORY — current-src publication refused: no result arrived at "

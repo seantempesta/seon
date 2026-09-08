@@ -10,6 +10,8 @@
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.schema]
+            [sci.core :as sci]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent CountDownLatch TimeUnit]))
 
@@ -413,3 +415,26 @@
                 (is (= expected (markers connection)))
                 (finally
                   (d/release connection))))))))))
+
+(deftest source-tombstone-provenance-does-not-prevent-live-removal
+  (test-support/with-database
+    (fn [connection]
+      (let [ctx (sci.eval/build-base-ctx)
+            identity [:seon.fn/sym "source-deletion-probe/value"]]
+        (db/transact! connection
+                      [{:seon.ns/name 'source-deletion-probe}
+                       {:seon.fn/sym (second identity)
+                        :seon.fn/ns [:seon.ns/name 'source-deletion-probe]
+                        :seon.schema.admission/source :core}])
+        (sci/eval-string* ctx "(ns source-deletion-probe) (defn value [] 1)")
+        (is (= 1 (sci/eval-string* ctx "(source-deletion-probe/value)")))
+        (is (= 1 (:seon.sci.eval/installed
+                  (sci.eval/install-row!
+                   {:seon.sci.eval/ctx ctx :seon.db/db @connection
+                    :seon.program/row
+                    {:seon.program/delete-identities [identity]
+                     :seon.program/ns [:seon.ns/name 'source-deletion-probe]
+                     :seon.program/source "(ns-unmap 'source-deletion-probe 'value)"}}))))
+        (is (nil? (sci/eval-string* ctx "(resolve 'source-deletion-probe/value)")))
+        (is (= :core (:seon.schema.admission/source
+                      (db/pull @connection '[*] identity))))))))
