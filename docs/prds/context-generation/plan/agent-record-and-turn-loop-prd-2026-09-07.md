@@ -880,3 +880,34 @@ evaluation of that same form. Writes and effects are never re-run. One
 algorithm, no block-specific code: the cache validity check applied to the
 whole transcript.
 
+## 15. Results: objects in memory, shown text on disk (owner, 2026-09-08)
+
+Supersedes §5's stored print node and the separate storage bound.
+
+- **In memory**: each agent's live SCI context keeps a map from evaluation
+  id to the ACTUAL result object — anything: an atom, a function, a
+  channel, a lazy seq. `result/e<id>` binds to that object directly. No
+  serialization, no admission walk, no rehydration; requery runs against
+  the real value. Lives as long as the JVM.
+- **On disk**: the evaluation entity stores the form and WHAT THE AGENT
+  SAW — the text the value renderer produced at evaluation time, elided
+  under the profile with its requery forms — plus out and error. A fact
+  about what was shown, never a serialization of the value. It regenerates
+  the prompt byte for byte after a restart because it IS the bytes.
+- **Deleted**: the stored print node, `result-edn`, result blobs,
+  `restorable-node`, `semantic-value`, `max-bytes` as a separate bound. The
+  one bound is the value renderer's profile, applied once at evaluation
+  time; the stored text inherits it. HTML renders the live object while it
+  exists, the stored text after a restart.
+- **Inspection**: `(my.turn/evals)` returns the agent's evaluations as
+  maps (id, form, shown text, `:t`, error), filterable by turn or form;
+  `(my.turn/eval id)` returns one in full including its read evidence;
+  `result/e<id>` is the live object, and after a restart the map says the
+  object is gone and the text remains. `dir` teaches the API.
+- Accepted: a result too large to show is stored as its elided text with
+  a requery form; after a restart that requery has nothing to reach.
+
+Vocabulary: "transcript" is retired; the agent's evaluations are
+`(seon.eval/of-agent db agent)` and their rendered block is the history.
+`seon.render.transcript` is renamed with the history it renders.
+
