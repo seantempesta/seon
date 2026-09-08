@@ -302,3 +302,51 @@ the next lane's, not this one's.
 `bin/test --platform`: **GREEN — 73 platform tests, 395 assertions, 0
 failures, 0 errors**, and the runner removed its isolated operator root as
 successful.
+
+### 9.3 The development cluster refused adoption — for the same reason, one key later
+
+`bin/seon --root tmp/juniper-context-live init --dev juniper-context`
+
+The PUBLICATION succeeded end to end — analysis, schema declarations, the
+30,410-entity program population, `:current-src` branch publication,
+`require :reload` of every changed namespace in `:seon.ns/requires` order,
+development schema declarations, program reconciliation, loaded definitions,
+and SCI acquisition. It then refused at **development JVM instrumentation**,
+verbatim:
+
+```text
+Development instrumentation configuration is unavailable.
+{:seon.error/kind :seon.boot/refused
+ :seon.boot/offense
+ {:seon.config/missing-effective "juniper-context"
+  :seon.error/kind :seon.config/missing-effective
+  :seon.error/data #:seon.config{:missing [:seon.config.error/max-evidence-bytes]}
+  :seon.error/message "Effective configuration for cluster \"juniper-context\"
+                       is missing required facts
+                       [:seon.config.error/max-evidence-bytes]."}}
+```
+
+This is the SAME refusal the `storage-bound` lane met (§6 of its note), one
+key later: a new REQUIRED config fact, and a running development cluster whose
+stored configuration predates it.
+
+**The operator's cap list is not the fix here, and adding the key to it would
+be one.** `script/seon/fresh_operator.clj:1613` is a `select-keys` of ADMISSION
+caps handed to `seon.instrument/apply!`, and `:seon.config.error/max-evidence-bytes`
+is not an admission cap. The refusal happens one call earlier, inside
+`config/effective`, before that `select-keys` is reached — so listing the key
+there would change nothing while looking like a fix.
+
+**Declaring the key optional is also not the fix.** `seon.error` carries a
+bootstrap default only because `seon.config` depends on it and a fault
+normalized before config is readable must still be bounded. Making the shipped
+dial optional would turn that bootstrap into a silent fallback on the ordinary
+path, which is a defect even while it works (law 2.4). Every other bound in
+this system is a required declared fact and this one is too.
+
+The lane stopped there and touched nothing else in that root, as its
+assignment directs. The orchestrator's move is the one the previous note
+already named: `bin/seon --root tmp/juniper-context-live config apply
+juniper-context config/default.edn` followed by a restart (the config is
+arm-time), or a reset. `:current-src` has already advanced to these commits,
+so the adoption is the only step outstanding.
