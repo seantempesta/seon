@@ -342,3 +342,23 @@ layout) and `adoption-rows` (agent rows against the cluster db; one-row
 faults; bounded refusal diagnostics; contract tests on the projection
 registry). Next: review residue, resume turn-cut (of-agent is what the
 page is waiting on), then hook-async.
+
+## 2026-09-08 16:35 — ruling: platform correctness before any feature; no bottlenecks
+
+Owner: "Prioritize the platform correctness to any individual features. We
+shouldn't be bottlenecked and we should have better resource sharing." And,
+on the render proc: "We can have as many io processes as we want, why are
+we only sharing one?"
+
+**Applied.** One proc per cluster was justified for coalescing DELTA
+publication and for owning the shared evaluation cache. Owning a cache is
+not a reason to execute every reader: a cache is a value any virtual
+thread reads and extends. Every caller derives on its own `:io` thread
+from a database value plus the shared caches — plain page on the request
+thread, feed first frame on the tab thread, agent context in the turn
+proc — and the render proc keeps one job, publishing deltas after a wake.
+`page-feed` reordered: make the in-flight page edit total (the page is
+500 on `value/transacted`), then this, then the page layout items; page
+edits verified on the lane's scratch root so `default` never shows a
+half-edit. Measured targets in the issue.
+
