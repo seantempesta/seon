@@ -734,3 +734,9 @@ or another agent; an installed defn reaches everyone. Both directions are
 regressions. This supersedes §2's "`:seon.def` deleted … kept data is
 transacted" only in mechanism: the storage is still deleted.
 
+Ruled 2026-09-08 ("yes stop serializing. Store it in memory"): the private
+layer holds the agent's defs and atoms as the OBJECTS THEMSELVES in the
+agent proc's state, never an EDN serialization — an atom keeps its identity
+across turns, and the `:seon.def` rows (which could not hold an atom at all)
+are deleted with their serializer.
+
