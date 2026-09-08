@@ -265,3 +265,13 @@ AI 1994 → 0.20 ms, 5 MiB string 841 → 0.17 ms; canonical map/set order
 (byte identity), pasteable requery forms `(get-in result/e… [path])`,
 quoted strings, default printing for entities without a pair. HTML stays
 unbounded (1.3 s for 100k, by ruling).
+
+Multi-cluster concurrency PROVEN (`bace54e98`, `8032ba43f`): 3+3 agents in
+two clusters, 60 provider-free turns, 2.9 turns/s, all isolation probes
+green (private defs, installed fns, handles, message routing), 63 flow
+threads all virtual, a second root in its own JVM with explicit-root MCP.
+Refuted: full JVM isolation — Malli's global registry and shared host
+wrappers couple clusters (a cohosted test removed 949 wrappers). Lane
+`cluster-scoped-registry` launched: registry reads/writes through the
+cluster projection; arming once per JVM, honest; regression with two
+clusters in one test JVM.
