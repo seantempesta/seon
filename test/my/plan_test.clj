@@ -6,6 +6,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.render :as render]
             [seon.schema]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
@@ -44,6 +45,8 @@
   [connection view]
   (assoc view
          :seon.db/db @connection
+         :seon.render.value/root [:seon.cluster.agent/id (:seon.cluster.agent/id view)]
+         :seon.render/profile (render/agent-render-profile (support/effective-config))
          :seon.sci.admit/caps (config/result-caps (support/effective-config))))
 
 (defn- ids

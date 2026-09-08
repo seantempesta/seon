@@ -507,7 +507,8 @@
                       (:my.plan.item/needs request))
           _ (doseq [token (:my.plan.item/about request)]
               (resolve-subject! database token))
-          plan-entity (or (plan-eid database agent-entity) "new-agent-plan")
+          existing-plan (plan-eid database agent-entity)
+          plan-entity (or existing-plan "new-agent-plan")
           owner (or parent plan-entity)
           attribute (if parent :my.plan.item/steps :my.plan/steps)
           tempid "new-plan-step"
@@ -517,7 +518,9 @@
                                :my.plan/current?)
                  true (assoc :db/id tempid
                              :my.plan.item/position
-                             (sibling-count database owner attribute))
+                             (if (or parent existing-plan)
+                               (sibling-count database owner attribute)
+                               0))
                  (seq needs) (assoc :my.plan.item/needs needs))]
       (cond-> [step [:db/add owner attribute tempid]]
         (= plan-entity "new-agent-plan")
@@ -596,10 +599,7 @@
   [database agent-id item-id]
   (let [agent-entity (agent-eid database agent-id)
         step (step-eid database item-id)]
-    (when-not (and step
-                   (db/q '[:find ?step . :in $ % ?agent ?step
-                            :where (owned ?agent ?step)]
-                         database rules agent-entity step))
+    (when-not (and step (contains? (owned-ids database agent-id) item-id))
       (refuse! ::not-owned "Select a step owned by this agent."
                {:my.plan.item/id item-id :seon.cluster.agent/id agent-id}))
     (when (db/q '[:find ?completed . :in $ ?step
@@ -787,7 +787,8 @@
       (refuse! ::agent-not-found
                (str "There is no agent named " (pr-str agent-id) ".")
                {:seon.cluster.agent/id agent-id}))
-    (let [plan-entity (or (plan-eid database agent-entity) "new-agent-plan")
+    (let [existing-plan (plan-eid database agent-entity)
+          plan-entity (or existing-plan "new-agent-plan")
           stored-objective (:my.plan/objective (agent-plan-pull database agent-id))
           objective (:my.plan/objective input)
           entries (input-entries (:my.plan/steps input))
@@ -881,7 +882,7 @@
               (assoc :my.plan/steps (set (get children nil)))
               current (assoc :my.plan/current-step (step-ref current)))
             clear-current
-            (when (and (not current)
+            (when (and existing-plan (not current)
                        (db/q '[:find ?current .
                                :in $ ?agent
                                :where [?agent :my.plan/current-step ?current]]
@@ -911,12 +912,12 @@
                            (empty? scalars)
                            (nil? clear-current)
                            (= current
-                              (db/q '[:find ?id .
+                              (when existing-plan (db/q '[:find ?id .
                                       :in $ ?agent
                                       :where
                                       [?agent :my.plan/current-step ?step]
                                       [?step :my.plan.item/id ?id]]
-                                    database plan-entity)))
+                                    database existing-plan))))
          ::diff {:my.plan/added added
                  :my.plan/changed changed
                  :my.plan/retracted (count retractions)}}))))
@@ -1170,9 +1171,16 @@
 
 (defn render-plan-html
   "Show the plan data through the shared value renderer."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :seon.render/hiccup :seon.error/value]]}
   [view]
-  [:section {:class "seon-family-entry my-plan"}
-   [:h3 "Plan"]
-   (value/render-html (assoc view :seon.render/value
-                             (select-keys view [:my.plan/objective :my.plan/steps :my.plan/current-step])))])
+  (let [rendered (value/render-html
+                  (assoc view
+                         :seon.render.value/options {:seon.render.value/structural? true}
+                         :seon.render/value
+                         (select-keys view [:my.plan/objective :my.plan/steps :my.plan/current-step])))]
+    (if (error-value? rendered)
+      rendered
+      [:section {:class "seon-family-entry my-plan"}
+       [:h3 "Plan"]
+       rendered])))

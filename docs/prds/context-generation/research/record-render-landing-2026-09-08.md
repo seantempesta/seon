@@ -203,3 +203,29 @@ Additional implementation paths in this slice: `src/my/agent.clj`,
 schema resources, `test/my/agent_test.clj`, and `test/seon/ai_test.clj`.
 The Juniper fixture and section 17's PRD integration paragraph changed too.
 The section 16 page draft is still uncommitted and not included in this slice.
+
+
+### Component follow-up, 2026-09-08
+
+The component commit is `74b5b4b05`. Its first completed isolated plan gate
+(`tmp/record-render-plan-gate.log`, root `run.WAmrg9`, HEAD `dbb0cda83`)
+ran 19 tests / 68 assertions: 5 failures and 4 errors. These are owned
+failures, not attributed to another lane. The earlier three-namespace gate
+was terminated by TERM before a tally; it is not a green proof.
+
+The report exposed reads using a not-yet-created component tempid: sibling
+counting assigned the first step an erroneous position, and reconciliation
+attempted a retract against that tempid. The follow-up only reads existing
+component ids. The start writer tests membership in the owned step identity
+set. The HTML fixture now carries a root identity and a fixed complete
+profile. The plan HTML function asks the shared renderer for structural data
+and propagates a typed error instead of placing an error map inside Hiccup.
+The replacement gate is `tmp/record-render-components-test4.log` (plan and
+settings namespaces); its result is pending at this checkpoint.
+
+Default MCP answered arithmetic and an explicit value-renderer call returned
+`:seon.render.value/missing-root-identity`, confirming the fixture omission.
+A call supplying the root subsequently timed out at 3000 ms. Development
+adoption again refused because source changed during adoption; no schema
+refusal or successful convergence is claimed. No refork, reseed, browser
+paint, or fresh/system/virtual/compact lifecycle proof has completed.
