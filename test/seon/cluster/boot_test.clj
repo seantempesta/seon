@@ -1277,7 +1277,6 @@
                     :seon.sci.eval/time-limit-ms 1000
                     :seon.config/on-core-error :record
                     :seon.cluster.agent/id "root"
-                    :seon.render.transcript/token-budget 100000
                     :seon.sci.admit/caps
                     (config/result-caps (config/defaults))})
                   build-index (.indexOf session "(defn largest")

@@ -1162,8 +1162,7 @@
                  :seon.config.eval.result/max-string 4096
                  :seon.config.eval.result/max-source 1048576
                  :seon.config.eval.result/max-nodes 4096)
-                :seon.cluster.agent/id agent-id
-                :seon.render.transcript/token-budget 100000})]
+                :seon.cluster.agent/id agent-id})]
           (is (inst?
                (db/q '[:find ?at .
                        :in $ ?run-id

@@ -2029,8 +2029,7 @@
                   :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
                   :seon.sci.eval/time-limit-ms 2000
                   :seon.config/on-core-error :panic
-                  :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-                  :seon.render.transcript/token-budget 100000})]
+                  :seon.sci.admit/caps (:seon.sci.admit/caps cluster)})]
             (is (not (str/includes?
                       rendered
                       "my.agents.agent-a=> ; I explained the result"))
@@ -3261,8 +3260,7 @@
                     :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
                     :seon.sci.eval/time-limit-ms 2000
                     :seon.config/on-core-error :panic
-                    :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-                    :seon.render.transcript/token-budget 100000})]
+                    :seon.sci.admit/caps (:seon.sci.admit/caps cluster)})]
               (is (= 6 (count receipts)))
               (is (= "(defn repaired [x]\n  (+ x 1))\n" (first sources)))
               (is (= "(+ 40 2)" (second sources))

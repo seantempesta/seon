@@ -500,8 +500,7 @@
       :seon.sci.admit/caps (config/result-caps settings)
       :seon.sci.eval/time-limit-ms
       (:seon.config.eval/time-limit-ms settings)
-      :seon.config/on-core-error (:seon.config/on-core-error settings)
-      ::transcript/token-budget 1000000000})))
+      :seon.config/on-core-error (:seon.config/on-core-error settings)})))
 
 (defn- assert-transcripts!
   [instance database specs]

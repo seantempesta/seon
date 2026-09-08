@@ -7,7 +7,6 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
-            [seon.ai.tokens :as tokens]
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.agent :as agent]
@@ -47,8 +46,14 @@
                      [[{:seon.print/face :seon.print/keyword
                         :seon.print/value :text}
                        string-node]]}
+        ;; A TRUNCATED STRING CARRIES WHAT IT CUT AND WHAT CUT IT — the
+        ;; declared face requires both, and the gate now runs under the
+        ;; contracts that say so.
         truncated-node {:seon.print/face :seon.print/truncated-string
-                        :seon.print/value "Agent: juni"}]
+                        :seon.print/value "Agent: juni"
+                        :seon.print/length 42
+                        :seon.print/bound-by
+                        :seon.config.eval.result/max-string}]
     ;; TERMINAL, AND STILL ONE LINE OF DATA. The node is taken as-is — no
     ;; renderer, no floor — but it prints quoted like every other face
     ;; (see the truncated case below), because splicing a string's own
@@ -202,7 +207,7 @@
                             (swap! receipt-calls inc)
                             (receipt-render unit))]
               (transcript/render-run-ai
-               (assoc (unit @connection 100000)
+               (assoc (unit connection)
                       :seon.cluster.run/id "terminal-values"
                       :seon.cluster.run/agent
                       {:seon.cluster.agent/id agent-id})))]
@@ -228,15 +233,20 @@
   (java.util.Date. (long (+ 1785500000000 offset))))
 
 (defn- unit
-  ([db token-budget]
-   (unit db token-budget caps))
-  ([db token-budget render-caps]
-   {:seon.db/db db
-    :seon.sci.eval/ctx (sci.eval/cluster-ctx db)
+  ;; THE FIXTURE HANDS THE ENVIRONMENT, exactly like production
+  ;; (`support/fork-cluster-ctx`): a ctx built around the fixture carries no
+  ;; connection and no environment, so every supplied default is inert in it.
+  ;; There is no token budget here any more — the transcript renders the
+  ;; history its query admitted and `seon.print/fit` at the AI boundary is
+  ;; the one place presentation elides.
+  ([connection] (unit connection caps))
+  ([connection render-caps]
+   {:seon.db/db @connection
+    :seon.db/connection connection
+    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
     :seon.sci.eval/time-limit-ms 1000
     :seon.config/on-core-error :record
     :seon.cluster.agent/id agent-id
-    :seon.render.transcript/token-budget token-budget
     :seon.sci.admit/caps render-caps}))
 
 (defn- full-agent-ai
@@ -400,7 +410,7 @@
   (support/with-database
     (fn [connection]
       (seed-populated-history! connection)
-      (let [request (unit @connection 100000)
+      (let [request (unit connection)
             result-eid (:db/id (db/pull @connection [:db/id]
                                         [:seon.cluster.eval/id "eval-result"]))
             ai (transcript/render-ai request)
@@ -465,7 +475,7 @@
          :seon.cluster.eval/at (at 1000)
          :seon.cluster.eval/error "No such namespace: missing.function"
          :seon.cluster.eval/source "(missing.function/call)"}])
-      (let [request (unit @connection 100000)
+      (let [request (unit connection)
             ai (transcript/render-ai request)
             html-value (transcript/render-html request)
             html-entry (html-entry-node html-value
@@ -486,26 +496,45 @@
           (is (str/includes? html-text
                              "No such namespace: missing.function")))))))
 
-(deftest a-tight-budget-degrades-then-elides-loudly
+(deftest the-transcript-is-whole-and-the-ai-boundary-elides-it
+  ;; THE RULED SHAPE (owner ruling, 2026-09-07; AGENTS §2.4): presentation
+  ;; elides in exactly ONE place, `seon.print/fit` at the AI context
+  ;; generation boundary, which every producer's output crosses through
+  ;; `seon.render/fit-terminal`. The transcript's own token ladder was a
+  ;; second elision mechanism: its driver (`best-summary`) had no caller, and
+  ;; the count it reported came from the HISTORY QUERY's limit, never from a
+  ;; budget. So the transcript renders what its query admitted, and the cut
+  ;; is made once, downstream, naming the bound it was made under.
   (support/with-database
     (fn [connection]
       (seed-populated-history! connection)
-      (let [db @connection
-            floor (transcript/minimum-token-budget (unit db 0))
-            budget (+ floor 180)
-            request (unit db budget)
+      (let [request (unit connection)
             ai (transcript/render-ai request)
             html-value (transcript/render-html request)
             html (hiccup/->string html-value)
-            visible (html-entries html-value)
-            elided (html-elided html-value)]
-        (is (pos? floor))
-        (is (pos? elided))
-        (is (= 8 (+ elided (count visible))))
-        (is (str/includes? ai (str elided " older transcript entr")))
-        (is (str/includes? html (str elided " older transcript entr")))
-        (is (<= (tokens/estimate ai) budget))
-        (is (<= (tokens/estimate html) budget))
+            visible (html-entries html-value)]
+        (testing "the transcript renders the whole query-bounded history"
+          (is (= 8 (count visible)))
+          (is (zero? (html-elided html-value))
+              "the transcript makes no presentation cut of its own")
+          (is (str/includes? html "eval-result")))
+        (testing "and the AI context generation boundary cuts it, once"
+          (let [tight (assoc (render/agent-render-profile
+                              (config/defaults))
+                             :seon.render.profile/token-budget 64)
+                cut (render/render-ai
+                     (assoc request
+                            :seon.render/value ai
+                            :seon.render/profile tight
+                            :seon.render.call/id [::transcript-cut agent-id]))]
+            (is (string? cut) (pr-str cut))
+            (is (< (count cut) (count ai))
+                "the AI projection is bounded by the render profile")
+            (is (str/includes? cut "more characters")
+                (str "the cut is an elision value naming what it omitted: "
+                     (subs cut 0 (min 400 (count cut)))))
+            (is (str/includes? cut "requery by")
+                "and it carries the identity the reader asks again with")))
         (assert-no-session-narration ai)))))
 
 (defn- seed-pinned-bootstrap-history!
@@ -563,11 +592,9 @@
   (support/with-database
     (fn [connection]
       (seed-pinned-bootstrap-history! connection)
-      (let [db @connection
-            floor (transcript/minimum-token-budget (unit db 0))
-            budget (+ floor 1000)
-            ai (transcript/render-ai (unit db budget))
-            html-value (transcript/render-html (unit db budget))
+      (let [request (unit connection)
+            ai (transcript/render-ai request)
+            html-value (transcript/render-html request)
             html (hiccup/->string html-value)
             html-rows (html-entries html-value)
             bootstrap-run-id (bootstrap/run-id agent-id)
@@ -589,9 +616,9 @@
             (.indexOf ai (bootstrap/task-message))
             pinned-end
             (.indexOf ai (prompted (dec bootstrap-count)))
-            marker-start (.indexOf ai "middle transcript entries elided")
             newest-start (.indexOf ai "newest history 0")]
-        (is (pos? (html-elided html-value)))
+        (is (zero? (html-elided html-value))
+            "the transcript renders its whole query-bounded history")
         (is (= (into [(first pinned-ids) bootstrap-task-id]
                      (rest pinned-ids))
                (subvec visible-ids 0 (inc bootstrap-count))))
@@ -601,16 +628,14 @@
         (is (every? #(= :full (:detail %))
                     (take (inc bootstrap-count) html-rows)))
         (is (= newest-ids (subvec visible-ids (- (count visible-ids) 6))))
-        (is (< pinned-end marker-start newest-start))
-        (is (str/includes? ai "middle transcript entries elided"))
+        (is (< pinned-end newest-start)
+            "the pinned opening precedes the newest tail in the AI text")
         (is (< (.indexOf html (last pinned-ids))
-               (.indexOf html "seon-transcript-elision")
-               (.indexOf html (first newest-ids))))
-        (is (<= (tokens/estimate ai) budget))
-        (is (<= (tokens/estimate html) budget))
+               (.indexOf html (first newest-ids)))
+            "and in the same order on the page")
         (assert-no-session-narration ai)))))
 
-(deftest supersession-chains-vanish-before-token-accounting
+(deftest supersession-chains-vanish-from-the-history
   (support/with-database
     (fn [connection]
       (let [bootstrap-run-id (bootstrap/run-id agent-id)]
@@ -669,12 +694,10 @@
            :seon.cluster.eval/ordinal 1
            :seon.cluster.eval/source "; proof comment"}])
         (let [db @connection
-              floor (transcript/minimum-token-budget (unit db 0))
-              at-floor (transcript/render-html (unit db floor))
-              full (transcript/render-html (unit db 100000))
+              full (transcript/render-html (unit connection))
               visible (mapv :id (html-entries full))]
-          (is (= 2 (html-elided at-floor))
-              "only the active proof receipt and comment are budget-elided")
+          (is (zero? (html-elided full))
+              "a superseded run is GONE from the history, never elided")
           (is (= "bootstrap-receipt" (first visible)))
           (is (= #{"bootstrap-receipt" "proof-receipt" "proof-comment"}
                  (set visible)))
@@ -706,7 +729,7 @@
          :seon.cluster.eval/at (at 1000)
          :seon.cluster.eval/result-edn "{"
          :seon.cluster.eval/source "("}])
-      (let [ai (transcript/render-ai (unit @connection 100000))]
+      (let [ai (transcript/render-ai (unit connection))]
         (is (str/includes?
              ai
              "Agent transcript-agent said to transcript-peer: Inspect the test fact."))
@@ -741,7 +764,7 @@
                         (swap! calls conj [selector entity-ids])
                         (pull-many db-value selector entity-ids))]
           (dotimes [_ 2]
-            (let [rendered (transcript/render-ai (unit database 100000))]
+            (let [rendered (transcript/render-ai (unit connection))]
               (is (str/includes? rendered "about-first"))
               (is (str/includes? rendered "about-second")))))
         (let [about-id-vectors
@@ -783,7 +806,7 @@
            :seon.cluster.eval/result-edn (pr-str result)
            :seon.cluster.eval/source "(identity result)"}])
         (let [ai (transcript/render-ai
-                  (unit @connection 100000 narrow-caps))]
+                  (unit connection narrow-caps))]
           (is (str/includes? ai "…"))
           (is (str/includes? ai "elided"))
           (is (not (str/includes? ai ":audit/field-39")))
@@ -809,7 +832,7 @@
          :seon.eval/missing :over-bound
          :seon.eval/size 8388608
          :seon.cluster.eval/source "(range)"}])
-      (let [ai (transcript/render-ai (unit @connection 100000))]
+      (let [ai (transcript/render-ai (unit connection))]
         (is (str/includes? ai ":value #:seon.eval{:missing :over-bound"))
         (is (str/includes? ai ":size 8388608"))
         (is (not (str/includes? ai ":result result/")))
@@ -854,7 +877,7 @@
                  :seon.ai.attempt/at (at 600)
                  :seon.ai.attempt/reasoning-blob digest
                  :seon.ai.attempt/reasoning-size (long (count reasoning)))])
-        (let [request (assoc (unit @connection 100000)
+        (let [request (assoc (unit connection)
                              :seon.db/connection connection)
               rendered
               (with-redefs [blob/get (fn [actual-connection actual-digest]
@@ -877,7 +900,13 @@
             (is (= "First line of thought…" (get-in disclosure [2 1 1])))
             (is (= reasoning (get-in disclosure [3 2 1 1])))))))))
 
-(deftest tight-budgets-pull-only-a-budget-derived-newest-candidate-set
+(deftest the-history-query-bounds-what-the-transcript-pulls
+  ;; THE ONLY BOUND ON THE CANDIDATE SET IS THE QUERY'S OWN
+  ;; (`:seon.config.eval.result/max-nodes`), and it is query work, not
+  ;; presentation: the caller's token budget never selected entries — the
+  ;; ladder that would have honoured it had no driver. The pull stays
+  ;; bounded, every admitted entry renders, and the AI boundary decides what
+  ;; fits afterwards.
   (support/with-database
     (fn [connection]
       (db/transact!
@@ -890,18 +919,23 @@
                      :seon.cluster.message/content (str "message " index)
                      :seon.cluster.message/at (at index)}))
              (range 100)))
-      (let [db @connection
-            floor (transcript/minimum-token-budget (unit db 0))
+      (let [candidate-limit
+            (:seon.config.eval.result/max-nodes caps)
             pulled (atom [])
             pull-many db/pull-many
-            ai (with-redefs [db/pull-many
-                             (fn [database selector entity-ids]
-                               (swap! pulled conj (count entity-ids))
-                               (pull-many database selector entity-ids))]
-                 (transcript/render-ai (unit db floor)))]
-        (is (str/includes? ai "100 older transcript entries elided"))
-        (is (every? #(<= % (max 6 floor)) @pulled))
-        (is (<= (tokens/estimate ai) floor))))))
+            request (unit connection)
+            html-value
+            (with-redefs [db/pull-many
+                          (fn [database selector entity-ids]
+                            (swap! pulled conj (count entity-ids))
+                            (pull-many database selector entity-ids))]
+              (transcript/render-html request))]
+        (is (seq @pulled) "the transcript pulls its candidates in bulk")
+        (is (every? #(<= % candidate-limit) @pulled)
+            "and never past the declared query-work bound")
+        (is (= 100 (count (html-entries html-value)))
+            "every admitted entry renders; nothing is budget-elided")
+        (is (zero? (html-elided html-value)))))))
 
 (def ^:private message-event-kinds
   #{:message-in :message-out :message-self :message-about :message-decline})
@@ -995,14 +1029,13 @@
    events))
 
 (deftest ^{:seon.test/long
-           "66.666 s pool: 40 fresh-branch generated histories with dual AI/HTML ordering and token-bound proofs."}
-  every-generated-history-is-ordered-total-and-token-bounded
+           "66.666 s pool: 40 fresh-branch generated histories with dual AI/HTML ordering and totality proofs."}
+  every-generated-history-is-ordered-and-total
   (let [check
         (tc/quick-check
          40
          (prop/for-all
-          [history history-generator
-           extra-budget (gen/choose 0 800)]
+          [history history-generator]
           (support/with-database
             (fn [connection]
               (let [events (mapv generated-event (range) history)
@@ -1012,10 +1045,7 @@
                                (mapcat generated-rows)
                                events)]
                 (db/transact! connection rows)
-                (let [db @connection
-                      floor (transcript/minimum-token-budget (unit db 0))
-                      budget (+ floor extra-budget)
-                      request (unit db budget)
+                (let [request (unit connection)
                       ai (transcript/render-ai request)
                       html-value (transcript/render-html request)
                       html (hiccup/->string html-value)
@@ -1030,12 +1060,10 @@
                                     (contains? visible-id-set (:id %)))
                               events)]
                   (and
-                   (= (count events) (+ elided (count html-rows)))
-                   (= visible-ids (subvec ordered-ids elided))
+                   (zero? elided)
+                   (= (count events) (count html-rows))
+                   (= visible-ids ordered-ids)
                    (= (count visible-ids) (count (distinct visible-ids)))
-                   (or (zero? elided)
-                       (and (str/includes? ai "older transcript entr")
-                            (str/includes? html "older transcript entr")))
                    (every? (fn [{:keys [content]}]
                              (and (str/includes? ai content)
                                   (str/includes? ai
@@ -1054,8 +1082,6 @@
                                            "user=> ("
                                            (str "(identity " source-index ")"))))))
                     visible-ids)
-                   (<= (tokens/estimate ai) budget)
-                   (<= (tokens/estimate html) budget)
                    ;; Every entry roots the values it renders, so no reader
                    ;; ever meets a render-contract refusal where its value
                    ;; belongs.
@@ -1068,7 +1094,7 @@
          :seed property-seed)]
     (support/assert-check!
      check
-     "Every transcript must preserve time order, totality, and its budget.")))
+     "Every transcript must preserve time order and totality.")))
 
 (deftest selected-evaluations-project-only-their-stored-source-and-result
   (support/with-database
@@ -1077,7 +1103,7 @@
      (let [database @connection
            evaluation (:db/id (db/pull database [:db/id]
                                       [:seon.cluster.eval/id "eval-result"]))
-           selected (assoc (unit database 10000)
+           selected (assoc (unit connection)
                            :seon.context.contribution/evaluations #{evaluation})
            basis (db/basis-t database)
            rendered (transcript/render-ai selected)]
@@ -1293,7 +1319,7 @@
                                           (:seon.db/tx-data prepared)))
                stored-db @connection
                ;; b. THE STORED HISTORY, queried back out of the database.
-               stored-unit (assoc (unit stored-db 1000000)
+               stored-unit (assoc (unit connection)
                                   :seon.cluster.agent/id "one-grammar-agent")
                stored-entries (transcript/history-entries stored-unit)
                stored-bytes (mapv :seon.render.history/bytes stored-entries)
@@ -1322,7 +1348,7 @@
                                      (:seon.cluster.eval/result-edn stored)))
                            (admit/result-handle (:db/id stored)))))
                      (range (count outcomes)))
-               page-unit (assoc (unit database 1000000)
+               page-unit (assoc (unit connection)
                                 :seon.cluster.agent/id "one-grammar-agent"
                                 :seon.cluster.run/id "one-grammar-stored"
                                 :seon.cluster.loop/evaluated-sources

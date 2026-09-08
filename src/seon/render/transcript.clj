@@ -8,7 +8,6 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [seon.db :as db]
-            [seon.ai.tokens :as tokens]
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
             [seon.context :as context]
@@ -19,18 +18,11 @@
             [seon.render :as render]
             [seon.render.agent :as agent]
             [seon.render.block :as block]
-            [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.walk :as walk]
             [seon.repl :as repl]
             [seon.sci.admit :as admit])
   (:import [java.io PushbackReader StringReader]))
-
-(def ^:private recent-entry-count
-  ;; The measured transcript prototype's stable full-detail tail. The exact
-  ;; threshold is quarry evidence, not stored state; a later model evaluation
-  ;; may change this one projection policy without rewriting history.
-  6)
 
 (def ^:private message-selector
   [:db/id
@@ -100,46 +92,6 @@
      (not-join [?run]
                [_ :seon.cluster.run/supersedes ?run])
      [(= ?run-id ?bootstrap-run-id) ?pinned?]]])
-
-(defn- message-count
-  [db agent-id]
-  (or
-   (db/q '[:find (count-distinct ?message) .
-          :in $ ?agent-id
-          :where
-          [?agent :seon.cluster.agent/id ?agent-id]
-          (or-join [?message ?agent]
-                   [?message :seon.cluster.message/to ?agent]
-                   [?message :seon.cluster.message/from ?agent])]
-        db agent-id)
-   0))
-
-(defn- receipt-count
-  [db agent-id]
-  (or
-   (db/q '[:find (count-distinct ?receipt) .
-          :in $ % ?agent-id ?bootstrap-run-id
-          :where
-          [?agent :seon.cluster.agent/id ?agent-id]
-          (active-run ?run ?agent ?bootstrap-run-id ?pinned?)
-          [?receipt :seon.cluster.eval/run ?run]]
-        db active-runs-rules agent-id (bootstrap/run-id agent-id))
-   0))
-
-(defn- history-count
-  [db agent-id]
-  (if (and db agent-id)
-    (+ (message-count db agent-id)
-       (receipt-count db agent-id)
-       (or (db/q '[:find (count ?run) .
-                   :in $ ?agent-id
-                   :where
-                   [?agent :seon.cluster.agent/id ?agent-id]
-                   [?run :seon.cluster.run/agent ?agent]
-                   [?run :seon.cluster.run/undisposed-at _]]
-                 db agent-id)
-           0))
-    0))
 
 (defn- recent-message-rows
   [db agent-id limit]
@@ -261,10 +213,6 @@
                   :args [db run-id]
                   :order-by '[?ordinal :asc]
                   :limit bounded-limit}))}))
-
-(defn- selected-run-count
-  [db run-id limit]
-  (count (:eval (selected-run-entity-ids db run-id limit))))
 
 (defn- pulled-many
   [db selector entity-ids]
@@ -752,19 +700,20 @@
            vec)
       [])))
 
-(defn- marker-text
-  [elided pinned?]
-  (str elided " " (if pinned? "middle" "older") " transcript entr"
-       (if (= 1 elided) "y" "ies") " elided by the token budget."))
-
 (defn- ai-output
-  [pinned entries elided]
+  ;; NO ELISION HERE. Presentation elides in exactly one place — the AI
+  ;; context generation boundary's `seon.print/fit`, which every producer's
+  ;; output crosses through `seon.render/fit-terminal` — so the transcript
+  ;; renders the history its own QUERY bound admitted and lets the profile
+  ;; decide what fits. The token ladder this namespace carried was a second
+  ;; elision mechanism whose only driver (`best-summary`) had no caller, and
+  ;; whose reported count came from the history query's limit rather than
+  ;; from any budget.
+  [pinned entries]
   (str/join
    "\n\n"
    (cond-> []
      (seq pinned) (into (map ::text pinned))
-     (pos? elided)
-     (conj (marker-text elided (seq pinned)))
      (seq entries) (into (map ::text entries)))))
 
 (defn- html-entries
@@ -788,36 +737,17 @@
    entries))
 
 (defn- html-output
-  [pinned entries elided]
+  ;; HTML is not bounded at all (owner ruling, 2026-09-07): the page serves
+  ;; the entries the transcript holds.
+  [pinned entries]
   (into
    [:section {:id (block/surface-id :transcript)
               :class "seon-transcript"}]
    (cond-> []
      (seq pinned)
      (conj (html-entries pinned))
-     (pos? elided)
-     (conj [:p {:class "seon-transcript-elision"
-                :data-transcript-elided (str elided)}
-            (marker-text elided (seq pinned))])
      (seq entries)
      (conj (html-entries entries)))))
-
-(defn- output-tokens
-  [pinned entries elided]
-  (max (long (or (tokens/estimate (ai-output pinned entries elided)) 0))
-       (long (or (tokens/estimate
-                  (hiccup/->string (html-output pinned entries elided)))
-                 0))))
-
-(defn- fits?
-  [budget pinned entries elided]
-  (<= (output-tokens pinned entries elided) budget))
-
-(defn- best-summary
-  [unit pinned entry newer older-count budget]
-  (let [candidate (projected-entry unit entry :summary)]
-    (when (fits? budget pinned (into [candidate] newer) older-count)
-      candidate)))
 
 (defn- candidate-history
   "The shared source of transcript entries, supplied evaluations or stored history."
@@ -878,17 +808,6 @@
   [unit]
   (let [db (:seon.db/db unit)
         agent-id (:seon.cluster.agent/id unit)
-        candidate-limit (admit/required-cap
-                         (:seon.sci.admit/caps unit)
-                         :seon.config.eval.result/max-nodes)
-        selected-run-id (::selected-run-id unit)
-        selected-evaluations (:seon.context.contribution/evaluations unit)
-        total (cond
-                (some? (:seon.cluster.loop/evaluated-sources unit))
-                (count (:seon.cluster.loop/evaluated-sources unit))
-                (some? selected-evaluations) (count selected-evaluations)
-                selected-run-id (selected-run-count db selected-run-id candidate-limit)
-                :else (history-count db agent-id))
         entries (if (or (some? (:seon.cluster.loop/evaluated-sources unit))
                         (and db agent-id))
                   (candidate-history unit)
@@ -897,30 +816,16 @@
                      (comp (filter ::pinned?)
                            (map #(projected-entry unit % :full)))
                      entries)
-        candidates (into [] (remove ::pinned?) entries)
-        projected (mapv #(projected-entry unit % :full) candidates)
-        elided (max 0 (- total (count pinned) (count candidates)))
-        measured (output-tokens pinned projected elided)]
+        candidates (into [] (remove ::pinned?) entries)]
     {::pinned pinned
-     ::entries projected
-     ::elided elided
-     ::minimum-token-budget measured
-     ::token-budget measured}))
-
-(defn minimum-token-budget
-  "Measured size of the complete query-bounded transcript."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:int {:min 0}]]}
-  [unit]
-  (::minimum-token-budget (projection (assoc unit ::token-budget 0))))
+     ::entries (mapv #(projected-entry unit % :full) candidates)}))
 
 (defn render-ai
   "Render one agent's bounded messages and faithful REPL session."
   {:malli/schema [:=> [:cat :seon.render/unit] :string]}
   [unit]
-  (let [{::keys [pinned entries elided]} (projection unit)]
-    (ai-output pinned entries elided)))
-
-(declare transcript-unit)
+  (let [{::keys [pinned entries]} (projection unit)]
+    (ai-output pinned entries)))
 
 (defn- selected-run-identities
   [unit]
@@ -968,8 +873,7 @@
     (cond
       identity-error identity-error
       (and (:seon.db/db unit) run-id agent-id)
-      (let [unit (assoc (transcript-unit
-                         (assoc unit :seon.cluster.agent/id agent-id))
+      (let [unit (assoc (assoc unit :seon.cluster.agent/id agent-id)
                         ::selected-run-id run-id)]
         (render-ai unit))
       :else (missing-selected-run unit identities))))
@@ -1037,14 +941,12 @@
   "Render the same bounded transcript with stable block and entry ids."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (let [{::keys [pinned entries elided]} (projection unit)]
-    ;; Reasoning is deliberately joined only after the shared projection has
-    ;; made every token-budget decision. It therefore changes neither the AI
-    ;; bytes nor which transcript entries the agent receives.
+  (let [{::keys [pinned entries]} (projection unit)]
+    ;; Reasoning is joined only after the shared projection, so it changes
+    ;; neither the AI bytes nor which transcript entries the agent receives.
     (html-output pinned
                  (sort-by entry-order
-                          (into entries (reasoning-attempts unit)))
-                 elided)))
+                          (into entries (reasoning-attempts unit))))))
 
 (defn render-run-html
   "Render a bounded run's stored forms and evaluation results as Hiccup."
@@ -1058,20 +960,12 @@
     (cond
       identity-error identity-error
       (and (:seon.db/db unit) run-id agent-id)
-      (let [unit (assoc (transcript-unit
-                         (assoc unit :seon.cluster.agent/id agent-id))
+      (let [unit (assoc (assoc unit :seon.cluster.agent/id agent-id)
                         ::selected-run-id run-id)]
         [:section {:class "seon-run-transcript"}
          (run/render-html unit)
          (render-html unit)])
       :else (missing-selected-run unit identities))))
-
-(defn- transcript-unit
-  [unit]
-  (assoc unit ::token-budget
-         (tokens/estimate-of-characters
-          (admit/required-cap (:seon.sci.admit/caps unit)
-                              :seon.config.eval.result/max-string))))
 
 (defn render-session-ai
   "Render the schema-declared agent session while status survives slice 1."
@@ -1080,7 +974,7 @@
   (when-let [status (agent/agent-ai unit)]
     (let [history (when (and (:seon.db/db unit)
                              (:seon.sci.admit/caps unit))
-                    (render-ai (transcript-unit unit)))]
+                    (render-ai unit))]
       (str status (when (seq history) (str "\n" history))))))
 
 (defn render-session-html
@@ -1090,7 +984,7 @@
   [unit]
   (when-let [status (agent/agent-html unit)]
     (if (and (:seon.db/db unit) (:seon.sci.admit/caps unit))
-      (conj status (render-html (transcript-unit unit)))
+      (conj status (render-html unit))
       status)))
 
 ;;; ---------------------------------------------------------------------------
