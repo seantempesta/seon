@@ -208,6 +208,52 @@
           "and `seon.test/run`, the agent-facing test verb, is among the
            declared contracts this worker can arm"))))
 
+(deftest a-worker-rearms-only-when-a-task-stripped-its-contracts
+  ;; CLASS: a pooled worker runs many tests per JVM, and `instrument/remove!`
+  ;; is total by design. One suite proving removal — or one arming a narrow
+  ;; filter and stripping everything in its `finally` — left every LATER task
+  ;; in that worker unarmed, so those tasks asserted the earlier suite's
+  ;; timing rather than their own subject: red in the pool, green in
+  ;; isolation, and the confirmation phase's `parallel-only` verdict was the
+  ;; only thing that said so.
+  ;;
+  ;; The armed state is DERIVED at the seam that admits the work rather than
+  ;; remembered from initialization, so nothing has to be declared and nothing
+  ;; can drift.
+  (let [reassert! (ns-resolve 'seon.test.runner 'reassert-contracts!)
+        arm-var (ns-resolve 'seon.test.runner 'arm-contracts!)
+        arms (atom [])
+        arming {:seon.test.runner/projection {:seon.schema.projection/forms {}}
+                :seon.test.runner/namespaces '[seon.db]
+                :seon.test.runner/instrumented 3}
+        re-arm-with
+        (fn [installed]
+          (with-redefs-fn
+            {arm-var (fn [projection worker-id namespaces]
+                       (swap! arms conj [worker-id (count namespaces)
+                                         (contains?
+                                          projection
+                                          :seon.schema.projection/forms)])
+                       {:seon.instrument/instrumented 3})
+             #'instrument/instrumented (constantly (set (range installed)))}
+            #(reassert! arming "pool-1")))]
+    (testing "a stripped worker re-arms before the next task"
+      (re-arm-with 0)
+      (is (= [["pool-1" 1 true]] @arms)
+          "re-armed once, with the worker's own projection and namespaces"))
+    (testing "an intact worker does not re-arm"
+      (re-arm-with 3)
+      (is (= 1 (count @arms))))
+    (testing "a worker carrying EXTRA wrappers is left alone"
+      ;; a test arming a filter of its own is expected to undo it; re-arming
+      ;; over that would fight the subject rather than protect it.
+      (re-arm-with 5)
+      (is (= 1 (count @arms))))
+    (testing "before initialization there is nothing to re-arm"
+      (with-redefs-fn
+        {arm-var (fn [& _] (throw (ex-info "must not arm" {})))}
+        #(is (nil? (reassert! nil "pool-1")))))))
+
 (deftest root-owning-tasks-never-co-run-inside-one-worker-group
   (let [group-a-tasks (atom [:a-1 :a-2])
         group-b-tasks (atom [:b-1])

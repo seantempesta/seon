@@ -108,16 +108,29 @@
   Malli stamps the original fn under `::mi/original` when it wraps, so
   this is a fact about the running process rather than a count somebody
   remembered to keep. It is what makes `apply!` idempotence and the
-  hot-reload strip both observable instead of assumed."
+  hot-reload strip both observable instead of assumed.
+
+  The candidates are the vars malli holds a FUNCTION SCHEMA for, not every
+  var in every loaded namespace. The stamp lives on the wrapper fn and names
+  no var (`reference-code/malli/src/malli/instrument.clj:8,38`), so a plain
+  alias — `(def real-evaluate sci.eval/evaluate)` captured while contracts
+  were armed — deref'd to the same wrapper and answered this question `true`
+  forever. Nothing could ever unstrument it, because malli unstruments what
+  it registered; so `remove!` reported a survivor it had no way to remove and
+  `apply!` in `:record` mode reported instrumenting one var while
+  instrumenting none. A check that reads an alias as its subject."
   {:malli/schema [:=> [:cat] [:set :any]]}
   []
   (into #{}
-        (comp (mapcat ns-interns)
-              (map val)
+        (comp (mapcat (fn [[namespace-symbol entries]]
+                        (keep (fn [[name-symbol _]]
+                                (find-var (symbol (str namespace-symbol)
+                                                  (str name-symbol))))
+                              entries)))
               (filter (fn [candidate]
                         (and (bound? candidate)
                              (some-> (deref candidate) meta ::mi/original)))))
-        (all-ns)))
+        (m/function-schemas)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The reporter

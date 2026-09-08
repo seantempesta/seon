@@ -888,12 +888,19 @@
   cluster was invisible here for as long as the worker never armed
   instrumentation — a check that reports health because its subject was
   never asked. The dial and the admission caps are the SHIPPED decisions
-  the operator compiles (`seon.config/default-decisions`), so the gate
+  the operator compiles (`seon.config/defaults`), so the gate
   cannot drift from boot by carrying constants of its own, and an absent
   cap refuses NAMING the key rather than instrumenting under a partial
   world."
   [projection worker-id namespaces]
-  (let [decisions (config/default-decisions)
+  ;; The COMPILED shipped effective config, not the raw decision document:
+  ;; `default-decisions` carries `:seon.config/absent` sentinels for optional
+  ;; dials, and `result-caps` declares `:seon.config/effective`. It answered
+  ;; correctly anyway because the cap keys it reads are all decided — so the
+  ;; disagreement was invisible for exactly as long as arming happened before
+  ;; contracts existed to observe it, and surfaced the moment a worker had to
+  ;; re-arm mid-run.
+  (let [decisions (config/defaults)
         caps (config/result-caps decisions)
         program (declared-program-namespaces)]
     (when (:seon.error/kind caps)
@@ -938,6 +945,38 @@
                  "instrumented=" (:seon.instrument/instrumented applied)))
       applied)))
 
+(defn- reassert-contracts!
+  "Re-arm this worker JVM when a task left its contracts stripped.
+
+  A pooled worker runs many tests per JVM, and `seon.instrument/remove!` is
+  total by design: one suite proving that instrumentation can be removed —
+  or one suite arming a narrow filter and stripping everything in its
+  `finally` — left every LATER task in that worker running unarmed. Those
+  tasks then asserted the earlier suite's timing rather than their own
+  subject: `seon.db-test/malformed-reads-return-flat-errors` and
+  `the-gate-runs-under-the-contracts-a-cluster-runs-under` were both red in
+  the pool and green in isolation, and the confirmation phase's
+  `parallel-only` verdict was the only thing saying so.
+
+  The armed state is therefore DERIVED at the seam that admits the work, not
+  remembered from initialization: the worker counts the wrappers actually
+  installed and re-arms when that disagrees with what it armed. Nothing has
+  to be declared, so nothing can drift — a new suite that strips contracts
+  costs one re-arm rather than a silently unarmed remainder."
+  [arming worker-id]
+  (when-let [{::keys [projection namespaces instrumented]} arming]
+    (let [live (count ((requiring-resolve 'seon.instrument/instrumented)))]
+      ;; LESS than the worker armed means a task STRIPPED wrappers, which is
+      ;; the hazard. More means a test armed something extra of its own and is
+      ;; expected to undo it; re-arming over that would fight its subject.
+      (when (< live instrumented)
+        (binding [*out* *err*]
+          (println "bin/test: RE-ARMING CONTRACTS"
+                   "worker=" worker-id
+                   "installed=" live
+                   "armed-at-initialization=" instrumented))
+        (arm-contracts! projection worker-id namespaces)))))
+
 (defn- write-protocol!
   [^PrintWriter writer value]
   (.println writer (str protocol-prefix (pr-str value)))
@@ -951,7 +990,7 @@
 
 (defn- serve-worker-commands!
   "Read and execute worker commands serially until explicitly stopped."
-  [worker-id ^BufferedReader reader ^PrintWriter writer]
+  [worker-id ^BufferedReader reader ^PrintWriter writer arming]
   (loop []
     (when-let [line (.readLine reader)]
       (let [command (edn/read-string line)]
@@ -983,10 +1022,15 @@
                                 (:seon.instrument/instrumented applied)})
               (schema/call-with-projection
                projection
-               #(serve-worker-commands! worker-id reader writer))))
+               #(serve-worker-commands!
+                 worker-id reader writer
+                 {::projection projection
+                  ::namespaces namespaces
+                  ::instrumented (:seon.instrument/instrumented applied)}))))
 
           :run
           (do
+            (reassert-contracts! arming worker-id)
             (write-protocol! writer
                              (assoc (run-task! (::worker-task command))
                                     ::worker-event :task-complete
@@ -1011,7 +1055,7 @@
   (write-protocol! writer {::worker-event :ready
                            ::worker-id worker-id
                            ::exchange-id (str worker-id "/readiness")})
-  (serve-worker-commands! worker-id reader writer))
+  (serve-worker-commands! worker-id reader writer nil))
 
 (defn- worker-main!
   [worker-id]
