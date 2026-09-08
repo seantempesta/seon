@@ -911,3 +911,13 @@ Vocabulary: "transcript" is retired; the agent's evaluations are
 `(seon.eval/of-agent db agent)` and their rendered block is the history.
 `seon.render.transcript` is renamed with the history it renders.
 
+### Result names are random (owner, 2026-09-08)
+
+`:seon.eval/id` is a random identifier minted when the evaluation is stored
+(twelve base32 characters, 60 bits), declared `:db.unique/identity`. The
+handle is `result/<id>` — the same string on disk, in the in-memory object
+map, and in the prompt — so every cluster a JVM ever holds can share one
+memory map with no collision. No counters, no ordinals in names, no entity
+ids (entity ids are a per-branch counter and repeat across clusters and
+resets). The (turn, ordinal) pair stays as the ORDER, never as the name.
+
