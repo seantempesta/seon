@@ -197,6 +197,36 @@ and stopped, sending the reader to the run loop's owner. The cause was two
 namespaces away, in a test that stripped three wrappers and did not put them
 back.
 
+### And it answered the open issue on its first whole-gate run
+
+**Eleven `seon.sci.eval-test` `parallel-only` verdicts in this `--all`, and
+every single one names the SAME two leakers:**
+
+```text
+bin/test: confirmation parallel-only seon.sci.eval-test/… worker=pool-1
+bin/test:   suspected leakers, earlier in worker pool-1 —
+bin/test:     seon.cluster.agent-test/routing-conservation-waits-for-terminal-evidence
+                [:seon.test.runner/snapshot-instrumented]
+bin/test:     seon.db-test/instrumented-wildcard-pull-keeps-unparsed-database-fields-ordinary
+                [:seon.test.runner/snapshot-instrumented]
+```
+
+`seon.db-test` strips **926** wrappers, `seon.cluster.agent-test` three, and
+neither restores them, so every later task in that worker asserts their timing
+instead of its own subject. That is
+[thirteen-sci-eval-reds-appear-only-under-the-whole-gate](../../../seon/issues/archive/thirteen-sci-eval-reds-appear-only-under-the-whole-gate.md),
+answered — and it fits every fact that note had already ruled out: neither
+`bin/test seon.sci.eval-test` nor the three-namespace selection could
+reproduce the class, because neither SCHEDULES those namespaces into one
+worker. `seon.db-test`'s strip is fixed; the other belongs to another lane.
+
+**The cost, stated:** loading the pool's whole namespace set makes each
+confirmation a full JVM boot plus 147 loads — roughly a minute rather than
+seconds — and this `--all` ran about 110 of them at `worker-count`
+parallelism. That is real, and it is the price of a verdict that means what it
+says. If it ever needs reducing, the lever is fewer reds, not a smaller
+world.
+
 ### It found one on its first run
 
 The FIRST `bin/test --platform` after the detector landed printed:
@@ -487,5 +517,6 @@ path's missing pre-load (issue filed, §1).
 | [`declared-program-namespaces-returns-empty-in-silence`](../../../seon/issues/archive/declared-program-namespaces-returns-empty-in-silence.md) | **resolved** — every absence is a typed refusal; the arming assertion is set coverage, not a floor of zero |
 | [`the-test-runners-re-arm-kills-the-worker-under-its-own-contract`](../../../seon/issues/the-test-runners-re-arm-kills-the-worker-under-its-own-contract.md) | already resolved by `instrumented-gate-backlog-2`; verified at HEAD and its remaining half — "never a per-namespace red" — is now enforced by `parallel-failure-classification` with its own regression |
 | [`an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker`](../../../seon/issues/an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker.md) | already resolved; the drift detector now makes the same class VISIBLE rather than only survivable |
-| [`thirteen-sci-eval-reds-appear-only-under-the-whole-gate`](../../../seon/issues/thirteen-sci-eval-reds-appear-only-under-the-whole-gate.md) | **named cause, still open** — the confirmation loaded a smaller world than the pool; fixed, awaiting the `--all` that is this note's acceptance criterion |
+| [`thirteen-sci-eval-reds-appear-only-under-the-whole-gate`](../../../seon/issues/archive/thirteen-sci-eval-reds-appear-only-under-the-whole-gate.md) | **resolved** — the `--all` its acceptance criterion asked for names the cause: eleven verdicts, the same two unrestored instrumentation strips behind all of them |
+| [`a-platform-test-leaves-its-worker-stripped-of-every-contract`](../../../seon/issues/a-platform-test-leaves-its-worker-stripped-of-every-contract.md) | **new** — the five leakers the detector named; three fixed here, two in another lane's files |
 | [`a-live-cluster-arms-ten-fewer-contracts-than-it-declares`](../../../seon/issues/a-live-cluster-arms-ten-fewer-contracts-than-it-declares.md) | **new** — found by the parity probe |

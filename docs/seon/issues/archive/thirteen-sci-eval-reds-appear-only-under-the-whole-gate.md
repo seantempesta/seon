@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, testing, instrumentation, wave/contract-gate]
 ---
@@ -113,3 +113,47 @@ so it sees a `def` into the base and does NOT see METADATA mutation of a shared
 SCI Var — and `agent-owned-sci-var-metadata-remains-mutable` and
 `compiled-runtime-metadata-cannot-be-changed-by-agent-code` are exactly that
 shape.
+
+## Resolved 2026-09-08 (`test-harness`) — the cause, named by the mechanism
+
+The `bin/test --all` this note's acceptance criteria asked for was run at a
+frozen worktree, with the runner now measuring the process-global state each
+task leaves behind. **Eleven `seon.sci.eval-test` `parallel-only` verdicts, and
+every single one names the same two leakers:**
+
+```text
+bin/test: confirmation parallel-only seon.sci.eval-test/… worker=pool-1
+bin/test:   suspected leakers, earlier in worker pool-1 —
+bin/test:     seon.cluster.agent-test/routing-conservation-waits-for-terminal-evidence
+                [:seon.test.runner/snapshot-instrumented]
+bin/test:     seon.db-test/instrumented-wildcard-pull-keeps-unparsed-database-fields-ordinary
+                [:seon.test.runner/snapshot-instrumented]
+```
+
+Both strip contract wrappers from the pooled worker and never put them back —
+`seon.db-test` removes **926** — so every later task in that worker asserts
+those tests' timing instead of its own subject. That is the whole class, and
+it fits every fact this note already recorded: `bin/test seon.sci.eval-test`
+and the three-namespace selection could not reproduce it because neither
+selection SCHEDULES those namespaces into the same worker.
+
+Two things were wrong, and both are fixed:
+
+1. **The confirmation was not reproducing the pool worker's world.** It
+   initialized its worker with ONE namespace while every pool worker holds the
+   whole selection, so a test whose subject depends on what is LOADED answered
+   a different question there. It now loads the same set; regression
+   `seon.test-runner-test/a-confirmation-loads-the-pool-workers-world`.
+2. **Nothing measured what a task left behind.** The worker now snapshots its
+   process-global state either side of every task and a red carries the
+   earlier tasks in its worker that changed any of it; regression
+   `seon.test-runner-test/a-task-that-changes-worker-global-state-is-named-as-the-leaker`.
+
+`seon.db-test`'s strip is **fixed** (it was in the lane's owned paths and now
+restores its entering wrappers). `seon.cluster.agent-test`'s belongs to another
+lane and is tracked, with the exact hunk, in
+[a-platform-test-leaves-its-worker-stripped-of-every-contract](a-platform-test-leaves-its-worker-stripped-of-every-contract.md),
+which is where the remaining members of the class live.
+
+Landing note:
+[test-harness](../../prds/context-generation/research/test-harness-landing-2026-09-08.md) §2.
