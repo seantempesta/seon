@@ -1646,3 +1646,14 @@ adoption; `config apply` is broken — issue filed). Re-verification lane
 running; lane 2 still parked behind it. Open from the repair: the eight
 transcript reds survive restored limits (cause unknown, the verifier is
 diagnosing).
+
+Re-verification (`research/verify-storage-repair-2026-09-07.md`): B1, B3,
+B5 hold; B2 and B4 REFUTED on a live cluster, and the reason is the gate
+itself — `bin/test` arms no contract instrumentation, only the operator
+does, so contract violations invisible to every green test fail live. Root
+cause of B2: `print/elision-node` merges stored nils into a contract that
+marks them optional. Root cause of B4: Malli validating the recursive
+`:seon.print/node` per level at the contract boundary. Six of the eight
+transcript reds are one dead driver (`best-summary`, no caller). Repair 2
+running (`tmp/lane-specs/storage-bound-repair-2-0907.md`): instrument the
+gate FIRST, then fix what it exposes. Lane 2 still parked.
