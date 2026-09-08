@@ -1801,7 +1801,7 @@
              "#!/usr/bin/env bash\n"
              "set -euo pipefail\n"
              "test \"$(cat src/owned.txt)\" = owned\n"
-             "test \"$(cat src/foreign.txt)\" = base\n"
+             "test \"$(cat src/foreign.txt)\" = \"${SEON_EXPECT_FOREIGN:-base}\"\n"
              "test \"$(cat src/added.txt)\" = added\n"
              "test ! -e src/deleted.txt\n"
              "if [ \"$1\" = -T:dev-cache ]; then\n"
@@ -1813,7 +1813,7 @@
              "done\n"
              "for worker in workers/*; do\n"
              "  test \"$(cat \"$worker/src/owned.txt\")\" = owned\n"
-             "  test \"$(cat \"$worker/src/foreign.txt\")\" = base\n"
+             "  test \"$(cat \"$worker/src/foreign.txt\")\" = \"${SEON_EXPECT_FOREIGN:-base}\"\n"
              "  test \"$(cat \"$worker/src/added.txt\")\" = added\n"
              "  test ! -e \"$worker/src/deleted.txt\"\n"
              "done\n"
@@ -1825,7 +1825,11 @@
              "export SEON_FAKE_CACHE_DIGEST=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
              "export SEON_FAKE_CACHE_PATH=\"$fixture/tmp/cache/$SEON_FAKE_CACHE_DIGEST\"\n"
              "mkdir -p \"$SEON_FAKE_CACHE_PATH\"\n"
-             "bin/test --paths src/owned.txt src/added.txt src/deleted.txt -- seon.fixture-test\n"))
+             "bin/test --paths src/owned.txt src/added.txt src/deleted.txt -- seon.fixture-test\n"
+             "export SEON_EXPECT_FOREIGN=foreign\n"
+             "bin/test seon.fixture-test > tmp/default.log 2>&1\n"
+             "case \"$(cat tmp/default.log)\" in *src/foreign.txt*) ;; *) cat tmp/default.log; exit 1 ;; esac\n"
+             "echo DEFAULT_SNAPSHOT_VERIFIED\n"))
       (let [process (.start (doto (ProcessBuilder. ^java.util.List
                                  ["/bin/bash" (.getPath script)
                                   (.getPath project-root) (.getPath (io/file root "checkout"))])
@@ -1838,6 +1842,7 @@
           (let [output (slurp log)]
             (is (zero? (.exitValue process)) output)
             (is (str/includes? output "SNAPSHOT_VERIFIED") output)
+            (is (str/includes? output "DEFAULT_SNAPSHOT_VERIFIED") output)
             (is (str/includes? output "src/owned.txt") output)
             (is (str/includes? output "src/added.txt") output)
             (is (str/includes? output "src/deleted.txt") output)

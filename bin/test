@@ -333,9 +333,15 @@ printf 'pid=%s process-start=%s suite-start=%s git=%s selection=%s\n' \
   "$selection" >"$run_root/test-run.txt"
 
 populate_checkout_root() {
-  local target_root=$1 entry
+  local target_root=$1 entry entries
   mkdir -p "$target_root/data" "$target_root/logs" \
     "$target_root/target" "$target_root/tmp"
+  entries=$({
+    git -C "$source_root" ls-files
+    if [ ${#overlay_paths[@]} -gt 0 ]; then
+      printf '%s\n' "${overlay_paths[@]}"
+    fi
+  } | awk -F/ 'NF {print $1}' | sort -u)
   while IFS= read -r entry; do
     if [ ! -e "$source_root/$entry" ] && [ ! -L "$source_root/$entry" ]; then
       continue
@@ -351,7 +357,7 @@ populate_checkout_root() {
         ;;
       *) ln -s "$source_root/$entry" "$target_root/$entry" ;;
     esac
-  done < <({ git -C "$source_root" ls-files; printf '%s\n' "${snapshot_paths[@]}"; } | awk -F/ 'NF {print $1}' | sort -u)
+  done <<< "$entries"
 
   ln -s "$source_root/.git" "$target_root/.git"
   if [ -e "$source_root/.env" ]; then
@@ -359,13 +365,24 @@ populate_checkout_root() {
   fi
 }
 
+# One snapshot mechanism: HEAD plus the selected working bytes. Without
+# --paths, overlay every tracked change and every non-ignored new file.
+git archive "$git_sha" | tar -x -C "$run_root"
+rm -rf "$run_root/reference-code"
+ln -s "$source_root/reference-code" "$run_root/reference-code"
+overlay_paths=()
 if [ ${#snapshot_paths[@]} -gt 0 ]; then
-  git archive "$git_sha" | tar -x -C "$run_root"
-  # Git archives omit submodule contents. Dependencies keep their existing owner.
-  rm -rf "$run_root/reference-code"
-  ln -s "$source_root/reference-code" "$run_root/reference-code"
-  for entry in "${snapshot_paths[@]}"; do
-    # Refuse a parent symlink: an overlay must stay inside this snapshot.
+  overlay_paths=("${snapshot_paths[@]}")
+else
+  git diff --no-renames --name-only -z "$git_sha" -- . ':!reference-code' >"$run_root/.snapshot-paths"
+  git ls-files --others --exclude-standard -z >>"$run_root/.snapshot-paths"
+  while IFS= read -r -d '' entry; do
+    overlay_paths+=("$entry")
+  done <"$run_root/.snapshot-paths"
+  rm "$run_root/.snapshot-paths"
+fi
+if [ ${#overlay_paths[@]} -gt 0 ]; then
+  for entry in "${overlay_paths[@]}"; do
     parent=$(dirname "$entry")
     while [ "$parent" != . ]; do
       if [ -L "$run_root/$parent" ]; then
@@ -374,20 +391,18 @@ if [ ${#snapshot_paths[@]} -gt 0 ]; then
       fi
       parent=$(dirname "$parent")
     done
-    rm -f "$run_root/$entry"
+    rm -rf "$run_root/$entry"
     if [ -e "$source_root/$entry" ] || [ -L "$source_root/$entry" ]; then
       mkdir -p "$run_root/$(dirname "$entry")"
       cp -Pp "$source_root/$entry" "$run_root/$entry"
     fi
   done
-  ln -s "$source_root/.git" "$run_root/.git"
-  if [ -e "$source_root/.env" ]; then
-    ln -s "$source_root/.env" "$run_root/.env"
-  fi
-  mkdir -p "$run_root/data" "$run_root/logs" "$run_root/target" "$run_root/tmp"
-else
-  populate_checkout_root "$run_root"
 fi
+ln -s "$source_root/.git" "$run_root/.git"
+if [ -e "$source_root/.env" ] && [ ! -e "$run_root/.env" ]; then
+  ln -s "$source_root/.env" "$run_root/.env"
+fi
+mkdir -p "$run_root/data" "$run_root/logs" "$run_root/target" "$run_root/tmp"
 
 # Compare the bytes actually copied, including untracked files, against HEAD.
 echo "bin/test: snapshot differences from HEAD $git_sha:"
