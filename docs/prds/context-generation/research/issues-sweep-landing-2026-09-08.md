@@ -5,12 +5,12 @@ date: 2026-09-08
 tags: [research, verification, test]
 ---
 
-# Issues sweep stopped at the protected plan-renderer boundary
+# Issues sweep — 2026-09-08
 
-The lane stopped under the assignment's final instruction: “If another lane's
-in-flight breakage blocks your gate, STOP and report the exact boundary.” No
-production code, tests, or issue lifecycle statuses were changed. This is an
-incomplete sweep, not a claim that the open inventory has been reviewed.
+The owner resumed this lane with the paths-only gate rule. The sweep is active;
+the initial stop below is historical evidence, not its current disposition.
+Later sections record fixes and closures. Unreviewed inventory rows remain
+explicit; this report does not claim the whole sweep complete.
 
 ## Authorities and scope
 
@@ -358,3 +358,53 @@ before reloading. The corrected form brackets config reading with
 `schema/call-with-projection`, reloads oversight, and passes the complete
 request to `instrument/apply!`; that exact corrected workflow is in the skill.
 Default returned 901 registered / 900 instrumented and `delayed: unknown`.
+
+### Refusal evidence and continued gate
+
+Reconciliation's existing `desired-identities` selected a duplicate by iterating
+`frequencies`. Default reproduced `k0` for twelve duplicated identities supplied
+in reverse order, whose first member was `k11`. The owner now scans the ordered
+identity vector against the counts. The existing canonical-database refusal
+regression covers 1, 8, and 12 identities in both orders. Hot-reloading only
+`seon.reconcile` and re-arming under default's handed projection returned `k11`.
+The stale construction diary and deleted schema-resource citation were removed
+from that namespace. No database behavior or identity representation changed.
+
+SCI's `interrupt!` in `reference-code/sci/src/sci/interrupt.cljc:42` throws
+ex-info carrying its private marker. The existing
+`seon.sci.kernel/failure-value` copied it into outward evidence. Default's
+direct owner probe returned marker-exposed? true. The fix removes only that
+private key from copied exception data; the real-SCI two-entrance deadline
+regression now rejects its presence while retaining its existing diagnostic
+record assertions. Live after-proof and the combined gate are pending.
+
+The first oversight gate found three stale live-test assumptions: exact empty
+wake buffer, a pong from every plumbing proc, and a later HTTP page still parked.
+The second paths-only gate at `74b5b4b05` ran 9 tests / 53 assertions with one
+reproducible failure: episode-runs was zero, not positive, after a new outside
+wake reset it. All four absence/pong cases and all five changed-test selector
+tests passed. The live integration now accepts a nonnegative episode count and
+valid occupancy, asserts honest reply/unknown evidence, and bounds its HTTP
+request with the fixture's declared event backstop. Neither failed gate is
+reported green. A combined subject gate is running with only this lane's diffs.
+
+### Additional dispositions after complete body reads
+
+| Note | Disposition |
+|---|---|
+| [unused Konserve cache](../../../seon/issues/archive/datahike-allocates-a-konserve-cache-it-never-reads.md) | Resolved existing fix. Current maintained source and its store regression retain one node cache. Default read-only probe: outer cache absent, node cache present, 4 ms. No new dependency-suite run claimed. |
+| [Malli source/artifact drift](../../../seon/issues/archive/malli-vendor-is-ahead-of-pinned-dependency.md) | Resolved existing fix: runtime uses the exact vendored local root. Repository-pin checks passed in the Markdown suite. |
+| [design-lab unsettled choices](../../../seon/issues/archive/design-lab-prd-mixes-observation-with-unsettled-design.md) | Superseded by §13–§15's entity render pair, live result object, and shown-text rulings. |
+| [effect context suffix](../../../seon/issues/archive/effect-context-suffix-returns-comment-notices.md) | Superseded by stored system-turn observations; the suffix function is absent. No second suffix family is added. |
+| [duplicate identity evidence](../../../seon/issues/duplicate-identity-refusal-evidence-is-unordered.md) | Fixed; canonical regression gate pending. |
+| [SCI private interrupt marker](../../../seon/issues/time-limit-face-exposes-interpreter-interrupt-marker.md) | Fixed at the failure projector; real-SCI regression gate and live after-proof pending. |
+| [changed-test selector](../../../seon/issues/changed-test-selector-classifies-hosts-by-path-prefix.md) | Existing delegation fix confirmed by all five namespace tests; lifecycle closure pending inventory update. |
+| [recursive deletion race](../../../seon/issues/recursive-delete-throws-when-entries-vanish-mid-walk.md) | Existing fix and deterministic concurrent-deletion regression found; subject gate pending. |
+| [shared namespace uniqueness test](../../../seon/issues/db-test-still-expects-a-unique-agent-namespace.md) | Existing test now proves shared assignment and uses a unique evaluation id for conflict rendering; subject gate pending. |
+| [unstewarded namespace oversight](../../../seon/issues/unowned-namespace-oversight-still-inverts-assignment.md) | Existing query and class regression use stewardship; operator wording still says unowned. Subject gate pending; note remains open. |
+
+The protected render, turn, source-adoption, operator, runner, and retention
+owners were read but not edited. Generic class notes spanning those owners
+remain open; a local child fix does not close the class. The dated first-stop
+inventory above still identifies unread or incompletely read bodies rather
+than claiming a completed census.

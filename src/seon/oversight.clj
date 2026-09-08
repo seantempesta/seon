@@ -14,8 +14,8 @@
   graph to describe.
 
   Every armed agent graph contributes its mailbox and turn ping. A
-  responsive turn proc with no current run is parked; a missing turn
-  reply or a current run is mid-turn. Current run and episode count are
+  responsive turn proc with no current turn is parked; an open turn is
+  mid-turn. Without either observation its state is unknown. Turn counts are
   derived from the same immutable database value. Buffer occupancy is
   Flow's channel data, and the cluster graph contributes the ordinary
   proc pass counts for the armer and render plumbing.
@@ -218,12 +218,12 @@
     (str n suffix)))
 
 (defn- agent-story-text
-  "The presentation implied by run and turn-ping presence."
+  "An open turn proves work; no turn plus a pong proves parked; else unknown."
   [agent]
-  (if (and (nil? (:seon.cluster.run/id agent))
-           (contains? agent :seon.oversight/turn-passes))
-    "parked"
-    "mid-turn"))
+  (cond
+    (:seon.cluster.run/id agent) "mid-turn"
+    (some? (:seon.oversight/turn-passes agent)) "parked"
+    :else "unknown"))
 
 (defn ai-story
   "Tell the fleet's current story in one concise line."
@@ -243,10 +243,10 @@
             (if (= "parked" story)
               (str agent-id ": parked")
               (str agent-id ": " story
-                   (when run-id (str " on run " run-id))
-                   (when (pos? episode-runs)
+                   (when run-id (str " on turn " run-id))
+                   (when (and run-id (pos? episode-runs))
                      (str ", " (ordinal episode-runs)
-                          " run this episode"))))))
+                          " turn since the outside wake"))))))
         agents)))))
 
 (defn- occupancy-text
@@ -273,8 +273,8 @@
        [:tr
         [:th "agent"]
         [:th "state"]
-        [:th "current run"]
-        [:th "episode"]
+        [:th "current turn"]
+        [:th "turn count"]
         [:th "mailbox"]
         [:th "turn buffer"]]]
       [:tbody
@@ -297,5 +297,5 @@
                (str (:seon.oversight/proc proc)
                     " "
                     (or (:seon.oversight/passes proc)
-                        "mid-pass")))
+                        "unknown")))
              plumbing))]]]))

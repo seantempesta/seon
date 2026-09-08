@@ -1,16 +1,26 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, agent, context, render, wave/agent-context]
 ---
 
 # Separate lab observations from hypotheses the lab should test
 
+## Superseded — 2026-09-08 issues sweep
+
+The earlier draft corrections are recorded below. The remaining result-handle
+and composition choices are now ruled by the agent-record-and-turn-loop PRD
+§13–§15: one AI/HTML pair per entity, live result objects in the persistent
+agent SCI context, and saved shown text for historical evaluations. They are
+no longer unsettled design-lab experiments. Implementation verification stays
+with the protected render and turn owners; closing this draft inconsistency
+does not claim their implementation complete.
+
 ## Evidence — 2026-09-05
 
-Read the [design-lab PRD](../../prds/context-generation/plan/design-lab-prd-2026-09-05.md)
-and [agent-centric design](../../prds/context-generation/plan/agent-centric-design-2026-09-04.md)
+Read the [design-lab PRD](../../../prds/context-generation/plan/design-lab-prd-2026-09-05.md)
+and [agent-centric design](../../../prds/context-generation/plan/agent-centric-design-2026-09-04.md)
 end to end during the owner's brainstorming orientation. These are draft
 consistency findings, not permission to impose a final architecture.
 
@@ -59,7 +69,7 @@ candidate-versus-validated distinction, and first-world namespace inconsistency.
 Raw result handles and projection composition remain design experiments.
 The owner clarified that any entity may be the start and the current walk and
 renderer discovery are also open to replacement. The latest comparison/pitch is
-recorded in the [investigation](../../prds/context-generation/research/design-lab-investigation-2026-09-05.md).
+recorded in the [investigation](../../../prds/context-generation/research/design-lab-investigation-2026-09-05.md).
 
 The design-lab PRD owns these clarifications. Resolve its contradictory first
 world and schema-observation behavior; distinguish candidate schema matches

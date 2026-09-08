@@ -1,11 +1,19 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, effect, agent, render, class/n1, wave/strict-repl-display]
 ---
 
 # Render effect notices as ordinary values
+
+## Superseded — 2026-09-08 issues sweep
+
+The turn PRD §14–§15 replaces prompt-only suffix assembly with stored ordinary
+system-turn observations. `seon.effect/context-suffix` no longer exists in the
+current owner. Adding a new suffix value family, as the historical proposal
+below suggests, would restore a second prompt assembly path. This closes that
+proposal; it does not certify all protected turn/effect integration behavior.
 
 ## Problem
 
@@ -19,7 +27,7 @@ display stream, so owner decision 11 forbids modeling them as comments.
 `src/seon/effect.clj:690-779`; `seon.render.walk/prose` appends that suffix at
 `src/seon/render/walk.clj:643-650` instead of reaching effect receipts through
 their declared render functions. The superseding ruling is decision 11 in
-[messaging, state, and reply-norm design](../../prds/sci-execution-runtime/research/messaging-state-design-notes-2026-08-03.md).
+[messaging, state, and reply-norm design](../../../prds/sci-execution-runtime/research/messaging-state-design-notes-2026-08-03.md).
 
 The strict-dogfood audit on 2026-08-12 also classifies this as a ruling-28
 violation. Pending and completed work are database facts, but this function
@@ -44,7 +52,7 @@ No `;;`-prefixed effect notice appears in the Drive 1 stored capture facts
 background or long foreground effect, so the context suffix never fired. The
 note stands unchanged on its own source evidence; this records only that the
 drive could not corroborate it. Recorded during the
-[results-as-data audit](../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
+[results-as-data audit](../../../prds/context-generation/research/results-as-data-audit-2026-08-14.md).
 
 ## N1 disposition — 2026-08-12
 

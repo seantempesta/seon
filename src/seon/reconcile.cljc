@@ -2,15 +2,6 @@
   "Declared configuration converges into database facts: the pure exact
   diff and its one apply operation.
 
-  CONTRACT LAYER (orchestrator-authored, 2026-07-27 — B2 wave, from
-  b2-plan §7; the algorithm is quarried from State A's provenance-scoped
-  reconciler and simplified by the writer's serial execution). The
-  schemas and function contracts are SEALED once the sealed suite
-  lands: test/seon/reconcile_test.clj is NOT YET AUTHORED (it needs the
-  fresh provenance attributes — :seon.db/user/:seon.db/process — which
-  arrive with the config package). No implementation lane starts before
-  that suite is committed.
-
   The model:
 
   - The managed slice is defined by PROVENANCE, never a taxonomy: an
@@ -47,7 +38,7 @@
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
-;;; Schemas: resources/seon/schema.edn owns this namespace's registrations.
+;;; Schemas: resources/seon/schemas/seon.reconcile.edn.
 ;;; ---------------------------------------------------------------------------
 
 ;;; ---------------------------------------------------------------------------
@@ -90,9 +81,8 @@
 (defn- desired-identities
   [identity-attrs desired]
   (let [identities (mapv #(desired-identity identity-attrs %) desired)
-        duplicate (some (fn [[identity n]]
-                          (when (> n 1) identity))
-                        (frequencies identities))]
+        counts (frequencies identities)
+        duplicate (some #(when (> (get counts %) 1) %) identities)]
     (when duplicate
       (refuse! ::duplicate-identity {::identity duplicate}))
     identities))

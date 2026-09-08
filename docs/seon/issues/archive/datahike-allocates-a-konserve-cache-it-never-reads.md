@@ -1,11 +1,20 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, database, class/n11, wave/store-perf]
 ---
 
 # Delete the konserve LRU our fork allocates and never reads
+
+## Resolution — 2026-09-08 issues sweep
+
+The maintained repair recorded below remains present. `datahike.store` hands
+the raw store to the persistent-set handler; `datahike.test.store-test/test-store`
+asserts that the wrapper cache is absent and the node cache exists. A read-only
+MCP probe on default returned false for the outer cache and true for the node
+cache in 4 ms. This closes the already repaired allocation defect; it does not
+claim a new dependency-suite run or a disk saving.
 
 ## Problem
 

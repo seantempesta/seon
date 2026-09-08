@@ -483,6 +483,7 @@
    throwable
    diagnostic-record]
   (let [timed-out? (= :time (:seon.eval/outcome diagnostic-record))
+        throwable-data (not-empty (dissoc (ex-data throwable) :sci.impl/interrupt))
         evidence (cond-> {:seon.sci.eval/throwable (.getName (class throwable))
                           :seon.sci.admit/record diagnostic-record}
                    subject (assoc :seon.fn/sym subject))
@@ -515,17 +516,17 @@
       :seon.error/diagnostic-member :throwable
       :seon.error/diagnostic-expected :successful-evaluation
       :seon.error/diagnostic-offending
-      (or (:sci.impl/symbol (ex-data throwable)) subject)
+      (or (:sci.impl/symbol throwable-data) subject)
       :seon.error/diagnostic-cause
       (or (ex-message throwable) (.getName (class throwable)))
       :seon.error/diagnostic-evidence diagnostic-record
       :seon.error/data
       (cond-> evidence
-        (ex-data throwable)
-        (assoc :seon.sci.eval/data (ex-data throwable))
+        throwable-data
+        (assoc :seon.sci.eval/data throwable-data)
 
-        (:sci.impl/symbol (ex-data throwable))
-        (assoc :seon.sci.eval/symbol (:sci.impl/symbol (ex-data throwable)))
+        (:sci.impl/symbol throwable-data)
+        (assoc :seon.sci.eval/symbol (:sci.impl/symbol throwable-data))
 
         (ex-message throwable)
         (assoc :seon.error/throw-site-message (ex-message throwable)))})))))

@@ -1,11 +1,19 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, schema, class/p5, wave/general]
 ---
 
 # Align vendored Malli source with the pinned dependency
+
+## Resolution — 2026-09-08 issues sweep
+
+`deps.edn` now selects `metosin/malli` with `:local/root "reference-code/malli"`.
+The source read and runtime dependency are the same checkout by construction;
+there is no independent Maven version to drift. The repository-pin validation
+regressions passed with the script-side Markdown suite (30 tests, 369 assertions).
+No dependency revision was changed by this sweep.
 
 ## Problem
 

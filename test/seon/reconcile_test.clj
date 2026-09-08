@@ -245,13 +245,16 @@
                     [{:seon.config/cluster "two"
                       :seon.cluster.run/id "also-two"}])))))))
       (testing "the same upsert handle appears twice"
-        (is (= ::reconcile/duplicate-identity
-               (::reconcile/rule
-                (test-support/refusal-data
-                 #(reconcile/plan
-                   @connection
-                   (request [(config-row "duplicate" 10)
-                             (config-row "duplicate" 11)])))))))
+        (doseq [size [1 8 12]
+                ordinals [(range size) (reverse (range size))]]
+          (let [names (mapv #(str "duplicate-" %) ordinals)
+                rows (mapv #(config-row % 10) (concat names names))
+                refusal (test-support/refusal-data
+                         #(reconcile/plan @connection (request rows)))]
+            (is (= ::reconcile/duplicate-identity (::reconcile/rule refusal)))
+            (is (= [:seon.config/cluster (first names)]
+                   (::reconcile/identity refusal))
+                "evidence follows desired-row order, never hash-map order"))))
       (testing "an unmanaged entity already owns the desired identity"
         (transact-as! connection
                       unmanaged-process

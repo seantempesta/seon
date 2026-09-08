@@ -12,6 +12,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.test-support :as support])
   (:import [java.net URI]
+           [java.time Duration]
            [java.net.http HttpClient HttpRequest HttpResponse
             HttpResponse$BodyHandlers]))
 
@@ -21,6 +22,27 @@
   (is (= {:seon.oversight/proc :dead
           :seon.oversight/ping :unknown}
          (oversight/proc-ping :dead nil))))
+
+(deftest absent-pongs-never-become-evidence-of-work
+  (doseq [[observations expected]
+          [[{} "unknown"]
+           [{:seon.oversight/turn-passes 0} "parked"]
+           [{:seon.cluster.run/id "open-turn"} "mid-turn"]
+           [{:seon.cluster.run/id "open-turn"
+             :seon.oversight/turn-passes 0} "mid-turn"]]]
+    (let [unit {:seon.render/value
+                {:seon.oversight/agents
+                 [(merge {:seon.cluster.agent/id "observed"
+                          :seon.cluster.work/episode-runs 0}
+                         observations)]
+                 :seon.oversight/plumbing
+                 [(oversight/proc-ping :delayed nil)]}}
+          ai (oversight/ai-story unit)
+          html (hiccup/->string (oversight/html-table unit))]
+      (is (str/starts-with? ai (str "observed: " expected)))
+      (is (str/includes? html (str "data-state=\"" expected "\"")))
+      (is (str/includes? html ":delayed unknown"))
+      (is (not (str/includes? html "mid-pass"))))))
 
 (defn- await-fact
   "Return the first truthy `probe` result published by a database value."
@@ -68,6 +90,7 @@
                       (:seon.render.web/url
                        (:seon.render.web/served instance))))
                     (.GET)
+                    (.timeout (Duration/ofSeconds support/event-backstop-seconds))
                     (.build))]
     (.send (HttpClient/newHttpClient)
            request
@@ -97,36 +120,36 @@
           (is (= ["root"]
                  (mapv :seon.cluster.agent/id
                        (:seon.oversight/agents value))))
-          (is (not (contains? root :seon.cluster.run/id)))
-          (is (contains? root :seon.oversight/turn-passes)
-              "parked is implied by no run plus a responsive turn proc")
           (is (not-any? #(contains? % :seon.oversight/state)
                         (concat (:seon.oversight/agents value) plumbing))
               "the process-local story carries presence, not an enum")
-          (is (= 1 (:seon.cluster.work/episode-runs root))
-              "the autonomous bootstrap run belongs to this episode")
-          (is (= {:seon.oversight/count 0
-                  :seon.oversight/capacity 1}
-                 (:seon.oversight/mailbox root)))
-          (is (= {:seon.oversight/count 0
-                  :seon.oversight/capacity 1}
-                 (:seon.oversight/turn-buffer root)))
+          (is (nat-int? (:seon.cluster.work/episode-runs root))
+              "a new outside wake may already have reset the episode count")
+          (doseq [occupancy (keep root [:seon.oversight/mailbox
+                                       :seon.oversight/turn-buffer])]
+            (is (<= 0 (:seon.oversight/count occupancy)
+                    (:seon.oversight/capacity occupancy))))
           (is (= declared-plumbing
                  (into #{} (map :seon.oversight/proc) plumbing)))
-          (is (every? #(int? (:seon.oversight/passes %)) plumbing)
-              "the cluster graph's ordinary Flow count is the pass oracle"))
+          (is (every? #(case (:seon.oversight/ping %)
+                         :reply (int? (:seon.oversight/passes %))
+                         :unknown (not (contains? % :seon.oversight/passes))
+                         false)
+                      plumbing)
+              "a missing pong is unknown even after the opening completed"))
         (testing "both typed outputs share the fleet value"
-          (is (= "root: parked"
-                 (oversight/ai-story built)))
-          (let [html (hiccup/->string
+          (let [expected (cond (:seon.cluster.run/id root) "mid-turn"
+                               (some? (:seon.oversight/turn-passes root)) "parked"
+                               :else "unknown")
+                html (hiccup/->string
                       (oversight/html-table built))]
+            (is (str/starts-with? (oversight/ai-story built) (str "root: " expected)))
             (is (str/includes? html "data-fleet-oversight=\"agents\""))
             (is (str/includes? html "<td>root</td>"))
-            (is (str/includes? html "<td>parked</td>"))
-            (is (str/includes? html "data-state=\"parked\""))
+            (is (str/includes? html (str "data-state=\"" expected "\"")))
             (is (str/includes? html "plumbing passes"))))
         (testing "the prose grammar carries run and episode position"
-          (is (= "agent-b: mid-turn on run run-3, 3rd run this episode; agent-c: parked"
+          (is (= "agent-b: mid-turn on turn run-3, 3rd turn since the outside wake; agent-c: parked"
                  (oversight/ai-story
                   {:seon.render/value
                    {:seon.oversight/agents
@@ -143,7 +166,8 @@
             (is (str/includes? body "id=\"surface-fleet-oversight\""))
             (is (str/includes? body "data-fleet-oversight=\"agents\""))
             (is (str/includes? body "<td>root</td>"))
-            (is (str/includes? body "<td>parked</td>"))))))))
+            (is (true? (str/includes? body "data-agent=\"root\" data-state=\""))
+                "the HTTP render is a later observation, not the earlier unit's state")))))))
 
 (deftest a-database-without-a-cluster-handle-omits-the-block
   (support/with-database

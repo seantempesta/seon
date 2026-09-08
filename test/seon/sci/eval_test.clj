@@ -2081,6 +2081,10 @@
                       :seon.fn/sym])
              "the invocation entrance adds only its subject"))
        (testing "the one deadline"
+         (doseq [failure [evaluated-cut invoked-cut]]
+           (is (not-any? #(and (map? %) (contains? % :sci.impl/interrupt))
+                         (tree-seq coll? seq failure))
+               "SCI's private interrupt marker never becomes outward evidence"))
          (is (= :seon.sci.eval/time-limit (:seon.error/kind evaluated-cut)))
          (is (= :seon.sci.kernel/time-limit (:seon.error/kind invoked-cut)))
          (is (str/starts-with? (:seon.error/message evaluated-cut)
