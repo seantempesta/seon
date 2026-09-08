@@ -1,12 +1,15 @@
 ---
 type: prd
-status: ready
+status: SUPERSEDED
+superseded-by: agent-record-and-turn-loop-prd-2026-09-07.md
 tags: [prd, agent, context, repl, sci, datahike, run-loop, wake]
 ---
 
 # The agent record and the REPL response
 
-The one design document (ruling 59a) for the agent's record, the REPL reply
+SUPERSEDED by [the turn-loop PRD](agent-record-and-turn-loop-prd-2026-09-07.md); the text below is historical evidence.
+
+Historically the one design document (ruling 59a) for the agent's record, the REPL reply
 the agent reads, the SCI context those two share, and the run loop that
 produces them. It says what is added, what is refactored in place, and what
 is deleted, on one platform. Nothing in it is deleted before this document
