@@ -34,6 +34,7 @@
                :seon.sci.eval/time-limit-ms 5000
                :seon.config/on-core-error :panic}))
            evidence (db/read-evidence @captured)
+           basis (db/basis-t @connection)
            patterns (mapcat :seon.db/read-index-patterns
                             (mapcat #(get-in % [:datahike.read/dependency-plan
                                                :datahike.query.dependency/sources])
@@ -58,6 +59,12 @@
                     :seon.cluster.message/content "Next message"}]))))
        ;; Remove replay inputs as data: these assertions must be decided by
        ;; retained index evidence, without re-executing the inbox.
+       (let [changes (db/read-evidence-changes @connection evidence basis)]
+         (if (= recipient "root")
+           (is (empty? changes) (pr-str changes))
+           (is (some #(and (= :seon.cluster.message/to (:a %))
+                           (= juniper (:v %))) changes)
+               (pr-str changes))))
        (db/read-evidence-current?
         @connection
         (mapv #(dissoc % :seon.db/read-request :seon.db/read-result-digest

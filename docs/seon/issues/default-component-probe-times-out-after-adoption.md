@@ -20,3 +20,11 @@ not proof of the timeout's cause. Concurrent isolated test confirmation
 workers were also running. No fallback transport was used.
 
 See the [landing evidence](../../prds/context-generation/research/record-render-landing-2026-09-08.md).
+
+Turn-cut observed the same boundary at 20:52 UTC on 2026-09-08:
+`runtime_status` with no arguments selected default, pid 36758, but returned
+runtime health and flow as `unknown` with `Read timed out`. The publication
+log independently said `Publication did not finish within its declared bound.`
+Earlier ordinary virtual turns had completed, including a contracted function
+installed by one agent and called by another. Those completed observations do
+not establish health after this timeout. No fallback transport was used.

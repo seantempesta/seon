@@ -306,7 +306,7 @@
                               :seon.cluster.agent/id])
       ::to (get-in message [:seon.cluster.message/to
                             :seon.cluster.agent/id])
-      ::about (second (get identities about-eid))
+      ::about (get identities about-eid)
       ::about-ref? (some? about-eid)
       ::reason (:my.message/reason message)}
      (when (= (bootstrap/task-message-id agent-id)
@@ -1117,18 +1117,6 @@
           ["No run of mine is recorded yet; this is my first episode."])
          older (conj (print/render-elision-ai older)))))))
 
-(def ^:private history-source
-  (str ";; What have I already done? These are my own submitted forms and the\n"
-       ";; values they returned, newest run first, printed exactly as the run\n"
-       ";; loop printed them at the time.\n"
-       (pr-str (list `format-history-ai (list `agent-history {})))))
-
-(defn render-history-ai
-  "`:seon.render/ai` — source reading this agent's own evaluation history."
-  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/source]}
-  [_runs]
-  history-source)
-
 (defn- runs-agent-id
   "The agent these runs belong to, read from the runs themselves."
   [database runs]
@@ -1140,6 +1128,18 @@
                             :where [?agent :seon.cluster.agent/id ?id]]
                           database eid)]
           (when-not (:seon.error/kind found) found)))))
+
+(defn render-history-ai
+  "Render saved evaluations directly; history is never a generated read form."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
+                  [:or :string :seon.error/value]]}
+  [runs database]
+  (let [rows (if (and (sequential? runs) (every? map? runs)) (vec runs) [])
+        agent-id (runs-agent-id database rows)]
+    (if agent-id
+      (format-history-ai (agent-history {:seon.db/db database
+                                        :seon.cluster.agent/id agent-id}))
+      "")))
 
 (defn render-history-html
   "`:seon.render/html` — one transcript per run, newest first.

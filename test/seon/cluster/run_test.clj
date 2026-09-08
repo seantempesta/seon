@@ -617,9 +617,8 @@
                           [{:seon.fn/calls [:seon.fn/sym]}]
                           [:seon.cluster.eval/id
                            (run/receipt-identity "macro-call-run" 0)])]
-        (is (some #(= "seon.bootstrap/help" (:seon.fn/sym %))
-                  (:seon.fn/calls form))
-            "the resolvable macro call lands as a lookup-ref edge"))
+        (is (empty? (:seon.fn/calls form))
+            "an ordinary evaluation does not duplicate program-graph call edges"))
       (let [result
             (db/transact!
              connection

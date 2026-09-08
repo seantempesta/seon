@@ -1806,6 +1806,11 @@
               (cons {:seon.ns/name starting-namespace} sources))]
     (when-not agent-eid
       (refuse! `record-evaluated-call ::no-such-agent request))
+    (when (db/q '[:find ?turn . :in $ ?agent
+                  :where [?turn :seon.cluster.run/agent ?agent]
+                  (not [?turn :seon.cluster.run/closed-at _])]
+                database agent-eid)
+      (refuse! `record-evaluated-call ::agent-already-running request))
     (when-not starting-namespace
       (refuse! `record-evaluated-call ::starting-namespace-missing request))
     (when-not (and (seq sources)

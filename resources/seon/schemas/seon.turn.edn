@@ -1,5 +1,33 @@
 #:seon.turn
-{:compaction-request
+{:write? :boolean
+ :basis-t :seon.db/basis-t
+ :status [:enum {:description "Why one read form participates in this system walk: no prior evaluation, unchanged dependencies, or changed dependencies."}
+          :none :unchanged :changed]
+ :changes :seon.db/datoms
+ :text :string
+ :form
+ [:map
+  [:seon.cluster.eval/source :seon.cluster.eval/source]
+  [:seon.ns/name :seon.ns/name]
+  [:seon.turn/status :seon.turn/status]
+  [:seon.render.walk/lookup {:optional true} :seon.render.walk/lookup]
+  [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]
+  [:seon.cluster.eval/read-basis-transaction {:optional true}
+   :seon.cluster.eval/read-basis-transaction]
+  [:seon.turn/changes {:optional true} :seon.turn/changes]
+  [:seon.turn/text {:optional true} :seon.turn/text]]
+ :forms [:vector :seon.turn/form]
+ :system-request
+ [:map
+  [:seon.cluster.loop/cluster :seon.cluster.loop/cluster]
+  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.turn/write? {:optional true} :seon.turn/write?]]
+ :system-result
+ [:map
+  [:seon.turn/forms :seon.turn/forms]
+  [:seon.render.walk/units :seon.render.walk/units]
+  [:seon.cluster.run/id {:optional true} :seon.cluster.run/id]]
+ :compaction-request
  [:map
   [:seon.db/connection :seon.db/connection]
   [:seon.cluster.agent/id :seon.cluster.agent/id]]

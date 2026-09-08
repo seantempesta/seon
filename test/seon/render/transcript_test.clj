@@ -535,7 +535,8 @@
             (is (str/includes? cut "more characters")
                 (str "the cut is an elision value naming what it omitted: "
                      (subs cut 0 (min 400 (count cut)))))
-            (is (str/includes? cut "requery by")
+            (is (str/includes? cut "requery "))
+            (is (str/includes? cut "transcript-cut")
                 "and it carries the identity the reader asks again with")))
         (assert-no-session-narration ai)))))
 
@@ -775,7 +776,8 @@
           (dotimes [_ 2]
             (let [rendered (transcript/render-ai (unit connection))]
               (is (str/includes? rendered "about-first"))
-              (is (str/includes? rendered "about-second")))))
+              (is (str/includes? rendered "about-second"))
+              (is (str/includes? rendered ":seon.problems/id")))))
         (let [about-id-vectors
               (into []
                     (keep (fn [[selector entity-ids]]
@@ -824,7 +826,8 @@
           (is (str/includes? ai
                              (str "bounded by "
                                   :seon.render.profile/max-children)))
-          (is (str/includes? ai "requery by"))
+          (is (str/includes? ai "requery "))
+          (is (str/includes? ai "eval-capped"))
           (is (not (str/includes? ai ":audit/field-39")))
           (assert-no-session-narration ai))))))
 
@@ -1225,11 +1228,8 @@
               "the actual namespace prompt and the stored result")
           (is (< (.indexOf ai "history-run-2") (.indexOf ai "history-run-0"))
               "newest first in the text as well"))
-        (testing "the source producer hands the agent that same derivation"
-          (is (str/includes?
-               (transcript/render-history-ai rows)
-               (str "(seon.render.transcript/format-history-ai"
-                    " (seon.render.transcript/agent-history {}))"))))
+        (testing "the AI projection renders the saved history without another read form"
+          (is (= ai (transcript/render-history-ai rows database))))
         (testing "the HTML projection states the same runs, labeled historical"
           (is (= [:h2 "History (3 runs)"] (nth html 2)))
           (is (= "Historical run — its results are stored, not fresh"
@@ -1263,11 +1263,6 @@
                     {:seon.cluster.agent/id "one-grammar-agent"
                      :seon.ns/name 'my.agents.one-grammar
                      :seon.cluster/name "one-grammar"}))
-     (db/transact! connection
-                   [{:seon.cluster.run/id "one-grammar-run"
-                     :seon.cluster.run/agent
-                     [:seon.cluster.agent/id "one-grammar-agent"]
-                     :seon.cluster.run/opened-at (java.util.Date.)}])
      (let [database @connection
            defaults (config/defaults)
            channel (async/chan 1)
@@ -1314,7 +1309,6 @@
                    :seon.db/db database
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
                    :seon.cluster.agent/id "one-grammar-agent"
-                   :seon.cluster.run/id "one-grammar-run"
                    :seon.cluster.eval/ordinal 0
                    :seon.ns/name 'my.agents.one-grammar
                    :seon.cluster.reply/sources sources}))

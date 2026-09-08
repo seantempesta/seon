@@ -72,11 +72,13 @@
                     :seon.cluster.run/process cluster/boot-process-identity
                     :seon.cluster.loop/stream-channel
                     (async/chan (async/sliding-buffer 1))})
-           submit (fn [id]
-                    (let [result (turn/virtual-turn!
+           submit (fn [id & [source]]
+                    (let [source (or source "(+ 1 1)")
+                          result (turn/virtual-turn!
                                   {:seon.cluster.loop/cluster handle
                                    :seon.cluster.agent/routing routing
-                                   :seon.cluster.agent/id id})
+                                   :seon.cluster.agent/id id
+                                   :seon.cluster.reply/text source})
                           turn-id (:seon.cluster.run/id result)
                           closed? #(some? (:seon.cluster.run/closed-at
                                            (db/pull @connection
@@ -91,7 +93,7 @@
                                    :where [?turn :seon.cluster.run/id ?id]
                                    [?attempt :seon.ai.attempt/run ?turn]]
                                  @connection turn-id)))
-                      (is (= "(+ 1 1)"
+                      (is (= source
                              (:seon.cluster.run/reply
                               (db/pull @connection [:seon.cluster.run/reply]
                                        [:seon.cluster.run/id turn-id]))))
@@ -121,6 +123,66 @@
            (is (= b (evaluations @connection "b")))
            (submit "a")
            (is (= 1 (count (evaluations @connection "a")))))
+         (let [request {:seon.cluster.loop/cluster handle
+                        :seon.cluster.agent/id "a"
+                        :seon.turn/write? true}
+               opening (turn/system-turn request)
+               opening-sources (mapv :seon.cluster.eval/source
+                                     (filter #(= :none (:seon.turn/status %))
+                                             (:seon.turn/forms opening)))]
+           (is (nil? (:seon.error/kind opening)) (pr-str opening))
+           (is (seq opening-sources) (pr-str opening))
+           (is (string? (:seon.cluster.run/id opening)))
+           (let [basis (db/basis-t @connection)
+                 unchanged (turn/system-turn request)]
+             (is (seq (:seon.turn/forms unchanged)) (pr-str unchanged))
+             (is (every? #(= :unchanged (:seon.turn/status %))
+                         (:seon.turn/forms unchanged)))
+             (is (nil? (:seon.cluster.run/id unchanged)))
+             (is (= basis (db/basis-t @connection))))
+           (turn/compact! {:seon.db/connection connection
+                           :seon.cluster.agent/id "a"})
+           (let [fresh (turn/system-turn request)]
+             (is (= opening-sources
+                    (mapv :seon.cluster.eval/source (:seon.turn/forms fresh))))
+             (is (every? #(= :none (:seon.turn/status %))
+                         (:seon.turn/forms fresh))))
+            (submit "a" "(my.message/inbox {})")
+           ;; Message facts are changed with both procs stopped. Only the
+           ;; explicit system walk runs: this proof cannot call a provider.
+           (doseq [id ["a" "b"]]
+             (agent/disarm! {:seon.cluster.agent/routing routing
+                             :seon.cluster.agent/id id}))
+           (db/transact! connection
+                         [{:seon.cluster.message/id "to-b"
+                           :seon.cluster.message/to [:seon.cluster.agent/id "b"]
+                           :seon.cluster.message/content "For B"
+                           :seon.cluster.message/at (java.util.Date.)}])
+           (let [other (turn/system-turn request)]
+             (is (seq (:seon.turn/forms other)) (pr-str other))
+             (is (every? #(= :unchanged (:seon.turn/status %))
+                         (:seon.turn/forms other)))
+             (is (nil? (:seon.cluster.run/id other))))
+           (db/transact! connection
+                         [{:seon.cluster.message/id "to-a"
+                           :seon.cluster.message/to [:seon.cluster.agent/id "a"]
+                           :seon.cluster.message/content "For A"
+                           :seon.cluster.message/at (java.util.Date.)}])
+           (let [basis (db/basis-t @connection)
+                 preview (turn/system-turn (assoc request :seon.turn/write? false))
+                 changed (filterv #(= :changed (:seon.turn/status %))
+                                  (:seon.turn/forms preview))]
+             (is (= basis (db/basis-t @connection)))
+                (is (= ["(my.message/inbox {})"]
+                    (mapv :seon.cluster.eval/source changed)) (pr-str preview))
+             (is (seq (:seon.turn/changes (first changed))))
+             (is (string? (:seon.turn/text (first changed))))
+             (let [stored (turn/system-turn request)]
+               (is (string? (:seon.cluster.run/id stored)) (pr-str stored))
+               (is (= 1 (count (db/q '[:find [?e ...] :in $ ?id
+                                      :where [?turn :seon.cluster.run/id ?id]
+                                      [?e :seon.cluster.eval/run ?turn]]
+                                    @connection (:seon.cluster.run/id stored))))))))
          (finally
            (doseq [id ["a" "b"]]
              (agent/disarm! {:seon.cluster.agent/routing routing

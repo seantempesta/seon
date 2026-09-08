@@ -666,7 +666,7 @@
                        (d/index-page database
                                      (:seon.db/index-page-options request)))))
 
-(defn- index-pattern-changed?
+(defn- index-pattern-change
   [changes pattern]
   (let [entity (:seon.db/pattern-entity pattern)
         attribute (:seon.db/pattern-attribute pattern)
@@ -677,9 +677,38 @@
           (and attribute value) [:avet [attribute (val value)]]
           attribute [:aevt [attribute]]
           :else [:eavt []])]
-    (boolean
-     (some #(or (nil? value) (= (val value) (:v %)))
-           (apply d/datoms changes index components)))))
+    (some #(when (or (nil? value) (= (val value) (:v %))) %)
+          (apply d/datoms changes index components))))
+
+(declare read-evidence-current? datom->data)
+
+(defn read-evidence-changes
+  "Return one changed datom witnessing each retained index pattern.
+  Witnesses use the same matching operation as cache validity. Broad read
+  plans contribute an attribute-scoped witness; they do not acquire an
+  entity or value constraint that their reader did not retain."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:vector :seon.db/read-evidence] :seon.db/basis-t]
+                  :seon.db/datoms]}
+  [database retained basis]
+  (let [declarations (read-declarations database)]
+   (into []
+        (comp (map #(datom->data declarations database %)) (distinct))
+        (mapcat
+         (fn [{position :seon.db/source-argument-position
+               plan :datahike.read/dependency-plan :as evidence}]
+           (when-not (read-evidence-current? database [evidence])
+            (let [source (some #(when (= position (:datahike.query.source/argument-position %)) %)
+                              (:datahike.query.dependency/sources plan))
+                 attributes (:datahike.query.source/attributes source)
+                 patterns (or (:seon.db/read-index-patterns source)
+                              (if (set? attributes)
+                                (mapv #(hash-map :seon.db/pattern-attribute %) attributes)
+                                [{}]))
+                 changes (d/since (d/history database)
+                                  (or (:seon.db/read-basis-t source) basis))]
+             (keep #(index-pattern-change changes %) patterns))))
+         retained))))
 
 (defn- index-evidence-current
   "An exact index check when historical datoms retain the read's dependencies.
@@ -697,7 +726,7 @@
                            (not (:db/noHistory (get (dbi/-schema database) attribute)))))
                        patterns))
       (let [changes (d/since (d/history database) basis)]
-        (not-any? #(index-pattern-changed? changes %) patterns)))))
+        (not-any? #(index-pattern-change changes %) patterns)))))
 
 (defn read-evidence-current?
   "True when `database` still satisfies every retained dependency revision."

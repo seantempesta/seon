@@ -7,6 +7,89 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
+## System-turn checkpoint, 2026-09-08 20:55 UTC
+
+The corrected owned-path gate passed **85 tests, 711 assertions, zero
+failures/errors**. The four lane-authored class tests account for 62
+assertions; the 81 inherited class tests account for 649 (including updated
+expectations and the strengthened about-identity assertion). Command:
+
+```sh
+bin/test --paths src/seon/db.clj src/seon/turn.clj src/seon/cluster/run.clj src/seon/render/transcript.clj resources/seon/schemas/seon.turn.edn test/seon/turn_test.clj test/seon/read_evidence_test.clj test/seon/cluster/run_test.clj test/seon/render/transcript_test.clj -- seon.turn-test seon.read-evidence-test seon.db-test seon.cluster.run-test seon.render.transcript-test
+```
+
+This lands the explicit system-turn API: fresh opening, unchanged reads with
+no write, scoped changed reads with datom witnesses, and compaction followed
+by the same fresh walk. It does not yet integrate the walk before every agent
+turn or implement the seven deletion rows. The old history source producer is
+gone (one definition to zero); its AI renderer reads saved history directly.
+The other retired-family counts are unchanged by this checkpoint.
+
+The successful gate root was removed by the runner. The throwaway worktree
+was removed after its fast runs completed. The earlier failed gate snapshot
+remains temporarily for diagnosis; no final cleanup claim is made yet.
+
+## System-turn iteration, 2026-09-08 20:22 UTC
+
+The current draft adds the declared-source/latest-read walk and changed-datom
+witnesses to `seon.turn/system-turn`. Its first isolated run had 66 tests,
+494 assertions, 11 failures, zero errors. Ten failures came from treating a
+normal walk-distance elision as fatal. The other was a stale expectation that
+ordinary evaluations duplicate program-graph call edges; the analyzer's own
+regression explicitly requires no duplication. The run assertion now follows
+that invariant, and no analyzer production change remains.
+
+The next fast iteration exposed the old history source producer reading its
+own evaluations, making each system turn invalidate itself. The history AI
+renderer now renders saved history directly. The inbox regression uses the
+same `(my.message/inbox {})` form as the declared producer so it tests one
+distinct form. Recipient-bound evidence remained green (two tests, 16
+assertions). The stable worktree fast run passed 85 tests and 707 assertions;
+the final stale-assertion correction separately passed all 22 run tests and
+173 assertions. The owned-path commit gate is running with the five subject
+namespaces (`seon.turn-test`, `seon.read-evidence-test`, `seon.db-test`,
+`seon.cluster.run-test`, and `seon.render.transcript-test`).
+
+That gate finished with 85 tests, 709 assertions, four failures in the one
+existing about-identity regression. History discarded the attribute half of
+the resolved lookup ref, leaving a string in a ref-valued field. The value
+renderer correctly refused to pull that string as an entity id. History now
+keeps the complete lookup ref; the existing regression also checks that its
+`:seon.problems/id` identity survives. The corrected slice is being checked
+on the frozen gate snapshot before another commit candidate is gated.
+
+Default is alive at pid 36758. Adoption currently refuses when loading
+`seon.test-support`; see
+[the adoption issue](../../../seon/issues/development-adoption-cannot-load-test-support.md).
+A direct JVM reload plus re-arming succeeded, but its old program metadata
+still describes the previous renderer arity. Therefore that observation does
+not prove source convergence or a working page. No provider call was made.
+
+The two earlier live source submissions each have two distinct transactions,
+derived from their identity and closing datoms. After compaction and subsequent
+adoptions, the retained history contains 18 + 4 and 19 + 4 datoms at those
+transactions respectively (`:with ?a ?v ?added` prevents counting entities
+instead of datoms). These are retained-history counts, not original transaction
+report counts; no-history attributes and compaction prevent that inference.
+The required three-write proof must count transaction reports while turns run.
+
+The requested shared-base probe answers **yes** on default. Agent
+`turn-cut-virtual` submitted
+`(defn shared-increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))`
+as `source:f0fd49bc-6a5a-4554-ae1d-940190618db4`. It closed, the program row
+held the contract, and `sci.core/namespace-state` on the cluster base contained
+`my.agents.turn-cut-virtual/shared-increment`. Agent `turn-cut-peer` then
+submitted `(my.agents.turn-cut-virtual/shared-increment 41)` as
+`source:3efc3775-405c-4dcb-84b0-577f43ddda5d`; it closed at
+2026-09-08T20:39:46Z with shown print-node value 42 and no provider attempts.
+These are ordinary source submissions on the currently loaded loop, not a
+claim that persistent-agent-context diff delivery has landed.
+
+The draft still uses the existing completed-source recording transaction and
+old result representation. It does not yet satisfy the three-write turn,
+persistent private SCI state, in-memory result objects, automatic compaction,
+or the seven deletion rows. No retired-reference reduction is claimed here.
+
 ## Virtual submission and compaction, 2026-09-08 19:37 UTC
 
 The exactness checkpoint is commit `823569cd3`. The next owned files are
