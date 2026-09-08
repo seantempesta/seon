@@ -21,6 +21,25 @@ coordinator/tests 59 seconds, snapshot `82d8ce7cd` plus this file's diff.
 The edit hook refused publication; this is not a live-adoption proof.
 The remaining sections below record the initial, superseded stop.
 
+## Database projection ownership, 20:57 UTC
+
+Removed `!database-projections` and its process-wide LRU. The one-argument
+database acquisition returns a projection to its caller; the existing
+two-argument acquisition reuses the caller's projection when its fingerprint
+matches. No replacement global holder was introduced.
+
+`database-projections-reuse-only-the-handed-value` uses a canonical database,
+transacts a schema declaration, and verifies unchanged-value identity reuse,
+new-value declaration visibility, and the old database/projection remaining
+unchanged. It replaces the former mocked derivation-count test.
+
+Both `bin/test-fast seon.schema-test` and `bin/test --paths
+src/seon/schema.clj test/seon/schema_test.clj -- seon.schema-test` passed
+**20 tests / 200 assertions**, zero failures/errors. Isolated coordinator/tests
+took 67 seconds; the successful run root was removed by the runner.
+The edit hook's publication timed out (exit 124); no live-adoption proof is
+claimed for this slice yet.
+
 No implementation landed. The assignment's stop boundary was reached during
 the initial armed baseline, before any production or test edits.
 

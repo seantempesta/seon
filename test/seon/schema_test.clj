@@ -4,7 +4,6 @@
             [clojure.test :refer [deftest is testing]]
             [clojure.walk :as walk]
             [datahike.api :as d]
-            [datahike.db :as datahike.db]
             [malli.error :as me]
             [seon.db]
             [seon.schema :as schema]
@@ -25,51 +24,28 @@
   (schema/begin-registration-delta
    (schema/build-projection (schema/registered-schemas))))
 
-(deftest database-projections-follow-exact-committed-identity
+(deftest database-projections-reuse-only-the-handed-value
   (test-support/with-database
    (fn [connection]
-     (let [derive-var
-           (ns-resolve 'seon.schema 'derive-projection-from-database)
-           derivations (atom [])
-           projection (schema/build-projection {})]
-       (with-redefs-fn
-         {derive-var
-          (fn [database _reusable-projection]
-            (swap! derivations conj
-                   (datahike.db/committed-value-identity database))
-            projection)}
-         (fn []
-           (let [before @connection
-                 first-projection (schema/projection-from-database before)
-                 repeated-projection (schema/projection-from-database before)]
-             (is (identical? first-projection repeated-projection))
-             (is (= 1 (count @derivations))
-                 "one committed database identity derives once")
-             (d/transact
-              connection
-              [{:seon.schema/key :seon.schema-test/cache-revision
-                :seon.schema/form ":string"
-                :seon.schema.admission/source :core}])
-             (let [after @connection]
-               (is (not= (datahike.db/committed-value-identity before)
-                         (datahike.db/committed-value-identity after)))
-               (is (identical? projection
-                               (schema/projection-from-database after)))
-               (is (= 2 (count @derivations))
-                   "a schema transaction's new identity derives anew")
-               (let [speculative
-                     (:db-after
-                      (d/with
-                       after
-                       [{:seon.schema/key
-                         :seon.schema-test/speculative-cache-revision
-                         :seon.schema/form ":keyword"
-                         :seon.schema.admission/source :core}]))]
-                 (is (nil? (datahike.db/committed-value-identity speculative)))
-                 (schema/projection-from-database speculative)
-                 (schema/projection-from-database speculative)
-                 (is (= 4 (count @derivations))
-                     "a speculative database value always derives fresh"))))))))))
+     (let [before @connection
+           projection (schema/projection-from-database before)
+           repeated (schema/projection-from-database before projection)]
+       (is (identical? projection repeated)
+           "the caller's unchanged projection is reused")
+       (d/transact
+        connection
+        [{:seon.schema/key :seon.schema-test/cache-revision
+          :seon.schema/form ":string"
+          :seon.schema.admission/source :core}])
+       (let [after (schema/projection-from-database @connection projection)]
+         (is (not (identical? projection after)))
+         (is (= :string (get (:seon.schema.projection/forms after)
+                             :seon.schema-test/cache-revision)))
+         (is (nil? (get (:seon.schema.projection/forms projection)
+                        :seon.schema-test/cache-revision)))
+         (is (identical? projection
+                         (schema/projection-from-database before projection))
+             "a newer database cannot change the old projection"))))))
 
 (deftest function-input-fit-is-total-for-an-absent-contract
   (let [projection (schema/build-projection (schema/registered-schemas))]

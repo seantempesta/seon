@@ -23,9 +23,7 @@
             [clojure.set :as set]
             [clojure.walk :as walk]
             [datahike.api :as d]
-            [datahike.db :as datahike.db]
             [datahike.db.interface :as dbi]
-            [datahike.lru :as datahike.lru]
             [seon.schema.form :as form]
             [seon.schema.internal :as internal]
             [clojure.edn :as edn]
@@ -2465,31 +2463,6 @@
           :seon.schema/predicate-functions {}
           :seon.schema/validate-render-contracts? true})))))))
 
-(def ^:private database-projection-cache-limit
-  "Match Datahike's bounded query-cache snapshot count. Eviction can only
-   repeat derivation; exact committed identity makes reuse correct."
-  64)
-
-(defonce ^:private !database-projections
-  (atom (datahike.lru/lru database-projection-cache-limit)))
-
-(defn- cached-database-projection
-  [db derive-fn]
-  (if-let [identity (datahike.db/committed-value-identity db)]
-    (let [candidate (delay (derive-fn))
-          selected
-          (get
-           (swap! !database-projections
-                  (fn [entries]
-                    (if-let [entry (find entries identity)]
-                      ;; Re-association is Datahike LRU's touch operation.
-                      (assoc entries identity (val entry))
-                      (assoc entries identity candidate))))
-           identity)]
-      @selected)
-    ;; Speculative and wrapped database values have no committed identity.
-    (derive-fn)))
-
 (defn- derive-projection-from-database
   [db reusable-projection]
   (projection-from-rows
@@ -2522,10 +2495,10 @@
 (defn projection-from-database
   "Build the immutable program projection at exactly `db`.
 
-   An attached committed value derives once per exact Datahike committed
-   identity. Speculative and wrapped values derive afresh. The optional
-   reusable projection avoids recompilation only when its canonical
-   fingerprint equals the queried rows."
+   The caller owns the resulting projection and passes it to later operations.
+   The optional reusable projection avoids recompilation only when its
+   canonical fingerprint equals the queried rows. No process-global holder
+   retains a cluster's projection."
   {:malli/schema
    [:function
     [:=> [:catn [:seon.schema/database-value :map]] ::projection]
@@ -2533,8 +2506,7 @@
                  [::projection ::projection]]
      ::projection]]}
   ([db]
-   (cached-database-projection
-    db #(derive-projection-from-database db {})))
+   (derive-projection-from-database db {}))
   ([db reusable-projection]
    ;; The reusable value may carry process-local predicate functions which are
    ;; deliberately absent from its pure fingerprint. It therefore remains an
