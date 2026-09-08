@@ -1,8 +1,12 @@
 (ns seon.fn.analyzer
   "Static Clojure source analysis for program-graph indexing."
   (:require [clj-kondo.core :as clj-kondo]
+            [clj-kondo.impl.cache :as kondo.cache]
+            [clj-kondo.impl.core :as kondo.core]
             [clj-kondo.impl.utils :as kondo.utils]
             [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [cognitect.transit :as transit]
             [clojure.string :as str]))
 
 (def ^:private config-directory ".clj-kondo")
@@ -120,15 +124,58 @@
 (defn- finding [entry]
   (present-values entry finding-keys))
 
+(defn- discard-obsolete-cache-entries!
+  [canonical-sources]
+  (let [root (kondo.core/resolve-cache-dir config-directory true cache-directory)]
+    (when (.isDirectory root)
+      (kondo.cache/with-thread-lock
+        (kondo.cache/with-cache root 6
+          (doall (for [directory (.listFiles root)
+                  :when (and (.isDirectory directory)
+                             (not (java.nio.file.Files/isSymbolicLink
+                                   (.toPath directory))))
+                  file (.listFiles directory)
+                  :when (and (.isFile file)
+                             (not (java.nio.file.Files/isSymbolicLink
+                                   (.toPath file)))
+                             (str/ends-with? (.getName file) ".transit.json"))
+                  :let [entry (with-open [input (io/input-stream file)]
+                                (transit/read (transit/reader input :json)))
+                        filename (:filename entry)
+                        namespace-name (symbol (subs (.getName file) 0
+                                                     (- (count (.getName file))
+                                                        (count ".transit.json"))))
+                        canonical-source (get canonical-sources namespace-name)]
+                  :when (and (string? filename)
+                             (or (= "<stdin>" filename)
+                                 (and canonical-source
+                                      (not= (.getCanonicalPath (io/file filename))
+                                            (.getCanonicalPath (io/file canonical-source))))
+                                 (and (not (str/includes? filename ".jar:"))
+                                      (not (.exists (io/file filename))))))]
+            (java.nio.file.Files/deleteIfExists (.toPath file)))))))))
+
 (defn- invoke-kondo
   [options]
-  (clj-kondo/run!
-   (merge {:lang :clj
+  ;; Complete source is authoritative. Old synthesized entries and entries
+  ;; whose source was removed cannot answer for an unanalysed language arm.
+  (when-not (false? (:cache options))
+    (discard-obsolete-cache-entries! {}))
+  (let [options (merge {:lang :clj
            :config-dir config-directory
            :cache-dir cache-directory
            :repro true
            :config analysis-config}
-          options)))
+          options)
+        result (clj-kondo/run! options)
+        sources (into {} (map (juxt :name :filename))
+                      (get-in result [:analysis :namespace-definitions]))]
+    ;; A current namespace declaration outranks a retained copy in any other
+    ;; language's cache, even when that old build artifact still exists.
+    (if (and (not (false? (:cache options)))
+             (seq (discard-obsolete-cache-entries! sources)))
+      (clj-kondo/run! options)
+      result)))
 
 (defn analyze
   "Analyze complete source roots or individual files without evaluation."

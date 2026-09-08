@@ -479,3 +479,27 @@ The shared instruction corrections were included in concurrent commit
 instruction-body issue is resolved. The already-resolved trailing-prose skill
 note is moved to the archive: the current skill states the correct rule at
 lines 17–18, and its existing resolution records the parser regression.
+
+### Priority static-analysis repair
+
+The owner's 14:20 stop-and-repair instruction superseded the ongoing sweep.
+The requested normal cached lint reproduced 15 errors. Cache-disabled lint
+had none, fully qualified protocol symbols failed identically, and the actual
+`identity-attr?` definition had both declared arities. The dependency cache
+contained synthesized `<stdin>` protocol fragments and an old, still-present
+AOT `seon/schema.cljc` with the obsolete arity. These facts falsify the proposed
+alias/arity source attribution: no valid protocol or reconciliation semantics
+were changed to accommodate the cache.
+
+The existing analyzer cache boundary now invalidates forbidden synthesized
+entries, deleted sources, and other-file language entries displaced by current
+namespace definitions. It uses clj-kondo's own thread/file locks and performs
+at most one reanalysis after displacement. One real-dependency regression
+covers old stdin, a retained old source file, symlink preservation, and a real
+invalid-arity refusal. Armed analyzer iteration passed 7 tests / 38 assertions
+before adding the symlink assertion. Normal cached lint then reported zero
+errors in 6,213 ms; the literal `grep error` also matches warning filenames and
+the zero-error summary. On default, hot reload plus re-arming followed by the
+five named source-file analysis returned `{:errors []}` in 5,191 ms. This is a
+hot-Var proof; hook publication convergence is still unknown after its missing
+completion advisory. Flow/analyzer iteration and the isolated gate are pending.

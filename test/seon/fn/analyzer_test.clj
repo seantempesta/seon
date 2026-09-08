@@ -1,7 +1,9 @@
 (ns seon.fn.analyzer-test
-  (:require [clojure.java.io :as io]
+  (:require [clj-kondo.core :as kondo]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
-            [seon.fn.analyzer :as analyzer]))
+            [seon.fn.analyzer :as analyzer]
+            [seon.test-support :as test-support]))
 
 (defn- fixture-directory
   [fixture-name]
@@ -14,6 +16,54 @@
   (let [file (io/file directory filename)]
     (spit file source)
     (.getCanonicalPath file)))
+
+(deftest canonical-analysis-rejects-obsolete-cache-authorities
+  (let [directory (fixture-directory (str (random-uuid)))
+        cache-root (io/file directory "cache")
+        sentinel-directory (io/file directory "sentinel")
+        sentinel (io/file sentinel-directory "cache-authority.transit.json")
+        options {:cache-dir (.getPath cache-root) :config-dir ".clj-kondo"
+                 :repro true :lang :clj}
+        source (write-fixture! directory "cache_authority.cljc"
+                               "(ns cache-authority) (defn f [x y] [x y])")
+        consumer (write-fixture! directory "cache_consumer.clj"
+                                 (str "(ns cache-consumer (:require [cache-authority :as a]"
+                                      " [clojure.java.io :as io]))\n"
+                                      "(a/f 1 2) (io/make-parents \"tmp/x/y\")"))
+        errors #(filter (fn [finding] (= :error (::analyzer/level finding)))
+                        (::analyzer/findings %))]
+    (try
+      (with-redefs-fn
+        {(ns-resolve 'seon.fn.analyzer 'cache-directory) (.getPath cache-root)}
+        (fn []
+          (doseq [poison-source ["(ns cache-authority) (defn f [x] x)"
+                                 "(ns clojure.java.io) (defn incomplete [] nil)"]]
+            (with-in-str poison-source
+              (kondo/run! (assoc options :lint ["-"]))))
+          (.mkdirs sentinel-directory)
+          (spit sentinel (slurp (io/file cache-root "v1" "clj"
+                                        "cache-authority.transit.json")))
+          (java.nio.file.Files/createSymbolicLink
+           (.toPath (io/file cache-root "v1" "symlinked-cache"))
+           (.toPath (.getAbsoluteFile sentinel-directory))
+           (make-array java.nio.file.attribute.FileAttribute 0))
+          (is (seq (:findings (kondo/run! (assoc options :lint [source consumer]))))
+              "the real dependency must observe the poisoned cache")
+          (is (empty? (errors (analyzer/analyze
+                              {::analyzer/paths [source consumer]}))))
+          (is (.exists sentinel) "cache cleanup must not follow a symlink")
+          (let [old-source (write-fixture! directory "cache_authority.clj"
+                                            "(ns cache-authority) (defn f [x] x)")]
+            (kondo/run! (assoc options :lint [old-source]))
+            (is (empty? (errors (analyzer/analyze
+                                {::analyzer/paths [source consumer]}))))
+            (spit consumer "(ns cache-consumer (:require [cache-authority :as a])) (a/f 1)")
+            (is (= [:invalid-arity]
+                   (mapv ::analyzer/type
+                         (errors (analyzer/analyze
+                                  {::analyzer/paths [source consumer]}))))))))
+      (finally
+        (test-support/delete-recursively! directory)))))
 
 (deftest complete-roots-and-individual-files-have-parity
   (let [directory (fixture-directory "parity")

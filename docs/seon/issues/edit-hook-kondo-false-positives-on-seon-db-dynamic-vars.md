@@ -79,3 +79,24 @@ correct, but would discard its cross-process dependency-analysis value.
   source defects.
 - Retained directories outside `src` and `test` remain absent from the
   manifest census.
+
+## Repair — 2026-09-08, issues-sweep
+
+The normal CLI reproduced 15 errors, including valid core.async protocols and
+`clojure.java.io/make-parents`. Fully qualified protocol symbols failed too.
+Cache-disabled analysis reported no errors. The Flow SPI cache recorded
+`<stdin>` and only two synthesized methods, omitting its actual protocols.
+The reconciliation arity finding came from the still-existing old
+`target/seon-jvm-aot-classes/seon/schema.cljc`, not the current two-arity
+definition in `src/seon/schema.clj`.
+
+`seon.fn.analyzer` now removes synthesized and deleted-source cache entries
+under clj-kondo's own locks. Current namespace definitions additionally
+displace cached entries from other source files across language directories;
+only such a displacement causes one reanalysis. Canonical dependency entries
+remain available. The real-clj-kondo regression creates both kinds of stale
+state, preserves a symlinked sentinel, and still rejects a genuine bad arity.
+Armed analyzer iteration passed; the normal cached CLI then reported zero
+errors (6,213 ms). Reloaded and re-armed default analysis returned `{:errors []}`
+in 5,191 ms. Isolated Flow/analyzer gate pending; this note remains open until
+that result is recorded.

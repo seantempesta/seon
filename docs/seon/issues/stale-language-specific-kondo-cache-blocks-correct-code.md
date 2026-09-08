@@ -69,3 +69,16 @@ lifecycle question belonging to whoever owns `.clj-kondo` configuration.
 Delete the offending entry. If an `invalid-arity` (or any resolution finding)
 contradicts the source, `ls .clj-kondo/.cache/v1/*/<ns>.transit.json` and
 remove any entry whose language the current file does not provide.
+
+## Repair — 2026-09-08, issues-sweep
+
+The same `identity-attr?` finding recurred against an old AOT source copy that
+still exists. Current `src/seon/schema.clj` declares both arities; changing the
+call would conceal the stale authority. The analyzer now derives namespace
+source authority from clj-kondo's current namespace definitions and invalidates
+other-file entries across language caches before one bounded reanalysis.
+The real dependency regression retains the old file deliberately and verifies
+both the valid new arity and refusal of a genuine invalid call. Normal cached
+whole-source lint is clean. The accompanying
+[cache repair](edit-hook-kondo-false-positives-on-seon-db-dynamic-vars.md)
+records the measured evidence; isolated gate verification remains pending.
