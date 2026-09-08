@@ -57,3 +57,7 @@ keys. Check the sibling faces built the same way while there.
 
 One regression proving the class: an armed-contract render of a nested database
 value returns the identity face, not a typed unknown.
+
+## Fix applied, proof pending
+
+2026-09-08: the producer declares its input as `:seon.db/database-value-identity` (`src/seon/render/value.clj`). The proof `nested-values-render-their-declared-faces` cannot yet go green because `seon.render.value-test` is 17/17 red on stale pre-ruling expectations (a lane is rewriting it); resolve when that lands.

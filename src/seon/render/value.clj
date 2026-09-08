@@ -60,7 +60,12 @@
 
 (defn render-database-identity-ai
   "Readable identity face for an admitted immutable database value."
-  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  ;; The input is the identity projection the registry declares this
+  ;; producer on (`:seon.db/database-value-identity`, unqualified Datahike
+  ;; keys), not a render unit: declared as a unit, an armed JVM refused it
+  ;; on every call (issue: the-database-identity-face-cannot-satisfy-its-
+  ;; own-declared-input, 2026-09-08).
+  {:malli/schema [:=> [:cat :seon.db/database-value-identity] :string]}
   [unit]
   (str "database " (pr-str (:db-name unit))
        " at basis transaction " (:t unit)
