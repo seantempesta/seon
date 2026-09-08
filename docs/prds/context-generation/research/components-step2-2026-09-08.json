@@ -1,0 +1,40 @@
+{
+  "url": "http://127.0.0.1:7809/ns/my.agents.juniper/debug",
+  "blocks": [
+    {
+      "attribute": ":seon.cluster.agent/id",
+      "ai": "AI\n\"juniper\"",
+      "html": "HTML\n\"juniper\""
+    },
+    {
+      "attribute": ":seon.agent/plan",
+      "ai": "AI\n; Your plan. (dir my.plan) is its API; (doc my.plan/complete!) explains one form.\nmy.agents.juniper=> (my.plan/current)\n#:seon.repl{:value #:my.plan.item{:expected-result \"The AI plan is concise and actionable; the HTML plan shows progress and stable step references without numeric entity ids.\",\n  :id \"juniper/render-plan\", :title \"Render this plan clearly\"}, :ms 287}\n\nmy.agents.juniper=> (my.plan/ready)\n#:seon.repl{:value [#:my.plan.item{:expected-result \"The AI plan is concise and actionable; the HTML plan shows progress and stable step references without numeric entity ids.\",\n    :id \"juniper/render-plan\", :title \"Render this plan clearly\"}], :ms 146}\n\nmy.agents.juniper=> (my.plan/blocked)\n#:seon.repl{:value [#:my.plan.item{:expected-result \"The comparison shows the previous and refreshed results together, with the relevant changed input.\",\n    :id \"juniper/compare-changed-results\", :needs [\"juniper/render-plan\"],\n    :title \"Compare refreshed results\"} #:my.plan.item{:expected-result \"Juniper identifies the current step and records a truthful plan update from the assembled context.\",\n    :id \"juniper/try-live-turn\", :needs [\"juniper/compare-changed-results\"],\n    :title \"Try the assembled context in a live agent turn\"}], :ms 140}",
+      "html": "HTML\nPlan\nmap 3 items, depth 0"
+    },
+    {
+      "attribute": ":seon.cluster.agent/namespace",
+      "ai": "AI\n(ns my.agents.juniper (:require my.message my.run seon.bootstrap seon.db))\n\n;; No definitions are indexed in this namespace yet; it belongs to agent juniper.\n;; Every `defn` evaluated here with a :malli/schema becomes one.",
+      "html": "HTML\nmy.agents.juniper\n\nRequires\n\nmy.message\nmy.run\nseon.bootstrap\nseon.db\n\nNo definitions are indexed in this namespace yet; it belongs to agent juniper. Every contracted `defn` evaluated here becomes one.\n\nnamespace source"
+    },
+    {
+      "attribute": ":seon.agent/settings",
+      "ai": "AI\n; Your setting overrides; omitted settings inherit the cluster defaults.\nmy.agents.juniper=> (my.agent/settings)\n#:seon.repl{:value {:seon.config.eval/time-limit-ms 2500, :seon.config.run/max-episode-runs\n  4}, :ms 260}",
+      "html": "HTML\nmap 3 items, depth 0"
+    },
+    {
+      "attribute": ":seon.cluster.message/inbound-content",
+      "ai": "AI\n\nNo value is stored or connected for this attribute.",
+      "html": "HTML\n\nNo value is stored or connected for this attribute."
+    },
+    {
+      "attribute": ":seon.cluster.message/_to",
+      "ai": "AI\n[(seon.cluster.message/format-ai (seon.db/pull [:seon.cluster.message/id :seon.cluster.message/content {:seon.cluster.message/from [:db/id :seon.cluster.agent/id]} {:seon.cluster.message/to [:db/id :seon.cluster.agent/id]}] [:seon.cluster.message/id \"bootstrap-task:juniper\"]))\n  (seon.cluster.message/format-ai (seon.db/pull [:seon.cluster.message/id :seon.cluster.message/content {:seon.cluster.message/from [:db/id :seon.cluster.agent/id]} {:seon.cluster.message/to [:db/id :seon.cluster.agent/id]}] [:seon.cluster.message/id \"design-lab/root-to-juniper/1\"]))\n  (seon.cluster.message/format-ai (seon.db/pull [:seon.cluster.message/id :seon.cluster.message/content {:seon.cluster.message/from [:db/id :seon.cluster.agent/id]} {:seon.cluster.message/to [:db/id :seon.cluster.agent/id]}] [:seon.cluster.message/id \"design-lab/root-to-juniper/2\"]))]",
+      "html": "HTML\nvector 3 items, depth 0"
+    },
+    {
+      "attribute": ":seon.cluster.run/_agent",
+      "ai": "AI\n[]",
+      "html": "HTML\nvector 1 items, depth 0"
+    }
+  ]
+}

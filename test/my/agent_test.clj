@@ -30,3 +30,27 @@
        (db/transact! connection
                      [[:db.fn/retractEntity [:seon.cluster.agent/id "settings-owner"]]])
        (is (nil? (db/pull @connection '[*] component)))))))
+
+(deftest settings-updates-preserve-one-component-and-agent-isolation
+  (support/with-database
+   (fn [connection]
+     (db/transact! connection [{:seon.cluster.agent/id "settings-owner"}
+                              {:seon.cluster.agent/id "other-owner"}])
+     (is (= {:seon.config.ai/model "example-model"
+             :seon.config.run/max-episode-runs 4}
+            (agent/settings! {:seon.config.ai/model "example-model"
+                              :seon.config.run/max-episode-runs 4}
+                             connection "settings-owner")))
+     (let [component #(get-in (db/pull @connection
+                                       [{:seon.agent/settings [:db/id]}]
+                                       [:seon.cluster.agent/id "settings-owner"])
+                               [:seon.agent/settings :db/id])
+           first-id (component)]
+       (is (integer? first-id))
+       (is (= {:seon.config.ai/model "example-model"
+               :seon.config.run/max-episode-runs 4
+               :seon.config.eval/time-limit-ms 1234}
+              (agent/settings! {:seon.config.eval/time-limit-ms 1234}
+                               connection "settings-owner")))
+       (is (= first-id (component)))
+       (is (= {} (agent/settings @connection "other-owner")))))))

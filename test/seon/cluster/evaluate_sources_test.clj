@@ -2,6 +2,7 @@
   (:require [clojure.core.async :as async]
             [clojure.test :refer [deftest is]]
             [seon.blob :as blob]
+            [my.agent :as my.agent]
             [seon.cluster.agent :as agent]
             [seon.cluster.loop :as loop]
             [seon.cluster.run :as run]
@@ -39,6 +40,8 @@
                                  :seon.cluster.eval/ordinal ordinal
                                  :seon.cluster.eval/at (java.util.Date.)}))
                          (range 7)))
+     (my.agent/settings! {:seon.config.eval/time-limit-ms 1700}
+                         connection "preview-batch-agent")
      (let [database @connection
            earlier-handle
            (admit/result-handle
@@ -89,6 +92,7 @@
                                  (apply original-transact args))
                   sci.eval/evaluate
                   (fn [request]
+                    (is (= 1700 (:seon.sci.eval/time-limit-ms request)))
                     (let [result (original-evaluate request)]
                       (when (= 1 (swap! evaluations inc))
                         (db/transact! connection [{:seon.cluster.agent/id "later-agent"}]))

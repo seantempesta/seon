@@ -105,3 +105,52 @@ Platform retry passed 82 tests / 486 assertions, zero failures and errors,
 with three workers (snapshot `run.Dz4uN9`, coordinator/test phase 90 seconds).
 The subject and platform gate used HEAD plus only the owned paths. The
 subsequent source edits only corrected nearby documentation/teaching text.
+
+
+## First commit adoption
+
+Commit `67fe1675d` adopted onto default successfully; publication
+`6aa09972-aadb-56cc-a9dd-ee5ec378034c`. I inspected the default page with
+Playwright and viewed its screenshot. Instructions and run blocks disappeared;
+a legacy cluster datom still appears. **RESET NEEDED: `67fe1675d`** for the
+orchestrator's single refork. Default was not stopped or restarted.
+
+
+## Settings component
+
+`my.agent/settings!` decides the component identity inside Datahike's writer
+and updates it in place. The schema's `:seon.schema/references` supplies the
+key set; there is no second dial roster. The turn bound now declares its
+per-agent overlay flag. Model settings already followed the component;
+evaluation/turn passes merge it into their supplied handle, and the agent's
+completion wait reads its override. Missing overlay schema references return
+a typed unknown-shape value.
+
+The subject gate passed **17 tests / 130 assertions**, zero failures/errors
+(`run.QjAvuD`, coordinator/test phase 87 s). The canonical property took
+24,649 ms after the query change. Its earlier fast run was interrupted after
+a thread dump proved it rebuilding the entire schema projection per overlay
+read; the dump is summarized in the existing
+[projection issue](../../../seon/issues/seon-db-reads-rebuild-the-projection-per-call-when-none-is-handed.md).
+The regression verifies repeated writes preserve one component, agent isolation,
+a changed override changes turn admission, and seven real SCI evaluations
+receive the explicit agent deadline.
+
+Scratch adoption `6aa09c1e-d8fb-56db-b1a3-b59707277291` completed. A live update
+and read returned in 48 ms:
+
+```clojure
+{:settings {:seon.config.eval/time-limit-ms 2500
+            :seon.config.run/max-episode-runs 4}
+ :same-component true
+ :dial-count 29}
+```
+
+The dial count is a dated observation of the schema query. The fixture now
+seeds these two overrides on its single settings component. The
+[scratch screenshot](components-step2-2026-09-08.png) and
+[AI/HTML text](components-step2-2026-09-08.json) were captured from the live
+page and inspected; useful presentation is the next cut.
+
+Settings platform gate: **82 tests / 486 assertions**, zero failures/errors
+(`run.oLleW9`, coordinator/test phase 112 s), with at most three workers.

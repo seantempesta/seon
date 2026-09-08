@@ -6,6 +6,7 @@
   turns remain until the turn PRD implementation replaces those paths."
   (:require [clojure.edn :as edn]
             [seon.db :as db]
+            [seon.ai :as ai]
             [seon.cluster.message :as message]
             [seon.cluster.run :as run]
             [seon.cluster.wake :as wake]
@@ -393,14 +394,13 @@
       0))
 
 (defn- max-episode-runs
-  "The episode dial, read from the config singleton on this database
-  value — a config fact like every other dial, so a live change applies
-  at the very next pass. Nil when absent, and absence is FAIL-CLOSED
-  (the `max-chain` precedent)."
-  [db]
-  (db/q '[:find ?value .
-         :where [_ :seon.config.run/max-episode-runs ?value]]
-       db))
+  "Read the agent override, otherwise the branch's config singleton."
+  [database agent-id]
+  (or (:seon.config.run/max-episode-runs (ai/agent-overlay database agent-id))
+      (db/q '[:find ?value .
+              :where [?config :seon.config/cluster _]
+                     [?config :seon.config.run/max-episode-runs ?value]]
+            database)))
 
 (defn- episode-capped?
   "True when `agent-id` may open no turn at all: the turn count has
@@ -415,7 +415,7 @@
   verify-listened-attributes-2026-09-08 §10). One missing schema
   resource is not a licence to spend."
   [db agent-id]
-  (let [limit (max-episode-runs db)]
+  (let [limit (max-episode-runs db agent-id)]
     (or (nil? limit)
         (some? (wake/declarations-refusal db))
         (>= (episode-runs db agent-id) limit))))

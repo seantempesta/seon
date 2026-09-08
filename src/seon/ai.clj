@@ -320,20 +320,36 @@
   [cluster-settings agent-settings]
   (merge cluster-settings agent-settings))
 
+(defn agent-setting-attributes
+  "The override keys, queried from the installed overlay schema's references."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or [:set :qualified-keyword] :seon.error/value]]}
+  [database]
+  (let [row (db/pull database '[{:seon.schema/references [:seon.schema/key]}]
+                     [:seon.schema/key :seon.config/agent-overlay])]
+    (cond
+      (:seon.error/kind row) row
+      (seq (:seon.schema/references row))
+      (into #{} (map :seon.schema/key) (:seon.schema/references row))
+      :else
+      {:seon.schema/unknown-shape :seon.config/agent-overlay
+       :seon.error/kind :seon.schema/unknown-shape
+       :seon.error/message "The agent overlay schema has no declared setting references."})))
+
 (defn agent-overlay
   "Declared setting overrides for one agent in a database value."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.cluster.agent/id]
     [:or :seon.config/agent-overlay :seon.error/value]]}
   [db agent-id]
-  (let [projection (schema/projection-from-database db)
-        attributes (map-attributes (:seon.schema.projection/forms projection)
-                                   :seon.config/agent-overlay)
-        row (db/pull db [{:seon.agent/settings (vec attributes)}]
-                     [:seon.cluster.agent/id agent-id])]
-    (if (:seon.error/kind row)
-      row
-      (select-keys (:seon.agent/settings row) attributes))))
+  (let [attributes (agent-setting-attributes db)]
+    (if (:seon.error/kind attributes)
+      attributes
+      (let [row (db/pull db [{:seon.agent/settings (vec attributes)}]
+                         [:seon.cluster.agent/id agent-id])]
+        (if (:seon.error/kind row)
+          row
+          (select-keys (:seon.agent/settings row) attributes))))))
 
 (defn- config-ai-ident->request-ident
   [config-ident]

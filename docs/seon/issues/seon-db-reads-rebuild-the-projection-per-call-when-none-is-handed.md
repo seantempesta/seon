@@ -125,3 +125,12 @@ the turn no longer depends on which executor ran the proc; regression
 `a-turn-hands-its-clusters-projection-to-every-database-call`
 (`test/seon/cluster/turn_test.clj`) runs the pass on a bare thread and asserts
 zero derivations.
+
+
+Components verification, 2026-09-08: `seon.ai/agent-overlay` explicitly rebuilt
+`projection-from-database` even with a handed projection. A thread dump of the
+armed `situation-totality-property` shows `max-episode-runs → agent-overlay →
+projection-from-database → build-projection`. The overlay only needs its key
+set: live `:seon.schema/references` already names those leaves (2 ms query).
+The components change queries those refs and deletes the projection rebuild
+from this read path. This does not close the other entry-point findings above.

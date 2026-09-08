@@ -2,6 +2,7 @@
   "The live-fact generated bootstrap run shared by every new agent."
   (:require [clojure.edn :as edn]
             [my.plan :as plan]
+            [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.cluster.run :as run]
             [seon.db :as db]
@@ -45,9 +46,11 @@
                              {:seon.cluster.run/trigger [:seon.cluster.message/id]}]
                            [:seon.cluster.run/id id]))
             turn-limit
-            (db/q '[:find ?limit .
-                   :where [_ :seon.config.run/max-episode-runs ?limit]]
-                 database)
+            (or (:seon.config.run/max-episode-runs (ai/agent-overlay database agent-id))
+                (db/q '[:find ?limit .
+                        :where [?config :seon.config/cluster _]
+                               [?config :seon.config.run/max-episode-runs ?limit]]
+                      database))
             turns-used
             ((requiring-resolve 'seon.cluster.work/episode-runs)
              database agent-id)

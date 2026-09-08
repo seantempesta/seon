@@ -48,8 +48,19 @@
                                   [?agent :seon.cluster.agent/id "juniper"]
                                   [?agent :seon.agent/plan ?plan]]
                                 database)
-                               "juniper-plan")]
+                               "juniper-plan")
+                           settings-ref
+                           (or (seon.db/q
+                                '[:find ?settings . :where
+                                  [?agent :seon.cluster.agent/id "juniper"]
+                                  [?agent :seon.agent/settings ?settings]]
+                                database)
+                               "juniper-settings")]
                  [{:db/id [:seon.cluster.agent/id "juniper"]
+                   :seon.agent/settings
+                   {:db/id settings-ref
+                    :seon.config.eval/time-limit-ms 2500
+                    :seon.config.run/max-episode-runs 4}
                    :seon.agent/plan
                    {:db/id plan-ref
                     :my.plan/objective "Improve Juniper context inspection"

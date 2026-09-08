@@ -1558,7 +1558,8 @@
     sources :seon.cluster.reply/sources
     starting-namespace :seon.ns/name
     defs-notices :seon.sci.eval/defs-notices}]
-  (let [connection (:seon.db/connection cluster)]
+  (let [connection (:seon.db/connection cluster)
+        cluster (merge cluster (ai/agent-overlay (or snapshot @connection) agent-id))]
     (loop [remaining (seq sources)
            ordinal first-ordinal
            namespace-name starting-namespace
@@ -2030,12 +2031,15 @@
                  ::now now
                  ::report report}
         pass (fn []
-               (case (:seon.cluster.work/situation work)
-                 :open (open-turn request)
-                 :call (call-turn request)
-                 :generate (generate-turn request)
-                 :resume (resume-turn request)
-                 :close (close-turn request)))]
+               (let [request (update request ::cluster merge
+                                     (ai/agent-overlay
+                                      @(:seon.db/connection cluster) agent-id))]
+                 (case (:seon.cluster.work/situation work)
+                   :open (open-turn request)
+                   :call (call-turn request)
+                   :generate (generate-turn request)
+                   :resume (resume-turn request)
+                   :close (close-turn request))))]
     (if-let [projection-state (:seon.sci.eval/projection-state cluster)]
       (schema/call-with-projection-state projection-state pass)
       (pass))))

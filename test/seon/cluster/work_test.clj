@@ -23,6 +23,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
+            [my.agent :as my.agent]
             [seon.cluster.work :as work]
             [seon.schema]
             [seon.test-support :as support])
@@ -747,6 +748,12 @@
                      (work/deferred-triggers database agent-id)))
             "it is deferred, and the deferral is a derivation with
              nothing stored"))
+      (my.agent/settings! {:seon.config.run/max-episode-runs 3} connection agent-id)
+      (is (= :open (:seon.cluster.work/situation
+                    (work/next-agent-work @connection request)))
+          "the agent component override changes the live admission bound")
+      (my.agent/settings! {:seon.config.run/max-episode-runs 2} connection agent-id)
+      (is (nil? (work/next-agent-work @connection request)))
       (db/transact!
        connection
        [{:seon.cluster.message/id "human-2"

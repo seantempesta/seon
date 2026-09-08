@@ -68,6 +68,7 @@
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
             [seon.bootstrap :as bootstrap]
+            [seon.ai :as ai]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.run :as run]
             [seon.cluster.work :as work]
@@ -459,7 +460,9 @@
         database @connection
         run-id (held-run-id database agent-id process)
         timeout-ms
-        (or carried-timeout-ms
+        (or (:seon.config.agent/turn-completion-backstop-ms
+             (ai/agent-overlay database agent-id))
+            carried-timeout-ms
             (:seon.config.agent/turn-completion-backstop-ms
              (config/effective database cluster-name)))
         [value selected]
@@ -933,7 +936,8 @@
             turn-backstop-state (atom nil)
             turn-completion-backstop-ms
             (:seon.config.agent/turn-completion-backstop-ms
-             (config/effective @connection (:seon.cluster/name handle)))
+             (merge (config/effective @connection (:seon.cluster/name handle))
+                    (ai/agent-overlay @connection agent-id)))
             _ (async/>!! completion ::ready)
             agent-handle (assoc handle
                                 :seon.cluster.wake/armer-channel
