@@ -29,7 +29,8 @@
 (def ^:private project-root
   (.getCanonicalFile (io/file (System/getProperty "user.dir"))))
 
-(deftest dependency-source-digest-does-not-name-the-checkout
+(deftest ^{:seon.test/platform "Dependency cache identity excludes checkout locations."}
+  dependency-source-digest-does-not-name-the-checkout
   (let [root (doto (io/file project-root "tmp" (str "digest-" (random-uuid))) .mkdirs)
         left (io/file root "left.clj")
         right (io/file root "right.clj")
@@ -51,7 +52,8 @@
       (is (not= (digest left) (digest right)))
       (finally (test-support/delete-recursively! root)))))
 
-(deftest snapshot-digest-follows-selected-bytes
+(deftest ^{:seon.test/platform "Published bases follow the selected first-party bytes."}
+  snapshot-digest-follows-selected-bytes
   (let [root (doto (io/file project-root "tmp" (str "snapshot-digest-" (random-uuid))) .mkdirs)
         left (io/file root "left")
         right (io/file root "right")]
@@ -68,7 +70,8 @@
 
 (declare stop-process-tree!)
 
-(deftest consecutive-cache-invocations-reuse-the-published-base
+(deftest ^{:seon.test/platform "Consecutive launchers reuse the immutable published base."}
+  consecutive-cache-invocations-reuse-the-published-base
   (let [root (doto (io/file project-root "tmp" (str "base-reuse-" (random-uuid))) .mkdirs)
         supplied (System/getProperty "seon.test.published-base")
         published (or supplied (str (io/file root "standalone/base")))]
@@ -118,7 +121,8 @@
           (is (.isDirectory (io/file published "data/store"))))
       (finally (test-support/delete-recursively! root)))))
 
-(deftest published-base-retention-preserves-live-users-and-symlink-targets
+(deftest ^{:seon.test/platform "Cache reclamation preserves live users and external files."}
+  published-base-retention-preserves-live-users-and-symlink-targets
   (let [root (doto (io/file project-root "tmp" (str "base-retention-" (random-uuid))) .mkdirs)
         parent (doto (io/file root "cache") .mkdirs)
         sentinel (doto (io/file root "sentinel") .mkdirs)
@@ -1912,7 +1916,8 @@
                task runs alone")
           (is (= :parallel-only (::runner/parallel-failure confirmed))))))))
 
-(deftest selected-paths-overlay-head-for-preparation-and-every-worker
+(deftest ^{:seon.test/platform "Publication and workers consume the selected snapshot."}
+  selected-paths-overlay-head-for-preparation-and-every-worker
   (let [root (doto (io/file project-root "tmp" (str "runner-paths-" (random-uuid))) .mkdirs)
         script (io/file root "probe.sh")
         log (io/file root "output.txt")
