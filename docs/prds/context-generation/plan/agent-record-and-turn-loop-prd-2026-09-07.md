@@ -935,3 +935,25 @@ transcript namespace's hand-assembled entries, entry kinds, and any
 history-specific formatting are deleted; nothing assembles the history but
 the walk.
 
+
+
+### Record-render integration boundary (2026-09-08)
+
+Record-render stopped at a foreign shared-base preparation failure:
+`seon.id/symbol-in`'s unregistered `:char` contract. Details and partial
+commits are in
+[the landing note](../research/record-render-landing-2026-09-08.md).
+This records implementation dependencies, not a change to the owner rulings:
+
+- The protected SCI injection seam (`program-documentation`,
+  `program-doc-var`, `program-dir-var`, `install-program-doc!` in
+  `src/seon/sci/eval.clj`) must hand back data instead of printing its old
+  documentation lines. Record-render did not edit that seam.
+- Replacing the old history namespace requires changing its protected
+  bootstrap/run-schema consumers in the same integration. No compatibility
+  namespace or duplicate history assembly should be introduced.
+- The history walk and `my.turn` need the settled evaluation query
+  `seon.eval/of-agent`, stored shown-text field, read-evidence shape, and
+  live-object carrier from the evaluation owner. Those APIs were not yet
+  present when this lane stopped; the lane did not invent a parallel store
+  or rerun saved forms to stand in for them.

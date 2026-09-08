@@ -1,6 +1,6 @@
 ---
 type: research
-status: in-progress
+status: blocked
 date: 2026-09-08
 tags: [render, agent, test]
 ---
@@ -113,3 +113,51 @@ boundary is `seon.render.web/render-source-call`, calling the protected
 `seon.cluster.loop/preview-sources`; the evaluation pair belongs to
 `seon.repl`. Plan ownership and mutations use the existing `my.plan/rules`
 and `transact-plan!` writer path.
+
+## Stop boundary and final lane tally
+
+The lane stopped under the owner's concurrent-breakage rule. The completed
+focused invocation was `bin/test my.plan-test seon.render.ns-test` at snapshot
+`628025af69ae1d60c19e480b00cd02c50507c75c`. It exited **1 before running any
+subject tests**, during shared published-base preparation. The exception
+contains `{:schema :char, :form :char}` at `seon.schema/build-projection`.
+The snapshot's `src/seon/id.clj:45`, outside record-render ownership, declares
+that schema in `seon.id/symbol-in`. The same minimal Malli probe on default
+returned that rejection. No foreign files or sessions were edited or resumed.
+
+The runner was reaped: launcher 31932, runner 33036, exit 1 at
+2026-09-08T18:24:03Z. The retained evidence root is
+`tmp/test-runs/run.9bJmLJ`; the focused log is
+`tmp/record-render-subject-final.log`. The failure happened before a test
+counter existed: **zero executed subject tests**, not a passing zero-test
+suite. Bare `bin/test` and a final `bin/test --platform` were not attempted
+after this stop condition. The earlier platform tally remains 73 tests,
+398 assertions, zero failures/errors, and does not validate the final slice.
+
+Commits:
+
+- `57264aeb9` — identity entity pair and database-derived request profile.
+- `080628130` — compact plan API and data-dependent teaching source, with
+  updated canonical-fixture tests; verification blocked as above.
+
+Implementation paths touched by these slices:
+
+- `src/seon/render.clj` (request-profile only)
+- `src/seon/render/ns.clj`
+- `resources/seon/schemas/seon.cluster.agent.edn` (render properties only)
+- `test/seon/render/ns_test.clj`
+- `src/my/plan.clj`
+- `resources/seon/schemas/my.plan.edn`
+- `test/my/plan_test.clj`
+
+No completed browser proof is claimed. Ten-load no-write and reply-byte
+identity proofs were not rerun. The page still needs entity/component/derived
+block assembly, scalar and Cluster-section removal, wake/fault pairs, and
+read-only stored-history plus would-be-system-turn rendering. The custom
+history namespace has not been replaced. `my.turn`, data-only `dir`/`doc`,
+and compacting the older `item`/`items` read surfaces remain unfinished.
+The old `:my.plan/ready-items` collection render declaration remains and
+must be removed with its callers. Existing format helpers also remain.
+The plan source test currently checks exact source bytes, despite its older
+shared-reader name; it does not prove execution through SCI. This must be
+corrected and supplemented with the real SCI proof before acceptance.
