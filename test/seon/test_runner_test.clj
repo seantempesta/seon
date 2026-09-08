@@ -458,6 +458,25 @@
         (.close watcher)
         (stop-injected-worker! worker)))))
 
+(deftest a-worker-dying-during-re-arm-names-the-re-arm
+  (let [worker
+        (start-injected-worker!
+         "re-arm-death"
+         (str "import os, sys\n"
+              "sys.stdin.readline()\n"
+              "print('SEON_TEST_WORKER_EDN {:seon.test.runner/worker-event :re-arming :seon.test.runner/worker-id \\\"re-arm-death\\\" :seon.test.runner/exchange-id \\\"re-arm-death\\\"}', flush=True)\n"
+              "os._exit(17)\n"))]
+    (try
+      (let [result (execute-injected-task! worker (exchange-task "re-arm-death"))]
+        (assert-one-terminal-error! "re-arm-death" result ::runner/re-arm-failed)
+        (is (= 17 (get-in result [::runner/worker-exchange-result
+                                  ::runner/worker-exit])))
+        (is (= :worker-exchange
+               (#'runner/parallel-failure-classification result
+                {::runner/task-summary {::runner/fail-count 0
+                                         ::runner/error-count 0}}))))
+      (finally (stop-injected-worker! worker)))))
+
 (deftest checked-write-failure-is-one-attributed-task-result
   (let [worker (start-injected-worker! "write-failure"
                                        "import sys; sys.exit(19)\n")
@@ -1280,8 +1299,8 @@
         (is (zero? (.waitFor launched)) output)
         (is (str/includes? (slurp transcript)
                            (str "dev-cache-digest=" fake-cache-digest)))
-        (is (empty? (vec (.listFiles run-parent)))
-            "a successful structural probe leaves no retained run root"))
+        (is (= 1 (count (.listFiles run-parent)))
+            "only the earlier cache-refusal snapshot remains"))
       (finally
         (when (.exists fixture-root)
           (test-support/delete-recursively! fixture-root))))))
@@ -1746,3 +1765,83 @@
                worker loaded, so the only remaining difference is that the
                task runs alone")
           (is (= :parallel-only (::runner/parallel-failure confirmed))))))))
+
+(deftest selected-paths-overlay-head-for-preparation-and-every-worker
+  (let [root (doto (io/file project-root "tmp" (str "runner-paths-" (random-uuid))) .mkdirs)
+        script (io/file root "probe.sh")
+        log (io/file root "output.txt")
+        child (atom nil)]
+    (try
+      (spit script (str
+             "set -euo pipefail\n"
+             "origin=$1\n"
+             "fixture=$2\n"
+             "mkdir -p \"$fixture/bin\" \"$fixture/src/seon\" \"$fixture/test\" \"$fixture/.agents/skills\" \"$fixture/.claude\" \"$fixture/.clj-kondo\" \"$fixture/tmp/fake-bin\"\n"
+             "cd \"$fixture\"\n"
+             "cp \"$origin/bin/test\" bin/test\n"
+             "cp \"$origin/bin/_java-home-resolver\" bin/_java-home-resolver\n"
+             "cp \"$origin/src/seon/fs.clj\" src/seon/fs.clj\n"
+             "printf '{:paths [\"src\"]}\\n' > bb.edn\n"
+             "printf 'tmp/\\ntarget/\\n' > .gitignore\n"
+             "printf 'base\\n' > src/owned.txt\n"
+             "printf 'base\\n' > src/foreign.txt\n"
+             "printf 'base\\n' > src/deleted.txt\n"
+             "touch test/fixture_test.clj .agents/skills/fixture .clj-kondo/fixture\n"
+             "ln -s .agents/skills seon-skills\n"
+             "ln -s ../.agents/skills .claude/skills\n"
+             "ln -s \"$origin/reference-code\" reference-code\n"
+             "git init -q\n"
+             "git add -- bin src test bb.edn .gitignore .agents .claude .clj-kondo seon-skills reference-code\n"
+             "git -c user.name=\"$(git -C \"$origin\" config user.name)\" -c user.email=\"$(git -C \"$origin\" config user.email)\" commit -qm baseline\n"
+             "printf 'owned\\n' > src/owned.txt\n"
+             "printf 'foreign\\n' > src/foreign.txt\n"
+             "printf 'added\\n' > src/added.txt\n"
+             "rm src/deleted.txt\n"
+             "cat > tmp/fake-bin/clojure <<'SH'\n"
+             "#!/usr/bin/env bash\n"
+             "set -euo pipefail\n"
+             "test \"$(cat src/owned.txt)\" = owned\n"
+             "test \"$(cat src/foreign.txt)\" = base\n"
+             "test \"$(cat src/added.txt)\" = added\n"
+             "test ! -e src/deleted.txt\n"
+             "if [ \"$1\" = -T:dev-cache ]; then\n"
+             "  printf '#:seon.dev-cache{:digest \"%s\", :path \"%s\"}\\n' \"$SEON_FAKE_CACHE_DIGEST\" \"$SEON_FAKE_CACHE_PATH\"\n"
+             "  exit 0\n"
+             "fi\n"
+             "for argument in \"$@\"; do\n"
+             "  if [ \"$argument\" = --prepare-base ]; then exit 0; fi\n"
+             "done\n"
+             "for worker in workers/*; do\n"
+             "  test \"$(cat \"$worker/src/owned.txt\")\" = owned\n"
+             "  test \"$(cat \"$worker/src/foreign.txt\")\" = base\n"
+             "  test \"$(cat \"$worker/src/added.txt\")\" = added\n"
+             "  test ! -e \"$worker/src/deleted.txt\"\n"
+             "done\n"
+             "echo SNAPSHOT_VERIFIED\n"
+             "SH\n"
+             "printf '#!/usr/bin/env bash\\necho 2\\n' > tmp/fake-bin/getconf\n"
+             "chmod +x tmp/fake-bin/*\n"
+             "export PATH=\"$fixture/tmp/fake-bin:$PATH\"\n"
+             "export SEON_FAKE_CACHE_DIGEST=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+             "export SEON_FAKE_CACHE_PATH=\"$fixture/tmp/cache/$SEON_FAKE_CACHE_DIGEST\"\n"
+             "mkdir -p \"$SEON_FAKE_CACHE_PATH\"\n"
+             "bin/test --paths src/owned.txt src/added.txt src/deleted.txt -- seon.fixture-test\n"))
+      (let [process (.start (doto (ProcessBuilder. ^java.util.List
+                                 ["/bin/bash" (.getPath script)
+                                  (.getPath project-root) (.getPath (io/file root "checkout"))])
+                             (.redirectErrorStream true)
+                             (.redirectOutput log)))]
+        (reset! child process)
+        (is (.waitFor process test-support/event-backstop-seconds TimeUnit/SECONDS)
+            "the snapshot launcher must terminate within the test bound")
+        (when-not (.isAlive process)
+          (let [output (slurp log)]
+            (is (zero? (.exitValue process)) output)
+            (is (str/includes? output "SNAPSHOT_VERIFIED") output)
+            (is (str/includes? output "src/owned.txt") output)
+            (is (str/includes? output "src/added.txt") output)
+            (is (str/includes? output "src/deleted.txt") output)
+            (is (not (str/includes? output "src/foreign.txt")) output))))
+      (finally
+        (when-let [process @child] (stop-process-tree! process))
+        (test-support/delete-recursively! root)))))

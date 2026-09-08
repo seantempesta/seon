@@ -53,6 +53,7 @@ Usage: bin/test [--all|--full|--platform|--changed PATH]...
   --all           platform tier, then every non-long test
   --full          platform tier, then every test (SEON_TEST_FULL=1 too)
   --platform      the declared moving-part regressions alone
+  --paths FILE... snapshot HEAD plus these working-tree files; use -- before namespaces
   --changed PATH  platform tier, then the tests reaching PATH (repeatable)
 
 An explicit namespace selection always runs every test in those namespaces
@@ -82,6 +83,7 @@ requested_mode=
 explicit_selection=0
 namespaces=()
 changed_paths=()
+snapshot_paths=()
 
 set_mode() {
   if [ -n "$requested_mode" ] && [ "$requested_mode" != "$1" ]; then
@@ -117,6 +119,28 @@ while [ $# -gt 0 ]; do
     --platform)
       set_mode platform
       shift
+      ;;
+    --paths)
+      shift
+      count_before=${#snapshot_paths[@]}
+      while [ $# -gt 0 ] && [[ "$1" != --* ]]; do
+        case "$1" in
+          /*|..|../*|*/../*|*/..|./*|*/./*|.git|.git/*|reference-code|reference-code/*)
+            echo "bin/test: --paths requires literal repository-relative first-party files: $1" >&2
+            exit 64 ;;
+        esac
+        if [ -d "$1" ] || { [ ! -e "$1" ] && [ ! -L "$1" ] &&
+          ! GIT_LITERAL_PATHSPECS=1 git ls-files --error-unmatch -- "$1" >/dev/null 2>&1; }; then
+          echo "bin/test: --paths requires an existing file or tracked deletion: $1" >&2
+          exit 64
+        fi
+        snapshot_paths+=("$1")
+        shift
+      done
+      if [ ${#snapshot_paths[@]} -eq "$count_before" ]; then
+        echo "bin/test: --paths requires at least one file" >&2
+        exit 64
+      fi
       ;;
     --changed)
       if [ $# -lt 2 ]; then
@@ -164,19 +188,6 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-if [ ${#namespaces[@]} -gt 0 ]; then
-  :
-else
-  while IFS= read -r file; do
-    ns=${file#test/}
-    ns=${ns%.clj}
-    ns=${ns%.cljc}
-    ns=${ns//\//.}
-    ns=${ns//_/-}
-    namespaces+=("$ns")
-  done < <(find test -type f \( -name '*_test.clj' -o -name '*_test.cljc' \) | sort)
-fi
-
 if [ "$explicit_selection" -eq 1 ]; then
   if [ -n "$requested_mode" ]; then
     echo "bin/test: an explicit namespace selection takes no tier flag" >&2
@@ -200,44 +211,12 @@ else
   esac
 fi
 
-if [ ${#namespaces[@]} -eq 0 ]; then
-  echo "bin/test: no test namespaces found under test/" >&2
-  exit 1
-fi
-
 if [ "$result_cluster" = "default" ]; then
   echo "bin/test: refusing to write result facts into the default cluster" >&2
   exit 2
 fi
 
 git_sha=$(git rev-parse HEAD)
-
-if ! dev_cache_output=$(clojure -T:dev-cache ensure-cache 2>&1); then
-  printf '%s\n' "$dev_cache_output" >&2
-  echo "bin/test: dependency cache freshness check failed" >&2
-  exit 1
-fi
-printf '%s\n' "$dev_cache_output"
-dev_cache_result=$(printf '%s\n' "$dev_cache_output" | tail -n 1)
-if ! dev_cache_digest=$(bb -e \
-  '(require (quote [clojure.edn :as edn]))
-   (print (:seon.dev-cache/digest
-           (edn/read-string (first *command-line-args*))))' \
-  "$dev_cache_result") ||
-   ! dev_cache_path=$(bb -e \
-  '(require (quote [clojure.edn :as edn]))
-   (print (:seon.dev-cache/path
-           (edn/read-string (first *command-line-args*))))' \
-  "$dev_cache_result"); then
-  echo "bin/test: dependency cache returned no readable selection" >&2
-  exit 1
-fi
-if ! [[ "$dev_cache_digest" =~ ^[0-9a-f]{64}$ ]] ||
-   [ ! -d "$dev_cache_path" ] ||
-   [ "${dev_cache_path##*/}" != "$dev_cache_digest" ]; then
-  echo "bin/test: dependency cache digest mismatch: digest=$dev_cache_digest path=$dev_cache_path" >&2
-  exit 1
-fi
 
 # EVERY EVIDENCE-WIDENING TIER RECORDS. Result facts are per-test and total —
 # `record-tx` replaces one test row's complete latest result — so a tier that
@@ -346,12 +325,11 @@ bb --config "$source_root/bb.edn" -e '
 process_start=$(ps -p "$$" -o lstart= | sed 's/^[[:space:]]*//')
 suite_start=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 run_root=$(mktemp -d "$run_parent/run.XXXXXX")
-printf 'pid=%s process-start=%s suite-start=%s git=%s dev-cache-digest=%s selection=%s\n' \
+printf 'pid=%s process-start=%s suite-start=%s git=%s selection=%s\n' \
   "$$" \
   "$process_start" \
   "$suite_start" \
   "$git_sha" \
-  "$dev_cache_digest" \
   "$selection" >"$run_root/test-run.txt"
 
 populate_checkout_root() {
@@ -359,6 +337,9 @@ populate_checkout_root() {
   mkdir -p "$target_root/data" "$target_root/logs" \
     "$target_root/target" "$target_root/tmp"
   while IFS= read -r entry; do
+    if [ ! -e "$source_root/$entry" ] && [ ! -L "$source_root/$entry" ]; then
+      continue
+    fi
     case "$entry" in
       data|logs|target|tmp) ;;
       .clj-kondo|bin|config|resources|script|src|test)
@@ -370,33 +351,105 @@ populate_checkout_root() {
         ;;
       *) ln -s "$source_root/$entry" "$target_root/$entry" ;;
     esac
-  done < <(git -C "$source_root" ls-files | awk -F/ '{print $1}' | sort -u)
+  done < <({ git -C "$source_root" ls-files; printf '%s\n' "${snapshot_paths[@]}"; } | awk -F/ 'NF {print $1}' | sort -u)
 
   ln -s "$source_root/.git" "$target_root/.git"
   if [ -e "$source_root/.env" ]; then
     ln -s "$source_root/.env" "$target_root/.env"
   fi
-  ln -s "$dev_cache_path" "$target_root/target/dev-dependency-classes"
 }
 
-populate_checkout_root "$run_root"
-
-# WHAT THIS GATE IS ACTUALLY TESTING, SAID OUT LOUD. The snapshot is the
-# WORKING TREE, not HEAD, and several lanes share this tree: a gate can run
-# against another lane's half-finished edit and report its reds against
-# whoever ran it. Silence about that is the same disease as every other check
-# in this project that reads absence of signal as health, so the first-party
-# paths differing from HEAD are named before the first JVM starts.
-# (docs/seon/issues/bin-test-snapshots-every-concurrent-lanes-uncommitted-edits.md)
-if working_tree_changes=$(git -C "$source_root" status --porcelain -- \
-  .clj-kondo bin config resources script src test 2>/dev/null); then
-  if [ -n "$working_tree_changes" ]; then
-    changed_count=$(printf '%s\n' "$working_tree_changes" | wc -l | tr -d ' ')
-    echo "bin/test: SNAPSHOT IS THE WORKING TREE, not $git_sha:" \
-      "$changed_count first-party path(s) differ from HEAD in this run:"
-    printf '%s\n' "$working_tree_changes" | sed 's/^/bin\/test:   /'
-    echo "bin/test: a red in a path you do not own may belong to another lane"
+if [ ${#snapshot_paths[@]} -gt 0 ]; then
+  git archive "$git_sha" | tar -x -C "$run_root"
+  # Git archives omit submodule contents. Dependencies keep their existing owner.
+  rm -rf "$run_root/reference-code"
+  ln -s "$source_root/reference-code" "$run_root/reference-code"
+  for entry in "${snapshot_paths[@]}"; do
+    # Refuse a parent symlink: an overlay must stay inside this snapshot.
+    parent=$(dirname "$entry")
+    while [ "$parent" != . ]; do
+      if [ -L "$run_root/$parent" ]; then
+        echo "bin/test: overlay parent is a symlink: $entry" >&2
+        exit 64
+      fi
+      parent=$(dirname "$parent")
+    done
+    rm -f "$run_root/$entry"
+    if [ -e "$source_root/$entry" ] || [ -L "$source_root/$entry" ]; then
+      mkdir -p "$run_root/$(dirname "$entry")"
+      cp -Pp "$source_root/$entry" "$run_root/$entry"
+    fi
+  done
+  ln -s "$source_root/.git" "$run_root/.git"
+  if [ -e "$source_root/.env" ]; then
+    ln -s "$source_root/.env" "$run_root/.env"
   fi
+  mkdir -p "$run_root/data" "$run_root/logs" "$run_root/target" "$run_root/tmp"
+else
+  populate_checkout_root "$run_root"
+fi
+
+# Compare the bytes actually copied, including untracked files, against HEAD.
+echo "bin/test: snapshot differences from HEAD $git_sha:"
+git -C "$source_root" --work-tree="$run_root" diff --name-status "$git_sha" -- \
+  . ':!reference-code' | while IFS= read -r entry; do
+    printf 'bin/test:   %s\n' "$entry"
+  done
+git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standard -- \
+  . ':!data' ':!logs' ':!target' ':!tmp' ':!reference-code' ':!test-run.txt' | while IFS= read -r entry; do
+    printf 'bin/test:   A %s\n' "$entry"
+  done
+echo "bin/test: end snapshot differences"
+
+# The dependency preparation and all workers consume this same snapshot.
+rmdir "$run_root/target"
+mkdir -p "$source_root/target"
+ln -s "$source_root/target" "$run_root/target"
+cd "$run_root"
+if ! dev_cache_output=$(clojure -T:dev-cache ensure-cache 2>&1); then
+  printf '%s\n' "$dev_cache_output" >&2
+  echo "bin/test: dependency cache freshness check failed" >&2
+  exit 1
+fi
+printf '%s\n' "$dev_cache_output"
+dev_cache_result=$(printf '%s\n' "$dev_cache_output" | tail -n 1)
+if ! dev_cache_digest=$(bb -e \
+  '(require (quote [clojure.edn :as edn]))
+   (print (:seon.dev-cache/digest
+           (edn/read-string (first *command-line-args*))))' \
+  "$dev_cache_result") ||
+   ! dev_cache_path=$(bb -e \
+  '(require (quote [clojure.edn :as edn]))
+   (print (:seon.dev-cache/path
+           (edn/read-string (first *command-line-args*))))' \
+  "$dev_cache_result"); then
+  echo "bin/test: dependency cache returned no readable selection" >&2
+  exit 1
+fi
+if ! [[ "$dev_cache_digest" =~ ^[0-9a-f]{64}$ ]] ||
+   [ ! -d "$dev_cache_path" ] ||
+   [ "${dev_cache_path##*/}" != "$dev_cache_digest" ]; then
+  echo "bin/test: dependency cache digest mismatch: digest=$dev_cache_digest path=$dev_cache_path" >&2
+  exit 1
+fi
+
+printf 'dev-cache-digest=%s\n' "$dev_cache_digest" >>"$run_root/test-run.txt"
+rm "$run_root/target"
+mkdir "$run_root/target"
+ln -s "$dev_cache_path" "$run_root/target/dev-dependency-classes"
+if [ "$explicit_selection" -eq 0 ]; then
+  namespaces=()
+  while IFS= read -r file; do
+    ns=${file#test/}; ns=${ns%.clj}; ns=${ns%.cljc}
+    ns=${ns//\//.}; ns=${ns//_/-}
+    namespaces+=("$ns")
+  done < <(find test -type f \( -name '*_test.clj' -o -name '*_test.cljc' \) | sort)
+fi
+cd "$source_root"
+
+if [ ${#namespaces[@]} -eq 0 ]; then
+  echo "bin/test: no test namespaces found under test/" >&2
+  exit 1
 fi
 
 logical_processors=$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)
@@ -407,6 +460,8 @@ worker_count=$((logical_processors / 2))
 if [ "$worker_count" -lt 1 ]; then
   worker_count=1
 fi
+original_source_root=$source_root
+source_root=$run_root
 worker_parent="$run_root/workers"
 mkdir -p "$worker_parent"
 for worker_number in $(seq 1 "$worker_count"); do
@@ -414,6 +469,10 @@ for worker_number in $(seq 1 "$worker_count"); do
 done
 populate_checkout_root "$worker_parent/serial"
 populate_checkout_root "$worker_parent/confirmation"
+source_root=$original_source_root
+for worker_root in "$worker_parent/"*; do
+  ln -s "$dev_cache_path" "$worker_root/target/dev-dependency-classes"
+done
 shared_published_base="$run_root/shared-published-base"
 
 if [ -z "$result_root" ]; then

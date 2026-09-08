@@ -1284,7 +1284,15 @@
 
           :run
           (do
+            (write-protocol! writer
+                             {::worker-event :re-arming
+                              ::worker-id worker-id
+                              ::exchange-id (::exchange-id command)})
             (reassert-contracts! arming worker-id)
+            (write-protocol! writer
+                             {::worker-event :armed
+                              ::worker-id worker-id
+                              ::exchange-id (::exchange-id command)})
             ;; THE WORKER MEASURES WHAT A TASK LEAVES BEHIND. A pooled worker
             ;; runs many tests per JVM, and the reds that only appear under
             ;; the whole gate are tests asserting an EARLIER task's leftovers.
@@ -1697,7 +1705,7 @@
        (= (::exchange-id expected) (::exchange-id reply))))
 
 (defn- read-exchange-reply!
-  [worker expected exit-future]
+  [worker expected exit-future phase]
   (loop []
     (if-let [line (.readLine ^BufferedReader (::worker-reader worker))]
       (if (str/starts-with? line protocol-prefix)
@@ -1705,12 +1713,17 @@
               (try
                 (edn/read-string (subs line (count protocol-prefix)))
                 (catch Throwable _ ::unparseable-worker-reply))]
-          (if (and (map? reply) (matching-worker-reply? expected reply))
-            {::exchange-terminal :reply ::exchange-reply reply}
-            (do
-              (append-worker-line! worker
-                                   (str "UNMATCHED_WORKER_REPLY " line))
-              (recur))))
+          (if (and (map? reply)
+                   (= (::worker-id expected) (::worker-id reply))
+                   (= (::exchange-id expected) (::exchange-id reply))
+                   (#{:re-arming :armed} (::worker-event reply)))
+            (do (reset! phase (::worker-event reply)) (recur))
+            (if (and (map? reply) (matching-worker-reply? expected reply))
+              {::exchange-terminal :reply ::exchange-reply reply}
+              (do
+                (append-worker-line! worker
+                                     (str "UNMATCHED_WORKER_REPLY " line))
+                (recur)))))
         (do
           (append-worker-line! worker line)
           (recur)))
@@ -1772,6 +1785,7 @@
              :seon.error/kind ::worker-retired
              ::missing-worker-event expected-event)
       (let [executor (Executors/newVirtualThreadPerTaskExecutor)
+            phase (atom :dispatched)
             exact-exit (.onExit process)
             exit-future
             (.thenApply
@@ -1784,7 +1798,7 @@
             (CompletableFuture/supplyAsync
              (reify java.util.function.Supplier
                (get [_]
-                 (read-exchange-reply! worker expected exit-future)))
+                 (read-exchange-reply! worker expected exit-future phase)))
              executor)
             bound-future
             (CompletableFuture/supplyAsync
@@ -1808,7 +1822,9 @@
                     (.get
                      (CompletableFuture/anyOf
                       (into-array CompletableFuture
-                                  [reply-future exit-future bound-future])))]
+                                  ;; Drain ordered protocol evidence before
+                                  ;; reporting the process exit it precedes.
+                                  [reply-future bound-future])))]
                 (case terminal
                   :reply (::exchange-reply outcome)
                   :exit
@@ -1817,7 +1833,10 @@
                     (assoc dispatch
                            ::dispatch-journal journal
                            ::worker-exchange-failure true
-                           :seon.error/kind ::worker-exited
+                           :seon.error/kind (if (= :re-arming @phase)
+                                              ::re-arm-failed
+                                              ::worker-exited)
+                           ::worker-phase @phase
                            ::worker-exit (::worker-exit outcome)
                            ::worker-error-log (::worker-error-log worker)
                            ::missing-worker-event expected-event))
