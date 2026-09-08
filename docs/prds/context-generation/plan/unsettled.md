@@ -1711,3 +1711,15 @@ orchestrator); cross-cluster writes not refused (BLOCKER, lane
 symbols; `declared-program-namespaces` silent `[]`; the P1 dial refusal
 takes down the whole MCP surface (seam too wide — for the turn lane); the
 `phase` close-on-refusal claim is UNPROVEN (the turn lane must prove it).
+
+Lane 2 `listened-attributes` LANDED (`c04765e10..c3ea827db`): wake set
+derived from `:seon.wake/listen|opens-turn?|inside` schema-row facts;
+both hand lists and the agent-id wake deleted; answered-by-`:t` live
+(double-pay dead); `seon.schedule.fire` accreted with `opens-turn? false`;
+trigger/opening-commit-id left as provenance for step 3 (seven readers).
+Filed: a turn that dies before replying still answers its wakes → PRD r8:
+ONLY A TURN HOLDING A REPLY ANSWERS. Custody lane refuted its premise
+(writes were refused; the runner's re-arm killed the worker — blocker
+filed). Dev JVM restarted + converged. Running: `verify-listened-attributes`
+(read-only), `instrumented-gate-backlog-2`. Step 3 (turn + loop + rename)
+launches ALONE after both.
