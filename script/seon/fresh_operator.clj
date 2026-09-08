@@ -906,8 +906,13 @@
         absent-count
         (reduce + (map (comp count :seon.test.status/absent) statuses))]
     (str "test evidence: UNKNOWN for " namespace-count " namespaces ("
-         absent-count " current tests have no recorded results); run bin/test; "
-         "details: bin/seon status --verbose")))
+         absent-count " current tests have no recorded result row on the "
+         ":test-results branch). Evidence is PER TEST and is written by the "
+         "tier that ran it, so a test no recording gate has run since the "
+         "last reset has no row and cannot be reported green or red; "
+         "`bin/test --all` runs every non-long test and records all of them, "
+         "`bin/test --full` adds the declared-long live-boot tests. "
+         "Details: bin/seon status --verbose")))
 
 (defn- parse-status-arguments
   [arguments]
