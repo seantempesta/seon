@@ -43,3 +43,24 @@ a compiled form, so it is loud only because the referenced var happens to
 be private — a public one would silently store the function object as a
 config fact. The fix is the same as above: send data, resolve nothing on the
 operator side.
+
+## 2026-09-08 — implementation, verification incomplete
+
+The operator now sends an absolute path string to the public `seon.config/apply!`
+file arity and gets the connection through public `seon.operator/connection`.
+Manifest symbols never enter compiled prepl source. Paths resolve from the
+working directory, including the shared reader used by `start --config`.
+
+A live intermediate probe also exposed the shipped-document versus sparse-overlay
+boundary: the shipped `:seon.config/available-processors` decision and
+initialization rows are not sparse-overlay inputs. The config owner now recognizes
+the shipped document by value and reapplies defaults through its existing compiler;
+other selected files retain sparse-overlay admission.
+
+The recurring live operator drill now applies `config/default.edn`, reads back
+the complete desired config row, and checks development adoption convergence.
+It has NOT run: the subject gate exited 1 before launching tests during concurrent
+runner-paths edits. Development adoption independently refused because source
+changed during adoption. Keep this issue open until the required gates and live
+apply/adopt proof pass. Evidence and unfinished work:
+[config-apply landing](../../prds/context-generation/research/config-apply-landing-2026-09-08.md).

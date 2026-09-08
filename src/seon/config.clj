@@ -502,18 +502,31 @@
     result))
 
 (defn apply!
-  "Compile once and exact-reconcile the one desired config row."
+  "Compile once and exact-reconcile the one desired config row.
+
+  With a path, read one selected EDN document. The shipped document selects
+  defaults and their initialization rows; any other document is a sparse
+  overlay and obeys the same admission rules as an in-memory manifest."
   {:malli/schema
-   [:=> [:cat :seon.config/apply-request] :seon.reconcile/result]}
-  [request]
-  (apply-compiled!
-   (:seon.db/connection request)
-   (compile-manifest
-    (select-keys
-     request
-     [:seon.config/manifest
-      :seon.config/environment
-      :seon.boot/cluster-name]))))
+   [:function
+    [:=> [:cat :seon.config/apply-request] :seon.reconcile/result]
+    [:=> [:cat :seon.config/apply-request :seon.config/path]
+     :seon.reconcile/result]]}
+  ([request]
+   (apply-compiled!
+    (:seon.db/connection request)
+    (compile-manifest
+     (select-keys
+      request
+      [:seon.config/manifest
+       :seon.config/environment
+       :seon.boot/cluster-name]))))
+  ([request path]
+   (let [document (read-edn-map path)
+         manifest (if (= document (default-document))
+                    {}
+                    (validate-layer (schema.edn/packaged-forms) document))]
+     (apply! (assoc request :seon.config/manifest manifest)))))
 
 (declare effective-in)
 

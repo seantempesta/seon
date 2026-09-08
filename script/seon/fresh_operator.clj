@@ -491,11 +491,8 @@
              {:seon.fresh-operator/arguments arguments}))))
 
 (defn- sparse-manifest
-  [root path]
-  (let [selected (fs/path path)
-        selected (if (fs/absolute? selected)
-                   selected
-                   (fs/path root selected))]
+  [path]
+  (let [selected (fs/absolutize path)]
     (when-not (fs/regular-file? selected)
       (fail! "The selected config manifest does not exist."
              {:seon.config/path (str selected)}))
@@ -2042,7 +2039,7 @@
   [root arguments]
   (let [{:seon.fresh-operator/keys [name config-path]}
         (parse-start-arguments arguments)
-        manifest (if config-path (sparse-manifest root config-path) {})
+        manifest (if config-path (sparse-manifest config-path) {})
         silence-ms (operator-silence-backstop-ms manifest)
         truth
         (reconciled-truth!
@@ -2162,19 +2159,12 @@
             (print-started! root name value)))))))
 
 (defn- config-apply-form
-  [name manifest]
+  [name path]
   (pr-str
-   `(let [instances# @@(ns-resolve 'seon.cluster
-                                   (symbol "running-instances"))
-          instance# (get instances# ~name)]
-      (when-not instance#
-        (throw (ex-info "The cluster is not running."
-                        {:seon.boot/cluster-name ~name})))
-      (seon.config/apply!
-       {:seon.db/connection
-        (:seon.boot/cluster-connection instance#)
-        :seon.boot/cluster-name ~name
-        :seon.config/manifest ~manifest}))))
+   `(seon.config/apply!
+     {:seon.db/connection (seon.operator/connection ~name)
+      :seon.boot/cluster-name ~name}
+     ~path)))
 
 (defn- config!
   [root arguments]
@@ -2183,7 +2173,7 @@
            {:seon.fresh-operator/arguments arguments}))
   (let [{:seon.fresh-operator/keys [name config-path]}
         (parse-config-apply-arguments (vec (rest arguments)))
-        manifest (sparse-manifest root config-path)
+        path (str (fs/absolutize config-path))
         truth (reconciled-truth! root)
         row (require-live-row! truth name)
         advertisement
@@ -2192,7 +2182,7 @@
                    {:seon.fresh-operator/name name}))
         result (terminal-value
                 (prepl-eval! advertisement
-                             (config-apply-form name manifest)))]
+                             (config-apply-form name path)))]
     (println (str "● " name " config applied " result))))
 
 (defn- export-destination

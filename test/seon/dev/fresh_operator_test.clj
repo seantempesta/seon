@@ -903,6 +903,16 @@
          (operator-private-value
           'parse-stop-arguments ["--force" "beta"]))))
 
+(deftest config-manifest-paths-use-the-working-directory
+  (let [manifest (edn/read-string (slurp config/default-manifest-path))]
+    (is (= manifest
+           (operator-private-value 'sparse-manifest
+                                   config/default-manifest-path)))
+    (is (= manifest
+           (operator-private-value
+            'sparse-manifest
+            (.getCanonicalPath (io/file config/default-manifest-path)))))))
+
 (deftest destructive-stop-selection-requires-one-unambiguous-cluster
   (let [row
         (fn [name]
@@ -1113,7 +1123,38 @@
                  `(some?
                    (:seon.boot/ready-ms
                     (get @seon.operator.runtime/running-instances ~name))))))
-            (::output started)))
+            (::output started))
+        (let [applied (run-operator root "config" "apply" name
+                                    "config/default.edn")]
+          (is (= 0 (::exit applied)) (::output applied))
+          (is (= "true"
+                 (prepl-eval
+                  advertisement
+                  (pr-str
+                   `(let [connection# (seon.operator/connection ~name)
+                          expected# (:seon.config/desired-row
+                                     (seon.config/compile-manifest
+                                      {:seon.boot/cluster-name ~name}))
+                          actual# (seon.db/pull
+                                   @connection# '[*]
+                                   [:seon.config/cluster ~name])]
+                      (= expected# (select-keys actual# (keys expected#)))))))
+              "every shipped decision, including symbols, survives the prepl boundary")
+          (let [adopted (run-operator root "init" "--dev" name)]
+            (is (= 0 (::exit adopted)) (::output adopted))
+            (is (= "true"
+                   (prepl-eval
+                    advertisement
+                    (pr-str
+                     `(let [instance# (get @seon.operator.runtime/running-instances ~name)
+                            connection# (seon.operator/connection ~name)]
+                        (= (:seon.source/commit-id
+                            (seon.db/pull @connection# '[*]
+                                          [:seon.cluster/name ~name]))
+                           (:seon.source/commit-id
+                            (seon.cluster.source/current
+                             (:seon.store/store instance#))))))))
+                "development adoption converges after config apply"))))
       (finally
         (try
           (run-operator root "down" "--force")
