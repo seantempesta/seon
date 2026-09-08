@@ -90,9 +90,12 @@ Checks:
   These prove live reachability, not new turn behavior or browser repaint.
 
 The bundled skill validator was run for all nine edited skills through
-`uv run --with pyyaml`. All nine stop at its rejection of the repository-
-required top-level type/status fields. This is a validation limit, not a
-skill-green claim.
+`uv run --with pyyaml`. All nine pass after retaining the supported
+name/description frontmatter. The repository Markdown hook still rejects
+those valid skill files under its generic document type/status rule.
+The exact conflict and its reproduction are recorded in the issue below.
+The frontmatter correction checkpoint is `d2ad98c58`; the byte counts
+above remain the explicitly dated pre-correction measurement.
 
 ## Remaining authority boundaries
 
