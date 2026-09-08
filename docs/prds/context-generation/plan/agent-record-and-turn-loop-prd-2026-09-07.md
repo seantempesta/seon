@@ -707,3 +707,15 @@ per commit, leaving a one-line typed refusal where a live caller remains
 still needs to exist announces itself on the live cluster instead of in
 argument.
 
+## 12. Proof standard for the loop (owner, 2026-09-08)
+
+No live model turns and no context submitted to a provider while the record
+is being ported. The loop is proven by VIRTUAL TURNS: N turns through the
+ordinary per-agent proc, each reply a fixture of no-op forms, nothing else
+running between turns. Required: three transactions per turn; the SCI
+context computed correctly and ISOLATED — agent A's def visible in A's next
+turn and never in B's, never in the base context; handles bind per agent; a
+third agent created mid-run sees neither ("don't cross the streams"); boot
+closes an open run and the next virtual turn proceeds; two projections of
+one agent's context are byte-identical.
+
