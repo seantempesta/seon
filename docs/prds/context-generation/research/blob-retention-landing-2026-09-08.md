@@ -1,6 +1,6 @@
 ---
 type: research
-status: implemented; verification blocked
+status: implemented; final gates running
 date: 2026-09-08
 tags: [blob, storage, runtime]
 ---
@@ -9,8 +9,8 @@ tags: [blob, storage, runtime]
 
 Implemented the root-wide 512 MiB budget, oldest-unreferenced-first reclamation,
 and registration through the existing scheduled maintenance portfolio. The
-private-function boundary is resolved. Verification remains incomplete because
-the second focused gate rejected another lane's plan renderer arity change.
+private-function boundary is resolved. The path-scoped subject gate is green,
+and the existing scheduled task has completed successfully on default.
 
 ## Implementation
 
@@ -39,7 +39,7 @@ The new regression uses the canonical published file-store fixture, real blob
 writes, explicit Konserve timestamps, a sibling Datahike branch, and actual
 reference retraction. It checks oldest-first deletion, sibling-reference
 survival, idempotence, excess reporting, and reclamation when only historical
-references remain. Its corrected version has not completed the gate.
+references remain. Its corrected version passed the path-scoped subject gate.
 The schedule regression now checks connection identity and excludes that opaque
 value from request-map equality.
 
@@ -47,7 +47,7 @@ The scheduled-error regression exposed a second defect: Datahike rejected an
 Integer evidence byte count inside its transaction function. `seon.error/prepare`
 now constructs that stored count as a Long. Live error evidence named
 `:seon.error/data-size`, value 19776, and the required `java.lang.Long` class.
-The corrected constructor still needs its post-change gate.
+The corrected constructor passed the subject gate, including `seon.error-test`.
 
 ## Grounding and measurements
 
@@ -75,7 +75,62 @@ sizes = [os.stat(os.path.join(root, name), follow_symlinks=False).st_size
 print({"files": len(sizes), "apparent_bytes": sum(sizes)})
 ```
 
-## Proofs and exact gate boundary
+## Proofs
+
+The owner restart and path-scoped gating rulings supersede the earlier stop
+record below. Implementation commit: `e9e15a585`.
+
+`bin/test --paths` over the nine implementation/test/config paths listed below,
+followed by `-- seon.blob.retention-test seon.blob-test seon.schedule-test
+seon.cluster.registry-test seon.error-test`, ran **62 tests / 307 assertions /
+0 failures / 0 errors**. Its isolated snapshot was HEAD
+`6626cbccbef524dcfcf7d0a4cb411e2a8d5ddf51`, with no overlay differences.
+
+The gate path set is:
+
+```text
+config/default.edn
+resources/seon/schemas/seon.config.blob.edn
+resources/seon/schemas/seon.blob.retention.edn
+src/seon/blob/retention.clj
+src/seon/cluster/registry.clj
+src/seon/schedule.clj
+src/seon/error.clj
+test/seon/blob/retention_test.clj
+test/seon/schedule_test.clj
+```
+
+The bare selector uses `bin/test --paths <these paths>`; platform uses
+`bin/test --platform --paths <these paths>`. Neither uses `--all` or `--full`.
+
+The reproducible [scheduled proof](blob_retention_scheduled_proof_2026_09_08.clj)
+uses the real default connection, installs a Datahike listener before querying,
+and wakes the existing schedule by changing its recurrence to an equivalent
+expression, restoring it in `finally`. The completion wait uses the declared
+30,000 ms operator event bound. No direct handler call supplies this proof.
+MCP JVM mode, without root or cluster arguments, returned:
+
+```clojure
+{:seon.schedule.task/id "root/maintenance/blob-retention"
+ :seon.blob.retention/scheduled-proof
+ ["maintenance-receipt/[\"root/maintenance/blob-retention\" #inst \"2026-09-08T18:58:00.000-00:00\"]"
+  "2026-09-08T18:58:29Z" 369679 369679 0]}
+```
+
+The row records completion time, bytes before, bytes after, and deletion count.
+This exercises loaded code after partial in-place adoption on default PID
+14049. It proves successful scheduling and settlement, not complete source
+convergence: full adoption encountered concurrent schema edits first moving
+`:seon.agent/plan`, then an invalid `[:seon.db/ref {:seon.db/component true}]`
+form. Neither foreign file was changed by this lane.
+The follow-up database query confirmed budget `536870912` and restored
+expression `"* * * * *"`.
+
+A bounded HTTP request to `http://127.0.0.1:7994` timed out with zero bytes;
+browser health is unproven. The observation has its own
+[issue](../../../seon/issues/default-web-request-times-out-during-partial-adoption.md).
+
+### Earlier failures and their repairs
 
 MCP JVM mode used no root/cluster arguments. Queries on default confirmed the
 536870912 config fact and new scheduled task. Its first invocation at
@@ -105,11 +160,8 @@ and `:440`: **my.plan/render-plan-html is called with 2 args but expects 1**.
 boundary blocked development publication. It is independently recorded in
 [the plan renderer issue](../../../seon/issues/plan-renderer-arity-change-blocks-development-publication.md).
 
-Per the assignment's explicit stop-on-foreign-gate-breakage rule, no further
-gate was started after that result. **Bare bin/test and bin/test --platform
-remain unrun.** The next focused gate must also include `seon.error-test`, then
-run bare and platform gates and prove successful scheduled completion on
-default. No provider call or cluster refork was performed by this lane.
+The owner subsequently replaced that stop rule with restart and path-scoped
+gating. No provider call or cluster refork was performed by this lane.
 
 ## Files and cleanup
 
@@ -118,10 +170,10 @@ Files touched: `config/default.edn`;
 `resources/seon/schemas/seon.blob.retention.edn`;
 `src/seon/blob/retention.clj`; `src/seon/cluster/registry.clj`;
 `src/seon/schedule.clj`; `src/seon/error.clj`;
-`test/seon/blob/retention_test.clj`; `test/seon/schedule_test.clj`; this note.
+`test/seon/blob/retention_test.clj`; `test/seon/schedule_test.clj`; this note;
+`docs/prds/context-generation/research/blob_retention_scheduled_proof_2026_09_08.clj`.
 
-Every launched shell session ended. Failed test roots remain under the runner's
+Failed test roots remain under the runner's
 retention policy with their evidence. No foreign root was removed. The temporary
 virtual-thread-inclusive JVM dump was removed. `git diff --check` passed.
-Unfinished: post-correction gates, full development adoption, successful
-scheduled completion, and any defects exposed by those proofs.
+Final bare/platform gate results and shell cleanup are recorded below when complete.

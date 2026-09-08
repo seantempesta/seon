@@ -35,15 +35,15 @@
                oldest (dated-blob! connection "oldest" 2000)
                newest (dated-blob! connection "newest" 3000)
                tx (db/transact! connection
-                                [{:seon.cluster.eval/result-blob referenced}])
+                                [{:seon.error/data-blob referenced}])
                _ (is (not (:seon.error/kind tx)) (pr-str tx))
                _ (d/branch! connection :blob-retention-test :blob-retention-sibling)
                eid (db/q (db/db connection)
                          '[:find ?e . :in $ ?digest
-                           :where [?e :seon.cluster.eval/result-blob ?digest]]
+                           :where [?e :seon.error/data-blob ?digest]]
                          referenced)
                retraction (db/transact! connection
-                                       [[:db/retract eid :seon.cluster.eval/result-blob referenced]])
+                                       [[:db/retract eid :seon.error/data-blob referenced]])
                _ (is (not (:seon.error/kind retraction)) (pr-str retraction))
                before (+ (physical-bytes connection referenced)
                          (physical-bytes connection oldest)
