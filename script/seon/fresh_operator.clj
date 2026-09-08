@@ -1610,7 +1610,8 @@
               :seon.sci.admit/caps
               (select-keys
                dials#
-               [:seon.config.eval.result/max-depth
+               [:seon.config.eval.result/max-bytes
+                :seon.config.eval.result/max-depth
                 :seon.config.eval.result/max-collection
                 :seon.config.eval.result/max-string
                 :seon.config.eval.result/max-source
