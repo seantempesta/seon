@@ -12,8 +12,9 @@ complete reconstructed program, delta reinstrumentation, and Shadow reload
 selection for replaceable runtime contexts. That lifecycle was deleted with
 the CLJS build and per-turn context reconstruction.
 
-Rulings 2026-08-01 #29, #31, and #33 replace it with one acquired base SCI
-`ctx` per cluster, fresh per-turn forks, host-Var instrumentation under the
+The replacement uses one acquired base SCI
+`ctx` per cluster, persistent per-agent contexts receiving base diffs,
+host-Var instrumentation under the
 core-error dial, and
 interpreted-function contract wrapping at the one program row installation
 seam. The current owners are `src/seon/instrument.clj` and
@@ -22,7 +23,9 @@ seam. The current owners are `src/seon/instrument.clj` and
 Re-evaluating a host `defn` requires `seon.instrument/apply!` because Malli's
 wrapper is replaced with the Var root. Runtime program row publication wraps
 interpreted functions from their committed contract as it installs them into
-the acquired base cluster `ctx`; later turn forks observe that installation.
+the acquired base cluster `ctx`; agent contexts receive that base diff.
+The [turn PRD §14](../../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
+supersedes the intermediate fresh-fork-per-turn lifecycle.
 
 ## Related
 
