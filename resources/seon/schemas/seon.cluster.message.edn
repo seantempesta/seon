@@ -102,6 +102,7 @@
                        [:and
                         {:description
                          "The agent addressed by this message; its reverse is that agent's inbox. A LISTENED ATTRIBUTE: asserting it wakes that agent. The assertion happens once — a message entity is new, so the datom always exists and is never retracted-and-reasserted.",
+                         :seon.db/index true,
                          :seon.wake/listen true,
                          :seon.wake/opens-turn? true,
                          :seon.render/ai

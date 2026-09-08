@@ -387,11 +387,14 @@
 (defn message-custody
   "Classify one message relative to the run whose prompt is being rendered.
 
-  The run's recorded trigger is its current instruction. An inbound message
-  to the same agent with no run pointing at it is pending work, even when it
-  arrived later and therefore interleaves honestly in the transcript. All
-  other messages are history. This is derived from refs on the supplied
-  database value; no prompt-local flag or message status is stored."
+  DERIVED FROM `:t`, LIKE EVERY OTHER ANSWEREDNESS QUESTION. A turn's
+  own transaction is the basis its context projected from, so a message
+  is in this turn's context exactly when its wake datom's `:t` is at or
+  before the turn's; it is what this turn is ABOUT when no earlier turn
+  of the same agent had already seen it; and it arrived too late for
+  this turn when its `:t` is greater. The recorded trigger reference
+  this replaces could not express two messages in one transaction, and
+  it swallowed a message transacted with the turn that answered it."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
          [:maybe :seon.cluster.run/id]
@@ -401,33 +404,33 @@
   [database run-id agent-id message-eid]
   (if-not run-id
     ::history
-    (let [current-trigger?
-          (some?
-           (db/q '[:find ?run .
-                   :in $ ?run-id ?message
-                   :where
-                   [?run :seon.cluster.run/id ?run-id]
-                   [?run :seon.cluster.run/trigger ?message]]
-                 database run-id message-eid))
-          inbound?
-          (some?
-           (db/q '[:find ?message .
-                   :in $ ?agent-id ?message
-                   :where
-                   [?agent :seon.cluster.agent/id ?agent-id]
-                   [?message :seon.cluster.message/to ?agent]]
-                 database agent-id message-eid))
-          claimed?
-          (some?
-           (db/q '[:find ?run .
-                   :in $ ?message
-                   :where
-                   [?run :seon.cluster.run/trigger ?message]]
-                 database message-eid))]
+    (let [message-t
+          (db/q '[:find ?tx .
+                  :in $ ?agent-id ?message
+                  :where
+                  [?agent :seon.cluster.agent/id ?agent-id]
+                  [?message :seon.cluster.message/to ?agent ?tx]]
+                database agent-id message-eid)
+          run-t (db/q '[:find ?tx .
+                        :in $ ?run-id
+                        :where
+                        [?run :seon.cluster.run/id ?run-id ?tx]]
+                      database run-id)]
       (cond
-        current-trigger? ::current-trigger
-        (and inbound? (not claimed?)) ::pending
-        :else ::history))))
+        (or (nil? message-t) (nil? run-t)) ::history
+        (> message-t run-t) ::pending
+        :else
+        (let [previous-t
+              (or (db/q '[:find (max ?tx) .
+                          :in $ ?agent-id ?run-t
+                          :where
+                          [?agent :seon.cluster.agent/id ?agent-id]
+                          [?run :seon.cluster.run/agent ?agent]
+                          [?run :seon.cluster.run/id _ ?tx]
+                          [(< ?tx ?run-t)]]
+                        database agent-id run-t)
+                  0)]
+          (if (> message-t previous-t) ::current-trigger ::history))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pre-provider capture

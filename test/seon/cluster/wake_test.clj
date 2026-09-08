@@ -223,7 +223,14 @@
     {::test-support/extra-schema
      [{:db/ident ::notice
        :db/valueType :db.type/ref
-       :db/cardinality :db.cardinality/one}
+       :db/cardinality :db.cardinality/one
+       ;; A LISTENED ATTRIBUTE MUST BE INDEXED. Datahike's `:avet` index
+       ;; holds only the attributes declared `:db/index true`, and the
+       ;; wake derivations seek that index; without it every wake on
+       ;; this attribute would read as absent. `route!` refuses the
+       ;; declaration rather than routing into that silence — proven by
+       ;; `an-unindexed-listened-attribute-is-refused-at-registration`.
+       :db/index true}
       {:seon.schema/key ::notice
        :seon.wake/listen true
        :seon.wake/opens-turn? true}]}
@@ -243,6 +250,38 @@
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key key})))))))
+
+(deftest an-unindexed-listened-attribute-is-refused-at-registration
+  ;; THE CLASS: absence of signal read as health. Datahike's `:avet`
+  ;; index contains ONLY attributes declared `:db/index true`
+  ;; (`reference-code/datahike/src/datahike/db.cljc:932`), and the turn
+  ;; bound and the unanswered-wake derivation both seek that index. A
+  ;; listened attribute without the index answers every seek with an
+  ;; empty sequence — no exception, no refusal — so the agent would
+  ;; simply never turn. The declaration is refused where it is
+  ;; registered instead.
+  (test-support/with-database
+    {::test-support/extra-schema
+     [{:db/ident ::unindexed-notice
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one}
+      {:seon.schema/key ::unindexed-notice
+       :seon.wake/listen true
+       :seon.wake/opens-turn? true}]}
+    (fn [connection]
+      (is (= ::wake/unindexed-listened-attribute
+             (:seon.error/kind
+              (wake/declarations-refusal (db/db connection))))
+          "the derivation names the attribute the index does not hold")
+      (is (contains? (wake/unindexed-listened-attributes (db/db connection))
+                     ::unindexed-notice))
+      (let [refusal (try (route-probe! connection
+                                       (async/chan (async/sliding-buffer 1)))
+                         (catch clojure.lang.ExceptionInfo failure
+                           (ex-data failure)))]
+        (is (= ::wake/unindexed-listened-attribute
+               (:seon.error/kind refusal))
+            "and registration refuses rather than routing into silence")))))
 
 (deftest a-fault-wakes-the-steward-of-the-failing-functions-namespace
   ;; THE CLASS: a fault used to reach an agent only by minting a MESSAGE,

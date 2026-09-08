@@ -60,6 +60,22 @@
                 :seon.cluster.message/content "do the thing"
                 :seon.cluster.message/at now}]))
 
+(defn- model-attempt
+  "The row that makes a turn an ANSWERING turn.
+
+  A wake is answered only by a turn whose reply came from a model
+  attempt, and an attempt row carrying no `:seon.ai.attempt/error` IS
+  that success. Every fixture turn below is a model turn, so each one
+  writes this beside the run exactly as `record-attempt!` does."
+  [run-id at]
+  {:seon.ai.attempt/id (str run-id "-attempt-0")
+   :seon.ai.attempt/run [:seon.cluster.run/id run-id]
+   :seon.ai.attempt/ordinal 0
+   :seon.ai.attempt/at at
+   :seon.ai/endpoint "https://fixture.invalid/v1/chat"
+   :seon.ai/model "fixture-model"
+   :seon.ai.attempt/settings-edn "{}"})
+
 (defn- open-run!
   "Open a run, optionally claimed by `holder`, optionally planned."
   [connection {:keys [holder planned? triggered?]}]
@@ -77,7 +93,8 @@
                        true (assoc :seon.cluster.work/situation :call)
                        planned? (assoc :seon.cluster.run/plan-digest digest))
                      {:seon.cluster.agent/id agent-id
-                      :seon.cluster.agent/run [:seon.cluster.run/id run-id]}]
+                      :seon.cluster.agent/run [:seon.cluster.run/id run-id]}
+                     (model-attempt run-id now)]
               planned?
               (into (map (fn [ordinal]
                            {:seon.cluster.eval/id (str run-id "-" ordinal)
@@ -134,7 +151,8 @@
             :seon.cluster.run/process process
             :seon.cluster.run/plan-digest digest}
            {:seon.cluster.agent/id agent-id
-            :seon.cluster.agent/run [:seon.cluster.run/id id]}]
+            :seon.cluster.agent/run [:seon.cluster.run/id id]}
+           (model-attempt id at)]
           (map-indexed
            (fn [ordinal _]
              {:seon.cluster.eval/id (str id "-" ordinal)
@@ -312,6 +330,12 @@
   (doseq [{::keys [label build expect]} states]
     (with-database
       (fn [connection]
+        ;; EVERY ROW CONFIGURES THE TURN DIAL. The bound is fail-closed on
+        ;; an absent dial — with no `:seon.config.run/max-episode-runs`
+        ;; fact, no wake opens a turn at all, which is the shipped
+        ;; configuration's business and not this table's subject. The
+        ;; capped rows below set their own smaller dial over this one.
+        (configure-cap! connection 100)
         (build connection)
         (let [db (db/db connection)
               derived (work/next-agent-work db request)]
@@ -534,7 +558,7 @@
         (is (= [message-id]
                (mapv :seon.cluster.message/id
                      (work/unanswered-triggers (db/db connection) agent-id))))
-        (is (= 0 (work/latest-turn-t (db/db connection) agent-id))
+        (is (= 0 (work/latest-answering-turn-t (db/db connection) agent-id))
             "no turn, no basis"))
       (let [wake-t (:seon.wake/t
                     (first (work/unanswered-wakes
@@ -544,7 +568,7 @@
                   is the basis, and no reference was written"
           (let [database (db/db connection)]
             (is (empty? (work/unanswered-triggers database agent-id)))
-            (is (< wake-t (work/latest-turn-t database agent-id))
+            (is (< wake-t (work/latest-answering-turn-t database agent-id))
                 "the wake arrived before the turn that answered it")
             (is (nil? (:seon.cluster.run/trigger
                        (db/pull database [:seon.cluster.run/trigger]

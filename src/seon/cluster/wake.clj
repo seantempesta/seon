@@ -157,6 +157,111 @@
                [?row :seon.schema/key ?key]]
              database)))
 
+(defn unindexed-listened-attributes
+  "The listened attributes Datahike's `:avet` index does not hold.
+
+  A LISTENED ATTRIBUTE MUST BE INDEXED, and that is a derived
+  requirement rather than a convention: the turn bound and the
+  unanswered-wake derivation read an agent's wakes through
+  `d/datoms :avet <attribute> <agent>`, and Datahike's `:avet` index
+  contains ONLY the attributes declared `:db/index true`
+  (`reference-code/datahike/src/datahike/db.cljc:932`). A listened
+  attribute without the index answers the seek with an empty sequence —
+  no refusal, no exception — which is this project's absence-as-health
+  class exactly: every wake would read as absent and the agent would
+  never turn."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  :seon.cluster.wake/attributes]}
+  [database]
+  (let [schema (d/schema database)]
+    (into #{}
+          (remove (fn [attribute]
+                    (true? (:db/index (get schema attribute)))))
+          (wake-attributes database))))
+
+(defn declarations-refusal
+  "The refusal that says the wake declarations cannot carry a cluster, or nil.
+
+  EMPTY FAILS CLOSED AND LOUD. With no listened attribute declared,
+  every derivation over the set answers empty: nothing routes, nothing
+  is unanswered, and — measured by the verifier — an empty INSIDE set
+  makes every wake read as outside and REFILLS the turn bound on a paid
+  loop. Absence of the declaration population is a schema defect, so it
+  refuses at the seam that admits the work instead of reading as health
+  at four separate derivations."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:maybe :seon.error/value]]}
+  [database]
+  (let [listened (wake-attributes database)
+        inside (inside-attributes database)
+        unindexed (unindexed-listened-attributes database)]
+    (cond
+      (empty? listened)
+      {:seon.error/kind ::no-listened-attributes
+       :seon.error/message
+       (str "No attribute declares :seon.wake/listen, so nothing can ever "
+            "wake an agent on this database.")
+       :seon.cluster.wake/attributes #{}}
+
+      (empty? inside)
+      {:seon.error/kind ::no-inside-attributes
+       :seon.error/message
+       (str "No attribute declares :seon.wake/inside, so every wake would "
+            "count as arriving from outside the agent and refill its turn "
+            "bound.")
+       :seon.cluster.wake/attributes listened}
+
+      (seq unindexed)
+      {:seon.error/kind ::unindexed-listened-attribute
+       :seon.error/message
+       (str "A listened attribute is not in the :avet index, so its wakes "
+            "read as absent: " (pr-str (vec (sort unindexed))))
+       :seon.cluster.wake/attributes unindexed})))
+
+(defn agent-wake-datoms
+  "Every wake datom addressed to one agent, newest index entry first.
+
+  `[entity tx attribute]` tuples read straight out of Datahike's
+  `:avet` index — one seek per attribute, no pull and no join. The turn
+  bound and the unanswered-wake derivation both compose from this, which
+  is what makes them O(the agent's own wakes) in cheap index iteration
+  rather than a `db/pull` per wake the agent has ever received (measured
+  47.5 ms per turn pass at 2,008 lifetime wakes before this).
+
+  DESCENDING, because both callers want the newest first: the bound's
+  anchor stops at the first outside wake, and the unanswered filter cuts
+  at the latest answering turn. Datahike orders `:avet` by (a, v, e), so
+  reversing one attribute's slice is descending entity order, and the
+  transaction each datom carries is what either caller actually
+  compares.
+
+  Direct `datahike.api` here for the same reason the listener above uses
+  it: this namespace is the system-side owner of the wake mechanism and
+  holds no agent custody."
+  {:malli/schema [:=> [:cat :seon.db/database-value :int
+                       :seon.cluster.wake/attributes]
+                  [:vector [:tuple :int :int :qualified-keyword]]]}
+  [database agent-eid attributes]
+  (into []
+        (mapcat (fn [attribute]
+                  (map (fn [datom] [(:e datom) (:tx datom) attribute])
+                       (reverse (d/datoms database :avet attribute
+                                          agent-eid)))))
+        attributes))
+
+(defn inside-wake?
+  "True when this wake entity carries any attribute declared inside.
+
+  One `:eavt` seek on the entity, so the anchor pays it for the newest
+  candidate and stops."
+  {:malli/schema [:=> [:cat :seon.db/database-value :int
+                       :seon.cluster.wake/attributes]
+                  :boolean]}
+  [database wake-eid inside]
+  (boolean
+   (some (fn [datom] (contains? inside (:a datom)))
+         (d/datoms database :eavt wake-eid))))
+
 (defn delivery
   "`offer!`'s answers plus the route owner's derived fence, named.
 
@@ -235,12 +340,21 @@
   — every delivery is `offer!` and the whole handler is one
   try/catch).
 
-  THE SET IS DERIVED ONCE, HERE. `wake-attributes` runs against the
-  connection's current database value at registration and the handler
-  closes over the answer: the listener itself never queries, because it
-  runs on the committing caller's critical path. A cluster learns a new
-  wake source at its next boot, which is when the schema declaring it is
-  installed anyway.
+  THE SET IS DERIVED HERE AND RE-DERIVED WHEN THE DECLARATION CHANGES.
+  `wake-attributes` runs against the connection's current database value
+  at registration and the handler holds the answer; it re-runs on the
+  report's own `:db-after` exactly when a transaction asserts a
+  `:seon.wake/*` property on a schema row. The listener still never
+  queries on an ordinary commit — that is the critical-path rule — and a
+  development cluster, whose whole point is that schema rows change in
+  place, no longer routes by a frozen answer while every other consumer
+  re-derives.
+
+  REGISTRATION REFUSES AN UNUSABLE DECLARATION POPULATION
+  (`declarations-refusal`): no listened attribute, no inside attribute,
+  or a listened attribute Datahike's `:avet` index does not hold. Each
+  of those reads as health at four separate derivations, and one of them
+  refills the turn bound on a paid loop.
 
   DISPATCH IS THE SAME DERIVATION. Every listened attribute is a ref
   whose VALUE is the recipient agent's entity id, so delivery is one
@@ -276,7 +390,9 @@
            :seon.render.web/interest
            :seon.cluster.wake/search-channel
            :seon.cluster.wake/fault-channel :seon.cluster.wake/key]}]
-  (let [listened (wake-attributes (d/db connection))]
+  (when-let [refusal (declarations-refusal (d/db connection))]
+    (throw (ex-info (:seon.error/message refusal) refusal)))
+  (let [listened (volatile! (wake-attributes (d/db connection)))]
     (d/listen
      connection
      key
@@ -295,12 +411,26 @@
                  "The derived search index refused a transaction report."
                  {:seon.cluster.wake/key key
                   :seon.cluster.wake/route ::search}))))
+           ;; A DECLARATION CHANGE RE-DERIVES THE SET, HERE, ON THE REPORT'S
+           ;; OWN `:db-after`. The set used to be frozen at registration
+           ;; while `seon.cluster.work` re-derived per call, so one live
+           ;; schema change left two answers to one question and an openable
+           ;; wake nothing would ever deliver — with no refusal and no fault
+           ;; (measured: verify-listened-attributes-2026-09-08 §1c). The
+           ;; handler's two prohibitions still hold: this neither throws nor
+           ;; parks, and the query runs only when a transaction actually
+           ;; asserts a `:seon.wake/*` property on a schema row, which is a
+           ;; schema publication and not an ordinary commit.
+           (when (some (fn [datom]
+                         (= "seon.wake" (namespace (nth datom 1))))
+                       (:tx-data report))
+             (vreset! listened (wake-attributes (:db-after report))))
            (doseq [datom (:tx-data report)]
              (let [attribute (nth datom 1)]
                (when (and (not @render?)
                           (contains? published-interest attribute))
                  (vreset! render? true))
-               (when (contains? listened attribute)
+               (when (contains? @listened attribute)
                  (let [agent-eid (nth datom 2)]
                    (if-let [channel (get (channels) agent-eid)]
                      (deliver! fault-channel key ::mailbox channel

@@ -8,10 +8,18 @@
                     :wake-request
                     [:map
                      {:description
-                      "How much of an agent's wake history a derivation wants: absent means the unanswered ones, :any means every one of them (the turn-bound anchor)."}
+                      "How much of an agent's wake history a derivation wants: absent means the unanswered ones, :any means every one of them. :seon.cluster.work/attributes says WHICH listened attributes are bound: absent means only those that open a turn, :listened means every listened attribute (what a context shows)."}
                      [:seon.cluster.work/answered?
                       {:optional true}
-                      :seon.cluster.work/answered?]],
+                      :seon.cluster.work/answered?]
+                     [:seon.cluster.work/attributes
+                      {:optional true}
+                      :seon.cluster.work/attributes]],
+                    :attributes
+                    [:enum
+                     {:description
+                      "Which listened attributes a wake derivation binds: :opening (only those declared :seon.wake/opens-turn? true) or :listened (every listened attribute)."}
+                     :opening :listened],
                     :episode-runs [:int {:min 0}],
                     :form-settlement
                     [:map
