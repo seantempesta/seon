@@ -731,8 +731,10 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
    real SCI fork, armed contracts), never a mocked or hand-rostered
    stand-in. A misrepresented harness produces garbage code that passes.
 1. **Iterate with `bin/test-fast <namespaces…>`**, which loads the program
-   and uses the worker's same contract arming in one JVM without checkout
-   copies or base publication. **Gate a commit with
+   and uses the worker's same contract arming in one JVM. With concurrent
+   editors, use `bin/test-fast --paths <your files…> -- <namespaces…>`:
+   it shares the gate's HEAD-plus-paths snapshot, without worker copies or
+   base publication. Plain namespaces use the working tree. **Gate a commit with
    `bin/test --paths <your own files…> -- <namespaces…>`** — it
    snapshots HEAD and overlays ONLY the paths you name, so no other lane's
    in-flight edit can block you (landed `e33a887fe`); bare `bin/test`

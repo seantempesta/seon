@@ -28,8 +28,10 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
    real SCI fork, armed contracts), never a mocked or hand-rostered
    stand-in. A misrepresented harness produces garbage code that passes.
 1. **Iterate with `bin/test-fast <namespaces…>`**, which loads the program
-   and uses the worker's same contract arming in one JVM without checkout
-   copies or base publication. **Gate a commit with
+   and uses the worker's same contract arming in one JVM. With concurrent
+   editors, use `bin/test-fast --paths <your files…> -- <namespaces…>`:
+   it shares the gate's HEAD-plus-paths snapshot, without worker copies or
+   base publication. Plain namespaces use the working tree. **Gate a commit with
    `bin/test --paths <your own files…> -- <namespaces…>`** — it
    snapshots HEAD and overlays ONLY the paths you name, so no other lane's
    in-flight edit can block you (landed `e33a887fe`); bare `bin/test`
@@ -693,8 +695,11 @@ class updates both in the same commit.
 Iterate with `bin/test-fast <namespaces…>`; gate a commit with
 `bin/test --paths <your files…> -- <namespaces…>`; run `bin/test --platform`
 before reporting. The fast loop loads the complete program and uses the
-worker's same contract arming in one JVM against the working tree, with the
-canonical in-memory fixture base built once on demand. It provides no
+worker's same contract arming in one JVM, with the canonical in-memory
+fixture base built once on demand. Plain namespaces use the working tree;
+`bin/test-fast --paths <your files…> -- <namespaces…>` reuses the gate's
+HEAD-plus-selected-files snapshot and removes it after the JVM exits,
+excluding foreign half-edits without preparing a published base. It provides no
 per-worker isolation, retained run roots, automatic platform tier, or
 recorded result facts; tests explicitly exercising file-backed boot still
 create their own fixture roots. These are iteration results, not the
