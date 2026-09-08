@@ -335,6 +335,12 @@ what the model call cost. Every attribute questioned:
 | `:seon.turn/reply` (+ blob over the bound; `reply-missing` when the blob was reclaimed) | the model's bytes, under the storage bound; stored before evaluation; a reclaimed blob is marked like a missing value |
 | `:seon.turn/attempts` | component set of `:seon.ai.attempt` entities — the AI owner's existing family, referenced, not re-homed (review F6); one per attempt; a paid call is a fact |
 
+Not in this schema, by design: session curation's superseding ref
+(`[TARGET]` ruled 2026-08-04, today spelled `:seon.cluster.run/supersedes`)
+is an ACCRETION onto the turn when that mechanism lands — one ref, added
+then, declared then. The docs lane (2026-09-08) noted the gap; this is the
+answer.
+
 Questioned and removed from the turn: the prompt text and per-segment
 contribution rows (derivable from basis + profile — and the whole point of
 byte-identical projection); `interrupted-at` on the turn (it lives on the
