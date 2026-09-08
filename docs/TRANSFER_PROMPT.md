@@ -31,11 +31,19 @@ grounding, review, and integration.
    then the current dependency spine in
    [the plan README](prds/sci-execution-runtime/plan/README.md). Do not
    restart settled design.
-3. **Every inherited claim is a hypothesis** — the previous session's
+3. **The current entry point is the agent record and turn loop PRD:**
+   [agent-record-and-turn-loop-prd-2026-09-07.md](prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
+   Read it end to end before touching the turn, wake, or agent-record
+   surfaces — it supersedes the record and loop sections of the PRD it
+   names in its own frontmatter, and [[agent-runtime]] in
+   `docs/seon/architecture/` is written to its target. Its `plan/
+   README.md` ordering and `unsettled.md` working edge remain the one
+   ledger of dated state; the PRD is the design, not a second ordering.
+4. **Every inherited claim is a hypothesis** — the previous session's
    attributions, counts, and "in flight" lines are what was believed at
    write time. Verify the load-bearing ones with one live command each
    before building on them (PROVEN-LIVE / CLAIMED / UNKNOWN discipline).
-4. Present understanding to the owner before launching lanes when the
+5. Present understanding to the owner before launching lanes when the
    inherited plan is nontrivial: your reading in your own words, the first
    moves, and every open decision as priced options.
 
@@ -52,6 +60,51 @@ before building on it; two lanes never edit one mechanism. Supervise on a
 ≤15-minute cadence by evidence (commits are the heartbeat; transcripts
 selectively), and stop + resume with the correction the minute new
 information invalidates a lane's direction.
+
+**Write every lane spec to a file under `tmp/lane-specs/` before launching
+it** (one file per lane, named for its assignment) rather than composing the
+spec only in the launch command — a spec that exists as a file survives the
+launch, is diffable across resumes, and is what a verifier reads to check a
+lane against its actual assignment rather than against what the orchestrator
+now remembers asking for.
+
+**The gate a lane's own tests must clear is the instrumented gate**: `bin/test`
+arming the same contract instrumentation a live cluster arms, not a lighter
+fixture-only run. A suite that is green without that instrumentation armed
+is not evidence — the 2026-09-08 backlog found 314 reds behind exactly that
+gap, most of them fixtures handing a shape the contract forbade rather than
+production defects. Confirm the gate a lane ran was the instrumented one
+before trusting its "green."
+
+**Lane rules learned this week (2026-09-07/08), binding for every lane spec:**
+
+- **Protected means concurrently edited, not merely related.** Name a path
+  protected because another live lane is touching it right now, not because
+  it is thematically adjacent to the assignment — an over-broad protected
+  list starves a lane of files it actually owns and needs to finish its own
+  slice.
+- **Verifiers live alongside what they verify**, not in a separate later
+  pass bolted on after the fact — a verification script or regression a
+  lane writes ships in the same commit as the mechanism it checks.
+- **One `--all` per lane.** A lane runs the full `bin/test --all` gate once,
+  at the end, over its finished slice — not repeatedly while iterating.
+  Repeated full runs mid-lane burn the shared JVM pool for no new evidence;
+  use focused/localized runs while iterating and reserve `--all` for the
+  checkpoint.
+- **No self-matching pollers.** A lane's background wait loop must never
+  `pgrep`/`ps` for a pattern that matches its own polling command — that
+  wedges the loop against itself and never exits. Kill your own background
+  shells before reporting done; the orchestrator sweeps stragglers at each
+  lane completion, but a lane that never exits its own poller is the defect.
+- **No adversarial verbs in a lane spec.** Write specs in neutral
+  engineering language — verify, falsify, probe, measure — never as an
+  attack on another lane's work or a demand to prove someone wrong; a lane
+  that refutes its own assignment with evidence has done its job, and
+  adversarial framing produces defensive work instead of honest findings.
+- **Never revert a shared file.** A lane that finds a shared-tree file in a
+  state it didn't expect reports whose in-flight work it looks like and
+  waits — it never `git checkout --`/`git reset --hard` a file to "clean
+  up" state another lane may still be relying on.
 
 ## Working with the owner
 
