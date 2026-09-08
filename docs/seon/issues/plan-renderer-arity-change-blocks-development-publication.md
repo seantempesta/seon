@@ -20,3 +20,13 @@ its explicit stop-at-foreign-breakage rule.
 
 Acceptance: the renderer's callers agree with its final contract and
 `init --dev default` publishes and adopts the current program.
+
+## Issues-sweep recurrence — 2026-09-08
+
+Bare `bin/test` also refused during shared published base preparation in
+`tmp/test-runs/run.c49nRe`, snapshot base
+`e9e15a585727adfec7b781d28f5e3eca7035e8c9`. The only four blocking findings
+are the same two-argument calls at lines 73, 196, 230, and 440; the renderer
+accepts one argument. No tests ran. The lane stopped under its explicit
+protected-boundary instruction. See the
+[landing evidence](../../prds/context-generation/research/issues-sweep-landing-2026-09-08.md).

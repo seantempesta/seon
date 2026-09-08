@@ -1,0 +1,22 @@
+[
+  {
+    "file": "test/my/plan_test.clj",
+    "row": 73,
+    "message": "my.plan/render-plan-html is called with 2 args but expects 1"
+  },
+  {
+    "file": "test/my/plan_test.clj",
+    "row": 196,
+    "message": "my.plan/render-plan-html is called with 2 args but expects 1"
+  },
+  {
+    "file": "test/my/plan_test.clj",
+    "row": 230,
+    "message": "my.plan/render-plan-html is called with 2 args but expects 1"
+  },
+  {
+    "file": "test/my/plan_test.clj",
+    "row": 440,
+    "message": "my.plan/render-plan-html is called with 2 args but expects 1"
+  }
+]
