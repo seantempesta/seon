@@ -258,7 +258,59 @@ shipped default while the in-memory one printed under the agent's choice.
 Both halves are done here: the two attributes are in the selector, and the
 two assertions that stated the old defect now state the ruled behaviour.
 
-### 6.2 The platform tier is red at HEAD, and was red before this step
+### 6.2 The step's own gate: 46 namespaces, before and after
+
+The same explicit selection of 46 namespaces — every namespace this merge
+touches plus its render, prompt, problem-routing, accretion and program
+neighbours — run at the baseline `4f8cd788f` in the worktree and at
+`2cf1c00fc` in the main tree.
+
+| | tests | assertions | failures | errors | red tests |
+|---|---|---|---|---|---|
+| baseline `4f8cd788f` | 575 | 3167 | 75 | 9 | **44** |
+| after the merge `2cf1c00fc` | 575 | 3174 | 75 | 9 | **43** |
+
+Diffed name-for-name:
+
+- **NEW reds: none.**
+- **Fixed:** `seon.eval.drive-test/transcript-projects-the-evaluation-time-limit`
+  — inherited red, green now that its expectation reads the merged bytes.
+- `seon.render.transcript-test/one-reply-reads-identically-on-the-page-in-history-and-in-the-prompt`
+  — the named PROOF — is **green** in both, and green only because the
+  `receipt-selector` repair landed here; it was red at `3f8801d62`, between
+  the two.
+- The 43 that remain are the same 43 the baseline has: the
+  disabled-rendering-limits family, the message-sentence family, the six
+  `seon.cluster.prompt-test` reds PRD §7 step 4 owns, the three
+  `seon.cluster.reply-test` recovery reds, the six `seon.cluster.boot-test`
+  environment reds (run in the earlier 15-namespace pass, not this one),
+  `settlement-mints-rows-for-unindexed-call-targets`, and the
+  `turn-test`/`fn-test`/`gen.loop-test`/`render.web-test`/`repl-parity-test`
+  members already recorded in the two earlier notes.
+
+The fourteen §5.6 behaviours are all proven by tests in this selection, and
+every one of their named proofs is green: `recovery-preserves-terminal-receipts-exactly`,
+`recovery-cannot-stamp-a-settled-receipt`, `restamp-recovery-test`,
+`recovery-marks-a-run-that-settled-no-receipt`, `transitions-agree-with-the-model`,
+`custody-mismatch-regression`, `a-non-holder-refuses-every-held-run-transition`,
+`close-refuses-a-broken-agent-pointer`, `receipt-transitions-preserve-one-terminal-outcome`,
+`kill-positions-per-agent-test`, `a-planned-orphan-run-is-interruption-not-work`,
+`an-unplanned-orphan-run-is-settled-not-resumed`, `episode-cap-refusal-test`,
+`answered-trigger-is-a-terminal-work-verdict`, `triggers-come-back-oldest-first`,
+`one-trigger-cannot-open-a-second-run-after-the-first-closes`,
+`answeredness-is-a-recorded-run-ref`,
+`delivery-rows-and-refusal-facts-share-the-terminal-transaction`,
+`a-turn-delivers-what-a-form-asks-to-send-and-still-finishes`,
+`install-gate-failure-settles-the-started-receipt-as-a-failure`,
+`a-refused-phase-escalates-once-per-signature-and-never-to-itself`,
+`everything-the-loop-writes-is-installable-by-boot`,
+`a-boot-built-database-takes-every-row-the-turn-writes`,
+`a-waiting-disposition-frees-the-agent-and-keeps-its-note`,
+`wait-closes-in-terminal-tx-test`,
+`generated-system-runs-grow-only-after-their-settled-prefix`,
+`a-generated-run-resumes-then-requests-one-more-form`.
+
+### 6.3 The platform tier is red at HEAD, and was red before this step
 
 `bin/test --all` **never reaches its bulk tier**:
 `seon.test-support-test/a-canonical-database-is-the-production-source-population`
