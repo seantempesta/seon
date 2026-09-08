@@ -22,8 +22,6 @@ the landing notes
 instrumented gate, [custody-isolation](custody-isolation-landing-2026-09-08.md) §4,
 [verify-repair-2](verify-repair-2-2026-09-08.md) §2, and the four named issues.
 
-(Sections filled in below as each slice lands.)
-
 ## 1. Parity with boot — the armed set is the set a cluster arms
 
 **Before.** `arm-contracts!` refused only when `:seon.instrument/instrumented`
@@ -32,7 +30,7 @@ namespaces, so a worker that armed none of the program still passed. Its input
 was unchecked too: `declared-program-namespaces` answered `[]` in silence
 whenever the relative root `"src"` did not resolve, and silently dropped any
 file whose first form was not an `ns` form
-([issue](../../../seon/issues/declared-program-namespaces-returns-empty-in-silence.md)).
+([issue](../../../seon/issues/archive/declared-program-namespaces-returns-empty-in-silence.md)).
 [verify-repair-2 §2](verify-repair-2-2026-09-08.md) measured the consequence:
 the gate armed **908** vars, a live cluster **871**, and three cluster-side
 vars — `seon.artifact/-main`,
@@ -121,7 +119,7 @@ makes the gap invisible. Filed:
 Not fixed here: it is a boot-path change wanting the reset-boundary live
 proof, with three lanes holding live clusters.
 
-**This closes** [`declared-program-namespaces-returns-empty-in-silence`](../../../seon/issues/declared-program-namespaces-returns-empty-in-silence.md).
+**This closes** [`declared-program-namespaces-returns-empty-in-silence`](../../../seon/issues/archive/declared-program-namespaces-returns-empty-in-silence.md).
 
 ## 2. Worker isolation — the runner now names the suspect, and one verdict was lying
 
@@ -372,7 +370,7 @@ path's missing pre-load (issue filed, §1).
 
 | issue | outcome |
 |---|---|
-| [`declared-program-namespaces-returns-empty-in-silence`](../../../seon/issues/declared-program-namespaces-returns-empty-in-silence.md) | **resolved** — every absence is a typed refusal; the arming assertion is set coverage, not a floor of zero |
+| [`declared-program-namespaces-returns-empty-in-silence`](../../../seon/issues/archive/declared-program-namespaces-returns-empty-in-silence.md) | **resolved** — every absence is a typed refusal; the arming assertion is set coverage, not a floor of zero |
 | [`the-test-runners-re-arm-kills-the-worker-under-its-own-contract`](../../../seon/issues/the-test-runners-re-arm-kills-the-worker-under-its-own-contract.md) | already resolved by `instrumented-gate-backlog-2`; verified at HEAD and its remaining half — "never a per-namespace red" — is now enforced by `parallel-failure-classification` with its own regression |
 | [`an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker`](../../../seon/issues/an-armed-contract-test-is-unarmed-by-another-test-in-the-same-worker.md) | already resolved; the drift detector now makes the same class VISIBLE rather than only survivable |
 | [`thirteen-sci-eval-reds-appear-only-under-the-whole-gate`](../../../seon/issues/thirteen-sci-eval-reds-appear-only-under-the-whole-gate.md) | **named cause, still open** — the confirmation loaded a smaller world than the pool; fixed, awaiting the `--all` that is this note's acceptance criterion |
