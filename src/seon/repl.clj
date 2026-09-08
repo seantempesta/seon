@@ -45,8 +45,30 @@
    :seon.repl/interrupted
    :seon.repl/result
    :seon.repl/out
+   :seon.repl/note
    :seon.repl/ns
    :seon.repl/ms])
+
+(defn- def-note
+  "The one-sentence note a top-level `def` earns, or nil.
+
+  Owner ruling, 2026-09-08: nothing defined with `def` is persisted — it
+  lives in the agent's SCI context for this JVM's life — and the agent is
+  told so on EVERY such form. Only a bare `def` earns it: `defn`,
+  `defschema`, `deftest` and the other definers become program rows and
+  persist. The head is read as EDN from the stored source; a source EDN
+  cannot read (a reader macro, an unbalanced form) earns nothing, since the
+  evaluation itself already says what went wrong."
+  [source]
+  (when (string? source)
+    (let [form (try (edn/read-string source) (catch Throwable _ nil))]
+      (when (and (seq? form) (= 'def (first form)) (symbol? (second form)))
+        (str (second form)
+             " lives only in your SCI context and is lost when the JVM"
+             " restarts. Nothing defined with def is persisted, atoms"
+             " included; they are for temporary data-modeling experiments."
+             " To keep something, write a function, schema, or test, or"
+             " transact the data into the database.")))))
 
 (defn- read-node
   "Read one stored EDN print node back, or say it is unreadable."
@@ -165,6 +187,7 @@
 (defn- response-entries
   "The response's present keys, in declared order, each already text."
   [{output :seon.cluster.eval/output
+    source :seon.cluster.eval/source
     handle :seon.repl/handle
     ending-ns :seon.sci.eval/ending-ns
     prompt-ns :seon.ns/name
@@ -191,6 +214,7 @@
                 ;; binding already settled.
                 :seon.repl/result (some-> handle str)
                 :seon.repl/out (when (seq output) (pr-str output))
+                :seon.repl/note (some-> (def-note source) pr-str)
                 :seon.repl/ns (when (and ending-ns (not= ending-ns prompt-ns))
                                 (str ending-ns))
                 :seon.repl/ms (when (int? duration) (str duration))}]

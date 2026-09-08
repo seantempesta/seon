@@ -24,6 +24,10 @@
              {:min 1,
               :description
               "The namespace one evaluation left in effect, present only when the form changed it — the next prompt line already says which namespace it is in."}],
+            :note
+            [:string
+             {:description
+              "The one-sentence note every top-level def earns (owner, 2026-09-08): the var lives only in the agent's SCI context and is never persisted; functions, schemas, tests, and transacted data are what persist."}],
             :interrupted
             [:string
              {:min 1,
@@ -43,7 +47,8 @@
              [:seon.repl/result {:optional true} :seon.repl/result]
              [:seon.repl/out {:optional true} :seon.repl/out]
              [:seon.repl/ns {:optional true} :seon.repl/ns]
-             [:seon.repl/ms {:optional true} :seon.repl/ms]],
+             [:seon.repl/ms {:optional true} :seon.repl/ms]
+             [:seon.repl/note {:optional true} :seon.repl/note]],
             :emission
             [:map
              {:description

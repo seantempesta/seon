@@ -71,6 +71,29 @@
         "output is its own pr-str'd key, never folded into the value")
     (is (str/includes? response ":value"))))
 
+(deftest every-def-says-it-is-not-persisted
+  ;; THE CLASS: an agent told nothing keeps defining data it expects to keep.
+  ;; Owner, 2026-09-08: every top-level def carries the one note; definers
+  ;; that become program rows carry none.
+  (let [emission (fn [source]
+                   {:seon.cluster.eval/source source
+                    :seon.ns/name 'my.agents.juniper
+                    :seon.cluster.eval/ordinal 0
+                    :seon.cluster.eval/result-edn
+                    "#:seon.print{:face :seon.print/nil, :value nil}"})
+        def-response (repl/response (emission "(def secret 99)"))
+        defn-response (repl/response (emission "(defn hello [] 42)"))]
+    (is (str/includes? def-response ":note \"secret lives only in your SCI context")
+        "a def carries the note, naming the var")
+    (is (str/includes? def-response "transact the data into the database.\"")
+        "the note ends by saying what persists")
+    (is (not (str/includes? defn-response ":note"))
+        "a defn becomes a program row and carries no note")
+    (is (= [:seon.repl/value :seon.repl/note]
+           (->> (re-seq #":(value|note|out|ns|ms)" def-response)
+                (map (comp keyword #(str "seon.repl/" %) second))))
+        "the note sits after :out and before :ns in the one order")))
+
 (deftest an-error-response-carries-no-value
   (let [response (repl/response {:seon.cluster.eval/source "(/ 1 0)"
                                  :seon.ns/name 'my.agents.juniper
