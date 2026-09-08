@@ -843,6 +843,12 @@
                 (let [frame-ns (frame-namespace frame)]
                   (when-not (or (contains? resolution-owner-namespaces frame-ns)
                                 (.startsWith ^String frame-ns "clojure.")
+                                ;; instrumentation plumbing is never a
+                                ;; caller: with contracts armed, malli's
+                                ;; wrapper sits between the caller and the
+                                ;; refusal and would otherwise be named as
+                                ;; the place to go and edit
+                                (.startsWith ^String frame-ns "malli.")
                                 (.startsWith ^String frame-ns "java."))
                     (str (frame-description frame frame-ns)
                          " [no declared source root — nearest frame]"))))

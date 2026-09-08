@@ -144,7 +144,17 @@
         (db/transact! (:seon.store/connection-object opened)
                     [{:seon.store.test/marker "survives"}])
         (is (nil? (store/release-store! opened)))
-        (is (nil? (store/release-store! opened)) "release is idempotent")
+        ;; A SECOND RELEASE IS REFUSED, not quietly repeated: the declared
+        ;; contract requires a live unreleased store held by this process
+        ;; root, and under the contracts every cluster arms that refusal is
+        ;; the typed value naming the member. Release remains total for the
+        ;; store it holds; releasing what it no longer holds is a caller bug
+        ;; the boundary now names.
+        (let [refusal (test-support/refusal-data
+                       #(store/release-store! opened))]
+          (is (= :seon.instrument/contract-violated
+                 (:seon.error/kind refusal))
+              "the second release names the contract it violated"))
         (let [reopened (store/open-store! {:seon.store/dir dir})]
           (try
             (is (false? (:seon.store/created? reopened))

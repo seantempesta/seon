@@ -16,16 +16,22 @@
 (defn form-children
   "The non-property children of one Malli form."
   {:malli/schema
-   [:=> [:cat :seon.schema/definition] [:vector :seon.schema/value]]}
+   [:=> [:cat :seon.schema/value] [:vector :seon.schema/value]]}
   [form]
   (if (vector? form)
     (into [] (remove map?) (rest form))
     []))
 
 (defn resolve-malli-form-in
-  "Resolve registered aliases against exactly one immutable projection."
+  "Resolve registered aliases against exactly one immutable projection.
+
+  It takes and returns any authored VALUE, not only a parseable form: the
+  bridge hands it every child of a declaration — predicate symbols,
+  properties maps, unregistered keywords — and answers them unchanged. The
+  declared `:seon.schema/definition` was a narrower promise than the
+  function keeps, which only an armed contract could say out loud."
   {:malli/schema
-   [:=> [:cat :map :seon.schema/definition] :seon.schema/definition]}
+   [:=> [:cat :map :seon.schema/value] :seon.schema/value]}
   [projection form]
   (cond
     (= :seon.db/ref form) form
@@ -40,7 +46,7 @@
 (defn resolve-malli-form
   "Resolve aliases against the canonical JVM declaration population."
   {:malli/schema
-   [:=> [:cat :seon.schema/definition] :seon.schema/definition]}
+   [:=> [:cat :seon.schema/value] :seon.schema/value]}
   [form]
   (resolve-malli-form-in
    {:seon.schema.projection/forms (packaged-forms)}
@@ -61,16 +67,20 @@
    :qualified-symbol :db.type/symbol})
 
 (defn form-head
-  "The head of one Malli form."
+  "The head of one Malli form.
+
+  It takes any authored VALUE: the bridge walks every child of a
+  declaration through it, and a child is often not a parseable form on its
+  own."
   {:malli/schema
-   [:=> [:cat :seon.schema/definition] :seon.schema/value]}
+   [:=> [:cat :seon.schema/value] :seon.schema/value]}
   [form]
   (if (vector? form) (first form) form))
 
 (defn resolve-datahike-form-in
   "Resolve aliases and wrappers in one projection to the stored form."
   {:malli/schema
-   [:=> [:cat :map :seon.schema/definition] :seon.schema/definition]}
+   [:=> [:cat :map :seon.schema/value] :seon.schema/value]}
   [projection form]
   (let [resolved (resolve-malli-form-in projection form)]
     (if (= :and (form-head resolved))
@@ -80,7 +90,7 @@
 (defn resolve-datahike-form
   "Resolve aliases and wrappers against canonical JVM declarations."
   {:malli/schema
-   [:=> [:cat :seon.schema/definition] :seon.schema/definition]}
+   [:=> [:cat :seon.schema/value] :seon.schema/value]}
   [form]
   (resolve-datahike-form-in
    {:seon.schema.projection/forms (packaged-forms)}
@@ -111,7 +121,7 @@
 
 (defn form->datahike-value-type-in
   "The Datahike value type represented by a form in one projection."
-  {:malli/schema [:=> [:cat :map :seon.schema/definition] :keyword]}
+  {:malli/schema [:=> [:cat :map :seon.schema/value] :keyword]}
   [projection form]
   (let [resolved (resolve-datahike-form-in projection form)
         head (form-head resolved)]
@@ -175,7 +185,7 @@
 
 (defn form->datahike-value-type
   "The Datahike value type represented by a canonical JVM Malli form."
-  {:malli/schema [:=> [:cat :seon.schema/definition] :keyword]}
+  {:malli/schema [:=> [:cat :seon.schema/value] :keyword]}
   [form]
   (form->datahike-value-type-in
    {:seon.schema.projection/forms (packaged-forms)}
@@ -183,7 +193,7 @@
 
 (defn form->cardinality
   "The Datahike cardinality represented by one Malli form."
-  {:malli/schema [:=> [:cat :seon.schema/definition] :keyword]}
+  {:malli/schema [:=> [:cat :seon.schema/value] :keyword]}
   [form]
   (let [resolved (resolve-datahike-form form)]
     (if (and (vector? resolved)
@@ -202,7 +212,7 @@
 (defn form->child-form
   "The stored child form for a collection schema, or the scalar form."
   {:malli/schema
-   [:=> [:cat :seon.schema/definition] :seon.schema/definition]}
+   [:=> [:cat :seon.schema/value] :seon.schema/value]}
   [form]
   (let [resolved (resolve-datahike-form form)]
     (if (and (vector? resolved)

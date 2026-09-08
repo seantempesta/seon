@@ -338,11 +338,17 @@
              (get-in refusal [:seon.error/data :seon.env/boundary])))))
 
   (testing "the work launcher"
-    (is (= :seon.env/absent-environment
-           (:seon.error/kind
-            (test-support/refusal-data
-             #(flow/start-work-launcher!
-               {:seon.flow/configuration launcher-configuration}))))))
+    ;; ITS REQUEST DECLARES THE ENVIRONMENT, so under the contracts every
+    ;; cluster arms the declared contract refuses first — at the same
+    ;; crossing, naming the same function. The env refusal below still owns
+    ;; every boundary whose declared shape ADMITS the call.
+    (let [refusal (test-support/refusal-data
+                   #(flow/start-work-launcher!
+                     {:seon.flow/configuration launcher-configuration}))]
+      (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+      (is (= 'seon.flow/start-work-launcher!
+             (:seon.error/diagnostic-operation
+              (:seon.error/data refusal))))))
 
   (let [environment (test-support/environment "refusal")
         launcher (flow/start-work-launcher!
@@ -357,9 +363,10 @@
                           :seon.flow/workload :io
                           :seon.flow/work-fn (fn [_] ::unreached)
                           :seon.flow/complete! (fn [_])}))]
-          (is (= :seon.env/absent-environment (:seon.error/kind refusal)))
-          (is (= :seon.flow/submit!
-                 (get-in refusal [:seon.error/data :seon.env/boundary])))))
+          (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+          (is (= 'seon.flow/submit!
+                 (:seon.error/diagnostic-operation
+                  (:seon.error/data refusal))))))
 
       (testing "the compute submission"
         (let [refusal (test-support/refusal-data
@@ -369,8 +376,9 @@
                           :seon.flow/workload :compute
                           :seon.flow/time-limit-ms 1000
                           :seon.flow/work-fn (fn [_] ::unreached)}))]
-          (is (= :seon.env/absent-environment (:seon.error/kind refusal)))
-          (is (= :seon.flow/submit!!
-                 (get-in refusal [:seon.error/data :seon.env/boundary])))))
+          (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
+          (is (= 'seon.flow/submit!!
+                 (:seon.error/diagnostic-operation
+                  (:seon.error/data refusal))))))
       (finally
         (flow/stop-work-launcher! launcher)))))

@@ -34,6 +34,32 @@ Two things were wrong in that file and only one is fixed:
   agent actually calls — a form through the SCI kernel — or assert the typed
   contract refusal as the value it is.
 
+## The class is system-wide, and the platform tier shows it
+
+With the gate armed (`07394e485`) the declared PLATFORM tier is red with nine
+members, and every one is this class — a test pinning a function's own typed
+refusal for an input its declared contract forbids, where the contract now
+refuses first with an equally evidence-complete value naming the function, the
+member and the offending argument:
+
+```text
+seon.cluster.store-test/open-write-release-reopen-preserves-data
+seon.db.declaration-population-test/a-read-resolves-the-declaration-population-at-most-once
+seon.env-test/a-crossing-that-names-no-environment-is-refused-where-it-is-built
+seon.flow-configuration-test/every-built-graph-proc-declares-a-specific-workload
+seon.flow-configuration-test/proc-construction-refuses-the-mixed-scaling-cliff
+seon.schema.declaration-population-test/an-unhanded-declaration-projection-refuses-without-reading-resources
+seon.sci.admit.declaration-population-test/a-supplied-projection-is-used-and-resolves-nothing
+seon.sci.admit.declaration-population-test/an-admission-resolves-the-declaration-population-at-most-once
+seon.sci.admit.declaration-population-test/an-admission-that-asks-no-identity-question-resolves-nothing
+```
+
+Three shapes appear: an argument the contract forbids (`:mixed`, a released
+connection, a non-Malli form), a fixture omitting a declared member
+(`:seon.config/on-core-error`), and a diagnostic whose CALLER frame is now
+malli's wrapper rather than the test. None is a production defect; all nine
+assert a pre-instrumentation shape.
+
 ## To do
 
 Decide the shape once for every agent-facing refusal test (there is more than

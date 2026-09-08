@@ -908,14 +908,20 @@
         (case (::worker-command command)
           :initialize
           (let [namespaces (mapv symbol (::worker-namespaces command))]
-            (doseq [namespace-name namespaces]
-              (require namespace-name))
-            ;; THE PROJECTION IS ACQUIRED AFTER THE REQUIRES, exactly as a
-            ;; cluster acquires its own after loading: a predicate schema's
-            ;; callable is admitted only once the namespace declaring it is
-            ;; loaded, so a projection built earlier refuses four shipped
-            ;; contracts (`my.fs/content?`, `my.shell/stdin?`,
-            ;; `my.shell/output?`) that a live cluster resolves.
+            ;; LOADING IS AN OPERATION AND IT ASKS SCHEMA QUESTIONS, so it
+            ;; runs under a projection like every other operation.
+            (schema/call-with-projection
+             (packaged-test-projection worker-id)
+             (fn []
+               (doseq [namespace-name namespaces]
+                 (require namespace-name))))
+            ;; THE PROJECTION THE LOOP HOLDS IS ACQUIRED AFTER THE REQUIRES,
+            ;; exactly as a cluster acquires its own after loading: a
+            ;; predicate schema's callable is admitted only once the
+            ;; namespace declaring it is loaded, so a projection built
+            ;; earlier refuses four shipped contracts (`my.fs/content?`,
+            ;; `my.shell/stdin?`, `my.shell/output?`) that a live cluster
+            ;; resolves.
             (let [projection (packaged-test-projection worker-id)
                   applied (arm-contracts! projection worker-id namespaces)]
               (write-protocol! writer

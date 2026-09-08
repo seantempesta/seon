@@ -169,3 +169,66 @@ admitted and `seon.print/fit` at the AI boundary makes the cut. Deleted:
   only what it has.
 - `cluster-ctx` then called `acquire!` with `{:seon.schema/projection nil}` —
   the same stored-nil-into-an-optional-key shape as BR1.
+
+
+## 7. The live proof
+
+The development cluster REFUSED adoption, for a reason this lane could not fix
+from outside it:
+
+```text
+bin/seon --root tmp/juniper-context-live init --dev juniper-context
+● current-src: analysis started: 251 source inputs
+✗ seon.schema/canonical-definition violated its contract (invalid-output):
+  must be a parseable, EDN-readable Malli form
+  args "[:=> [:cat :seon.print/identity-attributes :seon.print/node]
+          :seon.print/references]"
+```
+
+Adoption ANALYSES the tree before it reloads namespaces, so that JVM has the
+new `:seon.print/node` declaration and not yet the `seon.print/node?` Var it
+names; a fresh JVM adopts the same commit without complaint (proven below).
+Filed as
+[a-new-core-predicate-and-its-schema-cannot-be-adopted-in-place](../../../seon/issues/a-new-core-predicate-and-its-schema-cannot-be-adopted-in-place.md).
+The assignment permits only `init --dev` at that root, so the lane stopped
+there and proved the same facts on its own scratch cluster instead.
+
+### 7.1 Scratch cluster `repair2` under `tmp/repair2-live`
+
+`bin/seon --root tmp/repair2-live init` published from this tree; `start
+repair2` booted; **871 instrumented vars** in that JVM.
+
+**BR1, at the render boundary, with the cluster's own derived profile:**
+
+| value | AI | HTML |
+|---|---|---|
+| 5 MiB string | **1,832 bytes**, no error, `… more characters`, `requery by`, `bounded by :seon.render.profile/token-budget` | **5,243,007 bytes** — whole |
+| 5,000-element vector | **270 bytes**, no error, `… more children`, `requery by`, `bounded by :seon.render.profile/max-children` | **429,189 bytes** — whole |
+
+Before this repair both raised
+`seon.print/elision violated its contract (invalid-input)`.
+
+**BR3, admission under the same armed contracts:**
+
+| value | outcome |
+|---|---|
+| 5,000-deep map | admitted WHOLE (was `StackOverflowError` above 3,509) |
+| 20,000-deep map | admitted WHOLE |
+| 1,000,000-element vector | `:over-bound`, `:seon.eval/size` **8,388,644** — bytes reached |
+
+**The agent's own prompt page**, `GET /ns/my.agents.root/debug?prompt=true`
+(200, 30,374 bytes): no `prospective-context-unavailable`, no contract
+violation, and **eight elisions**, each carrying `more characters`,
+`requery by`, and `bounded by :seon.render.profile/token-budget`. That page
+was `:seon.render.web/prospective-context-unavailable` before.
+
+**FR5 live:** every `eval_clj` envelope in this session carries no
+`seon.sci.admit/capped?` key at all.
+
+### 7.2 One tool defect the live cluster reported immediately
+
+SCI evaluation mode (`eval_clj` `mode: "door"`) answered
+`seon.sci.eval/evaluate violated its contract (invalid-input): missing
+required key` on its first call: `script/seon/dev/mcp.clj` was sending the
+RETIRED `:seon.cluster.run.form/source` and `/ns` spellings, so the evaluator
+received no source at all. Fixed in `4ec6bd82a`.
