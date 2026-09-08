@@ -1,5 +1,22 @@
 ;;; Probe: bare `bin/test` selects by :seon.fn/calls reach, never by mtime or
-;;; by a filename convention. Run: clojure -M -i tmp/harness-probes/selection_probe.clj
+;;; by a filename convention.
+;;;
+;;; Run from a checkout root:
+;;;   clojure -M -i docs/prds/context-generation/research/scripts/\
+;;;                 test_harness_selection_probe_2026_09_08.clj
+;;;
+;;; NOTE: step 4 rewrites one source file's modification time in place, to
+;;; prove the basis ignores it. Run it in a throwaway worktree, not a tree
+;;; whose build cache you care about.
+;;;
+;;; Measured 2026-09-08 (frozen worktree at 31fb0b0b4):
+;;;   src/seon/test/selection.clj  -> 5 tests
+;;;   src/seon/db.clj              -> 800 tests across 111 namespaces,
+;;;                                   107 sharing no name stem with it
+;;;   src/seon/render/hiccup.clj   -> 246 tests across 35 namespaces
+;;;   AGENTS.md                    -> 0 tests
+;;;   an mtime change              -> digests identical, changed-inputs []
+;;;   a one-byte content change    -> that one path
 (require '[seon.fn :as seon.fn] '[seon.test.selection :as selection]
          '[clojure.java.io :as io])
 
