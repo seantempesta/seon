@@ -821,3 +821,62 @@ my.agents.juniper=> (my.plan/blocked)
 #:seon.repl{:value [#:my.plan.item{:id "juniper/compare-changed-results", :title "Compare refreshed results", :needs ["juniper/render-plan"]}]}
 ```
 
+### History (owner, 2026-09-08)
+
+ALL turns are shown by default; no clipping in the history "until we get
+shit under control". Order in the prompt: the record's own block, the
+plan, unanswered wakes, faults routed to me, then the history LAST — the
+agent's turns are the tail before it continues. Within the history:
+chronological, oldest first, the newest turn last. Each evaluation through
+`seon.repl/text`; nothing else formats it.
+
+## 14. Additive context: the prompt and the SCI context only grow (owner, 2026-09-08)
+
+"We shouldn't overwrite the previous context as that breaks caching … unless
+we wipe the data and do a compaction it is an additive process." Provider
+prompt caching works on a stable prefix, so:
+
+- **The transcript IS the prompt, and it only grows.** Generated context is
+  never re-rendered at the top. Generated forms are EXECUTED AND STORED as
+  evaluations on the agent's record like the agent's own forms, in one
+  additive sequence: a SYSTEM TURN 0 (identity, plan, `dir`s — the opening),
+  then agent turn 1, then a system turn holding what changed since (new
+  wakes, plan changes, the `since-last` query), then agent turn 2, and so
+  on. Every prompt is the stored evaluations in order through
+  `seon.repl/text`; bytes already sent never change; only the tail is new.
+- **A system turn is an ordinary turn with a reply and no provider
+  attempt** (the source-submission shape). "System" is derived, never
+  stamped. A system turn holding wakes' results answers those wakes under
+  the `:t` rule. The old generated-opening machinery does not return: a
+  system turn evaluates its forms like any turn.
+- **Before each agent turn the loop runs the system turn for what
+  changed**; nothing changed ⇒ no system turn. This is "render the diff as
+  if the agent queried it before its turn started".
+- **Compaction = wipe and regenerate**: retract the agent's evaluations;
+  the next system turn regenerates the opening from the current record. No
+  manual curation anywhere; one algorithm, every turn, including the first.
+- **The SCI context is additive too.** Each agent keeps ONE live context
+  across its turns (its fork of the base + its private layer), never
+  re-forked from scratch. When the base changes (a function installed by
+  anyone, an adoption), the agent's context RECEIVES THE DIFF — the new or
+  changed vars interned into it, the operation the install gate already
+  performs for one function. Result handles accrete. A JVM restart starts
+  the context empty and the history says what was there.
+- **Byte identity becomes trivial** (the bytes are stored facts). The
+  in-memory invocation cache serves the debug page's previews; `?prompt=true`
+  projects the stored transcript plus the would-be system turn WITHOUT
+  writing, for inspection. "Prompts are never stored" still holds: the
+  evaluations are stored, the prompt is generated from them.
+
+§8a ("the opening is a projection, nothing transacted") is superseded by
+this section: the opening is system turn 0, stored.
+
+**Everything, not the inbox** (owner, same day): for EVERY distinct read
+form in the transcript — generated or agent-written; a form that reads
+facts and neither transacts nor requests an effect — the loop looks at its
+latest evaluation; if any fact its read evidence names changed since that
+evaluation's `:t` (a `since` query), the system turn appends a fresh
+evaluation of that same form. Writes and effects are never re-run. One
+algorithm, no block-specific code: the cache validity check applied to the
+whole transcript.
+
