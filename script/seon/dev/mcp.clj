@@ -609,8 +609,12 @@
                "door evaluation is unavailable.")
          :seon.dev.mcp/cluster ~cluster}
         ((requiring-resolve 'seon.sci.eval/evaluate)
-         {:seon.cluster.run.form/source ~source
-          :seon.cluster.run.form/ns [:seon.ns/name '~namespace-symbol]
+         ;; THE KEYS `evaluate` DECLARES. These were the retired
+          ;; `:seon.cluster.run.form/*` spellings, so SCI evaluation mode
+          ;; handed the evaluator no source at all — invisible until the
+          ;; gate and this cluster armed the contract that says so.
+         {:seon.cluster.eval/source ~source
+          :seon.cluster.eval/ns [:seon.ns/name '~namespace-symbol]
           :seon.sci.eval/ctx (:seon.sci.eval/ctx instance#)
           :seon.sci.admit/caps (:seon.sci.admit/caps cluster#)
           :seon.sci.eval/time-limit-ms

@@ -422,19 +422,19 @@
                   "eval-wait" "decline-3" "eval-error" "self-4"]
                  (mapv :id html-rows))))
         (testing "recent receipts reproduce prompt, input, output, and result"
-          (is (str/includes?
-               ai
-               "Agent transcript-peer said to transcript-agent: Repair the owning namespace."))
+          ;; A MESSAGE ENTERS THE AGENT'S CONTEXT AS SOURCE, not as prose:
+          ;; `:seon.render/ai` returns the form the agent executes
+          ;; (`seon.cluster.message/render-ai`), and the executed form's
+          ;; printed result is the sentence. Asserting the sentence HERE was
+          ;; asserting the superseded prose shape (AGENTS §2.4 vocabulary).
+          (is (str/includes? ai "seon.cluster.message/format-ai")
+              "each message is the ordinary read-and-format form")
+          (is (str/includes? ai "\"peer-1\"")
+              "naming the message it reads, so the agent can ask again")
+          (is (str/includes? ai "\"decline-3\""))
+          (is (str/includes? ai "\"outside-0\""))
           (is (not (str/includes? ai "t=41"))
               "the receipt's read basis remains metadata, not result text")
-          (is (str/includes?
-               ai
-               "Agent transcript-agent said to transcript-peer: I cannot make the requested edit."))
-          (is (str/includes? ai "The namespace is owned by another agent."))
-          (is (str/includes? ai "An external observation, not this agent's decline."))
-          (is (str/includes? ai "From outside this cluster to transcript-agent"))
-          (is (not (str/includes? ai
-                                  "Agent transcript-agent said to transcript-agent: Start with")))
           (is (str/includes?
                ai
                (str ";; calculate the answer\n"
@@ -664,6 +664,7 @@
           {:seon.cluster.eval/id "original-comment"
            :seon.cluster.eval/run [:seon.cluster.run/id "original"]
            :seon.cluster.eval/ordinal 1
+           :seon.cluster.eval/at (at 102)
            :seon.cluster.eval/source "; original comment"}
 
           {:seon.cluster.run/id "curated"
@@ -692,6 +693,8 @@
           {:seon.cluster.eval/id "proof-comment"
            :seon.cluster.eval/run [:seon.cluster.run/id "proof"]
            :seon.cluster.eval/ordinal 1
+           ;; every entry the history orders carries the instant it orders by
+           :seon.cluster.eval/at (at 302)
            :seon.cluster.eval/source "; proof comment"}])
         (let [db @connection
               full (transcript/render-html (unit connection))
@@ -730,9 +733,9 @@
          :seon.cluster.eval/result-edn "{"
          :seon.cluster.eval/source "("}])
       (let [ai (transcript/render-ai (unit connection))]
-        (is (str/includes?
-             ai
-             "Agent transcript-agent said to transcript-peer: Inspect the test fact."))
+        ;; the message is the form that reads it, naming its own identity
+        (is (str/includes? ai "seon.cluster.message/format-ai"))
+        (is (str/includes? ai "\"about-test\""))
         (is (str/includes? ai "user=> ("))
         (is (str/includes? ai ":seon.cluster.eval/result-edn \"{\""))
         (assert-no-session-narration ai)))))
@@ -807,8 +810,15 @@
            :seon.cluster.eval/source "(identity result)"}])
         (let [ai (transcript/render-ai
                   (unit connection narrow-caps))]
+          ;; THE CUT IS THE ONE ELISION VALUE, and it says what it omitted,
+          ;; the bound that made it, and the identity to ask again with —
+          ;; the word "elided" was the retired transcript marker's prose.
           (is (str/includes? ai "…"))
-          (is (str/includes? ai "elided"))
+          (is (str/includes? ai "more children of 40"))
+          (is (str/includes? ai
+                             (str "bounded by "
+                                  :seon.render.profile/max-children)))
+          (is (str/includes? ai "requery by"))
           (is (not (str/includes? ai ":audit/field-39")))
           (assert-no-session-narration ai))))))
 
@@ -1064,17 +1074,18 @@
                    (= (count events) (count html-rows))
                    (= visible-ids ordered-ids)
                    (= (count visible-ids) (count (distinct visible-ids)))
-                   (every? (fn [{:keys [content]}]
-                             (and (str/includes? ai content)
-                                  (str/includes? ai
-                                                 (str "declined: " content))))
+                   ;; A MESSAGE IS SOURCE: the entry the agent reads is the
+                   ;; form that reads the message, so the identity is what
+                   ;; must be there — the content arrives when the form runs.
+                   (every? (fn [{:keys [id]}]
+                             (str/includes? ai (pr-str id)))
                            visible-declines)
                    (every?
                     (fn [id]
-                      (let [{:keys [kind content source-index]}
+                      (let [{:keys [kind source-index]}
                             (get events-by-id id)]
                         (if (= :message kind)
-                          (str/includes? ai content)
+                          (str/includes? ai (pr-str id))
                           (str/includes? ai
                                          (if (= :receipt-invalid
                                                 (:event-kind

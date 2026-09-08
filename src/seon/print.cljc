@@ -772,13 +772,22 @@
   [value]
   (and (map? value) (keyword? (::face value))))
 
+(def ^:private node-face-validator*
+  ;; THE FACE TABLE IS CORE-OWNED AND SHIPPED: no cluster, agent or delta
+  ;; registers a `:seon.print/node-face`, so one validator compiled from the
+  ;; packaged declaration population is the same answer every projection
+  ;; would give — and compiling it per call (or reading the declaration
+  ;; population per call, which is what asking the ambient registry costs)
+  ;; is the measured performance trap this project already named.
+  (delay
+    (schema/projection-validator
+     (schema/declaration-projection
+      #?(:clj (schema.edn/packaged-forms) :cljs {}))
+     ::node-face)))
+
 (defn- node-face-validator
   []
-  (if-some [projection (schema/handed-projection)]
-    (schema/projection-cache-value
-     projection ::node-face-validator
-     (fn [] (schema/projection-validator projection ::node-face)))
-    (schema/candidate-validator ::node-face)))
+  @node-face-validator*)
 
 (defn- node-children
   [node]
