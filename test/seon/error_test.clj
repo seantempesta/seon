@@ -175,9 +175,6 @@
           {:seon.ai/stream-truncated true
           :seon.error/kind :seon.ai/stream-truncated
            :seon.error/message "stream truncated"}
-          {:seon.cluster.loop/trigger-already-answered true
-          :seon.error/kind :seon.cluster.loop/trigger-already-answered
-           :seon.error/message "already answered"}
           {:seon.cluster.reply/unreadable "["
           :seon.error/kind :seon.cluster.reply/unreadable
            :seon.error/message "unreadable"}

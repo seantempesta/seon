@@ -1143,8 +1143,9 @@
            ;; The steward is decided inside the commit, not here: the
            ;; call merges its ref onto this same tempid.
            [:db.fn/call #'steward-call
-            {:seon.error/id id
-             :seon.instrument/fn (:seon.instrument/fn fact)}]]
+            (cond-> {:seon.error/id id}
+              (:seon.instrument/fn fact)
+              (assoc :seon.instrument/fn (:seon.instrument/fn fact)))]]
           (remove nil?)
           [(when (and attributed interrupted-a-run?
                       (not recurring?) (not silent?))

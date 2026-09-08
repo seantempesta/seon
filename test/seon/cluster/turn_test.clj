@@ -1744,6 +1744,16 @@
                       :seon.cluster.run/opened-at (Date. 1000)}
                      {:seon.cluster.agent/id "agent-a"
                       :seon.cluster.agent/run [:seon.cluster.run/id "run-crashed"]}])
+        ;; A LATER trigger — the one the wedge would strand. Answeredness
+        ;; is the turn's own transaction, so a wake OLDER than the wreck
+        ;; was answered by the turn that died holding it (no resume, and
+        ;; the model is never re-called); this one arrived after it and
+        ;; must still be heard.
+        (db/transact! connection
+                    [{:seon.cluster.message/id "m-after-crash"
+                      :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
+                      :seon.cluster.message/content "arrived while wedged"
+                      :seon.cluster.message/at now}])
         (testing "the agent is WEDGED: it is busy, and nothing is work"
           (is (nil? (work/next-agent-work @connection (request connection))))
           (is (= "run-crashed"
@@ -1768,6 +1778,8 @@
         (testing "and the trigger that was waiting behind it is ANSWERED
                   by a new run that ran to completion"
           (is (empty? (work/unanswered-triggers @connection "agent-a")))
+          (is (empty? (work/unanswered-wakes @connection "agent-a" {}))
+              "including the one that arrived while the agent was wedged")
           (let [new-runs (db/q '[:find [?id ...] :where
                                 [?r :seon.cluster.run/id ?id]
                                 [?r :seon.cluster.run/plan-digest _]]

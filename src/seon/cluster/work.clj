@@ -689,7 +689,10 @@
                             (:seon.cluster.message/id pulled))
                      (:seon.cluster.message/at pulled)
                      (assoc :seon.cluster.message/at
-                            (:seon.cluster.message/at pulled)))))))))
+                            (:seon.cluster.message/at pulled))
+                     (:seon.cluster.message/ordinal pulled)
+                     (assoc :seon.cluster.message/ordinal
+                            (:seon.cluster.message/ordinal pulled)))))))))
 
 (defn unanswered-triggers
   "The agent's unanswered MESSAGE wakes, oldest first.
@@ -704,8 +707,16 @@
                   [:vector [:map [:seon.cluster.message/id
                                   :seon.cluster.message/id]]]]}
   [db agent-id]
-  (into []
-        (comp (filter #(= :seon.cluster.message/to (:seon.wake/attribute %)))
-              (map #(select-keys % [:seon.cluster.message/id
-                                    :seon.cluster.message/at])))
-        (unanswered-wakes db agent-id {})))
+  (->> (unanswered-wakes db agent-id {})
+       (filter #(= :seon.cluster.message/to (:seon.wake/attribute %)))
+       ;; ORDERED BY THE MESSAGE'S OWN `at`, not by commit order: the
+       ;; fact carries the time, and a message written later can be
+       ;; older. `unanswered-wakes` orders by `:t` because that is the
+       ;; only time a wake in general has; the message family orders by
+       ;; the one it declares.
+       (sort-by (juxt #(inst-ms (:seon.cluster.message/at %))
+                      :seon.wake/t
+                      #(or (:seon.cluster.message/ordinal %) 0)
+                      :db/id))
+       (mapv #(select-keys % [:seon.cluster.message/id
+                              :seon.cluster.message/at]))))

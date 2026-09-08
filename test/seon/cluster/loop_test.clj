@@ -294,31 +294,39 @@
                :seon.problems/form-problem {:seon.problems/id :problem}
                :seon.cluster.agent/id "agent-1"}))))))
 
-(deftest one-trigger-cannot-open-a-second-run-after-the-first-closes
+(deftest one-wake-cannot-open-a-second-turn-after-the-first-closes
+  ;; THE SAME CLASS, PROVED BY THE DERIVATION INSTEAD OF A FENCE. It used
+  ;; to take a `:db.fn/call` refusing `::trigger-already-answered` on a
+  ;; stored reference; the wake's own transaction is older than the turn
+  ;; that opened, so the derivation never offers a second turn and there
+  ;; is nothing left to refuse.
   (test-support/with-database
     (fn [connection]
       (let [agent-id "one-answer"
             trigger-id "one-question"
             first-run "first-answer"
-            second-run "stale-second-answer"
-            open-trigger-call (private-loop-fn 'open-trigger-call)]
+            request {:seon.cluster.agent/id agent-id
+                     :seon.cluster.run/process process}]
         (db/transact!
          connection
          [{:seon.cluster.agent/id agent-id}
+          {:seon.config/cluster "loop-test"
+           :seon.config.run/max-episode-runs 100}
           {:seon.cluster.message/id trigger-id
            :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
            :seon.cluster.message/content "answer once"
            :seon.cluster.message/at now}])
+        (is (= :open (:seon.cluster.work/situation
+                      (work/next-agent-work (db/db connection) request)))
+            "the wake opens exactly one turn")
         (db/transact!
          connection
          {:tx-data
           (into
            [[:db.fn/call
-             open-trigger-call
+             #'run/open-call
              {:seon.cluster.run/id first-run
               :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-              :seon.cluster.run/trigger
-              [:seon.cluster.message/id trigger-id]
               :seon.cluster.run/opened-at now}]]
            (run/claim-tx
             {:seon.cluster.run/id first-run
@@ -331,28 +339,21 @@
           {:seon.cluster.run/id first-run
            :seon.cluster.run/process process
            :seon.cluster.run/closed-at now}))
-        (let [refused
-              (db/transact!
-               connection
-               [[:db.fn/call
-                 open-trigger-call
-                 {:seon.cluster.run/id second-run
-                  :seon.cluster.run/agent
-                  [:seon.cluster.agent/id agent-id]
-                  :seon.cluster.run/trigger
-                  [:seon.cluster.message/id trigger-id]
-                  :seon.cluster.run/opened-at now}]])]
-          (is (= :seon.cluster.loop/trigger-already-answered
-                 (:seon.error/kind refused)))
+        (let [database (db/db connection)]
+          (is (empty? (work/unanswered-wakes database agent-id {}))
+              "the closed turn answered it, with nothing stored")
+          (is (nil? (work/next-agent-work database request))
+              "and a second turn is never derived — the fence it used to
+               need is gone with the reference it guarded")
           (is (= [first-run]
                  (db/q '[:find [?run-id ...]
-                         :in $ ?trigger-id
+                         :in $ ?agent-id
                          :where
-                         [?trigger :seon.cluster.message/id ?trigger-id]
-                         [?run :seon.cluster.run/trigger ?trigger]
+                         [?agent :seon.cluster.agent/id ?agent-id]
+                         [?run :seon.cluster.run/agent ?agent]
                          [?run :seon.cluster.run/id ?run-id]]
-                       @connection trigger-id))
-              "the refused stale open leaves exactly one answering run"))))))
+                       database agent-id))
+              "exactly one turn exists"))))))
 
 (deftest delivery-rows-projects-rows-and-every-refusal-transaction
   (let [db {:immutable :database-value}

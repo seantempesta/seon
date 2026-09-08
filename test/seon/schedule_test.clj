@@ -6,6 +6,8 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.schedule :as schedule]
+            [seon.cluster.wake :as wake]
+            [seon.cluster.work :as work]
             [seon.test-support :as test-support])
   (:import [java.time Instant]
            [java.util Date]))
@@ -146,6 +148,51 @@
                        :seon.schedule.fire/nominal-at
                        :seon.schedule.fire/observed-at)
                (dissoc (execution-context) :seon.cluster.loop/cluster)))))))
+
+(deftest each-firing-is-one-wake-that-opens-no-turn
+  ;; THE CLASS: a recurrence definition is not an event. Claiming the
+  ;; SCHEDULE once would consume every later firing, so the wake rides
+  ;; the firing entity — one immutable entity per nominal instant, one
+  ;; `:seon.schedule.fire/agent` datom with its own transaction `:t`,
+  ;; asserted once and never re-asserted.
+  ;;
+  ;; And it is declared `:seon.wake/opens-turn? false`: the maintenance
+  ;; portfolio ticks on a cron, and a paid model call per tick is not a
+  ;; feature.
+  (test-support/with-database
+    (fn [connection]
+      (reset! handler-calls [])
+      (seed-task! connection "schedule-test/firing-wake"
+                  "seon.schedule-test/successful-handler")
+      (let [database (db/db connection)]
+        (is (contains? (wake/wake-attributes database)
+                       :seon.schedule.fire/agent)
+            "the firing attribute is listened")
+        (is (not (contains? (wake/turn-opening-attributes database)
+                            :seon.schedule.fire/agent))
+            "and it never opens a turn")
+        (is (zero? (count-with database :seon.schedule.fire/agent))
+            "the recurrence definition asserted no wake datom"))
+      (let [observed-at (observed-after-seed)]
+        (is (= 1 (schedule/fire-due! connection "root" observed-at
+                                     (execution-context))))
+        (let [database (db/db connection)]
+          (is (= 1 (count-with database :seon.schedule.fire/agent))
+              "one firing, one wake datom")
+          (is (= [(db/q '[:find ?agent . :where
+                          [?agent :seon.cluster.agent/id "root"]]
+                        database)]
+                 (db/q '[:find [?agent ...] :where
+                         [_ :seon.schedule.fire/agent ?agent]]
+                       database))
+              "pointing at the task's owner, so the router needs no query")
+          (is (empty? (work/unanswered-wakes database "root" {}))
+              "and it derives no turn-opening work"))
+        (is (= 0 (schedule/fire-due! connection "root" observed-at
+                                     (execution-context))))
+        (is (= 1 (count-with (db/db connection) :seon.schedule.fire/agent))
+            "re-firing the same nominal instant asserts nothing: a wake
+             datom is written once and never re-asserted")))))
 
 (deftest a-nominal-predating-the-task-never-fires
   ;; The class this kills: a fresh task has no fire history, and reading

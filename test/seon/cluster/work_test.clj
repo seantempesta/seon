@@ -144,16 +144,20 @@
            result-values))})
   ;; ONE ENTITY PER (run, ordinal): the terminal fact accretes onto the
   ;; evaluation the freeze minted, under the same identity.
+  ;; `vec`, because `seon.db/transact!` declares transaction data and a
+  ;; lazy seq is not it — a fixture that hands one gets a typed refusal
+  ;; the test then reads as a hang in whatever it asserts next.
   (db/transact!
    connection
-   (map-indexed
-    (fn [ordinal value]
-      {:seon.cluster.eval/id (str id "-" ordinal)
-       :seon.cluster.eval/run [:seon.cluster.run/id id]
-       :seon.cluster.eval/ordinal ordinal
-       :seon.cluster.eval/at at
-       :seon.cluster.eval/result-edn (pr-str value)})
-    result-values))
+   (vec
+    (map-indexed
+     (fn [ordinal value]
+       {:seon.cluster.eval/id (str id "-" ordinal)
+        :seon.cluster.eval/run [:seon.cluster.run/id id]
+        :seon.cluster.eval/ordinal ordinal
+        :seon.cluster.eval/at at
+        :seon.cluster.eval/result-edn (pr-str value)})
+     result-values)))
   (db/transact! connection
               [[:db/add [:seon.cluster.run/id id]
                 :seon.cluster.run/closed-at at]
@@ -517,21 +521,39 @@
                        (work/interruption db agent-id)))
             "it is wreckage to bury, not work to continue")))))
 
-(deftest answeredness-is-a-recorded-run-ref
+(deftest answeredness-is-the-turns-own-transaction
+  ;; THE CLASS: answeredness used to be a stored reference from the run
+  ;; to the one message it answered. It is now the turn's own `:t`, and
+  ;; nothing is stored — no claim, no flag, and no way for a turn to
+  ;; answer a wake its context could not have contained. One connection
+  ;; throughout, so every verdict is against real committed facts.
   (with-database
     (fn [connection]
       (add-trigger! connection)
-      (testing "a trigger no run points at is unanswered"
+      (testing "a wake newer than every turn is unanswered"
         (is (= [message-id]
                (mapv :seon.cluster.message/id
-                     (work/unanswered-triggers (db/db connection) agent-id)))))
-      (open-run! connection {:holder process :triggered? true})
-      (testing "opening a run against it answers it — with no flag anywhere"
-        (is (empty? (work/unanswered-triggers (db/db connection) agent-id))))
-      (testing "and a run opened without a trigger ref answers nothing"
+                     (work/unanswered-triggers (db/db connection) agent-id))))
+        (is (= 0 (work/latest-turn-t (db/db connection) agent-id))
+            "no turn, no basis"))
+      (let [wake-t (:seon.wake/t
+                    (first (work/unanswered-wakes
+                            (db/db connection) agent-id {})))]
+        (open-run! connection {:holder process})
+        (testing "opening a turn answers it — the turn's own transaction
+                  is the basis, and no reference was written"
+          (let [database (db/db connection)]
+            (is (empty? (work/unanswered-triggers database agent-id)))
+            (is (< wake-t (work/latest-turn-t database agent-id))
+                "the wake arrived before the turn that answered it")
+            (is (nil? (:seon.cluster.run/trigger
+                       (db/pull database [:seon.cluster.run/trigger]
+                                [:seon.cluster.run/id run-id])))
+                "and no run attribute records the answer"))))
+      (testing "a wake asserted after the turn is unanswered again"
         (close-run! connection)
         (is (empty? (work/unanswered-triggers (db/db connection) agent-id))
-            "the first trigger stays answered")
+            "the first wake stays answered")
         (db/transact! connection
                     [{:seon.cluster.message/id "message-3"
                       :seon.cluster.message/to
@@ -541,6 +563,123 @@
         (is (= ["message-3"]
                (mapv :seon.cluster.message/id
                      (work/unanswered-triggers (db/db connection) agent-id))))))))
+
+(deftest two-wakes-in-one-transaction-are-one-turn
+  ;; THE CLASS: selecting ONE unanswered item per turn paid the model
+  ;; twice for a context that already contained both. Measured live on
+  ;; the fixture that ships with this program: three messages, two of
+  ;; them in one commit, three paid turns. A turn's `:t` answers every
+  ;; wake at or before it, so the second call cannot happen.
+  (with-database
+    (fn [connection]
+      (configure-cap! connection 100)
+      (db/transact!
+       connection
+       [{:seon.cluster.message/id "pair-a"
+         :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+         :seon.cluster.message/content "a"
+         :seon.cluster.message/at now}
+        {:seon.cluster.message/id "pair-b"
+         :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+         :seon.cluster.message/content "b"
+         :seon.cluster.message/at now}])
+      (let [wakes (work/unanswered-wakes (db/db connection) agent-id {})]
+        (is (= 2 (count wakes)) "both are unanswered")
+        (is (apply = (map :seon.wake/t wakes))
+            "and they share one transaction, which is the whole point"))
+      (is (= :open (:seon.cluster.work/situation
+                    (work/next-agent-work (db/db connection)
+                                          {:seon.cluster.agent/id agent-id
+                                           :seon.cluster.run/process process})))
+          "one turn opens")
+      (open-run! connection {:holder process})
+      (close-run! connection)
+      (let [database (db/db connection)]
+        (is (empty? (work/unanswered-wakes database agent-id {}))
+            "and that ONE turn answered both")
+        (is (nil? (work/next-agent-work database
+                                        {:seon.cluster.agent/id agent-id
+                                         :seon.cluster.run/process process}))
+            "no second paid call")))))
+
+(deftest a-wake-arriving-mid-turn-opens-the-next-turn
+  ;; THE OTHER HALF of the `:t` rule, and the reason it is `>` and not
+  ;; `>=`: a wake whose transaction is newer than the open turn's was
+  ;; never in that turn's context, so it must not be swallowed by it.
+  (with-database
+    (fn [connection]
+      (configure-cap! connection 100)
+      (add-trigger! connection)
+      (open-run! connection {:holder process})
+      (db/transact!
+       connection
+       [{:seon.cluster.message/id "mid-turn"
+         :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+         :seon.cluster.message/content "arrived while the turn was open"
+         :seon.cluster.message/at (Date. 1700000000002)}])
+      (is (= ["mid-turn"]
+             (mapv :seon.cluster.message/id
+                   (work/unanswered-triggers (db/db connection) agent-id)))
+          "it is newer than the open turn's own transaction")
+      (close-run! connection)
+      (is (= {:seon.cluster.work/situation :open
+              :seon.cluster.agent/id agent-id
+              :seon.cluster.message/id "mid-turn"}
+             (work/next-agent-work (db/db connection)
+                                   {:seon.cluster.agent/id agent-id
+                                    :seon.cluster.run/process process}))
+          "and it opens the next turn"))))
+
+(deftest the-turn-bound-is-turns-since-the-latest-outside-wake
+  ;; THE CLASS: an agent whose own activity wakes it must not be able to
+  ;; refill its own budget. A fault routed to a steward and an agent-sent
+  ;; message are declared INSIDE wakes, so they spend the bound and never
+  ;; reset it; a human message is outside and does.
+  (with-database
+    (fn [connection]
+      (configure-cap! connection 2)
+      (add-outside-trigger! connection "human-1" now)
+      (is (zero? (work/episode-runs (db/db connection) agent-id))
+          "an outside wake arrived and no turn has answered it")
+      (closed-run! connection "turn-1" "human-1" [1] now)
+      (is (= 1 (work/episode-runs (db/db connection) agent-id)))
+      (closed-run! connection "turn-2" "human-1" [1] now)
+      ;; an agent-sent message, asserted AFTER the second turn: an
+      ;; INSIDE wake by its own declaration, unanswered by `:t`
+      (db/transact!
+       connection
+       [{:seon.cluster.message/id "self-1"
+         :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+         :seon.cluster.message/from [:seon.cluster.agent/id agent-id]
+         :seon.cluster.message/content "keep going"
+         :seon.cluster.message/at (Date. 1700000000002)}])
+      (let [database (db/db connection)]
+        (is (= 2 (work/episode-runs database agent-id))
+            "the inside wake did not refill the bound")
+        (is (nil? (work/next-agent-work database
+                                        {:seon.cluster.agent/id agent-id
+                                         :seon.cluster.run/process process}))
+            "AT the cap an inside wake opens nothing — this is what stops
+             a fault about an agent's own code looping forever")
+        (is (= ["self-1"]
+               (mapv :seon.cluster.message/id
+                     (work/deferred-triggers database agent-id)))
+            "it is deferred, and the deferral is a derivation with
+             nothing stored"))
+      (db/transact!
+       connection
+       [{:seon.cluster.message/id "human-2"
+         :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+         :seon.cluster.message/content "new instruction"
+         :seon.cluster.message/at (Date. 1700000000003)}])
+      (let [database (db/db connection)]
+        (is (zero? (work/episode-runs database agent-id))
+            "an outside wake ARRIVING is the reset; there is no reset code")
+        (is (= :open (:seon.cluster.work/situation
+                      (work/next-agent-work
+                       database {:seon.cluster.agent/id agent-id
+                                 :seon.cluster.run/process process})))
+            "and the agent hears it")))))
 
 (deftest triggers-come-back-oldest-first
   (with-database

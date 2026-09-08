@@ -31,4 +31,7 @@
               :seon.cluster.message/id]
              [:seon.cluster.message/at
               {:optional true}
-              :seon.cluster.message/at]]}
+              :seon.cluster.message/at]
+             [:seon.cluster.message/ordinal
+              {:optional true}
+              :seon.cluster.message/ordinal]]}
