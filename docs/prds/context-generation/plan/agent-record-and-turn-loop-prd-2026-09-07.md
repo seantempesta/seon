@@ -740,3 +740,21 @@ agent proc's state, never an EDN serialization — an atom keeps its identity
 across turns, and the `:seon.def` rows (which could not hold an atom at all)
 are deleted with their serializer.
 
+### The def note (owner-approved bytes, 2026-09-08)
+
+Every response to a top-level `def` (not `defn`, `defschema`, `deftest`,
+which persist as program rows) carries `:seon.repl/note`, placed after
+`:seon.repl/out` in the response order, one datum, never comment-shaped:
+
+```
+#:seon.repl{:value #'my.agents.juniper/x, :result result/e34291, :note "x lives only in your SCI context and is lost when the JVM restarts. Nothing defined with def is persisted, atoms included; they are for temporary data-modeling experiments. To keep something, write a function, schema, or test, or transact the data into the database."}
+```
+
+The text, with the var's name substituted: "`<name>` lives only in your SCI
+context and is lost when the JVM restarts. Nothing defined with def is
+persisted, atoms included; they are for temporary data-modeling
+experiments. To keep something, write a function, schema, or test, or
+transact the data into the database." Declared in `seon.repl.edn` as
+`:seon.repl/note :string`; written by the one generator `seon.repl` from
+the evaluation's read evidence (the form's head symbol), never by the loop.
+
