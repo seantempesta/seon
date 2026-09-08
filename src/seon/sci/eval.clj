@@ -1441,8 +1441,14 @@
     (if-not (seq refusals)
       state
       (if-let [connection (:seon.db/connection (::custody ctx))]
-        (let [effective (or (database-effective-config db)
-                            (config/defaults))
+        (let [read-effective (database-effective-config db)
+              ;; THE FALLBACK KEYS ON THE REFUSAL, not on nil: this read
+              ;; answers the typed unknown rather than an absence, so an
+              ;; `or` here would carry the refusal into `result-caps` and
+              ;; `commit-tx` instead of the shipped decisions it means.
+              effective (if (:seon.error/kind read-effective)
+                          (config/defaults)
+                          read-effective)
               caps (config/result-caps effective)
               recurrence-limit
               (:seon.config.error/recurrence-limit effective)
