@@ -62,12 +62,19 @@
 (declare stop-process-tree!)
 
 (deftest consecutive-cache-invocations-reuse-the-published-base
-  (let [published (System/getProperty "seon.test.published-base")
-        root (doto (io/file project-root "tmp" (str "base-reuse-" (random-uuid))) .mkdirs)]
+  (let [root (doto (io/file project-root "tmp" (str "base-reuse-" (random-uuid))) .mkdirs)
+        supplied (System/getProperty "seon.test.published-base")
+        published (or supplied (str (io/file root "standalone/base")))]
     (try
-      (is (some? published) "This launcher regression requires bin/test's published base.")
-      (when published
-        (let [original-ready (io/file (.getParentFile (io/file published)) "ready.edn")
+      (when-not supplied
+        ;; Direct iteration uses the same real publication fixture as boot tests.
+        (test-support/populate-published-root! published)
+        (spit (io/file published "manifest.edn") (pr-str @test-support/source-manifest))
+        (spit (io/file root "standalone/ready.edn")
+              (pr-str {:seon.test.cache/digest
+                       (#'dev-cache/test-digest (str project-root)
+                                                (System/getProperty "java.class.path"))})))
+      (let [original-ready (io/file (.getParentFile (io/file published)) "ready.edn")
               ready-value (edn/read-string (slurp original-ready))
               digest (:seon.test.cache/digest ready-value)
               directory (doto (io/file root "target/test-published-bases" digest) .mkdirs)
@@ -101,7 +108,7 @@
                 (finally (stop-process-tree! child)))))
           (is (= ready-value (edn/read-string (slurp ready))))
           (is (= before (cache/manifest (str base))))
-          (is (.isDirectory (io/file published "data/store")))))
+          (is (.isDirectory (io/file published "data/store"))))
       (finally (test-support/delete-recursively! root)))))
 
 (defn- captured-run-with-output []
