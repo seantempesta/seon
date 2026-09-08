@@ -831,7 +831,20 @@
                     :seon.render/invocations retained
                     :seon.render/captured-invocations captured
                     :seon.cluster.agent/id "source-cache-agent"
-                    :seon.cluster.loop/cluster {}
+                    ;; THE PREVIEW EVALUATES IN A REAL CLUSTER. The page's
+                    ;; preview is the run loop's own fork/parse/evaluate, so
+                    ;; the handle it is given carries what production carries:
+                    ;; the connection, the admission caps, and the one time
+                    ;; limit. An empty map used to be caught by a guard that
+                    ;; refused when no evaluator was named; the evaluator is a
+                    ;; Var now, and a fixture that hands less than production
+                    ;; hands is the defect.
+                    :seon.cluster.loop/cluster
+                    {:seon.db/connection connection
+                     :seon.cluster/name "source-cache"
+                     :seon.sci.admit/caps caps
+                     :seon.config.eval/time-limit-ms 2000
+                     :seon.config/on-core-error :panic}
                     :seon.cluster.agent/routing (atom {})))]
        (with-redefs-fn
          {#'kernel/invoke
@@ -895,7 +908,10 @@
                        (assoc invalidated
                               :seon.cluster.loop/cluster
                               {:seon.db/connection connection
-                               :seon.sci.admit/caps caps})
+                               :seon.cluster/name "source-cache"
+                               :seon.sci.admit/caps caps
+                               :seon.config.eval/time-limit-ms 2000
+                               :seon.config/on-core-error :panic})
                        @connection {} {} registration-key true true))))
                  third-invocations (atom {})
                  third-calls (atom {})

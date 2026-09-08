@@ -432,3 +432,24 @@ evaluations. Root-owned presentation changes are included with this checkpoint;
 the final declared-cardinality grouping edit postdates the gate and remains a
 separate browser/fixture verification. Live adoption and provider composition
 are not established by this gate.
+
+## Current state — 2026-09-07 (`one-eval-point` lane)
+
+The mechanism this note describes is gone, and the note looks superseded rather
+than fixed. A preview no longer submits a run: `seon.render.web/render-source-call`
+calls `seon.cluster.loop/preview-sources`, which forks, parses and evaluates
+without a `:seon.cluster.run/id`, so nothing settles, no evaluation entity is
+minted, and no reverse run ref is ever asserted on the acquired argument
+(ruling 59c; PRD `agent-record-and-repl-response-prd-2026-09-07.md` §6). Ten
+loads of `/ns/my.agents.juniper/debug` and its feed on the live
+`juniper-context` cluster left the basis transaction at `536871259`, unchanged
+— measured 2026-09-07, recorded in
+[the one-eval-point landing](../../prds/context-generation/research/one-eval-point-landing-2026-09-07.md).
+
+`seon.render-simplification-test/authored-source-invocation-reuses-one-stored-run-across-presentations`
+is still red, and its six failing assertions are this note's old design: they
+expect `submit-source!` to have been called once and the retained call's
+`:seon.render.call/source-run-id` to be the durable `"source-cache-run"`. Under
+59c a preview's run identity is a fresh in-memory uuid and no submission
+happens. The test's expectations are stale, not the behaviour. Whoever owns
+this note should close it and rewrite that oracle in the same commit.

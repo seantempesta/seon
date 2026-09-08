@@ -1853,8 +1853,7 @@
 (deftest a-red-form-routes-to-its-namespace-owner-and-the-fold-continues
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             route-run "route-run"
             ;; A genuinely red form: SCI throws, and ruling 67/68 make that
             ;; a flat error result on the eval — never a routed problem.
@@ -2046,8 +2045,7 @@
 (deftest an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence
   (with-cluster
     (fn [cluster]
-      (let [cluster (assoc cluster)
-            connection (:seon.db/connection cluster)
+      (let [connection (:seon.db/connection cluster)
             reply-text "{:a 1 :b}"
             ;; The attempt's usage participates in the prompt calibration.
             ;; Keep this fixture representative so the assertion below tests
@@ -2791,7 +2789,7 @@
 
 (defn- generated-turn-agrees-with-durable-facts?
   [scenario]
-  (with-cluster
+  (with-cluster fake-evaluate
     (fn [cluster]
       (let [{::keys [attempts succeeded?]} (expected-attempt-trace scenario)
             connection (:seon.db/connection cluster)
@@ -2885,7 +2883,7 @@
   ;; THE COMPOSITION QUESTION, answered by the fold rather than by a
   ;; rule: a turn sends in one form and completes in another, because
   ;; the loop reads EVERY form's value, not only the last.
-  (with-cluster fake-evaluate
+  (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
