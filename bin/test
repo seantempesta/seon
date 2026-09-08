@@ -475,6 +475,15 @@ worker_count=$((logical_processors / 2))
 if [ "$worker_count" -lt 1 ]; then
   worker_count=1
 fi
+# A pool no larger than the selection: an explicit one-namespace gate boots
+# one worker, not half the machine. Several lanes gate at once (2026-09-08:
+# five lanes, 45 JVMs); the pool is sized to the work, never to the host.
+if [ "$explicit_selection" -eq 1 ] && [ ${#namespaces[@]} -lt "$worker_count" ]; then
+  worker_count=${#namespaces[@]}
+fi
+if [ -n "${SEON_TEST_WORKERS-}" ] && [[ "$SEON_TEST_WORKERS" =~ ^[1-9][0-9]*$ ]]; then
+  worker_count=$SEON_TEST_WORKERS
+fi
 original_source_root=$source_root
 source_root=$run_root
 worker_parent="$run_root/workers"
