@@ -647,7 +647,7 @@ Owner rulings 2026-09-07/08, collected so no two lanes read different rules:
    SAME harness the codebase runs on (canonical fixtures, real database,
    real SCI fork, armed contracts), never a mocked or hand-rostered
    stand-in. A misrepresented harness produces garbage code that passes.
-1. **Gate = `bin/test --paths <your own files…> <namespaces…>`** — it
+1. **Gate = `bin/test --paths <your own files…> -- <namespaces…>`** — it
    snapshots HEAD and overlays ONLY the paths you name, so no other lane's
    in-flight edit can block you (landed `e33a887fe`); bare `bin/test`
    selects by `:seon.fn/calls` reach when you are alone; **plus

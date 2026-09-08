@@ -630,7 +630,7 @@ from `:seon.fn/calls` edges, never mtimes) — deliberately widening to every
 eligible test when the basis is missing, a file was removed, or a changed
 gate input sits outside the program graph; `--all` adds every
 non-long test; explicit namespaces run complete. A lane with concurrent neighbours gates with `bin/test --paths <its own
-files…> <namespaces…>`, which snapshots HEAD and overlays only those paths,
+files…> -- <namespaces…>`, which snapshots HEAD and overlays only those paths,
 so another lane's in-flight edit never blocks it. A LANE NEVER RUNS `--all`
 OR `--full` (owner, 2026-09-08: "It's a waste of time to run the entire test
 suite for every change") — bare `bin/test` plus its subject's namespaces
