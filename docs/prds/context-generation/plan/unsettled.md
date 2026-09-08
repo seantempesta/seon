@@ -1657,3 +1657,18 @@ marks them optional. Root cause of B4: Malli validating the recursive
 transcript reds are one dead driver (`best-summary`, no caller). Repair 2
 running (`tmp/lane-specs/storage-bound-repair-2-0907.md`): instrument the
 gate FIRST, then fix what it exposes. Lane 2 still parked.
+
+## 2026-09-08 early
+
+Repair 2 landed `07394e485..4fbd3fdd3`: THE GATE IS INSTRUMENTED (worker
+JVMs arm `seon.instrument/apply!` like boot); elision requests carry no
+nils; `:seon.print/node` validated iteratively (`seon.print/node?`);
+transcript elides once at the AI boundary — all eight transcript reds dead;
+platform tier green under contracts. Honest `--all`: 1,439 tests / 314 red,
+one class (tests pinning a function's own refusal where the contract now
+refuses first; fixtures handing forbidden shapes). Dev JVM restarted (a new
+core predicate cannot be adopted in place — issue filed) and converged.
+Running in parallel: `verify-repair-2` (read-only, live scratch) and
+`instrumented-gate-backlog` (drive the 314 to zero by class; production
+defects listed separately). Lane 2 (listened attributes) launches after
+both.
