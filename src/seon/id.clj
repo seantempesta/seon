@@ -42,7 +42,7 @@
 (defn symbol-in
   "The readable symbol `ns/<letter><id>` for an id — a Clojure symbol may
   not begin with a digit, so one letter leads. `(symbol-in \"result\" \\e id)`."
-  {:malli/schema [:=> [:cat :string :char [:string {:min 1}]] :qualified-symbol]}
+  {:malli/schema [:=> [:cat :string char? [:string {:min 1}]] :qualified-symbol]}
   [ns letter id]
   (symbol ns (str letter id)))
 
