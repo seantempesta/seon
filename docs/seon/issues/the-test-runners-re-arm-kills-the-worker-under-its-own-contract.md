@@ -54,3 +54,20 @@ leaves eighteen optional dials absent while the key's schema requires them, so
 under armed contracts. Nothing calls it there any more, which is why this is
 closed — but the disagreement is real and is a check nobody asks. It belongs
 to `seon.config`.
+
+## 2026-09-08 runner-paths follow-up
+
+The carried `arming-decision` was already present when this assignment began.
+The remaining gap was the coordinator's verdict: a process exit lost the
+re-arm's typed exception across the process boundary. Commit `cd42689b2`
+adds correlated re-arm start/end events to the existing worker protocol and
+consumes that evidence before reporting process exit. An exit between those
+events has kind `:seon.test.runner/re-arm-failed` in the coordinator's terminal
+exchange result, with worker identity, exit code and log path. Its tally stays
+under worker exchange failures even if isolated confirmation is green.
+
+The recurring regression is
+`seon.test-runner-test/a-worker-dying-during-re-arm-names-the-re-arm`:
+a subprocess publishes the re-arm event and immediately exits 17 through the
+existing exchange harness. Final gate evidence belongs to
+[the runner-paths landing note](../../prds/context-generation/research/runner-paths-landing-2026-09-08.md).

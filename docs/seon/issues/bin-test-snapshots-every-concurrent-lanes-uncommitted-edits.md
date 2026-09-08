@@ -1,6 +1,6 @@
 ---
 type: defect
-status: open
+status: resolved
 severity: friction
 tags: [testing, runner, lanes, class/shared-tree]
 ---
@@ -57,3 +57,32 @@ lane's own experience is a data point for it: it lost roughly forty minutes to
 a mid-edit `src/seon/render.clj` that broke the dependency-cache build, and
 then gated every slice from a throwaway worktree with `reference-code`
 symlinked in — option 3, by hand, exactly as the note predicts.
+
+## 2026-09-08 runner-paths implementation
+
+Option 1 is implemented in `cd42689b2`:
+
+```bash
+bin/test --paths bin/test src/seon/test/runner.clj test/seon/test_runner_test.clj -- seon.test-runner-test
+bin/test --paths src/seon/test/runner.clj --platform
+```
+
+The captured HEAD supplies the snapshot, with only named files overlaid from
+the working tree. A named tracked deletion removes that file; a named new
+file is copied. Dependency preparation and all worker directories consume
+that same snapshot. Every invocation prints its actual file differences
+from the captured HEAD, even when no differences exist.
+
+`selected-paths-overlay-head-for-preparation-and-every-worker` invokes the
+real launcher in an isolated Git fixture, changes an owned and a foreign
+file, adds one file and deletes another, and verifies exact bytes at
+preparation and in every worker. The foreign edit is absent from both the
+snapshot and its printed diff. Final gate evidence belongs to
+[the runner-paths landing note](../../prds/context-generation/research/runner-paths-landing-2026-09-08.md).
+
+Resolution proof: the complete runner namespace gate passed 35 tests / 223
+assertions before the final default-mode follow-up; its extended launcher
+regression then passed both modes standalone, and the final platform gate
+passed 73 / 398 / 0 / 0. Bare-gate completion is blocked at the unrelated
+plan-renderer arity boundary recorded in the landing note; no green bare
+gate is asserted. Follow-up commit: `9cfa856d3`.
