@@ -296,3 +296,49 @@ fault lifecycle on armed fixtures (`a2216e7dd`), short maintenance error
 identities via seon.id (`30e54d58d`). Page outage 14:49–15:11 (a refork
 plus a long adoption under the lifecycle lock) — availability defect
 assigned; reforks are rare by rule.
+
+## 2026-09-08 16:05 — the lockup, and what it was
+
+**What the owner saw.** After lunch the debug page would not load at all;
+then it loaded "full of errors, hardcoded and terrible". Load average 57,
+27 JVMs, the `default` JVM at 197% CPU.
+
+**Root causes, all now filed as blockers.**
+
+1. The feed's first frame is queued behind the cluster's single render
+   proc with an unbounded wait and a silent close, so under write load a
+   tab never paints and the browser reconnects forever
+   ([issue](../../../seon/issues/feed-first-frame-waits-behind-the-cluster-render-pass.md)).
+   The GET stays fast because it renders on the request thread.
+2. Seven lanes' edit hooks each ran a full adoption of `default` (172
+   adoptions in one lane's log, lock waits to 8 min), every adoption drops
+   the web server, and gates spawned 12 workers each. The lane runner now
+   caps `SEON_TEST_WORKERS=3` (`5073368b8`); lanes never refork `default`
+   (`a925f07aa`); the asynchronous hook is in the tree uncommitted
+   (hook-async lane, stopped).
+3. Every adoption was refused: acquisition read an agent-installed row's
+   namespace from the source snapshot and refused the whole cluster on one
+   leftover probe row
+   ([issue](../../../seon/issues/adoption-acquires-agent-rows-against-the-source-database.md)).
+4. The debug page labels blocks with a literal `case` and squeezes the
+   AI/HTML previews into a side column
+   ([issue](../../../seon/issues/debug-page-blocks-are-hand-labelled-and-squeezed.md)).
+5. The schedule proc looked its schema up in Malli's default registry
+   after the registry became cluster-scoped: a core fault at every boot.
+   Fixed (`5e34ac487`), together with the ambiguous zero-argument inbox
+   form. A new fault replaced it on the fresh JVM: `history-entries` on a
+   Long ([issue](../../../seon/issues/render-proc-faults-in-history-entries-on-a-long.md)).
+
+**Recovery.** All six lanes stopped; `default` reforked once on
+`6aa081b3…` (my retraction of probe rows had taken the root and Juniper
+namespaces with it — retract by explicit id list, never by prefix); Juniper
+reseeded; page 200 in 2.4 s, feed 832 KB at once. Thirty files of lane
+residue are uncommitted in the tree (hook, gate, test-support, tests);
+reviewed before any of those lanes resumes.
+
+**Running.** Two lanes only: `page-feed` (server up during adoption; first
+frame on the tab thread; derived block labels and the old full-width
+layout) and `adoption-rows` (agent rows against the cluster db; one-row
+faults; bounded refusal diagnostics; contract tests on the projection
+registry). Next: review residue, resume turn-cut (of-agent is what the
+page is waiting on), then hook-async.
