@@ -1767,3 +1767,21 @@ connection width, and a render terminal — three spots. Astra lane
 the value renderer's AI projection + declared AI render functions.
 Also: Opus lanes winding down (harness stopped clean at 14 commits; turn-
 loop and render-value finish their in-flight slice); all new lanes = astra.
+
+### 2026-09-08 afternoon — astra wave
+
+Dev env = `default` in the main root (hook, MCP, bin/seon, all argument-
+free). PRD r11 → §17: additive context (§14), results in memory / shown
+text on disk (§15), the debug page shows the algorithm (§16), plan and
+settings as components (§17), ids via `seon.id` (landed `628025af6`). Landed
+today by astra lanes: read-evidence exactness with both-direction proofs
+(`823569cd3`), plan/settings components (`74b5b4b05`), compact plan reads
+(`080628130`), runner `--paths` + re-arm (`cd42689b2..e33a887fe`), config
+apply (`fa1c0bd47`), blob retention (`e9e15a585`), docs/skills (40+).
+Orchestrator: clipping collapsed, def note, seon.id, pool sizing
+(`90170c3c8`). Running: turn-cut (seon.turn + §16 functions), record-
+render (page 500 first, then §16 page), blob-retention (gates), issues-
+sweep, runner-base-cache (6–8 min fixed cost per gate → seconds),
+hook-coalesce (one publication per quiet window). Known: page 500 on
+default (time-limit dropped on the page path, assigned); the operator
+lifecycle lock contended by per-edit adoptions (assigned).

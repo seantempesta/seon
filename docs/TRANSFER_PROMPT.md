@@ -305,3 +305,30 @@ warned about in prose but no test exercised, because every test ran
 the parts and none ran the composition. Public entry points acquire
 once; internal compositions call `-under-lock!` arms; and the
 regression forces the real composed operation on a real store.
+
+## The orchestrator's sweep (owner, 2026-09-08)
+
+"You are the orchestrator; you need to be finding problems and fixing them
+and restarting agents and improving the docs." Between lane reports, run
+this sweep and act on what it finds — never wait idle for a landing:
+
+1. `bin/codex-agent status`; tail each lane's `tmp/orchestrator/<lane>-stdout.log`
+   (bounded); a lane whose log is stale for 15 minutes or that stopped at an
+   obstacle gets stopped and resumed with the obstacle named as a root
+   cause to fix.
+2. `curl` the debug page on `default` and read `data/clusters/default/logs/seon.log`
+   for `ERROR`; a 500 is assigned within the minute to the lane whose
+   in-flight file caused it, with the log line quoted.
+3. `ps` for JVMs and `bin/test` roots: a gate that is not one namespace per
+   worker, a poller, a stale worktree or scratch root is swept.
+4. `git status`: uncommitted files older than an hour are a stopped lane's
+   or a stuck one's — decide which and act.
+5. Every measured problem becomes either a fix you land yourself (small,
+   root cause, path-limited) or a lane launched BARE and tracked, with the
+   measurement in its brief; every lesson lands in AGENTS.md, this file, or
+   the PRD's lane rules in the same beat.
+
+Launch and resume lanes bare and tracked (no shell redirect, no `&`); stop
+a lane before resuming it; `bin/codex-agent watch` only for a lane that was
+launched headless.
+
