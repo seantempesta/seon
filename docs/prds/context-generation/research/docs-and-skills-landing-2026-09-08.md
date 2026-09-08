@@ -112,11 +112,35 @@ The issue index is left to the orchestrator as instructed.
 
 ## Gate
 
-The required bare gate is next, followed on success by the subject
-namespaces and platform gate. Subject selection: `seon.repl-test`,
-`seon.db-test`, `seon.schema.datahike-test`,
-`seon.render.block-test`, and `seon.test-support-test`.
-No all/full invocation is permitted. The final assignment's explicit
-stop-on-concurrent-breakage rule takes precedence over its earlier
-worktree fallback instruction. Results will be recorded here before
-the lane report.
+Bare `bin/test` ran against snapshot
+`e1dc7d2a073863448a97d9f4c7460ae00a9a3c9e`, including concurrent working-tree
+edits, under `tmp/test-runs/run.0nlmFQ`. With no recorded green basis it
+selected 73 platform and 1,407 bulk tests. It reached bulk execution and
+reported this boundary at 2026-09-08T18:53:26Z:
+
+```text
+WORKER-GLOBAL STATE CHANGED by
+seon.cluster.agent-test/routing-conservation-waits-for-terminal-evidence
+worker=pool-2
+:seon.test.runner/drift-removed
+["seon.ai/complete" "seon.bootstrap/next-entry" "seon.sci.eval/evaluate"]
+:seon.test.runner/drift-removed-count 3
+```
+
+This re-observes the existing
+[instrumentation-drift issue](../../../seon/issues/a-platform-test-leaves-its-worker-stripped-of-every-contract.md).
+It does not establish which concurrent edit caused it. No production
+file, foreign session, or foreign gate was changed to investigate further.
+Following the assignment's stop-at-shared-breakage boundary, this lane
+sent TERM to its own launcher PID 16682. The launcher's reap backstop
+terminated coordinator PID 45137; recorded runner exit 137, launcher
+exit 143, and retained root are cancellation evidence, not a completed
+suite verdict. A subsequent process-table check found none of its nine
+worker PIDs remaining.
+
+The focused namespaces (`seon.repl-test`, `seon.db-test`,
+`seon.schema.datahike-test`, `seon.render.block-test`,
+`seon.test-support-test`) and separate `--platform` invocation were not
+run. No `--all`/`--full` invocation or worktree retry occurred. No owned
+background shell remains. Documentation validation and live reachability
+checks above passed; the required correctness gate is incomplete.
