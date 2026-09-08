@@ -15,6 +15,7 @@
             [seon.env :as env]
             [seon.fs :as fs]
             [seon.fn :as seon.fn]
+            [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.test.cache :as cache])
@@ -626,3 +627,20 @@
   (cluster/ensure-cluster-entity!
    connection cluster-name cluster/boot-process-identity)
   nil)
+
+(defn preserving-instrumentation-state
+  "Scope a test's deliberate instrumentation changes to that test.
+   Restore the entering callable roots and Malli registry even when it throws."
+  [body]
+  (let [roots (into {} (map (juxt identity deref)) (instrument/instrumented))
+        registry @(ns-resolve 'malli.core '-function-schemas*)
+        schemas @registry]
+    (try
+      (body)
+      (finally
+        (try
+          (instrument/remove!)
+          (finally
+            (reset! registry schemas)
+            (doseq [[instrumented-var callable] roots]
+              (alter-var-root instrumented-var (constantly callable)))))))))
