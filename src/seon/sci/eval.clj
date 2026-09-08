@@ -1443,7 +1443,9 @@
                      :seon.error/process acquisition-process
                      :seon.error/basis-t (db/basis-t db)
                      :seon.sci.admit/caps caps
-                     :seon.config.error/recurrence-limit recurrence-limit}
+                     :seon.config.error/recurrence-limit recurrence-limit
+                     :seon.config.error/max-evidence-bytes
+                     (:seon.config.error/max-evidence-bytes effective)}
                      escalate-to
                      (assoc :seon.config.error/escalate-to escalate-to))))
                refusals))
@@ -1890,6 +1892,8 @@
     {:seon.sci.eval/ctx ctx
      :seon.sci.eval/defs-notices (persistent! notices)}))
 
+(declare cluster-ctx*)
+
 (defn cluster-ctx
   "Build and cold-acquire one cluster's live SCI program context."
   {:malli/schema
@@ -1900,21 +1904,35 @@
     [:=> [:cat :seon.db/database-value :seon.db/connection
           :seon.sci.eval/projection-state]
      :seon.sci.eval/ctx]]}
+  ;; EACH ARITY HANDS ON ONLY WHAT IT HAS. Delegating through the widest
+  ;; arity with `nil` made the function violate its own declared contract the
+  ;; moment instrumentation was armed — which is every live cluster, and now
+  ;; the gate too — and it wrote a stored nil into the ctx's custody besides.
   ([db]
-   (cluster-ctx db nil))
+   (cluster-ctx* db nil nil))
   ([db connection]
-   (cluster-ctx db connection nil))
+   (cluster-ctx* db connection nil))
   ([db connection supplied-projection-state]
+   (cluster-ctx* db connection supplied-projection-state)))
+
+(defn- cluster-ctx*
+  [db connection supplied-projection-state]
    (let [ctx (assoc (build-base-ctx)
                     ::custody
-                    {:seon.db/connection connection}
+                    (cond-> {}
+                      connection (assoc :seon.db/connection connection))
                     ::kernel/install-function!
                     install-function-from-database!)
          supplied-projection
          (:seon.schema/projection (some-> supplied-projection-state deref))
-         acquired (acquire! {:seon.sci.eval/ctx ctx
-                             :seon.db/db db
-                             :seon.schema/projection supplied-projection})
+         ;; ABSENT MEANS NO KEY: `:seon.sci.eval/acquire-request` marks the
+         ;; projection optional, and an optional key present as nil is a
+         ;; contract violation on every instrumented JVM.
+         acquired (acquire! (cond-> {:seon.sci.eval/ctx ctx
+                                     :seon.db/db db}
+                              supplied-projection
+                              (assoc :seon.schema/projection
+                                     supplied-projection)))
          projection (:seon.schema/projection acquired)
          projection-state (or supplied-projection-state
                               (projection-state db projection))
@@ -1929,7 +1947,7 @@
      (when connection
        (call-preparation/watch!
         (get ctx call-preparation/carrier) connection projection))
-     ctx)))
+     ctx))
 
 (defn fork-cluster-ctx
   "Fork an acquired program ctx for one sovereign database connection.

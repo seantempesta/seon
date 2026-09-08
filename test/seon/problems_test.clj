@@ -87,7 +87,8 @@
       :seon.sci.admit/caps caps
       ;; no escalate-to: this suite is about the DERIVATION, and a
       ;; message would only add facts the derivation does not read
-      :seon.config.error/recurrence-limit 3}))))
+      :seon.config.error/recurrence-limit 3
+      :seon.config.error/max-evidence-bytes 16384}))))
 
 (defn- commit-wedged-run!
   [connection]

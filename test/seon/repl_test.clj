@@ -63,7 +63,9 @@
                                  :seon.cluster.eval/ordinal 2
                                  :seon.cluster.eval/output "hi\n"
                                  :seon.cluster.eval/result-edn
-                                 "#:seon.print{:face :seon.print/nil}"
+                                 ;; the declared `::nil` face carries its
+                                 ;; value key, exactly as admission emits it
+                                 "#:seon.print{:face :seon.print/nil, :value nil}"
                                  :seon.eval/duration-ms 1})]
     (is (str/includes? response ":out \"hi\\n\"")
         "output is its own pr-str'd key, never folded into the value")
@@ -204,6 +206,21 @@
                        :seon.ns/name 'my.agents.probe
                        :seon.cluster.eval/ordinal 3}))
         "an empty response map would claim the form had answered")))
+
+(deftest an-interrupted-evaluation-says-so-as-readable-data
+  ;; An evaluation boot cut settles `:ms` alone, so without this key it read
+  ;; exactly like one still running — absence of signal as health, in the
+  ;; agent's own history. The instant is `#inst` data, like every other
+  ;; instant the one print grammar renders, never a quoted string.
+  (let [emitted (repl/text {:seon.cluster.eval/source "(range)"
+                            :seon.ns/name 'my.agents.probe
+                            :seon.cluster.eval/interrupted-at
+                            (java.util.Date. 1785500000000)
+                            :seon.eval/duration-ms 30000})]
+    (is (str/includes? emitted ":interrupted #inst")
+        emitted)
+    (is (not (str/includes? emitted ":interrupted \"")))
+    (is (str/includes? emitted ":ms 30000"))))
 
 (deftest the-handle-is-the-evaluations-own-identity
   (testing "a stored evaluation names its value by its entity id, not its ordinal"

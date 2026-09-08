@@ -115,7 +115,7 @@
                   :my.message/value value))
             "and the loop cannot mistake it for a delivery")))
     (testing (str "content " (pr-str bad))
-      (is (string? (:seon.error/message (message/send "bob" bad)))))))
+      (is (string? (:seon.error/message (message/send "bob" bad))))))
   (doseq [bad [nil "" "   " "\n\t" 123 :failure {:id 1}]]
     (testing (str "about " (pr-str bad))
       (is (string? (:seon.error/message
@@ -137,7 +137,7 @@
         ;; (breaks on accretion), no kind dependence (deleted in W4/W5)
         (is (true? (get value expected-kind ::absent)))
         (is (string? (:seon.error/message value)))
-        (is (seon.schema/valid-candidate-value? :seon.error/value value)))))
+        (is (seon.schema/valid-candidate-value? :seon.error/value value))))))
 
 (deftest the-error-value-is-the-registered-one
   ;; `:seon.error/value` REQUIRES a kind. A function whose declared

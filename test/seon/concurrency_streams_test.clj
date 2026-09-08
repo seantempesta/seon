@@ -28,13 +28,16 @@
          :seon.config.eval.result/max-nodes 4096))
 
 (defn- transcript-unit
-  [database agent-id]
-  {:seon.db/db database
-   :seon.sci.eval/ctx (sci.eval/cluster-ctx database)
+  ;; THE FIXTURE HANDS THE ENVIRONMENT, exactly like production: a ctx built
+  ;; around the fixture carries no connection, so every supplied default in
+  ;; it is inert (`support/fork-cluster-ctx`).
+  [connection agent-id]
+  {:seon.db/db @connection
+   :seon.db/connection connection
+   :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
    :seon.sci.eval/time-limit-ms 1000
    :seon.config/on-core-error :record
    :seon.cluster.agent/id agent-id
-   :seon.render.transcript/token-budget 100000
    :seon.sci.admit/caps render-caps})
 
 (defn- html-message-ids
@@ -131,7 +134,7 @@
                trigger-ids
                (mapv :seon.cluster.message/id
                      (work/unanswered-triggers database recipient))
-               request (transcript-unit database recipient)
+               request (transcript-unit connection recipient)
                ai (transcript/render-ai request)
                html-ids (html-message-ids
                          (transcript/render-html request))

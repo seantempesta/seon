@@ -525,9 +525,13 @@
     :else value))
 
 (defn- enrich-projection-elisions
+  ;; KEYED ON THE SENTINEL, not on a retired flag. This asked
+  ;; `:seon.sci.admit/capped?`, which admission stopped writing when a value
+  ;; became faithful-or-missing (2026-09-07); the read then answered nil
+  ;; forever and the tail sentinel reached the tool unenriched. The walk is
+  ;; a no-op when no sentinel is present, so the positive signal is enough.
   [event]
-  (if (and (= :ret (:tag event))
-           (true? (get-in event [:val :seon.sci.admit/capped?])))
+  (if (= :ret (:tag event))
     (update-in event [:val :seon.dev.mcp/value]
                enrich-collection-tail-elisions [])
     event))

@@ -1,0 +1,171 @@
+---
+type: research
+status: complete
+date: 2026-09-07
+tags: [research, storage, print, render, error, test, instrumentation]
+---
+
+# Repair 2: the gate was blind, and what it saw when it opened its eyes
+
+Written by the `storage-bound-repair-2` lane against
+[AGENTS.md](../../../../AGENTS.md) §2.3, §2.4 and §5,
+[the independent verification](verify-storage-repair-2026-09-07.md) (read end
+to end — its ranked BR1-BR4 and FR1-FR7 are this lane's assignment),
+[the repair's landing note](storage-bound-repair-landing-2026-09-07.md), and
+[the first verifier's report](verify-storage-bound-2026-09-07.md), plus the
+`clojure-testing`, `data-oriented-clojure` and `repl` skills.
+
+## 1. Commits
+
+| commit | blocker |
+|---|---|
+| `07394e485` | BR2 — the gate armed no contract instrumentation |
+| `222559d5c` | BR1 — every presentation cut was a contract violation |
+| `5a26941c6` | BR3 — the print-node contract recursed per level |
+
+## 2. BR2 — the gate was blind, and what opening its eyes showed
+
+`bin/test` armed no Malli instrumentation: only `script/seon/fresh_operator.clj`
+did, at operator boot. Every contract a live cluster enforces was therefore
+invisible to the one correctness gate — this project's named failure class
+(a check that reports health because its subject was never asked) sitting
+under the gate itself.
+
+A worker JVM now applies `seon.instrument/apply!` exactly as boot does, from
+the SHIPPED decisions (`seon.config/default-decisions` +
+`seon.config/result-caps`), so the gate cannot drift from boot by carrying
+constants of its own and an absent cap refuses NAMING the key. Two ordering
+facts the arm exposed are fixed in the same commit: the packaged projection is
+acquired AFTER the worker's requires, and the namespaces owning the
+population's predicate symbols are loaded first (derived from the population,
+never a list) — without either, `seon.schema/malli-form?` answers false for
+four shipped contracts and `seon.schema/canonical-definition` violates its own
+output contract on any static analysis of the tree.
+
+### 2.1 The instrumented gate's reds BEFORE the repairs
+
+Measured in a baseline worktree at `58575c676` carrying ONLY the BR2 commit
+(`git worktree add tmp/repair2-baseline HEAD`, the two BR2 files copied in),
+on the assigned selection plus `seon.instrument-test`, `seon.test-runner-test`
+and `seon.effect-test`:
+
+**221 tests, 459 assertions, 155 red** (`tmp/repair2/baseline-instrumented.log`):
+
+| namespace | red |
+|---|---|
+| `seon.render.web-test` | 50 |
+| `seon.instrument-test` | 23 |
+| `seon.cluster.run-test` | 19 |
+| `seon.render.transcript-test` | 17 |
+| `seon.sci.admit-test` | 13 |
+| `seon.effect-test` | 11 |
+| `seon.error-test` | 9 |
+| `seon.print-test` | 5 |
+| `seon.render.walk-test` | 4 |
+| `seon.test-runner-test` | 3 |
+| `seon.repl-test` | 1 |
+
+131 of those are uncaught contract violations, and they decompose into a
+handful of causes, not 155:
+
+| cause | count | disposition |
+|---|---|---|
+| `seon.sci.eval/cluster-ctx` VIOLATES ITS OWN CONTRACT — the 1-arity delegated through the 2-arity with `nil`, and wrote `{:seon.db/connection nil}` into the ctx's custody besides. `seon.test-support` builds the process base that way, so it reached almost every fixture | 106 | fixed (each arity hands on only what it has) |
+| the admit-test request's `:seon.sci.admit/record` omits the declared `:seon.eval/host-interop-count` | 11 + 4 property failures | fixed (fixture) |
+| `seon.print/elision` refuses the stored nils `elision-node` merged in | 4 | BR1 |
+| `emit-text` / `emit-both` handed fixture maps that are not print nodes (a `::nil` face with no value key; a `::truncated-string` with no length or bound; an undeclared face) | 3 | fixed (fixtures; the undeclared-face floor moved to `#'emit-node`) |
+| `seon.repl/entity-emission` invalid-output: a run-test fixture used `:seon.cluster.eval/interrupted-at true` | 1 | fixed (fixture, and it now asserts the rendered instant) |
+| `seon.render.web/derived-port` handed `"."` by a property generating bare ASCII instead of the declared cluster-name domain | 1 property | fixed (generator) |
+
+None of these were visible to `bin/test` before this commit; the two the
+verifier measured live (BR1, BR3) are among them.
+
+
+## 3. BR1 — every presentation cut was a contract violation
+
+`seon.print/elision-node` built the one cut constructor's request with `merge`
+over a literal map, so `::prefix` and `::bound-by` rode as PRESENT NILS
+whenever the profile declared neither — the ordinary case. `:seon.print/elision-request`
+marks both optional, and an optional key present as nil fails its contract, so
+on every live cluster each cut answered
+`seon.print/elision violated its contract (invalid-input)` instead of an
+elision: `render-ai` returned a diagnostic, the agent's prospective prompt was
+`:seon.render.web/prospective-context-unavailable`, and MCP `eval_clj` failed
+for any result needing a cut. `fit` was the identity before the storage-bound
+repair, so nothing reached the constructor until it was restored.
+
+Absent means no key: the request is now built from the entries that exist.
+Each of `fit`'s three cut sites also NAMES the bound that made it —
+`:seon.render.profile/max-children` for a collection cut, the admitted node's
+own bound or `:seon.render.profile/token-budget` for a string cut — instead of
+inheriting a profile-level constant a caller had to remember to set.
+
+## 4. BR3 — the print-node contract recursed per level
+
+`:seon.print/node` was a recursive Malli `:ref`, and Malli's ref validator
+recurses once per level by construction
+(`reference-code/malli/src/malli/core.cljc:1975-2000`), so under the contracts
+every live cluster arms, validating a node deeper than 3,509 answered
+`java.lang.StackOverflowError` — an `Error` escaping a total operation at the
+one boundary law 2.4 requires a flat value from — while the walk that built the
+node is iterative and admits 100,000 levels. The proof that said otherwise was
+measured on a JVM with no contracts armed.
+
+The face table is now declared once as `:seon.print/node-face`, one level deep,
+with each child slot a shallow `:seon.print/node-child`; `seon.print/node?`
+walks the tree on an explicit stack and validates each node against that
+declared shape. Depth admitted by a contract is now the depth admission
+admits. Measured on a fresh JVM with the packaged projection handed:
+
+| case | before | after |
+|---|---|---|
+| 20,000-deep node validated | `StackOverflowError` | `true` |
+| a `::number` face whose value is a string | `false` | `false` |
+| an undeclared face | `false` | `false` |
+
+Because the declaration is deliberately no longer recursive, `:seon.print/node`
+and `:seon.print/node-child` declare `seon.print/node-generator` — one honest
+generator spanning every declared face, which is what the two long generative
+print properties now generate from.
+
+`seon.print-test/terminal-emission-is-total-for-an-unknown-or-absent-face`
+moved to `#'emit-node`: an undeclared face is not a print node, so the public
+boundary refuses it by contract while the emitter stays total over whatever
+reaches it — both halves true at once, instead of one of them being true only
+because nothing asked.
+
+## 5. BR4 — the transcript's budget mechanism had no driver
+
+`best-summary` (the only caller of `fits?`) had no caller anywhere in `src/`,
+and `projection` derived `::elided` from the history QUERY's limit while
+writing `::token-budget` as the measured output size. Presentation elides in
+exactly one place, so the transcript now renders the history its query
+admitted and `seon.print/fit` at the AI boundary makes the cut. Deleted:
+`best-summary`, `fits?`, `output-tokens`, `marker-text`, `::elided`,
+`::token-budget`, `::minimum-token-budget`, `history-count`, `message-count`,
+`receipt-count`, `selected-run-count`, and the undeclared
+`:seon.render.transcript/token-budget` key with its four writers.
+
+
+## 6. The frictions
+
+| finding | disposition |
+|---|---|
+| **FR1** `:seon.error/data-size` reported the SUBSTITUTE's size for `:unserializable` | fixed: a marker that measured nothing carries no size, so the fact OMITS `:seon.error/data-size` (absent, never a lie) and the marker's own reason says why. `seon.cluster`'s staging decision reads the size only when it is present |
+| **FR2** a throwable-shaped fault keeps no inline evidence at any plausible bound | FILED, not fixed: [a-throwable-fault-keeps-no-inline-evidence-at-any-plausible-bound](../../../seon/issues/a-throwable-fault-keeps-no-inline-evidence-at-any-plausible-bound.md) — raising the bound is not the fix, since a stack trace grows with the stack |
+| **FR3** `error/prepare` silently fell back to its bootstrap 16,384 | fixed: `:seon.config.error/max-evidence-bytes` is a REQUIRED member of `:seon.error/normalize-request` and `:seon.error/commit-tx-request`, the bootstrap constant is deleted, and the four committers (`seon.cluster`, `seon.cluster.loop`, `seon.schedule`, `seon.sci.eval`) hand the cluster's own dial — which the run loop now carries beside its other dials |
+| **FR4** AGENTS §2.4's "a request carrying no profile makes no presentation cut" was false | fixed in prose: `seon.render/request-profile` DERIVES the cluster's agent profile at the render entry points, so the AI projection is cut either way; only a seam holding no declared width (`seon.render.walk/presentation-width`) makes no presentation decision |
+| **FR5** `:seon.sci.admit/capped?` still written as a stored nil | fixed: the four writers are deleted (`seon.cluster` ×3, `seon.sci.kernel`), the MCP tail-elision enrichment is keyed on the `:seon.sci.admit/elided` SENTINEL it actually looks for rather than on the retired flag it read forever as nil, and the tests assert the key's absence. [Issue resolved](../../../seon/issues/archive/the-mcp-envelope-still-reports-the-retired-capped-key.md) |
+| **FR6** eleven tests build a SCI ctx around the repaired fixture | mostly fixed: `seon.render.transcript-test`, `seon.render.web-test` (both sites), `seon.concurrency-streams-test` and `seon.repl-parity-test` go through `support/fork-cluster-ctx`. `seon.call-preparation-test` and `seon.custody-stability-test` name `cluster-ctx` as their SUBJECT, and `my.plan-test` / `seon.cluster.agent-identity-test` build a production-shaped environment explicitly, so they already hand what production hands. The three `seon.cluster.turn-test` sites exercise COLD acquisition deliberately, and the arity repair below makes that legal |
+| **FR7** `:seon.repl/interrupted` was a quoted string | fixed: it renders as the readable `#inst` the one print grammar renders every other instant as, with a regression (`seon.repl-test/an-interrupted-evaluation-says-so-as-readable-data`) — there was none before |
+
+### 6.1 Two contract self-violations the arm exposed, both fixed here
+
+- `seon.sci.eval/cluster-ctx`'s 1-arity delegated through its 2-arity with
+  `nil`, so the function violated its own declared contract and wrote
+  `{:seon.db/connection nil}` into the ctx's custody. `seon.test-support`
+  builds the process base that way, which is why this one defect accounted for
+  106 of the 131 uncaught violations in the baseline. Each arity now hands on
+  only what it has.
+- `cluster-ctx` then called `acquire!` with `{:seon.schema/projection nil}` —
+  the same stored-nil-into-an-optional-key shape as BR1.

@@ -2772,6 +2772,8 @@
   []
   (candidate-forms))
 
+(declare delta-over)
+
 (defn begin-registration-delta
   "Create an isolated schema delta for one synchronous eval.
 
@@ -2782,14 +2784,22 @@
    [:function
     [:=> [:cat] :map]
     [:=> [:catn [::projection ::projection]] :map]]}
+  ;; EACH ARITY HANDS ON ONLY WHAT IT HAS. Delegating through the 1-arity
+  ;; with `nil` made this function violate its own declared contract under
+  ;; the instrumentation every live cluster arms, and wrote a stored nil
+  ;; projection into the delta besides.
   ([]
-   (begin-registration-delta nil))
+   (delta-over nil))
   ([projection]
-   (let [before (or (:seon.schema.projection/forms projection)
-                    (candidate-forms))]
-    {:seon.schema.delta/before before
-     :seon.schema.delta/projection projection
-     :seon.schema.delta/candidate-forms (atom before)})))
+   (delta-over projection)))
+
+(defn- delta-over
+  [projection]
+  (let [before (or (:seon.schema.projection/forms projection)
+                   (candidate-forms))]
+    (cond-> {:seon.schema.delta/before before
+             :seon.schema.delta/candidate-forms (atom before)}
+      projection (assoc :seon.schema.delta/projection projection))))
 
 (defn call-with-registration-delta
   "Call the function with registrations staged in the supplied delta.

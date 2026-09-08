@@ -102,7 +102,6 @@
             :seon.error/message message
             :seon.error/data {}})
    :seon.cluster.eval/error message
-   :seon.sci.admit/capped? false
    :seon.sci.admit/record
    {:seon.eval/fn-entries 1
     :seon.eval/duration-ms 1

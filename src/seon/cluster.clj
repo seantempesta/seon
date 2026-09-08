@@ -308,8 +308,6 @@
    node effective
    (cond-> {:seon.cluster.eval/ns (:seon.cluster.eval/ns value)
              :seon.sci.eval/ending-ns (:seon.sci.eval/ending-ns value)
-             :seon.sci.admit/capped?
-             (boolean (:seon.sci.admit/capped? value))
              :seon.sci.admit/record (:seon.sci.admit/record value)}
       (contains? value :seon.cluster.eval/error)
       (assoc :seon.cluster.eval/error (:seon.cluster.eval/error value))
@@ -368,7 +366,6 @@
     (if-let [refusal (or (when (:seon.error/kind effective) effective)
                          (when (:seon.error/kind caps) caps))]
       {:seon.dev.mcp/value refusal
-       :seon.sci.admit/capped? false
        :seon.dev.mcp/windowed? false}
       (let [evaluation-print-node (evaluation-node value)
             exception-envelope? (prepl-exception-envelope? value)
@@ -376,9 +373,7 @@
                                       (exception-summary value))
             admitted
             (if evaluation-print-node
-              {:seon.sci.admit/print-node evaluation-print-node
-               :seon.sci.admit/capped?
-               (boolean (:seon.sci.admit/capped? value))}
+              {:seon.sci.admit/print-node evaluation-print-node}
               (admit/admit-value
                {:seon.sci.admit/value (or exception-summary-value value)
                 :seon.sci.admit/interrupt-fn (fn [])
@@ -437,8 +432,6 @@
                  (if evaluation-print-node
                    (evaluation-face value projected-node effective)
                    (admit/semantic-value projected-node))
-                 :seon.sci.admit/capped?
-                 (:seon.sci.admit/capped? artifact)
                  :seon.dev.mcp/windowed? artifact-backed?}
           artifact-backed?
           (assoc :seon.blob/digest content-digest
@@ -2054,7 +2047,13 @@
   run is the one confusion recovery must not have. The run loop's
   handle should carry THIS value as `:seon.cluster.run/process`, so the
   holder a run names and the holder recovery judges are the same string."
-  {:malli/schema [:=> [:cat :seon.boot/advertisement] :seon.cluster.run/process]}
+  ;; IT NEEDS (pid, start-instant) AND NOTHING ELSE, so that is what it
+  ;; declares: `:seon.cluster.process/identity`, which every advertisement
+  ;; satisfies (maps are open). Demanding the whole advertisement to compute
+  ;; an identity was a lie about the dependency, and under armed contracts it
+  ;; refused three fixtures that hand exactly the pair the identity IS.
+  {:malli/schema [:=> [:cat :seon.cluster.process/identity]
+                  :seon.cluster.run/process]}
   [advertisement]
   (str (:seon.boot/pid advertisement) "-"
        (inst-ms (:seon.boot/start-instant advertisement))))
@@ -2434,8 +2433,12 @@
                     (assoc request
                            :seon.config.error/max-evidence-bytes
                            (:seon.config.error/max-evidence-bytes dials)))
-          staged (when (or (> (:seon.error/data-size (:seon.error/fact prepared))
-                             threshold)
+          staged (when (or (let [size (:seon.error/data-size
+                                       (:seon.error/fact prepared))]
+                             ;; AN UNSERIALIZABLE EVIDENCE MEASURED NOTHING,
+                             ;; so the fact carries no size; the content
+                             ;; comparison below is what decides staging then.
+                             (and (int? size) (> size threshold)))
                            (not= (:seon.error/data-content prepared)
                                  (:seon.error/data-edn (:seon.error/fact prepared))))
                    (blob/stage! connection (:seon.error/data-content prepared)))
@@ -2538,6 +2541,12 @@
               :seon.config/on-core-error (:seon.config/on-core-error dials)
               :seon.config.error/recurrence-limit
               (:seon.config.error/recurrence-limit dials)
+              ;; the fault family's own bound rides with the loop's other
+              ;; dials, so every committer this cluster owns hands it to
+              ;; `seon.error/commit-tx` instead of falling back to a
+              ;; bootstrap number nobody chose
+              :seon.config.error/max-evidence-bytes
+              (:seon.config.error/max-evidence-bytes dials)
               :seon.config.eval.result/blob-threshold
               (:seon.config.eval.result/blob-threshold dials)
               ;; the conversation bound: every delivery a turn makes is

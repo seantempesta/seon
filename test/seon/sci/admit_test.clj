@@ -77,7 +77,12 @@
     ;; production disposition by default: these trials are about the
     ;; codec, and the panic case has its own test
     :seon.config/on-core-error :record
+    ;; EVERY DECLARED MEMBER, exactly like production: the record schema
+    ;; requires `:seon.eval/host-interop-count`, and a fixture that omits a
+    ;; declared input is the defect (§5.1) — invisible for as long as the
+    ;; gate armed no contracts.
     :seon.sci.admit/record {:seon.eval/fn-entries 4242
+                            :seon.eval/host-interop-count 0
                             :seon.eval/duration-ms 7
                             :seon.eval/allocated-bytes 918273
                             :seon.eval/outcome :ok}}))

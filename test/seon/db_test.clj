@@ -820,7 +820,8 @@
                      (tree-seq coll? seq semantic)))
        (is (< (count admitted-artifact) inline-ceiling)
            "identity admission keeps the native report inline")
-       (is (false? (:seon.sci.admit/capped? admitted)))))))
+       (is (not (contains? admitted :seon.sci.admit/capped?))
+           "the retired key is absent, never a stored false")))))
 
 (deftest unique-rejection-names-the-existing-owner-as-data
   (test-support/with-database

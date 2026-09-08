@@ -180,9 +180,11 @@
                 ;; exactly like one still running — absence of signal read as
                 ;; health, in the agent's own history (PRD §4).
                 :seon.repl/interrupted
+                ;; AN INSTANT IS AN INSTANT. `(pr-str (.toString …))` made it
+                ;; a quoted string where the one print grammar renders every
+                ;; other instant as readable `#inst` data.
                 (when (inst? interrupted-at)
-                  (pr-str (.toString (.toInstant ^java.util.Date
-                                                 interrupted-at))))
+                  (pr-str interrupted-at))
                 ;; A HANDLE IS A FACT, NOT A FLAG. The caller that could bind
                 ;; one hands the symbol it bound; ruling 59c's "no handle" is
                 ;; simply its absence, so nothing here re-decides what the

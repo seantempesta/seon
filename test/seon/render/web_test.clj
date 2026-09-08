@@ -33,6 +33,7 @@
             [clojure.test :refer [deftest is testing]]
             [org.httpkit.server :as http]
             [seon.blob :as blob]
+            [seon.cluster :as cluster]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
@@ -2382,7 +2383,10 @@
   (support/assert-check!
    (tc/quick-check
     500
-    (prop/for-all [name (gen/such-that seq gen/string-ascii 100)]
+    ;; GENERATED FROM THE DECLARED DOMAIN, never from bare ASCII: a cluster
+    ;; name is one relative path segment, and `.` is not one — the property
+    ;; was calling `derived-port` with values its own contract refuses.
+    (prop/for-all [name cluster/cluster-name-generator]
       (<= web/port-floor (web/derived-port name) (dec web/port-ceiling)))
     :seed 202607280501)
    "derived port range"))

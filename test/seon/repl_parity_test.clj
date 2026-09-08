@@ -16,6 +16,10 @@
 ;; babashka@0fb349c414e717800be775ba9cb77c95a9eb700d
 ;; edamame@38e627467daa3f6f1e5a8eb6421f702d2a940b7f
 
+(def ^:dynamic *connection*
+  "The fixture's live connection, so the ctx carries the environment."
+  nil)
+
 (def ^:dynamic *database*
   "The immutable fixture database value used by one parity-gate run."
   nil)
@@ -38,7 +42,7 @@
   "Evaluate forms through one live production context and return each face."
   [forms]
   (let [db *database*
-        ctx (sci.eval/cluster-ctx db)]
+        ctx (test-support/fork-cluster-ctx *connection*)]
     (second
      (reduce
       (fn [[namespace-name results] source]
@@ -212,7 +216,8 @@
       (config/apply! {:seon.db/connection connection
                       :seon.config/manifest
                       {:seon.config/on-core-error :record}})
-      (binding [*database* @connection]
+      (binding [*database* @connection
+                *connection* connection]
         (run-tests)))))
 
 (defn- report-fixture

@@ -335,14 +335,6 @@
 ;;; The normalizer
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private default-inline-limit
-  ;; `seon.config` depends on this namespace, so bare `normalize` cannot read
-  ;; its shipped manifest without a cycle. This is the bootstrap value of
-  ;; `:seon.config.error/max-evidence-bytes`; running committers supply the
-  ;; live fact. The two move together — a fault normalized before config is
-  ;; readable must keep as much evidence as one normalized after it.
-  16384)
-
 (defn- meaningful-source
   [source]
   (if (and (map? source) (instance? Throwable (::flow/ex source)))
@@ -467,20 +459,29 @@
         source (meaningful-source source)
         admitted (bounded-admission source caps)
         full-edn (:seon.cluster.eval/result-edn admitted)
-        ;; ONE KEY. The fault family's own declared bound decides how much
-        ;; evidence the FACT keeps; the blob threshold decides where the
-        ;; complete evidence lives. `:seon.error/inline-limit` was the same
-        ;; number under a second spelling and is deleted.
-        inline-limit (or evidence-bytes default-inline-limit)
+        ;; ONE KEY, AND IT IS SUPPLIED. The fault family's own declared bound
+        ;; decides how much evidence the FACT keeps; the blob threshold
+        ;; decides where the complete evidence lives.
+        ;; `:seon.error/inline-limit` was the same number under a second
+        ;; spelling and is deleted. The bound is a REQUIRED member of
+        ;; `:seon.error/normalize-request` — a fallback to the bootstrap
+        ;; number when a caller omitted it was a silent fallback on the
+        ;; ordinary path, which is a defect even while it is right.
+        inline-limit evidence-bytes
         projected-source (:seon.sci.admit/value admitted)
         instrument-data (projected-instrument-data projected-source)
         flow? (map? source)
         ;; THE SIZE IS THE SOURCE'S, NOT THE SUBSTITUTE'S. When the whole
         ;; evidence went over the storage bound the marker is a few dozen
         ;; bytes, and reporting those as `data-size` said the evidence was
-        ;; small precisely when it was too large to keep.
-        data-size (or (:seon.eval/size (::marker admitted))
-                      (utf8-size full-edn))
+        ;; small precisely when it was too large to keep. An
+        ;; `:unserializable` marker measured NOTHING — there is no size to
+        ;; report — so the fact carries no `data-size` at all rather than the
+        ;; substitute's, and the marker's own reason is what says why.
+        marker (::marker admitted)
+        data-size (if marker
+                    (:seon.eval/size marker)
+                    (utf8-size full-edn))
         base-fact
         (cond-> {:seon.error/id id
                  :seon.error/at at
@@ -488,8 +489,8 @@
                  :seon.error/kind error-kind
                  :seon.error/signature (signature process class-name error-kind
                                                   (top-frame failure))
-                 :seon.error/data-size data-size
                  :seon.error/capped? true}
+          (int? data-size) (assoc :seon.error/data-size data-size)
           class-name (assoc :seon.error/throwable-class class-name)
           (and flow? (::flow/pid source))
           (assoc :seon.error/proc (::flow/pid source))
@@ -513,7 +514,7 @@
                     ;; one case where nothing was kept: the FULL admission
                     ;; also answered with the marker, so both sides were the
                     ;; same handful of bytes (F1, 2026-09-07).
-                    (boolean (or (::marker admitted)
+                    (boolean (or marker
                                  (:seon.eval/missing fact)
                                  (not= full-edn
                                        (:seon.error/data-edn fact)))))]
@@ -1037,10 +1038,14 @@
                            :seon.error/id id
                            :seon.error/at at
                            :seon.error/process process
-                           :seon.sci.admit/caps caps}
-                    evidence-bytes
-                    (assoc :seon.config.error/max-evidence-bytes
-                           evidence-bytes)
+                           :seon.sci.admit/caps caps
+                           ;; THE BOUND TRAVELS WITH THE REQUEST. It is a
+                           ;; declared member of this request, so a caller
+                           ;; that has dials hands it and one that does not
+                           ;; is refused by the contract — never a fallback
+                           ;; to a bootstrap number nobody chose here.
+                           :seon.config.error/max-evidence-bytes
+                           evidence-bytes}
                     basis-t (assoc :seon.error/basis-t basis-t)
                     (and run-id
                          (entity-exists? db :seon.cluster.run/id run-id))

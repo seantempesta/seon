@@ -291,8 +291,12 @@ and they are separate decisions with separate keys (owner ruling,
 EDN, and a value that reaches the bound is `:seon.eval/missing` with the
 bytes it reached; **the AI projection is bounded by the render profile** —
 `seon.print/fit` applies its string, child-count, depth and token limits, and
-that is the ONE place presentation elides anything, so a request carrying no
-profile makes no presentation cut; **HTML is not bounded at all** — a page
+that is the ONE place presentation elides anything. Presentation elides only
+under a profile, and a request that carries none is not a request without one:
+`seon.render/request-profile` DERIVES the cluster's agent profile at the render
+entry points, so the AI projection is cut either way (measured, 2026-09-07);
+only a seam holding no declared width — `seon.render.walk/presentation-width` —
+makes no presentation decision. **HTML is not bounded at all** — a page
 serves the value it holds. Query-work bounds and evaluation deadlines remain
 separate from all three, and a query-work cut is reported as its own elision
 naming the bound that made it. Previously

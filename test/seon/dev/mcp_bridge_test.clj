@@ -385,8 +385,7 @@
   (let [event {:tag :ret
                :val (pr-str
                      {:seon.dev.mcp/value
-                      '(0 1 :seon.sci.admit/elided)
-                      :seon.sci.admit/capped? true})}
+                      '(0 1 :seon.sci.admit/elided)})}
         decoded ((bridge-var 'decoded-projection-event) event)
         enriched ((bridge-var 'enrich-projection-elisions) decoded)
         value (get-in enriched [:val :seon.dev.mcp/value])

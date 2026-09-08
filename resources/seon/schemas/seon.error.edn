@@ -32,7 +32,6 @@
                {:optional true}
                :seon.config.error/escalate-to]
               [:seon.config.error/max-evidence-bytes
-               {:optional true}
                :seon.config.error/max-evidence-bytes]
               [:seon.error/fact {:optional true} :seon.error/fact]],
              :data :map,
@@ -113,7 +112,6 @@
                {:optional true}
                :seon.cluster.agent/id]
               [:seon.config.error/max-evidence-bytes
-               {:optional true}
                :seon.config.error/max-evidence-bytes]],
              :prepare-request :seon.error/normalize-request,
              :prepared

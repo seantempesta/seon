@@ -28,7 +28,7 @@
             [:string
              {:min 1,
               :description
-              "The instant boot cut one evaluation, as text. Present exactly when the evaluation carries :seon.cluster.eval/interrupted-at, so an evaluation that was interrupted never reads in the agent's own history like one that is still running."}],
+              "The instant boot cut one evaluation, as the readable #inst the one print grammar renders every other instant as. Present exactly when the evaluation carries :seon.cluster.eval/interrupted-at, so an evaluation that was interrupted never reads in the agent's own history like one that is still running."}],
             :ms
             [:string
              {:description

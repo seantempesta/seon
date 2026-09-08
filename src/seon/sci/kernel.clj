@@ -625,7 +625,6 @@
                 :seon.error/data
                 {:seon.sci.eval/throwable
                  (.getName (class admission-failure))} :seon.sci.kernel/failure-admission-failed true}
-               :seon.sci.admit/capped? false
                :seon.sci.admit/record record-value}))))
       (finally
         (when-let [stop! (::stop! @arm-state)]

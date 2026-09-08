@@ -116,7 +116,6 @@
         evaluation {:seon.cluster.eval/result-edn result-edn
                     :seon.cluster.eval/ns [:seon.ns/name 'user]
                     :seon.sci.eval/ending-ns 'user
-                    :seon.sci.admit/capped? true
                     :seon.sci.admit/record {:seon.eval/outcome :ok}}
         result (projected cluster-name effective evaluation)
         face (:seon.dev.mcp/value result)]
@@ -136,9 +135,7 @@
         artifact
         (render.value/artifact
          {:seon.sci.admit/print-node
-          (edn/read-string (:seon.cluster.eval/result-edn evaluation))
-          :seon.sci.admit/capped?
-          (:seon.sci.admit/capped? evaluation)})
+          (edn/read-string (:seon.cluster.eval/result-edn evaluation))})
         artifact-content (render.value/artifact-edn artifact)
         result (projected cluster-name effective evaluation)
         text (get-in result [:seon.dev.mcp/value :seon.dev.mcp/text])]
@@ -147,7 +144,6 @@
     (is (< (* 10 (utf8-size text)) (:seon.blob/size result))
         "the inline face is at least an order of magnitude smaller than its artifact")
     (is (true? (:seon.dev.mcp/windowed? result)))
-    (is (true? (:seon.sci.admit/capped? result)))
     (is (= (blob/digest artifact-content) (:seon.blob/digest result))
         "windowing retains the complete artifact digest")
     (is (= (count artifact-content) (:seon.blob/size result))

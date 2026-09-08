@@ -66,10 +66,18 @@
     (is (not-any? #(str/starts-with? (str/trim %) ";") (rest lines))))
   (is (nil? (repl/render-ai {}))
       "an evaluation with no source is not a REPL entry")
-  (is (= "user=> (side-effect)"
-         (repl/render-ai {:seon.cluster.eval/source "(side-effect)"
-                          :seon.cluster.eval/interrupted-at true}))
-      "an interrupted evaluation prints a prompt and no answer")
+  ;; AN INTERRUPTED EVALUATION SAYS SO. `interrupted-at` is an inst, not a
+  ;; flag, and since the REPL grammar renders it the response is the instant
+  ;; the boot cut the evaluation — never a bare prompt that reads exactly
+  ;; like a form still running.
+  (let [interrupted (repl/render-ai
+                     {:seon.cluster.eval/source "(side-effect)"
+                      :seon.cluster.eval/interrupted-at
+                      (java.util.Date. 1785500000000)})]
+    (is (str/starts-with? interrupted "user=> (side-effect)"))
+    (is (str/includes? interrupted ":interrupted #inst") interrupted)
+    (is (not (str/includes? interrupted ":value"))
+        "an interrupted evaluation answers no value"))
   (let [triage-edn
         (try
           (/ 1 0)

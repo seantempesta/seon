@@ -22,7 +22,6 @@
             :seon.error/message "Unable to resolve symbol: prefix-def"
             :seon.error/data {}})
    :seon.cluster.eval/error "Unable to resolve symbol: prefix-def"
-   :seon.sci.admit/capped? false
    :seon.sci.admit/record
    {:seon.eval/fn-entries 1
     :seon.eval/duration-ms 1

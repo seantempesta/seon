@@ -67,6 +67,10 @@
 
 (def ^:private process "test-cluster-4242-1753650000000")
 
+(def ^:private evidence-bytes
+  ;; the shipped `:seon.config.error/max-evidence-bytes` decision
+  16384)
+
 (defn- request
   "A normalize request over `source`, with optional attribution."
   ([source] (request source {}))
@@ -75,7 +79,11 @@
            :seon.error/id "err-1"
            :seon.error/at #inst "2026-07-27T21:00:00.000-00:00"
            :seon.error/process process
-           :seon.sci.admit/caps caps}
+           :seon.sci.admit/caps caps
+           ;; THE FAULT FAMILY'S BOUND IS A DECLARED MEMBER of the request,
+           ;; exactly like production's committer supplies it: `prepare` no
+           ;; longer falls back to a bootstrap number when a caller omits it.
+           :seon.config.error/max-evidence-bytes evidence-bytes}
           extra)))
 
 (deftest diagnostic-construction-is-evidence-complete
@@ -782,6 +790,7 @@
           :seon.error/process process
           :seon.sci.admit/caps caps
           :seon.config.error/recurrence-limit 3
+          :seon.config.error/max-evidence-bytes evidence-bytes
           :seon.config.error/escalate-to "root"}
          extra))
 

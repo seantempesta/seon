@@ -208,8 +208,9 @@
         artifact (value/artifact admitted)
         stored (value/artifact-edn artifact)
         restored (value/read-artifact stored)]
-    (is (= #{:seon.sci.admit/print-node :seon.sci.admit/capped?}
-           (set (keys artifact))))
+    (is (contains? artifact :seon.sci.admit/print-node))
+    (is (not (contains? artifact :seon.sci.admit/capped?))
+        "the retired key is absent from the durable artifact")
     (is (= (:seon.sci.admit/value admitted)
            (value/artifact-value restored)))
     (is (= (:seon.cluster.eval/result-edn admitted)

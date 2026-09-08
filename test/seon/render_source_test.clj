@@ -321,7 +321,7 @@
      (doseq [[run-id source result] [["declared-source" "(+ 1 1)"
                                      "#:seon.print{:face :seon.print/number, :value 2}"]
                                     ["stored-transcript" "(println \"already ran\")"
-                                     "#:seon.print{:face :seon.print/nil}"]]]
+                                     "#:seon.print{:face :seon.print/nil, :value nil}"]]]
        (db/transact!
         connection
         [{:seon.cluster.run/id run-id

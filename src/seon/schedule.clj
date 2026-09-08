@@ -516,6 +516,8 @@
            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
            :seon.config.error/recurrence-limit
            (:seon.config.error/recurrence-limit cluster)
+           :seon.config.error/max-evidence-bytes
+           (:seon.config.error/max-evidence-bytes cluster)
            :seon.cluster.agent/id agent-id}
     (:seon.config.error/escalate-to cluster)
     (assoc :seon.config.error/escalate-to

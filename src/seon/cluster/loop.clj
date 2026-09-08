@@ -443,7 +443,9 @@
            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
            :seon.error/basis-t (db/basis-t db)
            :seon.config.error/recurrence-limit
-           (:seon.config.error/recurrence-limit cluster)}
+           (:seon.config.error/recurrence-limit cluster)
+           :seon.config.error/max-evidence-bytes
+           (:seon.config.error/max-evidence-bytes cluster)}
           (when-let [escalate-to (:seon.config.error/escalate-to cluster)]
             {:seon.config.error/escalate-to escalate-to})
           attribution)))
