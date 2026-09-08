@@ -1,7 +1,5 @@
 ---
 name: clojure-testing
-type: skill
-status: active
 description: "Test Seon with the canonical Datahike fixture, real SCI evaluation, armed contracts, bounded event waits, and reproducible properties. Use for regressions, fixture diagnosis, and gate selection."
 ---
 
