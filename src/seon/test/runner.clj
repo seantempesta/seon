@@ -1108,74 +1108,7 @@
      ::caps caps
      ::program (declared-program-namespaces)}))
 
-(defn- arm-contracts!
-  "Instrument this worker JVM's loaded contracts exactly as boot does.
-
-  The gate must ask the question a live cluster asks. A contract
-  violation that makes an agent's prompt unavailable on a running
-  cluster was invisible here for as long as the worker never armed
-  instrumentation — a check that reports health because its subject was
-  never asked. The dial and the admission caps are the SHIPPED decisions
-  the operator compiles (`seon.config/defaults`), so the gate
-  cannot drift from boot by carrying constants of its own, and an absent
-  cap refuses NAMING the key rather than instrumenting under a partial
-  world."
-  [decision projection worker-id namespaces]
-  (let [{::keys [decisions caps program]} decision]
-    ;; THE PROGRAM IS LOADED BEFORE IT IS ARMED. Instrumentation selects
-    ;; loaded vars carrying `:malli/schema`, so a namespace nothing required
-    ;; contributes nothing and the gate silently arms a smaller world than
-    ;; the cluster it claims to reproduce.
-    (doseq [namespace-name program]
-      (require namespace-name))
-    (let [applied ((requiring-resolve 'seon.instrument/apply!)
-                   {:seon.config/on-core-error
-                    (:seon.config/on-core-error decisions)
-                    :seon.sci.admit/caps caps
-                    :seon.schema/projection projection})]
-      (when (:seon.error/kind applied)
-        (throw
-         (ex-info (:seon.error/message applied)
-                  (assoc applied ::instrumentation-unavailable true))))
-      ;; ABSENCE IS NEVER HEALTH, AND A COUNT IS NOT THE QUESTION. A floor of
-      ;; zero was satisfied by the worker's OWN test vars, so a worker that
-      ;; armed none of the program still passed. The question is SET COVERAGE
-      ;; against the set a booted cluster arms, and both sides are derived the
-      ;; same way: `seon.instrument/armable` asks malli's own two questions
-      ;; (a declared function schema, a non-primitive value) over the program
-      ;; namespaces this worker just loaded, and `seon.instrument/instrumented`
-      ;; reads the wrappers actually installed. `seon.artifact/-main`,
-      ;; `seon.artifact/install-initialization-pages!` and `seon.test/run`
-      ;; were live on every cluster and armed by nothing here.
-      (let [armable ((requiring-resolve 'seon.instrument/armable) program)
-            installed ((requiring-resolve 'seon.instrument/instrumented))
-            unarmed (into (sorted-set)
-                          (map #(str (symbol %)))
-                          (set/difference armable installed))]
-        (when (seq unarmed)
-          (throw
-           (ex-info
-            (str "bin/test armed a smaller world than a cluster in worker "
-                 worker-id ": " (count unarmed) " of " (count armable)
-                 " declared program contracts across " (count program)
-                 " program namespaces carry no wrapper — "
-                 (str/join ", " (take 10 unarmed))
-                 (when (> (count unarmed) 10) ", ...") ".")
-            (assoc applied
-                   ::instrumentation-unavailable true
-                   ::program-namespace-count (count program)
-                   ::armable-count (count armable)
-                   ::unarmed-program-contracts (vec unarmed)))))
-        (binding [*out* *err*]
-          (println "bin/test: CONTRACTS ARMED"
-                   "worker=" worker-id
-                   "mode=" (:seon.config/on-core-error decisions)
-                   "namespaces=" (count namespaces)
-                   "program-namespaces=" (count program)
-                   "registered=" (:seon.instrument/registered applied)
-                   "instrumented=" (:seon.instrument/instrumented applied)
-                   "program-armable=" (count armable))))
-      applied)))
+(def ^:private arm-contracts! (requiring-resolve 'seon.test.arm/arm-contracts!))
 
 (defn- initialize-contracts!
   "Load selected tests and acquire the one arming value for workers and test-fast."

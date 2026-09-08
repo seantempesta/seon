@@ -11,6 +11,8 @@
             [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.fn :as seon.fn]
+            [seon.instrument :as instrument]
+            [malli.core :as m]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
@@ -59,6 +61,22 @@
            connection nil)
           (is (= before (:max-tx @connection))
               "clock-free schema reconciliation is idempotent"))))))
+
+(deftest an-instrumentation-test-restores-the-entering-contracts-on-failure
+  (let [roots (into {} (map (juxt identity deref)) (instrument/instrumented))
+        schemas (m/function-schemas)]
+    (is (seq roots) "the regression must enter with real armed contracts")
+    (is (= ::deliberate-failure
+           (try
+             (test-support/preserving-instrumentation-state
+              (fn []
+                (instrument/remove!)
+                (is (empty? (instrument/instrumented)))
+                (throw (ex-info "fixture failure" {::cause ::deliberate-failure}))))
+             (catch clojure.lang.ExceptionInfo error (::cause (ex-data error))))))
+    (is (= (set (keys roots)) (instrument/instrumented)))
+    (is (every? (fn [[v callable]] (identical? callable @v)) roots))
+    (is (= schemas (m/function-schemas)))))
 
 (deftest config-reconciliation-cannot-retract-the-schema-population
   (test-support/with-database

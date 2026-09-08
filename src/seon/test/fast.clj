@@ -12,9 +12,9 @@
 
 (defn -main
   "Arm contracts, run the named test namespaces, exit with the tally."
+  {:malli/schema [:=> [:cat [:* :string]] :nil]}
   [& args]
   (let [namespaces (mapv symbol args)
-      arming (#'arm/initialize-contracts! "test-fast" namespaces)
       started (java.time.Instant/now)
       progress (atom {:seon.test.runner/description "test-fast initialization"
                       :seon.test.runner/at-nanos (System/nanoTime)
@@ -23,7 +23,10 @@
                 progress (#'runner/silence-seconds) started)
       exit-code
       (try
-        (let [arming arming]
+        (let [_ (when (empty? namespaces)
+                  (throw (ex-info "At least one test namespace is required."
+                                  {:seon.error/kind ::missing-namespaces})))
+              arming (#'arm/initialize-contracts! "test-fast" namespaces)]
           (doseq [namespace-name namespaces]
             (when (empty? (#'runner/test-vars-in [namespace-name]))
               (throw (ex-info "Requested namespace has no tests."
