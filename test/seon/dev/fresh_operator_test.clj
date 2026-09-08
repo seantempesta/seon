@@ -1472,9 +1472,7 @@
           (reap-process-identity! process-identity))
         (delete-recursively! root)))))
 
-(deftest ^{:seon.test/long
-           "53.876 s pool: real Malli collection/instrumentation refreshes a stale start wrapper before add."}
-  add-refreshes-a-genuinely-stale-wrapper-before-current-start
+(deftest add-refreshes-a-genuinely-stale-wrapper-before-current-start
   (let [root (fresh-root)
         form (operator-private-value 'add-form (str root) "scratch" {})
         start-var #'cluster/start!
@@ -1551,8 +1549,9 @@
         (is (= [true true] @effective-projections)
             "both operator config reads run inside the cluster projection"))
       (finally
-        (mi/unstrument! {:filters [start-filter]})
         (alter-meta! start-var (constantly start-meta))
+        ;; with-redefs already restored the original instrumented root.
+        (mi/clj-collect! {:ns ['seon.cluster]})
         (reset! (var-get instances-var) instances-before)))))
 
 (deftest start-sweep-refusal-is-retryable-and-unwinds-the-partial-instance
