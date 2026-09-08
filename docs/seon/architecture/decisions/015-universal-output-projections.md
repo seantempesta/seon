@@ -5,32 +5,37 @@ date: 2026-08-04
 tags: [decision, architecture, rendering, observability]
 ---
 
-# ADR-015: Two universal output projections with one fit owner
+# ADR-015: Entity render pairs and one value-rendering bound
 
 ## Decision
 
-Every consumer-visible text value crosses `:seon.render/ai`; every semantic web
-UI value crosses `:seon.render/html`. Static authored bytes and transport
-framing are not third projections. Important schemas declare named render functions,
-and the generic floor is the total fallback.
+Apply [the agent record and turn loop PRD §13–§15](../../../prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
+One entity schema declares one AI/HTML render pair. Scalars share the
+entity's block; components and declared derived queries cover whole
+concerns. No pair means the default attribute-map printer.
 
-Reference admission retains only identity facts. Render-function selection recurses
-from that identity; the selected render function owns semantic rendering.
-`seon.print/fit` alone applies a database-derived consumer profile. Values that
-do not fit contain ordinary elision values with path, counts, offset, profile,
-and requery identity or refusal. Program facts declare external sinks and
-projection boundaries so output completeness is queryable.
+A render function chooses source from its data. Generated source is
+evaluated and stored in ordinary system turns. The evaluation schema's
+pair renders history through the walk, using stored shown text and the
+single `seon.repl/text` grammar. No third form projection or
+history-specific formatter exists.
+
+At evaluation time the value renderer applies the profile once.
+The database stores shown text, including elisions and requery forms,
+plus source, out, and error. Actual result objects remain in each
+agent's live SCI context. There is no separate result byte bound,
+stored print node, or result blob.
+
+HTML renders the live object without presentation clipping, and uses
+shown text after restart. Query-work bounds and evaluation deadlines
+remain independent from presentation.
 
 ## Consequences
 
-- Tools, errors, logs, status, prompts, and web surfaces share render-function and fitting
-  semantics.
-- Consumers select profiles; render functions do not invent local truncation rules.
-- Elision is structured data, not punctuation.
-- Output audits derive crossings from the program graph.
+Earlier prompt bytes survive data, profile, code, and JVM changes
+because they are saved observations. Inspection distinguishes saved
+text from a live object and reports when a requery can no longer reach
+that object. Compaction is the explicit wipe and regeneration boundary.
 
-## Related
-
-- [[ui]] — projection resolution, profiles, and the output floor.
-- [[observability]] — bounded output evidence.
-- [[data-model]] — render-function and output-path facts.
+See [UI](../ui.md), [context](../context.md), and
+[observability](../observability.md).
