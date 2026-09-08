@@ -179,6 +179,52 @@
       {})
     (admitted-value caps value)))
 
+(def ^:private non-caller-namespace-prefixes
+  ;; DERIVED FROM WHAT THESE FRAMES ARE, not from a hand list of ours: the
+  ;; host, the language, the contract library's own wrapper, and this
+  ;; reporter are the machinery that CAUGHT the violation. None of them is a
+  ;; place to go and edit, and naming one is how a refusal ends up pointing
+  ;; the reader at the checker instead of the caller.
+  ["malli." "clojure." "java." "jdk." "sun." "seon.instrument"])
+
+(defn- caller-frame
+  "The first stack frame that is neither the contract machinery nor the host.
+
+  A refusal must name the member AND the frame that supplied it. With
+  contracts armed, malli's instrumented wrapper sits between the caller and
+  the refusal, so the nearest outside frame is `malli.core` and a reader
+  following it lands in a dependency."
+  []
+  (some (fn [^StackTraceElement frame]
+          (let [demunged (clojure.lang.Compiler/demunge (.getClassName frame))
+                separator (.indexOf demunged "/")
+                frame-ns (if (neg? separator)
+                           demunged
+                           (subs demunged 0 separator))]
+            (when-not (some #(.startsWith ^String frame-ns ^String %)
+                            non-caller-namespace-prefixes)
+              (str frame-ns " (" (.getFileName frame)
+                   ":" (.getLineNumber frame) ")"))))
+        (.getStackTrace (Thread/currentThread))))
+
+(def ^:private headline-problem-paths
+  ;; The headline is a CONCISE DIAGNOSIS — `seon.instrument-test`'s bounded
+  ;; headline regression measures it at under 64 estimated tokens — so the
+  ;; paths it names are the first few a reader can act on. The complete list
+  ;; is data on the value, never omitted.
+  4)
+
+(defn- problem-path
+  "One Malli problem's path INTO THE ARGUMENT, as ordinary data.
+
+  Input explanations begin with the positional argument index, which the
+  surrounding args vector already represents. For a missing required key
+  this path IS the key: naming it is the difference between \"missing
+  required key\" and a refusal a reader can act on."
+  [kind problem]
+  (vec (cond-> (:in problem)
+         (= :malli.core/invalid-input kind) next)))
+
 (defn- offending-value
   "The exact Malli-reported key/value pair, nested only along its path."
   [caps kind problem]
@@ -333,11 +379,27 @@
           first-problem (first problems)
           problem-message (or (some-> first-problem me/error-message)
                               "does not satisfy the declared schema")
+          ;; EVERY PROBLEM, EACH WITH ITS PATH. Reporting one of N was the
+          ;; absence-as-health shape one level up: a two-problem refusal
+          ;; showed a single "missing required key" and an offending value
+          ;; naming a DIFFERENT key than the one the reader had to supply.
+          ;; The paths come first because for a missing required key the
+          ;; path is the key.
+          problem-paths
+          (into [] (comp (map #(problem-path kind %)) (remove empty?))
+                problems)
+          problem-rows
+          (mapv (fn [problem]
+                  (cond-> {:seon.instrument.problem/message
+                           (or (me/error-message problem)
+                               "does not satisfy the declared schema")}
+                    (seq (problem-path kind problem))
+                    (assoc :seon.instrument.problem/path
+                           (problem-path kind problem))))
+                problems)
           representative-problem
-          (when (and bounded-caps first-problem)
-            (admitted-value
-             bounded-caps
-             {:seon.instrument.problem/message problem-message}))
+          (when (and bounded-caps (seq problem-rows))
+            (admitted-value bounded-caps problem-rows))
           schema-form (m/form offended)
           expected (if (and (= :malli.core/invalid-input kind)
                             (= :cat (first schema-form))
@@ -349,6 +411,7 @@
           offending (when (and bounded-caps first-problem)
                       (offending-value bounded-caps kind first-problem))
           function-symbol (:fn-name data)
+          caller (caller-frame)
           arm (if (= :malli.core/invalid-output kind) :output :input)]
       (error/diagnostic
        {:seon.error/kind ::contract-violated
@@ -358,7 +421,18 @@
         ;; and arguments here made it print a print and repeat one payload.
         :seon.error/message
         (str function-symbol " violated its contract ("
-             (name kind) "): " problem-message)
+             (name kind) "): " problem-message
+             (when (seq problem-paths)
+               ;; THE HEADLINE IS BOUNDED LIKE EVERY OTHER RENDERED
+               ;; VALUE, and the omission is COUNTED rather than silent.
+               ;; A 200-problem violation names the first few paths a
+               ;; reader can act on; the complete list rides
+               ;; `:seon.instrument/problem-paths` and the evidence.
+               (let [shown (vec (take headline-problem-paths problem-paths))
+                     remaining (- (count problem-paths) (count shown))]
+                 (str " at " (pr-str shown)
+                      (when (pos? remaining)
+                        (str " and " remaining " more"))))))
         :seon.error/diagnostic-layer :instrumentation
         :seon.error/diagnostic-operation function-symbol
         :seon.error/diagnostic-member
@@ -368,12 +442,15 @@
         :seon.error/diagnostic-cause kind
         :seon.error/diagnostic-evidence
         (when representative-problem
-          {:seon.instrument/problem-count problem-count
-           :seon.instrument/problems [representative-problem]})
+          (cond-> {:seon.instrument/problem-count problem-count
+                   :seon.instrument/problems representative-problem}
+            caller (assoc :seon.instrument/caller caller)))
         :seon.error/data
         (cond-> {::malli kind
                  ::arm arm
                  ::problem-count problem-count}
+          (seq problem-paths) (assoc ::problem-paths problem-paths)
+          caller (assoc ::caller caller)
           function-symbol (assoc ::fn (str function-symbol))
           expected-value
           (assoc ::schema (admit/canonical-edn expected-value))
