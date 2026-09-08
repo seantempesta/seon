@@ -1731,3 +1731,14 @@ full-suite runs. Changed: the turn-loop lane (step 3) launched NOW,
 concurrently with backlog 2, ownership split by file; verifiers run
 concurrently with the next lane instead of gating it; `--all` runs once
 per lane, at the end. PRD r9 folds lane 2's verifier blockers into step 3.
+
+Docs lane landed (7 commits: architecture docs at the PRD target; curation
+ref = later accretion, recorded in PRD §4). Backlog 2 landed
+(`d2793c0ba..c8db5b649`): projection class dissolved (`malli-form?` asks
+the projection in hand; 38 → 6), worker armed state derived per task,
+repl-parity/db/data reds cured, 8 production defects fixed; `--all` 158
+distinct red of which 62 sit in the turn-loop lane's files (it inherits
+them), 20 `parallel-only` (13 sci.eval — filed, unattributed). NOTE:
+`--all` skips 54 declared-long live-boot/operator tests — the wave's final
+gate is `--full`. Running: `turn-loop` (step 3), `refused-render-typed-
+unknown` (step 5 render half). Step 4 spec drafted (`agent-record-0908.md`).
