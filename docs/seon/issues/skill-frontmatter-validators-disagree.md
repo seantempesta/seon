@@ -29,9 +29,12 @@ Observed 2026-09-08 in the docs-and-skills lane:
 - The system `python3` lacks PyYAML; using uv supplied it and exposed
   the actual validation conflict. No validator code was changed.
 
-The edited skills retain repository-required metadata. The hook then
-warns that `skill` is not in its vault vocabulary, despite multiple
-skill files using it; its vocabulary population needs the same scope review.
+The edited skills now retain the supported name/description frontmatter;
+all nine pass the bundled validator. The repository hook still emits its
+two document-metadata errors on these valid skill files. During diagnosis,
+adding type/status instead produced a warning that `skill` was absent
+from the vault vocabulary, despite multiple skill files using it.
+Classification and vocabulary must use the correct skill-document scope.
 
 ## Owner
 
