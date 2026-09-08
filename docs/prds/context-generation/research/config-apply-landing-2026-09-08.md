@@ -43,6 +43,23 @@ row entries matched database read-back; the search projection remains a SYMBOL.
 The processor-count decision resolved to 18. No model call was made.
 Gates continue below this checkpoint; the earlier stop is historical evidence.
 
+The first completed subject gate ran 53 tests / 311 assertions: 9 failures and
+1 error across five tests. Task completion messages do not report a verdict;
+the earlier 189,600 ms completion was NOT a passing regression. `6b54338fe`
+repairs the confirmed causes: syntax quoting had qualified the pull wildcard
+as `clojure.core/*` (use the parser's declared `:*` spelling); the operator's
+store-lock helper passed `Path` to a string contract (stringify at its caller);
+config refusal and status text tests expected older diagnostics; and the reload
+drill expected publication to accept deliberately removed call facts. That drill
+now verifies refusal, reloads the damaged owner, and then verifies publication.
+Dependency evidence: `reference-code/datalog-parser/src/datalog/parser/pull.cljc:65`
+declares all three wildcard spellings; the default JVM confirmed `[:*]` and
+`'[*]` produce equal config rows. `f1ebd4754` also repairs the observed wrapper
+fixture leak: `with-redefs` had restored the instrumented root before the
+fixture's extra `unstrument!` removed it. The fixture restores its schema
+registration and retains that original root. Its measured 611 ms execution
+also removed the obsolete long-test classification, so the bare gate covers it.
+
 Verification stopped at the concurrent runner boundary, as the assignment requires.
 The implementation is in the working tree for review; the issue remains open. No protected
 turn-cut path was edited and no protected-path hunk is required.

@@ -1,8 +1,8 @@
 ---
 type: defect
-status: open
+status: resolved
 severity: friction
-tags: [operator, config, prepl]
+tags: [issue, operator, config]
 ---
 
 # `bin/seon config apply` fails compiling its own prepl form
@@ -63,4 +63,23 @@ It has NOT run: the subject gate exited 1 before launching tests during concurre
 runner-paths edits. Development adoption independently refused because source
 changed during adoption. Keep this issue open until the required gates and live
 apply/adopt proof pass. Evidence and unfinished work:
-[config-apply landing](../../prds/context-generation/research/config-apply-landing-2026-09-08.md).
+[config-apply landing](../../../prds/context-generation/research/config-apply-landing-2026-09-08.md).
+
+## Resolution — 2026-09-08
+
+The owner superseded the earlier stop rule. Commit `eb66a4b12` repairs the
+operator/config boundary. The live `default` sequence succeeded: config apply
+performed three operations, then development adoption converged. Independent
+read-back matched all 77 desired row entries and confirmed the search projection
+is still a symbol. Adopted and published commit IDs both equalled
+`6aa04f2d-55d7-5cb0-8f09-cf9a2fd2e7c1`.
+
+The real operator regression applies repository-relative `config/default.edn`,
+reads back the desired row, and adopts the published source. Its first run
+exposed syntax-quoted wildcard selectors becoming `clojure.core/*`; `6b54338fe`
+uses Datahike's equivalent `:*` wildcard. The independent live probe had ordinary
+quoted selectors and passed. Probe source and exact output are in the landing
+note; probe commit `8fb5365ec`. The namespace gate additionally
+exposed a fixture removing the original contract wrapper after `with-redefs`
+restored it; `f1ebd4754` removes that extra cleanup and restores the original
+schema registration. Final gate tallies are recorded in the landing note.
