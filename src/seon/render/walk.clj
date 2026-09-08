@@ -43,6 +43,7 @@
             [seon.render :as render]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.sci.admit :as admit]
             [seon.sci.kernel :as sci.kernel]))
 
 ;;; ---------------------------------------------------------------------------
@@ -78,32 +79,42 @@
   [attribute width]
   [attribute :limit (inc (long width))])
 
-(defn- connection-width
+(defn- presentation-width
   "How many connections on one attribute the AI boundary shows.
 
-  THE ELISION LIVES HERE, at AI context generation, and nowhere else. This
-  read used to be `:seon.config.eval.result/max-collection` — a STORAGE cap —
-  so moving a storage bound silently rewrote the agent's context and the two
-  decisions could never be reasoned about apart. The render profile is the
-  presentation authority (`:seon.render.profile/max-children`), it is already
-  carried on every render request, and it is part of the byte-identity
-  qualification `same db, same commit, same profile`."
+  THE PRESENTATION ELISION LIVES HERE, at AI context generation, and nowhere
+  else. This read used to be `:seon.config.eval.result/max-collection` — a
+  STORAGE cap — so moving a storage bound silently rewrote the agent's
+  context and the two decisions could never be reasoned about apart. The
+  render profile is the presentation authority
+  (`:seon.render.profile/max-children`), it is already carried on every
+  render request, and it is part of the byte-identity qualification `same db,
+  same commit, same profile`.
+
+  A request that carries no profile is not an AI context generation and makes
+  no presentation cut. It is still bound by the pull's own query-work limit,
+  and `connection-observation` reports THAT cut whether a profile was carried
+  or not — a width of `Integer/MAX_VALUE` here is the absence of a
+  presentation decision, never a claim that nothing was truncated."
   ^long [request]
   (let [declared (:seon.render.profile/max-children
                   (:seon.render/profile request))]
     (if (nat-int? declared)
       (long declared)
-      ;; A REQUEST THAT CARRIES NO PROFILE IS NOT AN AI CONTEXT GENERATION,
-      ;; so it elides nothing: it shows every connection the pull returned.
       ;; Deriving one here instead would both cut where no presentation
       ;; decision was made AND re-read effective config per acquisition —
       ;; the fetch-at-call-time defect (law 2.1) measured three times over.
       (long Integer/MAX_VALUE))))
 
+(defn- pull-width
+  "The pull's own query-work limit on one attribute's connections."
+  ^long [caps]
+  (admit/required-cap caps :seon.config.eval.result/max-collection))
+
 (defn- bounded-acquisition-distance
   [distance caps]
   (min (long distance)
-       (dec (long (:seon.config.eval.result/max-nodes caps)))))
+       (dec (admit/required-cap caps :seon.config.eval.result/max-nodes))))
 
 (defn root-selector
   "A concrete bidirectional pull selector for an agent-root distance.
@@ -145,7 +156,7 @@
         ;; THE PULL'S OWN LIMIT IS QUERY WORK, not the AI boundary's elision:
         ;; it decides how many stored refs Datahike is asked for, and the
         ;; walk's declared connection width decides how many the agent sees.
-        width (:seon.config.eval.result/max-collection caps)
+        width (pull-width caps)
         distance (bounded-acquisition-distance distance caps)
         leaf (into [:db/id] identity-attributes)]
     (letfn [(selector-at [remaining]
@@ -221,8 +232,36 @@
    (apply dissoc entity (map reverse-attribute ref-attributes))
    ref-attributes))
 
+(defn- connection-observation
+  "One elision value naming WHICH bound cut an attribute's connections.
+
+  Two bounds cut here and both must be reported. The pull asks for one value
+  beyond its query-work limit, so a returned count past that limit is the
+  pull's own truncation — and it is reported whether or not the request
+  carried a presentation profile. Reading `Integer/MAX_VALUE` as \"nothing was
+  cut\" was this project's named failure class, a check reporting health from
+  absence of signal: with no profile the observation could never fire even
+  though the pull had already stopped at 8,193 (measured 2026-09-07,
+  research/verify-storage-bound-2026-09-07.md B5)."
+  [attribute reverse? shown query-limit presentation-limit]
+  (let [bound-by (if (<= (long query-limit) (long presentation-limit))
+                   :seon.config.eval.result/max-collection
+                   :seon.render.profile/max-children)]
+    {:seon.render.walk/attribute attribute
+     :seon.error/value
+     {::elided true
+      :seon.error/kind ::elided
+      :seon.error/message
+      (str "elided additional " (when reverse? "reverse ") attribute
+           " connections past " shown
+           ", bounded by " bound-by)
+      :seon.error/data
+      {:seon.render.walk/attribute attribute
+       :seon.print/bound-by bound-by
+       :seon.render.walk/shown (long shown)}}}))
+
 (defn- acquisition-members
-  [database root distance width]
+  [database root distance width query-width]
   (let [installed (installed-attributes database)
         refs (into []
                    (keep (fn [[attribute properties]]
@@ -231,7 +270,8 @@
                              attribute)))
                    installed)
         identities (db/populated-identity-attributes database)
-        width (long width)]
+        width (long width)
+        query-width (long query-width)]
     (letfn [(connection-values [entity attribute reverse?]
               (let [display (if reverse?
                               (reverse-attribute attribute)
@@ -274,11 +314,16 @@
                                          values (if reverse?
                                                   (sort-by :db/id > values)
                                                   values)
-                                         kept (take width values)
+                                         ;; THE TIGHTER OF THE TWO BOUNDS
+                                         ;; decides what is shown, and the
+                                         ;; observation names which one it
+                                         ;; was.
+                                         shown (min width query-width)
+                                         kept (take shown values)
                                          kept (if reverse?
                                                 (sort-by :db/id kept)
                                                 kept)
-                                         elided? (> (count values) width)]
+                                         elided? (> (count values) shown)]
                                      (cond->
                                       (mapv (fn [child]
                                               {:seon.render.walk/attribute
@@ -288,21 +333,9 @@
                                                :seon.render.walk/pulled child})
                                             kept)
                                        elided?
-                                       (conj
-                                        {:seon.render.walk/attribute attribute
-                                         :seon.error/value
-                                         {::elided true
-                                          :seon.error/kind ::elided
-                                          :seon.error/message
-                                          (str "elided additional "
-                                               (when reverse? "reverse ")
-                                               attribute " connection"
-                                               "s"
-                                               " at the render profile's"
-                                               " declared connection width")
-                                          :seon.error/data
-                                          {:seon.render.walk/attribute
-                                           attribute}}}))))
+                                       (conj (connection-observation
+                                              attribute reverse? shown
+                                              query-width width)))))
                                  connection-attributes))]
                       (if (or (pos? remaining)
                               (and (zero? remaining)
@@ -438,7 +471,8 @@
                 ;; would hand the second caller the first caller's profile.
                 (acquisition-members database root
                                      (bounded-acquisition-distance distance caps)
-                                     (connection-width request))))))))
+                                     (presentation-width request)
+                                     (pull-width caps))))))))
 
 (defn membership-diff
   "Changed, added, and removed members between two root acquisitions."
@@ -568,7 +602,8 @@
              members (:seon.render.walk/members acquisition)
              order (:seon.render.walk/order acquisition)
              root-namespace-eid (acquired-root-namespace-eid acquisition)
-             node-limit (long (:seon.config.eval.result/max-nodes caps))]
+             node-limit (admit/required-cap
+                         caps :seon.config.eval.result/max-nodes)]
          (if (empty? order)
            [{:seon.render.walk/lookup lookup
              :seon.render/distance distance

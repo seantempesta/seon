@@ -126,6 +126,68 @@
                                "DECLARATION POPULATION FALLBACK"))
            "the complete traversal stays under its supplied projection")))))
 
+(defn- elision-observations
+  [acquisition]
+  (->> (vals (:seon.render.walk/members acquisition))
+       (mapcat :seon.render.walk/connections)
+       (keep :seon.error/value)
+       (filter #(= ::walk/elided (:seon.error/kind %)))
+       vec))
+
+(deftest a-truncated-connection-is-reported-whichever-bound-cut-it
+  ;; THE PROJECT'S NAMED FAILURE CLASS, created by a fix: the presentation
+  ;; width answered `Integer/MAX_VALUE` for a request carrying no profile
+  ;; while the PULL still stopped at its own query-work limit, so the
+  ;; observation could never fire and a truncated connection read as
+  ;; complete (measured 2026-09-07: width 1 -> 7 elisions, no profile -> 0,
+  ;; width 100000 -> 0). Two bounds cut here and both are reported.
+  (support/with-database
+   (fn [connection]
+     (seed-agent-and-transcript! connection)
+     (db/transact!
+      connection
+      (mapv (fn [ordinal]
+              {:seon.cluster.eval/id (str "render-walk-eval-" ordinal)
+               :seon.cluster.eval/run [:seon.cluster.run/id "render-walk-run"]
+               :seon.cluster.eval/ordinal ordinal
+               :seon.cluster.eval/at (at (+ 10 ordinal))
+               :seon.cluster.eval/ns [:seon.ns/name agent-namespace]
+               :seon.cluster.eval/result-edn "42"
+               :seon.cluster.eval/source "(+ 20 22)"})
+            [1 2]))
+     (let [database @connection
+           ctx (support/fork-cluster-ctx connection)
+           narrow (assoc caps :seon.config.eval.result/max-collection 2)]
+       (testing "the pull's own cut is reported with NO profile supplied"
+         (let [observations
+               (elision-observations
+                (walk/root-acquisition
+                 (assoc (request database ctx 2)
+                        :seon.sci.admit/caps narrow)))]
+           (is (seq observations)
+               "a connection the pull truncated read as complete")
+           (is (every? #(= :seon.config.eval.result/max-collection
+                           (get-in % [:seon.error/data :seon.print/bound-by]))
+                       observations)
+               (pr-str observations))
+           (is (every? #(str/includes? (:seon.error/message %)
+                                       "max-collection")
+                       observations)
+               "and the message names the bound that made the cut")))
+       (testing "a tighter presentation width names the render profile"
+         (let [observations
+               (elision-observations
+                (walk/root-acquisition
+                 (assoc (request database ctx 2)
+                        :seon.render/profile
+                        {:seon.render.profile/id :seon.render.profile/agent
+                         :seon.render.profile/max-children 1})))]
+           (is (seq observations))
+           (is (every? #(= :seon.render.profile/max-children
+                           (get-in % [:seon.error/data :seon.print/bound-by]))
+                       observations)
+               (pr-str observations))))))))
+
 (deftest html-neighborhood-emits-no-traversal-only-elision-units
   (support/with-database
    (fn [connection]

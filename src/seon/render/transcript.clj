@@ -824,8 +824,9 @@
   [unit]
   (let [db (:seon.db/db unit)
         agent-id (:seon.cluster.agent/id unit)
-        candidate-count (long (get-in unit [:seon.sci.admit/caps
-                                            :seon.config.eval.result/max-nodes]))
+        candidate-count (admit/required-cap
+                         (:seon.sci.admit/caps unit)
+                         :seon.config.eval.result/max-nodes)
         evaluated-sources (:seon.cluster.loop/evaluated-sources unit)]
     (if (some? evaluated-sources)
           (mapv
@@ -877,8 +878,9 @@
   [unit]
   (let [db (:seon.db/db unit)
         agent-id (:seon.cluster.agent/id unit)
-        candidate-limit (long (get-in unit [:seon.sci.admit/caps
-                                            :seon.config.eval.result/max-nodes]))
+        candidate-limit (admit/required-cap
+                         (:seon.sci.admit/caps unit)
+                         :seon.config.eval.result/max-nodes)
         selected-run-id (::selected-run-id unit)
         selected-evaluations (:seon.context.contribution/evaluations unit)
         total (cond
@@ -1068,8 +1070,8 @@
   [unit]
   (assoc unit ::token-budget
          (tokens/estimate-of-characters
-          (long (get-in unit [:seon.sci.admit/caps
-                              :seon.config.eval.result/max-string])))))
+          (admit/required-cap (:seon.sci.admit/caps unit)
+                              :seon.config.eval.result/max-string))))
 
 (defn render-session-ai
   "Render the schema-declared agent session while status survives slice 1."

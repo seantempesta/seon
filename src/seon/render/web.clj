@@ -70,6 +70,7 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.form :as schema.form]
+            [seon.sci.admit :as admit]
             [seon.sci.kernel :as sci.kernel]
             [starfederation.datastar.clojure.adapter.common :as datastar.common]
             [starfederation.datastar.clojure.adapter.http-kit :as datastar.http-kit]
@@ -590,7 +591,8 @@
               (map (fn [attribute]
                      [attribute (direct-attribute db eid attribute)]))
               attributes)
-        width (long (:seon.config.eval.result/max-collection caps))
+        width (admit/required-cap
+               caps :seon.config.eval.result/max-collection)
         reverse-groups
         (when reverse?
           (->> (db/q '[:find ?source ?attribute
