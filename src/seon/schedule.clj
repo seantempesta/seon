@@ -25,6 +25,7 @@
             [seon.id :as id]
             [seon.maintenance :as maintenance]
             [seon.operator.runtime :as operator.runtime]
+            [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
   (:import [com.cronutils.model Cron CronType]
            [com.cronutils.model.definition CronDefinitionBuilder]
@@ -497,11 +498,13 @@
        (string? (:seon.error/message value))))
 
 (defn- declared-maintenance-request-values
-  [effective]
+  [projection effective]
   (select-keys
    effective
    (m/explicit-keys
-    (m/deref (m/schema :seon.maintenance.request/value)))))
+    (m/deref
+     (m/schema :seon.maintenance.request/value
+               {:registry (:seon.schema.projection/registry projection)})))))
 
 (defn- canonical-path
   [path]
@@ -509,7 +512,8 @@
 
 (defn- execution-context
   [database cluster]
-  (let [cluster-name (:seon.cluster/name cluster)
+  (let [projection (schema/projection-from-database database)
+        cluster-name (:seon.cluster/name cluster)
         effective (config/effective database cluster-name)
         instance (get @operator.runtime/running-instances cluster-name)
         repository-root
@@ -522,7 +526,7 @@
         (canonical-path
          (or (get-in instance [:seon.boot/config :seon.boot/log-dir])
              (io/file managed-root "data" "clusters" cluster-name "logs")))]
-    (merge (declared-maintenance-request-values effective)
+    (merge (declared-maintenance-request-values projection effective)
            {:seon.config.blob/max-bytes (:seon.config.blob/max-bytes effective)
             :seon.boot/cluster-name cluster-name
             :seon.operator/repository-root repository-root

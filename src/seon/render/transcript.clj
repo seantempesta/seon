@@ -887,7 +887,10 @@
   "Return the ordinary inbox listing form for messages reached through `to`."
   {:malli/schema [:=> [:cat :seon.cluster.message/to] :seon.render/form]}
   [_recipient]
-  (list 'my.message/inbox))
+  ;; The empty request map names the call shape: `inbox` has a map arity
+  ;; and a positional arity, so a bare call is ambiguous to call
+  ;; preparation (it refused on the live page, 2026-09-08).
+  (list 'my.message/inbox {}))
 
 (defn- entry-basis
   [db entry]
