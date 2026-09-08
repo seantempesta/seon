@@ -16,6 +16,7 @@
             [seon.cluster.boot-test]
             [seon.test-runner-failure-fixture]
             [seon.test.runner :as runner]
+            [seon.test.arm :as arm]
             [seon.test-support :as test-support])
   (:import [java.io PrintWriter]
            [java.lang ProcessHandle]
@@ -109,6 +110,38 @@
           (is (= ready-value (edn/read-string (slurp ready))))
           (is (= before (cache/manifest (str base))))
           (is (.isDirectory (io/file published "data/store"))))
+      (finally (test-support/delete-recursively! root)))))
+
+(deftest published-base-retention-preserves-live-users-and-symlink-targets
+  (let [root (doto (io/file project-root "tmp" (str "base-retention-" (random-uuid))) .mkdirs)
+        parent (doto (io/file root "cache") .mkdirs)
+        sentinel (doto (io/file root "sentinel") .mkdirs)
+        now (System/currentTimeMillis)
+        current (ProcessHandle/current)]
+    (try
+      (spit (io/file sentinel "keep") "untouched")
+      (doseq [ordinal (range 6)]
+        (let [directory (doto (io/file parent (str ordinal)) .mkdirs)
+              ready (io/file directory "ready.edn")]
+          (spit ready "{}")
+          (is (.setLastModified ready (- now (* ordinal 1000))))))
+      (let [live (io/file parent "5")
+            references (doto (io/file live "references") .mkdirs)]
+        (spit (io/file references "live.edn")
+              (pr-str {:seon.test.cache/pid (.pid current)
+                       :seon.test.cache/started
+                       (str (.orElse (.startInstant (.info current)) nil))})))
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath (io/file parent "4" "sentinel")) (.toPath sentinel)
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (#'cache/reap! parent)
+      (is (= #{"0" "1" "2" "5"} (set (map #(.getName %) (.listFiles parent)))))
+      (is (= "untouched" (slurp (io/file sentinel "keep"))))
+      (is (.setLastModified (io/file parent "0/ready.edn")
+                            (- now (* 25 60 60 1000))))
+      (#'cache/reap! parent)
+      (is (not (.exists (io/file parent "0"))))
+      (is (.isDirectory (io/file parent "5")))
       (finally (test-support/delete-recursively! root)))))
 
 (defn- captured-run-with-output []
@@ -297,6 +330,8 @@
            declared contracts this worker can arm"))))
 
 (deftest fast-and-worker-arm-the-complete-program-contract-set
+  (is (identical? (var-get #'runner/arm-contracts!) #'arm/arm-contracts!)
+      "The worker delegates to the exact arming Var used by test-fast.")
   ;; Run this same observation in test-fast and in the isolated worker.
   ;; Both enter initialize-contracts!; observe actual wrappers rather than
   ;; trusting its count or a hand-maintained list of expected functions.

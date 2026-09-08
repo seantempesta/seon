@@ -91,7 +91,10 @@
                 channel (.getChannel file)]
       ;; Closing the owning channel releases its lock, including on failure.
       (.lock channel)
-      (let [hit? (and (= digest (::digest (read-edn ready)))
+      (let [acquired (System/nanoTime)
+            _ (println "bin/test: CACHE LOCK acquired wait-ms="
+                       (quot (- acquired started) 1000000))
+            hit? (and (= digest (::digest (read-edn ready)))
                       (.isDirectory (io/file base "data" "store"))
                       (.isFile (io/file base "manifest.edn")))]
         (when-not hit?
@@ -117,7 +120,8 @@
         (.setLastModified ready (System/currentTimeMillis))
         (reap! parent)
         (println "bin/test:" (if hit? "REUSE cached base" "PREPARED cached base")
-                 digest "elapsed-ms=" (quot (- (System/nanoTime) started) 1000000))
+                 digest "elapsed-ms=" (quot (- (System/nanoTime) started) 1000000)
+                 "work-ms=" (quot (- (System/nanoTime) acquired) 1000000))
         (flush)))))
 
 (defn manifest
