@@ -147,6 +147,7 @@
         (settle-row!
          "pending-function-run" "pending-function-agent"
          {:seon.fn/sym function-symbol
+          :seon.schema.admission/source :agent
           :seon.fn/ns [:seon.ns/name namespace-name]
           :seon.fn/source
           "(defn ^{:malli/schema [:=> [:cat] :int]} target [] 1)"
@@ -968,7 +969,10 @@
                value))
             function-row
             (fn [result]
+              ;; `:seon.fn/fn` declares its admission source, so a row that
+              ;; omits it is a shape the declared contract forbids.
               {:seon.fn/sym qualified-id
+               :seon.schema.admission/source :agent
                :seon.fn/ns [:seon.ns/name namespace-name]
                :seon.fn/source
                (str "(defn ^{:malli/schema [:=> [:cat] :int]} "

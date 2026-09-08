@@ -819,7 +819,15 @@
         ;; falls through to its children, which is what the delegating
         ;; producer asked for.
         rendering (:seon.render/rendering request #{})
-        selected (when (map? value)
+        ;; NO PROJECTION MEANS NOTHING IS DECLARED, AND NOTHING IS
+        ;; SELECTED. Both halves of selection ask the projection a
+        ;; question — which shapes this value matches, and whether the
+        ;; producer's output satisfies the output schema — so a request
+        ;; carrying no ctx has no question to ask and the ordinary print
+        ;; node is the answer. Every request that names a producer
+        ;; explicitly is a `:seon.render/call-request`, which declares its
+        ;; ctx.
+        selected (when (and projection (map? value))
                    (or (get value output)
                        (declared-producer projection request value output)))
         selected (when-not (contains? rendering selected) selected)]

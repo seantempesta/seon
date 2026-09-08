@@ -2294,6 +2294,29 @@
                 "the HTTP refusal is text, never a competing morph"))
           (finally (.close stream)))))))
 
+(defn- service-request
+  "The DECLARED `:seon.render.web/service`, with only what a test varies over
+  it. Its members are the ones a running cluster hands `start!` and
+  `inbound`; a map of the four a given assertion reads is a shape the
+  declared contract forbids."
+  [connection overrides]
+  (merge {:seon.store/connection-object connection
+          :seon.cluster.agent/id agent-id
+          :seon.sci.admit/caps caps
+          :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+          :seon.config.eval/time-limit-ms
+          (:seon.config.eval/time-limit-ms (config/defaults))
+          :seon.config/on-core-error :record
+          :seon.cluster.run/process process
+          :seon.render.web/pages-mult
+          (async/mult (async/chan (async/sliding-buffer 1)))
+          :seon.render.web/registration (atom {})
+          :seon.render.web/latest-packages (atom {})
+          :seon.render.web/render-channel (async/chan (async/sliding-buffer 1))
+          :seon.render/context-channel (async/chan (async/sliding-buffer 1))
+          :seon.render.web/fault-channel (async/chan (async/dropping-buffer 1))}
+         overrides))
+
 (deftest transaction-refusals-map-to-http-without-success
   (support/with-database
     (fn [connection]
@@ -2303,10 +2326,7 @@
                    {:seon.cluster.agent/id agent-id
                     :seon.cluster/name "web-write-refusal"
                     :seon.ns/name 'my.agents.root}))
-      (let [service {:seon.store/connection-object connection
-                     :seon.cluster.agent/id agent-id
-                     :seon.sci.admit/caps caps
-                     :seon.cluster.run/process process}
+      (let [service (service-request connection {})
             inbound {:seon.cluster.agent/id agent-id
                      :seon.cluster.message/inbound-content "accepted"}]
         (doseq [[result expected-status]
@@ -2331,8 +2351,7 @@
                             {:seon.error/kind :seon.db/rejected
                              :seon.error/message "injected process refusal"})]
               (support/refusal-data
-               #(web/start! {:seon.store/connection-object connection
-                             :seon.cluster.run/process process})))]
+               #(web/start! (service-request connection {}))))]
         (is (= :seon.db/rejected (:seon.error/kind result)))
         (is (= "injected process refusal" (:seon.error/message result)))))))
 
@@ -2408,23 +2427,11 @@
   (with-server
     (fn [connection first-server _graph]
       (let [taken (:seon.render.web/port first-server)
+            ;; its own disposable view half: this test is about the PORT,
+            ;; and the second view never opens a feed
             second-server (web/start!
-                           {:seon.store/connection-object connection
-                            :seon.cluster.agent/id agent-id
-                            :seon.sci.admit/caps caps
-                            :seon.cluster.run/process process
-                            ;; its own disposable view half: this test
-                            ;; is about the PORT, and the second view
-                            ;; never opens a feed
-                            :seon.render.web/pages-mult
-                            (async/mult (async/chan (async/sliding-buffer 1)))
-                            :seon.render.web/registration (atom {})
-                            :seon.render.web/latest-packages (atom {})
-                            :seon.render.web/render-channel
-                            (async/chan (async/sliding-buffer 1))
-                            :seon.render.web/fault-channel
-                            (async/chan (async/dropping-buffer 1))
-                            :seon.render.web/port taken})]
+                           (service-request connection
+                                            {:seon.render.web/port taken}))]
         (try
           (is (not= taken (:seon.render.web/port second-server))
               "it bound somewhere else")
