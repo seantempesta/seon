@@ -1014,3 +1014,14 @@ agent map, with the component's own `[:map {:seon.db/attributes true
 :seon.render/ai … :seon.render/html …}]` entity schema. The debug page
 renders the record as identity, plan, settings, then the derived blocks.
 
+
+
+§17 integration (record-render, 2026-09-08): component attributes are declared
+in `resources/seon/schemas/seon.agent.edn` as `:seon.agent/plan` and
+`:seon.agent/settings`; the currently named agent entity schema refers to
+them in identity/plan/settings order. Turn-cut's identity rename must retain
+these declarations. `my.plan` keeps today's agent-id argument and follows
+`:seon.agent/plan` internally. `seon.ai/agent-overlay` follows
+`:seon.agent/settings`; its keys and render pair derive in the existing
+`:seon.config/agent-overlay` schema. Agent completion and evaluation time
+limits are declared per-agent settings. No second overlay key list is added.

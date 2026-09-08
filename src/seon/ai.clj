@@ -324,13 +324,15 @@
   "Declared setting overrides for one agent in a database value."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.cluster.agent/id]
-    :seon.config/agent-overlay]}
+    [:or :seon.config/agent-overlay :seon.error/value]]}
   [db agent-id]
   (let [attributes (map-attributes (schema/declaration-population)
-                                   :seon.config/agent-overlay)]
-    (select-keys
-     (or (db/pull db (vec attributes) [:seon.cluster.agent/id agent-id]) {})
-     attributes)))
+                                   :seon.config/agent-overlay)
+        row (db/pull db [{:seon.agent/settings (vec attributes)}]
+                     [:seon.cluster.agent/id agent-id])]
+    (if (:seon.error/kind row)
+      row
+      (select-keys (:seon.agent/settings row) attributes))))
 
 (defn- config-ai-ident->request-ident
   [config-ident]

@@ -8,8 +8,8 @@
 ; Load this file through MCP JVM evaluation on the explicitly selected scratch
 ; cluster. These are sample messages requested by Sean, not model-generated
 ; replies. The plan is one agent-owned component tree: the agent owns the
-; objective through :my.plan/steps, the objective owns its four steps through
-; :my.plan.item/steps, :my.plan.item/position orders them, and
+; plan through :seon.agent/plan. Its objective and four root steps share that
+; component; :my.plan.item/position orders the steps, and
 ; :my.plan/current-step names the open step Juniper is working on.
 (defn install!
   "Install the Juniper example in the explicitly selected running cluster."
@@ -34,17 +34,10 @@
                 connection
                 {:tx-data
                  [{:db/id [:seon.cluster.agent/id "juniper"]
-                   :my.plan/current-step "step-render-plan"
-                   :my.plan/steps
-                   #{{:db/id "step-objective"
-                      :my.plan.item/id "juniper/understand-context"
-                      :my.plan.item/position 0
-                      :my.plan.item/title "Improve Juniper context inspection"
-                      :my.plan.item/description
-                      "Make identity, messages, plans, changed results, and the eventual live agent context easy to inspect together."
-                      :my.plan.item/expected-result
-                      "A clear paired context view whose facts and rendered results can be checked without guessing."
-                      :my.plan.item/steps
+                   :seon.agent/plan
+                   {:my.plan/objective "Improve Juniper context inspection"
+                    :my.plan/current-step "step-render-plan"
+                    :my.plan/steps
                       #{{:db/id "step-inspect"
                          :my.plan.item/id "juniper/inspect-identity-messages"
                          :my.plan.item/position 0
@@ -80,7 +73,7 @@
                          "After the visual and result checks pass, ask Juniper to find the same facts and update its own plan."
                          :my.plan.item/expected-result
                          "Juniper identifies the current step and records a truthful plan update from the assembled context."
-                         :my.plan.item/needs #{"step-compare"}}}}}}
+                         :my.plan.item/needs #{"step-compare"}}}}}
                   {:seon.cluster.message/id "design-lab/root-to-juniper/1"
                    :seon.cluster.message/from [:seon.cluster.agent/id "root"]
                    :seon.cluster.message/to [:seon.cluster.agent/id "juniper"]

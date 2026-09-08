@@ -92,7 +92,8 @@
                (db/q '[:find ?id
                        :where
                        [?agent :seon.cluster.agent/id "alice"]
-                       [?agent :my.plan/steps ?step]
+                       [?agent :seon.agent/plan ?plan]
+                       [?plan :my.plan/steps ?step]
                        [?step :my.plan.item/id ?id]]
                      @connection))
             "ownership is the forward component edge, with no stored backlink")))))
@@ -229,7 +230,7 @@
         (is (str/includes? printed "Inspect the facts"))
         (is (str/includes? printed "my.plan.item/title"))))))
 
-(deftest plan-source-runs-through-the-shared-reader
+(deftest plan-source-selects-reads-from-current-data
   (with-plan
     (fn [connection]
       (add connection "ship" "Ship the plan unit")
@@ -458,8 +459,10 @@
       (db/transact! connection
                     [{:seon.cluster.agent/id "juniper"}
                      {:db/id [:seon.cluster.agent/id "juniper"]
-                      :my.plan/current-step "step-render-plan"
-                      :my.plan/steps juniper-fixture-steps}])
+                      :seon.agent/plan
+                      {:my.plan/objective "Improve Juniper context inspection"
+                       :my.plan/current-step "step-render-plan"
+                       :my.plan/steps juniper-fixture-steps}}])
       (let [current (plan/plan {:seon.db/db @connection
                                 :seon.cluster.agent/id "juniper"})
             ai (plan/format-plan-ai current)
@@ -485,3 +488,26 @@
         (is (str/includes? printed "my.plan/current-step"))
         (is (not (str/includes? printed ":open nil"))
             "no nil attribute reaches the rendered panel")))))
+
+(deftest the-plan-component-holds-objective-tree-and-current-step
+  (with-plan
+    (fn [connection]
+      (plan/plan! {:my.plan/objective "Ship the change"
+                  :my.plan/steps [{:my.plan.item/id "ship"
+                                   :my.plan.item/title "Verify it"}]
+                  :my.plan/current-step {:my.plan.item/id "ship"}}
+                 @connection connection "alice")
+      (let [agent (db/pull @connection
+                           '[:my.plan/steps :my.plan/current-step
+                             {:seon.agent/plan [*]}]
+                           [:seon.cluster.agent/id "alice"])
+            component (:seon.agent/plan agent)]
+        (is (= "Ship the change" (:my.plan/objective component)))
+        (is (seq (:my.plan/steps component)))
+        (is (:my.plan/current-step component))
+        (is (not (contains? agent :my.plan/steps)))
+        (is (not (contains? agent :my.plan/current-step)))
+        (is (= "ship" (:my.plan.item/id (plan/current @connection "alice"))))
+        (db/transact! connection [[:db.fn/retractEntity [:seon.cluster.agent/id "alice"]]])
+        (is (nil? (db/pull @connection '[*] (:db/id component))))
+        (is (nil? (db/pull @connection '[*] [:my.plan.item/id "ship"])))))))

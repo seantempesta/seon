@@ -1659,7 +1659,9 @@
   (let [props (or (form/attr-form-properties definition) {})
         required-attrs
         (some-> (internal/map-required-attrs forms definition) set)]
-    (when (seq required-attrs)
+    (when (or (seq required-attrs)
+              (and (:seon.db/attributes props)
+                   (seq (form/map-entries definition))))
       (merge
         {:seon.schema/key schema-key
          :seon.schema/required-attrs required-attrs
@@ -1864,7 +1866,8 @@
             (reduce (fn [result attr]
                       (update result attr (fnil conj []) schema-key))
                     index
-                    required-attrs))
+                    (or (seq required-attrs)
+                        (map first (form/map-entries (get forms schema-key))))))
           (sorted-map)
           required-by-key)
         shape-rank
@@ -1956,7 +1959,7 @@
    dependencies))
 
 (defn- shape-projections
-  [shape-rows]
+  [forms shape-rows]
   (let [required-by-key
         (into (sorted-map)
               (map (fn [[k row]]
@@ -1968,7 +1971,8 @@
            (reduce (fn [result attr]
                      (update result attr (fnil conj []) schema-key))
                    index
-                   required-attrs))
+                   (or (seq required-attrs)
+                       (map first (form/map-entries (get forms schema-key))))))
          (sorted-map)
          required-by-key)
         shape-rank
@@ -2036,6 +2040,7 @@
                 (reverse-dependencies
                  (:seon.schema.projection/function-dependencies composed))}
                (shape-projections
+                (:seon.schema.projection/forms composed)
                 (:seon.schema.projection/shape-rows composed)))]
     (assoc composed
            :seon.schema.projection/fingerprint
@@ -2616,7 +2621,7 @@
            [:seon.schema.projection/required-by-key
             :seon.schema.projection/shape-index
             :seon.schema.projection/catalog])
-          (shape-projections shape-rows))
+          (shape-projections forms shape-rows))
         fingerprint
         (-> (reusable-projection-fingerprint projection)
             (replace-fingerprint-entry

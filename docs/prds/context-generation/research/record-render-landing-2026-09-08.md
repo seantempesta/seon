@@ -1,6 +1,6 @@
 ---
 type: research
-status: blocked
+status: in-progress
 date: 2026-09-08
 tags: [render, agent, test]
 ---
@@ -161,3 +161,45 @@ must be removed with its callers. Existing format helpers also remain.
 The plan source test currently checks exact source bytes, despite its older
 shared-reader name; it does not prove execution through SCI. This must be
 corrected and supplemented with the real SCI proof before acceptance.
+
+
+## Resumed for sections 17 and 16
+
+The owner resumed this lane and replaced the concurrency gate with
+`bin/test --paths` over only lane-owned files. The earlier stop is historical.
+The plan arity change and all four callers were already committed in
+`080628130`; the working tree had no residual plan arity diff when rechecked.
+
+Section 17 component slice:
+
+- `:seon.agent/plan` owns the objective, root steps, and current-step ref.
+  `my.plan` ownership queries follow that edge, and the existing writer
+  operations target its component. Juniper's fixture now has an objective
+  and four root steps rather than an objective-shaped root step.
+- `:seon.agent/settings` owns the overlay. `my.agent/settings` delegates to
+  the existing `seon.ai/agent-overlay` reader, which now pulls that component.
+  The existing schema derivation still supplies all per-agent dial keys and
+  now declares the settings render pair. Evaluation and agent completion
+  time limits are per-agent dials.
+- Optional-only entity maps enter schema discovery by their declared
+  attributes; an unrelated map does not match them merely because they have
+  no required attributes. Both full and incremental projection indexes use
+  the same admission rule. This was necessary for a sparse settings entity.
+- Malli requires `[:and {:seon.db/component true} :seon.db/ref]` for these
+  alias-backed refs; the literal vector-headed alias in section 17 refused.
+  The component metadata and storage semantics are unchanged.
+
+The first isolated attempt caught a misplaced attribute declaration and the
+second caught that alias syntax. Both were fixed in this lane. The third
+attempt (`tmp/record-render-components-test3.log`) passed shared-base
+preparation and entered the runner; its tally is pending at this checkpoint.
+Main-root development adoption reached program reconciliation; no browser
+or component fixture proof is claimed at this checkpoint.
+
+Additional implementation paths in this slice: `src/my/agent.clj`,
+`src/seon/ai.clj` (overlay reader only), `src/seon/schema.clj` (shape discovery),
+`src/seon/schema/edn.clj` (derived overlay pair),
+`resources/seon/schemas/seon.agent.edn`, the config-agent and config-eval
+schema resources, `test/my/agent_test.clj`, and `test/seon/ai_test.clj`.
+The Juniper fixture and section 17's PRD integration paragraph changed too.
+The section 16 page draft is still uncommitted and not included in this slice.

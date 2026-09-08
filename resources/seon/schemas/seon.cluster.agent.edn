@@ -9,6 +9,8 @@
                       [:seon.cluster.agent/namespace
                        {:optional true}
                        :seon.cluster.agent/namespace]
+                      [:seon.agent/plan {:optional true} :seon.agent/plan]
+                      [:seon.agent/settings {:optional true} :seon.agent/settings]
                       [:seon.cluster.agent/run
                        {:optional true}
                        :seon.cluster.agent/run]],
@@ -75,10 +77,6 @@
                      [:string
                       {:min 1,
                        :seon.db/identity true,
-                       :seon.render/ai
-                       seon.cluster.agent/render-id-ai,
-                       :seon.render/html
-                       seon.cluster.agent/render-id-html,
                        :description
                        "The agent's identity: the name every message, run, and namespace assignment resolves it by."}],
                      :identity-request

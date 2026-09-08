@@ -598,8 +598,9 @@
     (fn [connection]
       (db/transact! connection
                   [{:seon.cluster.agent/id "planner"
-                    :seon.config.ai/model "planner-model"
-                    :seon.config.ai/thinking :high}])
+                    :seon.agent/settings
+                    {:seon.config.ai/model "planner-model"
+                     :seon.config.ai/thinking :high}}])
       (is (= {:seon.config.ai/model "planner-model"
               :seon.config.ai/thinking :high}
              (ai/agent-overlay @connection "planner")))

@@ -1,0 +1,2 @@
+#:seon.agent{:plan [:and {:seon.db/component true} :seon.db/ref]
+             :settings [:and {:seon.db/component true} :seon.db/ref]}

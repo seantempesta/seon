@@ -1,8 +1,9 @@
 (ns my.plan
   "One agent-owned plan: a component tree of steps and its derived current view.
 
-  The agent entity owns its root steps through `:my.plan/steps`, a component
-  ref set; a step owns its nested steps the same way through
+  The agent owns one plan through `:seon.agent/plan`. That component holds
+  its objective, current step, and root `:my.plan/steps`; each step owns its
+  nested steps through
   `:my.plan.item/steps`. The component edge IS the ownership fact, so nothing
   stores an agent backlink or a parent backlink: a parent derives from the
   reverse component edge and ownership derives by following the edges down.
@@ -37,9 +38,11 @@
      [?ancestor :my.plan.item/steps ?middle]
      (descendant ?middle ?node)]
     [(owned ?agent ?step)
-     [?agent :my.plan/steps ?step]]
+     [?agent :seon.agent/plan ?plan]
+     [?plan :my.plan/steps ?step]]
     [(owned ?agent ?step)
-     [?agent :my.plan/steps ?root]
+     [?agent :seon.agent/plan ?plan]
+     [?plan :my.plan/steps ?root]
      (descendant ?root ?step)]
     [(leaf ?step)
      [?step :my.plan.item/id]
@@ -107,6 +110,12 @@
           :in $ ?agent-id
           :where [?agent :seon.cluster.agent/id ?agent-id]]
         database agent-id))
+
+(defn- plan-eid
+  [database agent-entity]
+  (db/q '[:find ?plan . :in $ ?agent
+          :where [?agent :seon.agent/plan ?plan]]
+        database agent-entity))
 
 (defn- step-eid
   [database item-id]
@@ -231,15 +240,11 @@
     (walk pulled nil 0)))
 
 (defn- completion-limit
-  [database agent-id]
+  [database _agent-id]
   (let [cluster-name
         (db/q '[:find ?cluster-name .
-                :in $ ?agent-id
-                :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                [?agent :seon.cluster.agent/cluster ?cluster]
-                [?cluster :seon.cluster/name ?cluster-name]]
-              database agent-id)
+                :where [?cluster :seon.cluster/name ?cluster-name]]
+              database)
         effective (when cluster-name (config/effective database cluster-name))]
     (long
      (:seon.config.render.agent/max-children
@@ -278,11 +283,13 @@
 
 (defn- agent-plan-pull
   [database agent-id]
-  (db/pull database
-           [:seon.cluster.agent/id
-            {:my.plan/current-step [:my.plan.item/id]}
-            {:my.plan/steps step-selector}]
-           [:seon.cluster.agent/id agent-id]))
+  (let [row (db/pull database
+                     [{:seon.agent/plan
+                       [:my.plan/objective
+                        {:my.plan/current-step [:my.plan.item/id]}
+                        {:my.plan/steps step-selector}]}]
+                     [:seon.cluster.agent/id agent-id])]
+    (if (error-value? row) row (:seon.agent/plan row))))
 
 (defn plan
   "Read this agent's whole plan as one derived current value.
@@ -323,6 +330,8 @@
                      :my.plan/blocked (into [] (keep by-id) (sort blocked-ids))
                      :my.plan/recent-completions
                      (:my.plan/recent-completions completions)}
+              (:my.plan/objective pulled)
+              (assoc :my.plan/objective (:my.plan/objective pulled))
               current-id (assoc :my.plan/current-step
                                 {:my.plan.item/id current-id})
               (:my.plan/older-completions completions)
@@ -498,7 +507,8 @@
                       (:my.plan.item/needs request))
           _ (doseq [token (:my.plan.item/about request)]
               (resolve-subject! database token))
-          owner (or parent agent-entity)
+          plan-entity (or (plan-eid database agent-entity) "new-agent-plan")
+          owner (or parent plan-entity)
           attribute (if parent :my.plan.item/steps :my.plan/steps)
           tempid "new-plan-step"
           step (cond-> (dissoc request
@@ -510,14 +520,17 @@
                              (sibling-count database owner attribute))
                  (seq needs) (assoc :my.plan.item/needs needs))]
       (cond-> [step [:db/add owner attribute tempid]]
+        (= plan-entity "new-agent-plan")
+        (conj [:db/add agent-entity :seon.agent/plan plan-entity])
         (:my.plan/current? request)
-        (conj [:db/add agent-entity :my.plan/current-step tempid])))))
+        (conj [:db/add plan-entity :my.plan/current-step tempid])))))
 
 (defn- complete-step-call
   [database request]
   (let [item-id (:my.plan.item/id request)
         agent-id (:seon.cluster.agent/id request)
         agent-entity (agent-eid database agent-id)
+        plan-entity (plan-eid database agent-entity)
         step (step-eid database item-id)]
     (when-not step
       (refuse! ::not-found
@@ -543,8 +556,8 @@
         (= step (db/q '[:find ?current .
                         :in $ ?agent
                         :where [?agent :my.plan/current-step ?current]]
-                      database agent-entity))
-        (conj [:db/retract agent-entity :my.plan/current-step step])))))
+                      database plan-entity))
+        (conj [:db/retract plan-entity :my.plan/current-step step])))))
 
 (defn add!
   "Add one step to this agent's plan, at the root or under a named parent step."
@@ -594,7 +607,7 @@
                 database step)
       (refuse! ::unusable-current-step "Select an open step."
                {:my.plan.item/id item-id}))
-    [[:db/add agent-entity :my.plan/current-step step]]))
+    [[:db/add (plan-eid database agent-entity) :my.plan/current-step step]]))
 
 (defn start!
   "Select one of your steps as current and return that step."
@@ -774,7 +787,10 @@
       (refuse! ::agent-not-found
                (str "There is no agent named " (pr-str agent-id) ".")
                {:seon.cluster.agent/id agent-id}))
-    (let [entries (input-entries (:my.plan/steps input))
+    (let [plan-entity (or (plan-eid database agent-entity) "new-agent-plan")
+          stored-objective (:my.plan/objective (agent-plan-pull database agent-id))
+          objective (:my.plan/objective input)
+          entries (input-entries (:my.plan/steps input))
           _ (refuse-duplicate-identities! entries)
           _ (refuse-duplicate-positions! entries)
           wanted-ids (into #{} (map :my.plan.item/id) entries)
@@ -859,7 +875,8 @@
                           (filter #(contains? existing (:my.plan.item/id %))
                                   entries))
             agent-map
-            (cond-> {:db/id agent-entity}
+            (cond-> {:db/id plan-entity}
+              objective (assoc :my.plan/objective objective)
               (seq (get children nil))
               (assoc :my.plan/steps (set (get children nil)))
               current (assoc :my.plan/current-step (step-ref current)))
@@ -868,8 +885,8 @@
                        (db/q '[:find ?current .
                                :in $ ?agent
                                :where [?agent :my.plan/current-step ?current]]
-                             database agent-entity))
-              [[:db/retract agent-entity :my.plan/current-step]])
+                             database plan-entity))
+              [[:db/retract plan-entity :my.plan/current-step]])
             added (count (remove #(contains? existing (:my.plan.item/id %))
                                  entries))
             stored (stored-comparables database existing)
@@ -881,9 +898,14 @@
                                             (entry-comparable
                                              entry needs-by-id)))))
                              entries))]
-        {::tx-data (vec (concat step-maps [agent-map] scalars
-                                (or clear-current []) retractions))
-         ::converged? (and (zero? added)
+        {::tx-data (vec (concat step-maps
+                                (when (or objective (seq entries))
+                                  [agent-map [:db/add agent-entity :seon.agent/plan plan-entity]])
+                                (when (and stored-objective (nil? objective))
+                                  [[:db/retract plan-entity :my.plan/objective]])
+                                scalars (or clear-current []) retractions))
+         ::converged? (and (= objective stored-objective)
+                           (zero? added)
                            (zero? changed)
                            (zero? (count retractions))
                            (empty? scalars)
@@ -894,7 +916,7 @@
                                       :where
                                       [?agent :my.plan/current-step ?step]
                                       [?step :my.plan.item/id ?id]]
-                                    database agent-entity)))
+                                    database plan-entity)))
          ::diff {:my.plan/added added
                  :my.plan/changed changed
                  :my.plan/retracted (count retractions)}}))))
@@ -1139,7 +1161,7 @@
 
 (defn render-plan-ai
   "Choose the plan's read forms from its current data."
-  {:malli/schema [:=> [:cat :my.plan/component-view] :seon.render/source]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [view]
   (if (seq (:my.plan/steps view))
     (str "; Your plan. (dir my.plan) is its API; (doc my.plan/complete!) explains one form.\n"
@@ -1148,9 +1170,9 @@
 
 (defn render-plan-html
   "Show the plan data through the shared value renderer."
-  {:malli/schema [:=> [:cat :my.plan/component-view] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [view]
   [:section {:class "seon-family-entry my-plan"}
    [:h3 "Plan"]
    (value/render-html (assoc view :seon.render/value
-                             (select-keys view [:my.plan/steps :my.plan/current-step])))])
+                             (select-keys view [:my.plan/objective :my.plan/steps :my.plan/current-step])))])
