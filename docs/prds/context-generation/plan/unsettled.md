@@ -1682,3 +1682,12 @@ commit; the run never closes), P4 MCP enrichment throws on a raw string,
 P5 nil into `result-caps`, P6 set-node generator duplicates. Fix lane
 running (`production-defects-p1-p6`) alongside the backlog lane. Also:
 the `--all` log lists 260 red names, not 314.
+
+`instrumented-gate-backlog` landed (`2fa2e1e17..05c5556d2`): --all reds 260
+→ 190, contract violations 266 → 108; one fixture choke point
+(`test-support/cluster-handle`); agent-facing refusals cross the SCI kernel
+(`test-support/agent-value`); six production defects fixed; filed
+`an-incremental-projection-build-refuses-the-key-it-just-added` (~15 reds,
+three priced options — OWNER DECISION). Remaining ~190: that class, ~35
+live-boot/operator suites, 5 repl-parity, singletons. `production-defects-
+p1-p6` still running.
