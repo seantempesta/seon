@@ -9,6 +9,18 @@ tags: [research, runtime, sci]
 
 ## Evaluation presentation continuation
 
+Committed as **adfdcc839**. Post-commit `bin/test --platform` passed **83
+tests, 490 assertions, zero failures/errors**. The subject gate's 55 tests
+comprise one new test (six assertions) and 54 inherited tests; nine assertions
+were added to inherited tests (seven web-history/system-turn assertions and two
+caller-owned render-cost assertions). After two additional evaluations appeared,
+the repeatable live probe still passed: **276,218 bytes, 52 entries**, all three
+unwanted history counts zero. A fresh Chrome read confirmed that result. Both
+gate processes exited and removed their isolated roots. This lane started no
+background cluster and made no provider requests. New uncommitted render-owner
+edits appeared after this commit; they are preserved and are not part of its
+path-isolated subject-gate claim.
+
 The evaluation query shape owns the REPL render pair. The debug history invokes
 that pair once per evaluation, retaining source, namespace, output and errors;
 read evidence remains queryable and is not printed in history. Renderer invocation
