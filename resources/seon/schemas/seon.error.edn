@@ -2,6 +2,7 @@
              [:and
               {:description
                "The agent this fault happened to; its reverse is that agent's fault list.",
+               :seon.render/ai seon.error/render-faults-ai,
                :seon.render/html seon.error/render-faults-html,
                :seon.db/index true}
               :seon.db/ref],

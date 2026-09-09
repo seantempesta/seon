@@ -626,33 +626,24 @@
       (is (not (str/blank? prose))))))
 
 (deftest the-default-renderers-accept-an-attribute-shaped-error
-  (let [projection (schema/build-projection (schema/registered-schemas))]
-    (with-redefs [schema/current-projection (constantly projection)]
-      (let [value {:my.fs/not-found "/tmp/missing.edn"
-                   :my.fs/path "/tmp/missing.edn"
-                   :seon.error/message "No file exists at that path."}
-            ai (error/render-ai value)
-            html (error/render-html value)]
-        (testing "the AI face separates failure subject from sibling evidence"
-          (is (str/includes? ai "No file exists at that path."))
-          (is (str/includes? ai "Failed: :my.fs/not-found=\"/tmp/missing.edn\""))
-          (is (str/includes? ai "Evidence: :my.fs/path=\"/tmp/missing.edn\""))
-          (is (str/includes? ai "Re-read the current facts")))
-        (testing "the HTML face has distinct marker and evidence rows"
-          (is (= :article (first html)))
-          (is (schema/valid-candidate-value? :seon.render/hiccup html))
-          (is (= "No file exists at that path." (get-in html [2 2])))
-          (is (= "seon-error-marker" (get-in html [3 1 :class])))
-          (is (= ":my.fs/not-found" (get-in html [3 2 2 1])))
-          (is (= "seon-error-evidence" (get-in html [4 1 :class])))
-          (is (str/includes? (pr-str html) ":my.fs/path")))))))
+  (test-support/with-database
+   (fn [_]
+     (let [value {:my.fs/not-found "/tmp/missing.edn"
+                  :my.fs/path "/tmp/missing.edn"
+                  :seon.error/message "No file exists at that path."}
+           ai (error/render-ai value)
+           html (error/render-html value)]
+       (is (= value (edn/read-string ai)) "AI retains the complete flat error")
+       (is (= :article (first html)))
+       (is (schema/valid-candidate-value? :seon.render/hiccup html))
+       (is (str/includes? (pr-str html) (:seon.error/message value)))))))
 
 (deftest the-default-html-face-links-committed-evidence
   (let [html (error/render-html
               {:seon.error/unclassified true
                :seon.error/id "err-42"
                :seon.error/message "Nothing recognized this error."})
-        href (get-in html [4 2 1 :href])]
+        href (get-in (last html) [2 1 :href])]
     (is (str/starts-with? href "/data?"))
     (is (str/includes? href "%3Aseon.error%2Fid"))))
 
@@ -802,41 +793,6 @@
                   [?message :seon.cluster.message/to ?agent]
                   [?agent :seon.cluster.agent/id ?to]]
                 db)))]))
-
-(deftest a-committed-fault-renders-its-evidence-without-renderer-failure-prose
-  (with-db
-    (fn [connection]
-      (db/transact!
-       connection
-       (error/commit-tx
-        @connection
-        (commit-request
-         (transform-error (ex-info "walk evidence" {}))
-         {:seon.cluster.agent/id "agent-3"})))
-      (let [db @connection
-            ctx (test-support/fork-cluster-ctx connection)
-            request {:seon.db/db db
-                     :seon.sci.eval/ctx ctx
-                     :seon.render.walk/lookup
-                     [:seon.cluster.agent/id "agent-3"]
-                     :seon.render/distance 1
-                     :seon.sci.admit/caps caps
-                     :seon.sci.eval/time-limit-ms 2000
-                     :seon.config/on-core-error :panic}
-            units (walk/neighborhood
-                   (assoc request :seon.render/output :seon.render/ai))
-            html-units (walk/neighborhood
-                        (assoc request :seon.render/output :seon.render/html))
-            text (clojure.string/join
-                  "\n" (keep :seon.render/output units))]
-        (is (str/includes? text "The loop :step failed"))
-        (is (str/includes? text "Inspect error"))
-        (is (not (str/includes? text "projection threw")))
-        (is (not (str/includes? text "violated its contract")))
-        (is (pos? (count html-units))
-            "the HTML assertion inspects a real walked neighborhood")
-        (is (every? (complement :seon.error/value) html-units)
-            "pulled error entities render cards instead of renderer failures")))))
 
 (deftest a-missing-recurrence-limit-refuses-at-the-declared-contract
   ;; the recursion fence extended to OUR bugs: `(> 1 nil)` thrown out of

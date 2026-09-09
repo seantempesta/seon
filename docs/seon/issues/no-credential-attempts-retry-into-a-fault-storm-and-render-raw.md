@@ -38,3 +38,23 @@ Three defects, one owner each:
 Proof: reseed on a fresh cluster → at most one fault for the missing
 credential, or none when the fixture's settings say no provider; the
 faults block shows no "items, depth" text.
+
+
+## 2026-09-09 faults-render verification
+
+AI static disposition is terminal (`3f26b8af3`, 52 tests / 236 assertions).
+The live isolated credential probe still produced two turns, one ordinal-zero
+attempt each, and four fault rows. The loop records the attempt error and
+terminal settlement independently, and later admits another turn. This issue
+remains open: fixing AI disposition alone does not establish one fault.
+The lane requested permission to extend its loop ownership beyond no-provider;
+see the dated faults-render landing note for the exact boundary and seed proof.
+
+
+The no-provider setting and fixture landed in `a4a0d457c`; canonical gate
+1 test / 13 assertions. Scratch reseed produced zero provider attempts,
+provider faults and token usage. The default served faults concern was then
+measured at 11,618 bytes, nine error cards, zero `items, depth` occurrences.
+The committed HTML/AI evidence and browser-tool limitation are recorded in
+[the landing note](../../prds/context-generation/research/faults-render-landing-2026-09-09.md).
+The remaining defect is duplicate loop settlement/automatic new turns.

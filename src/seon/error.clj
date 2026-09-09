@@ -1313,52 +1313,42 @@
                       :offset "0"}))
 
 (defn render-ai
-  "`:seon.render/ai` — one error value as honest steering prose.
-
-  Every class schema declares this producer unless it earns a specialist.
-  New class values render their required message, then every present evidence
-  attribute, then one conservative next step. A legacy committed fact retains
-  its existing notice prose until slice 2 converts the fact emission path.
-
-  `d/pull` wraps refs as `{:db/id N}` and adds `:db/id`, neither of
-  which the fact schema admits — `seon.render.value/transacted` is the
-  one place that unwrapping is written."
+  "Render the flat error value, preserving its recorded diagnostic data."
   {:malli/schema [:=> [:cat :seon.schema/value] [:string {:min 1}]]}
   [unit]
-  (let [value (rendered-error-value unit)]
-    (if (and (:seon.error/kind value) (:seon.error/id value))
-      (try
-        (ai-prose (notice {:seon.error/fact value}))
-        (catch Throwable _
-          ;; TOTAL, because this runs on the error path: a fact the
-          ;; notice builder cannot accept still says what it is, rather
-          ;; than faulting the render that was reporting a fault.
-          (str (:seon.error/kind value) ": " (:seon.error/message value))))
-      (default-ai-prose value))))
+  (let [value (rendered-error-value unit)
+        source (when (:seon.error/data-edn value) (fact-source value))]
+    (pr-str (merge (if (map? source) source
+                       (if (map? value) value {}))
+                   (select-keys value [:seon.error/kind :seon.error/message])))))
 
 (defn render-html
-  "`:seon.render/html` — one readable error card for debug surfaces."
+  "Render one fault's kind, message, time, function, turn, and evidence link."
   {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/hiccup]}
   [unit]
-  (let [value (rendered-error-value unit)
-        marker (error-marker value)
-        evidence (error-evidence value marker)]
+  (let [value (if (map? (:seon.render/value unit))
+                (:seon.render/value unit) unit)
+        turn (:seon.error/run value)
+        turn-ref (if (map? turn)
+                   (if-let [id (:seon.turn/id turn)]
+                     [:seon.turn/id id] (:db/id turn))
+                   turn)]
     (into
      [:article {:class "seon-family-entry seon-error-entry"}
+      [:p {:class "seon-kicker"} (str (:seon.error/kind value))]
       [:h3 {:class "seon-error-message"} (:seon.error/message value)]]
      (concat
-      (when marker
-        [[:dl {:class "seon-error-marker"}
-          [:div {:class "seon-error-marker-row"}
-           [:dt (str (first marker))]
-           [:dd (pr-str (second marker))]]]])
-      (when (seq evidence)
-        [(into [:dl {:class "seon-error-evidence"}]
-               (map (fn [[attribute evidence-value]]
-                      [:div {:class "seon-error-evidence-row"}
-                       [:dt (str attribute)]
-                       [:dd (pr-str evidence-value)]]))
-               evidence)])
+      (when-let [at (:seon.error/at value)]
+        (let [instant (str (if (instance? java.util.Date at)
+                             (.toInstant ^java.util.Date at) at))]
+          [[:time {:class "seon-error-at" :datetime instant} instant]]))
+      (when-let [function (:seon.instrument/fn value)]
+        [[:p {:class "seon-error-function"} "Function: " (str function)]])
+      (when turn-ref
+        [[:p {:class "seon-error-run"}
+          [:a {:href (render.route/path :seon.render.route/data {}
+                                        {:entity (pr-str turn-ref)})}
+           (str "Turn: " (pr-str turn-ref))]]])
       (when-let [id (:seon.error/id value)]
         [[:p {:class "seon-error-link"}
           [:a {:href (evidence-path id)} "Inspect durable evidence"]]])))))
@@ -1379,61 +1369,42 @@
             (when-not (:seon.error/kind row)
               (:seon.turn/id row)))))))
 
-(defn render-faults-html
-  "`:seon.render/html` — the faults recorded against one agent, newest first.
+(defn- fault-entities
+  [faults]
+  (->> (if (coll? faults) faults [])
+       (map (fn [fault]
+              (if (map? fault) fault
+                  {:seon.error/kind :seon.render/unavailable
+                   :seon.error/message (str "Fault entity was not acquired: " (pr-str fault))})))
+       (sort-by fault-order)))
 
-  The unit is the reverse of `:seon.error/agent`. Each fault reaches the one
-  error card renderer, so a fault listed here and the same fault inspected
-  alone state the same facts; the run it happened in is a link, not an id.
-  There is deliberately no `:seon.render/ai` companion: an agent's own faults
-  are not in its context by default, and a renderer that answers with nothing
-  would be worse than declaring nothing."
-  {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
-                  :seon.render/hiccup]}
-  [faults database]
-  (let [faults (if (and (sequential? faults) (every? map? faults))
-                 (sort-by fault-order faults)
-                 [])]
-    (if (seq faults)
-      (into [:section {:class "seon-family-entry seon-error-faults"}
-             [:h2 (str "Faults (" (count faults) ")")]]
-            (map (fn [fault]
-                   (let [run-id (run-identity database
-                                              (:seon.error/run fault))]
-                     (cond-> [:article {:class "seon-error-fault"}
-                              [:p {:class "seon-kicker"}
-                               (str (:seon.error/kind fault))]
-                              ;; ONLY THE FACTS THE CARD STATES. A pulled fault
-                              ;; carries its printed data blob, digest, basis,
-                              ;; and process; handing the whole entity to the
-                              ;; card dumped every one of them as evidence.
-                              (render-html
-                               (select-keys fault
-                                            [:seon.error/id
-                                             :seon.error/kind
-                                             :seon.error/message]))]
-                       (:seon.error/at fault)
-                       (conj (let [instant (.toString
-                                            (.toInstant
-                                             ^java.util.Date
-                                             (:seon.error/at fault)))]
-                               [:time {:class "seon-error-at"
-                                       :datetime instant}
-                                instant]))
-                       run-id
-                       (conj [:p {:class "seon-error-run"}
-                              [:a {:href (render.route/path
-                                          :seon.render.route/data
-                                          {}
-                                          {:entity
-                                           (pr-str [:seon.turn/id
-                                                    run-id])})}
-                               (str "in run " run-id)]])))))
-            faults)
-      [:section {:class "seon-family-entry seon-error-faults"}
-       [:h2 "Faults (0)"]
-       [:p {:class "seon-error-faults-empty"}
-        "No fault is recorded against this agent."]])))
+(defn render-faults-ai
+  "Render each fault through the error entity's AI pair."
+  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
+  [faults]
+  (str/join "\n" (map render-ai (fault-entities faults))))
+
+(defn render-faults-html
+  "Render each fault through the error entity's HTML pair, newest first."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.schema/value] :seon.render/hiccup]
+                  [:=> [:cat :seon.schema/value :seon.db/database-value]
+                   :seon.render/hiccup]]}
+  ([faults]
+  (let [entities (fault-entities faults)]
+    (into [:section {:class "seon-family-entry seon-error-faults"}
+           [:h2 (str "Faults (" (count entities) ")")]]
+          (if (seq entities)
+            (map render-html entities)
+            [[:p {:class "seon-error-faults-empty"}
+              "No fault is recorded against this agent."]]))))
+  ([faults database]
+   (render-faults-html
+    (mapv (fn [fault]
+            (if (map? fault) fault
+                (db/pull database '[* {:seon.error/run [:db/id :seon.turn/id]}]
+                         fault)))
+          faults))))
 
 (defn time-limit-prose
   "`:seon.render/ai` — evaluation time-limit evidence without guessing cause."

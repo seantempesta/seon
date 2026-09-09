@@ -95,3 +95,9 @@ second open for the same agent through `db/transact!`; the result retains both
 `seon.db-test` gate passed 38 tests and 320 assertions with zero failures or
 errors. A controlled live web/source-submission run remains the final proof
 that the transient caller receives this value in the original process.
+
+
+2026-09-09 scratch faults-render seed re-observed a classified
+`agent-already-running` refusal and `supervision-not-committed` fault while
+provider calls were disabled. This does not prove the wrapper defect recurred;
+it records the remaining supervision boundary without attributing its cause.

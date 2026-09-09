@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, walk, history, class/total-boundary]
 ---
@@ -24,3 +24,8 @@ threw instead of rendering a typed value (§2.4). Fix at the walk: accept
 the §15 shape (shown text, out, error) and delete the print-node
 expectation; regression on the canonical fixture with one stored
 evaluation; the render never throws.
+
+
+Resolved by `a90ed5cce`: the canonical stored-evaluation regression passes
+1 test / 7 assertions, including unparseable shown text and error-only settlement.
+Ordering accepts settlement facts without reconstructing a print node.

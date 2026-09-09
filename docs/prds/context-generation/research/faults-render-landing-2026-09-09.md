@@ -143,3 +143,35 @@ without that authorization.
 Final slice 3 applies the previously isolated hunk to the now-unprotected
 loop source, with the landed `seon.turn` attribute names. Concurrent edits in
 `src/seon/turn.clj` and its test are preserved and excluded from lane gates.
+
+
+## Final fault concern integration
+
+The default HTTP response after development reload was 200 / 55,390 bytes.
+`faults_render_extract_2026_09_09.py` extracts the actual concern and refuses
+an absent subject. The committed default block is 11,618 UTF-8 bytes,
+contains nine error cards, and contains ZERO `items, depth` strings. Its AI
+column contains the flat credential errors; its HTML column uses the entity
+pair. No lifecycle operation was performed on default.
+
+The initial focused fault gate passed 1 test / 15 assertions. The broader
+error namespace check exposed an obsolete walk test: its actual output was
+only the identity/inbox opening prefix, so it never acquired its fault
+subject. That test is replaced by `pulled-fault-concern-uses-the-entity-pair`,
+which asserts a real stored entity id and invokes the debug page's real SCI
+preview path. Flat attribute-shaped errors retain every input attribute in
+AI output; old prose assertions now assert exact flat data instead.
+
+`test/seon/turn_test.clj` is concurrently edited and remains untouched. Its
+fault-card test at the dated line 1792 assumes the retired nested HTML card
+structure and the text `in run run-1`; those expectations need updating to
+the new entity pair when its owner lands. This is a protected test boundary,
+not a claim that the complete turn namespace is green.
+
+Final shared commits so far: slice 1 `a90ed5cce`; slice 2 `3f26b8af3`;
+slice 3 `a4a0d457c`. Final slice 3 isolated gate: 1 test / 13 assertions.
+Adoptions after slices 2 and 3 completed reload and instrumentation but
+reported source changed during adoption. The final adoption must converge;
+intermediate reload evidence alone does not establish a matching commit id.
+
+Final slice 4 gate: 34 tests / 154 assertions, zero failures or errors.

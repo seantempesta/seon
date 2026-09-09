@@ -1,0 +1,27 @@
+{
+  "seon.probe/form": "(let [c (seon.operator/connection \"faults-render\") d @c] {:seon.probe/juniper-attempts (seon.db/q '[:find ?id :where [?j :seon.cluster.agent/id \"juniper\"] [?t :seon.cluster.run/agent ?j] [?a :seon.ai.attempt/run ?t] [?a :seon.ai.attempt/id ?id]] d) :seon.probe/juniper-token-usage (seon.db/q '[:find ?u :where [?j :seon.cluster.agent/id \"juniper\"] [?t :seon.cluster.run/agent ?j] [?a :seon.ai.attempt/run ?t] [?a :seon.ai.attempt/usage-edn ?u]] d) :seon.probe/static-faults (seon.db/q '[:find ?id ?turn :where [?j :seon.cluster.agent/id \"terminal-refusal-probe\"] [?e :seon.error/agent ?j] [?e :seon.error/id ?id] [?e :seon.error/run ?turn]] d)})",
+  "seon.probe/observed-at": "2026-09-09T08:25Z",
+  "seon.probe/result": {
+    "seon.probe/juniper-attempts": [],
+    "seon.probe/juniper-token-usage": [],
+    "seon.probe/static-faults": [
+      [
+        "f01b3474-2b81-4916-a75c-ce3b0757e474",
+        36495
+      ],
+      [
+        "65e3705f-acee-46d9-950d-e419bb3d0d27",
+        36471
+      ],
+      [
+        "1546cf9d-48e7-4595-b292-d47fd0aa2ede",
+        36495
+      ],
+      [
+        "77d53bb7-0a1a-4c5d-8a90-4e4daa525ebc",
+        36471
+      ]
+    ]
+  },
+  "seon.probe/note": "Successful follow-up MCP read with seon.ai.attempt/run; earlier guessed attributes returned explicit invalid-read diagnostics, never interpreted as zero."
+}
