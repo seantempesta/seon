@@ -406,3 +406,49 @@ fault evidence and exact ownership boundary are filed in
 [the feed issue](../../../seon/issues/feed-writer-casts-an-absent-package-number.md).
 This corrects the provisional bootstrap attribution above; the message itself
 names the interrupted bootstrap turn, which is not the throwing function.
+
+### Follow-up default adoption and final observation
+
+Commit **`03d3bfb1b`** was adopted with `bin/seon init --dev default --changed`
+using the three owned source/schema/test paths. It converged at source
+`6aa0cf6a-730f-5ba3-960e-f00e731bc9f6`, digest
+`7769bc5c1a72d7ce3bca8b85a91ffbe65db82cd47c89cdc111066a30979754b3`.
+No default stop, refork, or restart occurred.
+
+The first browser observation falsified adoption convergence: the JVM renderer
+returned new source, but the page retained the old inbox source and HTML.
+SCI-mode MCP and the instrumented `seon.render/shared-cache` accessor timed out
+at 10 seconds. Simple JVM probes remained 2–3 ms. Reading the cache as existing
+data and clearing its disposable contents returned in 2 ms:
+
+```clojure
+(let [c (:seon.cluster.loop/cluster
+         (get @seon.operator.runtime/running-instances "default"))
+      state (:seon.sci.eval/projection-state c)
+      cache (:seon.render/cache @state)
+      before (vec (keys @cache))]
+  (reset! cache {})
+  {:cleared-render-cache-keys before})
+```
+
+The next default browser capture showed **eight message read forms**, **4,900
+UTF-8 AI-column bytes** including its label, and **two reply expressions**.
+I opened and inspected the
+[default message screenshot](components-messages-default-2026-09-08-messages.png).
+[Full-page screenshot](components-messages-default-2026-09-08.png),
+[exact evaluated AI/HTML bytes](components-messages-default-2026-09-08.json), and
+[generated source bytes](components-messages-default-2026-09-08.ai.clj)
+are retained. The two additional messages are feed faults observed during the
+probes, not fabricated renderer fixtures. The first message's evaluation time
+in the final default capture is `:ms 71`.
+
+The confirmed stale-render observation and MCP timeouts are recorded in
+[the adoption probe issue](../../../seon/issues/default-component-probe-times-out-after-adoption.md).
+The missing invalidation edge remains page-feed's protected integration work.
+Default still shows undeclared reverse blocks, including stored defs, because
+the proposed web hunk is deliberately unapplied. Their deletion belongs to
+turn-cut, as requested. This landing does not claim that filtering has shipped.
+
+Cleanup: the creating checkout's operator stopped scratch PID 32693, generation
+`ab935d18-9b3b-4043-af90-eb97959ca4c2`, and reported its store lock free. The
+process was absent before removing the owned worktree and scratch root.

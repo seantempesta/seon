@@ -52,3 +52,24 @@ at `6aa09fd1-1bbd-52ab-a9ae-a4a290e2cad6`. Juniper reseeding returned in
 and captured the debug page successfully. The component checkpoint's
 cache-schema failure is not the final observed state. This does not claim
 that every earlier timeout reported by other owners has been resolved.
+
+## Message-render follow-up, 2026-09-08
+
+After default adoption of components commit `03d3bfb1b` reported convergence
+(source `6aa0cf6a-730f-5ba3-960e-f00e731bc9f6`), the JVM call to
+`seon.cluster.message/render-inbox-ai` returned the new per-message source,
+but the browser retained the old single inbox form and old HTML without reply
+expressions. A SCI-mode MCP call of `(seon.cluster.message/render-inbox-ai [])`
+timed out at 10,000 ms. JVM-mode MCP still answered. This does not establish
+whether acquisition or retained rendering is the cause; default was not
+restarted or reforked. See the components landing note for the cache probe.
+
+A raw-data probe found `:seon.render/cache` on the cluster's existing projection
+state. Resetting that disposable atom to `{}` returned in 2 ms; no database
+facts or process lifecycle were changed. The next default screenshot showed
+eight `my.message/read` results and both root-addressed reply expressions.
+Thus retained rendering hid the adopted code. The precise missing invalidation
+edge is not established. Calls through `seon.render/shared-cache` timed out
+both with and without projection binding, while reading and resetting the
+same cache atom directly answered immediately. These accessor/SCI timeouts
+remain a distinct unresolved observation, not proof the cache reset hung.
