@@ -277,6 +277,8 @@
             namespace-name
             (assoc :seon.fn/ns [:seon.ns/name namespace-name])
             doc (assoc :seon.fn/doc doc)
+            (:seon.fn/doc-order metadata)
+            (assoc :seon.fn/doc-order (:seon.fn/doc-order metadata))
             schema (assoc :seon.fn/spec (pr-str schema))
             (contains? #{:io :compute} workload)
             (assoc :seon.fn/workload workload)))))))

@@ -234,3 +234,57 @@ Final platform after that correction: 83 tests / 490 assertions / zero
 failures or errors, one worker. **RESET NEEDED remains `3f07beb88`**;
 this slice adds compatible schema facts and does not authorize a default
 lifecycle operation.
+
+Slice 4 commit: `e4372b061`. The post-commit default adoption again refused
+because its loaded overlay projection names the retired
+`my.agent/render-settings-ai`. Default HTTP remained 71,301 bytes.
+
+## Slice 5 — plan writes and their documentation
+
+`add!` derives an omitted id with `seon.id/digest` over agent and title.
+The writer appends after the maximum sibling position, rather than using
+the sibling count (which reused positions in sparse plans). `update!`
+changes the supplied title, description, or completion criterion.
+`complete!` defaults its completion instant; `current!` selects an open
+item. All four return the changed item with its actual derived state.
+Every `my.plan` call remains one optional request map.
+
+The generic program fact `:seon.fn/doc-order` is admitted at both static
+indexing and runtime declaration. `dir` orders by that fact, then symbol;
+the plan writes declare the first four positions. There is no function-name
+roster inside documentation rendering.
+
+The real SCI regression starts with a sibling at position 8, adds an item
+at 9 without supplying an id, changes its criterion, selects it, completes
+it, and verifies the returned state after each write. It also verifies
+all four names first in `dir`. Focused gate: 46 tests / 356 assertions /
+zero failures or errors. Platform: 83 / 490 / zero failures or errors.
+
+Live scratch `add!` returned:
+
+```clojure
+{:my.plan.item/id "aa1cc4264367"
+ :my.plan.item/title "Verify live plan defaults"
+ :my.plan/done-when "The returned item has its derived identity and state."
+ :my.plan/needs []
+ :my.plan/state :ready}
+```
+
+The MCP cluster SCI context has no calling agent, so this operational probe
+supplied `:seon.agent/id "juniper"`; the scoped SCI regression omits it.
+The live call completed in 3,293 ms. This scratch-only item is removed when
+the scenario is reseeded. The first adoption reloaded the new indexer after
+publishing, leaving its earlier derived rows without `:seon.fn/doc-order`;
+that distinction was observed directly, not inferred from a converged flag.
+
+The follow-up publication converged at
+`6aa1b51c-8d7e-51fa-b990-af7431def128`. Live program rows then contained
+`add! 0`, `update! 1`, `complete! 2`, `current! 3`, and the SCI query
+returned exactly `["my.plan/add!" "my.plan/update!" "my.plan/complete!"
+"my.plan/current!"]` in 80 ms. Default still needs the orchestrator's
+single refork for `3f07beb88`; no additional destructive operation was taken.
+
+The final path gate after the documentation wording update passed the real
+SCI plan API regression: 1 test / 20 assertions / zero failures or errors.
+The broader 46-test gate and 83-test platform gate above cover the same
+implementation; the subsequent changes clarified docstrings only.

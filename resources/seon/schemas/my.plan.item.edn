@@ -80,7 +80,8 @@
                [:map
                 {:description
                  "One step to add to an agent's plan, at the root or nested under a named parent step."}
-                [:my.plan.item/id :my.plan.item/id]
+                [:my.plan.item/id {:optional true} :my.plan.item/id]
+                [:my.plan/done-when {:optional true} :my.plan/done-when]
                 [:my.plan.item/title :my.plan.item/title]
                 [:my.plan.item/description
                  {:optional true}

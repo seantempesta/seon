@@ -385,6 +385,7 @@
                :seon.fn/arglists (str "(" (str/join " " (::analyzer/arglist-strs entry)) ")")
                :seon.fn/private? (boolean (::analyzer/private entry))}
         (::analyzer/macro entry) (assoc :seon.fn/macro? true)
+        (:seon.fn/doc-order metadata) (assoc :seon.fn/doc-order (:seon.fn/doc-order metadata))
         (::analyzer/doc entry) (assoc :seon.fn/doc (::analyzer/doc entry))
         (:malli/schema metadata)
         (assoc :seon.fn/spec

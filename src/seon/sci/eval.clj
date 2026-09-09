@@ -1102,7 +1102,7 @@
            intern-map))))
 
 (def ^:private program-documentation-selector
-  [:seon.fn/sym :seon.fn/doc :seon.fn/arglists :seon.fn/spec
+  [:seon.fn/sym :seon.fn/doc :seon.fn/doc-order :seon.fn/arglists :seon.fn/spec
    {:seon.fn/arities
     [:seon.fn.arity/order :seon.fn.arity/arity
      {:seon.fn.arity/input-refs [:seon.schema/key :seon.schema/form]}
@@ -1160,7 +1160,8 @@
   [_ctx documentation]
   (let [by-namespace
         (group-by (comp symbol namespace symbol :seon.fn/sym)
-                  (sort-by :seon.fn/sym (vals documentation)))]
+                  (sort-by (juxt #(get % :seon.fn/doc-order Long/MAX_VALUE) :seon.fn/sym)
+                           (vals documentation)))]
     (sci/new-macro-var
      'dir
      (fn [_form _env namespace-name]

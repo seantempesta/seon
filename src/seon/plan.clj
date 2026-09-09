@@ -15,6 +15,7 @@
   parent, depth, and state are queries over current facts, never stored."
   (:require [clojure.string :as str]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.print :as print]
             [seon.schema.edn :as schema.edn]))
 
@@ -441,12 +442,13 @@
                {member reference}))
     step))
 
-(defn- sibling-count
+(defn- next-position
   [database owner attribute]
-  (long (count (db/q '[:find [?child ...]
-                 :in $ ?owner ?attribute
-                 :where [?owner ?attribute ?child]]
-               database owner attribute))))
+  (inc (long (or (db/q '[:find (max ?position) .
+                         :in $ ?owner ?attribute
+                         :where [?owner ?attribute ?child]
+                                [?child :my.plan.item/position ?position]]
+                       database owner attribute) -1))))
 
 (defn- add-step-call
   [database request]
@@ -487,7 +489,7 @@
                  true (assoc :db/id tempid
                              :my.plan.item/position
                              (if (or parent existing-plan)
-                               (sibling-count database owner attribute)
+                               (next-position database owner attribute)
                                0))
                  (seq needs) (assoc :my.plan.item/needs needs))]
       (cond-> [step [:db/add owner attribute tempid]]
@@ -544,7 +546,12 @@
          :seon.db/connection :seon.agent/id]
     [:or :my.plan/step-summary :seon.error/value]]}
   [step connection agent-id]
-  (let [request (assoc step :seon.agent/id agent-id)
+  (let [step (cond-> step
+               (not (:my.plan.item/id step))
+               (assoc :my.plan.item/id (id/digest 12 [agent-id (:my.plan.item/title step)]))
+               (:my.plan/done-when step)
+               (assoc :my.plan.item/expected-result (:my.plan/done-when step)))
+        request (assoc (dissoc step :my.plan/done-when) :seon.agent/id agent-id)
         result (transact-plan! connection agent-id
                                [[:db.fn/call #'add-step-call request]])]
     (if (error-value? result)
@@ -593,6 +600,29 @@
     (if (error-value? result)
       result
       (changed-item (:db-after result) agent-id item-id))))
+
+(defn- update-step-call
+  [database agent-id changes]
+  (let [item-id (:my.plan.item/id changes)
+        step (step-eid database item-id)]
+    (when-not (and step (contains? (owned-ids database agent-id) item-id))
+      (refuse! :my.plan/not-owned "Update a step owned by this agent."
+               {:my.plan.item/id item-id :seon.agent/id agent-id}))
+    (let [attributes (cond-> (select-keys changes [:my.plan.item/title
+                                                  :my.plan.item/description])
+                       (:my.plan/done-when changes)
+                       (assoc :my.plan.item/expected-result (:my.plan/done-when changes)))]
+      (if (seq attributes) [(assoc attributes :db/id step)] []))))
+
+(defn update!
+  "Update an owned item's title, description, or done-when; return the changed item."
+  {:malli/schema [:=> [:cat :my.plan/update-fields :seon.db/connection :seon.agent/id]
+                  [:or :my.plan/step-summary :seon.error/value]]}
+  [changes connection agent-id]
+  (let [result (transact-plan! connection agent-id
+                               [[:db.fn/call #'update-step-call agent-id changes]])]
+    (if (error-value? result) result
+        (changed-item (:db-after result) agent-id (:my.plan.item/id changes)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Whole-tree reconciliation

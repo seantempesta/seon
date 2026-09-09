@@ -60,7 +60,7 @@
      :seon.test/subject
      :seon.fn/arities
      :seon.fn/ast :seon.fn/calls :seon.fn/keywords :seon.fn/workload
-     :seon.fn/external-sink :seon.fn/projection-boundary
+     :seon.fn/doc-order :seon.fn/external-sink :seon.fn/projection-boundary
      :seon.effect/capability
      :seon.schema.admission/source]}
    :seon.schema/key
