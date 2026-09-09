@@ -2,7 +2,10 @@
                      [:map
                       {:seon.db/attributes true,
                        :seon.render/units
-                       [:seon.cluster.message/_to
+                       [:seon.agent/plan
+                        :seon.cluster.message/_to
+                        :seon.agent/settings
+                        :seon.agent/namespace
                         :seon.turn/_agent
                         :seon.error/_agent],
                        :seon.render/ai

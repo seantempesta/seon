@@ -856,10 +856,28 @@
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or [:maybe :string] :seon.error/value]]}
   [unit]
-  (let [data (render-data unit)]
-    (if (error-value? data)
-      data
-      (ai-text data))))
+  (let [database (:seon.db/db unit)
+        namespace-name (:seon.ns/name unit)
+        agent-id (when database
+                   (db/q '[:find ?id . :in $ ?name
+                           :where [?namespace :seon.ns/name ?name]
+                                  [?agent :seon.agent/namespace ?namespace]
+                                  [?agent :seon.agent/id ?id]] database namespace-name))]
+    (if agent-id
+      (let [attributes (sort (db/q '[:find [?key ...] :in $ ?name
+                                    :where [?namespace :seon.ns/name ?name]
+                                           [?schema :seon.schema/ns ?namespace]
+                                           [?schema :seon.schema/key ?key]]
+                                  database namespace-name))]
+        (when (seq attributes)
+          (str ";; What data is in my namespace?\n"
+               (pr-str (list 'seon.db/q
+                             (list 'quote '[:find ?attribute (count ?entity)
+                                            :in $ [?attribute ...]
+                                            :where [?entity ?attribute _]])
+                             (vec attributes))))))
+      (let [data (render-data unit)]
+        (if (error-value? data) data (ai-text data))))))
 
 (defn render-html
   "Render the namespace's same definitions as stable HTML entries."

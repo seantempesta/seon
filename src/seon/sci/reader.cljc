@@ -400,7 +400,8 @@
         (assoc function :seon.fn/source source))
       (when-let [test (test-declaration form namespace-name context)]
         (assoc test :seon.test/source source))
-      (schema-declaration form context)
+      (when-let [declaration (schema-declaration form context)]
+        (assoc declaration :seon.schema/ns [:seon.ns/name namespace-name]))
       (schema-unregister form context)
       (namespace-unmap form context)))))
 

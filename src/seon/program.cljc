@@ -792,9 +792,10 @@
                           (schema/canonical-schema-rows
                            (assoc (schema/registered-schemas)
                                   schema-key definition)))]
-            (assoc row
-                   :seon.schema.admission/source
-                   (:seon.schema.admission/source candidate)))
+            (cond-> (assoc row :seon.schema.admission/source
+                               (:seon.schema.admission/source candidate))
+              (:seon.schema/ns candidate)
+              (assoc :seon.schema/ns (:seon.schema/ns candidate))))
 
           :else candidate)
         row (canonical-row candidate)]

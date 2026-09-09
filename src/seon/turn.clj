@@ -2512,7 +2512,11 @@
     0))
 
 (defn episode-runs
-  "The agent's turns taken since its latest wake from outside itself.
+  "The agent's ordinary turns taken since its latest outside wake.
+
+  System turns have no provider attempt and freeze their plan in the identity
+  transaction; they do not consume this bound. Ordinary virtual turns open
+  first and freeze a reply later. Provider attempts always consume the bound.
 
   DERIVED FROM `:t` AND NOTHING ELSE. Datahike stamps every datom with
   its transaction, so a turn's own identity datom carries the basis it
@@ -2535,7 +2539,10 @@
               [?agent :seon.agent/id ?agent-id]
               [?run :seon.turn/agent ?agent]
               [?run :seon.turn/id _ ?tx]
-              [(>= ?tx ?since)]]
+              [(>= ?tx ?since)]
+              (or-join [?run ?tx]
+                [?run :seon.turn/attempts _]
+                (not [?run :seon.turn/plan-digest _ ?tx]))]
             db agent-id (outside-wake-t db agent-id))
       0))
 
@@ -2547,6 +2554,13 @@
               :where [?config :seon.config/cluster _]
                      [?config :seon.config.run/max-episode-runs ?value]]
             database)))
+
+(defn turns-left
+  "The remaining turns under the same session bound that admits a turn."
+  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id] :my.agent/turns-left]}
+  [database agent-id]
+  (long (max 0 (- (or (max-episode-runs database agent-id) 0)
+                  (episode-runs database agent-id)))))
 
 (defn- opening-deferred?
   "True when `agent-id` may open no turn at all: the turn count has

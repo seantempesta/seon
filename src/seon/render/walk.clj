@@ -43,6 +43,7 @@
             [seon.render :as render]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.form :as schema.form]
             [seon.sci.admit :as admit]
             [seon.sci.kernel :as sci.kernel]))
 
@@ -644,6 +645,43 @@
       :seon.error/message
       "elided connections at the requested distance cap"}}))
 
+(defn- declared-acquisition
+  "Order the root's declared concerns, grouping reverse refs at their renderer."
+  [projection _database acquisition output]
+  (let [root-lookup (first (:seon.render.walk/order acquisition))
+        root (get-in acquisition [:seon.render.walk/members root-lookup])
+        entity (:seon.render/value root)
+        concerns (->> (schema/matching-shapes-in projection (render/transacted entity))
+                      (mapcat #(-> (get-in projection [:seon.schema.projection/forms (:seon.schema/key %)])
+                                   schema.form/schema-properties :seon.render/units))
+                      distinct vec)]
+    (if (empty? concerns)
+      acquisition
+      (reduce
+       (fn [result display]
+         (let [reverse? (str/starts-with? (name display) "_")
+               attribute (if reverse? (keyword (namespace display) (subs (name display) 1)) display)
+               producer (when reverse?
+                          (let [properties (schema.form/attr-form-properties
+                                            (get-in projection [:seon.schema.projection/forms attribute]))]
+                            (when (:seon.render/form properties) (get properties output))))
+               connected (filter #(= attribute (:seon.render.walk/attribute %))
+                                 (map (:seon.render.walk/members acquisition)
+                                      (rest (:seon.render.walk/order acquisition))))]
+           (if producer
+             (let [lookup [root-lookup display]
+                   member {:seon.render.walk/lookup lookup
+                           :seon.render.walk/path [display]
+                           :seon.render.walk/found-depth 1
+                           :seon.render.walk/attribute attribute
+                           :seon.render/value {attribute root-lookup}}]
+               (-> result
+                   (assoc-in [:seon.render.walk/members lookup] member)
+                   (update :seon.render.walk/order conj lookup)))
+             (update result :seon.render.walk/order into
+                     (map :seon.render.walk/lookup connected)))))
+       (assoc acquisition :seon.render.walk/order [root-lookup]) concerns))))
+
 (defn neighborhood
   "Render the root acquisition's stable members without further discovery."
   {:malli/schema [:=> [:cat :seon.render.walk/request] :seon.render.walk/units]}
@@ -662,6 +700,7 @@
        (let [distance (long (get request :seon.render/distance 1))
              acquisition (or (:seon.render.walk/root-acquisition request)
                              (root-acquisition request))
+             acquisition (declared-acquisition projection database acquisition output)
              members (:seon.render.walk/members acquisition)
              order (:seon.render.walk/order acquisition)
              root-namespace-eid (acquired-root-namespace-eid acquisition)

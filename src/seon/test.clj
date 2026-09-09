@@ -28,3 +28,14 @@
             (if (:seon.error/kind committed)
               committed
               (first committed))))))))
+
+(defn owned-symbols
+  "Read the test symbols declared in the calling agent's assigned namespace."
+  {:malli/schema [:=> [:cat :my.plan/request] [:vector :seon.test/sym]]}
+  [{database :seon.db/db agent-id :seon.agent/id}]
+  (vec (sort (db/q '[:find [?symbol ...] :in $ ?agent-id
+                     :where [?agent :seon.agent/id ?agent-id]
+                            [?agent :seon.agent/namespace ?namespace]
+                            [?test :seon.test/ns ?namespace]
+                            [?test :seon.test/sym ?symbol]]
+                   database agent-id))))

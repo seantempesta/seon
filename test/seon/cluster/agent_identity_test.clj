@@ -110,19 +110,21 @@
                                     {:seon.agent/id agent-id})
                                    "\n)"))
               value (:seon.sci.admit/value result)]
-          (is (= agent-id (:seon.agent/id value)))
-          (is (= namespace-name (get-in value [:seon.agent/namespace :seon.ns/name])))
-          (is (= agent-id (get-in value [:seon.agent/namespace :seon.ns/steward
-                                        :seon.agent/id])))
+          (is (= agent-id (:my.agent/id value)))
+          (is (= namespace-name (:my.agent/namespace value)))
+          (is (= agent-id (:my.agent/steward value)))
           (is (empty? (:seon.cluster.eval/output result))))
         (is (= {:seon.config.eval/time-limit-ms 1234}
                (:seon.sci.admit/value
                 (evaluate "(my.agent/settings! {:seon.config.eval/time-limit-ms 1234})"))))
-        (is (= {:seon.config.eval/time-limit-ms 1234}
+        (is (= {:seon.config.eval/time-limit-ms 1234 :my.agent/turns-left 0}
                (:seon.sci.admit/value (evaluate "(my.agent/settings)"))))
         (let [dials (:seon.sci.admit/value (evaluate (str "(do\n" (seon.agent/render-settings-ai {}) "\n)")))]
-          (is (set? dials))
-          (is (get dials :seon.config.run/max-episode-runs)))
+          (is (map? dials))
+          (is (= 0 (:my.agent/turns-left dials))))
+        (is (= [] (:seon.sci.admit/value (evaluate "(my.test/run)"))))
+        (is (= {:my.run/disposition :wait :my.run/note "Session complete."}
+               (:seon.sci.admit/value (evaluate "(my.agent/done)"))))
         (is (= expected (:seon.sci.admit/value (evaluate "(seon.cluster.agent/whoami)"))))
         (is (= "Agent     supplied\nCluster   identity-cluster"
                (:seon.sci.admit/value

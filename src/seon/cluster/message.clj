@@ -532,7 +532,7 @@
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/source]]}
   [unit]
   (when-let [id (get unit ::id)]
-    (str "; Read this message; reply with (doc my.message/send).\n"
+    (str ";; I should read this message and decide how to respond.\n"
          (pr-str (list 'my.message/read {:my.message/id id})))))
 
 (defn render-html
@@ -618,7 +618,7 @@
     (str/join "\n\n"
               (keep render-ai
                     (sort-by (juxt ::at ::id) recipient-or-inbox)))
-    "; Messages are read from the recipient's inbox.\n(my.message/inbox)"))
+    ";; I should check my inbox for anything I need to respond to.\n(my.message/inbox)"))
 
 (defn- message-order
   [message]

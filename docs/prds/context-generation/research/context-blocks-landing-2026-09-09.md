@@ -159,3 +159,78 @@ The cache rebuild diagnosis and bounded retries are recorded in
 `docs/seon/issues/source-publication-cache-contention-hides-dependency-analysis-failure.md`.
 The normal publication classpath rebuild completed, followed by successful
 scratch adoption. No other lane's process was operated.
+
+Slice 3 commit: `e506861ac`. Its default adoption refused at
+`:seon.config/agent-overlay`: the old running projection still named
+`my.agent/render-settings-ai`, whose program row has moved to
+`seon.agent/render-settings-ai`. HTTP remained available (71,301 bytes).
+This is a loaded publication/projection boundary, not a failing slice test.
+The pending **RESET NEEDED** from `3f07beb88` remains; default was not
+stopped, reforked, or restarted.
+
+## Slice 4 — forms that express my next action
+
+The identity block now emits `(my.agent/identity)`; its derived scalar
+values use `:my.agent/*`, preserving the stored namespace ref's meaning.
+The plan emits `(my.plan/items)` and returns authored order, state,
+`:my.plan/done-when`, and stable dependency refs. The completion criterion
+projects the existing `:my.plan.item/expected-result` fact; there is no
+second stored criterion. Changed-item returns now derive state from the
+whole owned plan, so selecting a current item cannot return `:open`.
+Completed items are no longer clipped by a read outside the AI renderer.
+
+Settings emit only `(my.agent/settings)`, adding derived
+`:my.agent/turns-left` from the turn owner's existing session bound.
+`(my.agent/done)` returns the existing terminal wait disposition without
+sending a message. `(my.test/run)` resolves the database's declared test
+symbols in the caller's actual SCI context and uses `seon.test/run`, the
+same runner and result writer as the platform.
+
+The walk reads concern order from the matching schema's authored
+`:seon.render/units`. An explicitly declared reverse form supplies an
+inbox block even when no message entity exists. This fixes the regression
+where an empty inbox vanished from system turn 0. Comments state my intent
+before each form. Schema declarations now retain their actual namespace
+ref as `:seon.schema/ns` at the reader/declaration seam; the namespace
+renderer derives one count query from those rows, with no keyword-name
+inference and no form when there are no declared keys.
+
+The live turn-count probe exposed a necessary correction: system turns
+were consuming the session bound, so a settings read could invalidate
+itself each time a system turn stored it. The turn owner now excludes
+turns whose plan was frozen in their identity transaction—the existing
+writer fact distinguishing system source from an ordinary reply. Ordinary
+open turns still consume the bound. The regression requires a second
+system-turn call to append nothing and retain unchanged read evidence.
+
+The first final slice-4 gate passed 50 tests / 372 assertions; platform
+passed 83 / 490. The turn-count correction is being gated again below.
+Scratch source `6aa1b1c1-6514-570e-b457-d8e0b501a445` converged in place.
+Its HTTP page was 69,513 bytes, with zero `ExceptionInfo` occurrences and
+zero `(seon.ai/agent-setting-attributes)` forms. System turn `145e968a2d41`
+stored exactly help, identity, items, inbox, settings, in that order.
+
+Final focused gate after the turn-count correction: 62 tests / 447
+assertions / zero failures or errors, one worker. Successful scratch
+adoption: `6aa1b2be-5ba4-508e-8cb1-d9283c29dc18`. The live repeat probe
+returned exactly:
+
+```clojure
+{:first {:seon.turn/id "7691ba19caa6"}
+ :second {}
+ :statuses [:unchanged :unchanged :unchanged :unchanged :unchanged]
+ :settings {:seon.config.eval/time-limit-ms 2500
+            :seon.config.ai/no-provider true
+            :seon.config.run/max-episode-runs 4
+            :my.agent/turns-left 2}}
+```
+
+This probe completed in 1,154 ms. The two already-consumed ordinary turns
+remain fixture residue until slice 6; system refreshes do not spend more.
+The final gate and platform run serially with one worker because of the
+recorded parallel published-base acquisition failure.
+
+Final platform after that correction: 83 tests / 490 assertions / zero
+failures or errors, one worker. **RESET NEEDED remains `3f07beb88`**;
+this slice adds compatible schema facts and does not authorize a default
+lifecycle operation.

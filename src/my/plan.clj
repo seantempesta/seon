@@ -15,10 +15,10 @@
   (plan/item request))
 
 (defn items
-  "Read items from my plan."
-  {:malli/schema [:=> [:cat :my.plan/items-request] [:or :my.plan/render-steps :seon.error/value]]}
+  "Read every item in my plan in authored order, with state and completion criteria."
+  {:malli/schema [:=> [:cat :my.plan/request] [:or [:vector :my.plan/step-summary] :seon.error/value]]}
   [request]
-  (plan/items request))
+  (plan/steps (:seon.db/db request) (:seon.agent/id request)))
 
 (defn current
   "Read my plan’s current."

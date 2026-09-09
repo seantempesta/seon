@@ -1,15 +1,41 @@
 (ns seon.agent
   "Read the calling agent's own record components."
-  (:require [seon.ai :as ai]
+  (:refer-clojure :exclude [identity])
+  (:require [seon.turn :as turn]
+            [seon.ai :as ai]
             [seon.db :as db]
             [seon.config :as config]))
+
+(defn identity
+  "Read stable identity values without projecting a stored ref as a scalar."
+  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
+                  [:or :my.agent/identity :seon.error/value]]}
+  [database agent-id]
+  (let [row (db/pull database
+                     [:seon.agent/id {:seon.agent/namespace
+                                      [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]
+                     [:seon.agent/id agent-id])]
+    (cond
+      (:seon.error/kind row) row
+      (not (:seon.agent/id row))
+      {:seon.agent/no-such-agent agent-id
+       :seon.error/kind :seon.agent/no-such-agent
+       :seon.error/message (str "No agent has id " (pr-str agent-id) ".")}
+      :else
+      (cond-> {:my.agent/id (:seon.agent/id row)}
+        (get-in row [:seon.agent/namespace :seon.ns/name])
+        (assoc :my.agent/namespace (get-in row [:seon.agent/namespace :seon.ns/name]))
+        (get-in row [:seon.agent/namespace :seon.ns/steward :seon.agent/id])
+        (assoc :my.agent/steward (get-in row [:seon.agent/namespace :seon.ns/steward :seon.agent/id]))))))
 
 (defn settings
   "Read your setting overrides; omitted settings inherit the cluster defaults."
   {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
-                  [:or :seon.config/agent-overlay :seon.error/value]]}
+                  [:or :my.agent/settings :seon.error/value]]}
   [database agent-id]
-  (ai/agent-overlay database agent-id))
+  (let [overrides (ai/agent-overlay database agent-id)]
+    (if (:seon.error/kind overrides) overrides
+        (assoc overrides :my.agent/turns-left (turn/turns-left database agent-id)))))
 
 (defn- update-settings-call
   [database agent-id overrides]
@@ -44,14 +70,13 @@
                                         [:seon.agent/id agent-id]}})]
     (if (:seon.error/kind result)
       result
-      (settings (:db-after result) agent-id))))
+      (ai/agent-overlay (:db-after result) agent-id))))
 
 (defn render-settings-ai
-  "Read overrides and the schema-declared dials, with an example change form."
+  "Read my overrides and the remaining turns in this session."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [_settings]
-  (str "; Your overrides inherit omitted defaults; change one with (my.agent/settings! {:seon.config.eval/time-limit-ms 5000}).\n"
-       "(my.agent/settings)\n(seon.ai/agent-setting-attributes)"))
+  ";; I should check my overrides and how many turns I have left.\n(my.agent/settings)")
 
 (defn render-settings-html
   "Show every declared agent dial, its effective value, and where it comes from."

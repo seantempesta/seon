@@ -23,6 +23,10 @@
                          (agent/creation-tx {:seon.agent/id "help"
                                              :seon.ns/name 'my.agents.help
                                              :seon.cluster/name "help"})))
+     (db/transact! connection
+                   [{:seon.agent/id "help"
+                     :seon.agent/plan {:my.plan/objective "Verify the opening"}
+                     :seon.agent/settings {:seon.config.ai/no-provider true}}])
      (let [ctx (support/fork-cluster-ctx connection "help")
            handle (support/cluster-handle
                    {:seon.db/connection connection
@@ -44,6 +48,9 @@
            (is (nil? (:seon.error/kind opening)) (pr-str opening))
            (is (string? (:seon.turn/id opening)))
            (is (= "(help)" (:seon.cluster.eval/source saved)))
+           (is (= ["(help)" "(my.agent/identity)" "(my.plan/items)"
+                   "(my.message/inbox)" "(my.agent/settings)"]
+                  (mapv :seon.cluster.eval/source (evaluation/of-agent @connection "help"))))
            (is (vector? lines) (pr-str lines))
            (is (= 13 (count lines)))
            (is (every? #(and (string? %) (not (str/includes? % "\n"))) lines))
@@ -54,6 +61,10 @@
            (is (str/includes? (last lines) "my.plan"))
            (is (not (seq (:seon.cluster.eval/output saved))))
            (is (seq evidence))
+           (is (= 0 (turn/episode-runs @connection "help")))
+           (let [again (turn/system-turn request)]
+             (is (nil? (:seon.turn/id again)) (pr-str again))
+             (is (every? #(= :unchanged (:seon.turn/status %)) (:seon.turn/forms again))))
            (is (true? (db/read-evidence-current? @connection evidence)))
            (is (str/includes? shown ":ms"))
            (is (str/includes? shown "result/e"))

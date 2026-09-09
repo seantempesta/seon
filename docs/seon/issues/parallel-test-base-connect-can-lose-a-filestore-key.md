@@ -45,3 +45,14 @@ This invocation used one worker but overlapped a separate one-worker platform
 gate. Its isolated confirmation passed. The removing actor remains unknown;
 this evidence does not attribute the loss to either runner or to GC.
 The lane repeats the final gate and platform serially after the source fix.
+
+## Recurrence in context blocks — 2026-09-09
+
+The slice-4 three-worker gate at HEAD `e506861ac` plus its named paths
+raised `NoSuchFileException` in
+`my.plan-test/nested-steps-derive-parent-depth-and-order` for published base
+`9d0eb8b029e072fd7ef0661082b437bf0b825e51ad9365be58dce4cba2a0c151`, key
+`88fe77b0-bc40-4949-8d5b-f4a9f458a006`. The runner's isolated confirmation
+passed and reported no worker-global drift. Log:
+`tmp/context-blocks/gate-slice4.log`. The actor remains unestablished;
+no other lane's process or files were operated.

@@ -39,6 +39,7 @@
                {:seon.db/identity true, :seon.search/index :symbol}],
               :form :string,
               :shape :seon.db/ref,
+              :ns [:and {:description "The namespace where this schema was declared."} :seon.db/ref],
               :references
               [:set
                {:description
@@ -60,6 +61,7 @@
                 :seon.schema.admission/source]
                [:seon.schema/form :seon.schema/form]
                [:seon.schema/generatable? :seon.schema/generatable?]
+               [:seon.schema/ns {:optional true} :seon.schema/ns]
                [:seon.schema/shape {:optional true} :seon.schema/shape]
                [:seon.schema/references
                 {:optional true}

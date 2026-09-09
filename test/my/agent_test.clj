@@ -21,7 +21,8 @@
                              [:seon.agent/settings :db/id])
            matches (schema/matching-shapes-in (schema/projection-from-database database) settings)]
        (is (= {:seon.config.eval/time-limit-ms 1234
-               :seon.config.agent/turn-completion-backstop-ms 5678}
+               :seon.config.agent/turn-completion-backstop-ms 5678
+               :my.agent/turns-left 0}
               settings))
        (is (some #(= 'seon.agent/render-settings-ai (:seon.render/ai %)) matches))
        (is (not-any? #(= 'seon.agent/render-settings-ai (:seon.render/ai %))
@@ -53,4 +54,4 @@
               (agent/settings! {:seon.config.eval/time-limit-ms 1234}
                                connection "settings-owner")))
        (is (= first-id (component)))
-       (is (= {} (agent/settings @connection "other-owner")))))))
+       (is (= {:my.agent/turns-left 0} (agent/settings @connection "other-owner")))))))

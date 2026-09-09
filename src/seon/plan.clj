@@ -14,7 +14,6 @@
   Completion is the presence of `:my.plan.item/completed-at`; ready, blocked,
   parent, depth, and state are queries over current facts, never stored."
   (:require [clojure.string :as str]
-            [seon.config :as config]
             [seon.db :as db]
             [seon.print :as print]
             [seon.schema.edn :as schema.edn]))
@@ -238,43 +237,13 @@
                   (sort-by sibling-order nodes)))]
     (walk pulled nil 0)))
 
-(defn- completion-limit
-  [database _agent-id]
-  (let [cluster-name
-        (db/q '[:find ?cluster-name .
-                :where [?cluster :seon.cluster/name ?cluster-name]]
-              database)
-        effective (when cluster-name (config/effective database cluster-name))]
-    (long
-     (:seon.config.render.agent/max-children
-      (if (and (map? effective) (not (error-value? effective)))
-        effective
-        (config/defaults))))))
-
 (defn- completion-view
-  [database agent-id steps]
-  (let [completed
-        (sort-by (fn [step]
-                   [(- (.getTime ^java.util.Date
-                                 (:my.plan.item/completed-at step)))
+  [_database _agent-id steps]
+  {:my.plan/recent-completions
+   (vec (sort-by (fn [step]
+                   [(- (.getTime ^java.util.Date (:my.plan.item/completed-at step)))
                     (:my.plan.item/id step)])
-                 (filterv :my.plan.item/completed-at steps))
-        total (count completed)
-        limit (completion-limit database agent-id)
-        recent (vec (take limit completed))
-        omitted (- total (count recent))]
-    (cond-> {:my.plan/recent-completions recent}
-      (pos? omitted)
-      (assoc
-       :my.plan/older-completions
-       {:seon.print/face :seon.print/elided
-        :seon.print/omitted omitted
-        :seon.print/elision-unit :children
-        :seon.render.data/total total
-        :seon.render.data/path [:my.plan/recent-completions]
-        :seon.render.data/next-offset (count recent)
-        :seon.render.profile/id :seon.render.profile/agent
-        :seon.print/requery-id [:seon.agent/id agent-id]}))))
+                 (filter :my.plan.item/completed-at steps)))})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Current reads
@@ -376,12 +345,12 @@
   [step]
   (if (error-value? step)
     step
-    (cond-> (select-keys step [:my.plan.item/id :my.plan.item/title
-                             :my.plan.item/expected-result
-                             :my.plan.item/completed-at
-                             :my.plan.item/about])
-    (seq (:my.plan/needs step))
-      (assoc :my.plan/needs (:my.plan/needs step)))))
+    (cond-> (assoc (select-keys step [:my.plan.item/id :my.plan.item/title
+                                     :my.plan.item/completed-at :my.plan.item/about
+                                     :my.plan/state])
+                   :my.plan/needs (vec (:my.plan/needs step)))
+      (:my.plan.item/expected-result step)
+      (assoc :my.plan/done-when (:my.plan.item/expected-result step)))))
 
 (defn current
   "Read your current step; an empty map means none is selected."
@@ -561,6 +530,13 @@
                       database plan-entity))
         (conj [:db/retract plan-entity :my.plan/current-step step])))))
 
+(defn- changed-item
+  [database agent-id item-id]
+  (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
+    (if (error-value? view) view
+        (step-summary (first (filter #(= item-id (:my.plan.item/id %))
+                                    (:my.plan/steps view)))))))
+
 (defn add!
   "Add one step to this agent's plan, at the root or under a named parent step."
   {:malli/schema
@@ -573,8 +549,7 @@
                                [[:db.fn/call #'add-step-call request]])]
     (if (error-value? result)
       result
-      (step-summary (item {:seon.db/db (:db-after result)
-                           :my.plan.item/id (:my.plan.item/id step)})))))
+      (changed-item (:db-after result) agent-id (:my.plan.item/id step)))))
 
 (defn complete!
   "Complete one owned step and clear it when it is this agent's current step."
@@ -591,8 +566,7 @@
                            :seon.agent/id agent-id}]])]
     (if (error-value? result)
       result
-      (step-summary (item {:seon.db/db (:db-after result)
-                           :my.plan.item/id item-id})))))
+      (changed-item (:db-after result) agent-id item-id))))
 
 (defn- start-step-call
   [database agent-id item-id]
@@ -618,8 +592,7 @@
                                [[:db.fn/call #'start-step-call agent-id item-id]])]
     (if (error-value? result)
       result
-      (step-summary (item {:seon.db/db (:db-after result)
-                           :my.plan.item/id item-id})))))
+      (changed-item (:db-after result) agent-id item-id))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Whole-tree reconciliation
@@ -1160,13 +1133,10 @@
          older (conj (print/render-elision-ai older)))))))
 
 (defn render-plan-ai
-  "Choose the plan's read forms from its current data."
+  "Read my complete plan as the instructions for what to do next."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
-  [view]
-  (if (seq (:my.plan/steps view))
-    (str "; Your plan. (dir my.plan) is its API; (doc my.plan/complete!) explains one form.\n"
-         "(my.plan/current)\n(my.plan/ready)\n(my.plan/blocked)")
-    "; You have no plan yet.\n(dir my.plan)\n(doc my.plan/add!)"))
+  [_view]
+  ";; I should follow my plan and verify the current step's completion criterion.\n(my.plan/items)")
 
 (defn render-plan-html
   "Show the objective, current focus, progress, and every step with its state."

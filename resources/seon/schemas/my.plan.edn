@@ -1,4 +1,5 @@
 #:my.plan{:objective :string
+          :done-when :string
           :entity
           [:map {:seon.db/attributes true
                  :seon.render/ai seon.plan/render-plan-ai
@@ -13,7 +14,9 @@
            [:my.plan.item/expected-result {:optional true} :my.plan.item/expected-result]
            [:my.plan.item/completed-at {:optional true} :my.plan.item/completed-at]
            [:my.plan.item/about {:optional true} :my.plan.item/about]
-           [:my.plan/needs {:optional true} :my.plan/needs]]
+           [:my.plan/needs {:optional true} :my.plan/needs]
+           [:my.plan/state {:optional true} :my.plan/state]
+           [:my.plan/done-when {:optional true} :my.plan/done-when]]
           :step-summary
           [:map
            [:my.plan.item/id :my.plan.item/id]
@@ -21,7 +24,9 @@
            [:my.plan.item/expected-result {:optional true} :my.plan.item/expected-result]
            [:my.plan.item/completed-at {:optional true} :my.plan.item/completed-at]
            [:my.plan.item/about {:optional true} :my.plan.item/about]
-           [:my.plan/needs {:optional true} :my.plan/needs]]
+           [:my.plan/needs {:optional true} :my.plan/needs]
+           [:my.plan/state {:optional true} :my.plan/state]
+           [:my.plan/done-when {:optional true} :my.plan/done-when]]
           :steps
           [:set
            {:seon.db/component true,
@@ -193,7 +198,7 @@
           :recent-completions
           [:vector
            {:description
-            "The bounded most-recent steps carrying completed-at."}
+            "All completed steps, most recent first; presentation bounds belong to rendering."}
            :my.plan/render-step],
           :older-completions :seon.print/elision,
           :ready-items

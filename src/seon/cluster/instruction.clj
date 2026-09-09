@@ -45,7 +45,8 @@
               :where
               [?namespace :seon.ns/name ?namespace-name]
               [?function :seon.fn/ns ?namespace]
-              [?function :seon.fn/spec _]
+              (or [?function :seon.fn/spec _]
+                  [?function :seon.fn/macro? true])
               [(get-else $ ?function :seon.fn/private? false) ?private]]
             db)
        (keep (fn [[namespace-name private?]]
