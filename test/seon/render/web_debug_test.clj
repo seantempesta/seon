@@ -7,8 +7,56 @@
             [seon.config :as config]
             [seon.error :as error]
             [seon.render :as render]
+            [seon.render.walk :as walk]
             [seon.schema :as schema]
             [seon.test-support :as support]))
+
+(deftest saved-history-preserves-shown-text-with-numeric-lookups
+  (support/with-database
+   (fn [connection]
+     (let [written
+           (db/transact!
+            connection
+            [{:seon.ns/name 'my.agents.history-probe}
+             {:seon.cluster.agent/id "history-probe"
+              :seon.cluster.agent/namespace [:seon.ns/name 'my.agents.history-probe]
+              :seon.agent/plan {:my.plan/objective "An anonymous component"}}
+             {:seon.turn/id "history-probe-turn"
+              :seon.turn/agent [:seon.cluster.agent/id "history-probe"]
+              :seon.turn/opened-at (java.util.Date. 0)}
+             {:seon.cluster.eval/id "history-probe-evaluation"
+              :seon.cluster.eval/run [:seon.turn/id "history-probe-turn"]
+              :seon.cluster.eval/ordinal 0
+              :seon.cluster.eval/ns [:seon.ns/name 'my.agents.history-probe]
+              :seon.cluster.eval/source "(my.plan/plan {})"
+              :seon.eval/value "The component's shown text."}])
+           _ (is (nil? (:seon.error/kind written)))
+           database @connection
+           agent-row (db/pull database '[:db/id {:seon.agent/plan [:db/id]}]
+                          [:seon.cluster.agent/id "history-probe"])
+           agent-eid (:db/id agent-row)
+           component-eid (get-in agent-row [:seon.agent/plan :db/id])
+           request {:seon.db/db database
+                    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                    :seon.render.walk/lookup agent-eid
+                    :seon.sci.admit/caps (config/result-caps (config/defaults))
+                    :seon.sci.eval/time-limit-ms 5000
+                    :seon.config/on-core-error :record}
+           history (walk/history request)]
+       (is (instance? Long agent-eid))
+       (is (instance? Long component-eid))
+       (is (= 1 (count history)))
+       (is (= "my.agents.history-probe=> (my.plan/plan {})\n#:seon.repl{:value The component's shown text., :result result/ehistory-probe-evaluation}"
+              (:seon.render.history/bytes (first history))))
+       (is (= history
+              (walk/history (assoc request :seon.render.walk/lookup
+                                   [:seon.cluster.agent/id "history-probe"]))))
+       (let [changed (db/transact! connection
+                                  [[:db/add component-eid :my.plan/objective
+                                    "The current component changed"]])]
+         (is (nil? (:seon.error/kind changed)))
+         (is (= history (walk/history (assoc request :seon.db/db @connection)))
+             "History reuses the observation without executing or reprinting the component."))))))
 
 (deftest blocks-use-the-values-schema-documentation
   (support/with-database

@@ -73,3 +73,59 @@ There was no foreign load/gate boundary and no worktree was needed.
 Slice 1 owns only `src/seon/cluster.clj`,
 `test/seon/cluster/web_binding_test.clj`, the web probe, this landing note,
 and the ephemeral-port issue's move into `archive/`. The index is untouched.
+
+Slice 1 commit: **`c6db5d67c`**.
+
+## Slice 2: numeric history lookup at HEAD
+
+Read the history issue end to end at its actual `archive/` path. It was
+already resolved/archived. Archaeology: `985a830b5` guarded the numeric
+lookup before detecting message identity; `baa1dde54` recorded its
+regression. The old issue incorrectly called that namespace detection;
+this note corrects it from the exact historical diff. `ff9507c1b` stores shown text;
+`0b7c8043c` / `a90ed5cce` accept those settlements in ordered episodes;
+`595b0bf7c` replaces the old `history-entries` path with saved evaluations
+and removes that helper/test. The current owner is `walk/history`, querying
+`seon.eval/of-agent` and calling the evaluation schema's render pair.
+
+The new recurring canonical regression is
+`seon.render.web-debug-test/saved-history-preserves-shown-text-with-numeric-lookups`.
+It positively requires Long ids for both agent and anonymous component, one
+rendered evaluation, exact shown bytes, equivalent numeric/ref lookup, and
+unchanged history after changing the component. It exercises HEAD production
+source; no renderer patch is needed. Exact expected text:
+
+```text
+my.agents.history-probe=> (my.plan/plan {})
+#:seon.repl{:value The component's shown text., :result result/ehistory-probe-evaluation}
+```
+
+This intentionally non-EDN shown text cannot be decoded to reconstruct the
+component. Fast namespace proof: **9 tests / 41 assertions / zero failures
+or errors**. The gate also includes `seon.render.episode-test` to verify the
+shown-text/ordered-episode boundary cited by the assignment.
+
+Read-only live command:
+`(load-file "/Users/sean/src/seon/docs/prds/context-generation/research/platform_tail_history_probe_2026_09_09.clj")`.
+The fresh scratch JVM returned **222 ms**, agent **35252**, plan **35259**,
+**10 entries / 5,022 UTF-8 bytes**, equal numeric/ref histories, no-provider
+true, and **0 provider attempts**. This uses the canonical Juniper fixture
+and the current saved-history owner. It does not claim the deleted helper
+was executable or that the obsolete render-proc context channel survived.
+
+Required gate:
+`SEON_TEST_WORKERS=3 bin/test --paths test/seon/render/web_debug_test.clj -- seon.render.web-debug-test seon.render.episode-test`
+passed **10 tests / 50 assertions / zero failures/errors**, **26 s** in the
+coordinator/test phase. Matching explicit platform gate passed **83 / 490 /
+zero failures/errors**, **45 s**. Logs: `tmp/platform-tail-history-gate.log`,
+`tmp/platform-tail-history-platform.log`. Successful roots `run.CPuPJR`
+and `run.hk0CyL` removed themselves. No foreign boundary or worktree.
+
+Root-scoped `down` reaped scratch PID **49469** and reported the flock free.
+Process-table inspection found no Java/bb holder before removing
+`tmp/platform-tail-root`; recursive removal did not follow symlinks. Default
+remains PID **40078**, HTTP **7994**, PREPL **63396**. No RESET NEEDED is
+introduced by this test/documentation slice.
+
+Slice 2 owns the web-debug regression, the history probe, the archived
+history issue, and this note. The index remains untouched.
