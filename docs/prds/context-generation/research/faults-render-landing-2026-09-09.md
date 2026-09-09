@@ -175,3 +175,34 @@ reported source changed during adoption. The final adoption must converge;
 intermediate reload evidence alone does not establish a matching commit id.
 
 Final slice 4 gate: 34 tests / 154 assertions, zero failures or errors.
+
+
+## Final landing and cleanup
+
+Slice 4 is `5c9c0cc4e`. Final platform gate passes: 83 tests / 490 assertions,
+zero failures/errors, with `SEON_TEST_WORKERS=3`. No full suite was run.
+
+Final default adoption CONVERGED at source commit
+`6aa118c6-7266-56af-8546-a495cd83ba0f`, digest
+`eb8c0666871121927d633d6e51ad41fbe9f600b9741d8dca8f9d810c09d28b3a`.
+A live database query of `:seon.source/commit-id` returned that same UUID.
+A pull by `:seon.schema/key :seon.config.ai/no-provider` returned the optional,
+per-agent `[:= ... true]` declaration. An earlier probe guessed
+`:seon.schema/id` and returned a typed invalid-read; that result is not schema
+proof. The final installed-key pull is the evidence.
+
+Final HTTP: 200 / 55,391 bytes; extracted concern remains exactly 11,618
+bytes, nine cards, zero generic-printer markers. Browser screenshot remains
+unavailable. The historical RESET NEEDED warnings above were resolved by the
+owner's separate refork and this successful in-place adoption; this lane
+never restarted, stopped or reforked default.
+
+The isolated JVM exited through its operator; its store lock became free.
+The isolated root and worktree were removed, along with this lane's retained
+failed renderer gate after the replacement regression passed. No live runner
+held that root. Other worktrees and all foreign source/test edits remain.
+
+The one-fault requirement remains OPEN: the credential probe measured four
+faults across two turns. Only AI attempt-policy retries are fixed. The user
+scope-extension question has received no answer, so the loop changes remain
+limited to the explicitly authorized no-provider branch.
