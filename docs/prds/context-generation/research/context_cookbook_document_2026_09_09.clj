@@ -7,6 +7,7 @@
       path (str root "context-cookbook-2026-09-09.md")
       prior (slurp path)
       result (edn/read-string (slurp (str root "context_cookbook_rechecked_2026_09_09.edn")))
+      blocks (edn/read-string (slurp (str root "context_cookbook_blocks_2026_09_09.edn")))
       records (concat (:reads result) (:writes result) (:proposed-reads result))
       _ (assert (every? :unchanged? records))
       prefix (subs prior 0 (or (str/index-of prior "\n## Agent-source recheck\n")
@@ -52,6 +53,14 @@
              "and then ran through `datahike.api/with`. Writes below are the agent's source, never committed to default. "
              "The new report timestamps come from those actual speculative transactions. "
              "[Complete recheck evidence](context_cookbook_rechecked_2026_09_09.edn).\n"
+             "\n## Tuned block outputs\n\nThese later executed forms are exactly the bytes emitted by the current block pairs. "
+             "Raw pulls keep database refusals visible. Their shown text uses the production value renderer.\n"
+             (str/join
+              (for [{:keys [label source source-bytes shown shown-bytes evidence]} (:records blocks)]
+                (str "\n### " label "\n\n```clojure\n" source "\n```\n\n"
+                     source-bytes " source bytes; **" shown-bytes " shown UTF-8 bytes**; evidence "
+                     (pr-str evidence) ".\n\n```clojure\n" shown "\n```\n")))
+             "\n## Earlier equivalent-source probes\n"
              (str/join (map #(section :read %) (:reads result)))
              "\n## Write examples\n\nThe proposed identity, transaction-time, message, and runtime attributes exist only in the speculative value. "
              "These are dependency-semantic probes, not a claim that the data lane's schema is installed.\n"

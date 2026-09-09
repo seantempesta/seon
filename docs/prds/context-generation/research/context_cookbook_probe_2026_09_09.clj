@@ -8,6 +8,9 @@
             [seon.eval :as evaluation]
             [seon.operator :as operator]
             [seon.operator.runtime :as runtime]
+            [seon.agent :as agent]
+            [seon.cluster.message :as message]
+            [seon.plan :as plan]
             [seon.render :as render]
             [seon.repl :as repl]
             [seon.render.value :as value]
@@ -409,3 +412,38 @@
          (spit "docs/prds/context-generation/research/context_cookbook_directory_2026_09_09.edn"
                (pr-str result))
          result)))))
+
+(defn probe-rendered-blocks!
+  "Execute the exact generated block source against default without committing."
+  []
+  (let [connection (operator/connection "default") database @connection
+        projection (schema/projection-from-database database)
+        configuration (schema/call-with-projection projection #(config/effective database "default"))
+        unit {:seon.db/db database :seon.agent/id "juniper"
+              :seon.render.call/id [:context-cookbook/raw-block]
+              :seon.sci.admit/caps (config/result-caps configuration)
+              :seon.render/profile (render/agent-render-profile configuration)}]
+    (schema/call-with-projection
+     projection
+     (fn []
+       (let [records
+             (mapv
+              (fn [[label source]]
+                (let [sink (atom [])
+                      raw (binding [db/*conn* connection db/*read-database* database
+                                    db/*read-evidence-sink* sink]
+                            (eval (read-string source)))
+                      shown (value/render-ai (assoc unit :seon.render/value raw))]
+                  {:label label :source source :source-bytes (byte-count source)
+                   :output (pr-str raw) :bytes (byte-count (pr-str raw))
+                   :shown shown :shown-bytes (byte-count shown)
+                   :evidence (mapv #(if (seq (:seon.db/read-index-patterns %))
+                                     :index-patterns :attribute-level) @sink)}))
+              [["Plan" (plan/render-plan-ai unit)]
+               ["Settings" (agent/render-settings-ai unit)]
+               ["Messages" (message/render-inbox-ai [:seon.agent/id "juniper"])]])
+             result {:basis (db/basis-t database) :records records
+                     :default-unchanged? (= (db/basis-t database) (db/basis-t @connection))}]
+         (spit "docs/prds/context-generation/research/context_cookbook_blocks_2026_09_09.edn"
+               (pr-str result))
+         (mapv #(select-keys % [:label :source-bytes :bytes :shown-bytes :evidence]) records))))))

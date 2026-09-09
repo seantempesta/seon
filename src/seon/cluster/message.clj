@@ -55,6 +55,7 @@
   transactions upsert one answer at Datahike's serial commit point."
   (:refer-clojure :exclude [read send])
   (:require [seon.db :as db]
+            [seon.repl :as repl]
             [seon.id :as id]
             [clojure.string :as str]
             [seon.render.route :as route]
@@ -618,7 +619,14 @@
     (str/join "\n\n"
               (keep render-ai
                     (sort-by (juxt ::at ::id) recipient-or-inbox)))
-    ";; I should check my inbox for anything I need to respond to.\n(my.message/inbox)"))
+    (str ";; I should follow incoming messages with a reverse-ref pull on myself.\n"
+         (repl/source-text
+          (list 'seon.db/pull
+                      (list 'quote
+                            '[{:seon.cluster.message/_to
+                               [:seon.cluster.message/id :seon.cluster.message/content
+                                {:seon.cluster.message/from [:seon.agent/id]}]}])
+                      recipient-or-inbox)))))
 
 (defn- message-order
   [message]

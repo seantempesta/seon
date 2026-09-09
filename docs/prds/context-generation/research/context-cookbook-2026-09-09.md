@@ -40,6 +40,31 @@ content, not observed browser paint.
 
 ## Read choice and evidence
 
+The current-schema plan, settings, and inbox pairs now emit raw pulls. A pull's
+flat refusal remains visible: selecting a missing key with a default had hidden
+one during the empty-component probe. The existing declared traversal emits the
+plan and settings pair even before their component exists and carries the root
+identity into that unit. Empty reads retain evidence and are reevaluated after
+the first component or incoming message is added.
+
+Live default JVM, explicitly supplied connection and immutable basis: plan
+**524 source / 1545 shown bytes**, settings **324 / 139**, messages **268 / 1250**.
+The plan selector includes recursive child steps, so its evidence is
+attribute-level; settings and reverse messages record finite index patterns.
+These are hot-reloaded function probes, not a claim that default's old opening
+was rewritten. [Exact emitted comments, forms, raw outputs, shown text, and
+counts](context_cookbook_blocks_2026_09_09.edn).
+
+The broad render fixture boundary was reproduced at HEAD: **21 tests / 116
+assertions, 17 failures / 5 errors**, with a **1,143,148,974-byte** diagnostic log.
+[The stale fixture and unbounded assertion output are recorded](../../../seon/issues/render-fixtures-dump-context-on-stale-assertions.md).
+The focused fast suite passed **23 tests / 266 assertions**.
+The final isolated gate, including first-data refresh after empty reads, passed
+**23 tests / 276 assertions**; platform passed **83 / 490**. One earlier isolated
+attempt failed opening the published fixture at
+`target/test-published-bases/33b3a16f11248447fe67d96f2944e6c4790cdce2156ce1833eb826bf38d86834/base/data/store/08461e7b-8413-44ad-b643-a3b6d585966e`
+(`NoSuchFileException`, Konserve `migrate_old_files`); the serial repeat passed.
+
 Pull describes one known entity or a known set, including nested and reverse refs. Use q for value filters, joins, and aggregates; combine q with inner pull when both filtering and shaping. The live reverse message pull recorded index patterns and returned the incoming messages in one form. Pattern-only aggregate q also recorded index patterns. Inner pull and not recorded attribute-level evidence: correct but coarse. Explicit finite selectors recorded index patterns; wildcard/recursive selectors cannot make that claim. Source: src/seon/db.clj:335–423. Index-pattern presence means constraints at each pattern, not a fully joined result dependency. An invalid read is a refusal, never an empty healthy block.
 
 ## Dependency ledger
@@ -191,6 +216,97 @@ The [capture script](context_cookbook_probe_2026_09_09.clj) and
 ## Agent-source recheck
 
 All source forms below use reader quotes, explicit keyword keys, and supplied database custody. The production `seon.repl/source-text` uses Clojure's `pprint/code-dispatch`; the probe calls that same function. Each of the 23 bare reads was executed beside its explicit-database form at the same immutable basis; all returned equal values. Each of the nine printed transactions parsed to identical transaction data and then ran through `datahike.api/with`. Writes below are the agent's source, never committed to default. The new report timestamps come from those actual speculative transactions. [Complete recheck evidence](context_cookbook_rechecked_2026_09_09.edn).
+
+## Tuned block outputs
+
+These later executed forms are exactly the bytes emitted by the current block pairs. Raw pulls keep database refusals visible. Their shown text uses the production value renderer.
+
+### Plan
+
+```clojure
+;; I should pull the plan component; its set is shown in position order, and get with a default could hide a refusal.
+(seon.db/pull
+  '[{:seon.agent/plan
+     [:my.plan/objective
+      {:my.plan/current-step [:my.plan.item/id]}
+      {:my.plan/steps
+       [:my.plan.item/id
+        :my.plan.item/title
+        :my.plan.item/expected-result
+        :my.plan.item/position
+        :my.plan.item/completed-at
+        {:my.plan.item/needs [:my.plan.item/id]}
+        {:my.plan.item/steps ...}]}]}]
+  [:seon.agent/id "juniper"])
+```
+
+524 source bytes; **1545 shown UTF-8 bytes**; evidence [:attribute-level].
+
+```clojure
+#:seon.agent{:plan #:my.plan{:current-step #:my.plan.item{:id "juniper/query"},
+    :objective "Which customer has the largest total? Add an order of 40 for them and tell me the new total.",
+    :steps [#:my.plan.item{:expected-result "I have read the order ids, customers, and amounts.",
+        :id "juniper/query", :position 0, :title "Query the orders"} #:my.plan.item{:expected-result
+        "A grouped sum query identifies the customer and their total.", :id
+        "juniper/aggregate", :needs #{#:my.plan.item{:id "juniper/query"}},
+        :position 1, :title "Find the customer with the largest total"} #:my.plan.item{:expected-result
+        "The transaction result identifies the new order.", :id "juniper/transact",
+        :needs #{#:my.plan.item{:id "juniper/aggregate"}}, :position 2, :title
+        "Add an order of 40 for that customer"} #:my.plan.item{:expected-result
+        "A fresh grouped sum query includes the new order.", :id "juniper/requery",
+        :needs #{#:my.plan.item{:id "juniper/transact"}}, :position 3, :title
+        "Read the customer's new total"} #:my.plan.item{:expected-result
+        "The sent message contains the customer and verified new total.",
+        :id "juniper/reply", :needs #{#:my.plan.item{:id "juniper/requery"}},
+        :position 4, :title "Tell root the customer and new total"} #:my.plan.item{:expected-result
+        "All preceding plan items are complete.", :id "juniper/done", :needs
+        #{#:my.plan.item{:id "juniper/reply"}}, :position 5, :title "Finish the session"}]}}
+```
+
+### Settings
+
+```clojure
+;; I should pull my overrides; omitted settings inherit defaults, and turns left is derived rather than stored.
+(seon.db/pull
+  '[{:seon.agent/settings
+     [:seon.config.ai/model
+      :seon.config.ai/no-provider
+      :seon.config.eval/time-limit-ms
+      :seon.config.run/max-episode-runs]}]
+  [:seon.agent/id "juniper"])
+```
+
+324 source bytes; **139 shown UTF-8 bytes**; evidence [:index-patterns].
+
+```clojure
+#:seon.agent{:settings {:seon.config.ai/no-provider true, :seon.config.eval/time-limit-ms
+    10000, :seon.config.run/max-episode-runs 20}}
+```
+
+### Messages
+
+```clojure
+;; I should follow incoming messages with a reverse-ref pull on myself.
+(seon.db/pull
+  '[{:seon.cluster.message/_to
+     [:seon.cluster.message/id
+      :seon.cluster.message/content
+      {:seon.cluster.message/from [:seon.agent/id]}]}]
+  [:seon.agent/id "juniper"])
+```
+
+268 source bytes; **1250 shown UTF-8 bytes**; evidence [:index-patterns].
+
+```clojure
+#:seon.cluster.message{:_to [#:seon.cluster.message{:content "Which customer has the largest total? Add an order of 40 for them and tell me the new total.",
+      :from #:seon.agent{:id "root"}, :id "juniper/largest-customer"} #:seon.cluster.message{:content
+      "The turn :step failed with :seon.turn.loop/terminal-refusal-settlement-refused. It interrupted run 9fc9bc9ef8ad. Inspect error 87b4435a-be93-4c14-9a91-9b297c7bb289; the proc survived and no work was re-executed. Signature: 7bb0c70556be5160eecc344f4ecdecf2527f81a02295af4b2b816250cce12e7c.",
+      :id "a867b3f81998"} #:seon.cluster.message{:content "The turn :seon.agent/turn-completion-backstop failed with :seon.agent/turn-completion-backstop. Inspect error 0655d57c-acfb-49f5-a41e-881f03518b75; the proc survived and no work was re-executed. Signature: 3ae3fc79d662c93b3e88f01ee416806f825c187712bd6ec3a99cdcecdf6f925d.",
+      :id "8524995cba6d"} #:seon.cluster.message{:content "The turn :seon.agent/turn-completion-backstop failed with :seon.agent/turn-completion-backstop. Inspect error f3111fb4-6796-492a-bf10-1736131afd31; the proc survived and no work was re-executed. Signature: 3ae3fc79d662c93b3e88f01ee416806f825c187712bd6ec3a99cdcecdf6f925d.",
+      :id "da9a06b826b8"}]}
+```
+
+## Earlier equivalent-source probes
 
 ## Identity
 

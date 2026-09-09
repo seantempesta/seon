@@ -646,7 +646,7 @@
       "elided connections at the requested distance cap"}}))
 
 (defn- declared-acquisition
-  "Order the root's declared concerns, grouping reverse refs at their renderer."
+  "Order declared concerns; an owned component has a block even before it exists."
   [projection _database acquisition output]
   (let [root-lookup (first (:seon.render.walk/order acquisition))
         root (get-in acquisition [:seon.render.walk/members root-lookup])
@@ -661,10 +661,11 @@
        (fn [result display]
          (let [reverse? (str/starts-with? (name display) "_")
                attribute (if reverse? (keyword (namespace display) (subs (name display) 1)) display)
-               producer (when reverse?
-                          (let [properties (schema.form/attr-form-properties
-                                            (get-in projection [:seon.schema.projection/forms attribute]))]
-                            (when (:seon.render/form properties) (get properties output))))
+               properties (schema.form/attr-form-properties
+                           (get-in projection [:seon.schema.projection/forms attribute]))
+               producer (when (or (and reverse? (:seon.render/form properties))
+                                  (and (not reverse?) (:seon.db/component properties)))
+                          (get properties output))
                connected (filter #(= attribute (:seon.render.walk/attribute %))
                                  (map (:seon.render.walk/members acquisition)
                                       (rest (:seon.render.walk/order acquisition))))]
@@ -674,7 +675,9 @@
                            :seon.render.walk/path [display]
                            :seon.render.walk/found-depth 1
                            :seon.render.walk/attribute attribute
-                           :seon.render/value {attribute root-lookup}}]
+                           :seon.render/value
+                           (assoc {attribute root-lookup}
+                                  (first root-lookup) (second root-lookup))}]
                (-> result
                    (assoc-in [:seon.render.walk/members lookup] member)
                    (update :seon.render.walk/order conj lookup)))

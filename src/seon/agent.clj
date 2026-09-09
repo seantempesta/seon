@@ -4,6 +4,7 @@
   (:require [seon.turn :as turn]
             [seon.ai :as ai]
             [seon.db :as db]
+            [seon.repl :as repl]
             [seon.config :as config]))
 
 (defn identity
@@ -75,8 +76,16 @@
 (defn render-settings-ai
   "Read my overrides and the remaining turns in this session."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
-  [_settings]
-  ";; I should check my overrides and how many turns I have left.\n(my.agent/settings)")
+  [unit]
+  (str ";; I should pull my overrides; omitted settings inherit defaults, and turns left is derived rather than stored.\n"
+       (repl/source-text
+        (list 'seon.db/pull
+              (list 'quote
+                    '[{:seon.agent/settings
+                       [:seon.config.ai/model :seon.config.ai/no-provider
+                        :seon.config.eval/time-limit-ms
+                        :seon.config.run/max-episode-runs]}])
+              [:seon.agent/id (:seon.agent/id unit)]))))
 
 (defn render-settings-html
   "Show every declared agent dial, its effective value, and where it comes from."
@@ -84,7 +93,11 @@
                   [:or :seon.render/hiccup :seon.error/value]]}
   [unit]
   (let [database (:seon.db/db unit)
-        component (or (:seon.render/value unit) unit)
+        component (if (and database (:seon.agent/id unit))
+                    (get (db/pull database '[{:seon.agent/settings [*]}]
+                                  [:seon.agent/id (:seon.agent/id unit)])
+                         :seon.agent/settings {})
+                    (or (:seon.render/value unit) unit))
         attributes (if database (ai/agent-setting-attributes database)
                        (set (keys (dissoc component :db/id))))
         cluster-name (when database

@@ -24,10 +24,6 @@
                                              :seon.ns/name 'my.agents.help
                                              :seon.cluster/name "help"})))]
        (is (:db-after setup) (pr-str setup)))
-     (db/transact! connection
-                   [{:seon.agent/id "help"
-                     :seon.agent/plan {:my.plan/objective "Verify the opening"}
-                     :seon.agent/settings {:seon.config.ai/no-provider true}}])
      (let [ctx (support/fork-cluster-ctx connection "help")
            handle (support/cluster-handle
                    {:seon.db/connection connection
@@ -60,10 +56,14 @@
                "a second real system pass committed while this pass evaluated")
            (is (string? (:seon.turn/id @committed)))
            (is (= "(help)" (:seon.cluster.eval/source saved)))
-           (is (= ['help 'seon.db/pull 'my.plan/items 'my.message/inbox
-                   'my.agent/settings 'dir]
+           (is (= ['help 'seon.db/pull 'seon.db/pull 'seon.db/pull
+                   'seon.db/pull 'dir]
                   (mapv (comp first edn/read-string :seon.cluster.eval/source)
                         (evaluation/of-agent @connection "help"))))
+           (let [entries (evaluation/of-agent @connection "help")
+                 empty-reads (subvec entries 2 5)]
+             (is (= ["nil" "nil" "nil"] (mapv :seon.eval/value empty-reads)))
+             (is (every? #(seq (:seon.cluster.eval/read-evidence %)) empty-reads)))
            (is (vector? lines) (pr-str lines))
            (is (= 13 (count lines)))
            (is (every? #(and (string? %) (not (str/includes? % "\n"))) lines))
@@ -100,7 +100,26 @@
              (db/transact! connection
                            [[:db/add [:seon.fn/sym "seon.bootstrap/help-value"]
                              :seon.fn/source (str source "\n")]])
-             (is (false? (db/read-evidence-current? @connection evidence)))))
+             (is (false? (db/read-evidence-current? @connection evidence))))
+           (let [initial (subvec (evaluation/of-agent @connection "help") 2 5)
+                 written (db/transact!
+                          connection
+                          [{:seon.agent/id "help"
+                            :seon.agent/plan {:my.plan/objective "Observe the new plan"}
+                            :seon.agent/settings {:seon.config.ai/no-provider true}}
+                           {:seon.cluster.message/id "new-message"
+                            :seon.cluster.message/to [:seon.agent/id "help"]
+                            :seon.cluster.message/content "Observe the new message"
+                            :seon.cluster.message/at (java.util.Date. 0)}])]
+             (is (:db-after written) (pr-str written))
+             (is (every? #(false? (db/read-evidence-current?
+                                   @connection (:seon.cluster.eval/read-evidence %))) initial))
+             (is (not (:seon.error/kind (turn/system-turn request))))
+             (let [latest (into {} (map (juxt :seon.cluster.eval/source :seon.eval/value))
+                                (evaluation/of-agent @connection "help"))]
+               (doseq [[entry text] (map vector initial
+                                        ["Observe the new plan" "Observe the new message" "no-provider true"])]
+                 (is (str/includes? (get latest (:seon.cluster.eval/source entry)) text))))))
          (finally
            (doseq [channel [(:seon.cluster.wake/channel handle)
                             (:seon.render/context-channel handle)

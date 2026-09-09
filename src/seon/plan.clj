@@ -17,6 +17,7 @@
             [seon.db :as db]
             [seon.id :as id]
             [seon.print :as print]
+            [seon.repl :as repl]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -1165,8 +1166,21 @@
 (defn render-plan-ai
   "Read my complete plan as the instructions for what to do next."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
-  [_view]
-  ";; I should follow my plan and verify the current step's completion criterion.\n(my.plan/items)")
+  [unit]
+  (str ";; I should pull the plan component; its set is shown in position order, and get with a default could hide a refusal.\n"
+       (repl/source-text
+        (list 'seon.db/pull
+              (list 'quote
+                    '[{:seon.agent/plan
+                       [:my.plan/objective
+                        {:my.plan/current-step [:my.plan.item/id]}
+                        {:my.plan/steps
+                         [:my.plan.item/id :my.plan.item/title
+                          :my.plan.item/expected-result :my.plan.item/position
+                          :my.plan.item/completed-at
+                          {:my.plan.item/needs [:my.plan.item/id]}
+                          {:my.plan.item/steps ...}]}]}])
+              [:seon.agent/id (:seon.agent/id unit)]))))
 
 (defn render-plan-html
   "Show the objective, current focus, progress, and every step with its state."
