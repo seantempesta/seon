@@ -1,0 +1,2 @@
+{:seon.render.debug/details?
+ [:boolean {:description "Include full raw data and render evidence in an explicitly requested debug inspection."}]}

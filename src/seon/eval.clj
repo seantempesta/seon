@@ -14,7 +14,9 @@
   is a diagnostic, distinct from an existing agent with no evaluations."
   {:malli/schema
    [:=> [:cat :seon.db/db :seon.cluster.agent/id]
-    [:or [:vector :seon.eval/entity] :seon.error/value]]}
+    [:or [:vector [:and :seon.eval/entity
+                   [:map [:db/id :int] [:t :seon.db/basis-t]]]]
+     :seon.error/value]]}
   [database agent-id]
   (let [agent-row (db/pull database [:seon.cluster.agent/id]
                        [:seon.cluster.agent/id agent-id])]
@@ -35,7 +37,7 @@
       (let [rows
             (db/q '[:find ?t ?turn-id ?ordinal ?evaluation-t
                     (pull ?evaluation
-                          [* {:seon.cluster.eval/ns [:seon.ns/name]}
+                          [* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
                            {:seon.cluster.eval/read-evidence [*]}])
                     :in $ ?agent-id
                     :where

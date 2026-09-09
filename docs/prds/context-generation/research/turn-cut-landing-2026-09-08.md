@@ -7,6 +7,40 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
+## Evaluation presentation continuation
+
+The evaluation query shape owns the REPL render pair. The debug history invokes
+that pair once per evaluation, retaining source, namespace, output and errors;
+read evidence remains queryable and is not printed in history. Renderer invocation
+now preserves the original acquired value, including expanded refs. Schema
+selection still uses its transaction projection. Full raw data and renderer
+evidence are available through `details=true`, rather than eagerly embedded in
+every debug block. Default URL parameters are omitted by comparing against the
+existing query parser's defaults; explicit overrides round-trip unchanged.
+
+Live default verification, without restarting or reforking it: HTTP 200,
+**267,418 bytes**, **50 evaluation entries**, zero printer summaries, zero
+`items, depth` labels and zero inline read-evidence fields in history. Chrome's
+accessibility view independently showed the REPL comments, prompts and responses;
+its history section contained neither depth labels nor read evidence. The
+repeatable check is `turn-cut-debug-probe-2026-09-08.py`. This replaces the
+owner's observed approximately 2.3 MB generic-map page; no saved result was
+clipped or deleted.
+
+Final path-isolated gate: **55 tests, 333 assertions, zero failures/errors**.
+The new URL regression contributes six assertions; inherited real-SCI turn
+regressions now verify the actual web history and system-turn presentation.
+The inherited render-cost regression was updated to the separately landed
+caller-owned transaction batching and verifies that rendering itself does not
+write. The earlier query checkpoint's platform gate passed 83 tests / 490
+assertions; it predates this display change and is not its platform proof.
+
+This slice adds zero turn datoms and deletes no persisted attributes, so it
+requires no schema reset. The stored-result conversion, process-custody removal,
+namespace rename and remaining deletion rows are still unfinished. In particular,
+this presentation fix does not claim that legacy result storage or stored defs
+have been removed.
+
 ## Evaluation query continuation, 2026-09-08
 
 The resumed tree has no uncommitted loop/run/SCI changes. The debug caller

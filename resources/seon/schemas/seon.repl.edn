@@ -1,4 +1,7 @@
-#:seon.repl{:value
+#:seon.repl{:entity-request
+            [:or :seon.render/unit :seon.eval/entity
+             [:map [:seon.render/value :seon.eval/entity]]],
+            :value
             [:string
              {:description
               "The text one evaluation printed for its result: the stored admitted print node emitted through seon.print, never a second stored copy. An evaluation that stored no value prints seon.repl/missing-text here instead — the reason and the bytes it reached — and carries no :seon.repl/result beside it."}],

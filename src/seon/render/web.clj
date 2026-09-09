@@ -184,6 +184,7 @@
         output
         :seon.render/html)
       :seon.render.debug/prompt? (= "true" (get query "prompt"))
+      :seon.render.debug/details? (= "true" (get query "details"))
       :seon.render.data/limit
       (positive-query-long (get query "limit")
                            (:seon.render.data/limit debug-defaults) 200)
@@ -219,6 +220,7 @@
     :subject (pr-str (:seon.render.debug/subject debug-request))
     :output (pr-str (:seon.render/output debug-request))
     :prompt (str (boolean (:seon.render.debug/prompt? debug-request)))
+    :details (str (boolean (:seon.render.debug/details? debug-request)))
     :limit (str (:seon.render.data/limit debug-request))
     :maxRefAttributes
     (str (:seon.render.data/max-ref-attributes debug-request))
@@ -736,13 +738,15 @@
                [:p "No system turn."])]
             (map (fn [form]
                    [:section {:class "seon-debug-system-form"}
-                    (algorithm-value-html
-                     request
-                     (select-keys form
-                                  [:seon.render.walk/lookup
-                                   :seon.turn/status
-                                   :seon.cluster.eval/read-basis-transaction
-                                   :seon.turn/changes]))
+                    [:p [:strong (pr-str (:seon.turn/status form))]
+                     (when-let [lookup (:seon.render.walk/lookup form)]
+                       [:code (str " · " (pr-str lookup))])]
+                    (when-let [basis (:seon.cluster.eval/read-basis-transaction form)]
+                      [:p "Read basis transaction " (str basis)])
+                    (when (seq (:seon.turn/changes form))
+                      [:details
+                       [:summary (str (count (:seon.turn/changes form)) " changed facts")]
+                       [:pre (pr-str (:seon.turn/changes form))]])
                     ;; The turn API already produced these bytes through
                     ;; seon.repl/text; printing the string again escapes them.
                     [:pre {:class "seon-debug-source"}
@@ -780,7 +784,8 @@
       (when-not (:seon.error/kind evaluations)
        [:section {:class "seon-debug-prompt-pane"}
        [:h3 "Context now"]
-       (algorithm-value-html request evaluations)])
+       (into [:div {:class "seon-debug-evaluations"}]
+             (map #(algorithm-value-html request %) evaluations))])
       (when prospective
        [:section {:class "seon-debug-prompt-pane"}
        [:h3 "Would-be system turn"]
@@ -794,10 +799,20 @@
 
 (defn- debug-page-url
   [debug-request changes]
-  (route/path
-   ::route/namespace-debug
-   {:namespace (str (:seon.render.debug/viewer-namespace debug-request))}
-   (debug-query-strings (merge debug-request changes))))
+  (let [request (merge debug-request changes)
+        defaults (debug-query {} (:seon.render.debug/subject request)
+                              (:seon.render.debug/viewer-namespace request)
+                              (:seon.cluster.agent/id request))
+        default-query (debug-query-strings defaults)
+        query (debug-query-strings (merge defaults request))]
+    (route/path
+     ::route/namespace-debug
+     {:namespace (str (:seon.render.debug/viewer-namespace request))}
+     (into {}
+           (remove (fn [[parameter setting]]
+                     (and (not= :subject parameter)
+                          (= setting (get default-query parameter)))))
+           query))))
 
 (defn- debug-subject-link
   [debug-request subject label]
@@ -808,6 +823,12 @@
                :seon.render.data/outgoing-cursor nil
                :seon.render.data/incoming-cursor nil})}
    [:code (pr-str label)]])
+
+(defn- debug-details-link
+  [debug-request]
+  [:a {:href (debug-page-url debug-request
+                            {:seon.render.debug/details? true})}
+   "Load full raw data and render evidence"])
 
 (defn- debug-program-identity
   [database ctx]
@@ -1115,9 +1136,11 @@
         "renderer "
         (debug-renderer-link
          (assoc debug-request :seon.render/output output) selected)]
-       (when entry (debug-read-dependencies-html entry))
-       (when entry (debug-renderer-contract entry selected))
-       (when entry (debug-renderer-definition entry))])))
+       (when (and entry (:seon.render.debug/details? debug-request))
+         [:div
+          (debug-read-dependencies-html entry)
+          (debug-renderer-contract entry selected)
+          (debug-renderer-definition entry)])])))
 
 (declare debug-render-experiment)
 
@@ -1201,6 +1224,8 @@
      (if (seq selected)
        (into [:div {:class "seon-debug-projection-grid"}] selected)
        [:p "No render function was selected for this attribute."])
+     (when-not (:seon.render.debug/details? debug-request)
+       (debug-details-link debug-request))
      (when (seq alternatives)
        [:details {:class "seon-debug-alternative-renderers"}
         [:summary (str "compatible alternatives · " (count alternatives))]
@@ -1306,7 +1331,9 @@
            "No value is stored or connected for this attribute."])]]]
      [:details {:class "seon-debug-data-details"}
       [:summary "Raw data and schema"]
-      [:h4 "Raw data"]
+      (if (:seon.render.debug/details? debug-request)
+       [:div
+       [:h4 "Raw data"]
       (if present?
         (debug-value-html value)
         [:p "This attribute is absent on the selected entity."])
@@ -1314,6 +1341,7 @@
       (if-let [form (or (:seon.schema/form metadata) attribute-schema)]
         (debug-value-html form)
         [:p "No schema is registered for this attribute."])]
+       (debug-details-link debug-request))]
      (if present?
        (applicable-renderers-html debug-request experiments)
        [:details {:class "seon-debug-renderers"}

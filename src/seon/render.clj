@@ -190,11 +190,9 @@
   ;; exception below: arbitrary value keys never become its unit keys.
   (let [argument (render-argument request)
         value (:seon.render/value argument)
-        producer-value (if (map? value)
-                         (cond-> (transaction-shape value request)
-                           (find value :db/id)
-                           (assoc :db/id (:db/id value)))
-                         value)]
+        ;; Transaction shape is for schema selection. Invocation preserves
+        ;; the pulled value and the names reached through its refs.
+        producer-value value]
     (if (map? value)
       (assoc (merge producer-value
                     (dissoc argument :seon.render/value

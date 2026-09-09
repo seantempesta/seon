@@ -128,7 +128,7 @@
                      [:seon.error/data
                       :seon.error/diagnostic-operation]))))))
 
-(deftest only-agent-context-render-receipts-record-cost
+(deftest only-agent-context-renders-prepare-cost-facts-for-the-caller
   (support/with-database
    (fn [connection]
      (seed-entities! connection)
@@ -166,6 +166,8 @@
                    :seon.render.call/id agent-call-id
                    :seon.render/captured-calls agent-captured))
            after-agent (db/basis-t @connection)
+           prepared (get-in @agent-captured [agent-call-id :seon.db/tx-data])
+           settled (db/transact! connection prepared)
            facts (db/q '[:find ?shape ?profile ?tokens ?at
                          :where
                          [?cost :seon.render.cost/shape-key ?shape]
@@ -180,8 +182,10 @@
        (is (zero? web-fact-count))
        (is (string? agent-output))
        (is (= #{agent-call-id} (set (keys @agent-captured))))
-       (is (< after-web after-agent)
-           "an agent-context render records its cost against the held run")
+       (is (= after-web after-agent)
+           "rendering prepares costs without moving the caller's database basis")
+       (is (= 1 (count prepared)))
+       (is (nil? (:seon.error/kind settled)) (pr-str settled))
        (is (= 1 (count facts)))
        (let [[shape profile estimated at] (first facts)]
          (is (= :seon.config/entity shape))
@@ -206,7 +210,7 @@
           [:seon.render/ai :seon.render/html])))
   (is (= {:seon.render/ai `repl/render-ai
           :seon.render/html `repl/render-html}
-         (select-keys (family-properties :seon.cluster.eval/receipt)
+         (select-keys (family-properties :seon.eval/entity)
                       [:seon.render/ai :seon.render/html])))
   (is (= {:seon.render/ai `cluster/render-ai
           :seon.render/html `cluster/render-html}

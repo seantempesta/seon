@@ -38,11 +38,7 @@
                     :triage-edn [:string {:min 1}],
                     :receipt
                     [:map
-                    {:seon.db/attributes true,
-                     :seon.render/ai
-                      seon.repl/render-ai,
-                      :seon.render/html
-                      seon.repl/render-html}
+                    {:seon.db/attributes true}
                      [:seon.cluster.eval/id :seon.cluster.eval/id]
                      [:seon.cluster.eval/run :seon.cluster.eval/run]
                      [:seon.cluster.eval/ordinal

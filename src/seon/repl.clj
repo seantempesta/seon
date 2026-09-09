@@ -274,9 +274,12 @@
   The prompt namespace is the evaluation's own `:seon.cluster.eval/ns` when
   the pull reached its name; an unreached namespace prints as `user`, which
   is what a REPL with no namespace in effect is called."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.repl/emission]}
+  {:malli/schema [:=> [:cat :seon.repl/entity-request] :seon.repl/emission]}
   [unit]
-  (cond-> (select-keys unit [:seon.cluster.eval/id
+  (let [unit (if (map? (:seon.render/value unit))
+               (:seon.render/value unit)
+               unit)]
+   (cond-> (select-keys unit [:seon.cluster.eval/id
                              :seon.cluster.eval/source
                              :seon.cluster.eval/comment
                              :seon.cluster.eval/ordinal
@@ -310,11 +313,11 @@
     ;; the same predicate that binds the fork's handles refuses here.
     (and (int? (:db/id unit))
          (admit/restorable-node (:seon.cluster.eval/result-edn unit)))
-    (assoc :seon.repl/handle (admit/result-handle (:db/id unit)))))
+    (assoc :seon.repl/handle (admit/result-handle (:db/id unit))))))
 
 (defn render-ai
   "`:seon.render/ai` — one evaluation, as the REPL session it was."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.repl/entity-request] [:maybe :string]]}
   [unit]
   (let [emission (entity-emission unit)]
     (when (seq (:seon.cluster.eval/source emission))
@@ -325,7 +328,7 @@
 
   The comment is its own element rather than a line of the prompt, which is
   the whole reason it is stored apart from the source it introduces."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.repl/entity-request] [:maybe :seon.render/hiccup]]}
   [unit]
   (let [emission (entity-emission unit)
         prose (:seon.cluster.eval/comment emission)

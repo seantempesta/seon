@@ -156,6 +156,20 @@
        (is (str/includes? (pr-str preview) "Faults (1)"))
        (is (str/includes? (pr-str preview) "A declared fault card."))))))
 
+(deftest debug-links-omit-defaults-and-round-trip-every-override
+  (let [subject [:seon.cluster.agent/id "juniper"]
+        viewer 'my.agents.juniper]
+    (doseq [query [{} {"details" "true" "output" ":seon.render/ai"
+                      "limit" "17" "maxWork" "31" "offset" "3"
+                      "path" "[:seon.agent/plan]"}]]
+      (let [request (#'web/debug-query query subject viewer "juniper")
+            url (#'web/debug-page-url request {})
+            parameters (#'web/query-params
+                        {:query-string (.getRawQuery (java.net.URI. url))})]
+        (is (= request (#'web/debug-query parameters subject viewer "juniper")))
+        (is (not (str/includes? url "maxRefAttributes=40")))
+        (is (not (str/includes? url "viewer=")))))))
+
 (deftest agent-identity-groups-scalars-and-keeps-declared-components
   (support/with-database
    (fn [connection]

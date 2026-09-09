@@ -1,7 +1,8 @@
 #:seon.eval{:entity
-            [:map
-             [:db/id :int]
-             [:t :seon.db/basis-t]
+            [:map {:seon.render/ai seon.repl/render-ai
+                   :seon.render/html seon.repl/render-html}
+             [:db/id {:optional true} :int]
+             [:t {:optional true} :seon.db/basis-t]
              [:seon.cluster.eval/id :seon.cluster.eval/id]
              [:seon.cluster.eval/run [:map [:db/id :int]]]
              [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]

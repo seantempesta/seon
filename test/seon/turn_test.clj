@@ -1,6 +1,7 @@
 (ns seon.turn-test
   (:require [clojure.core.async :as async]
             [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [seon.cluster :as cluster]
@@ -9,6 +10,8 @@
             [seon.db :as db]
             [seon.eval :as evaluation]
             [seon.flow :as flow]
+            [seon.render.hiccup :as hiccup]
+            [seon.render.web :as web]
             [seon.test-support :as support]
             [seon.turn :as turn]))
 
@@ -116,6 +119,22 @@
            (is (= 'my.agents.a
                   (get-in (first saved) [:seon.cluster.eval/ns :seon.ns/name])))
            (is (= saved (evaluation/of-agent database "a")))
+           (let [html (#'web/debug-ai-html
+                       "a"
+                       {:seon.render.debug/evaluations saved
+                        :seon.render.debug/request
+                        {
+                         :seon.render.call/id [:seon.turn-test/history]
+                         :seon.db/db database
+                         :seon.sci.eval/ctx ctx
+                         :seon.sci.admit/caps (:seon.sci.admit/caps handle)
+                         :seon.sci.eval/time-limit-ms 2000
+                         :seon.config/on-core-error :panic}})]
+             (is (str/includes? html "seon-eval-entry") html)
+             (is (str/includes? html "my.agents.a") html)
+             (is (str/includes? html "(+ 1 1)") html)
+             (is (not (str/includes? html "items, depth")) html)
+             (is (not (str/includes? html "read-evidence")) html))
            (is (= basis (db/basis-t @connection)))
            (is (= :seon.eval/agent-not-found
                   (:seon.error/kind (evaluation/of-agent database "absent")))))
@@ -145,6 +164,9 @@
            (is (nil? (:seon.error/kind opening)) (pr-str opening))
            (is (seq opening-sources) (pr-str opening))
            (is (string? (:seon.cluster.run/id opening)))
+           (let [html (hiccup/->string (#'web/system-turn-html {} opening))]
+             (is (str/includes? html ":none"))
+             (is (not (str/includes? html "items, depth"))))
            (let [basis (db/basis-t @connection)
                  unchanged (turn/system-turn request)]
              (is (seq (:seon.turn/forms unchanged)) (pr-str unchanged))
