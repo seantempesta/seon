@@ -632,3 +632,43 @@ worker wedge: 43 tests / 272 assertions, 6 failures, all from nested cache
 reclamation crossing the worker's linked published-cache root.
 `published-test-cache-reclamation-refuses-its-linked-root.md` records the
 exact boundary and canonical-root repair; that repair is still being gated.
+
+## Resume landing checkpoint
+
+- `10b034289`: fn production defaults/findings and canonical indexing
+  fixtures; 30 tests / 175 assertions green.
+- `5cebd004e`: inherited landing and issue evidence; three stale notes
+  archived.
+- `2f05c8684`: canonical fault fixtures, proc lifecycle injection, Monitor
+  resource scoping; 21 tests / 200 assertions green; two notes archived.
+- `51b268490`: resolve the owned published-cache directory before deletion;
+  the linked-root/sentinel regression and real concurrent launchers pass.
+  Runner gate 43 tests / 270 assertions, 0 failures/errors, 97 seconds
+  coordinator/tests; platform 83 tests / 490 assertions, 0 failures/errors,
+  52 seconds coordinator/tests. Native selected lint 0 errors / 532 warnings.
+
+Additional dispositions: the historical worker-exchange blocker is resolved
+by `5b5ddb8d5` and the current green class gate; archived. The script-side
+markdown publication blocker is resolved by its recorded relocation; its
+script regression now passes 31 tests / 376 assertions; archived. The
+69 GB store-growth attribution and generated-opening environment notes were
+read end to end and remain open: the former still owes recurrence and
+retention evidence; the latter overlaps the active turn/context cut.
+
+Development publication attempt
+`bin/seon init --dev default --changed src/seon/fn.clj` exited 1 before
+adoption. Its complete-publication fallback found unresolved callers of
+`run/claim-tx`, `run/held?`, `run/release-tx`, and `work/interruption` in the
+active turn rename, including `test/seon/cluster/run_test.clj:211,248,811`
+and `test/seon/cluster/loop_test.clj:331,1728`. No foreign file or session
+was changed, and no publication retry or default restart was attempted.
+This is an analysis boundary, not evidence that a schema reset is needed.
+Default connectivity was proved above; adoption of this slice remains
+unverified.
+
+Owned failed roots `run.y12EIe`, `run.dSiF5R`, and `run.3fZfcg` were removed
+after the process table showed no holders. Successful isolated gates and
+fast snapshots removed their own roots. No scratch cluster or worktree was
+created during this resume. The issue-index check remains red on existing
+metadata and schedule drift; the owner's schedule was preserved. This
+checkpoint does not claim the full historical issue inventory is closed.

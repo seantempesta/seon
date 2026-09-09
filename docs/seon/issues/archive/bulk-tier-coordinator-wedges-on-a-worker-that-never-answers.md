@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, test, runner, wave/parallel-stress-triage]
 ---
@@ -74,3 +74,16 @@ The coordinator had dispatched that ordinary bulk task and waited unboundedly in
 The `confirmation-7` message came from the injected regression at `test/seon/test_runner_test.clj:158-209`; no retained `confirmation-launch.edn` exists, so production confirmation never started.
 The constructibility defect is one raw pipe read with neither `Process.onExit` nor a declared task deadline, followed by an unbounded pool-future `.get`.
 Require one total exchange seam that journals identity before a checked write and races reply versus exact process exit versus deadline, converting either non-reply terminal event into an attributed typed tally result.
+
+## Verified resolution — 2026-09-09
+
+The missing exchange seam landed in `5b5ddb8d5`. Current source journals
+dispatch, checks writes, observes exact process exit, and bounds reply
+completion. Class regressions cover exit before readiness, killed accepted
+work, failed writes, re-arm death, and a live worker exceeding its bound.
+The 2026-09-09 selected runner gate passed 43 tests / 270 assertions, with
+two concurrent real nested launchers reaching their tallies; platform passed
+83 tests / 490 assertions. The first sweep rerun found a separate linked
+cache-root refusal, fixed in `51b268490` and recorded in its own archived
+note. No absent reply was treated as success. The owner's paths-only gate
+rule supersedes this note's historical request for two bare whole gates.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, test, operator, wave/program-graph-indexing]
 ---
@@ -62,3 +62,15 @@ gate. Follow-up debt: convert seon.dev.markdown's schemas to a
 registered family (resources/seon/schemas/), after which both files
 may return to the indexed model and this issue's original acceptance
 is restorable.
+
+## Verified resolution — 2026-09-09
+
+The recorded option 1 remains the implementation: namespace and regression
+are together under `script/seon/dev/`. The original publication mismatch is
+resolved. The direct script-side regression command
+`bb -e '(require (quote seon.dev.markdown-test)) (clojure.test/run-tests (quote seon.dev.markdown-test))'`
+ran 31 tests / 376 assertions, zero failures/errors, on 2026-09-09. Fresh
+selected test-base publications completed without the old markdown symbol
+finding. The deliberate cost remains: this script test is not discovered
+by the indexed main gate. Moving the namespace back into the indexed model
+is an optional architecture change, not the unresolved original blocker.
