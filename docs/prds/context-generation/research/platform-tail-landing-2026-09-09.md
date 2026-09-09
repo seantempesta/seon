@@ -1,6 +1,6 @@
 ---
 type: research
-status: active
+status: complete
 date: 2026-09-09
 tags: [research, operator, render, test]
 ---
@@ -129,3 +129,102 @@ introduced by this test/documentation slice.
 
 Slice 2 owns the web-debug regression, the history probe, the archived
 history issue, and this note. The index remains untouched.
+
+Slice 2 commit: **`dd51f4df0`**.
+
+## Slice 3: exact ordered-declaration boundary
+
+Read `turn-rename-landing-2026-09-09.md` and
+`loop-proof-landing-2026-09-09.md` end to end, including the former's
+slice 3 program-declaration boundary and slice 5.2 cold-write section.
+Also read the plan README, working edge, and binding PRD §10 and §§13–15.
+The later loop proof measures three arithmetic forms; it does not expand
+that result into a cold declaration-installation proof.
+
+**Remaining: consolidation of ordered declaration calls, and a measured
+cold ordinary-proc turn that installs dependent declarations.** These are
+different from grouping settlement into one actual database transaction,
+which the source already does. No declaration planner or dependency API
+change is landed in this bounded slice; this is the explicitly authorized
+boundary-recording outcome.
+
+The exact current path:
+
+- `src/seon/turn.clj:1037`, `receipt-settle-batch-tx`: when any request
+  carries `:seon.program/row`, retain one ordered `receipt-settle-call` per
+  request. Otherwise use the one `receipt-settle-batch-call`.
+- `:1022`, `receipt-settle-batch-call`: explicitly refuses program rows
+  with `:seon.turn/ordered-declarations-required`; it cannot silently flatten
+  them against the entering database.
+- `:3361`, `settle-batch!`: sends the complete ordered vector and side
+  effects to **one** `seon.db/transact!`. Multiple transaction-function calls
+  are not multiple transactions.
+- `:1234`, `pending-subject-resolution-tx`, called by `row-tx`: a function
+  arriving after its test queries and resolves the earlier pending subject.
+  Flattening both against the original database loses that earlier row.
+
+Dependency ledger: Datahike's `db/transaction.cljc:1152` invokes each
+`:db.fn/call` with the current mid-transaction database and splices its
+returned operations before the next call. The dependency owns that ordering.
+The prior `d/with` attempt is not a reusable writer simulation: the writer
+uses transient indexes, and `PersistentSortedSet.java:951` refuses
+`asTransient` when already editable (`Expected persistent set`). No new
+simulation or duplicated declaration owner was introduced here.
+
+Existing recurring surfaces: `seon.turn-test/virtual-turns-use-the-proc-and-compaction-is-agent-scoped`
+measures the first arithmetic turn, then three arithmetic forms on two
+canonical forks; `batch-settlement-preserves-declaration-order` verifies
+test-first/function-second subject resolution in an actual batch settlement.
+The latter prepares its turn/evaluations with earlier writes. It is **not**
+a cold ordinary-proc installation or a total three-write measurement.
+
+To close the remaining proof, start an agent with no prior evaluations and
+submit contracted dependent declarations through the ordinary no-provider
+proc. Listen to every transaction until that turn closes, including
+metadata-only writes; require three total reports, saved source before
+execution, successful installations, resolved test subject, and executable
+installed functions. Separately, reducing its ordered writer calls to one
+requires the owner's pending planner/dependency decision; a three-report
+result alone would not prove that reduction.
+
+The committed read-only JVM
+[declaration probe](platform_tail_declarations_probe_2026_09_09.clj) returns
+exactly two `#'seon.turn/receipt-settle-call` operations for test then function,
+and one `#'seon.turn/receipt-settle-batch-call` for the same evaluations
+without program rows. Execution took **3 ms**, transactions submitted **0**.
+This proves the loaded construction branch, not successful installation.
+Pinned dependency commits: Datahike `cdcb5792db8bd599487f099437265d18a31164a5`,
+persistent-sorted-set `e1a17bbe767c7801e67407c81f64efabfd2f1601`.
+
+`bin/issues-index --check` exits **1**, as the owner's schedule still names
+the now-archived ephemeral-port issue. It also reports the top-level
+resolved no-credential issue and its stale schedule row, plus missing rows
+for turn execution submission, additive system turns, browser observation,
+and virtual-turn routing. These seven diagnostics are recorded in
+`tmp/platform-tail-index-check.log`; no index row or unrelated issue was
+edited. This is a schedule reconciliation boundary, not a failed code gate.
+
+Fast HEAD snapshot: **23 tests / 363 assertions / zero failures/errors**.
+Both canonical forks measured the cold arithmetic turn at **3 reports /
+23 datoms (16 / 5 / 2)**, and the warmed three-form turn at **3 reports /
+45 datoms (30 / 13 / 2)**. Both direct declaration-order regressions passed.
+These numbers deliberately retain their exact scope; they are not the
+unmeasured cold declaration-installation result.
+
+Required final command:
+`SEON_TEST_WORKERS=3 bin/test --paths docs/prds/context-generation/research/platform-tail-landing-2026-09-09.md docs/prds/context-generation/research/platform_tail_declarations_probe_2026_09_09.clj -- seon.turn-test`
+passed **23 tests / 367 assertions / zero failures/errors**, **45 s** in the
+coordinator/test phase. The matching explicit `--platform --paths` command
+passed **83 / 490 / zero failures/errors**, **72 s**. Logs:
+`tmp/platform-tail-declarations-gate.log` and
+`tmp/platform-tail-declarations-platform.log`. Successful roots `run.d38lJz`
+and `run.p8GN8l` removed themselves. The fast runner and both gate launchers
+exited 0. All owned shells are ended; no scratch root/worktree remains.
+
+Slice 3 owns only this note and the declaration-construction probe. It
+introduces no production change or RESET NEEDED. All three bounded slices
+have their selected green gate and a separate green platform run, capped
+at three workers. Default lifecycle was never operated. The inherited
+untracked paths are preserved, all local document links resolve, and Git
+whitespace validation passes. The remaining declaration proof and schedule
+reconciliation are explicit boundaries above.
