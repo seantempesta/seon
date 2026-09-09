@@ -1271,6 +1271,7 @@
           observed-db @connection
           prompt-db (run/opening-db observed-db run-id)
           rendered
+          (when-not (:seon.config.ai/no-provider settings)
           (phase
            #(prompt/prompt prompt-db
                            {:seon.turn/id run-id
@@ -1283,7 +1284,7 @@
                             :seon.sci.eval/time-limit-ms
                             (:seon.config.eval/time-limit-ms cluster)
                             :seon.config/on-core-error
-                            (:seon.config/on-core-error cluster)}))
+                            (:seon.config/on-core-error cluster)})))
           ;; CAPTURE BEFORE THE PROVIDER (ruling 4, 2026-07-28): the
           ;; exact prompt text, the rendered basis and the ordered
           ;; contribution records commit in ONE turn-owned transaction
@@ -1295,6 +1296,7 @@
           ;; and the backup's system segment is re-derivable from the
           ;; committed primary error fact, never re-captured.
           captured
+          (when-not (:seon.config.ai/no-provider settings)
           (db/transact!
            connection
            (context/capture-tx
@@ -1307,12 +1309,15 @@
                              prompt-db)
                :seon.error/value rendered}
               {:seon.turn/id run-id
-               :seon.cluster.prompt/rendered-context rendered})))
+               :seon.cluster.prompt/rendered-context rendered}))))
           ;; THE EXACT-TEXT HANDOFF: the loop extracts the rendered
           ;; text and alone places that string in `:seon.ai/prompt` —
           ;; the bytes the capture recorded are the bytes sent.
           text (:seon.cluster.prompt/text rendered)]
       (cond
+        (:seon.config.ai/no-provider settings)
+        (freeze! {:seon.ai/text "(+ 1 1)"})
+
         (:seon.error/kind captured)
         ;; A refused prompt/capture closes this run and records the refusal.
         ;; The next pass derives correction from those facts below the ONE

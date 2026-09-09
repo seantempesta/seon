@@ -106,3 +106,40 @@ Final integration slice 1: `a90ed5cce`, canonical gate 1 test / 7 assertions.
 Final integration slice 2: canonical gate 52 tests / 236 assertions, green.
 Adoption reached JVM instrumentation but reported source changed during
 adoption; concurrent `seon.turn` edits are preserved.
+
+
+## Scratch seed and final verification boundaries
+
+Scratch `faults-render` booted from the isolated source at PID 58521, HTTP
+7815. Before seed, the effective cluster setting was `no-provider true`,
+with zero attempts and faults. Juniper's own settings also carried it before
+messages. At 08:11:11 UTC three virtual replies had completed as `(+ 1 1)`;
+provider attempts were zero and token-usage rows were empty. Two unrelated
+supervision faults remained: `agent-already-running` and root supervision not
+committed. This is zero provider faults, not zero faults overall.
+
+After that measurement a synthetic presentation fault was inserted. Scratch
+HTTP returned 200, 47,839 bytes. The saved concern block is 3,522 bytes and
+contains zero `items, depth` occurrences. It displays kind, message, UTC time,
+function, turn link and evidence link through the error pair. Exact direct
+AI output is saved in `faults-render-ai-2026-09-09.txt` (82 UTF-8 bytes).
+The committed presentation probe records the exact historical scratch API;
+its `seon.cluster.run` identifiers predate the other lane's rename.
+
+Screenshot unavailable: CUA reported no available browser, and native Chrome
+and Brave both returned `cgWindowNotFound (-10005)`. HTTP evidence proves
+served HTML only; no browser-paint claim is made.
+
+A separate agent then used a verified absent credential, with no-provider
+removed at cluster level. It produced two separate turns, each attempt ordinal
+zero, but FOUR no-credential fault rows. Static refusals no longer retry
+inside the AI attempt policy. The loop independently commits an attempt fault
+and commits it again during terminal settlement, then admits another turn.
+The requested one-fault guarantee therefore remains unproven and falsified by
+this probe. Scope extension was requested because this assignment permits
+loop edits ONLY for the no-provider branch; no extra settlement edit is made
+without that authorization.
+
+Final slice 3 applies the previously isolated hunk to the now-unprotected
+loop source, with the landed `seon.turn` attribute names. Concurrent edits in
+`src/seon/turn.clj` and its test are preserved and excluded from lane gates.

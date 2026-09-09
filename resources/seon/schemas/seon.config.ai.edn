@@ -33,6 +33,12 @@
                  [:=
                   #:seon.config{:optional true, :per-agent true}
                   true],
+                 :no-provider
+                 [:=
+                  {:seon.config/optional true,
+                   :seon.config/per-agent true,
+                   :description "Use virtual turns with a no-op reply instead of provider attempts. This per-agent setting lives on the settings component; no credential lookup, provider request, or token usage occurs."}
+                  true],
                  :presence-penalty
                  [:double
                   {:min -2.0,

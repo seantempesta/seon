@@ -60,7 +60,7 @@
                    :seon.agent/settings
                    {:db/id settings-ref
                     :seon.config.eval/time-limit-ms 2500
-                    :seon.config.ai/api-key-variable "SEON_DESIGN_LAB_NO_CREDENTIAL"
+                    :seon.config.ai/no-provider true
                     :seon.config.run/max-episode-runs 4}
                    :seon.agent/plan
                    {:db/id plan-ref
