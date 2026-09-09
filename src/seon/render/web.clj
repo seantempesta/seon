@@ -202,7 +202,7 @@
       :seon.render.data/cursor
       (data/parse-cursor (get query "path") (get query "offset"))}
       agent-id
-      (assoc :seon.cluster.agent/id agent-id)
+      (assoc :seon.agent/id agent-id)
 
       (read-query-value (get query "outgoingCursor"))
       (assoc :seon.render.data/outgoing-cursor
@@ -248,7 +248,7 @@
   never includes this surface in the delta or disturbs its caret."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (let [agent-id (:seon.cluster.agent/id unit)]
+  (let [agent-id (:seon.agent/id unit)]
     [:form {:id (block/surface-id :message-bar)
             :class "seon-bar"
             :data-signals "{text:'',refusal:''}"
@@ -289,7 +289,7 @@
   settings: reconnect forever, and do not hold a socket open for a
   backgrounded tab."
   {:malli/schema [:=> [:cat :seon.render.web/page-request] :string]}
-  [{:keys [:seon.cluster.agent/id :seon.render/page :seon.render.web/feed-url
+  [{:keys [:seon.agent/id :seon.render/page :seon.render.web/feed-url
            :seon.render.debug/viewer-namespace]}]
   (str
    "<!doctype html>"
@@ -323,7 +323,7 @@
          [:nav {:class "seon-agent-routes"}
           [:a {:href (route/path ::route/agent {:id id})} "agent"]
           [:a {:href (route/path ::route/agent-debug {:id id})} "debug"]])
-       (when id (message-bar-html {:seon.cluster.agent/id id}))
+       (when id (message-bar-html {:seon.agent/id id}))
        (seq page)]
       ;; OUTSIDE every morph target. A data-init inside one is stripped
       ;; by that element's first whole-element morph, and the tab then
@@ -343,8 +343,8 @@
   [agent-id unit]
   (value/node-id
    (assoc unit
-          :seon.cluster.agent/id agent-id
-          :seon.render.value/root [:seon.cluster.agent/id agent-id])
+          :seon.agent/id agent-id
+          :seon.render.value/root [:seon.agent/id agent-id])
    (:seon.render.walk/path unit)))
 
 (defn- rank-class
@@ -356,7 +356,7 @@
 
 (defn surface-html
   "Serialize one walked HTML unit into its stable morph wrapper."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/id
+  {:malli/schema [:=> [:cat :seon.agent/id
                        :seon.render.walk/unit
                        [:int {:min 0}]]
                   :string]}
@@ -420,7 +420,7 @@
   render proc share this derivation. The proc retains fragments for deltas.
 
   Process provenance rides the service request."
-  [{:keys [:seon.db/db :seon.cluster.agent/id
+  [{:keys [:seon.db/db :seon.agent/id
            :seon.render.web/root-agent-id
            :seon.db/connection] caps :seon.sci.admit/caps
     stream-partial :seon.ai/partial
@@ -451,7 +451,7 @@
         (when (= id root-agent-id)
           (oversight/unit
            {:seon.db/db db
-            :seon.cluster.agent/id root-agent-id
+            :seon.agent/id root-agent-id
             :seon.sci.admit/caps caps
             :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
             :seon.sci.eval/time-limit-ms
@@ -476,7 +476,7 @@
         fleet-unit
         (when fleet-call
           (cond-> {:seon.render.walk/lookup
-                   [:seon.cluster.agent/id root-agent-id]
+                   [:seon.agent/id root-agent-id]
                    :seon.render.walk/path [::fleet-oversight]
                    :seon.render.walk/found-depth 0
                    :seon.render/distance 0}
@@ -695,10 +695,10 @@
   (merge render-context
          {:seon.db/db database
           :seon.db/connection connection
-          :seon.cluster.agent/id agent-id
+          :seon.agent/id agent-id
           :seon.sci.eval/time-limit-ms
           (:seon.config.eval/time-limit-ms render-context)
-          :seon.render.value/root [:seon.cluster.agent/id agent-id]
+          :seon.render.value/root [:seon.agent/id agent-id]
           :seon.sci.admit/caps caps}))
 
 (defn- debug-prompt
@@ -794,7 +794,7 @@
   (let [request (merge debug-request changes)
         defaults (debug-query {} (:seon.render.debug/subject request)
                               (:seon.render.debug/viewer-namespace request)
-                              (:seon.cluster.agent/id request))
+                              (:seon.agent/id request))
         default-query (debug-query-strings defaults)
         query (debug-query-strings (merge defaults request))]
     (route/path
@@ -866,10 +866,10 @@
              (map (fn [[attribute value]]
                     [:code (pr-str [attribute value])]))
              identities))
-     (when-let [agent-id (:seon.cluster.agent/id debug-request)]
+     (when-let [agent-id (:seon.agent/id debug-request)]
        [:a {:href (debug-page-url
                     debug-request
-                    {:seon.render.debug/subject [:seon.cluster.agent/id agent-id]
+                    {:seon.render.debug/subject [:seon.agent/id agent-id]
                      :seon.render.data/cursor (data/parse-cursor nil nil)})}
         "View agent entity"])]
     [:div
@@ -1269,7 +1269,7 @@
         root (:seon.render.debug/subject debug-request)
         cursor {:seon.render.data/path
                 (if (or (reverse-attribute? attribute)
-                        (= attribute :seon.cluster.agent/agent)) [] [attribute])
+                        (= attribute :seon.agent/agent)) [] [attribute])
                 :seon.render.data/offset 0}
         value (if present? (connected-value related value) value)
         experiments
@@ -1352,7 +1352,7 @@
                         (remove declared)
                         distinct
                         (sort-by str))
-        agent? (some? (:seon.cluster.agent/id acquisition))
+        agent? (some? (:seon.agent/id acquisition))
         components (when agent?
                      (into #{}
                            (keep (fn [[attribute properties]]
@@ -1376,7 +1376,7 @@
              agent?
              (conj (debug-found-value
                     projection render-request debug-request
-                    :seon.cluster.agent/agent identity-value true related
+                    :seon.agent/agent identity-value true related
                     context-selection context-source-call)))
            (map (fn [attribute]
                   (let [entry (find (if (reverse-attribute? attribute)
@@ -1405,9 +1405,9 @@
 (defn- assigned-agent-namespace
   [database agent-id]
   (get-in (db/pull database
-                   [{:seon.cluster.agent/namespace [:seon.ns/name]}]
-                   [:seon.cluster.agent/id agent-id])
-          [:seon.cluster.agent/namespace :seon.ns/name]))
+                   [{:seon.agent/namespace [:seon.ns/name]}]
+                   [:seon.agent/id agent-id])
+          [:seon.agent/namespace :seon.ns/name]))
 
 (defn- render-source-call
   "Render one authored source slot, evaluating it through the run loop's one path.
@@ -1433,7 +1433,7 @@
     (if (or (not source) (:seon.render.call/output call-entry))
       rendered
       (let [database (:seon.db/db request)
-            agent-id (:seon.cluster.agent/id request)
+            agent-id (:seon.agent/id request)
             observed (atom [])
             namespace-name
             (or (:seon.render/namespace request)
@@ -1444,7 +1444,7 @@
                ::owner-not-ensured
                "Evaluating this preview requires an agent assigned to the viewing namespace."
                'seon.render.web/render-source-call
-               :seon.cluster.agent/id :seon.cluster.agent/id
+               :seon.agent/id :seon.agent/id
                (select-keys request [:seon.render/namespace :seon.render.value/root])
                ::owner-not-ensured nil)
               (binding [db/*read-evidence-sink* observed]
@@ -1453,7 +1453,7 @@
                        {:seon.turn.loop/cluster (:seon.turn.loop/cluster request)
                         :seon.db/db database
                         :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
-                        :seon.cluster.agent/id agent-id
+                        :seon.agent/id agent-id
                         :seon.ns/name namespace-name
                         :seon.cluster.reply/text source
                         :seon.sci.admit/caps (:seon.sci.admit/caps request)})]
@@ -1577,7 +1577,7 @@
   [::debug-data
    (select-keys debug-request
                 [:seon.render.debug/subject
-                 :seon.cluster.agent/id
+                 :seon.agent/id
                  :seon.render.data/limit
                  :seon.render.data/max-ref-attributes
                  :seon.render.data/max-result-weight
@@ -1722,7 +1722,7 @@
                ::declared-units declared-units
                ::reverse-values reverse-values
                ::context-selection
-               (when-let [agent-id (:seon.cluster.agent/id debug-request)]
+               (when-let [agent-id (:seon.agent/id debug-request)]
                  (context/selection database agent-id))
                ::observation observation
                ::related-entities
@@ -1761,7 +1761,7 @@
         declared-units (::declared-units debug-data-output)
         reverse-values (::reverse-values debug-data-output)
         captured-calls (atom {data-call-id debug-data-entry})
-        render-agent-id (:seon.cluster.agent/id debug-request)
+        render-agent-id (:seon.agent/id debug-request)
         render-request
         (when (map? acquisition)
           (cond->
@@ -1779,14 +1779,14 @@
             (:seon.config.eval/time-limit-ms handle)
             :seon.config/on-core-error (:seon.config/on-core-error handle)
             :seon.turn.loop/cluster handle
-            :seon.cluster.agent/routing
-            (:seon.cluster.agent/routing handle)
+            :seon.agent/routing
+            (:seon.agent/routing handle)
             :seon.render/retained-calls retained-calls
             :seon.render/captured-calls captured-calls
             :seon.render/invocations retained-invocations
             :seon.render/captured-invocations captured-invocations}
             render-agent-id
-            (assoc :seon.cluster.agent/id render-agent-id)))
+            (assoc :seon.agent/id render-agent-id)))
         context-source-call nil
         units-html
         (if render-request
@@ -1805,10 +1805,10 @@
                 {:seon.error/kind ::render-value-missing
                  :seon.error/message "The selected entity does not exist."}))])
         prompt-id (str "debug-ai-"
-                       (or (:seon.cluster.agent/id debug-request) "inspection"))
+                       (or (:seon.agent/id debug-request) "inspection"))
         prompt-result
         (when (:seon.render.debug/prompt? debug-request)
-          (when-let [agent-id (:seon.cluster.agent/id debug-request)]
+          (when-let [agent-id (:seon.agent/id debug-request)]
             (debug-prompt db connection agent-id caps
                           (assoc handle :seon.render/profile profile
                                         :seon.turn.loop/cluster handle))))
@@ -1825,7 +1825,7 @@
                             observation)}
           prompt-result
           (assoc prompt-id
-                 (debug-ai-html (:seon.cluster.agent/id debug-request)
+                 (debug-ai-html (:seon.agent/id debug-request)
                                 prompt-result)))]
     {:seon.render.web/page page
      :seon.render.web/fragments {}
@@ -2063,7 +2063,7 @@
                     (= ::debug-tab (first registration-key)))
         debug-request (when debug? (second registration-key))
         agent-id (if debug?
-                   (:seon.cluster.agent/id debug-request)
+                   (:seon.agent/id debug-request)
                    registration-key)
         retained-invocations (::invocations retained-values {})
         captured-invocations (atom {})]
@@ -2078,8 +2078,8 @@
         ;; only advances its observed database basis below.
         (if (or invalidate-calls? (nil? (get-in retained-values [::page-results registration-key])) (seq candidates))
           (debug-page-result database connection debug-request caps profile
-                             (assoc handle :seon.cluster.agent/routing
-                                    (:seon.cluster.agent/routing handle))
+                             (assoc handle :seon.agent/routing
+                                    (:seon.agent/routing handle))
                              retained retained-invocations
                              captured-invocations)
           {::retained-only? true
@@ -2093,7 +2093,7 @@
             call-id (root-call-id :seon.render/html registration-key)
             request
             (cond-> {:seon.db/db database
-                     :seon.cluster.agent/id agent-id
+                     :seon.agent/id agent-id
                      :seon.render.web/root-agent-id
                      (:seon.render.web/root-agent-id handle)
                      :seon.sci.admit/caps caps
@@ -2111,7 +2111,7 @@
                      :seon.render/captured-invocations captured-invocations
                      :seon.render/candidate-call-ids candidates
                      :seon.render.walk/lookup
-                     [:seon.cluster.agent/id agent-id]
+                     [:seon.agent/id agent-id]
                      :seon.render/distance 2}
               (get-in streams [agent-id :seon.ai/partial])
               (assoc :seon.ai/partial
@@ -2180,7 +2180,7 @@
                       {:seon.db/connection connection
                        :seon.render.web/root-agent-id
                        (:seon.render.web/root-agent-id service
-                                                      (:seon.cluster.agent/id service))})]
+                                                      (:seon.agent/id service))})]
     (schema/call-with-projection
      projection
      (fn []
@@ -2246,8 +2246,8 @@
   absence-reads-as-health class; it says so through the logging owner, naming
   the page and the diagnostic that will otherwise reach no database fact."
   ([state registration-key failure last-signature]
-   (let [fault-channel (:seon.cluster.agent/fault-channel
-                        @(:seon.cluster.agent/routing state))
+   (let [fault-channel (:seon.agent/fault-channel
+                        @(:seon.agent/routing state))
          debug? (and (vector? registration-key)
                      (= ::debug-tab (first registration-key)))
          message (str "Deriving this page threw " (.getName (class failure))
@@ -2379,7 +2379,7 @@
            (let [debug? (and (vector? registration-key)
                              (= ::debug-tab (first registration-key)))
                  agent-id (if debug?
-                            (:seon.cluster.agent/id (second registration-key))
+                            (:seon.agent/id (second registration-key))
                             registration-key)
                  [package package-changed?]
                  (next-package
@@ -2447,9 +2447,9 @@
                         {:seon.db/db @connection
                          :seon.db/connection connection
                          :seon.turn.loop/cluster cluster
-                         :seon.cluster.agent/routing
-                         (or (:seon.cluster.agent/routing request)
-                             (:seon.cluster.agent/routing cluster))})
+                         :seon.agent/routing
+                         (or (:seon.agent/routing request)
+                             (:seon.agent/routing cluster))})
         result (turn-function-result
                 function [(cond-> prepared
                             (= action :system-turn) (assoc :seon.turn/write? true))])]
@@ -2468,8 +2468,8 @@
        (change-context request)
        (let [entries (render.walk/history
                       (assoc request :seon.render.walk/lookup
-                             [:seon.cluster.agent/id
-                              (:seon.cluster.agent/id request)]))]
+                             [:seon.agent/id
+                              (:seon.agent/id request)]))]
          (if (:seon.error/kind entries)
            entries
            {:seon.cluster.prompt/text (history-text entries)
@@ -2577,7 +2577,7 @@
                  ::interest (assoc state ::streams {})
                  ::stream
                  (assoc-in state
-                           [::streams (:seon.cluster.agent/id message)]
+                           [::streams (:seon.agent/id message)]
                            message)
                  ::runtime-eval (invalidate-runtime-derived-state state)
                  state)
@@ -2704,7 +2704,7 @@
   revision. Later contiguous packages may use deltas; gaps use keyframes.
   A missing package reaches the client as a typed signal before close."
   {:malli/schema [:=> [:cat :any :seon.render.web/feed-request] :any]}
-  [request {:keys [:seon.cluster.agent/id]
+  [request {:keys [:seon.agent/id]
             connection :seon.store/connection-object
             pages-mult :seon.render.web/pages-mult
             registration :seon.render.web/registration
@@ -2720,7 +2720,7 @@
         registration-key
         (if debug?
           [::debug-tab
-           (debug-query query [:seon.cluster.agent/id id] viewer-namespace
+           (debug-query query [:seon.agent/id id] viewer-namespace
                         (when (agent-namespace @connection id) id))]
           id)
         channel (:async-channel request)
@@ -2782,7 +2782,7 @@
                  (async/offer!
                   fault-channel
                   {:clojure.core.async.flow/pid :seon.render.web/feed
-                   :seon.cluster.agent/id id
+                   :seon.agent/id id
                    :clojure.core.async.flow/ex
                    (ex-info "The browser feed writer failed."
                             {:seon.render.web/tab-id tab-id
@@ -2865,14 +2865,14 @@
   (some?
    (db/q '[:find ?agent .
           :in $ ?agent-id
-          :where [?agent :seon.cluster.agent/id ?agent-id]]
+          :where [?agent :seon.agent/id ?agent-id]]
         db agent-id)))
 
 (defn- inbound-tx-meta
   [db process user-id]
   (cond-> {:seon.db/process [:seon.db.process/id process]}
     (agent-exists? db user-id)
-    (assoc :seon.db/user [:seon.cluster.agent/id user-id])))
+    (assoc :seon.db/user [:seon.agent/id user-id])))
 
 (defn inbound
   "Commit one admitted inbound message and return its Ring response.
@@ -2884,12 +2884,12 @@
                        :seon.render.web/inbound]
                   :any]}
   [{connection :seon.store/connection-object
-    :keys [:seon.cluster.agent/id]
+    :keys [:seon.agent/id]
     caps :seon.sci.admit/caps
     process :seon.db.process/id}
    inbound]
   (let [request
-        {:seon.cluster.agent/id (:seon.cluster.agent/id inbound)
+        {:seon.agent/id (:seon.agent/id inbound)
          :seon.cluster.message/inbound-content
          (or (:seon.cluster.message/inbound-content inbound) "")
          :seon.cluster.message/at (Date.)
@@ -2961,8 +2961,8 @@
   (db/q '[:find ?namespace-name .
          :in $ ?agent-id
          :where
-         [?agent :seon.cluster.agent/id ?agent-id]
-         [?agent :seon.cluster.agent/namespace ?namespace]
+         [?agent :seon.agent/id ?agent-id]
+         [?agent :seon.agent/namespace ?namespace]
          [?namespace :seon.ns/name ?namespace-name]]
        db agent-id))
 
@@ -2982,7 +2982,7 @@
       (let [ensure! (requiring-resolve 'seon.cluster/ensure-entity!)
             result (ensure!
                     connection process
-                    {:seon.cluster.agent/id (str namespace-name)
+                    {:seon.agent/id (str namespace-name)
                      :seon.cluster/name (current-cluster-name @connection)
                      :seon.ns/name namespace-name})]
         (if (:seon.error/kind result)
@@ -2999,8 +2999,8 @@
 (defn- walk-request
   [db caps agent-id output connection render-context]
   (cond-> {:seon.db/db db
-             :seon.cluster.agent/id agent-id
-             :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
+             :seon.agent/id agent-id
+             :seon.render.walk/lookup [:seon.agent/id agent-id]
              :seon.render/output output
              :seon.render/distance (:depth namespace-walk-options)
              :seon.sci.admit/caps caps
@@ -3025,7 +3025,7 @@
             unit-html (vals (dissoc page stream-strip-id))]
         {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
-     :body (shell {:seon.cluster.agent/id agent-id
+     :body (shell {:seon.agent/id agent-id
                    :seon.render/page
                    [[:section {:class "seon-namespace-page"
                                :data-signals__ifmissing
@@ -3048,7 +3048,7 @@
   (let [db @connection
         query (query-params request)
         default-subject (if agent-id
-                          [:seon.cluster.agent/id agent-id]
+                          [:seon.agent/id agent-id]
                           [:seon.ns/name viewer-namespace])
         debug-request (debug-query query default-subject viewer-namespace
                                    agent-id)
@@ -3101,7 +3101,7 @@
                      {:id feed-id}
                      (debug-query-strings debug-request))}
         agent-id
-        (assoc :seon.cluster.agent/id agent-id)))}))
+        (assoc :seon.agent/id agent-id)))}))
 
 (defn- canonical-namespace-response
   [{connection :seon.store/connection-object :as service} debug? request]
@@ -3134,14 +3134,14 @@
   [service request]
   (agent-alias-response service false
                         (assoc-in request [:path-params :id]
-                                  (:seon.cluster.agent/id service))))
+                                  (:seon.agent/id service))))
 
 (defn- inbound-response
   [service request]
   (let [agent-id (get-in request [:path-params :id])
         params (decode-form request)]
     (inbound service
-             (cond-> {:seon.cluster.agent/id agent-id}
+             (cond-> {:seon.agent/id agent-id}
                (contains? params "content")
                (assoc :seon.cluster.message/inbound-content
                       (get params "content"))))))
@@ -3159,7 +3159,7 @@
                   (merge service (:seon.turn.loop/cluster service)
                   {:seon.db/connection (:seon.store/connection-object service)
                    :seon.render/context-action action
-                   :seon.cluster.agent/id (get-in request [:path-params :id])
+                   :seon.agent/id (get-in request [:path-params :id])
                    :seon.sci.eval/time-limit-ms
                    (:seon.config.eval/time-limit-ms service)}))
                  {:seon.render.web/invalid-context-action true
@@ -3174,13 +3174,13 @@
   [service request]
   (feed request
         (merge service
-               {:seon.cluster.agent/id (get-in request [:path-params :id])
+               {:seon.agent/id (get-in request [:path-params :id])
                 :seon.render.web/root-agent-id
-                (:seon.cluster.agent/id service)})))
+                (:seon.agent/id service)})))
 
 (defn- data-response
   [{connection :seon.store/connection-object
-    :keys [:seon.cluster.agent/id]
+    :keys [:seon.agent/id]
     caps :seon.sci.admit/caps
     :as service}
    request]
@@ -3261,7 +3261,7 @@
                       (render/agent-render-profile effective)))]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
-     :body (shell {:seon.cluster.agent/id id
+     :body (shell {:seon.agent/id id
                    :seon.render/page [(value/render-html unit)]
                    :seon.render.web/feed-url
                    (route/path ::route/feed {:id id})})}))

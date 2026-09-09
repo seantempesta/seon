@@ -150,7 +150,7 @@
           (str "(" function-symbol " " (pr-str argument) ")")
           :seon.cluster.eval/ns
           [:seon.ns/name (agent-namespace db agent-id)]
-          :seon.cluster.agent/id agent-id
+          :seon.agent/id agent-id
           :seon.sci.admit/caps caps
           :seon.sci.eval/time-limit-ms 30000
           :seon.config/on-core-error :panic})]
@@ -213,8 +213,8 @@
    (db/q '[:find ?message .
           :in $ ?from-id ?to-id
           :where
-          [?from :seon.cluster.agent/id ?from-id]
-          [?to :seon.cluster.agent/id ?to-id]
+          [?from :seon.agent/id ?from-id]
+          [?to :seon.agent/id ?to-id]
           [?message :seon.cluster.message/from ?from]
           [?message :seon.cluster.message/to ?to]]
         db from-id to-id)))
@@ -225,8 +225,8 @@
         (db/q '[:find [?message-id ...]
                :in $ ?from-id ?to-id
                :where
-               [?from :seon.cluster.agent/id ?from-id]
-               [?to :seon.cluster.agent/id ?to-id]
+               [?from :seon.agent/id ?from-id]
+               [?to :seon.agent/id ?to-id]
                [?message :seon.cluster.message/from ?from]
                [?message :seon.cluster.message/to ?to]
                [?message :seon.cluster.message/id ?message-id]]

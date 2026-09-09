@@ -43,7 +43,7 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
+      (db/transact! connection [{:seon.agent/id "agent-a"}])
       (body connection))))
 
 (defn problems-surface
@@ -96,7 +96,7 @@
   [connection]
   (db/transact! connection
               [{:seon.turn/id "run-failed"
-                :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+                :seon.turn/agent [:seon.agent/id "agent-a"]
                 :seon.turn/opened-at now
                 :seon.turn/closed-at now
                 :seon.turn/error "the model did not answer"}]))
@@ -105,7 +105,7 @@
   [connection]
   (db/transact! connection
               [{:seon.turn/id "run-with-receipt"
-                :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+                :seon.turn/agent [:seon.agent/id "agent-a"]
                :seon.turn/opened-at now
                 :seon.turn/closed-at now}
                {:seon.cluster.eval/id "receipt-1"
@@ -163,7 +163,7 @@
     run? (assoc :seon.error/run
                 [:seon.turn/id "generated-error-run"])
     agent? (assoc :seon.error/agent
-                  [:seon.cluster.agent/id "agent-a"])))
+                  [:seon.agent/id "agent-a"])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; A healthy cluster says nothing at all
@@ -201,9 +201,9 @@
        connection
        [{:seon.config/cluster "default"
          :seon.config.ai/model "z-cluster-model"}
-        {:seon.cluster.agent/id "agent-a"
+        {:seon.agent/id "agent-a"
          :seon.config.ai/model "a-agent-model"}
-        {:seon.cluster.agent/id "agent-b"
+        {:seon.agent/id "agent-b"
          :seon.config.ai/model "z-cluster-model"}])
       (let [value (found connection)
             entries (:seon.problems/missing-models value)]
@@ -329,7 +329,7 @@
          (db/transact!
           connection
           [{:seon.turn/id "generated-error-run"
-            :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+            :seon.turn/agent [:seon.agent/id "agent-a"]
             :seon.turn/opened-at now}])
          (let [facts (mapv (fn [ordinal attribution]
                              (generated-error-fact

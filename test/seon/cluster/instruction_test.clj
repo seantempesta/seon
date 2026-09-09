@@ -145,7 +145,7 @@
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "ensure")
-      (let [first-request {:seon.cluster.agent/id "alice"
+      (let [first-request {:seon.agent/id "alice"
                            :seon.cluster/name "ensure"
                            :seon.ns/name 'my.agents.alice}
             resumed-request (assoc first-request
@@ -154,14 +154,14 @@
                    (cluster/ensure-entity!
                     connection cluster/boot-process-identity first-request))))
         (let [before (db/pull @connection '[*]
-                             [:seon.cluster.agent/id "alice"])]
+                             [:seon.agent/id "alice"])]
           (is (nil? (:seon.error/kind
                      (cluster/ensure-entity!
                       connection cluster/boot-process-identity
                       resumed-request))))
           (is (= before
                  (db/pull @connection '[*]
-                         [:seon.cluster.agent/id "alice"])))
+                         [:seon.agent/id "alice"])))
           (is (nil? (db/q '[:find ?namespace .
                            :in $ ?namespace-name
                            :where

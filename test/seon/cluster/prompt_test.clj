@@ -37,7 +37,7 @@
                      {:seon.turn.loop/cluster handle
                       :seon.db/db @connection
                       :seon.sci.eval/ctx ctx
-                      :seon.cluster.agent/id "walker"
+                      :seon.agent/id "walker"
                       :seon.ns/name 'my.agents.walker
                       :seon.cluster.reply/text source
                       :seon.sci.admit/caps caps})
@@ -45,7 +45,7 @@
                        {:seon.turn.loop/cluster handle
                         :seon.db/db @connection
                         :seon.turn/id run-id
-                        :seon.turn/agent [:seon.cluster.agent/id "walker"]
+                        :seon.turn/agent [:seon.agent/id "walker"]
                         :seon.turn/starting-ns [:seon.ns/name 'my.agents.walker]
                         :seon.turn/reply source
                         :seon.turn/opened-at (:seon.turn/opened-at preview)
@@ -72,13 +72,13 @@
                       :seon.boot/cluster-name "prompt-walk"})
       (db/transact! connection
                   (agent/creation-tx
-                   {:seon.cluster.agent/id "walker"
+                   {:seon.agent/id "walker"
                     :seon.cluster/name "prompt-walk"
                     :seon.ns/name 'my.agents.walker}))
       (db/transact! connection
                   [{:seon.cluster.message/id "walk-message"
                     :seon.cluster.message/to
-                    [:seon.cluster.agent/id "walker"]
+                    [:seon.agent/id "walker"]
                     :seon.cluster.message/content "inspect this walk"
                     :seon.cluster.message/at (Date. 1700000000000)}])
       (let [ctx (support/fork-cluster-ctx connection)]
@@ -87,7 +87,7 @@
       (db/transact! connection
                   [{:seon.turn/id "walk-run"
                     :seon.turn/agent
-                    [:seon.cluster.agent/id "walker"]
+                    [:seon.agent/id "walker"]
                     :seon.turn/trigger
                     [:seon.cluster.message/id "walk-message"]
                     :seon.turn/opened-at (Date. 1700000001000)}])
@@ -96,7 +96,7 @@
 (defn- request
   [connection ctx]
   {:seon.turn/id "walk-run"
-   :seon.cluster.agent/id "walker"
+   :seon.agent/id "walker"
    :seon.db/connection connection
    :seon.sci.admit/caps caps
    :seon.sci.eval/ctx ctx
@@ -128,7 +128,7 @@
                    (prompt/prompt @connection (request connection ctx)))]
        (db/transact! connection
                      [{:seon.cluster.message/id "later"
-                       :seon.cluster.message/to [:seon.cluster.agent/id "walker"]
+                       :seon.cluster.message/to [:seon.agent/id "walker"]
                        :seon.cluster.message/content "not evaluated yet"
                        :seon.cluster.message/at (Date. 1700000002000)}])
        (let [after (:seon.cluster.prompt/text
@@ -184,13 +184,13 @@
       (support/seed-cluster! connection "no-trigger")
       (db/transact! connection
                   (agent/creation-tx
-                   {:seon.cluster.agent/id "walker"
+                   {:seon.agent/id "walker"
                     :seon.cluster/name "no-trigger"
                     :seon.ns/name 'my.agents.walker}))
       (db/transact! connection
                   [{:seon.turn/id "walk-run"
                     :seon.turn/agent
-                    [:seon.cluster.agent/id "walker"]
+                    [:seon.agent/id "walker"]
                     :seon.turn/opened-at (Date.)}])
       (testing "the custody invariant remains independent of presentation"
         (is (= :seon.cluster.prompt/no-trigger
@@ -204,7 +204,7 @@
   (planted
    (fn [connection ctx]
      (db/transact! connection
-                   [{:seon.cluster.agent/id "walker"
+                   [{:seon.agent/id "walker"
                      :seon.agent/settings {:seon.config.ai/prompt-token-budget 3}}])
      (let [distances (atom [])
            acquire (fn [render-request]
@@ -248,7 +248,7 @@
   [model ordinal characters provider-tokens]
   (let [run-id (str "usage-run-" ordinal)]
     [{:seon.turn/id run-id
-      :seon.turn/agent [:seon.cluster.agent/id "walker"]
+      :seon.turn/agent [:seon.agent/id "walker"]
       :seon.turn/opened-at (Date. (+ 1700000100000 (* 1000 ordinal)))}
      {:seon.context.capture/id (str run-id "-context-1")
       :seon.context.capture/run [:seon.turn/id run-id]
@@ -279,7 +279,7 @@
                          :where [_ :seon.config.ai/model ?model]]
                        @connection)]
        (db/transact! connection
-                     [{:seon.cluster.agent/id "walker"
+                     [{:seon.agent/id "walker"
                        :seon.agent/settings {:seon.config.ai/prompt-token-budget 100}}])
        (testing "with no recorded usage the measured prior is named"
          (let [calibration (prompt/model-calibration @connection model)]

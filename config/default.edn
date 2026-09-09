@@ -494,9 +494,9 @@
    :seon.call-preparation/supplier
    [:seon.fn/sym "seon.db/supplied-connection"]}
 
-  {:seon.call-preparation/key :seon.cluster.agent/id
+  {:seon.call-preparation/key :seon.agent/id
    :seon.call-preparation/schema
-   [:seon.schema/key :seon.cluster.agent/id]
+   [:seon.schema/key :seon.agent/id]
    :seon.call-preparation/supplier
    [:seon.fn/sym "seon.env/supplied-agent-id"]}
 

@@ -118,7 +118,7 @@
                               :seon.boot/cluster-name "web-test"})
             _ (db/transact! connection
                             (cluster.agent/creation-tx
-                             {:seon.cluster.agent/id agent-id
+                             {:seon.agent/id agent-id
                               :seon.cluster/name "web-test"
                               :seon.ns/name 'my.agents.root}))
             ctx (support/fork-cluster-ctx connection)
@@ -189,7 +189,7 @@ handle))}}
           (reset! server (web/start!
                           {:seon.turn.loop/cluster handle
                            :seon.store/connection-object connection
-                           :seon.cluster.agent/id agent-id
+                           :seon.agent/id agent-id
                            :seon.sci.admit/caps caps
                            :seon.sci.eval/ctx ctx
                            :seon.config.eval/time-limit-ms
@@ -304,7 +304,7 @@ handle))}}
   (db/transact! connection
               [{:seon.turn/id run-id
                 :seon.turn/agent
-                [:seon.cluster.agent/id agent-id]
+                [:seon.agent/id agent-id]
                 :seon.turn/opened-at (java.util.Date.)}]))
 
 (defn- client [] (.build (HttpClient/newBuilder)))
@@ -437,7 +437,7 @@ handle))}}
     (fn [connection server _context]
       (db/transact! connection
                   (cluster.agent/creation-tx
-                   {:seon.cluster.agent/id "agent-b"
+                   {:seon.agent/id "agent-b"
                     :seon.cluster/name "web-test"
                     :seon.ns/name 'my.agents.agent-b}))
       (let [root (.body (fetch server "/"))
@@ -485,7 +485,7 @@ handle))}}
                (db/q '[:find [?process-id ...]
                       :in $ ?agent-id
                       :where
-                      [?agent :seon.cluster.agent/id ?agent-id ?tx]
+                      [?agent :seon.agent/id ?agent-id ?tx]
                       [?tx :seon.db/process ?process]
                       [?process :seon.db.process/id ?process-id]]
                     @connection owner))
@@ -613,7 +613,7 @@ handle))}}
   (support/with-database
    (fn [connection]
      (db/transact! connection
-                   [{:seon.cluster.agent/id "unit-owner"
+                   [{:seon.agent/id "unit-owner"
                      :seon.agent/plan {:my.plan/objective "Inspect the page"}
                      :seon.agent/settings
                      {:seon.config.eval/time-limit-ms 1234}}])
@@ -621,9 +621,9 @@ handle))}}
            projection (schema/projection-from-database database)
            declared (web-private 'declared-entity-units)
            entity (db/pull database '[*]
-                           [:seon.cluster.agent/id "unit-owner"])]
-       (is (= [:seon.cluster.agent/id :seon.agent/plan
-               :seon.cluster.agent/namespace :seon.agent/settings
+                           [:seon.agent/id "unit-owner"])]
+       (is (= [:seon.agent/id :seon.agent/plan
+               :seon.agent/namespace :seon.agent/settings
                :seon.cluster.message/inbound-content]
               (declared projection database entity))
            "declared attributes retain schema order before block grouping")
@@ -827,7 +827,7 @@ handle))}}
                  :forms (total :seon.cluster.eval/ordinal)
                  :faults (total :seon.error/id)}))
             subject (URLEncoder/encode
-                     (pr-str [:seon.cluster.agent/id agent-id]) "UTF-8")
+                     (pr-str [:seon.agent/id agent-id]) "UTF-8")
             feed-path (str "/feed/" agent-id "?debug=true"
                            "&viewer=my.agents.root"
                            "&subject=" subject
@@ -1253,7 +1253,7 @@ handle))}}
                   data (ex-data (:clojure.core.async.flow/ex fault))]
               (is (= :seon.render.web/feed
                      (:clojure.core.async.flow/pid fault)))
-              (is (= agent-id (:seon.cluster.agent/id fault)))
+              (is (= agent-id (:seon.agent/id fault)))
               (is (string? (:seon.render.web/tab-id data)))
               (is (= agent-id (:seon.render.web/page data)))
               (is (= :seon.render/html (:seon.render/output data))))
@@ -1398,7 +1398,7 @@ handle))}}
                 (web/start!
                  (service-request connection
                  {:seon.store/connection-object connection
-                  :seon.cluster.agent/id agent-id
+                  :seon.agent/id agent-id
                   :seon.sci.admit/caps caps
                   :seon.db.process/id process
                   :seon.render.web/pages-mult (async/mult pages-channel)
@@ -1488,7 +1488,7 @@ handle))}}
         (.close doomed))
       ;; a snapshot in flight on the stream conn, dropped on the floor
       (async/offer! (:stream-channel context)
-                    {:seon.cluster.agent/id agent-id
+                    {:seon.agent/id agent-id
                      :seon.ai/partial {:seon.ai/text "half a re"
                                        :seon.ai/tokens 3}})
       (async/poll! (:stream-channel context))
@@ -1541,10 +1541,10 @@ handle))}}
             run-b "stream-run-b"]
         (open-run! connection run-a)
         (db/transact! connection
-                    [{:seon.cluster.agent/id "agent-b"}
+                    [{:seon.agent/id "agent-b"}
                      {:seon.turn/id run-b
                       :seon.turn/agent
-                      [:seon.cluster.agent/id "agent-b"]
+                      [:seon.agent/id "agent-b"]
                       :seon.turn/opened-at (java.util.Date.)}])
         (let [tab (open-feed server (str "/feed/" agent-id))]
         (try
@@ -1556,7 +1556,7 @@ handle))}}
                        [:initial-fact-paint-derived])
 
           (async/offer! (:stream-channel context)
-                        {:seon.cluster.agent/id agent-id
+                        {:seon.agent/id agent-id
                          :seon.turn/id run-a
                          :seon.ai/partial {:seon.ai/text "A half reply"
                                            :seon.ai/tokens 3}})
@@ -1567,7 +1567,7 @@ handle))}}
           ;; This is the displacing value from the audit ordering. It
           ;; changes B's transient entry but cannot carry semantics for A.
           (async/offer! (:stream-channel context)
-                        {:seon.cluster.agent/id "agent-b"
+                        {:seon.agent/id "agent-b"
                          :seon.turn/id run-b
                          :seon.ai/partial {:seon.ai/text "B newest"
                                            :seon.ai/tokens 2}})
@@ -1593,7 +1593,7 @@ handle))}}
           (testing "a delayed partial cannot repaint over its terminal fact"
             (let [before (derivations context)]
               (async/offer! (:stream-channel context)
-                            {:seon.cluster.agent/id agent-id
+                            {:seon.agent/id agent-id
                              :seon.turn/id run-a
                              :seon.ai/partial {:seon.ai/text "too late"
                                                :seon.ai/tokens 99}})
@@ -1619,7 +1619,7 @@ handle))}}
                        #(= 1 (:seon.render.web/watched-agents %))
                        [:first-tab-derived])
           (async/offer! (:stream-channel context)
-                        {:seon.cluster.agent/id agent-id
+                        {:seon.agent/id agent-id
                          :seon.turn/id run-id
                          :seon.ai/partial {:seon.ai/text "not durable"
                                            :seon.ai/tokens 2}})
@@ -1742,7 +1742,7 @@ handle))}}
   (with-server
     (fn [connection server _context]
       (db/transact! connection
-                  [{:seon.cluster.agent/id "alice"}])
+                  [{:seon.agent/id "alice"}])
       (let [response
             (fetch server
                    "/data?entity=%5B%3Aseon.cluster.agent%2Fid+%22alice%22%5D&path=%5B%5D&offset=0")
@@ -1877,7 +1877,7 @@ handle))}}
     (fn [connection server _context]
       (db/transact! connection
                   (cluster.agent/creation-tx
-                   {:seon.cluster.agent/id "alice"
+                   {:seon.agent/id "alice"
                     :seon.cluster/name "web-test"
                     :seon.ns/name 'my.agents.alice}))
       (let [agent-page (.body (fetch server "/agent/root"))
@@ -1899,9 +1899,9 @@ handle))}}
   (with-server
     (fn [connection server _context]
       (db/transact! connection
-                  {:tx-data [{:seon.cluster.agent/id "debug-trigger"}]
+                  {:tx-data [{:seon.agent/id "debug-trigger"}]
                    :tx-meta {:seon.db/user
-                             [:seon.cluster.agent/id agent-id]}})
+                             [:seon.agent/id agent-id]}})
       (let [stream (open-feed server (debug-feed-path
                                       agent-id [] "&maxRefAttributes=200"))]
         (try
@@ -1929,14 +1929,14 @@ handle))}}
                        :in $ ?content
                        :where [?message :seon.cluster.message/content ?content]
                        [?message :seon.cluster.message/to ?agent]
-                       [?agent :seon.cluster.agent/id ?id]]
+                       [?agent :seon.agent/id ?id]]
                      @connection "wire-echo-2026072903")))))))
 
 (deftest the-inbound-route-is-method-discriminated-test
   ;; seed 2026072905 — the former prefix-dispatch shadow class.
   (with-server
     (fn [connection server _context]
-      (db/transact! connection [{:seon.cluster.agent/id "bob"}])
+      (db/transact! connection [{:seon.agent/id "bob"}])
       (is (= 404 (.statusCode (fetch server "/agent/bob/message"))))
       (is (= 404 (.statusCode (post-form server "/agent/bob" "content=x"))))
       (is (= 404 (.statusCode
@@ -1972,7 +1972,7 @@ handle))}}
   declared contract forbids."
   [connection overrides]
   (merge {:seon.store/connection-object connection
-          :seon.cluster.agent/id agent-id
+          :seon.agent/id agent-id
           :seon.sci.admit/caps caps
           :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
           :seon.config.eval/time-limit-ms
@@ -1993,11 +1993,11 @@ handle))}}
       (support/seed-cluster! connection "web-write-refusal")
       (db/transact! connection
                   (cluster.agent/creation-tx
-                   {:seon.cluster.agent/id agent-id
+                   {:seon.agent/id agent-id
                     :seon.cluster/name "web-write-refusal"
                     :seon.ns/name 'my.agents.root}))
       (let [service (service-request connection {})
-            inbound {:seon.cluster.agent/id agent-id
+            inbound {:seon.agent/id agent-id
                      :seon.cluster.message/inbound-content "accepted"}]
         (doseq [[result expected-status]
                 [[{:seon.error/kind :seon.db/rejected
@@ -2132,7 +2132,7 @@ handle))}}
   (support/seed-cluster! connection "web-fault-test")
   (db/transact! connection
                 (cluster.agent/creation-tx
-                 {:seon.cluster.agent/id "agent-a"
+                 {:seon.agent/id "agent-a"
                   :seon.cluster/name "web-fault-test"
                   :seon.ns/name 'my.agents.fault-test}))
   {:seon.turn.loop/cluster
@@ -2144,8 +2144,8 @@ handle))}}
     :seon.config.eval/time-limit-ms 1000
     :seon.config/on-core-error :panic
     :seon.db.process/id "web-fault-test"})
-   :seon.cluster.agent/routing
-   (atom {:seon.cluster.agent/fault-channel fault-channel})
+   :seon.agent/routing
+   (atom {:seon.agent/fault-channel fault-channel})
    :seon.render.web/registration (atom {"agent-a" 1})
    :seon.render.web/latest-packages (atom {})
    :seon.render.web/root-agent-id "root"
@@ -2203,7 +2203,7 @@ handle))}}
       ;; Routing with no fault channel value at all: `failed-page-result`
       ;; derefs it, and a nil deref target throws inside the reporting path.
       (let [state (assoc (throwing-render-state connection nil)
-                         :seon.cluster.agent/routing nil)
+                         :seon.agent/routing nil)
             after (with-redefs-fn
                     {#'web/derive-page!
                      (fn [& _] (throw (ex-info "the page threw" {})))}

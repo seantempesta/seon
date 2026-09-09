@@ -107,7 +107,7 @@
   [database agent-id]
   (db/q '[:find ?agent .
           :in $ ?agent-id
-          :where [?agent :seon.cluster.agent/id ?agent-id]]
+          :where [?agent :seon.agent/id ?agent-id]]
         database agent-id))
 
 (defn- plan-eid
@@ -159,7 +159,7 @@
   '[:find [?id ...]
     :in $ % ?agent-id
     :where
-    [?agent :seon.cluster.agent/id ?agent-id]
+    [?agent :seon.agent/id ?agent-id]
     (owned ?agent ?step)
     [?step :my.plan.item/id ?id]])
 
@@ -167,7 +167,7 @@
   '[:find [?id ...]
     :in $ % ?agent-id
     :where
-    [?agent :seon.cluster.agent/id ?agent-id]
+    [?agent :seon.agent/id ?agent-id]
     (owned ?agent ?step)
     [?step :my.plan.item/id ?id]
     (ready ?step)])
@@ -176,7 +176,7 @@
   '[:find [?id ...]
     :in $ % ?agent-id
     :where
-    [?agent :seon.cluster.agent/id ?agent-id]
+    [?agent :seon.agent/id ?agent-id]
     (owned ?agent ?step)
     [?step :my.plan.item/id ?id]
     (not-join [?step] [?step :my.plan.item/completed-at _])
@@ -274,7 +274,7 @@
         :seon.render.data/path [:my.plan/recent-completions]
         :seon.render.data/next-offset (count recent)
         :seon.render.profile/id :seon.render.profile/agent
-        :seon.print/requery-id [:seon.cluster.agent/id agent-id]}))))
+        :seon.print/requery-id [:seon.agent/id agent-id]}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Current reads
@@ -287,7 +287,7 @@
                        [:my.plan/objective
                         {:my.plan/current-step [:my.plan.item/id]}
                         {:my.plan/steps step-selector}]}]
-                     [:seon.cluster.agent/id agent-id])]
+                     [:seon.agent/id agent-id])]
     (if (error-value? row) row (:seon.agent/plan row))))
 
 (defn plan
@@ -299,7 +299,7 @@
   {:malli/schema
    [:=> [:catn [:request :my.plan/request]]
     [:or :my.plan/component-view :seon.error/value]]}
-  [{database :seon.db/db agent-id :seon.cluster.agent/id}]
+  [{database :seon.db/db agent-id :seon.agent/id}]
   (let [agent-entity (agent-eid database agent-id)]
     (cond
       (error-value? agent-entity) agent-entity
@@ -308,7 +308,7 @@
       {:my.plan/agent-not-found true
        :seon.error/kind :my.plan/agent-not-found
        :seon.error/message (str "There is no agent named " (pr-str agent-id) ".")
-       :seon.error/data {:seon.cluster.agent/id agent-id}}
+       :seon.error/data {:seon.agent/id agent-id}}
 
       :else
       (let [pulled (agent-plan-pull database agent-id)
@@ -323,7 +323,7 @@
                                      (set ready-ids) (set blocked-ids))
                 by-id (into {} (map (juxt :my.plan.item/id identity)) steps)
                 completions (completion-view database agent-id steps)]
-            (cond-> {:seon.cluster.agent/id agent-id
+            (cond-> {:seon.agent/id agent-id
                      :my.plan/steps steps
                      :my.plan/ready (into [] (keep by-id) (sort ready-ids))
                      :my.plan/blocked (into [] (keep by-id) (sort blocked-ids))
@@ -385,10 +385,10 @@
 
 (defn current
   "Read your current step; an empty map means none is selected."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
                   [:or :my.plan/current-value :seon.error/value]]}
   [database agent-id]
-  (let [view (plan {:seon.db/db database :seon.cluster.agent/id agent-id})
+  (let [view (plan {:seon.db/db database :seon.agent/id agent-id})
         current-id (get-in view [:my.plan/current-step :my.plan.item/id])]
     (if (error-value? view)
       view
@@ -398,27 +398,27 @@
 
 (defn blocked
   "Read your blocked steps and the step identities they need."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
                   [:or [:vector :my.plan/step-summary] :seon.error/value]]}
   [database agent-id]
-  (let [view (plan {:seon.db/db database :seon.cluster.agent/id agent-id})]
+  (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
     (if (error-value? view) view (mapv step-summary (:my.plan/blocked view)))))
 
 (defn steps
   "Read your plan steps in their authored tree order."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
                   [:or [:vector :my.plan/step-summary] :seon.error/value]]}
   [database agent-id]
-  (let [view (plan {:seon.db/db database :seon.cluster.agent/id agent-id})]
+  (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
     (if (error-value? view) view (mapv step-summary (:my.plan/steps view)))))
 
 (defn ready
   "Read your ready steps; complete one with my.plan/complete!."
   {:malli/schema
-   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+   [:=> [:cat :seon.db/db :seon.agent/id]
     [:or [:vector :my.plan/step-summary] :seon.error/value]]}
   [database agent-id]
-  (let [view (plan {:seon.db/db database :seon.cluster.agent/id agent-id})]
+  (let [view (plan {:seon.db/db database :seon.agent/id agent-id})]
     (if (error-value? view) view (mapv step-summary (:my.plan/ready view)))))
 
 (defn ready-subjects
@@ -427,7 +427,7 @@
   Ready-step order and each authored subject-vector order are retained.
   Repeated resolved rows collapse at their first occurrence."
   {:malli/schema
-   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+   [:=> [:cat :seon.db/db :seon.agent/id]
     [:or :my.plan/intent-subjects :seon.error/value]]}
   [database agent-id]
   (let [steps (ready database agent-id)]
@@ -452,7 +452,7 @@
   (db/transact!
    connection
    {:tx-data tx-data
-    :tx-meta {:seon.db/user [:seon.cluster.agent/id agent-id]}}))
+    :tx-meta {:seon.db/user [:seon.agent/id agent-id]}}))
 
 (defn- owned-step-eid!
   [database agent-entity reference member]
@@ -482,12 +482,12 @@
 (defn- add-step-call
   [database request]
   (let [item-id (:my.plan.item/id request)
-        agent-id (:seon.cluster.agent/id request)
+        agent-id (:seon.agent/id request)
         agent-entity (agent-eid database agent-id)]
     (when-not agent-entity
       (refuse! :my.plan/agent-not-found
                (str "There is no agent named " (pr-str agent-id) ".")
-               {:seon.cluster.agent/id agent-id}))
+               {:seon.agent/id agent-id}))
     (when (step-eid database item-id)
       (refuse! :my.plan/identity-exists
                (str "Plan step " (pr-str item-id) " already exists.")
@@ -512,7 +512,7 @@
           attribute (if parent :my.plan.item/steps :my.plan/steps)
           tempid "new-plan-step"
           step (cond-> (dissoc request
-                               :seon.cluster.agent/id
+                               :seon.agent/id
                                :my.plan/parent-step
                                :my.plan/current?)
                  true (assoc :db/id tempid
@@ -530,7 +530,7 @@
 (defn- complete-step-call
   [database request]
   (let [item-id (:my.plan.item/id request)
-        agent-id (:seon.cluster.agent/id request)
+        agent-id (:seon.agent/id request)
         agent-entity (agent-eid database agent-id)
         plan-entity (plan-eid database agent-entity)
         step (step-eid database item-id)]
@@ -546,7 +546,7 @@
                (str "Plan step " (pr-str item-id)
                     " is not in this agent's plan.")
                {:my.plan.item/id item-id
-                :seon.cluster.agent/id agent-id}))
+                :seon.agent/id agent-id}))
     (if (db/q '[:find ?completed-at .
                 :in $ ?step
                 :where [?step :my.plan.item/completed-at ?completed-at]]
@@ -565,10 +565,10 @@
   "Add one step to this agent's plan, at the root or under a named parent step."
   {:malli/schema
    [:=> [:cat :my.plan.item/add-request
-         :seon.db/connection :seon.cluster.agent/id]
+         :seon.db/connection :seon.agent/id]
     [:or :my.plan/step-summary :seon.error/value]]}
   [step connection agent-id]
-  (let [request (assoc step :seon.cluster.agent/id agent-id)
+  (let [request (assoc step :seon.agent/id agent-id)
         result (transact-plan! connection agent-id
                                [[:db.fn/call #'add-step-call request]])]
     (if (error-value? result)
@@ -580,7 +580,7 @@
   "Complete one owned step and clear it when it is this agent's current step."
   {:malli/schema
    [:=> [:cat :my.plan.item/id :my.plan.item/completed-at
-         :seon.db/connection :seon.cluster.agent/id]
+         :seon.db/connection :seon.agent/id]
     [:or :my.plan/step-summary :seon.error/value]]}
   [item-id completed-at connection agent-id]
   (let [result
@@ -588,7 +588,7 @@
                         [[:db.fn/call #'complete-step-call
                           {:my.plan.item/id item-id
                            :my.plan.item/completed-at completed-at
-                           :seon.cluster.agent/id agent-id}]])]
+                           :seon.agent/id agent-id}]])]
     (if (error-value? result)
       result
       (step-summary (item {:seon.db/db (:db-after result)
@@ -600,7 +600,7 @@
         step (step-eid database item-id)]
     (when-not (and step (contains? (owned-ids database agent-id) item-id))
       (refuse! :my.plan/not-owned "Select a step owned by this agent."
-               {:my.plan.item/id item-id :seon.cluster.agent/id agent-id}))
+               {:my.plan.item/id item-id :seon.agent/id agent-id}))
     (when (db/q '[:find ?completed . :in $ ?step
                   :where [?step :my.plan.item/completed-at ?completed]]
                 database step)
@@ -611,7 +611,7 @@
 (defn start!
   "Select one of your steps as current and return that step."
   {:malli/schema [:=> [:cat :my.plan.item/id :seon.db/connection
-                       :seon.cluster.agent/id]
+                       :seon.agent/id]
                   [:or :my.plan/step-summary :seon.error/value]]}
   [item-id connection agent-id]
   (let [result (transact-plan! connection agent-id
@@ -785,7 +785,7 @@
     (when-not agent-entity
       (refuse! :my.plan/agent-not-found
                (str "There is no agent named " (pr-str agent-id) ".")
-               {:seon.cluster.agent/id agent-id}))
+               {:seon.agent/id agent-id}))
     (let [existing-plan (plan-eid database agent-entity)
           plan-entity (or existing-plan "new-agent-plan")
           stored-objective (:my.plan/objective (agent-plan-pull database agent-id))
@@ -933,7 +933,7 @@
   steps they own."
   {:malli/schema
    [:=> [:cat :my.plan/component-input :seon.db/database-value
-         :seon.db/connection :seon.cluster.agent/id]
+         :seon.db/connection :seon.agent/id]
     [:or :my.plan/plan-result :seon.error/value]]}
   [input database connection agent-id]
   (try
@@ -948,7 +948,7 @@
                connection
                {:tx-data (:my.plan/tx-data compiled)
                 :datahike/expected-basis-t basis
-                :tx-meta {:seon.db/user [:seon.cluster.agent/id agent-id]}})]
+                :tx-meta {:seon.db/user [:seon.agent/id agent-id]}})]
           (if (error-value? result)
             result
             {:my.plan/converged? false
@@ -1094,7 +1094,7 @@
 (defn- update-example
   "One executable form updating this plan, using real stable identities."
   [view]
-  (let [agent-id (:seon.cluster.agent/id view)
+  (let [agent-id (:seon.agent/id view)
         current (get-in view [:my.plan/current-step :my.plan.item/id])
         other? #(not= current (:my.plan.item/id %))
         next-step (or (some :my.plan.item/id
@@ -1109,7 +1109,7 @@
            " :my.plan.item/title \"My first step\"} )")
       (pr-str
        (list 'seon.db/transact!
-             [{:db/id [:seon.cluster.agent/id agent-id]
+             [{:db/id [:seon.agent/id agent-id]
                :my.plan/current-step [:my.plan.item/id next-step]}])))))
 
 (defn- current-title
@@ -1143,7 +1143,7 @@
       (str/join
        "\n\n"
        (cond->
-        [(str "Plan for " (:seon.cluster.agent/id view)
+        [(str "Plan for " (:seon.agent/id view)
               (when objective
                 (str "\nObjective: " objective))
               (if-let [current (current-title view)]
@@ -1175,14 +1175,14 @@
   [unit]
   (let [database (:seon.db/db unit)
         component (or (:seon.render/value unit) unit)
-        agent-id (or (:seon.cluster.agent/id unit)
+        agent-id (or (:seon.agent/id unit)
                      (when (and database (:db/id component))
                        (db/q '[:find ?id . :in $ ?plan
                                :where [?agent :seon.agent/plan ?plan]
-                                      [?agent :seon.cluster.agent/id ?id]]
+                                      [?agent :seon.agent/id ?id]]
                              database (:db/id component))))
         view (if (and database agent-id)
-               (plan {:seon.db/db database :seon.cluster.agent/id agent-id})
+               (plan {:seon.db/db database :seon.agent/id agent-id})
                component)]
     (if (error-value? view)
       view

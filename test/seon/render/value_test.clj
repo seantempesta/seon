@@ -19,7 +19,7 @@
 
 (defn- unit
   [raw]
-  {:seon.cluster.agent/id "root"
+  {:seon.agent/id "root"
    :seon.render.call/id [:seon.render.value-test/floor]
    :seon.render/value raw
    :seon.sci.admit/caps caps})
@@ -119,7 +119,7 @@
                               (:seon.render.value/options projection))))))))
 
 (deftest anonymous-roots-refuse-instead-of-colliding
-  (let [anonymous {:seon.cluster.agent/id "root"
+  (let [anonymous {:seon.agent/id "root"
                    :seon.render/value {:same/value 1}
                    :seon.sci.admit/caps caps}
         results [(value/render-html anonymous)

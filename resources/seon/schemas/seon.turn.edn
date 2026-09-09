@@ -82,7 +82,7 @@
                                 [:seon.cluster.eval/ns :seon.cluster.eval/ns]]]]]],
                    :system-run-request
                    [:map
-                    [:seon.cluster.agent/id :seon.cluster.agent/id]
+                    [:seon.agent/id :seon.agent/id]
                     [:seon.turn/id :seon.turn/id]
 
                     [:seon.turn/opened-at :seon.turn/opened-at]
@@ -95,7 +95,7 @@
                     [:seon.turn/trigger {:optional true} :seon.turn/trigger]],
                    :generated-run-request
                    [:map
-                    [:seon.cluster.agent/id :seon.cluster.agent/id]
+                    [:seon.agent/id :seon.agent/id]
                     [:seon.turn/id :seon.turn/id]
 
                     [:seon.turn/opened-at :seon.turn/opened-at]
@@ -183,7 +183,7 @@
  :system-request
  [:map
   [:seon.turn.loop/cluster :seon.turn.loop/cluster]
-  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.agent/id :seon.agent/id]
   [:seon.turn/write? {:optional true} :seon.turn/write?]]
  :system-result
  [:map
@@ -193,10 +193,10 @@
  :compaction-request
  [:map
   [:seon.db/connection :seon.db/connection]
-  [:seon.cluster.agent/id :seon.cluster.agent/id]]
+  [:seon.agent/id :seon.agent/id]]
  :virtual-request
  [:map
   [:seon.turn.loop/cluster :seon.turn.loop/cluster]
-  [:seon.cluster.agent/routing :seon.cluster.agent/routing]
-  [:seon.cluster.agent/id :seon.cluster.agent/id]
+  [:seon.agent/routing :seon.agent/routing]
+  [:seon.agent/id :seon.agent/id]
   [:seon.cluster.reply/text {:optional true} :seon.cluster.reply/text]]}

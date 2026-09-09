@@ -94,7 +94,7 @@
     (update :seon.error/run restore-error-ref :seon.turn/id)
 
     (contains? pulled :seon.error/agent)
-    (update :seon.error/agent restore-error-ref :seon.cluster.agent/id)))
+    (update :seon.error/agent restore-error-ref :seon.agent/id)))
 
 (defn- error-signatures
   "Every committed error, grouped by signature, worst-recurring first."
@@ -104,7 +104,7 @@
                               {:seon.error/run
                                [:db/id :seon.turn/id]
                                :seon.error/agent
-                               [:db/id :seon.cluster.agent/id]}]) ...]
+                               [:db/id :seon.agent/id]}]) ...]
               :where
               ;; Membership is the declared error identity, not any row
               ;; that happens to carry a signature. Signature-only rows
@@ -131,12 +131,12 @@
               [?run :seon.turn/id ?id]
               [?run :seon.turn/error ?error]
               [?run :seon.turn/agent ?agent]
-              [?agent :seon.cluster.agent/id ?agent-id]]
+              [?agent :seon.agent/id ?agent-id]]
             db)
        (sort)
        (mapv (fn [[id agent-id message]]
                {:seon.turn/id id
-                :seon.cluster.agent/id agent-id
+                :seon.agent/id agent-id
                 :seon.turn/error message}))))
 
 (defn- errored-receipts
@@ -198,7 +198,7 @@
                    :where
                    [?form :seon.cluster.eval/run ?run]
                    [?run :seon.turn/agent ?author]
-                   [?author :seon.cluster.agent/id ?author-id]]
+                   [?author :seon.agent/id ?author-id]]
                  db (:db/id form))
             kind (or (:seon.error/kind admitted)
                      (when unbound? ::unbound-var)
@@ -213,7 +213,7 @@
          :seon.cluster.eval/ordinal ordinal
          :seon.cluster.eval/source
          (:seon.cluster.eval/source form)
-         :seon.cluster.agent/id owner-id
+         :seon.agent/id owner-id
          :seon.problems/author author-id
          :seon.error/kind kind
          :seon.cluster.eval/error error}))))
@@ -227,9 +227,9 @@
   {:malli/schema [:=> [:cat :seon.problems/form-problem]
                   [:maybe :my.message/message]]}
   [problem]
-  (when-not (= (:seon.cluster.agent/id problem)
+  (when-not (= (:seon.agent/id problem)
                (:seon.problems/author problem))
-    {:my.message/to (:seon.cluster.agent/id problem)
+    {:my.message/to (:seon.agent/id problem)
      :my.message/about (:seon.problems/id problem)
      :my.message/content
      (str "Repair problem " (:seon.problems/id problem)
@@ -245,13 +245,13 @@
   or a flag, because none exists."
   [db]
   (->> (db/q '[:find [?agent-id ...]
-              :where [_ :seon.cluster.agent/id ?agent-id]]
+              :where [_ :seon.agent/id ?agent-id]]
             db)
        sort
        (keep (fn [agent-id]
                (let [deferred (turn/deferred-triggers db agent-id)]
                  (when (seq deferred)
-                   {:seon.cluster.agent/id agent-id
+                   {:seon.agent/id agent-id
                     :seon.turn.work/episode-runs
                     (turn/episode-runs db agent-id)
                     :seon.problems/deferred-count (count deferred)}))))
@@ -263,7 +263,7 @@
   OWNERSHIP IS THE NAMESPACE'S OWN `:seon.ns/steward` FACT, asserted inside
   the creation transaction (`seon.cluster.agent/steward-call`) and read by
   `seon.cluster.agent/steward-of`. This used to invert
-  `:seon.cluster.agent/namespace`, but that attribute is assignment, not
+  `:seon.agent/namespace`, but that attribute is assignment, not
   ownership: it is not unique, several agents may be assigned one namespace,
   and a namespace every agent had merely been assigned still answered
   \"owned\". Absence of a steward is what nobody can fake."
@@ -479,7 +479,7 @@
     "failed runs"
     (for [entry (:seon.problems/failed-runs found)]
       (row "run" (:seon.turn/id entry)
-           "agent" (:seon.cluster.agent/id entry)
+           "agent" (:seon.agent/id entry)
            "error" (:seon.turn/error entry))))
    (family-section
     "errored forms"
@@ -492,7 +492,7 @@
    (family-section
     "deferred agents"
     (for [entry (:seon.problems/deferred-agents found)]
-      (row "agent" (:seon.cluster.agent/id entry)
+      (row "agent" (:seon.agent/id entry)
            "episode runs" (:seon.turn.work/episode-runs entry)
            "deferred" (:seon.problems/deferred-count entry))))
    (family-section
@@ -533,7 +533,7 @@
                (:seon.cluster.eval/id entry)
                " and revise the remaining plan from current facts."))
         (for [entry (:seon.problems/deferred-agents found)]
-          (str "Agent " (:seon.cluster.agent/id entry) " has run "
+          (str "Agent " (:seon.agent/id entry) " has run "
                (:seon.turn.work/episode-runs entry)
                " self-triggered runs since the last outside trigger; "
                (:seon.problems/deferred-count entry)
@@ -564,7 +564,7 @@
 
         (for [entry (:seon.problems/failed-runs found)]
           (str "seon.problems failed-run run=" (:seon.turn/id entry)
-               " agent=" (:seon.cluster.agent/id entry)
+               " agent=" (:seon.agent/id entry)
                " error=" (pr-str (:seon.turn/error entry))))
         (for [entry (:seon.problems/errored-receipts found)]
           (str "seon.problems errored-receipt receipt="
@@ -577,7 +577,7 @@
                  (str " error=" (pr-str message)))))
         (for [entry (:seon.problems/deferred-agents found)]
           (str "seon.problems deferred-agent agent="
-               (:seon.cluster.agent/id entry)
+               (:seon.agent/id entry)
                " episode-runs=" (:seon.turn.work/episode-runs entry)
                " deferred=" (:seon.problems/deferred-count entry)
                " (agent-sent triggers wait for an outside trigger)"))

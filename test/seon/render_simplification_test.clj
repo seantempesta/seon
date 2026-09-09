@@ -101,7 +101,7 @@
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            projection (kernel/context-projection ctx)
-           entity {:seon.cluster.agent/id "unit-owner"
+           entity {:seon.agent/id "unit-owner"
                    :my.plan/steps [{:db/id 42 :my.plan.item/id "s1"}]}
            argument (ns-resolve 'seon.render 'render-invocation-argument)]
        (doseq [[output producer] [[:seon.render/html 'seon.plan/render-plan-html]
@@ -153,11 +153,11 @@
    (fn [connection]
      (db/transact!
       connection
-      [{:seon.cluster.agent/id "pulled-render-owner"}
+      [{:seon.agent/id "pulled-render-owner"}
        {:my.plan.item/id "pulled-render-item"
         :my.plan.item/title "Render the pulled item"
         :my.plan.item/agent
-        [:seon.cluster.agent/id "pulled-render-owner"]
+        [:seon.agent/id "pulled-render-owner"]
         :my.plan.item/about ['seon.plan/render-item-html]}])
      (let [database @connection
            pulled (db/pull database '[*]
@@ -198,12 +198,12 @@
      (db/transact!
       connection
       (agent/creation-tx
-       {:seon.cluster.agent/id "identity-agent"
+       {:seon.agent/id "identity-agent"
         :seon.cluster/name "agent-render-selection"
         :seon.ns/name fixture-a}))
      (let [database @connection
            pulled (db/pull database '[*]
-                           [:seon.cluster.agent/id "identity-agent"])
+                           [:seon.agent/id "identity-agent"])
            request (assoc (render-request database
                                           (support/fork-cluster-ctx connection)
                                           nil pulled)
@@ -803,12 +803,12 @@
       ;; transaction data is a VECTOR, not a lazy sequence.
       (into
        (agent/creation-tx
-        {:seon.cluster.agent/id "source-cache-agent"
+        {:seon.agent/id "source-cache-agent"
          :seon.ns/name fixture-a
          :seon.cluster/name "source-cache"})
        [{:seon.turn/id "source-cache-run"
          :seon.turn/agent
-         [:seon.cluster.agent/id "source-cache-agent"]
+         [:seon.agent/id "source-cache-agent"]
          :seon.turn/opened-at #inst "2026-09-06T20:00:00Z"
          :seon.turn/starting-ns [:seon.ns/name fixture-a]}
         {:seon.cluster.eval/id "source-cache-eval"
@@ -842,7 +842,7 @@
                     :seon.render/captured-calls calls
                     :seon.render/invocations retained
                     :seon.render/captured-invocations captured
-                    :seon.cluster.agent/id "source-cache-agent"
+                    :seon.agent/id "source-cache-agent"
                     ;; THE PREVIEW EVALUATES IN A REAL CLUSTER. The page's
                     ;; preview is the run loop's own fork/parse/evaluate, so
                     ;; the handle it is given carries what production carries:
@@ -857,7 +857,7 @@
                      :seon.sci.admit/caps caps
                      :seon.config.eval/time-limit-ms 2000
                      :seon.config/on-core-error :panic}
-                    :seon.cluster.agent/routing (atom {})))]
+                    :seon.agent/routing (atom {})))]
        (with-redefs-fn
          {#'kernel/invoke
           (fn [invocation]
@@ -876,7 +876,7 @@
                                        {:seon.ns/name fixture-a}))
                  registration-key
                  [:seon.render.web/debug-tab
-                  {:seon.cluster.agent/id "source-cache-agent"}]
+                  {:seon.agent/id "source-cache-agent"}]
                  invalidated
                  (target-call
                   'seon.render.web 'invalidate-runtime-derived-state
@@ -1004,7 +1004,7 @@
      (db/transact!
       connection
       (agent/creation-tx
-       {:seon.cluster.agent/id "owner-b"
+       {:seon.agent/id "owner-b"
         :seon.cluster/name "render-failure"
         :seon.ns/name fixture-b}))
      (let [failure {:seon.error/kind :render.test/broken
@@ -1025,7 +1025,7 @@
              (db/q '[:find [?content ...]
                     :in $ ?owner
                     :where
-                    [?agent :seon.cluster.agent/id ?owner]
+                    [?agent :seon.agent/id ?owner]
                     [?message :seon.cluster.message/to ?agent]
                     [?message :seon.cluster.message/content ?content]]
                   @connection "owner-b")]

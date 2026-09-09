@@ -1,7 +1,7 @@
 {:my.message/read-request [:map [:my.message/id :my.message/id] [:seon.db/db :seon.db/database-value]]
  :my.message/about [:string {:min 1}],
  :my.message/content [:string {:min 1}],
- :my.message/from :seon.cluster.agent/id,
+ :my.message/from :seon.agent/id,
  :my.message/at :inst,
  :my.message/id :seon.cluster.message/id,
  :my.message/inbox-entry
@@ -14,7 +14,7 @@
  :my.message/inbox-request
              [:map
               [:seon.db/db :seon.db/database-value]
-              [:seon.cluster.agent/id :seon.cluster.agent/id]
+              [:seon.agent/id :seon.agent/id]
               [:seon.db/since {:optional true} :seon.db/basis-t]],
  :my.message/inbox-options
              [:map

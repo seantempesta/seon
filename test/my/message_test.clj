@@ -21,20 +21,20 @@
   (support/with-database
     (fn [connection]
       (db/transact! connection
-                    [{:seon.cluster.agent/id "alice"}
-                     {:seon.cluster.agent/id "bob"}])
+                    [{:seon.agent/id "alice"}
+                     {:seon.agent/id "bob"}])
       (let [before (db/basis-t @connection)]
         (db/transact! connection
                       [{:seon.cluster.message/id "m-1"
                         :seon.cluster.message/to
-                        [:seon.cluster.agent/id "bob"]
+                        [:seon.agent/id "bob"]
                         :seon.cluster.message/from
-                        [:seon.cluster.agent/id "alice"]
+                        [:seon.agent/id "alice"]
                         :seon.cluster.message/content "First message"
                         :seon.cluster.message/at #inst "2026-08-12T10:00:00.000-00:00"}
                        {:seon.cluster.message/id "m-2"
                         :seon.cluster.message/to
-                        [:seon.cluster.agent/id "bob"]
+                        [:seon.agent/id "bob"]
                         :seon.cluster.message/content (apply str (repeat 200 "x"))
                         :seon.cluster.message/at #inst "2026-08-12T11:00:00.000-00:00"}])
         (f connection before)))))
@@ -61,9 +61,9 @@
       (let [value (message/read "m-1" @connection)]
         (is (= {:seon.cluster.message/id "m-1"
                 :seon.cluster.message/to
-                [:seon.cluster.agent/id "bob"]
+                [:seon.agent/id "bob"]
                 :seon.cluster.message/from
-                [:seon.cluster.agent/id "alice"]
+                [:seon.agent/id "alice"]
                 :seon.cluster.message/content "First message"
                 :seon.cluster.message/at
                 #inst "2026-08-12T10:00:00.000-00:00"}

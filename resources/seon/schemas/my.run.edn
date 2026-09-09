@@ -5,7 +5,7 @@
           [:my.run/delivered-to
            {:optional true}
            :my.run/delivered-to]],
-         :delivered-to [:or :seon.cluster.agent/id [:= :outside]],
+         :delivered-to [:or :seon.agent/id [:= :outside]],
          :disposition [:enum :wait :completed],
          :note [:string {:min 1}],
          :namespace-unit

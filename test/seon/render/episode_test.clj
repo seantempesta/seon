@@ -11,9 +11,9 @@
      (is (not (:seon.error/kind
                (db/transact!
                 connection
-                [{:seon.cluster.agent/id "episode-agent"}
+                [{:seon.agent/id "episode-agent"}
                  {:seon.turn/id "episode-turn"
-                  :seon.turn/agent [:seon.cluster.agent/id "episode-agent"]
+                  :seon.turn/agent [:seon.agent/id "episode-agent"]
                   :seon.turn/opened-at (java.util.Date. 0)}
                  {:seon.cluster.eval/id "episode-evaluation"
                   :seon.cluster.eval/run [:seon.turn/id "episode-turn"]

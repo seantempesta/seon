@@ -13,12 +13,12 @@
        connection
        {:tx-data
         [{:seon.ns/name 'my.agents.projection-proof}
-         {:seon.cluster.agent/id "projection-proof"
-          :seon.cluster.agent/namespace
+         {:seon.agent/id "projection-proof"
+          :seon.agent/namespace
           [:seon.ns/name 'my.agents.projection-proof]}
          {:seon.turn/id "projection-proof-run"
           :seon.turn/agent
-          [:seon.cluster.agent/id "projection-proof"]
+          [:seon.agent/id "projection-proof"]
           :seon.turn/opened-at (java.util.Date.)}
          ;; `result-size` is intentionally absent. Evaluation rendering derives
          ;; from the declared content and must not require that numeric fact.

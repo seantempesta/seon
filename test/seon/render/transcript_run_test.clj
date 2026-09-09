@@ -20,13 +20,13 @@
    (fn [connection]
      (db/transact!
       connection
-      [{:seon.cluster.agent/id "run-render-agent"}
+      [{:seon.agent/id "run-render-agent"}
        {:seon.turn/id "run-a"
-        :seon.turn/agent [:seon.cluster.agent/id "run-render-agent"]
+        :seon.turn/agent [:seon.agent/id "run-render-agent"]
         :seon.turn/opened-at #inst "2026-09-06T00:00:00.000-00:00"
         :seon.turn/closed-at #inst "2026-09-06T00:00:02.000-00:00"}
        {:seon.turn/id "run-b"
-        :seon.turn/agent [:seon.cluster.agent/id "run-render-agent"]
+        :seon.turn/agent [:seon.agent/id "run-render-agent"]
         :seon.turn/opened-at #inst "2026-09-06T00:01:00.000-00:00"}
        ;; ONE ENTITY PER (run, ordinal): the frozen source and the settled
        ;; result are attributes of the same evaluation. Ordinal 1 of run-a

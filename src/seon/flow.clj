@@ -894,8 +894,8 @@
       (::flow/cid fault) (assoc ::dropped-fault-cid (::flow/cid fault))
       (::flow/op fault) (assoc ::dropped-fault-op (::flow/op fault))
       frame (assoc ::dropped-fault-frame frame)
-      (:seon.cluster.agent/id fault)
-      (assoc :seon.cluster.agent/id (:seon.cluster.agent/id fault)))))
+      (:seon.agent/id fault)
+      (assoc :seon.agent/id (:seon.agent/id fault)))))
 
 (defn- merge-dropped-fault
   [summary fault]
@@ -928,9 +928,9 @@
     (::dropped-fault-cid dropped-fault)
     (assoc ::flow/cid (::dropped-fault-cid dropped-fault))
 
-    (:seon.cluster.agent/id dropped-fault)
-    (assoc :seon.cluster.agent/id
-           (:seon.cluster.agent/id dropped-fault))))
+    (:seon.agent/id dropped-fault)
+    (assoc :seon.agent/id
+           (:seon.agent/id dropped-fault))))
 
 (deftype CountedDroppingBuffer
   [^LinkedList buffer

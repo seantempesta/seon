@@ -13,26 +13,26 @@
   it does not execute source or apply a presentation limit. A missing agent
   is a diagnostic, distinct from an existing agent with no evaluations."
   {:malli/schema
-   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+   [:=> [:cat :seon.db/db :seon.agent/id]
     [:or [:vector [:and :seon.eval/entity
                    [:map [:db/id :int] [:t :seon.db/basis-t]]]]
      :seon.error/value]]}
   [database agent-id]
-  (let [agent-row (db/pull database [:seon.cluster.agent/id]
-                       [:seon.cluster.agent/id agent-id])]
+  (let [agent-row (db/pull database [:seon.agent/id]
+                       [:seon.agent/id agent-id])]
     (cond
       (:seon.error/kind agent-row) agent-row
-      (nil? (:seon.cluster.agent/id agent-row))
+      (nil? (:seon.agent/id agent-row))
       (error/diagnostic
        {:seon.error/kind ::agent-not-found
         :seon.error/message "Cannot read evaluations of an absent agent."
         :seon.error/diagnostic-layer :seon.eval
         :seon.error/diagnostic-operation 'seon.eval/of-agent
-        :seon.error/diagnostic-member :seon.cluster.agent/id
-        :seon.error/diagnostic-expected :seon.cluster.agent/id
+        :seon.error/diagnostic-member :seon.agent/id
+        :seon.error/diagnostic-expected :seon.agent/id
         :seon.error/diagnostic-offending agent-id
         :seon.error/diagnostic-cause :seon.db/not-found
-        :seon.error/diagnostic-evidence [:seon.cluster.agent/id agent-id]})
+        :seon.error/diagnostic-evidence [:seon.agent/id agent-id]})
       :else
       (let [rows
             (db/q '[:find ?t ?turn-id ?ordinal ?evaluation-t
@@ -41,7 +41,7 @@
                            {:seon.cluster.eval/read-evidence [*]}])
                     :in $ ?agent-id
                     :where
-                    [?agent :seon.cluster.agent/id ?agent-id]
+                    [?agent :seon.agent/id ?agent-id]
                     [?turn :seon.turn/agent ?agent]
                     [?turn :seon.turn/id ?turn-id ?t]
                     [?evaluation :seon.cluster.eval/run ?turn]

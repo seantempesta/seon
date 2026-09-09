@@ -93,10 +93,10 @@
        :seon.error/message
        "A rendered value root requires a caller-supplied block id."
        :seon.error/data
-       {:seon.cluster.agent/id (:seon.cluster.agent/id unit)
+       {:seon.agent/id (:seon.agent/id unit)
         :seon.render.data/path path} :seon.render.value/missing-root-identity true}
       (str "seon-value-"
-           (id/digest 24 [(:seon.cluster.agent/id unit) root-address path])))))
+           (id/digest 24 [(:seon.agent/id unit) root-address path])))))
 
 (defn- encoded
   [value]

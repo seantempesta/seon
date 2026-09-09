@@ -204,7 +204,7 @@
   []
   (let [connection (atom nil)
         state {:seon.turn.loop/cluster {:seon.db/connection connection}
-               :seon.cluster.agent/turns 7}]
+               :seon.agent/turns 7}]
     (reset! connection state)
     state))
 
@@ -318,7 +318,7 @@
                       (request source
                                (when attributed?
                                  {:seon.turn/id "run-9"
-                                  :seon.cluster.agent/id "agent-3"})))
+                                  :seon.agent/id "agent-3"})))
                 ;; the codec ran: the projection READS BACK as EDN. The
                 ;; read is the assertion — a projection that did not
                 ;; survive the codec throws here and fails the trial —
@@ -530,11 +530,11 @@
   (let [with (error/normalize (request {:seon.error/kind :seon.db/rejected
                                         :seon.error/message "no"}
                                        {:seon.turn/id "run-9"
-                                        :seon.cluster.agent/id "agent-3"}))
+                                        :seon.agent/id "agent-3"}))
         without (error/normalize (request {:seon.error/kind :seon.db/rejected
                                            :seon.error/message "no"}))]
     (is (= [:seon.turn/id "run-9"] (:seon.error/run with)))
-    (is (= [:seon.cluster.agent/id "agent-3"] (:seon.error/agent with)))
+    (is (= [:seon.agent/id "agent-3"] (:seon.error/agent with)))
     (is (not (contains? without :seon.error/run)))
     (is (not (contains? without :seon.error/agent))
         "no attributable agent is a state, not a nil")))
@@ -568,7 +568,7 @@
   (error/normalize (request (transform-error (refused-chain
                                               :seon.turn/not-the-holder))
                             {:seon.turn/id "run-9"
-                             :seon.cluster.agent/id "agent-3"})))
+                             :seon.agent/id "agent-3"})))
 
 (defn- rendered
   [notice output]
@@ -759,8 +759,8 @@
       (test-support/seed-cluster! connection "error-test")
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name "error-test"})
-      (db/transact! connection [{:seon.cluster.agent/id "root"}
-                              {:seon.cluster.agent/id "agent-3"}])
+      (db/transact! connection [{:seon.agent/id "root"}
+                              {:seon.agent/id "agent-3"}])
       (body connection))))
 
 (defn- commit-request
@@ -791,7 +791,7 @@
                   :where
                   [?message :seon.cluster.message/about _]
                   [?message :seon.cluster.message/to ?agent]
-                  [?agent :seon.cluster.agent/id ?to]]
+                  [?agent :seon.agent/id ?to]]
                 db)))]))
 
 (deftest a-missing-recurrence-limit-refuses-at-the-declared-contract
@@ -825,7 +825,7 @@
       unless told"
         (let [[_ messages] (commit! connection
                                     (transform-error (ex-info "boom" {}))
-                                    {:seon.cluster.agent/id "agent-3"
+                                    {:seon.agent/id "agent-3"
                                      :seon.turn/id "run-9"})]
           (is (= {"agent-3" 1} messages))))))
   (with-db
@@ -836,7 +836,7 @@
               (commit! connection
                        {:seon.error/kind :seon.turn/not-the-holder
                         :seon.error/message "the run is held by another process"}
-                       {:seon.cluster.agent/id "agent-3"
+                       {:seon.agent/id "agent-3"
                         :seon.turn/id "run-9"})]
           (is (= 1 facts))
           (is (= {} messages)))))))
@@ -851,7 +851,7 @@
     (fn [connection]
       (let [[facts messages] (commit! connection
                                       (transform-error (ex-info "boom" {}))
-                                      {:seon.cluster.agent/id "ghost"})]
+                                      {:seon.agent/id "ghost"})]
         (is (= 1 facts))
         (is (= {"root" 1} messages)
             "it escalates exactly as an unattributable error does")))))
@@ -892,7 +892,7 @@
   (with-db
     (fn [connection]
       (let [source (transform-error (ex-info "boom" {}))
-            request (commit-request source {:seon.cluster.agent/id "agent-3"
+            request (commit-request source {:seon.agent/id "agent-3"
                                             :seon.turn/id "run-9"})
             tx (error/commit-tx @connection request)]
         ;; the SAME request committed twice: re-execution after a crash

@@ -7,8 +7,8 @@
 (deftest history-orders-turn-transactions-before-ordinals-and-keeps-unfinished-forms
   (support/with-database
    (fn [connection]
-     (db/transact! connection [{:seon.cluster.agent/id "a"}
-                               {:seon.cluster.agent/id "b"}])
+     (db/transact! connection [{:seon.agent/id "a"}
+                               {:seon.agent/id "b"}])
      (is (= [] (evaluation/of-agent @connection "a")))
      (doseq [[turn-id timestamp agent-id sources]
              [["z-first" 2000 "a" [[1 "a1"] [0 "a0"]]]
@@ -17,7 +17,7 @@
        (db/transact!
         connection
         (into [{:seon.turn/id turn-id
-                :seon.turn/agent [:seon.cluster.agent/id agent-id]
+                :seon.turn/agent [:seon.agent/id agent-id]
                 :seon.turn/opened-at (java.util.Date. timestamp)}]
               (map (fn [[ordinal source]]
                      {:seon.cluster.eval/id source

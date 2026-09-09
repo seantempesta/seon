@@ -16,14 +16,14 @@
     {:seon.ns/name 'my.agents.situation
      :seon.ns/requires [[:seon.ns/name 'my.run]
                         [:seon.ns/name 'my.message]]}
-    {:seon.cluster.agent/id "situation"
-     :seon.cluster.agent/namespace [:seon.ns/name 'my.agents.situation]}
+    {:seon.agent/id "situation"
+     :seon.agent/namespace [:seon.ns/name 'my.agents.situation]}
     {:seon.turn/id "situation-run"
-     :seon.turn/agent [:seon.cluster.agent/id "situation"]
+     :seon.turn/agent [:seon.agent/id "situation"]
      :seon.turn/opened-at #inst "2026-08-12T12:00:00.000-00:00"
      :seon.turn/starting-ns [:seon.ns/name 'my.agents.situation]}
     {:seon.cluster.message/id "unread"
-     :seon.cluster.message/to [:seon.cluster.agent/id "situation"]
+     :seon.cluster.message/to [:seon.agent/id "situation"]
      :seon.cluster.message/content "Read me"
      :seon.cluster.message/at #inst "2026-08-12T12:00:01.000-00:00"}]))
 
@@ -33,15 +33,15 @@
       (seed-situation! connection)
       (let [situation (bootstrap/situation @connection "situation")
             stored (db/pull @connection '[*]
-                            [:seon.cluster.agent/id "situation"])]
-        (is (= {:seon.cluster.agent/id "situation"
-                :seon.cluster.agent/namespace-ref
+                            [:seon.agent/id "situation"])]
+        (is (= {:seon.agent/id "situation"
+                :seon.agent/namespace-ref
                 [:seon.ns/name 'my.agents.situation]
-                :seon.cluster.agent/unread-message-count 1
-                :seon.cluster.agent/open-run-ref
+                :seon.agent/unread-message-count 1
+                :seon.agent/open-run-ref
                 [:seon.turn/id "situation-run"]
                 :seon.turn/turns-remaining 0
-                :seon.cluster.agent/protocol-namespaces
+                :seon.agent/protocol-namespaces
                 ['my.message 'my.run]}
                situation))
         (is (= '(seon.bootstrap/situation)
@@ -51,10 +51,10 @@
                 :seon.repl/form '(help)}
                (agent/situation-form situation)))
         (is (not-any? #(contains? stored %)
-                      [:seon.cluster.agent/namespace-ref
-                       :seon.cluster.agent/unread-message-count
-                       :seon.cluster.agent/open-run-ref
-                       :seon.cluster.agent/protocol-namespaces])
+                      [:seon.agent/namespace-ref
+                       :seon.agent/unread-message-count
+                       :seon.agent/open-run-ref
+                       :seon.agent/protocol-namespaces])
             "every situation member is derived, never stored on the agent")
         (testing "the situation shape owns real orientation prose"
           (let [text (agent/render-situation-ai situation)]
@@ -66,7 +66,7 @@
   (is (= "situation"
          (env/supplied-agent-id
           (env/environment {:seon.boot/cluster-name "situation"
-                            :seon.cluster.agent/id "situation"}))))
+                            :seon.agent/id "situation"}))))
   (is (= :seon.env/agent-id-absent
          (:seon.error/kind
           (env/supplied-agent-id

@@ -45,10 +45,10 @@
      (db/transact!
       connection
       [{:seon.ns/name 'fixture.history}
-       {:seon.cluster.agent/id "history-agent"
-        :seon.cluster.agent/namespace [:seon.ns/name 'fixture.history]}
+       {:seon.agent/id "history-agent"
+        :seon.agent/namespace [:seon.ns/name 'fixture.history]}
        {:seon.cluster.message/id "history-message"
-        :seon.cluster.message/to [:seon.cluster.agent/id "history-agent"]
+        :seon.cluster.message/to [:seon.agent/id "history-agent"]
         :seon.cluster.message/at (java.util.Date. 1786400000000)
         :seon.cluster.message/content "Read me."}])
      (let [database @connection
@@ -88,7 +88,7 @@
                         :seon.cluster.message/to)))))
        (testing "the entity floor uses the projection's declared identity"
          (let [agent-entity (db/pull database '[*]
-                                     [:seon.cluster.agent/id "history-agent"])
+                                     [:seon.agent/id "history-agent"])
                producer (selected agent-entity)
                form (render/render-form-value
                      (render-request database ctx agent-entity))]
@@ -135,7 +135,7 @@
 
 (def ^:private episode-candidates
   [{:seon.repl/key :root
-    :seon.repl/subject [:seon.cluster.agent/id "worker"]
+    :seon.repl/subject [:seon.agent/id "worker"]
     :seon.repl/entry {:seon.repl/form '(help)}}
    {:seon.repl/key :run-namespace
     :seon.repl/subject 'my.run
@@ -165,14 +165,14 @@
    :seon.repl/candidates candidates
    :seon.repl/settled settled
    :seon.print/identity-attributes
-   #{:seon.cluster.agent/id :seon.cluster.message/id :seon.ns/name}})
+   #{:seon.agent/id :seon.cluster.message/id :seon.ns/name}})
 
 (deftest generated-episodes-have-two-independent-gates
   (let [settled
         [{:seon.repl/key :root
           :seon.sci.admit/print-node
-          (settled-node {:seon.cluster.agent/id "worker"
-                         :seon.cluster.agent/protocol-namespaces
+          (settled-node {:seon.agent/id "worker"
+                         :seon.agent/protocol-namespaces
                          ['my.message 'my.run]
                          :outside/reference 'outside.ns})}
          {:seon.repl/key :run-namespace
@@ -211,7 +211,7 @@
   (let [settled
         [{:seon.repl/key :root
           :seon.sci.admit/print-node
-          (settled-node {:seon.cluster.agent/protocol-namespaces
+          (settled-node {:seon.agent/protocol-namespaces
                          ['my.message]})}
          {:seon.repl/key :message-namespace
           :seon.sci.admit/print-node
@@ -236,7 +236,7 @@
   (let [root-settled
         [{:seon.repl/key :root
           :seon.sci.admit/print-node
-          (settled-node {:seon.cluster.agent/protocol-namespaces ['my.run]})}]
+          (settled-node {:seon.agent/protocol-namespaces ['my.run]})}]
         result (walk/ordered-episode
                 (episode-request episode-candidates root-settled))]
     (is (= [:root :run-namespace] (mapv :seon.repl/key result)))

@@ -57,14 +57,14 @@
      (support/seed-cluster! connection "memory-preview")
      (db/transact! connection
                    (into (agent/creation-tx
-                          {:seon.cluster.agent/id "memory-preview-agent"
+                          {:seon.agent/id "memory-preview-agent"
                            :seon.ns/name 'my.agents.memory-preview
                            :seon.cluster/name "memory-preview"})
                          [{:my.plan.item/id "preview-item" :my.plan.item/title "Before"}]))
      (db/transact! connection
                    (turn/open-tx
                     {:seon.turn/id "agent-is-busy"
-                     :seon.turn/agent [:seon.cluster.agent/id "memory-preview-agent"]
+                     :seon.turn/agent [:seon.agent/id "memory-preview-agent"]
                      :seon.turn/opened-at (java.util.Date.)}))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
@@ -86,7 +86,7 @@
                     :seon.render/captured-invocations invocations
                     :seon.sci.admit/caps caps :seon.sci.eval/time-limit-ms 2000
                     :seon.config/on-core-error :panic
-                    :seon.cluster.agent/id "memory-preview-agent"
+                    :seon.agent/id "memory-preview-agent"
                     :seon.turn.loop/cluster cluster}
            preview
            (with-redefs [db/transact! (fn [& _] (throw (ex-info "preview wrote database facts" {})))
@@ -226,7 +226,7 @@
      (support/seed-cluster! connection "source-contract")
      (db/transact! connection
                    (agent/creation-tx
-                    {:seon.cluster.agent/id "source-contract-agent"
+                    {:seon.agent/id "source-contract-agent"
                      :seon.ns/name 'my.agents.source-contract
                      :seon.cluster/name "source-contract"}))
      (doseq [[run-id source result] [["declared-source" "(+ 1 1)"
@@ -236,7 +236,7 @@
        (db/transact!
         connection
         [{:seon.turn/id run-id
-          :seon.turn/agent [:seon.cluster.agent/id "source-contract-agent"]
+          :seon.turn/agent [:seon.agent/id "source-contract-agent"]
           :seon.turn/opened-at #inst "2026-09-06T20:00:00Z"
           :seon.turn/closed-at #inst "2026-09-06T20:00:01Z"
           :seon.turn/starting-ns [:seon.ns/name 'my.agents.source-contract]}
@@ -273,9 +273,9 @@
               :seon.render/captured-invocations captured-invocations
               :seon.sci.admit/caps caps :seon.sci.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic
-              :seon.cluster.agent/id "source-contract-agent"
+              :seon.agent/id "source-contract-agent"
               :seon.turn.loop/cluster cluster
-              :seon.cluster.agent/routing (atom {})})
+              :seon.agent/routing (atom {})})
            stored-run (db/pull database '[*] [:seon.turn/id "stored-transcript"])
            output-refs
            (fn [function-symbol]
@@ -296,8 +296,8 @@
                             "2"))
          (let [unowned-request
                (-> (request :unowned 'seon.render-source-test/authored-source
-                            {:seon.cluster.agent/id "source-contract-agent"})
-                   (dissoc :seon.cluster.agent/id)
+                            {:seon.agent/id "source-contract-agent"})
+                   (dissoc :seon.agent/id)
                    (assoc :seon.render/namespace 'my.agents.source-contract
                           :seon.render/captured-calls (atom {})
                           :seon.render/captured-invocations (atom {})))
@@ -309,7 +309,7 @@
                "no source is submitted without its viewing agent")
            (is (str/includes?
                 (source-call (assoc unowned-request
-                                    :seon.cluster.agent/id "source-contract-agent"))
+                                    :seon.agent/id "source-contract-agent"))
                 "2")
                "entity attributes cannot make absent and present execution custody identical")
            (is (= 2 @evaluations))))

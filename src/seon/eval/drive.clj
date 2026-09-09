@@ -24,7 +24,7 @@
   (symbol (str "my.agents." agent-id)))
 
 (defn- creation-request [cluster-name agent-id]
-  {:seon.cluster.agent/id agent-id
+  {:seon.agent/id agent-id
    :seon.cluster/name cluster-name
    :seon.ns/name (default-agent-namespace agent-id)})
 
@@ -83,7 +83,7 @@
   [connection cluster-name process agent-id content]
   (let [caps (config/result-caps
               (config/effective @connection cluster-name))
-        request {:seon.cluster.agent/id agent-id
+        request {:seon.agent/id agent-id
                  :seon.cluster.message/inbound-content content
                  :seon.cluster.message/at (Date.)
                  :seon.config.eval.result/max-string
@@ -105,13 +105,13 @@
     (or (db/q '[:find ?id .
                :in $ ?agent-id ?content
                :where
-               [?agent :seon.cluster.agent/id ?agent-id]
+               [?agent :seon.agent/id ?agent-id]
                [?message :seon.cluster.message/to ?agent]
                [?message :seon.cluster.message/content ?content]
                [?message :seon.cluster.message/id ?id]]
              @connection agent-id content)
         (throw (ex-info "The committed objective message has no identity."
-                        {:seon.cluster.agent/id agent-id})))))
+                        {:seon.agent/id agent-id})))))
 
 (defn- objective-run-ids [db message-id]
   (->> (db/q '[:find ?run-id ?opened-tx
@@ -230,10 +230,10 @@
   "Derive a terminal episode state from a trigger or explicit proof run ids."
   {:malli/schema
    [:function
-    [:=> [:cat :seon.db/database-value :seon.cluster.agent/id
+    [:=> [:cat :seon.db/database-value :seon.agent/id
           :seon.db.process/id :seon.cluster.message/id [:int {:min 1}]]
      [:maybe :seon.eval.drive/terminal-state]]
-    [:=> [:cat :seon.db/database-value :seon.cluster.agent/id
+    [:=> [:cat :seon.db/database-value :seon.agent/id
           :seon.db.process/id
           [:map [:seon.eval.drive/run-ids :seon.eval.drive/run-ids]
            [:seon.eval.drive/run-cap :seon.eval.drive/run-cap]]]
@@ -270,7 +270,7 @@
         idle? (and (seq run-ids)
                    (nil? (turn/next-agent-work
                           db
-                          {:seon.cluster.agent/id agent-id
+                          {:seon.agent/id agent-id
                            :seon.db.process/id process})))]
     (cond
       (seq completions)
@@ -296,8 +296,8 @@
    {:seon.db/db db
     :seon.db/connection (:seon.boot/cluster-connection instance)
     :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
-    :seon.cluster.agent/id agent-id
-    :seon.render.value/root [:seon.cluster.agent/id agent-id]
+    :seon.agent/id agent-id
+    :seon.render.value/root [:seon.agent/id agent-id]
     :seon.sci.admit/caps (config/result-caps settings)
     :seon.sci.eval/time-limit-ms
     (:seon.config.eval/time-limit-ms settings)

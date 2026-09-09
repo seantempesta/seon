@@ -31,7 +31,7 @@
   {:seon.db/db @connection
    :seon.db/connection connection
    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
-   :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
+   :seon.render.walk/lookup [:seon.agent/id agent-id]
    :seon.sci.admit/caps (config/result-caps (config/defaults))
    :seon.sci.eval/time-limit-ms 5000
    :seon.config/on-core-error :record
@@ -42,7 +42,7 @@
   (support/with-database
     (fn [connection]
       (seed-cluster! connection "generated-bootstrap")
-      (let [request {:seon.cluster.agent/id agent-id
+      (let [request {:seon.agent/id agent-id
                      :seon.cluster/name "generated-bootstrap"
                      :seon.ns/name namespace-name}
             process cluster/boot-process-identity
@@ -77,9 +77,9 @@
                             :seon.cluster.message/content])))
         (is (= {:seon.turn.work/situation :generate
                 :seon.turn/id run-id
-                :seon.cluster.agent/id agent-id}
+                :seon.agent/id agent-id}
                (turn/next-agent-work
-                @connection {:seon.cluster.agent/id agent-id
+                @connection {:seon.agent/id agent-id
                              :seon.db.process/id process})))))))
 
 (deftest drive-free-generation-is-pure-deterministic-and-pull-gated
@@ -88,7 +88,7 @@
       (seed-cluster! connection "generated-proof")
       (cluster/ensure-entity!
        connection cluster/boot-process-identity
-       {:seon.cluster.agent/id agent-id
+       {:seon.agent/id agent-id
         :seon.cluster/name "generated-proof"
         :seon.ns/name namespace-name})
       (let [request (generator-request connection)
@@ -167,7 +167,7 @@
       (seed-cluster! connection "reborn-namespace-membership")
       (cluster/ensure-entity!
        connection cluster/boot-process-identity
-       {:seon.cluster.agent/id agent-id
+       {:seon.agent/id agent-id
         :seon.cluster/name "reborn-namespace-membership"
         :seon.ns/name namespace-name})
       (db/transact!
@@ -243,7 +243,7 @@
       (seed-cluster! connection "intent-membership")
       (cluster/ensure-entity!
        connection cluster/boot-process-identity
-       {:seon.cluster.agent/id agent-id
+       {:seon.agent/id agent-id
         :seon.cluster/name "intent-membership"
         :seon.ns/name namespace-name})
       (db/transact!
@@ -321,7 +321,7 @@
       (support/seed-cluster! connection "missing-intent-budget")
       (cluster/ensure-entity!
        connection cluster/boot-process-identity
-       {:seon.cluster.agent/id agent-id
+       {:seon.agent/id agent-id
         :seon.cluster/name "missing-intent-budget"
         :seon.ns/name namespace-name})
       (let [result (bootstrap/pull-result (generator-request connection))]
@@ -368,11 +368,11 @@
       (db/transact!
        connection
        (into (cluster.agent/creation-tx
-              {:seon.cluster.agent/id "root"
+              {:seon.agent/id "root"
                :seon.cluster/name "supervision"
                :seon.ns/name 'my.agents.root})
              (cluster.agent/creation-tx
-              {:seon.cluster.agent/id "worker"
+              {:seon.agent/id "worker"
                :seon.cluster/name "supervision"
                :seon.ns/name 'my.agents.worker})))
       (let [tx (bootstrap/supervision-tx

@@ -597,7 +597,7 @@
   (test-support/with-database
     (fn [connection]
       (db/transact! connection
-                  [{:seon.cluster.agent/id "planner"
+                  [{:seon.agent/id "planner"
                     :seon.agent/settings
                     {:seon.config.ai/model "planner-model"
                      :seon.config.ai/thinking :high}}])

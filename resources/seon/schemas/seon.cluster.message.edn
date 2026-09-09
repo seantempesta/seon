@@ -24,7 +24,7 @@
                        :delivery-request
                        [:map
                         [:my.message/value :my.message/value]
-                        [:seon.cluster.agent/id :seon.cluster.agent/id]
+                        [:seon.agent/id :seon.agent/id]
                         [:seon.turn/id :seon.turn/id]
                         [:seon.cluster.eval/ordinal
                          :seon.cluster.eval/ordinal]
@@ -51,7 +51,7 @@
                        :ordinal [:int {:min 0}],
                        :inbound-request
                        [:map
-                        [:seon.cluster.agent/id :seon.cluster.agent/id]
+                        [:seon.agent/id :seon.agent/id]
                         [:seon.cluster.message/inbound-content
                          :seon.cluster.message/inbound-content]
                         [:seon.cluster.message/at
@@ -93,7 +93,7 @@
                        :reply-request
                        [:map
                         [:my.run/result :my.run/result]
-                        [:seon.cluster.agent/id :seon.cluster.agent/id]
+                        [:seon.agent/id :seon.agent/id]
                         [:seon.cluster.message/trigger
                          {:optional true}
                          :seon.cluster.message/id]],
@@ -150,7 +150,7 @@
                         :seon.cluster.message/pulled],
                        :size [:int {:min 0}],
                        :limit [:int {:min 0}],
-                       :unknown-recipient :seon.cluster.agent/id
+                       :unknown-recipient :seon.agent/id
                        :unknown-recipient-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unknown message recipient"} [:seon.cluster.message/unknown-recipient :seon.cluster.message/unknown-recipient] [:seon.error/message :seon.error/message]]
                        :unknown-about :seon.cluster.message/id
                        :unknown-about-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unknown message named as context"} [:seon.cluster.message/unknown-about :seon.cluster.message/unknown-about] [:seon.error/message :seon.error/message]]

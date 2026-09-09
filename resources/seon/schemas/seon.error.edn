@@ -43,9 +43,9 @@
               [:seon.turn/id
                {:optional true}
                :seon.turn/id]
-              [:seon.cluster.agent/id
+              [:seon.agent/id
                {:optional true}
-               :seon.cluster.agent/id]
+               :seon.agent/id]
               [:seon.config.error/escalate-to
                {:optional true}
                :seon.config.error/escalate-to]
@@ -127,9 +127,9 @@
               [:seon.turn/id
                {:optional true}
                :seon.turn/id]
-              [:seon.cluster.agent/id
+              [:seon.agent/id
                {:optional true}
-               :seon.cluster.agent/id]
+               :seon.agent/id]
               [:seon.config.error/max-evidence-bytes
                :seon.config.error/max-evidence-bytes]],
              :prepare-request :seon.error/normalize-request,
@@ -156,9 +156,9 @@
               [:seon.error/notification
                {:optional true}
                :seon.error/notification]
-              [:seon.cluster.agent/id
+              [:seon.agent/id
                {:optional true}
-               :seon.cluster.agent/id]],
+               :seon.agent/id]],
              :notice-request
              [:map
               [:seon.error/fact :seon.error/fact]
@@ -175,9 +175,9 @@
               [:seon.error/notification
                {:optional true}
                :seon.error/notification]
-              [:seon.cluster.agent/id
+              [:seon.agent/id
                {:optional true}
-               :seon.cluster.agent/id]],
+               :seon.agent/id]],
              :notification [:enum :final],
              :notification-limit [:int {:min 1}],
              :occurrence [:int {:min 1}],

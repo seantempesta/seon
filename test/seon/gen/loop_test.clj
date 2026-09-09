@@ -70,7 +70,7 @@
 (def ^:private cast-rows
   (into []
         (mapcat (fn [[agent-id namespace-name]]
-                  (agent/creation-tx {:seon.cluster.agent/id agent-id
+                  (agent/creation-tx {:seon.agent/id agent-id
                                       :seon.cluster/name "generate-code-v0"
                                       :seon.ns/name namespace-name})))
         cast-spec))
@@ -171,7 +171,7 @@
 
 (defn- agent-ids
   [db]
-  (sort (db/q '[:find [?id ...] :where [?e :seon.cluster.agent/id ?id]] db)))
+  (sort (db/q '[:find [?id ...] :where [?e :seon.agent/id ?id]] db)))
 
 (defn- planner-census
   [database]
@@ -181,7 +181,7 @@
                     [?run :seon.turn/id ?id]
                     [?run :seon.turn/opened-at ?opened]
                     [?run :seon.turn/agent ?agent]
-                    [?agent :seon.cluster.agent/id "planner"]]
+                    [?agent :seon.agent/id "planner"]]
                   database)
              (sort-by (comp inst-ms second))
              ffirst)
@@ -239,7 +239,7 @@
 
                              (turn/next-agent-work
                               @connection
-                              {:seon.cluster.agent/id agent-id
+                              {:seon.agent/id agent-id
                                :seon.db.process/id process
                                :seon.turn.work/now at}))
                            (agent-ids @connection))]
@@ -369,7 +369,7 @@
               [?receipt :seon.cluster.eval/id ?receipt-id]
               [?m :seon.cluster.message/about ?receipt]
               [?m :seon.cluster.message/to ?to]
-              [?to :seon.cluster.agent/id ?to-id]]
+              [?to :seon.agent/id ?to-id]]
             db run-id)))
 
 (defn- states
@@ -449,9 +449,9 @@
        (db/transact! connection
                    [{:seon.cluster.message/id "goal-1"
                      :seon.cluster.message/to
-                     [:seon.cluster.agent/id "planner"]
+                     [:seon.agent/id "planner"]
                      :seon.cluster.message/from
-                     [:seon.cluster.agent/id "root"]
+                     [:seon.agent/id "root"]
                      :seon.cluster.message/content
                      (str "Build the widget helpers: my.gen.alpha owns "
                           "the arithmetic and my.gen.beta owns the label.")
@@ -608,7 +608,7 @@
                             [?about :seon.cluster.eval/id ?receipt-id]
                             [?m :seon.cluster.message/about ?about]
                             [?m :seon.cluster.message/to ?to]
-                            [?to :seon.cluster.agent/id "alpha"]
+                            [?to :seon.agent/id "alpha"]
                             [?m :seon.cluster.message/id ?id]]
                           db (turn/problem-id run-id 2))))
                "the assignment is one hop from the human-shaped goal")))))))
@@ -626,9 +626,9 @@
        (db/transact! connection
                    [{:seon.cluster.message/id "goal-1"
                      :seon.cluster.message/to
-                     [:seon.cluster.agent/id "planner"]
+                     [:seon.agent/id "planner"]
                      :seon.cluster.message/from
-                     [:seon.cluster.agent/id "root"]
+                     [:seon.agent/id "root"]
                      :seon.cluster.message/content "Count the primes."
                      :seon.cluster.message/at now}])
        (let [run-id
@@ -665,9 +665,9 @@
        (db/transact! connection
                    [{:seon.cluster.message/id "goal-1"
                      :seon.cluster.message/to
-                     [:seon.cluster.agent/id "planner"]
+                     [:seon.agent/id "planner"]
                      :seon.cluster.message/from
-                     [:seon.cluster.agent/id "root"]
+                     [:seon.agent/id "root"]
                      :seon.cluster.message/content "Build the helpers."
                      :seon.cluster.message/at now}])
        ;; every owner is mute; only the planner ever answers, and it
@@ -686,7 +686,7 @@
                 (db/q '[:find ?content .
                        :where
                        [?m :seon.cluster.message/to ?to]
-                       [?to :seon.cluster.agent/id "root"]
+                       [?to :seon.agent/id "root"]
                        [?m :seon.cluster.message/content ?content]]
                      db))
              "the planner said it was finished")

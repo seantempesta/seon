@@ -81,16 +81,16 @@
                {:seon.cluster.message/id "task-1"
                 :frontier/nested
                 [[:seon.ns/name 'my.run]
-                 {:seon.cluster.agent/id "worker"}]}})]
+                 {:seon.agent/id "worker"}]}})]
     (is (= #{'my.run/complete
              'my.message
              'my.run
              [:seon.cluster.message/id "task-1"]
              [:seon.ns/name 'my.run]
-             [:seon.cluster.agent/id "worker"]}
+             [:seon.agent/id "worker"]}
            (print/references
             #{:seon.cluster.message/id :seon.ns/name
-              :seon.cluster.agent/id}
+              :seon.agent/id}
             node)))
     (is (not (contains? (print/references #{} node)
                         [:seon.cluster.message/id "task-1"]))

@@ -15,7 +15,7 @@
                 :proc-request
                 [:map
                  [:seon.turn.loop/cluster :seon.turn.loop/cluster]
-                 [:seon.cluster.agent/id :seon.cluster.agent/id]
+                 [:seon.agent/id :seon.agent/id]
                  [:seon.schedule/channel :seon.flow/channel]],
                 :channel :seon.flow/channel,
                 :execution-context

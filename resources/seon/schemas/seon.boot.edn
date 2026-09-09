@@ -81,9 +81,9 @@
              [:seon.render.web/served
               {:optional true}
               :seon.render.web/server]
-             [:seon.cluster.agent/routing
+             [:seon.agent/routing
               {:optional true}
-              :seon.cluster.agent/routing]
+              :seon.agent/routing]
              [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]],
             :log-dir [:string {:min 1}],
             :overrides
@@ -110,7 +110,7 @@
              [:seon.boot/cluster-name :seon.boot/cluster-name]
              [:seon.boot/pid :seon.boot/pid]
              [:seon.boot/prepl-port [:int {:min 1, :max 65535}]]
-             [:seon.cluster.agent/count :seon.cluster.agent/count]
+             [:seon.agent/count :seon.agent/count]
              [:seon.problems/problems :seon.problems/problems]
              [:seon.render.web/url
               {:optional true}

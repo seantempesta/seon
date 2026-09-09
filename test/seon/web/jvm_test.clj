@@ -213,7 +213,7 @@
 (defn- effect-context
   [connection]
   {:seon.db/connection connection
-   :seon.cluster.agent/id "web-agent"
+   :seon.agent/id "web-agent"
    :seon.turn/id "web-receipt-run"
    :seon.cluster.eval/ordinal 0
    :seon.boot/cluster-name "default"
@@ -351,10 +351,10 @@
            [(merge (seon-config/defaults)
                    {:seon.config/cluster "default"}
                    (config base-url))
-            {:seon.cluster.agent/id "web-agent"}
+            {:seon.agent/id "web-agent"}
             {:seon.turn/id "web-receipt-run"
              :seon.turn/agent
-             [:seon.cluster.agent/id "web-agent"]}])
+             [:seon.agent/id "web-agent"]}])
           (let [result
                 (with-redefs-fn
                   {(ns-resolve 'seon.web.jvm 'credential)
@@ -393,10 +393,10 @@
                    {:seon.config/cluster "default"}
                    (config base-url)
                    {:seon.config.web/max-inline-bytes 4096})
-            {:seon.cluster.agent/id "web-agent"}
+            {:seon.agent/id "web-agent"}
             {:seon.turn/id "web-receipt-run"
              :seon.turn/agent
-             [:seon.cluster.agent/id "web-agent"]}])
+             [:seon.agent/id "web-agent"]}])
           (let [context (effect-context connection)
                 [text-result binary-result]
                 (binding [db/*conn* connection

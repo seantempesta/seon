@@ -23,7 +23,7 @@
   ([database ctx distance output]
   {:seon.db/db database
    :seon.sci.eval/ctx ctx
-   :seon.render.walk/lookup [:seon.cluster.agent/id agent-id]
+   :seon.render.walk/lookup [:seon.agent/id agent-id]
    :seon.render/output output
    :seon.render/distance distance
    :seon.sci.admit/caps caps
@@ -35,10 +35,10 @@
   (db/transact!
    connection
    [{:seon.ns/name agent-namespace}
-    {:seon.cluster.agent/id agent-id
-     :seon.cluster.agent/namespace [:seon.ns/name agent-namespace]}
+    {:seon.agent/id agent-id
+     :seon.agent/namespace [:seon.ns/name agent-namespace]}
     {:seon.turn/id "render-walk-run"
-     :seon.turn/agent [:seon.cluster.agent/id agent-id]
+     :seon.turn/agent [:seon.agent/id agent-id]
      :seon.turn/opened-at (at 0)}
     {:seon.cluster.eval/id "render-walk-eval"
      :seon.cluster.eval/run [:seon.turn/id "render-walk-run"]
@@ -55,7 +55,7 @@
      (db/transact!
       connection
       [{:db/id "identityless-run"
-        :seon.turn/agent [:seon.cluster.agent/id agent-id]}])
+        :seon.turn/agent [:seon.agent/id agent-id]}])
      (let [database @connection
            identity-attributes (db/populated-identity-attributes database)
            units (walk/neighborhood

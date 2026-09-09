@@ -25,8 +25,8 @@
 ]
         (db/transact!
          connection
-         [{:seon.cluster.agent/id agent-id
-           :seon.cluster.agent/namespace
+         [{:seon.agent/id agent-id
+           :seon.agent/namespace
            {:seon.ns/name namespace-name
             :seon.ns/source "(ns acquire.rows)"}}
           {:seon.fn/sym "acquire.rows/bad"

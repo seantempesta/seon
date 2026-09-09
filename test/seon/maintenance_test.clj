@@ -247,7 +247,7 @@
     :seon.schedule/expression "0 2 * * *"
     :seon.schedule/zone-id "UTC"}
    {:seon.schedule.task/id task-id
-    :seon.schedule.task/owner [:seon.cluster.agent/id "root"]
+    :seon.schedule.task/owner [:seon.agent/id "root"]
     :seon.schedule.task/function [:seon.fn/sym handler]
     :seon.schedule.task/schedule
     [:seon.schedule/id (str task-id "/schedule")]}])
@@ -270,7 +270,7 @@
       :seon.maintenance.request/fire
       [:seon.schedule.fire/id (str receipt-id "/fire")]
       :seon.maintenance.request/handler [:seon.fn/sym handler]
-      :seon.maintenance.request/agent [:seon.cluster.agent/id "root"]
+      :seon.maintenance.request/agent [:seon.agent/id "root"]
       :seon.maintenance.request/cluster-name "default"
       :seon.maintenance.request/repository-root "/repo"
       :seon.maintenance.request/managed-root "/repo/operator"
@@ -288,7 +288,7 @@
         census-handler "seon.operator/census-processes!"]
     (db/transact!
      connection
-     (into [{:seon.cluster.agent/id "root"}]
+     (into [{:seon.agent/id "root"}]
            cat
            [(task-transaction footprint-task footprint-handler)
             (task-transaction census-task census-handler)]))

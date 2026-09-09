@@ -6,7 +6,7 @@
 
 (defn- request
   [agent-id run-id contribution-id]
-  {:seon.cluster.agent/id agent-id
+  {:seon.agent/id agent-id
    :seon.turn/id run-id
    :seon.context.contribution/id contribution-id})
 
@@ -32,13 +32,13 @@
            seed
            (db/transact!
             connection
-            (into [{:seon.cluster.agent/id "selection-a"}
-                   {:seon.cluster.agent/id "selection-b"}]
+            (into [{:seon.agent/id "selection-a"}
+                   {:seon.agent/id "selection-b"}]
                   (concat
                    (map (fn [[agent-id run-id closed?]]
                           (cond-> {:seon.turn/id run-id
                                    :seon.turn/agent
-                                   [:seon.cluster.agent/id agent-id]}
+                                   [:seon.agent/id agent-id]}
                             closed? (assoc :seon.turn/closed-at
                                            #inst "2026-09-06T00:00:00Z")))
                         runs)
@@ -110,12 +110,12 @@
                (context/selection @connection "missing")))))
      (let [before-evaluations (db/q '[:find (count ?e) .
                                       :where [?e :seon.cluster.eval/id]] @connection)
-           remove-request {:seon.cluster.agent/id "selection-a"
+           remove-request {:seon.agent/id "selection-a"
                            :seon.context.contribution/id "chosen-1"}
            foreign (db/transact!
                     connection
                     [[:db.fn/call context/remove-tx
-                      (assoc remove-request :seon.cluster.agent/id "selection-b")]])]
+                      (assoc remove-request :seon.agent/id "selection-b")]])]
        (is (= :seon.context/foreign-contribution (:seon.context/selection-refused foreign)))
        (is (nil? (:seon.error/kind
                   (db/transact! connection [[:db.fn/call context/remove-tx remove-request]]))))
@@ -132,14 +132,14 @@
      (let [closed-at #inst "2026-09-06T00:00:00Z"
            _ (db/transact!
               connection
-              [{:seon.cluster.agent/id "compact-agent"}
+              [{:seon.agent/id "compact-agent"}
                {:seon.turn/id "compact-before"
                 :seon.turn/agent
-                [:seon.cluster.agent/id "compact-agent"]
+                [:seon.agent/id "compact-agent"]
                 :seon.turn/closed-at closed-at}
                {:seon.turn/id "compact-after"
                 :seon.turn/agent
-                [:seon.cluster.agent/id "compact-agent"]
+                [:seon.agent/id "compact-agent"]
                 :seon.turn/closed-at closed-at}
                {:seon.ns/name 'compact.context}
                {:seon.cluster.eval/id "compact-before-0"

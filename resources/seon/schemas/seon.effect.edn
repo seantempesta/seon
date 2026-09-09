@@ -67,9 +67,9 @@
                [:seon.sci.admit/caps :seon.sci.admit/caps]
                [:seon.config/on-core-error
                 :seon.config/on-core-error]
-               [:seon.cluster.agent/id
+               [:seon.agent/id
                 {:optional true}
-                :seon.cluster.agent/id]
+                :seon.agent/id]
                [:seon.flow/work-launcher
                 {:optional true}
                 :seon.flow/work-launcher]],

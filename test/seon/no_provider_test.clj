@@ -22,15 +22,15 @@
        (support/seed-cluster! connection cluster-name)
        (db/transact! connection
                      (agent/creation-tx
-                      {:seon.cluster.agent/id agent-id
+                      {:seon.agent/id agent-id
                        :seon.ns/name 'my.agents.refused
                        :seon.cluster/name cluster-name}))
        (db/transact! connection
-                     [{:seon.cluster.agent/id agent-id
+                     [{:seon.agent/id agent-id
                        :seon.agent/settings
                        {:seon.config.ai/api-key-variable credential}}
                       {:seon.cluster.message/id "refusal-trigger"
-                       :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+                       :seon.cluster.message/to [:seon.agent/id agent-id]
                        :seon.cluster.message/content "Take one turn."
                        :seon.cluster.message/at now}])
        (let [cluster (support/cluster-handle
@@ -43,7 +43,7 @@
                        :seon.sci.admit/caps (config/result-caps (config/defaults))
                        :seon.config.error/recurrence-limit 3
                        :seon.config.message/max-chain 8})
-             request {:seon.cluster.agent/id agent-id}
+             request {:seon.agent/id agent-id}
              step! #(turn/turn {:seon.turn.loop/cluster cluster
                                 :seon.turn.work/next %} now)]
          (is (nil? (:seon.config.ai/no-provider
@@ -68,7 +68,7 @@
          (is (seq (turn/unanswered-wakes @connection agent-id {})))
          (db/transact! connection
                        [{:seon.cluster.message/id "new-outside-trigger"
-                         :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+                         :seon.cluster.message/to [:seon.agent/id agent-id]
                          :seon.cluster.message/content "Configuration repaired; try again."
                          :seon.cluster.message/at now}])
          (is (= :open (:seon.turn.work/situation
@@ -87,21 +87,21 @@
            created (db/transact!
                     connection
                     (agent/creation-tx
-                     {:seon.cluster.agent/id agent-id
+                     {:seon.agent/id agent-id
                       :seon.ns/name 'my.agents.no-provider
                       :seon.cluster/name cluster-name}))
            written (db/transact!
                     connection
-                    [{:seon.cluster.agent/id agent-id
+                    [{:seon.agent/id agent-id
                       :seon.agent/settings {:seon.config.ai/no-provider true}}
                      {:seon.cluster.message/id "no-provider-message"
-                      :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+                      :seon.cluster.message/to [:seon.agent/id agent-id]
                       :seon.cluster.message/content "Take a virtual turn."
                       :seon.cluster.message/at now}])
            opened (db/transact! connection
                     (turn/open-tx
                      {:seon.turn/id turn-id
-                      :seon.turn/agent [:seon.cluster.agent/id agent-id]
+                      :seon.turn/agent [:seon.agent/id agent-id]
                       :seon.turn/trigger [:seon.cluster.message/id "no-provider-message"]
                       :seon.turn/opened-at now}))
            cluster (support/cluster-handle
@@ -118,7 +118,7 @@
                    {:seon.turn.loop/cluster cluster
                     :seon.turn.work/next
                     {:seon.turn.work/situation :call
-                     :seon.cluster.agent/id agent-id
+                     :seon.agent/id agent-id
                      :seon.turn/id turn-id}} now)
            database @connection]
        (doseq [result [applied seeded created written opened report]]

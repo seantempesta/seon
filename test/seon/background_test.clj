@@ -14,7 +14,7 @@
       (let [now (Date.)]
         (db/transact!
          connection
-         [{:seon.cluster.agent/id "background-agent"}
+         [{:seon.agent/id "background-agent"}
           {:seon.fn/sym "my.example/background-call"}
           {:seon.turn/id "origin-run"}
           {:seon.effect/id "background-effect"
@@ -28,19 +28,19 @@
            :seon.effect/result-size 21
            :seon.effect/duration-ms 3
            :seon.effect/settled-at now
-           :seon.effect/to [:seon.cluster.agent/id "background-agent"]}])
+           :seon.effect/to [:seon.agent/id "background-agent"]}])
         (is (= {:seon.turn.work/situation :open
-                :seon.cluster.agent/id "background-agent"}
+                :seon.agent/id "background-agent"}
                (turn/next-agent-work
                 @connection
-                {:seon.cluster.agent/id "background-agent"
+                {:seon.agent/id "background-agent"
                  :seon.db.process/id "process"})))
         (db/transact!
          connection
          (turn/open-tx
           {:seon.turn/id "result-run"
            :seon.turn/agent
-           [:seon.cluster.agent/id "background-agent"]
+           [:seon.agent/id "background-agent"]
            :seon.turn/opened-at now}))
         (let [opened
               (db/pull

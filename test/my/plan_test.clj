@@ -24,9 +24,9 @@
       (db/transact! connection
                     [{:db/id "plan-ns"
                       :seon.ns/name 'fixture.plan}
-                     {:seon.cluster.agent/id "alice"
-                      :seon.cluster.agent/namespace "plan-ns"}
-                     {:seon.cluster.agent/id "bob"}])
+                     {:seon.agent/id "alice"
+                      :seon.agent/namespace "plan-ns"}
+                     {:seon.agent/id "bob"}])
       (f connection))))
 
 (defn- add
@@ -39,13 +39,13 @@
 (defn- plan-of
   ([connection] (plan-of connection "alice"))
   ([connection agent-id]
-   (plan/plan {:seon.db/db @connection :seon.cluster.agent/id agent-id})))
+   (plan/plan {:seon.db/db @connection :seon.agent/id agent-id})))
 
 (defn- render-view
   [connection view]
   (assoc view
          :seon.db/db @connection
-         :seon.render.value/root [:seon.cluster.agent/id (:seon.cluster.agent/id view)]
+         :seon.render.value/root [:seon.agent/id (:seon.agent/id view)]
          :seon.render/profile (render/agent-render-profile (support/effective-config))
          :seon.sci.admit/caps (config/result-caps (support/effective-config))))
 
@@ -94,7 +94,7 @@
         (is (= #{["ship"]}
                (db/q '[:find ?id
                        :where
-                       [?agent :seon.cluster.agent/id "alice"]
+                       [?agent :seon.agent/id "alice"]
                        [?agent :seon.agent/plan ?plan]
                        [?plan :my.plan/steps ?step]
                        [?step :my.plan.item/id ?id]]
@@ -404,11 +404,11 @@
                            {:seon.sci.eval/ctx base
                             :seon.db/db database
                             :seon.db/connection connection
-                            :seon.cluster.agent/id agent-id}))]
+                            :seon.agent/id agent-id}))]
                 (:seon.sci.admit/value
                  (sci.eval/evaluate
                   {:seon.sci.eval/ctx live
-                   :seon.cluster.agent/id agent-id
+                   :seon.agent/id agent-id
                    :seon.sci.admit/caps
                    (config/result-caps (support/effective-config))
                    :seon.sci.eval/time-limit-ms 5000
@@ -419,7 +419,7 @@
             alice (evaluate "alice" "(my.plan/plan {})")
             bob (evaluate "bob" "(my.plan/plan {})")
             explicit (evaluate "alice"
-                               "(my.plan/plan {:seon.cluster.agent/id \"bob\"})")
+                               "(my.plan/plan {:seon.agent/id \"bob\"})")
             bob-text (evaluate "bob"
                                "(seon.plan/format-plan-ai (my.plan/plan {}))")]
         (is (= ["alice-work"] (ids (:my.plan/ready alice))))
@@ -456,14 +456,14 @@
   (support/with-database
     (fn [connection]
       (db/transact! connection
-                    [{:seon.cluster.agent/id "juniper"}
-                     {:db/id [:seon.cluster.agent/id "juniper"]
+                    [{:seon.agent/id "juniper"}
+                     {:db/id [:seon.agent/id "juniper"]
                       :seon.agent/plan
                       {:my.plan/objective "Improve Juniper context inspection"
                        :my.plan/current-step "step-render-plan"
                        :my.plan/steps juniper-fixture-steps}}])
       (let [current (plan/plan {:seon.db/db @connection
-                                :seon.cluster.agent/id "juniper"})
+                                :seon.agent/id "juniper"})
             ai (plan/render-plan-ai current)
             printed (pr-str (plan/render-plan-html (render-view connection current)))]
         (is (= ["juniper/inspect-identity-messages"
@@ -497,7 +497,7 @@
       (let [agent (db/pull @connection
                            '[:my.plan/steps :my.plan/current-step
                              {:seon.agent/plan [*]}]
-                           [:seon.cluster.agent/id "alice"])
+                           [:seon.agent/id "alice"])
             component (:seon.agent/plan agent)]
         (is (= "Ship the change" (:my.plan/objective component)))
         (is (seq (:my.plan/steps component)))
@@ -505,6 +505,6 @@
         (is (not (contains? agent :my.plan/steps)))
         (is (not (contains? agent :my.plan/current-step)))
         (is (= "ship" (:my.plan.item/id (plan/current @connection "alice"))))
-        (db/transact! connection [[:db.fn/retractEntity [:seon.cluster.agent/id "alice"]]])
+        (db/transact! connection [[:db.fn/retractEntity [:seon.agent/id "alice"]]])
         (is (nil? (db/pull @connection '[*] (:db/id component))))
         (is (nil? (db/pull @connection '[*] [:my.plan.item/id "ship"])))))))

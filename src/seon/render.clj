@@ -125,7 +125,7 @@
   (let [context (select-keys request
                              [:seon.db/db
                               :seon.sci.eval/ctx
-                              :seon.cluster.agent/id
+                              :seon.agent/id
                               :seon.turn/id
                               :seon.render.call/id
                               :seon.sci.admit/caps
@@ -635,7 +635,7 @@
       (select-keys request [:seon.sci.admit/caps
                             :seon.sci.eval/time-limit-ms
                             :seon.config/on-core-error
-                            :seon.cluster.agent/id
+                            :seon.agent/id
                             :seon.render/namespace
                             :seon.render.call/source-output?])]}))
 
@@ -1414,8 +1414,8 @@
           :in $ ?namespace-name
           :where
           [?namespace :seon.ns/name ?namespace-name]
-          [?agent :seon.cluster.agent/namespace ?namespace]
-          [?agent :seon.cluster.agent/id ?agent-id]]
+          [?agent :seon.agent/namespace ?namespace]
+          [?agent :seon.agent/id ?agent-id]]
         database namespace-name))
 
 (defn renderer-failure
@@ -1465,7 +1465,7 @@
         (cond-> {:seon.cluster.message/id
                  message-id
                  :seon.cluster.message/to
-                 [:seon.cluster.agent/id owner]
+                 [:seon.agent/id owner]
                  :seon.cluster.message/content message}
           at (assoc :seon.cluster.message/at at))))}))
 
@@ -1482,7 +1482,7 @@
     [:catn
      [:seon.render.walk/context
       [:map
-       [:seon.cluster.agent/id :seon.cluster.agent/id]
+       [:seon.agent/id :seon.agent/id]
        [:seon.db/db {:optional true} :seon.db/database-value]
        [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
        [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]
@@ -1527,8 +1527,8 @@
         (db/q '[:find ?name .
                :in $ ?agent-id
                :where
-               [?agent :seon.cluster.agent/id ?agent-id]
-               [?agent :seon.cluster.agent/namespace ?namespace]
+               [?agent :seon.agent/id ?agent-id]
+               [?agent :seon.agent/namespace ?namespace]
                [?namespace :seon.ns/name ?name]]
              db agent-id)
         instant (:db/txInstant (db/pull db [:db/txInstant] basis))]
@@ -1575,7 +1575,7 @@
   ([options]
    (try
      (let [db (ambient-database-value)
-           agent-id (:seon.cluster.agent/id *walk-context*)]
+           agent-id (:seon.agent/id *walk-context*)]
        (cond
          (nil? db)
          (walk-error "No live cluster database is bound to this evaluation.")
@@ -1603,7 +1603,7 @@
 
              :else
              (let [root (get options :root
-                             [:seon.cluster.agent/id agent-id])
+                             [:seon.agent/id agent-id])
                    depth (long (get options :depth 2))
                    branch (:branch options)
                    units
@@ -1611,7 +1611,7 @@
                     (cond->
                      {:seon.db/db db
                       :seon.sci.eval/ctx (:seon.sci.eval/ctx *walk-context*)
-                      :seon.cluster.agent/id agent-id
+                      :seon.agent/id agent-id
                       :seon.turn/id
                       (:seon.turn/id *walk-context*)
                       :seon.render/retained-calls

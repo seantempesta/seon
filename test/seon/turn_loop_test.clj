@@ -122,7 +122,7 @@
                              :seon.ai/model "model"}
             :seon.ai/settings settings
             :seon.turn/id "run-1"
-            :seon.cluster.agent/id "agent-1"
+            :seon.agent/id "agent-1"
             :seon.ai.attempt/ordinal 2
             :seon.ai/usage {"prompt_tokens" 3}
             :seon.ai.model/last-latency-ms 42
@@ -136,7 +136,7 @@
                               :seon.ai/model "model"}
              :seon.ai/settings settings
              :seon.turn/id "run-1"
-             :seon.cluster.agent/id "agent-1"
+             :seon.agent/id "agent-1"
              :seon.ai.attempt/ordinal 2
              :seon.turn.loop/attempt-evidence evidence
              :seon.error/value failure
@@ -185,7 +185,7 @@
              ((private-loop-fn 'provider-targets)
               {:seon.db/db db
                :seon.cluster/name "cluster"
-               :seon.cluster.agent/id "agent"})))
+               :seon.agent/id "agent"})))
       (is (= [[:effective db "cluster"]
               [:overlay db "agent"]
               [:settings cluster-settings overlay]
@@ -208,7 +208,7 @@
         (ai/settings (test-support/effective-config)
                      {:seon.config.ai/model "deepseek-v4-flash"})
         :seon.turn/id "gauge-run"
-        :seon.cluster.agent/id "gauge-agent"
+        :seon.agent/id "gauge-agent"
         :seon.ai.attempt/ordinal 0
         :seon.ai.model/last-latency-ms 200
         :seon.ai/usage {"completion_tokens" 20}}
@@ -238,7 +238,7 @@
             :seon.cluster.eval/ns [:seon.ns/name 'current.namespace]
             :seon.sci.admit/caps caps
             :seon.sci.eval/ctx ctx
-            :seon.cluster.agent/id "agent-1"
+            :seon.agent/id "agent-1"
             :seon.turn/id "run-1"
             :seon.cluster.eval/ordinal 3
             :seon.boot/cluster-name "default"
@@ -249,7 +249,7 @@
              :seon.turn.loop/evaluation-namespace 'current.namespace
              :seon.turn.loop/cluster cluster
              :seon.sci.eval/ctx ctx
-             :seon.cluster.agent/id "agent-1"
+             :seon.agent/id "agent-1"
              :seon.turn/id "run-1"
              :seon.cluster.eval/ordinal 3})))))
 
@@ -264,7 +264,7 @@
                   message/reply (fn [actual-db request]
                                   (is (= db actual-db))
                                   (is (= {:my.run/result "done"
-                                          :seon.cluster.agent/id "agent-1"
+                                          :seon.agent/id "agent-1"
                                           :seon.cluster.message/trigger "m-1"}
                                          request))
                                   reply)
@@ -275,7 +275,7 @@
                :seon.sci.eval/evaluation {:seon.sci.admit/value :explicit}
                :seon.turn.loop/settled completed
                :seon.problems/form-problem {:seon.problems/id :problem}
-               :seon.cluster.agent/id "agent-1"
+               :seon.agent/id "agent-1"
                :seon.cluster.message/trigger "m-1"})))
       (is (= reply
              ((private-loop-fn 'asked-value)
@@ -283,7 +283,7 @@
                :seon.sci.eval/evaluation {:seon.sci.admit/value :ordinary}
                :seon.turn.loop/settled completed
                :seon.problems/form-problem {:seon.problems/id :problem}
-               :seon.cluster.agent/id "agent-1"
+               :seon.agent/id "agent-1"
                :seon.cluster.message/trigger "m-1"})))
       (is (= assignment
              ((private-loop-fn 'asked-value)
@@ -291,7 +291,7 @@
                :seon.sci.eval/evaluation {:seon.sci.admit/value :ordinary}
                :seon.turn.loop/settled nil
                :seon.problems/form-problem {:seon.problems/id :problem}
-               :seon.cluster.agent/id "agent-1"}))))))
+               :seon.agent/id "agent-1"}))))))
 
 (deftest one-wake-cannot-open-a-second-turn-after-the-first-closes
   ;; THE SAME CLASS, PROVED BY THE DERIVATION INSTEAD OF A FENCE. It used
@@ -304,15 +304,15 @@
       (let [agent-id "one-answer"
             trigger-id "one-question"
             first-run "first-answer"
-            request {:seon.cluster.agent/id agent-id
+            request {:seon.agent/id agent-id
                      :seon.db.process/id process}]
         (db/transact!
          connection
-         [{:seon.cluster.agent/id agent-id}
+         [{:seon.agent/id agent-id}
           {:seon.config/cluster "loop-test"
            :seon.config.run/max-episode-runs 100}
           {:seon.cluster.message/id trigger-id
-           :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+           :seon.cluster.message/to [:seon.agent/id agent-id]
            :seon.cluster.message/content "answer once"
            :seon.cluster.message/at now}])
         (is (= :open (:seon.turn.work/situation
@@ -325,7 +325,7 @@
            [[:db.fn/call
              #'turn/open-call
              {:seon.turn/id first-run
-              :seon.turn/agent [:seon.cluster.agent/id agent-id]
+              :seon.turn/agent [:seon.agent/id agent-id]
               :seon.turn/opened-at now}]]
            [])})
         (db/transact!
@@ -352,7 +352,7 @@
                  (db/q '[:find [?run-id ...]
                          :in $ ?agent-id
                          :where
-                         [?agent :seon.cluster.agent/id ?agent-id]
+                         [?agent :seon.agent/id ?agent-id]
                          [?run :seon.turn/agent ?agent]
                          [?run :seon.turn/id ?run-id]]
                        database agent-id))
@@ -386,14 +386,14 @@
                 {:seon.db/db db
                  :seon.turn.loop/cluster cluster
                  :seon.turn.loop/asked asked
-                 :seon.cluster.agent/id "agent-1"
+                 :seon.agent/id "agent-1"
                  :seon.turn/id "run-1"
                  :seon.cluster.eval/ordinal 2
                  :seon.turn.loop/now now
                  :seon.cluster.message/trigger "m-1"})))
         (is (= [:delivery db
                 {:my.message/value asked
-                 :seon.cluster.agent/id "agent-1"
+                 :seon.agent/id "agent-1"
                  :seon.turn/id "run-1"
                  :seon.cluster.eval/ordinal 2
                  :seon.cluster.message/at now
@@ -417,13 +417,13 @@
         (db/transact!
          connection
          (cluster.agent/creation-tx
-          {:seon.cluster.agent/id agent-id
+          {:seon.agent/id agent-id
            :seon.ns/name starting-ns
            :seon.cluster/name cluster-name}))
         (db/transact!
          connection
          (turn/open-tx {:seon.turn/id run-id
-                       :seon.turn/agent [:seon.cluster.agent/id agent-id]
+                       :seon.turn/agent [:seon.agent/id agent-id]
                        :seon.turn/opened-at now}))
 
         (db/transact!
@@ -454,7 +454,7 @@
                 :seon.sci.eval/time-limit-ms 2000
                 :seon.config/on-core-error :panic
                 :seon.boot/cluster-name cluster-name
-                :seon.cluster.agent/id agent-id
+                :seon.agent/id agent-id
                 :seon.turn/id run-id
                 :seon.cluster.eval/ordinal 0})]
           (is (= ending-ns (:seon.sci.eval/ending-ns first-evaluation)))
@@ -500,7 +500,7 @@
                    (turn/evaluate-sources
                     {:seon.turn.loop/cluster cluster
                      :seon.sci.eval/ctx ctx
-                     :seon.cluster.agent/id agent-id
+                     :seon.agent/id agent-id
                      :seon.turn/id run-id
                      :seon.cluster.eval/ordinal 1
                      :seon.ns/name resumed-namespace
@@ -528,15 +528,15 @@
         (db/transact!
          connection
          (into (cluster.agent/creation-tx
-                {:seon.cluster.agent/id "planner"
+                {:seon.agent/id "planner"
                  :seon.ns/name 'my.agents.planner
                  :seon.cluster/name cluster-name})
                (cluster.agent/creation-tx
-                {:seon.cluster.agent/id "worker"
+                {:seon.agent/id "worker"
                  :seon.ns/name 'my.agents.worker
                  :seon.cluster/name cluster-name})))
         (db/transact! connection
-                    [{:seon.cluster.agent/id "planner"
+                    [{:seon.agent/id "planner"
                       :seon.agent/settings {:seon.config.ai/thinking :high}}])
         (let [db @connection
               cluster-settings (config/effective db cluster-name)
@@ -558,23 +558,23 @@
   [{connection :seon.db/connection :as cluster} agent-id run-id message-id]
   (db/transact! connection
               [{:seon.cluster.message/id message-id
-                :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+                :seon.cluster.message/to [:seon.agent/id agent-id]
                 :seon.cluster.message/content "prove live settings"
                 :seon.cluster.message/at now}])
   (db/transact!
    connection
    [{:seon.turn/id run-id
-     :seon.turn/agent [:seon.cluster.agent/id agent-id]
+     :seon.turn/agent [:seon.agent/id agent-id]
      :seon.turn/trigger [:seon.cluster.message/id message-id]
      :seon.turn/opened-at now
      }
-    {:seon.cluster.agent/id agent-id
+    {:seon.agent/id agent-id
      }]))
 
 (defn- call-work
   [agent-id run-id]
   {:seon.turn.work/situation :call
-   :seon.cluster.agent/id agent-id
+   :seon.agent/id agent-id
    :seon.turn/id run-id})
 
 (defn- settings-attempts
@@ -620,20 +620,20 @@
        (db/transact!
         connection
         (cluster.agent/creation-tx
-         {:seon.cluster.agent/id agent-id
+         {:seon.agent/id agent-id
           :seon.ns/name 'my.agents.generated-agent
           :seon.cluster/name cluster-name}))
        (db/transact!
         connection
         [{:seon.cluster.message/id message-id
-          :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+          :seon.cluster.message/to [:seon.agent/id agent-id]
           :seon.cluster.message/content "start"
           :seon.cluster.message/at now}])
        (db/transact!
         connection
         (turn/open-tx {:seon.turn/id run-id
                       :seon.turn/agent
-                      [:seon.cluster.agent/id agent-id]
+                      [:seon.agent/id agent-id]
                       :seon.turn/trigger
                       [:seon.cluster.message/id message-id]
                       :seon.turn/opened-at now}))
@@ -718,13 +718,13 @@
         (db/transact!
          connection
          (cluster.agent/creation-tx
-          {:seon.cluster.agent/id agent-id
+          {:seon.agent/id agent-id
            :seon.ns/name assigned-namespace
            :seon.cluster/name cluster-name}))
         (db/transact!
          connection
          (turn/open-tx {:seon.turn/id run-id
-                       :seon.turn/agent [:seon.cluster.agent/id agent-id]
+                       :seon.turn/agent [:seon.agent/id agent-id]
                        :seon.turn/opened-at now}))
 
         (db/transact!
@@ -780,7 +780,7 @@
                   :seon.sci.eval/time-limit-ms 2000
                   :seon.config/on-core-error :panic
                   :seon.boot/cluster-name cluster-name
-                  :seon.cluster.agent/id agent-id
+                  :seon.agent/id agent-id
                   :seon.turn/id run-id
                   :seon.cluster.eval/ordinal 0})]
             (db/transact!
@@ -853,15 +853,15 @@
        (db/transact!
         connection
         (cluster.agent/creation-tx
-         {:seon.cluster.agent/id agent-id
+         {:seon.agent/id agent-id
           :seon.ns/name 'my.agents.live-settings
           :seon.cluster/name cluster-name}))
        (db/transact!
         connection
-        [{:seon.cluster.agent/id agent-id
+        [{:seon.agent/id agent-id
           :seon.agent/settings {:seon.config.ai/thinking :high}}])
        (let [opening (turn/system-turn {:seon.turn.loop/cluster cluster
-                                        :seon.cluster.agent/id agent-id
+                                        :seon.agent/id agent-id
                                         :seon.turn/write? true})]
          (is (nil? (:seon.error/kind opening)) (pr-str opening)))
        (prepare-call! cluster agent-id "settings-run-1" "settings-message-1")
@@ -1003,8 +1003,8 @@
     (test-support/with-database
      (fn [connection]
        (db/transact! connection
-                     [{:seon.cluster.agent/id "worker"}
-                      {:seon.cluster.agent/id "supervisor"}])
+                     [{:seon.agent/id "worker"}
+                      {:seon.agent/id "supervisor"}])
        (is (= [[] [] ["supervisor"] [] [] []]
               (mapv (fn [_] (refuse-phase! connection "supervisor" "worker"))
                     (range 6)))
@@ -1015,7 +1015,7 @@
   (testing "the failing agent is never mailed about its own refusal"
     (test-support/with-database
      (fn [connection]
-       (db/transact! connection [{:seon.cluster.agent/id "worker"}])
+       (db/transact! connection [{:seon.agent/id "worker"}])
        (is (= [[] [] [] [] [] []]
               (mapv (fn [_] (refuse-phase! connection "worker" "worker"))
                     (range 6)))
@@ -1080,11 +1080,11 @@
         (db/transact!
          connection
          [{:seon.ns/name 'my.agents.undisposed-agent}
-          {:seon.cluster.agent/id agent-id
-           :seon.cluster.agent/namespace
+          {:seon.agent/id agent-id
+           :seon.agent/namespace
            [:seon.ns/name 'my.agents.undisposed-agent]}
           {:seon.cluster.message/id message-id
-           :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+           :seon.cluster.message/to [:seon.agent/id agent-id]
            :seon.cluster.message/content "prove the contract"
            :seon.cluster.message/at now}])
         (db/transact!
@@ -1092,7 +1092,7 @@
          (into [] cat
                [(turn/open-tx
                  {:seon.turn/id run-id
-                  :seon.turn/agent [:seon.cluster.agent/id agent-id]
+                  :seon.turn/agent [:seon.agent/id agent-id]
                   :seon.turn/trigger [:seon.cluster.message/id message-id]
                   :seon.turn/opened-at now})
                 []
@@ -1134,7 +1134,7 @@
                   :seon.db.process/id process
                   :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)})
                 :seon.turn.loop/now now
-                :seon.cluster.agent/id agent-id
+                :seon.agent/id agent-id
                 :seon.turn/id run-id
                 :seon.db.process/id process
                 :seon.cluster.eval/ordinal 2
@@ -1160,7 +1160,7 @@
                  :seon.config.eval.result/max-string 4096
                  :seon.config.eval.result/max-source 1048576
                  :seon.config.eval.result/max-nodes 4096)
-                :seon.cluster.agent/id agent-id})]
+                :seon.agent/id agent-id})]
           (is (inst?
                (db/q '[:find ?at .
                        :in $ ?run-id
@@ -1221,10 +1221,10 @@
                    (schema/canonical-database-attributes)))
       (testing "the trigger — the exact transact the live drive failed on"
         (is (map? (db/transact! connection
-                              [{:seon.cluster.agent/id "alice"}
+                              [{:seon.agent/id "alice"}
                                {:seon.cluster.message/id "m-live"
                                 :seon.cluster.message/to
-                                [:seon.cluster.agent/id "alice"]
+                                [:seon.agent/id "alice"]
                                 :seon.cluster.message/content "count the widgets"
                                 :seon.cluster.message/at now}]))))
       (testing "the run, its agent pointer, and recorded trigger"
@@ -1232,14 +1232,14 @@
                    connection
                    {:tx-data [{:seon.turn/id "run-live"
                                :seon.turn/agent
-                               [:seon.cluster.agent/id "alice"]
+                               [:seon.agent/id "alice"]
                                :seon.turn/trigger
                                [:seon.cluster.message/id "m-live"]
                                :seon.turn/opened-at now
 
                                :seon.turn/plan-digest
                                (apply str (repeat 64 "a"))}
-                              {:seon.cluster.agent/id "alice"
+                              {:seon.agent/id "alice"
                                }]}))))
       (testing "one frozen evaluation, then its start and its settlement, all
                 on the ONE entity that (run, ordinal) names"
@@ -1298,7 +1298,7 @@
                       :where
                       [?m :seon.cluster.message/id "m-live"]
                       [?m :seon.cluster.message/to ?agent]
-                      [?agent :seon.cluster.agent/id ?id]]
+                      [?agent :seon.agent/id ?id]]
                     @connection))))
       (finally
         (d/release connection)
@@ -1313,7 +1313,7 @@
   per-agent facts and always were, so the crash walk derives through
   `next-agent-work` with the same rows and the same expected
   situations."
-  {:seon.cluster.agent/id "agent-a"
+  {:seon.agent/id "agent-a"
    :seon.db.process/id process
    :seon.turn.work/now now})
 
@@ -1324,9 +1324,9 @@
                       :seon.boot/cluster-name "loop-test"})
       (db/transact! connection
                   [{:seon.ns/name 'user}
-                   {:seon.cluster.agent/id "agent-a"}
+                   {:seon.agent/id "agent-a"}
                    {:seon.cluster.message/id "m-1"
-                    :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
+                    :seon.cluster.message/to [:seon.agent/id "agent-a"]
                     :seon.cluster.message/content "go"
                     :seon.cluster.message/at now}])
       (body connection))))
@@ -1336,7 +1336,7 @@
    connection
    {:tx-data
     (cond-> [(cond-> {:seon.turn/id "run-1"
-                      :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+                      :seon.turn/agent [:seon.agent/id "agent-a"]
                       :seon.turn/trigger
                       [:seon.cluster.message/id "m-1"]
                       :seon.turn/opened-at now}
@@ -1344,7 +1344,7 @@
                                (apply str (repeat 64 "a")))
                closed? (assoc :seon.turn/closed-at now))]
       (not closed?)
-      (conj {:seon.cluster.agent/id "agent-a"
+      (conj {:seon.agent/id "agent-a"
              })
       closed?
       (conj {:seon.ai.attempt/id "closed-attempt"
@@ -1420,7 +1420,7 @@
               (turn/settle!
                {:seon.turn.loop/cluster cluster
                 :seon.turn.loop/now now
-                :seon.cluster.agent/id "agent-a"
+                :seon.agent/id "agent-a"
                 :seon.turn/id "run-1"
                 :seon.cluster.eval/ordinal 0
                 :seon.error/value gate-refusal}))
@@ -1545,7 +1545,7 @@
         :seon.sci.eval/ctx ctx
         :seon.db.process/id process})
       :seon.turn.loop/now now
-      :seon.cluster.agent/id "agent-a"
+      :seon.agent/id "agent-a"
       :seon.turn/id "run-1"
       :seon.cluster.eval/ordinal 0
       :seon.sci.eval/evaluation
@@ -1666,7 +1666,7 @@
             (mapv (fn [ordinal]
                     {:seon.turn.loop/cluster cluster
                      :seon.turn.loop/now now
-                     :seon.cluster.agent/id "agent-a"
+                     :seon.agent/id "agent-a"
                      :seon.turn/id "run-1"
                      :seon.cluster.eval/ordinal ordinal
                      :seon.sci.eval/evaluation (evaluate ordinal)})
@@ -1699,18 +1699,18 @@
             "every begun ordinal settled, so no form can execute twice")
         (is (inst? (closed-at connection))
             "and the turn closed in the refusal path itself")
-        (is (nil? (turn/open-for-agent database [:seon.cluster.agent/id "agent-a"]))
+        (is (nil? (turn/open-for-agent database [:seon.agent/id "agent-a"]))
             "the agent holds no wreckage")
         (db/transact! connection
                       [{:seon.cluster.message/id "m-after-refusal"
                         :seon.cluster.message/to
-                        [:seon.cluster.agent/id "agent-a"]
+                        [:seon.agent/id "agent-a"]
                         :seon.cluster.message/content "again"
                         :seon.cluster.message/at now}])
         (is (= :open
                (:seon.turn.work/situation
                 (turn/next-agent-work
                  @connection
-                 {:seon.cluster.agent/id "agent-a"
+                 {:seon.agent/id "agent-a"
                   :seon.db.process/id process})))
             "AND THE AGENT TAKES ITS NEXT TURN")))))

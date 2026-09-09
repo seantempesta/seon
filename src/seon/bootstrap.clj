@@ -27,23 +27,23 @@
 (defn situation
   "Derive one agent's live opening seeds from current database facts."
   {:malli/schema
-   [:=> [:cat :seon.db/db :seon.cluster.agent/id]
-    [:or :seon.cluster.agent/situation :seon.error/value]]}
+   [:=> [:cat :seon.db/db :seon.agent/id]
+    [:or :seon.agent/situation :seon.error/value]]}
   [database agent-id]
   (let [agent
         (db/pull database
-                 '[:seon.cluster.agent/id
-                   {:seon.cluster.agent/namespace
+                 '[:seon.agent/id
+                   {:seon.agent/namespace
                     [:db/id :seon.ns/name
                      {:seon.ns/requires [:seon.ns/name]}]}]
-                 [:seon.cluster.agent/id agent-id])]
-    (if-not (:seon.cluster.agent/id agent)
-      {:seon.cluster.agent/no-such-agent agent-id
-       :seon.error/kind :seon.cluster.agent/no-such-agent
+                 [:seon.agent/id agent-id])]
+    (if-not (:seon.agent/id agent)
+      {:seon.agent/no-such-agent agent-id
+       :seon.error/kind :seon.agent/no-such-agent
        :seon.error/message (str "No agent has id " (pr-str agent-id) ".")
-       :seon.error/data {:seon.cluster.agent/id agent-id}}
-      (let [namespace (:seon.cluster.agent/namespace agent)
-            run (when-let [id (turn/open-for-agent database [:seon.cluster.agent/id agent-id])]
+       :seon.error/data {:seon.agent/id agent-id}}
+      (let [namespace (:seon.agent/namespace agent)
+            run (when-let [id (turn/open-for-agent database [:seon.agent/id agent-id])]
                   (db/pull database
                            '[:seon.turn/id
                              {:seon.turn/trigger [:seon.cluster.message/id]}]
@@ -67,19 +67,19 @@
                      'seon.turn/unanswered-triggers)
                     database agent-id))]
         (cond->
-         {:seon.cluster.agent/id agent-id
-          :seon.cluster.agent/namespace-ref
+         {:seon.agent/id agent-id
+          :seon.agent/namespace-ref
           [:seon.ns/name (:seon.ns/name namespace)]
-          :seon.cluster.agent/unread-message-count (long unread)
+          :seon.agent/unread-message-count (long unread)
           :seon.turn/turns-remaining
           (long (max 0 (- (or turn-limit 0) turns-used)))
-          :seon.cluster.agent/protocol-namespaces
+          :seon.agent/protocol-namespaces
           (->> (:seon.ns/requires namespace)
                (map :seon.ns/name)
                sort
                vec)}
           run
-          (assoc :seon.cluster.agent/open-run-ref
+          (assoc :seon.agent/open-run-ref
                  [:seon.turn/id
                   (:seon.turn/id run)])
           (:seon.turn/trigger run)
@@ -100,14 +100,14 @@
 
 (defn run-id
   "The deterministic id of an agent's system-authored bootstrap run."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.agent/id]
                   :seon.turn/id]}
   [agent-id]
   (id/digest 12 [::turn agent-id]))
 
 (defn task-message-id
   "The deterministic identity of one agent's real bootstrap task message."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.agent/id]
                   :seon.cluster.message/id]}
   [agent-id]
   (id/digest 12 [::task-message agent-id]))
@@ -192,7 +192,7 @@
   [acquisition]
   (get-in acquisition
           [:seon.render.walk/root
-           :seon.cluster.agent/namespace
+           :seon.agent/namespace
            :seon.ns/name]))
 
 (defn- opening-candidate-lookups
@@ -286,7 +286,7 @@
         (db/q '[:find ?budget .
                 :in $ ?agent-id
                 :where
-                [?agent :seon.cluster.agent/id ?agent-id]
+                [?agent :seon.agent/id ?agent-id]
                 [?cluster :seon.cluster/config ?config]
                 [?config :seon.config.bootstrap/beyond-closure-token-budget
                  ?budget]]
@@ -308,8 +308,8 @@
     (db/q '[:find [?target-name ...]
             :in $ ?agent-id
             :where
-            [?agent :seon.cluster.agent/id ?agent-id]
-            [?agent :seon.cluster.agent/namespace ?own-namespace]
+            [?agent :seon.agent/id ?agent-id]
+            [?agent :seon.agent/namespace ?own-namespace]
             [?artifact :seon.fn/ns ?own-namespace]
             [?artifact :seon.fn/private? false]
             [?artifact :seon.fn/spec]
@@ -320,8 +320,8 @@
     (db/q '[:find [?target-name ...]
             :in $ ?agent-id
             :where
-            [?agent :seon.cluster.agent/id ?agent-id]
-            [?agent :seon.cluster.agent/namespace ?own-namespace]
+            [?agent :seon.agent/id ?agent-id]
+            [?agent :seon.agent/namespace ?own-namespace]
             [?artifact :seon.test/ns ?own-namespace]
             [?artifact :seon.test/usage true]
             [?artifact :seon.test/pass-count ?passes]
@@ -647,7 +647,7 @@
   (db/q '[:find [?source ...]
           :in $ ?agent-id
           :where
-          [?agent :seon.cluster.agent/id ?agent-id]
+          [?agent :seon.agent/id ?agent-id]
           [?run :seon.turn/agent ?agent]
           [?form :seon.cluster.eval/run ?run]
           [?form :seon.cluster.eval/ordinal ?ordinal]
@@ -686,7 +686,7 @@
   (some?
    (db/q '[:find ?message .
            :where
-           [?root :seon.cluster.agent/id "root"]
+           [?root :seon.agent/id "root"]
            [?message :seon.cluster.message/from ?root]]
          database)))
 
@@ -699,7 +699,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.db.process/id
                        :seon.turn/opened-at
-                       :seon.cluster.agent/id]
+                       :seon.agent/id]
                   :seon.store/transaction-data]}
   [database process opened-at agent-id]
   (let [run-id (supervision-run-id)
@@ -710,7 +710,7 @@
         read-expression
         (str "(seon.db/q {:query '[:find ?at ?source ?result "
              ":in $ ?agent-id :where "
-             "[?agent :seon.cluster.agent/id ?agent-id] "
+             "[?agent :seon.agent/id ?agent-id] "
              "[?run :seon.turn/agent ?agent] "
              "[?form :seon.cluster.eval/run ?run] "
              "[?form :seon.cluster.eval/ordinal ?ordinal] "
@@ -747,7 +747,7 @@
       []
       (turn/system-run-tx
        database
-       {:seon.cluster.agent/id "root"
+       {:seon.agent/id "root"
         :seon.turn/id run-id
         :seon.db.process/id process
         :seon.turn/opened-at opened-at
@@ -762,14 +762,14 @@
     [:cat
      :seon.db/database-value
      [:map
-      [:seon.cluster.agent/id :seon.cluster.agent/id]
+      [:seon.agent/id :seon.agent/id]
       [:seon.cluster/name :seon.cluster/name]
       [:seon.ns/name :seon.ns/name]
       [:seon.db.process/id :seon.db.process/id]
       [:seon.turn/opened-at :seon.turn/opened-at]]]
     :seon.store/transaction-data]}
   [db
-   {agent-id :seon.cluster.agent/id
+   {agent-id :seon.agent/id
     namespace-name :seon.ns/name
     process :seon.db.process/id
     opened-at :seon.turn/opened-at}]
@@ -794,13 +794,13 @@
         message-row
         {:seon.cluster.message/id message-id
          :seon.cluster.message/ordinal 0
-         :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
+         :seon.cluster.message/to [:seon.agent/id agent-id]
          :seon.cluster.message/content (task-message)
          :seon.cluster.message/at opened-at}]
     (into [namespace-row message-row]
           (turn/generated-run-tx
            db
-           {:seon.cluster.agent/id agent-id
+           {:seon.agent/id agent-id
             :seon.turn/id id
             :seon.db.process/id process
             :seon.turn/opened-at opened-at

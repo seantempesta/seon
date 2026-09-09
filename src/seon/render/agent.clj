@@ -11,7 +11,7 @@
   "Name the agent from its identity; lifecycle belongs to its turn facts."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
-  (when-let [id (get unit :seon.cluster.agent/id)]
+  (when-let [id (get unit :seon.agent/id)]
     (str "Agent " id ".")))
 
 (defn agent-html

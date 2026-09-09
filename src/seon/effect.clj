@@ -646,8 +646,8 @@
                        :seon.effect/opened-at opened-at}
                        background?
                        (assoc :seon.effect/notify
-                              [:seon.cluster.agent/id
-                               (:seon.cluster.agent/id *request-context*)]))
+                              [:seon.agent/id
+                               (:seon.agent/id *request-context*)]))
                      opened
                      (db/transact!
                       connection

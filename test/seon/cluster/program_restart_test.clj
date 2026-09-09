@@ -23,7 +23,7 @@
    {:tx-data
     [[:db.fn/call
       #'message/inbound-tx
-      {:seon.cluster.agent/id agent-id
+      {:seon.agent/id agent-id
        :seon.cluster.message/inbound-content content
        :seon.cluster.message/at (java.util.Date.)
        :seon.config.eval.result/max-string 4096}]]}))
@@ -75,7 +75,7 @@
   (db/q '[:find (count ?receipt) .
          :in $ ?agent-id ?bootstrap-run-id
          :where
-         [?agent :seon.cluster.agent/id ?agent-id]
+         [?agent :seon.agent/id ?agent-id]
          [?run :seon.turn/agent ?agent]
          [?run :seon.turn/id ?run-id]
          [(not= ?run-id ?bootstrap-run-id)]
@@ -91,7 +91,7 @@
   (db/q '[:find ?result .
          :in $ ?agent-id ?bootstrap-run-id ?ordinal
          :where
-         [?agent :seon.cluster.agent/id ?agent-id]
+         [?agent :seon.agent/id ?agent-id]
          [?run :seon.turn/agent ?agent]
          [?run :seon.turn/id ?run-id]
          [(not= ?run-id ?bootstrap-run-id)]
@@ -106,7 +106,7 @@
   (db/q '[:find ?agent-id .
          :where
          [?run :seon.turn/agent ?agent]
-         [?agent :seon.cluster.agent/id ?agent-id]
+         [?agent :seon.agent/id ?agent-id]
          (not [?run :seon.turn/closed-at _])]
        db))
 
@@ -116,7 +116,7 @@
    (db/q '[:find ?run .
           :in $ ?agent-id
           :where
-          [?agent :seon.cluster.agent/id ?agent-id]
+          [?agent :seon.agent/id ?agent-id]
           [?run :seon.turn/agent ?agent]
           (not [?run :seon.turn/closed-at _])]
         db agent-id)))
@@ -126,7 +126,7 @@
   (db/q '[:find (count ?run) .
          :in $ ?agent-id ?bootstrap-run-id
          :where
-         [?agent :seon.cluster.agent/id ?agent-id]
+         [?agent :seon.agent/id ?agent-id]
          [?run :seon.turn/agent ?agent]
          [?run :seon.turn/id ?run-id]
          [(not= ?run-id ?bootstrap-run-id)]
@@ -158,7 +158,7 @@
          (map semantic-result
               (db/q '[:find [?result ...]
                      :where
-                     [?agent :seon.cluster.agent/id "restart-b"]
+                     [?agent :seon.agent/id "restart-b"]
                      [?run :seon.turn/agent ?agent]
                      [?receipt :seon.cluster.eval/run ?run]
                      [?receipt :seon.cluster.eval/ordinal 0]
@@ -182,7 +182,7 @@
            (get-in first-instance
                    [:seon.turn.loop/cluster
                     :seon.db.process/id])
-           {:seon.cluster.agent/id "restart-a"
+           {:seon.agent/id "restart-a"
             :seon.cluster/name cluster-name
             :seon.ns/name 'my.agents.restart-a})
           (await-bootstrap! connection "restart-a")
@@ -353,7 +353,7 @@
            (get-in second-instance
                    [:seon.turn.loop/cluster
                     :seon.db.process/id])
-           {:seon.cluster.agent/id "restart-b"
+           {:seon.agent/id "restart-b"
             :seon.cluster/name cluster-name
             :seon.ns/name 'my.agents.restart-b})
           (await-bootstrap! connection "restart-b")

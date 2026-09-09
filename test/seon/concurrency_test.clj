@@ -16,9 +16,9 @@
   (:import [java.util.concurrent CountDownLatch]))
 
 (defn- with-message-route [connection body]
-  (db/transact! connection [{:seon.cluster.agent/id "recipient"}])
+  (db/transact! connection [{:seon.agent/id "recipient"}])
   (let [recipient (:db/id (db/pull @connection [:db/id]
-                                 [:seon.cluster.agent/id "recipient"]))
+                                 [:seon.agent/id "recipient"]))
         mailbox (async/chan (async/sliding-buffer 1))
         armer (async/chan (async/sliding-buffer 1))
         render (async/chan (async/sliding-buffer 1))
@@ -56,7 +56,7 @@
                        right
                        [{:seon.cluster.message/id "connection-isolation"
                          :seon.cluster.message/to
-                         [:seon.cluster.agent/id "recipient"]
+                         [:seon.agent/id "recipient"]
                          :seon.cluster.message/content "only the right recipient"
                          :seon.cluster.message/at (java.util.Date.)}])]
                   (is (not (:seon.error/kind result)))
@@ -90,15 +90,15 @@
        (let [created
              (db/transact! connection
               (agent/creation-tx
-               {:seon.cluster.agent/id agent-id
+               {:seon.agent/id agent-id
                :seon.cluster/name (:seon.cluster/name handle)
                :seon.ns/name (symbol (str "my.agents.concurrency." agent-id))}))]
          (when (:seon.error/kind created)
            (throw (ex-info "Agent creation refused" created)))
          (agent/arm! {:seon.turn.loop/cluster handle
-                      :seon.cluster.agent/routing
-                      (:seon.cluster.agent/routing instance)
-                      :seon.cluster.agent/id agent-id}))))))
+                      :seon.agent/routing
+                      (:seon.agent/routing instance)
+                      :seon.agent/id agent-id}))))))
 
 (defn- concurrent-wave! [subjects source-fn]
   (let [start (CountDownLatch. 1)
@@ -113,9 +113,9 @@
                    source (source-fn instance agent-id)
                    result (turn/virtual-turn!
                            {:seon.turn.loop/cluster handle
-                            :seon.cluster.agent/routing
-                            (:seon.cluster.agent/routing instance)
-                            :seon.cluster.agent/id agent-id
+                            :seon.agent/routing
+                            (:seon.agent/routing instance)
+                            :seon.agent/id agent-id
                             :seon.cluster.reply/text source})
                    run-id (:seon.turn/id result)]
                (when-not run-id
@@ -131,7 +131,7 @@
                    (db/pull @connection
                             [:seon.turn/opened-at :seon.turn/closed-at
                              :seon.turn/reply
-                             {:seon.turn/agent [:seon.cluster.agent/id]}]
+                             {:seon.turn/agent [:seon.agent/id]}]
                             [:seon.turn/id run-id])
                    ::attempts
                    (db/q '[:find (count ?attempt) . :in $ ?id
@@ -184,15 +184,15 @@
                     :seon.db.process/id cluster/boot-process-identity
                     :seon.turn.loop/stream-channel
                     (async/chan (async/sliding-buffer 1))})]
-       (swap! routing assoc :seon.cluster.agent/fault-channel faults)
+       (swap! routing assoc :seon.agent/fault-channel faults)
        (try
          (body {:seon.turn.loop/cluster handle
                 :seon.sci.eval/ctx ctx
-                :seon.cluster.agent/routing routing})
+                :seon.agent/routing routing})
          (finally
-           (doseq [id (keys (:seon.cluster.agent/armed @routing))]
-             (agent/disarm! {:seon.cluster.agent/routing routing
-                            :seon.cluster.agent/id id}))
+           (doseq [id (keys (:seon.agent/armed @routing))]
+             (agent/disarm! {:seon.agent/routing routing
+                            :seon.agent/id id}))
            (flow/stop-work-launcher! launcher)
            (doseq [channel [faults (:seon.cluster.wake/channel handle)
                             (:seon.render/context-channel handle)
@@ -242,7 +242,7 @@
                       (is (string? (:seon.turn/reply (::turn result))))
                       (is (= (::agent result)
                              (get-in result [::turn :seon.turn/agent
-                                             :seon.cluster.agent/id])))
+                                             :seon.agent/id])))
                       (is (= 1 (count evaluations)))
                       (is (= (str (::cluster result) "/" (::agent result) "/" ordinal)
                              (:seon.print/value

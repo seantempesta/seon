@@ -624,7 +624,7 @@
                      [:seon.render.walk/members
                       (first (:seon.render.walk/order acquisition))])
         namespace-ref (get-in root [:seon.render/value
-                                    :seon.cluster.agent/namespace])]
+                                    :seon.agent/namespace])]
     (when (map? namespace-ref) (:db/id namespace-ref))))
 
 (defn- distance-cap-unit
@@ -858,8 +858,8 @@
   {:malli/schema [:=> [:cat :seon.render.walk/history-request]
                   [:or [:vector :map] :seon.error/value]]}
   [{database :seon.db/db lookup :seon.render.walk/lookup :as request}]
-  (let [agent-id (:seon.cluster.agent/id
-                  (db/pull database [:seon.cluster.agent/id] lookup))
+  (let [agent-id (:seon.agent/id
+                  (db/pull database [:seon.agent/id] lookup))
         evaluations (evaluation/of-agent database agent-id)]
     (if (:seon.error/kind evaluations)
       evaluations

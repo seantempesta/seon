@@ -39,19 +39,19 @@
 (defn- with-connection [body]
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
+      (db/transact! connection [{:seon.agent/id "agent-a"}])
       (body connection))))
 
 (defn- agent-eid
   "The recipient's ENTITY ID — what a `:seon.cluster.message/to` datom
   carries as its value, and therefore the key `route!` looks up."
   [connection]
-  (db/q '[:find ?e . :where [?e :seon.cluster.agent/id "agent-a"]]
+  (db/q '[:find ?e . :where [?e :seon.agent/id "agent-a"]]
        @connection))
 
 (defn- message-tx [id]
   [{:seon.cluster.message/id id
-    :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
+    :seon.cluster.message/to [:seon.agent/id "agent-a"]
     :seon.cluster.message/content "hello"
     :seon.cluster.message/at (Date.)}])
 
@@ -59,7 +59,7 @@
   "A commit of attributes a TURN writes — the other side of C2."
   [id]
   [{:seon.turn/id id
-    :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+    :seon.turn/agent [:seon.agent/id "agent-a"]
     :seon.turn/opened-at (Date.)
     :seon.turn/plan-digest (apply str (repeat 64 "a"))}])
 
@@ -173,7 +173,7 @@
                inside)
             "and the population's own activity never refills the turn
              bound it spends")
-        (is (not (contains? listened :seon.cluster.agent/id))
+        (is (not (contains? listened :seon.agent/id))
             "creating an agent is not a wake: its first message is its
              first wake, and the armer belt arms an agent created and
              addressed in one commit")))))
@@ -193,14 +193,14 @@
       (let [mailbox (async/chan (async/sliding-buffer 1))
             {:keys [armer key]} (route-probe! connection mailbox)]
         (try
-          (db/transact! connection [{:seon.cluster.agent/id "agent-b"}])
+          (db/transact! connection [{:seon.agent/id "agent-b"}])
           (is (nil? (async/poll! armer))
               "creating an agent asserts no listened attribute, so it
                wakes nobody by itself")
           (db/transact!
            connection
            [{:seon.cluster.message/id "m-to-b"
-             :seon.cluster.message/to [:seon.cluster.agent/id "agent-b"]
+             :seon.cluster.message/to [:seon.agent/id "agent-b"]
              :seon.cluster.message/content "hello"
              :seon.cluster.message/at (Date.)}])
           (is (some? (test-support/await-event! armer "armer wake"))
@@ -235,7 +235,7 @@
        :seon.wake/listen true
        :seon.wake/opens-turn? true}]}
     (fn [connection]
-      (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
+      (db/transact! connection [{:seon.agent/id "agent-a"}])
       (let [recipient (agent-eid connection)
             mailbox (async/chan (async/sliding-buffer 1))
             {:keys [key]} (route-probe! connection mailbox)]
@@ -300,9 +300,9 @@
     (fn [connection]
       (db/transact!
        connection
-       [{:seon.cluster.agent/id "agent-a"}
+       [{:seon.agent/id "agent-a"}
         {:seon.ns/name 'my.agents.agent-a
-         :seon.ns/steward [:seon.cluster.agent/id "agent-a"]}
+         :seon.ns/steward [:seon.agent/id "agent-a"]}
         {:seon.fn/sym "my.agents.agent-a/broken"
          :seon.fn/ns [:seon.ns/name 'my.agents.agent-a]}])
       (let [recipient (agent-eid connection)
@@ -331,7 +331,7 @@
              :seon.config.error/max-evidence-bytes 4096
              :seon.config.error/recurrence-limit 3
              ;; the fault is ABOUT agent-a's own code AND happened to it
-             :seon.cluster.agent/id "agent-a"}))
+             :seon.agent/id "agent-a"}))
           (is (= recipient
                  (:db/id (:seon.error/steward
                           (db/pull (db/db connection)
@@ -355,7 +355,7 @@
   ;; routing it could not resolve.
   (test-support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
+      (db/transact! connection [{:seon.agent/id "agent-a"}])
       (db/transact!
        connection
        (error/commit-tx
@@ -572,7 +572,7 @@
           [commits (gen/vector (gen/elements [:message :agent :run]) 1 8)]
           (test-support/with-database
             (fn [connection]
-              (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
+              (db/transact! connection [{:seon.agent/id "agent-a"}])
               (let [recipient-eid (agent-eid connection)
                     mailbox (async/chan 64)
                     channels {recipient-eid mailbox}
@@ -601,7 +601,7 @@
                       ;; a bare agent creation asserts no listened
                       ;; attribute, so it must wake NOBODY
                       :agent (db/transact! connection
-                                         [{:seon.cluster.agent/id
+                                         [{:seon.agent/id
                                            (str "pa-" index)}])
                       :run (db/transact! connection (run-tx
                                                    (str "pr-" index)))))

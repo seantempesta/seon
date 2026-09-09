@@ -36,14 +36,14 @@
               (config/compile-manifest
                {:seon.boot/cluster-name "loop-proof"
                 :seon.config/manifest {:seon.config.ai/no-provider true}}))
-             {:seon.cluster.agent/id "proof"
-              :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.proof}}
-             {:seon.cluster.agent/id "other"
-              :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.other}}
-             {:seon.cluster.agent/id "unobserved"
-              :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.unobserved}}
-             {:seon.cluster.agent/id "root"
-              :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.root}}])
+             {:seon.agent/id "proof"
+              :seon.agent/namespace {:seon.ns/name 'my.agents.proof}}
+             {:seon.agent/id "other"
+              :seon.agent/namespace {:seon.ns/name 'my.agents.other}}
+             {:seon.agent/id "unobserved"
+              :seon.agent/namespace {:seon.ns/name 'my.agents.unobserved}}
+             {:seon.agent/id "root"
+              :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
            _ (is (nil? (:seon.error/kind configured)))
            ctx (support/fork-cluster-ctx connection)
            environment (support/environment "loop-proof" connection)
@@ -70,7 +70,7 @@
                         :seon.sci.eval/ctx ctx
                         :seon.db.process/id cluster/boot-process-identity})
                request {:seon.turn.loop/cluster handle
-                        :seon.cluster.agent/id "proof"
+                        :seon.agent/id "proof"
                         :seon.turn/write? true}
                prompt #(render/acquire-context!
                         (merge handle
@@ -80,14 +80,14 @@
                                  (db/pull @connection [:seon.turn/id]
                                           (get-in (last (evaluation/of-agent @connection "proof"))
                                                   [:seon.cluster.eval/run :db/id])))
-                                :seon.cluster.agent/id "proof"
+                                :seon.agent/id "proof"
                                 :seon.sci.eval/time-limit-ms
                                 (:seon.config.eval/time-limit-ms handle)}))
                submit
                (fn [source]
                  (let [result (turn/virtual-turn!
                                (assoc request
-                                      :seon.cluster.agent/routing routing
+                                      :seon.agent/routing routing
                                       :seon.cluster.reply/text source))
                        id (:seon.turn/id result)
                        closed? #(and id
@@ -99,7 +99,7 @@
                      (support/await-event! events ::closed (fn [_] (closed?))))
                    (is (boolean (closed?)))
                    id))]
-           (swap! routing assoc :seon.cluster.agent/fault-channel faults)
+           (swap! routing assoc :seon.agent/fault-channel faults)
            (d/listen connection ::proof
                      (fn [report]
                        (swap! transactions conj report)
@@ -135,7 +135,7 @@
                    (is (nil? (:seon.turn/id unchanged)))
                    (is (= basis (db/basis-t @connection))))
                  (turn/compact! {:seon.db/connection connection
-                                 :seon.cluster.agent/id "proof"})
+                                 :seon.agent/id "proof"})
                  (is (empty? (evaluation/of-agent @connection "proof")))
                  (let [regenerated (turn/system-turn request)
                        after (stored-text @connection)]
@@ -152,8 +152,8 @@
                    (println {:seon.test/stage :compact
                              :seon.test/stored (bytes-evidence after)}))))
              (agent/arm! {:seon.turn.loop/cluster handle
-                          :seon.cluster.agent/routing routing
-                          :seon.cluster.agent/id "proof"})
+                          :seon.agent/routing routing
+                          :seon.agent/id "proof"})
              (testing "three-form reply, actual handles, and additive history"
                (let [prefix (stored-text @connection)
                      _ (reset! transactions [])
@@ -177,14 +177,14 @@
                            :seon.test/datoms (mapv #(count (:tx-data %)) reports)
                            :seon.test/stored (bytes-evidence (stored-text @connection))})))
              (submit "(my.message/inbox {})")
-             (agent/disarm! {:seon.cluster.agent/routing routing
-                             :seon.cluster.agent/id "proof"})
+             (agent/disarm! {:seon.agent/routing routing
+                             :seon.agent/id "proof"})
              (testing "changed reads answer only observed wakes"
                (let [prefix (stored-text @connection)
                      message (db/transact!
                               connection
                               [{:seon.cluster.message/id "proof-wake"
-                                :seon.cluster.message/to [:seon.cluster.agent/id "proof"]
+                                :seon.cluster.message/to [:seon.agent/id "proof"]
                                 :seon.cluster.message/content "Read the changed message."
                                 :seon.cluster.message/at (java.util.Date. 0)}])
                      wake-t (db/basis-t (:db-after message))]
@@ -209,12 +209,12 @@
                (let [written (db/transact!
                               connection
                               [{:seon.cluster.message/id "proof-wake-2"
-                                :seon.cluster.message/to [:seon.cluster.agent/id "proof"]
+                                :seon.cluster.message/to [:seon.agent/id "proof"]
                                 :seon.cluster.message/content "A second changed message."
                                 :seon.cluster.message/at (java.util.Date. 1)}])
                      wake-t (db/basis-t (:db-after written))
                      closed? #(seq (db/q '[:find ?turn :in $ ?since
-                                           :where [?agent :seon.cluster.agent/id "proof"]
+                                           :where [?agent :seon.agent/id "proof"]
                                            [?turn :seon.turn/agent ?agent]
                                            [?turn :seon.turn/id _ ?t]
                                            [(>= ?t ?since)]
@@ -222,12 +222,12 @@
                                            [?turn :seon.turn/closed-at]]
                                          @connection wake-t))]
                  (agent/arm! {:seon.turn.loop/cluster handle
-                              :seon.cluster.agent/routing routing
-                              :seon.cluster.agent/id "proof"})
+                              :seon.agent/routing routing
+                              :seon.agent/id "proof"})
                  (when-not (closed?)
                    (support/await-event! events ::wake-turn-closed (fn [_] (closed?))))
-                 (agent/disarm! {:seon.cluster.agent/routing routing
-                                 :seon.cluster.agent/id "proof"})
+                 (agent/disarm! {:seon.agent/routing routing
+                                 :seon.agent/id "proof"})
                  (let [fresh (filter #(>= (:t %) wake-t)
                                      (evaluation/of-agent @connection "proof"))]
                    (is (seq fresh))
@@ -252,7 +252,7 @@
                                   {:seon.turn.loop/cluster handle
                                    :seon.db/db @connection
                                    :seon.sci.eval/ctx ctx
-                                   :seon.cluster.agent/id "root"
+                                   :seon.agent/id "root"
                                    :seon.ns/name 'my.agents.root
                                    :seon.cluster.reply/text query-source
                                    :seon.sci.admit/caps (:seon.sci.admit/caps handle)})
@@ -263,13 +263,13 @@
                      (is (nil? (:seon.error/kind result)) (pr-str result))))))
              (testing "boot closes durable intent and never reexecutes it"
                (let [id (turn/next-id @connection "loop-proof" "other")
-                     source "(seon.db/transact! [{:seon.cluster.agent/id \"must-not-execute\"}])"
+                     source "(seon.db/transact! [{:seon.agent/id \"must-not-execute\"}])"
                      sources (turn/planned-sources source 'my.agents.other 10000)]
                  (db/transact!
                   connection
                   (turn/system-run-tx
                    @connection
-                   {:seon.cluster.agent/id "other"
+                   {:seon.agent/id "other"
                     :seon.turn/id id
                     :seon.turn/opened-at (java.util.Date. 0)
                     :seon.turn/starting-ns [:seon.ns/name 'my.agents.other]
@@ -283,29 +283,29 @@
                    (is (every? :seon.cluster.eval/interrupted-at saved))
                    (is (some? (:seon.turn/closed-at
                                (db/pull @connection [:seon.turn/closed-at] [:seon.turn/id id]))))
-                   (is (nil? (turn/next-agent-work @connection {:seon.cluster.agent/id "other"})))
+                   (is (nil? (turn/next-agent-work @connection {:seon.agent/id "other"})))
                    (is (nil? (db/q '[:find ?e . :where
-                                     [?e :seon.cluster.agent/id "must-not-execute"]] @connection)))
+                                     [?e :seon.agent/id "must-not-execute"]] @connection)))
                    (is (= 0 (:seon.boot/recovered-runs (#'cluster/recover-runs! connection))))
                    (is (= basis (db/basis-t @connection))))))
              (testing "a system-only turn without the wake's results answers nothing"
                (db/transact!
                 connection
                 [{:seon.cluster.message/id "unobserved-wake"
-                  :seon.cluster.message/to [:seon.cluster.agent/id "unobserved"]
+                  :seon.cluster.message/to [:seon.agent/id "unobserved"]
                   :seon.cluster.message/content "This agent has no inbox read."
                   :seon.cluster.message/at (java.util.Date. 2)}])
                (let [pending (turn/unanswered-wakes @connection "unobserved" {})
                      system (turn/system-turn
-                             (assoc request :seon.cluster.agent/id "unobserved"))]
+                             (assoc request :seon.agent/id "unobserved"))]
                  (is (= 1 (count pending)))
                  (is (string? (:seon.turn/id system)) (pr-str system))
                  (is (= pending (turn/unanswered-wakes @connection "unobserved" {})))))
              (is (empty? (db/q '[:find [?attempt ...]
                                  :where [?attempt :seon.ai.attempt/id]] @connection)))
              (finally
-               (agent/disarm! {:seon.cluster.agent/routing routing
-                               :seon.cluster.agent/id "proof"})
+               (agent/disarm! {:seon.agent/routing routing
+                               :seon.agent/id "proof"})
                (d/unlisten connection ::proof)
                (doseq [channel [events faults
                                 (:seon.cluster.wake/channel handle)

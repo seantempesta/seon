@@ -24,24 +24,24 @@
   (support/with-database
    (fn [connection]
      (db/transact! connection
-                   [{:db/id "steward" :seon.cluster.agent/id "record-steward"}
+                   [{:db/id "steward" :seon.agent/id "record-steward"}
                     {:db/id "namespace" :seon.ns/name 'my.agents.record
                      :seon.ns/steward "steward"}
-                    {:seon.cluster.agent/id "record-agent"
-                     :seon.cluster.agent/namespace "namespace"}])
+                    {:seon.agent/id "record-agent"
+                     :seon.agent/namespace "namespace"}])
      (let [unit {:seon.db/db @connection
-                 :seon.cluster.agent/id "record-agent"}
+                 :seon.agent/id "record-agent"}
            source (agent/render-identity-ai unit)
            form (edn/read-string source)
            selector (second (second form))
            observed (db/pull @connection selector (nth form 2))]
-       (is (= "record-agent" (:seon.cluster.agent/id observed)))
+       (is (= "record-agent" (:seon.agent/id observed)))
        (is (= 'my.agents.record
-              (get-in observed [:seon.cluster.agent/namespace :seon.ns/name])))
+              (get-in observed [:seon.agent/namespace :seon.ns/name])))
        (is (= "record-steward"
-              (get-in observed [:seon.cluster.agent/namespace :seon.ns/steward
-                                :seon.cluster.agent/id])))
-       (is (not (str/includes? source ":seon.cluster.agent/cluster")))))))
+              (get-in observed [:seon.agent/namespace :seon.ns/steward
+                                :seon.agent/id])))
+       (is (not (str/includes? source ":seon.agent/cluster")))))))
 
 (defn- namespace-unit
   [db namespace-name distance token-budget]
@@ -277,8 +277,8 @@
                     :seon.ns/name 'my.agents.fresh
                     :seon.ns/steward "fresh-agent"}
                    {:db/id "fresh-agent"
-                    :seon.cluster.agent/id "fresh"
-                    :seon.cluster.agent/namespace "fresh-namespace"}])
+                    :seon.agent/id "fresh"
+                    :seon.agent/namespace "fresh-namespace"}])
       (let [db @connection
             unit (namespace-unit db 'my.agents.fresh 1 256)
             ai (sut/render-ai unit)

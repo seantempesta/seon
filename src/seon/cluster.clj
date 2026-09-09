@@ -2205,21 +2205,21 @@
    [:=> [:cat :seon.db/database-value
          :seon.db.process/id
          :inst
-         :seon.cluster.agent/creation-request]
+         :seon.agent/creation-request]
     :seon.store/transaction-data]}
   [db process now
-   {agent-id :seon.cluster.agent/id
+   {agent-id :seon.agent/id
     namespace-name :seon.ns/name
     :as request}]
   (if (db/q '[:find ?agent .
              :in $ ?agent-id
-             :where [?agent :seon.cluster.agent/id ?agent-id]]
+             :where [?agent :seon.agent/id ?agent-id]]
            db agent-id)
     []
     (into (cluster.agent/creation-tx request)
           (bootstrap/seed-tx
            db
-           {:seon.cluster.agent/id agent-id
+           {:seon.agent/id agent-id
             :seon.cluster/name (:seon.cluster/name request)
             :seon.ns/name namespace-name
             :seon.db.process/id process
@@ -2233,8 +2233,8 @@
   {:malli/schema
    [:=> [:cat :seon.db/connection
          :seon.db.process/id
-         :seon.cluster.agent/creation-request]
-    [:or :seon.cluster.agent/creation-result :seon.error/value]]}
+         :seon.agent/creation-request]
+    [:or :seon.agent/creation-result :seon.error/value]]}
   [connection process request]
   (let [transaction-result
         (db/transact!
@@ -2247,36 +2247,36 @@
       ;; Read back from the connection because this operation needs only the
       ;; current committed value, not the rest of the transaction report.
       (let [database (db/db connection)
-            agent-id (:seon.cluster.agent/id request)
+            agent-id (:seon.agent/id request)
             bootstrap-run-id (bootstrap/run-id agent-id)
             agent
             (db/pull database
-                     '[:seon.cluster.agent/id
-                       {:seon.cluster.agent/namespace [:seon.ns/name]}]
-                     [:seon.cluster.agent/id agent-id])
+                     '[:seon.agent/id
+                       {:seon.agent/namespace [:seon.ns/name]}]
+                     [:seon.agent/id agent-id])
             run-agent-id
             (db/q '[:find ?agent-id .
                     :in $ ?run-id
                     :where
                     [?run :seon.turn/id ?run-id]
                     [?run :seon.turn/agent ?agent]
-                    [?agent :seon.cluster.agent/id ?agent-id]]
+                    [?agent :seon.agent/id ?agent-id]]
                   database bootstrap-run-id)
             namespace-name
-            (get-in agent [:seon.cluster.agent/namespace :seon.ns/name])
+            (get-in agent [:seon.agent/namespace :seon.ns/name])
             cluster-name
             (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)]
         (if (and namespace-name cluster-name (= agent-id run-agent-id))
-          {:seon.cluster.agent/id agent-id
+          {:seon.agent/id agent-id
            :seon.ns/name namespace-name
            :seon.cluster/name cluster-name
            :seon.turn/id bootstrap-run-id}
-          {:seon.error/kind :seon.cluster.agent/creation-incomplete
-           :seon.cluster.agent/creation-incomplete agent-id
+          {:seon.error/kind :seon.agent/creation-incomplete
+           :seon.agent/creation-incomplete agent-id
            :seon.error/message
            (str "Agent " (pr-str agent-id)
                 " committed without its namespace, cluster, or bootstrap run.")
-           :seon.error/data {:seon.cluster.agent/id agent-id}})))))
+           :seon.error/data {:seon.agent/id agent-id}})))))
 
 (defn- seed-root-agent!
   "Ensure root and its agent-owned maintenance initialization exist."
@@ -2285,17 +2285,17 @@
    (ensure-entity!
     connection
     process
-    {:seon.cluster.agent/id root-agent-id
+    {:seon.agent/id root-agent-id
      :seon.cluster/name cluster-name
      :seon.ns/name 'my.agents.root})
-   {:seon.cluster.agent/id root-agent-id
-    :seon.boot/population :seon.cluster.agent/agent})
+   {:seon.agent/id root-agent-id
+    :seon.boot/population :seon.agent/agent})
   (require-committed!
    (db/transact!
     connection
     {:tx-data [[:db.fn/call #'schedule/root-maintenance-seed-call]]
      :tx-meta {:seon.db/process [:seon.db.process/id process]}})
-   {:seon.cluster.agent/id root-agent-id
+   {:seon.agent/id root-agent-id
     :seon.boot/population :seon.schedule/root-maintenance}))
 
 (defn- serve!
@@ -2337,11 +2337,11 @@
                 ;; a live dial change applies without restarting a tab.
                 (merge {:seon.render.web/port wanted
                         :seon.store/connection-object connection
-                        :seon.cluster.agent/id root-agent-id
+                        :seon.agent/id root-agent-id
                         :seon.sci.admit/caps (config/result-caps dials)}
                        (select-keys view
                                     [:seon.turn.loop/cluster
-                                     :seon.cluster.agent/routing
+                                     :seon.agent/routing
                                      :seon.render.web/pages-mult
                                      :seon.render.web/registration
                                      :seon.render.web/latest-packages
@@ -2385,7 +2385,7 @@
   (db/q '[:find ?id .
          :in $ ?agent-id
          :where
-         [?agent :seon.cluster.agent/id ?agent-id]
+         [?agent :seon.agent/id ?agent-id]
          [?run :seon.turn/agent ?agent]
          (not [?run :seon.turn/closed-at])
          [?run :seon.turn/id ?id]]
@@ -2424,7 +2424,7 @@
     (let [db @connection
           dials (config/effective db cluster-name)
           source-fault fault
-          agent-id (:seon.cluster.agent/id source-fault)
+          agent-id (:seon.agent/id source-fault)
           run-id (when agent-id (tagged-run db agent-id))
           dropped-count (::flow/dropped-fault-count source-fault)
           threshold (:seon.config.eval.result/blob-threshold dials)
@@ -2451,7 +2451,7 @@
             (assoc :seon.config.error/escalate-to
                    (:seon.config.error/escalate-to dials))
             run-id (assoc :seon.turn/id run-id)
-            agent-id (assoc :seon.cluster.agent/id agent-id))
+            agent-id (assoc :seon.agent/id agent-id))
           ;; The fault family's own bound decides how much evidence the
           ;; durable fact keeps; the blob threshold decides where the
           ;; complete evidence lives. Two decisions, two declared keys, ONE
@@ -2608,18 +2608,18 @@
   handle and the view), so the graph definition stays pure data."
   [handle routing view]
   (let [environment (env/of handle)]
-    {:procs {:seon.cluster.agent/armer
+    {:procs {:seon.agent/armer
              {:proc (flow/var-process
                      #'cluster.agent/armer-step :io
                      (env/carry {:seon.turn.loop/cluster handle
-                                 :seon.cluster.agent/routing routing}
+                                 :seon.agent/routing routing}
                                 environment))}
              :seon.render.web/render
              {:proc (flow/var-process
                      #'web/render-step :io
                      (env/carry (assoc view
                                        :seon.turn.loop/cluster handle
-                                       :seon.cluster.agent/routing routing)
+                                       :seon.agent/routing routing)
                                 environment))}
              :seon.search/index
              {:proc (flow/var-process
@@ -2744,7 +2744,7 @@
         pages-mult (::pages-mult joins)]
     ;; the fault channel joins the routing entry so every later arm
     ;; can tap its agent graph's errors into the ONE committer inbox
-    (swap! routing assoc :seon.cluster.agent/fault-channel
+    (swap! routing assoc :seon.agent/fault-channel
            (:seon.flow/fault-channel fanout))
     ;; THE ROUTING DELIVERY (F1 §4): one listener per cluster, and its
     ;; own faults ride the same path as every other fault
@@ -2760,7 +2760,7 @@
                   :seon.cluster.wake/search-channel search-channel
                   :seon.cluster.wake/fault-channel
                   (:seon.flow/fault-channel fanout)
-                  :seon.cluster.wake/key :seon.cluster.agent/route})
+                  :seon.cluster.wake/key :seon.agent/route})
     ;; BOOT IS ONE WAKE through the ordinary render path. The listener is
     ;; already registered and the cold interest is `:all`, so commits before
     ;; this offer are covered by the same newest-database derivation as every
@@ -2774,19 +2774,19 @@
     (cluster.agent/armer-step
      (cluster.agent/armer-step
       {:seon.turn.loop/cluster handle
-       :seon.cluster.agent/routing routing})
-     ::cluster.agent/arm
-     ::cluster.agent/boot)
+       :seon.agent/routing routing})
+     :seon.agent/arm
+     :seon.agent/boot)
     {:seon.turn.loop/cluster handle
      :seon.flow/graph graph
      :seon.flow/error-fanout fanout
-     :seon.cluster.agent/routing routing
+     :seon.agent/routing routing
      ;; the view half `serve!` hands to the web service: one mult over
      ;; the proc's pages out-port, the shared registration, and the
      ;; wake channel a freshly opened tab offers into
      :seon.render.web/view
      (assoc view
-            :seon.cluster.agent/routing routing
+            :seon.agent/routing routing
             :seon.render.web/pages-mult pages-mult
             :seon.render.web/fault-channel
             (:seon.flow/fault-channel fanout))
@@ -2822,35 +2822,35 @@
   (when-let [handle (:seon.turn.loop/cluster instance)]
     (wake/unlisten! {:seon.cluster.wake/connection
                      (:seon.db/connection handle)
-                     :seon.cluster.wake/key :seon.cluster.agent/route}))
+                     :seon.cluster.wake/key :seon.agent/route}))
   (when-let [handle (:seon.turn.loop/cluster instance)]
     (let [armer-channel (:seon.cluster.wake/channel handle)
           quiesced (async/promise-chan)]
       (when-not (async.protocols/closed? armer-channel)
         (when-not (async/>!! armer-channel
-                             {::cluster.agent/quiesce quiesced})
+                             {:seon.agent/quiesce quiesced})
           (throw
            (ex-info "The cluster armer input closed before quiescence."
                     {:seon.error/kind
-                     :seon.cluster.agent/armer-quiescence-undeliverable
-                     :seon.cluster.agent/armer-quiescence-undeliverable true
+                     :seon.agent/armer-quiescence-undeliverable
+                     :seon.agent/armer-quiescence-undeliverable true
                      :seon.error/message
                      "The cluster armer input closed before quiescence."})))
-        (when-not (= ::cluster.agent/quiesced (async/<!! quiesced))
+        (when-not (= :seon.agent/quiesced (async/<!! quiesced))
           (throw
            (ex-info "The cluster armer did not publish quiescence."
                     {:seon.error/kind
-                     :seon.cluster.agent/armer-quiescence-undeliverable
-                     :seon.cluster.agent/armer-quiescence-undeliverable true
+                     :seon.agent/armer-quiescence-undeliverable
+                     :seon.agent/armer-quiescence-undeliverable true
                      :seon.error/message
                      "The cluster armer did not publish quiescence."})))
         ;; Closure is the observable completion fact a later stop derives
         ;; from. Publish it only after the armer acknowledged quiescence.
         (async/close! armer-channel))))
-  (when-let [routing (:seon.cluster.agent/routing instance)]
-    (doseq [agent-id (sort (keys (:seon.cluster.agent/armed @routing)))]
-      (cluster.agent/disarm! {:seon.cluster.agent/id agent-id
-                              :seon.cluster.agent/routing routing})))
+  (when-let [routing (:seon.agent/routing instance)]
+    (doseq [agent-id (sort (keys (:seon.agent/armed @routing)))]
+      (cluster.agent/disarm! {:seon.agent/id agent-id
+                              :seon.agent/routing routing})))
   (when-let [graph (:seon.flow/graph instance)]
     (flow.core/stop graph)
     ;; BOTH cluster-graph procs are joined at their own completions —
@@ -3205,7 +3205,7 @@
         advertisement (:seon.boot/advertisement instance)
         agents (if db
                  (or (db/q '[:find (count ?a) . :where
-                            [?a :seon.cluster.agent/id _]] db)
+                            [?a :seon.agent/id _]] db)
                      0)
                  0)
         found (if db
@@ -3215,7 +3215,7 @@
     (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name advertisement)
              :seon.boot/pid (:seon.boot/pid advertisement)
              :seon.boot/prepl-port (:seon.boot/prepl-port advertisement)
-             :seon.cluster.agent/count agents
+             :seon.agent/count agents
              ;; `{}` when healthy — the same value `problems` derives, so
              ;; the banner screams exactly when the facts do and nobody
              ;; maintains a second notion of "fine"
@@ -3251,7 +3251,7 @@
      true
      (into [(str "  repl         " (:seon.boot/prepl-port ready)
                  "  (pid " (:seon.boot/pid ready) ")")
-            (str "  agents       " (:seon.cluster.agent/count ready))
+            (str "  agents       " (:seon.agent/count ready))
             (str "  problems     " (if (empty? problems)
                                      "none"
                                      (str (count problems) " families — "

@@ -1,6 +1,6 @@
 #:seon.turn.work{:agent-request
                     [:map
-                     [:seon.cluster.agent/id :seon.cluster.agent/id]
+                     [:seon.agent/id :seon.agent/id]
                      ],
                     :answered?
                     [:= :any],
@@ -26,7 +26,7 @@
                       :seon.cluster.eval/id]
                      [:seon.cluster.eval/ordinal
                       :seon.cluster.eval/ordinal]
-                     [:seon.cluster.agent/id :seon.cluster.agent/id]
+                     [:seon.agent/id :seon.agent/id]
                      [:seon.problems/id
                       {:optional true}
                       :seon.problems/id]
@@ -52,25 +52,25 @@
                       [:map
                        [:seon.turn.work/situation [:= :resume]]
                        [:seon.turn/id :seon.turn/id]
-                       [:seon.cluster.agent/id :seon.cluster.agent/id]
+                       [:seon.agent/id :seon.agent/id]
                        [:seon.cluster.eval/ordinal
                         :seon.cluster.eval/ordinal]]]
                      [:call
                       [:map
                        [:seon.turn.work/situation [:= :call]]
                        [:seon.turn/id :seon.turn/id]
-                       [:seon.cluster.agent/id
-                        :seon.cluster.agent/id]]]
+                       [:seon.agent/id
+                        :seon.agent/id]]]
                      [:generate
                       [:map
                        [:seon.turn.work/situation [:= :generate]]
                        [:seon.turn/id :seon.turn/id]
-                       [:seon.cluster.agent/id
-                        :seon.cluster.agent/id]]]
+                       [:seon.agent/id
+                        :seon.agent/id]]]
                      [:open
                       [:map
                        [:seon.turn.work/situation [:= :open]]
-                       [:seon.cluster.agent/id :seon.cluster.agent/id]
+                       [:seon.agent/id :seon.agent/id]
                        [:seon.cluster.message/id
                         {:optional true}
                         :seon.cluster.message/id]]]
@@ -78,8 +78,8 @@
                       [:map
                        [:seon.turn.work/situation [:= :close]]
                        [:seon.turn/id :seon.turn/id]
-                       [:seon.cluster.agent/id
-                        :seon.cluster.agent/id]]]],
+                       [:seon.agent/id
+                        :seon.agent/id]]]],
                     :now :inst,
                     :plan-settlement
                     [:map

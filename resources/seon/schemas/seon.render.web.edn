@@ -4,7 +4,7 @@
                   :live-processes-unavailable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark live process state that cannot be observed"} [:seon.render.web/live-processes-unavailable :seon.render.web/live-processes-unavailable] [:seon.error/message :seon.error/message]]
                   :feed-request
                   [:map
-                   [:seon.cluster.agent/id :seon.cluster.agent/id]
+                   [:seon.agent/id :seon.agent/id]
                    [:seon.render.web/root-agent-id
                     :seon.render.web/root-agent-id]
                    [:seon.store/connection-object :seon.store/connection-object]
@@ -29,7 +29,7 @@
                    seon.render.web/server?],
                   :inbound
                   [:map
-                   [:seon.cluster.agent/id :seon.cluster.agent/id]
+                   [:seon.agent/id :seon.agent/id]
                    [:seon.cluster.message/inbound-content
                     {:optional true}
                     :seon.cluster.message/inbound-content]],
@@ -47,9 +47,9 @@
                    seon.flow/atom-reference?],
                   :page-request
                   [:map
-                   [:seon.cluster.agent/id
+                   [:seon.agent/id
                     {:optional true}
-                    :seon.cluster.agent/id]
+                    :seon.agent/id]
                    [:seon.render.debug/viewer-namespace
                     {:optional true}
                     :seon.ns/name]
@@ -67,7 +67,7 @@
                    [:seon.db/connection
                     {:optional true}
                     :seon.db/connection]
-                   [:seon.cluster.agent/id :seon.cluster.agent/id]
+                   [:seon.agent/id :seon.agent/id]
                    [:seon.render.web/root-agent-id
                     :seon.render.web/root-agent-id]
                    [:seon.sci.admit/caps :seon.sci.admit/caps]
@@ -87,7 +87,7 @@
                     "must be a process-local atom containing registered namespace pages"
                     :gen/gen seon.flow/atom-reference-generator}
                    seon.flow/atom-reference?],
-                  :root-agent-id :seon.cluster.agent/id,
+                  :root-agent-id :seon.agent/id,
                   :server
                   [:map
                    [:seon.render.web/server
@@ -100,7 +100,7 @@
                   :service
                   [:map
                    [:seon.store/connection-object :seon.store/connection-object]
-                   [:seon.cluster.agent/id :seon.cluster.agent/id]
+                   [:seon.agent/id :seon.agent/id]
                    [:seon.sci.admit/caps :seon.sci.admit/caps]
                    [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                    [:seon.config.eval/time-limit-ms

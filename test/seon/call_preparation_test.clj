@@ -684,14 +684,14 @@
        (is (= :my.plan/agent-not-found
               (:seon.error/kind
                (plan/plan {:seon.db/db @connection
-                           :seon.cluster.agent/id "missing"}))))
+                           :seon.agent/id "missing"}))))
        (let [ctx (sci.eval/cluster-ctx @connection connection)
              acquired-projection (:seon.schema/projection ctx)
              environment
              (env/refuse-incomplete-environment!
               (env/environment {:seon.boot/cluster-name "plan-call"
                                 :seon.db/connection connection
-                                :seon.cluster.agent/id "missing"
+                                :seon.agent/id "missing"
                                 :seon.schema/projection acquired-projection}))
              observed (atom nil)
              live (-> (env/carry-state ctx (env/environment-state environment))
@@ -710,7 +710,7 @@
               live
               (str "(my.plan/plan {:seon.db/db "
                    "(seon.call-preparation-test/probe-current-database), "
-                   ":seon.cluster.agent/id \"missing\"})"))]
+                   ":seon.agent/id \"missing\"})"))]
          (is (contains? (:seon.call-preparation/supplied-defaults current)
                         :seon.db/db)
              (pr-str (:seon.call-preparation/refusals current)))
@@ -718,7 +718,7 @@
            (is (= 1 (count prepared)))
            (is (db/database-value? (:seon.db/db (first prepared))))
            (is (= "missing"
-                  (:seon.cluster.agent/id (first prepared)))))
+                  (:seon.agent/id (first prepared)))))
          (is (= "my.plan/plan" @observed)
              "SCI hands the hook the indexed callee identity")
          (is (not (instance? Throwable omitted))

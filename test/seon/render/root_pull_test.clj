@@ -74,21 +74,21 @@
    (fn [connection]
      (db/transact!
       connection
-      [{:seon.cluster.agent/id "temporal-root-agent"}
+      [{:seon.agent/id "temporal-root-agent"}
        {:seon.cluster.message/id "temporal-root-message"
         :seon.cluster.message/to
-        [:seon.cluster.agent/id "temporal-root-agent"]
+        [:seon.agent/id "temporal-root-agent"]
         :seon.cluster.message/at (java.util.Date. 1786400000000)
         :seon.cluster.message/content "The opening message."}])
      (db/transact!
       connection
       [{:seon.turn/id "temporal-root-run"
         :seon.turn/agent
-        [:seon.cluster.agent/id "temporal-root-agent"]
+        [:seon.agent/id "temporal-root-agent"]
         :seon.turn/trigger
         [:seon.cluster.message/id "temporal-root-message"]
         :seon.turn/opened-at (java.util.Date. 1786400000001)}
-       {:seon.cluster.agent/id "temporal-root-agent"
+       {:seon.agent/id "temporal-root-agent"
         }])
      (let [current @connection
            temporal (db/as-of current (db/basis-t current))
@@ -99,7 +99,7 @@
             {:seon.db/db temporal
              :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
              :seon.render.walk/lookup
-             [:seon.cluster.agent/id "temporal-root-agent"]
+             [:seon.agent/id "temporal-root-agent"]
              :seon.render/distance 1
              :seon.sci.admit/caps caps})
            messages (get-in acquisition
@@ -108,10 +108,10 @@
            history
            (walk/history
             {:seon.db/db temporal
-             :seon.cluster.agent/id "temporal-root-agent"
+             :seon.agent/id "temporal-root-agent"
              :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
              :seon.render.walk/lookup
-             [:seon.cluster.agent/id "temporal-root-agent"]
+             [:seon.agent/id "temporal-root-agent"]
              :seon.render/distance 1
              :seon.sci.admit/caps caps
              :seon.sci.eval/time-limit-ms 5000
@@ -139,18 +139,18 @@
    (fn [connection]
      (db/transact!
       connection
-      [{:seon.cluster.agent/id "historical-walk-agent"}
+      [{:seon.agent/id "historical-walk-agent"}
        {:seon.cluster.message/id "historical-walk-message"
         :seon.cluster.message/to
-        [:seon.cluster.agent/id "historical-walk-agent"]
+        [:seon.agent/id "historical-walk-agent"]
         :seon.cluster.message/at (java.util.Date. 1786400000000)
         :seon.cluster.message/content "A historical walk must terminate."}])
      (let [current @connection
            render-request {:seon.db/db current
-                    :seon.cluster.agent/id "historical-walk-agent"
+                    :seon.agent/id "historical-walk-agent"
                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                     :seon.render.walk/lookup
-                    [:seon.cluster.agent/id "historical-walk-agent"]
+                    [:seon.agent/id "historical-walk-agent"]
                     :seon.render/distance 1
                     :seon.sci.admit/caps caps
                     :seon.sci.eval/time-limit-ms 5000
@@ -400,7 +400,7 @@
              "neighborhood consumes the acquisition without discovery")
          (walk/history
           (assoc render-request
-                 :seon.cluster.agent/id "root"
+                 :seon.agent/id "root"
                  :seon.render.walk/root-acquisition acquisition
                  :seon.render/captured-calls (atom {})))
          (is (zero? @reads)

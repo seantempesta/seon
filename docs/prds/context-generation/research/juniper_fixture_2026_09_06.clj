@@ -26,7 +26,7 @@
      (let [created
            (seon.cluster/ensure-entity!
             connection process
-            {:seon.cluster.agent/id "juniper"
+            {:seon.agent/id "juniper"
              :seon.cluster/name cluster-name
              :seon.ns/name 'my.agents.juniper})]
        (if (:seon.error/kind created)
@@ -45,18 +45,18 @@
                            plan-ref
                            (or (seon.db/q
                                 '[:find ?plan . :where
-                                  [?agent :seon.cluster.agent/id "juniper"]
+                                  [?agent :seon.agent/id "juniper"]
                                   [?agent :seon.agent/plan ?plan]]
                                 database)
                                "juniper-plan")
                            settings-ref
                            (or (seon.db/q
                                 '[:find ?settings . :where
-                                  [?agent :seon.cluster.agent/id "juniper"]
+                                  [?agent :seon.agent/id "juniper"]
                                   [?agent :seon.agent/settings ?settings]]
                                 database)
                                "juniper-settings")]
-                 [{:db/id [:seon.cluster.agent/id "juniper"]
+                 [{:db/id [:seon.agent/id "juniper"]
                    :seon.agent/settings
                    {:db/id settings-ref
                     :seon.config.eval/time-limit-ms 2500
@@ -104,22 +104,22 @@
                          "Juniper identifies the current step and records a truthful plan update from the assembled context."
                          :my.plan.item/needs #{(step-ref "juniper/compare-changed-results")}}}}}
                   {:seon.cluster.message/id "design-lab/root-to-juniper/1"
-                   :seon.cluster.message/from [:seon.cluster.agent/id "root"]
-                   :seon.cluster.message/to [:seon.cluster.agent/id "juniper"]
+                   :seon.cluster.message/from [:seon.agent/id "root"]
+                   :seon.cluster.message/to [:seon.agent/id "juniper"]
                    :seon.cluster.message/content
                    "Please make your current plan and the messages you receive easy to understand together. Start by inspecting the data connected to your agent entity."
                    :seon.cluster.message/at #inst "2026-09-06T19:35:00Z"}
                   {:seon.cluster.message/id "design-lab/root-to-juniper/2"
-                   :seon.cluster.message/from [:seon.cluster.agent/id "root"]
-                   :seon.cluster.message/to [:seon.cluster.agent/id "juniper"]
+                   :seon.cluster.message/from [:seon.agent/id "root"]
+                   :seon.cluster.message/to [:seon.agent/id "juniper"]
                    :seon.cluster.message/content
                    "Show Sean which function renders each block and an executable example of updating your plan. We will compare the assembled context before trying a live model turn."
                    :seon.cluster.message/at #inst "2026-09-06T19:36:00Z"}]))]]
                  :tx-meta
-                 {:seon.db/user [:seon.cluster.agent/id "root"]
+                 {:seon.db/user [:seon.agent/id "root"]
                   :seon.db/process [:seon.db.process/id process]}})]
            (if (:seon.error/kind written)
              written
              (my.plan/plan
               {:seon.db/db (seon.db/db connection)
-               :seon.cluster.agent/id "juniper"})))))))))
+               :seon.agent/id "juniper"})))))))))

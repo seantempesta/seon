@@ -498,7 +498,7 @@
     evidence-bytes :seon.config.error/max-evidence-bytes
     :seon.sci.admit/keys [caps]
     run-id :seon.turn/id
-    agent-id :seon.cluster.agent/id}]
+    agent-id :seon.agent/id}]
   (let [failure (throwable source)
         class-name (when failure (.getName (class failure)))
         error-kind (kind source failure)
@@ -557,7 +557,7 @@
           basis-t (assoc :seon.error/basis-t basis-t)
           run-id (assoc :seon.error/run [:seon.turn/id run-id])
           agent-id (assoc :seon.error/agent
-                          [:seon.cluster.agent/id agent-id]))
+                          [:seon.agent/id agent-id]))
         fact (fit-fact-payload
               base-fact source
               (message source failure) instrument-data caps inline-limit)
@@ -640,7 +640,7 @@
   {:malli/schema [:=> [:cat :seon.error/notice-request] :seon.error/notice]}
   [{:seon.error/keys [fact reason occurrence occurrences notification-limit
                       notification]
-    agent-id :seon.cluster.agent/id}]
+    agent-id :seon.agent/id}]
   (let [presentation (if (= :seon.instrument/contract-violated
                             (:seon.error/kind fact))
                        `instrumentation-prose
@@ -655,7 +655,7 @@
       occurrences (assoc :seon.error/occurrences occurrences)
       notification-limit (assoc :seon.error/notification-limit notification-limit)
       notification (assoc :seon.error/notification notification)
-      agent-id (assoc :seon.cluster.agent/id agent-id))))
+      agent-id (assoc :seon.agent/id agent-id))))
 
 (defn- fact-source
   [fact]
@@ -962,7 +962,7 @@
   [db agent-id]
   (some? (db/q '[:find ?agent .
                 :in $ ?id
-                :where [?agent :seon.cluster.agent/id ?id]]
+                :where [?agent :seon.agent/id ?id]]
               db agent-id)))
 
 (defn- entity-exists?
@@ -1003,12 +1003,12 @@
   [fact recipient reason notification]
   {:seon.cluster.message/id
    (id/digest 12 [::notification (:seon.error/id fact) recipient reason])
-   :seon.cluster.message/to [:seon.cluster.agent/id recipient]
+   :seon.cluster.message/to [:seon.agent/id recipient]
    :seon.cluster.message/content
    (ai-prose
     (notice (merge {:seon.error/fact fact
                     :seon.error/reason reason
-                    :seon.cluster.agent/id recipient}
+                    :seon.agent/id recipient}
                    notification)))
    :seon.cluster.message/at (:seon.error/at fact)
    :seon.cluster.message/about (fact-tempid (:seon.error/id fact))})
@@ -1122,7 +1122,7 @@
        supplied-fact :seon.error/fact
        :seon.sci.admit/keys [caps]
        run-id :seon.turn/id
-       agent-id :seon.cluster.agent/id
+       agent-id :seon.agent/id
        escalate-to :seon.config.error/escalate-to
        limit :seon.config.error/recurrence-limit}]
   (let [fact (or supplied-fact
@@ -1144,8 +1144,8 @@
                          (entity-exists? db :seon.turn/id run-id))
                     (assoc :seon.turn/id run-id)
                     (and agent-id
-                         (entity-exists? db :seon.cluster.agent/id agent-id))
-                    (assoc :seon.cluster.agent/id agent-id))))
+                         (entity-exists? db :seon.agent/id agent-id))
+                    (assoc :seon.agent/id agent-id))))
         fact (cond-> fact
                (and (:seon.error/run fact)
                     (not (entity-exists?
@@ -1155,7 +1155,7 @@
 
                (and (:seon.error/agent fact)
                     (not (entity-exists?
-                          db :seon.cluster.agent/id
+                          db :seon.agent/id
                           (second (:seon.error/agent fact)))))
                (dissoc :seon.error/agent))
         occurrence (inc (recurrence db (:seon.error/signature fact) process))

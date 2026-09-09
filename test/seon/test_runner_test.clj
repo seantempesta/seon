@@ -907,7 +907,7 @@
         (db/transact!
          connection
          (agent/creation-tx
-          {:seon.cluster.agent/id "fixture-owner"
+          {:seon.agent/id "fixture-owner"
            :seon.cluster/name "test"
            :seon.ns/name 'seon.test-runner-failure-fixture}))
         (is
@@ -922,8 +922,8 @@
                [?test :seon.test/sym ?test-symbol]
                [(= ?test-symbol ?selected-test)]
                [?test :seon.test/ns ?namespace]
-               [?agent :seon.cluster.agent/namespace ?namespace]
-               [?agent :seon.cluster.agent/id ?agent-id]
+               [?agent :seon.agent/namespace ?namespace]
+               [?agent :seon.agent/id ?agent-id]
                [?test :seon.test/pass-count ?passes]
                [?test :seon.test/fail-count ?failures]
                [?test :seon.test/error-count ?errors]

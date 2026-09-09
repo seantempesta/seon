@@ -48,7 +48,7 @@
     be DISJOINT, and that is a computed property rather than a reviewed
     list (L8, L17). The routed set is `wake-attributes`; a turn commits
     `:seon.turn/*`, `:seon.cluster.eval/*`,
-    `:seon.cluster.eval/*`, `:seon.cluster.agent/run`. The RENDER wake
+    `:seon.cluster.eval/*`, `:seon.agent/run`. The RENDER wake
     is deliberately outside that property: its interest is the union
     of retained reads' attributes, and its consumer derives pages
     rather than work, so it cannot make an idle cluster do anything;

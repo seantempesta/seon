@@ -78,7 +78,7 @@
   (db/q '[:find ?run-id .
          :in $ ?agent-id
          :where
-         [?agent :seon.cluster.agent/id ?agent-id]
+         [?agent :seon.agent/id ?agent-id]
          [?run :seon.turn/agent ?agent]
          (not [?run :seon.turn/closed-at])
          [?run :seon.turn/id ?run-id]]
@@ -116,19 +116,19 @@
   [db timeout-ms agent-id entry]
   (let [ping (flow/ping (:seon.flow/graph entry)
                         :timeout-ms timeout-ms)
-        mailbox (get ping ::agent/mailbox)
-        turn (get ping ::agent/turn)
+        mailbox (get ping :seon.agent/mailbox)
+        turn (get ping :seon.agent/turn)
         run-id (current-run-id db agent-id)
         mailbox-occupancy
-        (occupancy (get-in mailbox [::flow/ins ::agent/wake]))
+        (occupancy (get-in mailbox [::flow/ins :seon.agent/wake]))
         turn-occupancy
         (occupancy
-         (or (get-in turn [::flow/ins ::agent/episode])
+         (or (get-in turn [::flow/ins :seon.agent/episode])
              ;; While the turn transform is active it cannot pong. The
              ;; mailbox's out is the same direct 1:1 channel, so occupancy
              ;; remains observable without inventing another counter.
-             (get-in mailbox [::flow/outs ::agent/episode])))]
-    (cond-> {:seon.cluster.agent/id agent-id
+             (get-in mailbox [::flow/outs :seon.agent/episode])))]
+    (cond-> {:seon.agent/id agent-id
              :seon.turn.work/episode-runs
              (turn/episode-runs db agent-id)}
       run-id
@@ -162,8 +162,8 @@
 (defn- fleet-value
   "The complete process-local fleet value at one database value."
   [db instance]
-  (let [routing (:seon.cluster.agent/routing instance)
-        armed (or (some-> routing deref ::agent/armed) {})
+  (let [routing (:seon.agent/routing instance)
+        armed (or (some-> routing deref :seon.agent/armed) {})
         timeout-ms (ping-timeout-ms db)]
     {:seon.oversight/agents
      (into []
@@ -197,7 +197,7 @@
         instance (or (:seon.boot/instance source)
                      (owning-instance db))]
     (when (and db
-               (:seon.cluster.agent/routing instance)
+               (:seon.agent/routing instance)
                (:seon.flow/graph instance))
       (assoc source
              :seon.render/value (fleet-value db instance)
@@ -237,7 +237,7 @@
        "; "
        (map
         (fn [agent]
-          (let [agent-id (:seon.cluster.agent/id agent)
+          (let [agent-id (:seon.agent/id agent)
                 story (agent-story-text agent)
                 run-id (:seon.turn/id agent)
                 episode-runs (:seon.turn.work/episode-runs agent)]
@@ -281,9 +281,9 @@
       [:tbody
        (for [agent agents]
          (let [story (agent-story-text agent)]
-           [:tr {:data-agent (:seon.cluster.agent/id agent)
+           [:tr {:data-agent (:seon.agent/id agent)
                  :data-state story}
-            [:td (:seon.cluster.agent/id agent)]
+            [:td (:seon.agent/id agent)]
             [:td story]
             [:td (or (:seon.turn/id agent) "—")]
             [:td (:seon.turn.work/episode-runs agent)]

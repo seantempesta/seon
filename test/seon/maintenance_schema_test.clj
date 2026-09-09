@@ -47,7 +47,7 @@
          :seon.schedule.fire/id "root/maintenance/footprint@1785895200000"
          :seon.schedule.fire/nominal-at nominal-at
          :seon.schedule.fire/observed-at observed-at
-         :seon.cluster.agent/id "root"
+         :seon.agent/id "root"
          :seon.boot/cluster-name "default"
          :seon.operator/repository-root "/repo"
          :seon.operator/managed-root "/repo"
@@ -101,14 +101,14 @@
             observed-at (instant "2026-08-05T02:00:01Z")]
         (db/transact!
          connection
-         [{:seon.cluster.agent/id "maintenance-schema-test/root"}
+         [{:seon.agent/id "maintenance-schema-test/root"}
           {:seon.fn/sym handler}
           {:seon.schedule/id schedule-id
            :seon.schedule/expression "0 2 * * *"
            :seon.schedule/zone-id "UTC"}
           {:seon.schedule.task/id task-id
            :seon.schedule.task/owner
-           [:seon.cluster.agent/id "maintenance-schema-test/root"]
+           [:seon.agent/id "maintenance-schema-test/root"]
            :seon.schedule.task/function [:seon.fn/sym handler]
            :seon.schedule.task/schedule [:seon.schedule/id schedule-id]}
           {:seon.schedule.fire/id fire-id
@@ -127,7 +127,7 @@
             [:seon.schedule.fire/id fire-id]
             :seon.maintenance.request/handler [:seon.fn/sym handler]
             :seon.maintenance.request/agent
-            [:seon.cluster.agent/id "maintenance-schema-test/root"]
+            [:seon.agent/id "maintenance-schema-test/root"]
             :seon.maintenance.request/cluster-name "default"
             :seon.maintenance.request/repository-root "/repo"
             :seon.maintenance.request/managed-root "/repo"
@@ -217,7 +217,7 @@
           "the config population does not own agent schedule rows")
       (db/transact!
        connection
-       (into [{:seon.cluster.agent/id "root"}]
+       (into [{:seon.agent/id "root"}]
              (map (fn [row] {:seon.fn/sym (:seon.fn/sym row)}))
              portfolio))
       (let [first-result
@@ -236,7 +236,7 @@
                   :where
                   [?task :seon.schedule.task/id ?task-id]
                   [?task :seon.schedule.task/owner ?owner]
-                  [?owner :seon.cluster.agent/id "root"]
+                  [?owner :seon.agent/id "root"]
                   [?task :seon.schedule.task/function ?function]
                   [?function :seon.fn/sym ?handler]
                   [?task :seon.schedule.task/schedule ?schedule]

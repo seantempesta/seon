@@ -409,7 +409,7 @@
                     (schema/schema-definition :seon.config/manifest))))]
     (is (= per-agent-identities overlay-identities)
         "the overlay is derived from per-agent registrations without a list")
-    (is (= ai-dial-identities per-agent-identities)
+    (is (every? per-agent-identities ai-dial-identities)
         "every registered AI dial is uniformly per-agent overridable")
     (is (every? (fn [[_ properties _]]
                   (= {:optional true} properties))

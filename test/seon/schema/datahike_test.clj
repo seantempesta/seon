@@ -299,14 +299,14 @@
   ;; grow with the transaction's attribute count or nesting depth.
   (let [resolutions (atom 0)
         real-declaration-population schema/declaration-population
-        wide {:seon.cluster.agent/id "agent-a"
+        wide {:seon.agent/id "agent-a"
               :seon.cluster.message/id "m-1"
               :seon.cluster.message/content "do the thing"
               :seon.cluster.message/at (java.util.Date.)
               :seon.turn/id "run-1"
               ::title "Alpha"}
-        nested {:seon.cluster.agent/id "agent-b"
-                :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.b}}]
+        nested {:seon.agent/id "agent-b"
+                :seon.agent/namespace {:seon.ns/name 'my.agents.b}}]
     (with-redefs [schema/declaration-population
                   (fn []
                     (swap! resolutions inc)
@@ -336,9 +336,9 @@
           branch]
          :datahike.cache/generation
          (java.util.UUID/fromString "aa7bc82c-65c4-44a0-98df-87c7c798b13b")
-         :datahike.read/attributes #{:seon.cluster.agent/id}
+         :datahike.read/attributes #{:seon.agent/id}
          :datahike.cache/attribute-revisions
-         {:seon.cluster.agent/id
+         {:seon.agent/id
           (java.util.UUID/fromString "8d12cd47-3e5b-4d3e-9505-5dd72ee1cde9")}}
         encoded
         (get (first

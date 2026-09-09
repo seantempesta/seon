@@ -22,27 +22,27 @@
       connection
       [{:seon.ns/name 'my.gen.planner}
        {:seon.ns/name 'my.gen.alpha}
-       {:seon.cluster.agent/id "planner"
-        :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.planner]}
-       {:seon.cluster.agent/id "alpha"
-        :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.alpha]}
-       {:seon.cluster.agent/id "root"}
+       {:seon.agent/id "planner"
+        :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
+       {:seon.agent/id "alpha"
+        :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
+       {:seon.agent/id "root"}
        {:seon.cluster.message/id "goal"
-        :seon.cluster.message/to [:seon.cluster.agent/id "root"]
+        :seon.cluster.message/to [:seon.agent/id "root"]
         :seon.cluster.message/content "Generate the program."
         :seon.cluster.message/at now}])
      (db/transact!
       connection
       [{:seon.cluster.message/id "planner-goal"
-        :seon.cluster.message/to [:seon.cluster.agent/id "planner"]
-        :seon.cluster.message/from [:seon.cluster.agent/id "root"]
+        :seon.cluster.message/to [:seon.agent/id "planner"]
+        :seon.cluster.message/from [:seon.agent/id "root"]
         :seon.cluster.message/caused-by [:seon.cluster.message/id "goal"]
         :seon.cluster.message/content "Generate the program."
         :seon.cluster.message/at now}])
      (db/transact!
       connection
       [{:seon.turn/id run-id
-        :seon.turn/agent [:seon.cluster.agent/id "planner"]
+        :seon.turn/agent [:seon.agent/id "planner"]
         :seon.turn/trigger
         [:seon.cluster.message/id "planner-goal"]
         :seon.turn/opened-at now
@@ -75,7 +75,7 @@
         (message/delivery
          @connection
          {:my.message/value value
-          :seon.cluster.agent/id sender
+          :seon.agent/id sender
           :seon.turn/id run-id
           :seon.cluster.eval/ordinal 0
           :seon.cluster.message/at now
@@ -137,10 +137,10 @@
             {:seon.turn/id run-id
              :seon.cluster.eval/ordinal 1
              :seon.sci.eval/evaluation failed})]
-       (is (= "alpha" (:seon.cluster.agent/id attributed))
+       (is (= "alpha" (:seon.agent/id attributed))
            "the reader-projected namespace owns the red form")
        (is (= "planner" (:seon.problems/author attributed)))
-       (is (= "planner" (:seon.cluster.agent/id fallback))
+       (is (= "planner" (:seon.agent/id fallback))
            "pre-reader absence and an unowned namespace both fall back to author")
        (is (schema/valid-candidate-value?
             :seon.problems/form-problem attributed))))))
@@ -165,7 +165,7 @@
              :seon.cluster.eval/ordinal 0
              :seon.sci.eval/evaluation
              (evaluation-error "self-owned red")})]
-       (is (= "planner" (:seon.cluster.agent/id problem)))
+       (is (= "planner" (:seon.agent/id problem)))
        (is (= "planner" (:seon.problems/author problem)))
        (when-let [assignment (problems/assignment-value problem)]
          (deliver! connection "planner" "self-assignment" assignment))
@@ -192,7 +192,7 @@
      (db/transact!
       connection
       [{:seon.turn/id "historical-run"
-        :seon.turn/agent [:seon.cluster.agent/id "planner"]
+        :seon.turn/agent [:seon.agent/id "planner"]
         :seon.turn/opened-at now
         :seon.turn/plan-digest "historical-digest"}
        {:seon.cluster.eval/id "historical-form"

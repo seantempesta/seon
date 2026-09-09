@@ -82,7 +82,7 @@
   run ordinals determine form order. No source or result is copied."
   {:malli/schema
    [:=> [:catn [:database :seon.db/database-value]
-                [:agent-id :seon.cluster.agent/id]]
+                [:agent-id :seon.agent/id]]
     [:or :seon.context/selection :seon.error/value]]}
   [database agent-id]
   (let [agent-data
@@ -92,12 +92,12 @@
                    [:seon.context.contribution/id
                     :seon.context.contribution/position
                     {:seon.context.contribution/evaluations [:db/id]}]}]
-                 [:seon.cluster.agent/id agent-id])]
+                 [:seon.agent/id agent-id])]
     (cond
       (:seon.error/kind agent-data) agent-data
       (nil? agent-data)
       (selection-refusal ::no-such-agent
-                         {:seon.cluster.agent/id agent-id} {})
+                         {:seon.agent/id agent-id} {})
       :else
       (->> (:seon.context.contribution/_agent agent-data)
            (map (fn [contribution]
@@ -117,11 +117,11 @@
 
 (defn- eligible-run
   [database request]
-  (let [agent-id (:seon.cluster.agent/id request)
+  (let [agent-id (:seon.agent/id request)
         run-id (:seon.turn/id request)
         agent-data (transaction-read
                     (db/pull database [:db/id]
-                             [:seon.cluster.agent/id agent-id]))
+                             [:seon.agent/id agent-id]))
         run-data (transaction-read
                   (db/pull database
                            [:db/id :seon.turn/closed-at
@@ -151,7 +151,7 @@
   [rule request]
   (let [refusal (selection-refusal
                  rule request
-                 {:seon.cluster.agent/id (:seon.cluster.agent/id request)
+                 {:seon.agent/id (:seon.agent/id request)
                   :seon.turn/id (:seon.turn/id request)
                   :seon.context.contribution/id
                   (:seon.context.contribution/id request)})]
@@ -212,14 +212,14 @@
   (let [contribution (transaction-read
                       (db/pull database
                                [:db/id {:seon.context.contribution/agent
-                                        [:seon.cluster.agent/id]}]
+                                        [:seon.agent/id]}]
                                [:seon.context.contribution/id
                                 (:seon.context.contribution/id request)]))]
     (cond
       (nil? contribution) []
-      (not= (:seon.cluster.agent/id request)
+      (not= (:seon.agent/id request)
             (get-in contribution [:seon.context.contribution/agent
-                                  :seon.cluster.agent/id]))
+                                  :seon.agent/id]))
       (refuse-selection! ::foreign-contribution request)
       :else [[:db/retractEntity (:db/id contribution)]])))
 
@@ -308,7 +308,7 @@
                 [:request :seon.context/comparison-request]]
     [:or :seon.context/comparison :seon.error/value]]}
   [database request]
-  (let [agent-id (:seon.cluster.agent/id request)
+  (let [agent-id (:seon.agent/id request)
         run-id (:seon.turn/id request)
         evaluated-sources (:seon.turn.loop/evaluated-sources request)
         in-memory? (some? evaluated-sources)
@@ -320,7 +320,7 @@
                    [:db/id {:seon.cluster.eval/run [:db/id]}]}]
                  [:seon.context.contribution/id contribution-id])
         agent-data (db/pull database [:db/id]
-                       [:seon.cluster.agent/id agent-id])
+                       [:seon.agent/id agent-id])
         refreshed
         (when-not in-memory? (db/pull database
                  [:db/id :seon.turn/closed-at
@@ -399,7 +399,7 @@
   {:malli/schema
    [:=> [:cat :seon.db/database-value
          [:maybe :seon.turn/id]
-         :seon.cluster.agent/id
+         :seon.agent/id
          :int]
     :keyword]}
   [database run-id agent-id message-eid]
@@ -409,7 +409,7 @@
           (db/q '[:find ?tx .
                   :in $ ?agent-id ?message
                   :where
-                  [?agent :seon.cluster.agent/id ?agent-id]
+                  [?agent :seon.agent/id ?agent-id]
                   [?message :seon.cluster.message/to ?agent ?tx]]
                 database agent-id message-eid)
           run-t (db/q '[:find ?tx .
@@ -425,7 +425,7 @@
               (or (db/q '[:find (max ?tx) .
                           :in $ ?agent-id ?run-t
                           :where
-                          [?agent :seon.cluster.agent/id ?agent-id]
+                          [?agent :seon.agent/id ?agent-id]
                           [?run :seon.turn/agent ?agent]
                           [?run :seon.turn/id _ ?tx]
                           [(< ?tx ?run-t)]]

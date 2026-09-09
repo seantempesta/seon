@@ -69,12 +69,12 @@
    connection
    (into
     (agent/creation-tx
-     {:seon.cluster.agent/id agent-id
+     {:seon.agent/id agent-id
       :seon.cluster/name cluster-name
       :seon.ns/name 'my.agents.render-coverage})
     [{:seon.fn/sym owner-symbol}
      {:seon.turn/id run-id
-      :seon.turn/agent [:seon.cluster.agent/id agent-id]}
+      :seon.turn/agent [:seon.agent/id agent-id]}
      {:seon.effect/id "effect-pending"
       :seon.effect/run [:seon.turn/id run-id]
       :seon.effect/owner [:seon.fn/sym owner-symbol]
@@ -201,12 +201,12 @@
 (deftest important-runtime-entities-declare-and-use-readable-faces
   (is (= {:seon.render/ai `agent/render-identity-ai
           :seon.render/html `agent/render-identity-html}
-         (select-keys (family-properties :seon.cluster.agent/agent)
+         (select-keys (family-properties :seon.agent/agent)
                       [:seon.render/ai :seon.render/html])))
   (is (= {:seon.render/ai `agent/render-creation-ai
           :seon.render/html `agent/render-creation-html}
          (select-keys
-          (family-properties :seon.cluster.agent/creation-result)
+          (family-properties :seon.agent/creation-result)
           [:seon.render/ai :seon.render/html])))
   (is (= {:seon.render/ai `repl/render-ai
           :seon.render/html `repl/render-html}
@@ -265,14 +265,14 @@
                       {:seon.db/db database
                        :seon.sci.eval/ctx ctx
                        :seon.render.walk/lookup
-                       [:seon.cluster.agent/id agent-id]
+                       [:seon.agent/id agent-id]
                        :seon.render/output output
                        :seon.sci.admit/caps caps
                        :seon.sci.eval/time-limit-ms 2000
                        :seon.config/on-core-error :panic
                        :seon.render/distance 2})]
            (is (seq units))
-           (is (nil? (walk-output-by-attribute units :seon.cluster.agent/cluster))
+           (is (nil? (walk-output-by-attribute units :seon.agent/cluster))
                "the branch is not a stored connection on the agent")))))))
 
 (deftest effect-receipts-render-state-from-attribute-presence
@@ -339,7 +339,7 @@
                       {:seon.db/db database
                        :seon.sci.eval/ctx ctx
                        :seon.render.walk/lookup
-                       [:seon.cluster.agent/id agent-id]
+                       [:seon.agent/id agent-id]
                        :seon.render/output output
                        :seon.sci.admit/caps caps
                        :seon.sci.eval/time-limit-ms 2000
@@ -443,7 +443,7 @@
     ctx))
 
 (def ^:private probe-call-id
-  [:seon.render/ai [:seon.cluster.agent/id agent-id] 1])
+  [:seon.render/ai [:seon.agent/id agent-id] 1])
 
 (defn- probe-render
   [database ctx value producer limit-ms]
@@ -465,7 +465,7 @@
      (seed-entities! connection)
      (let [database @connection
            ctx (probe-ctx connection)
-           value (pulled database [:seon.cluster.agent/id agent-id])]
+           value (pulled database [:seon.agent/id agent-id])]
        (testing "a producer that runs past the limit names itself and the bound"
          (let [refused (probe-render database ctx value
                                      'my.render-probe/slow 50)]
@@ -533,7 +533,7 @@
      (seed-entities! connection)
      (let [database @connection
            ctx (probe-ctx connection)
-           value (pulled database [:seon.cluster.agent/id agent-id])
+           value (pulled database [:seon.agent/id agent-id])
            pass (fn [limit-ms]
                   {:steady (probe-render database ctx value
                                          'my.render-probe/steady 2000)

@@ -24,7 +24,7 @@
              ;; render service carries the cluster's SCI context, and the
              ;; projection every `/data` response reads comes from it.
              {:seon.store/connection-object connection
-              :seon.cluster.agent/id "root"
+              :seon.agent/id "root"
               :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
               :seon.sci.admit/caps caps}
              {:query-string ""})]

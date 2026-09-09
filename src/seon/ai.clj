@@ -339,14 +339,14 @@
 (defn agent-overlay
   "Declared setting overrides for one agent in a database value."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.cluster.agent/id]
+   [:=> [:cat :seon.db/database-value :seon.agent/id]
     [:or :seon.config/agent-overlay :seon.error/value]]}
   [db agent-id]
   (let [attributes (agent-setting-attributes db)]
     (if (:seon.error/kind attributes)
       attributes
       (let [row (db/pull db [{:seon.agent/settings (vec attributes)}]
-                         [:seon.cluster.agent/id agent-id])]
+                         [:seon.agent/id agent-id])]
         (if (:seon.error/kind row)
           row
           (select-keys (:seon.agent/settings row) attributes))))))

@@ -426,15 +426,15 @@
          [{:seon.ns/name namespace-name
            :seon.ns/source "(ns my.agents.call-edges)"
            :seon.ns/requires [[:seon.ns/name 'my.run]]}
-          {:seon.cluster.agent/id "call-edges-agent"
-           :seon.cluster.agent/namespace
+          {:seon.agent/id "call-edges-agent"
+           :seon.agent/namespace
            [:seon.ns/name namespace-name]}])
         (db/transact!
          connection
          (turn/open-tx
           {:seon.turn/id run-id
            :seon.turn/agent
-           [:seon.cluster.agent/id "call-edges-agent"]
+           [:seon.agent/id "call-edges-agent"]
            :seon.turn/opened-at (java.util.Date.)}))
 
         (db/transact!
@@ -506,15 +506,15 @@
              :seon.fn/source "(defn helper [value] value)"
              :seon.fn/arglists "([value])"
              :seon.fn/private? false}
-            {:seon.cluster.agent/id "settlement-parity-agent"
-             :seon.cluster.agent/namespace
+            {:seon.agent/id "settlement-parity-agent"
+             :seon.agent/namespace
              [:seon.ns/name namespace-name]}])
           (db/transact!
            connection
            (turn/open-tx
             {:seon.turn/id "settlement-parity-run"
              :seon.turn/agent
-             [:seon.cluster.agent/id "settlement-parity-agent"]
+             [:seon.agent/id "settlement-parity-agent"]
              :seon.turn/opened-at (java.util.Date.)}))
 
           (db/transact!

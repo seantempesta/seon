@@ -16,8 +16,8 @@
      (db/transact!
       connection
       [{:seon.cluster/name "shown-text"}
-       {:seon.cluster.agent/id "juniper"
-        :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.juniper}
+       {:seon.agent/id "juniper"
+        :seon.agent/namespace {:seon.ns/name 'my.agents.juniper}
         :seon.agent/plan
         {:my.plan/objective "Keep generated source out of values"
          :my.plan/current-step "current-item"
@@ -32,7 +32,7 @@
      (let [ctx (support/fork-cluster-ctx connection)
            request {:seon.cluster.eval/source "[(my.plan/current) (my.plan/blocked) (my.message/inbox) (my.agent/settings)]"
                     :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
-                    :seon.cluster.agent/id "juniper"
+                    :seon.agent/id "juniper"
                     :seon.sci.eval/ctx ctx
                     :seon.db/db @connection
                     :seon.db/connection connection

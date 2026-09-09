@@ -107,7 +107,7 @@
                true
                (conj {:seon.schedule.task/id task-id
                       :seon.schedule.task/owner
-                      [:seon.cluster.agent/id "root"]
+                      [:seon.agent/id "root"]
                       :seon.schedule.task/function [:seon.fn/sym function]
                       :seon.schedule.task/schedule
                       [:seon.schedule/id schedule-id]}))))
@@ -212,7 +212,7 @@
   (->> (db/q '[:find ?task ?task-id ?function ?expression ?zone-id
                :in $ ?agent-id
                :where
-               [?owner :seon.cluster.agent/id ?agent-id]
+               [?owner :seon.agent/id ?agent-id]
                [?task :seon.schedule.task/owner ?owner]
                [?task :seon.schedule.task/id ?task-id]
                [?task :seon.schedule.task/function ?function-row]
@@ -289,7 +289,7 @@
            :seon.maintenance.request/fire fire-tempid
            :seon.maintenance.request/handler function-eid
            :seon.maintenance.request/agent
-           [:seon.cluster.agent/id (:seon.cluster.agent/id request)]
+           [:seon.agent/id (:seon.agent/id request)]
            :seon.maintenance.request/cluster-name
            (:seon.boot/cluster-name request)
            :seon.maintenance.request/repository-root
@@ -327,7 +327,7 @@
   [database
    {task-id :seon.schedule.task/id
     requested-fire-id :seon.schedule.fire/id
-    agent-id :seon.cluster.agent/id
+    agent-id :seon.agent/id
     function :seon.fn/sym
     nominal-at :seon.schedule.fire/nominal-at
     observed-at :seon.schedule.fire/observed-at
@@ -350,7 +350,7 @@
                  :where
                  [?task :seon.schedule.task/id ?task-id]
                  [?task :seon.schedule.task/owner ?owner]
-                 [?owner :seon.cluster.agent/id ?owner-id]
+                 [?owner :seon.agent/id ?owner-id]
                  [?task :seon.schedule.task/function ?function]
                  [?function :seon.fn/sym ?function-sym]]
                database task-id))]
@@ -377,7 +377,7 @@
            (ex-info "The scheduled task owner or function changed."
                     {:seon.error/kind ::invalid-task-owner
                      :seon.schedule.task/id task-id
-                     :seon.cluster.agent/id agent-id
+                     :seon.agent/id agent-id
                      :seon.fn/sym function :seon.schedule/invalid-task-owner true})))
         (let [fire-tempid (str "schedule-fire/" derived-fire-id)
               request-tempid (str fire-tempid "/request")]
@@ -547,7 +547,7 @@
            (:seon.config.error/recurrence-limit cluster)
            :seon.config.error/max-evidence-bytes
            (:seon.config.error/max-evidence-bytes cluster)
-           :seon.cluster.agent/id agent-id}
+           :seon.agent/id agent-id}
     (:seon.config.error/escalate-to cluster)
     (assoc :seon.config.error/escalate-to
            (:seon.config.error/escalate-to cluster))))
@@ -603,9 +603,9 @@
   fires."
   {:malli/schema
    [:function
-    [:=> [:cat :seon.db/connection :seon.cluster.agent/id :inst]
+    [:=> [:cat :seon.db/connection :seon.agent/id :inst]
      :seon.schedule/fire-count]
-    [:=> [:cat :seon.db/connection :seon.cluster.agent/id :inst
+    [:=> [:cat :seon.db/connection :seon.agent/id :inst
           :seon.schedule/execution-context]
      :seon.schedule/fire-count]]}
   ([connection agent-id observed-at]
@@ -646,7 +646,7 @@
                (merge common-request
                       {:seon.schedule.task/id task-id
                        :seon.schedule.fire/id claimed-fire-id
-                       :seon.cluster.agent/id agent-id
+                       :seon.agent/id agent-id
                        :seon.fn/sym (:seon.fn/sym task)
                        :seon.schedule.fire/nominal-at nominal
                        :seon.schedule.fire/observed-at observed-at})
@@ -699,7 +699,7 @@
             timer
             (-> (Thread/ofVirtual)
                 (.name (str "seon-schedule-"
-                            (:seon.cluster.agent/id state)))
+                            (:seon.agent/id state)))
                 (.start
                  (fn []
                    (try
@@ -776,7 +776,7 @@
   ([state _input _message]
    (let [connection (get-in state [:seon.turn.loop/cluster
                                    :seon.db/connection])
-         agent-id (:seon.cluster.agent/id state)
+         agent-id (:seon.agent/id state)
          observed-at (Date.)
          cluster (get-in state [:seon.turn.loop/cluster])
          fires (fire-due!

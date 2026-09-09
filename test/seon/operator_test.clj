@@ -443,7 +443,7 @@
                {:seon.schedule.task/id "root/maintenance/reap-dead-roots"
                 :seon.schedule.fire/id
                 (pr-str ["root/maintenance/reap-dead-roots" now])
-                :seon.cluster.agent/id "root"
+                :seon.agent/id "root"
                 :seon.fn/sym "seon.operator/reap-dead-roots!"
                 :seon.schedule.fire/nominal-at now
                 :seon.schedule.fire/observed-at now
@@ -848,7 +848,7 @@
         ready-a {:seon.boot/cluster-name "a"
                  :seon.boot/pid 1
                  :seon.boot/prepl-port 1001
-                 :seon.cluster.agent/count 0
+                 :seon.agent/count 0
                  :seon.problems/problems {}}
         ready-b (assoc ready-a
                        :seon.boot/cluster-name "b"

@@ -53,7 +53,7 @@
     (fn [connection]
       (db/transact!
        connection
-       [{:seon.cluster.agent/id "background-agent"}
+       [{:seon.agent/id "background-agent"}
         {:seon.turn/id "background-run"}
         {:seon.fn/sym "my.example/call"}
         {:seon.effect/id "background-result"
@@ -64,7 +64,7 @@
          :seon.effect/request-edn "{}"
          :seon.effect/opened-at #inst "2026-08-03T12:00:00.000-00:00"
          :seon.effect/notify
-         [:seon.cluster.agent/id "background-agent"]}])
+         [:seon.agent/id "background-agent"]}])
       (binding [db/*conn* connection]
         (is (= {:seon.effect/id "background-result"
                 :seon.effect/request-edn "{}"}
@@ -79,6 +79,6 @@
       (is (= "background-agent"
              (get-in
               (db/pull @connection
-                       [{:seon.effect/notify [:seon.cluster.agent/id]}]
+                       [{:seon.effect/notify [:seon.agent/id]}]
                        [:seon.effect/id "background-result"])
-              [:seon.effect/notify :seon.cluster.agent/id]))))))
+              [:seon.effect/notify :seon.agent/id]))))))

@@ -15,8 +15,8 @@
   THREE PROCS, all pinned `:io`, all var step-fns through the one
   `seon.flow/var-process` door (F0(a)):
 
-  - `::mailbox` — total and instant: forward one payload-free
-    `::episode` signal downstream and count deliveries. It never reads
+  - `:seon.agent/mailbox` — total and instant: forward one payload-free
+    `:seon.agent/episode` signal downstream and count deliveries. It never reads
     the database (the turn pass owns the basis) and never blocks (its
     downstream conn is sliding-1). It exists so the graph answers
     ping/pause within microseconds at ALL times — the turn transform
@@ -25,13 +25,13 @@
     boundary: pausing the graph pauses the mailbox instantly, so no
     new episode begins, while an in-flight turn runs to its durable
     terminal.
-  - `::turn` — one episode pass per signal, the central pass's proven
+  - `:seon.agent/turn` — one episode pass per signal, the central pass's proven
     shape narrowed to one agent: settle this agent's orphan, pin ONE
     database value, derive `next-agent-work`, execute the situation
     through the surviving `seon.turn/turn` owner (custody law,
     pre-provider capture, terminal transactions all unchanged), then
     self-rewake into this agent's OWN mailbox when more remains.
-  - `::schedule` — one disposable timer and fact listener scoped to this
+  - `:seon.agent/schedule` — one disposable timer and fact listener scoped to this
     agent. It derives due nominal instants, atomically commits fire+message,
     and waits on `:io`; it never polls another agent's schedules.
 
@@ -52,7 +52,7 @@
   mailbox channels by recipient ENTITY id, because that is what a
   committed `message/to` datom carries) — a disposable artifact rebuilt
   by arming at boot, never a fact. The cluster's one `wake/route!`
-  listener delivers through it; `::armer` (hosted in the cluster's own
+  listener delivers through it; `:seon.agent/armer` (hosted in the cluster's own
   graph, R7) closes the created-and-messaged-in-one-commit window by
   deriving (agents in facts) − (armed set) under a payload-free wake.
 
@@ -100,7 +100,7 @@
   Assignment is not stewardship: a second agent assigned the same namespace
   leaves the first agent's stewardship standing."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.agent/id :seon.ns/name]
+                       :seon.agent/id :seon.ns/name]
                   :seon.store/transaction-data]}
   [database agent-id namespace-name]
   (let [steward (db/q '[:find ?steward .
@@ -114,7 +114,7 @@
     (if steward
       []
       [[:db/add [:seon.ns/name namespace-name] :seon.ns/steward
-        [:seon.cluster.agent/id agent-id]]])))
+        [:seon.agent/id agent-id]]])))
 
 (defn creation-tx
   "Create one agent with its namespace in this database branch.
@@ -125,9 +125,9 @@
   stewardship is decided inside the transaction by `steward-call`: the
   creating agent stewards a namespace that has none yet, and never
   displaces an existing steward."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/creation-request]
-                  :seon.cluster.agent/creation-tx]}
-  [{agent-id :seon.cluster.agent/id
+  {:malli/schema [:=> [:cat :seon.agent/creation-request]
+                  :seon.agent/creation-tx]}
+  [{agent-id :seon.agent/id
     namespace-name :seon.ns/name}]
   (let [namespace-tempid (str "namespace:" namespace-name)]
     [{:db/id namespace-tempid
@@ -136,8 +136,8 @@
       [[:seon.ns/name 'my.message]
        [:seon.ns/name 'my.run]
        [:seon.ns/name 'seon.db]]}
-     {:seon.cluster.agent/id agent-id
-      :seon.cluster.agent/namespace namespace-tempid}
+     {:seon.agent/id agent-id
+      :seon.agent/namespace namespace-tempid}
      [:db.fn/call #'steward-call agent-id namespace-name]]))
 
 (defn situation-form
@@ -149,9 +149,9 @@
    :seon.repl/form '(help)})
 
 (def ^:private identity-selector
-  '[:seon.cluster.agent/id
-    {:seon.cluster.agent/namespace
-     [:seon.ns/name {:seon.ns/steward [:seon.cluster.agent/id]}]}])
+  '[:seon.agent/id
+    {:seon.agent/namespace
+     [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}])
 
 (defn identity-form
   "Return the database read that reproduces an agent's identity."
@@ -161,26 +161,26 @@
    :seon.repl/form
    (list 'seon.db/pull
          (list 'quote identity-selector)
-         [:seon.cluster.agent/id (:seon.cluster.agent/id unit)])})
+         [:seon.agent/id (:seon.agent/id unit)])})
 
 (defn whoami
   "Describe the current agent's identity, namespace, and cluster.
 
   SCI supplies missing database and agent entries in the request map.
-  Pass :seon.cluster.agent/id to inspect another agent, or :seon.db/db
+  Pass :seon.agent/id to inspect another agent, or :seon.db/db
   to query an explicit snapshot.
   Use seon.db/pull when the identity attributes themselves are needed as data."
   {:malli/schema
-   [:=> [:cat :seon.cluster.agent/identity-request]
+   [:=> [:cat :seon.agent/identity-request]
     [:or [:maybe :string] :seon.error/value]]}
   [request]
    (let [agent-data (db/pull (:seon.db/db request) identity-selector
-                           [:seon.cluster.agent/id (:seon.cluster.agent/id request)])]
+                           [:seon.agent/id (:seon.agent/id request)])]
      (if (:seon.error/kind agent-data)
        agent-data
-       (when-let [agent-id (:seon.cluster.agent/id agent-data)]
+       (when-let [agent-id (:seon.agent/id agent-data)]
          (let [namespace-name
-               (get-in agent-data [:seon.cluster.agent/namespace :seon.ns/name])
+               (get-in agent-data [:seon.agent/namespace :seon.ns/name])
                cluster-name
                (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] (:seon.db/db request))]
            (str "Agent     " agent-id
@@ -196,9 +196,9 @@
 
 (defn render-id-ai
   "Read the identity concern from its identifying attribute."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/id] :seon.render/source]}
+  {:malli/schema [:=> [:cat :seon.agent/id] :seon.render/source]}
   [agent-id]
-  (render-identity-ai {:seon.cluster.agent/id agent-id}))
+  (render-identity-ai {:seon.agent/id agent-id}))
 
 (defn render-identity-html
   "Render an agent's id, namespace, and steward as an identity card."
@@ -208,19 +208,19 @@
   (let [agent-data (if-let [database (:seon.db/db unit)]
                      (if (:seon.error/kind database)
                        database
-                       (when-let [agent-id (:seon.cluster.agent/id unit)]
+                       (when-let [agent-id (:seon.agent/id unit)]
                          (db/pull database identity-selector
-                                  [:seon.cluster.agent/id agent-id])))
+                                  [:seon.agent/id agent-id])))
                      (or (:seon.render/value unit) unit))]
     (if (:seon.error/kind agent-data)
       agent-data
-      (let [agent-id (:seon.cluster.agent/id agent-data)
+      (let [agent-id (:seon.agent/id agent-data)
             namespace-name
             (get-in agent-data
-                    [:seon.cluster.agent/namespace :seon.ns/name])
+                    [:seon.agent/namespace :seon.ns/name])
             steward
             (get-in agent-data
-                    [:seon.cluster.agent/namespace :seon.ns/steward :seon.cluster.agent/id])]
+                    [:seon.agent/namespace :seon.ns/steward :seon.agent/id])]
         (when agent-id
           [:article {:class "seon-family-entry seon-agent-identity-entry"}
            [:header
@@ -242,14 +242,14 @@
 (defn render-id-html
   "Render the identity unit as a compact labeled card.
 
-  The unit's stored value is `:seon.cluster.agent/id`; call preparation
+  The unit's stored value is `:seon.agent/id`; call preparation
   supplies the database, so the card reads id, namespace, and cluster from the
   same three attributes [[whoami]] reads."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/id :seon.db/database-value]
+  {:malli/schema [:=> [:cat :seon.agent/id :seon.db/database-value]
                   :seon.render/hiccup]}
   [agent-id database]
   (let [rendered (render-identity-html {:seon.db/db database
-                                        :seon.cluster.agent/id agent-id})]
+                                        :seon.agent/id agent-id})]
     (cond
       (:seon.error/kind rendered)
       [:article {:class "seon-family-entry seon-agent-identity-entry"}
@@ -275,19 +275,19 @@
   (let [doc-line (fn [documented-var]
                    (first (str/split-lines (:doc (meta documented-var)))))
         situation
-        (if (contains? unit :seon.cluster.agent/unread-message-count)
+        (if (contains? unit :seon.agent/unread-message-count)
           unit
-          (when (and (:seon.db/db unit) (:seon.cluster.agent/id unit))
+          (when (and (:seon.db/db unit) (:seon.agent/id unit))
             (bootstrap/situation (:seon.db/db unit)
-                                 (:seon.cluster.agent/id unit))))]
+                                 (:seon.agent/id unit))))]
     (when (and situation (not (:seon.error/kind situation)))
-      (str "You are agent " (:seon.cluster.agent/id situation)
+      (str "You are agent " (:seon.agent/id situation)
            " in namespace "
-           (second (:seon.cluster.agent/namespace-ref situation)) ". "
+           (second (:seon.agent/namespace-ref situation)) ". "
            "Your opening is generated from live facts. "
-           "You have " (:seon.cluster.agent/unread-message-count situation)
+           "You have " (:seon.agent/unread-message-count situation)
            " unread message"
-           (when-not (= 1 (:seon.cluster.agent/unread-message-count situation))
+           (when-not (= 1 (:seon.agent/unread-message-count situation))
              "s")
            ". " (:seon.turn/turns-remaining situation)
            " turns remain in this episode."
@@ -303,7 +303,7 @@
   "`:seon.render/ai` — the compact result of creating or resuming an agent."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
-  (when-let [agent-id (:seon.cluster.agent/id unit)]
+  (when-let [agent-id (:seon.agent/id unit)]
     (str "Agent " agent-id " · namespace " (:seon.ns/name unit)
          " · cluster " (:seon.cluster/name unit)
          " · bootstrap run " (:seon.turn/id unit) ".")))
@@ -313,7 +313,7 @@
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:maybe :seon.render/hiccup]]}
   [unit]
-  (when-let [agent-id (:seon.cluster.agent/id unit)]
+  (when-let [agent-id (:seon.agent/id unit)]
     [:article {:class "seon-family-entry seon-agent-creation-entry"}
      [:h3 (str "Agent " agent-id)]
      [:dl
@@ -329,14 +329,14 @@
   namespace, and stewardship only decides where that namespace's faults and
   requests are routed. Surfaces that need one evaluating agent take the first."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name]
-                  [:vector :seon.cluster.agent/id]]}
+                  [:vector :seon.agent/id]]}
   [db namespace-name]
   (let [ids (db/q '[:find [?agent-id ...]
                     :in $ ?namespace-name
                     :where
                     [?namespace :seon.ns/name ?namespace-name]
-                    [?agent :seon.cluster.agent/namespace ?namespace]
-                    [?agent :seon.cluster.agent/id ?agent-id]]
+                    [?agent :seon.agent/namespace ?namespace]
+                    [?agent :seon.agent/id ?agent-id]]
                   db namespace-name)]
     (if (:seon.error/kind ids) [] (vec (sort ids)))))
 
@@ -347,14 +347,14 @@
   an inversion of assignment: several agents may be assigned one namespace,
   and exactly one of them stewards it."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name]
-                  [:maybe :seon.cluster.agent/id]]}
+                  [:maybe :seon.agent/id]]}
   [db namespace-name]
   (db/q '[:find ?agent-id .
          :in $ ?namespace-name
          :where
          [?namespace :seon.ns/name ?namespace-name]
          [?namespace :seon.ns/steward ?agent]
-         [?agent :seon.cluster.agent/id ?agent-id]]
+         [?agent :seon.agent/id ?agent-id]]
        db namespace-name))
 
 ;;; ---------------------------------------------------------------------------
@@ -363,7 +363,7 @@
 
 (defn mailbox-step
   "The mailbox transform, in Flow's four arities.
-  Total and instant: one payload-free `::episode` signal downstream per
+  Total and instant: one payload-free `:seon.agent/episode` signal downstream per
   wake, deliveries counted in the ping map. The wake channel arrives as
   an in-port — the same channel the routing entry names — so listener
   routing, the arm prime, and the self-rewake all target ONE edge."
@@ -375,19 +375,19 @@
                    [:tuple :map [:maybe [:map-of :keyword [:vector :some]]]]]]}
   ([]
    {:ins {}
-    :outs {::episode
+    :outs {:seon.agent/episode
            "One payload-free episode signal: a wake says only \"look\"."}
     :workload :io
-    :ping-map-fn (fn [state] (select-keys state [::deliveries]))})
+    :ping-map-fn (fn [state] (select-keys state [:seon.agent/deliveries]))})
   ([args]
    (assoc args
-          ::flow/in-ports {::wake (:seon.cluster.wake/channel args)}
-          ::deliveries 0))
+          ::flow/in-ports {:seon.agent/wake (:seon.cluster.wake/channel args)}
+          :seon.agent/deliveries 0))
   ([state _transition]
    state)
   ([state _input _message]
-   [(update state ::deliveries inc)
-    {::episode [::wake]}]))
+   [(update state :seon.agent/deliveries inc)
+    {:seon.agent/episode [:seon.agent/wake]}]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The ONE blueprint
@@ -404,37 +404,37 @@
   pass derives ALL of this agent's work from one fresh database value,
   so coalescing is free by the same argument that made the central
   pass's wake safe."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/blueprint-request] :map]}
-  [{handle :seon.turn.loop/cluster agent-id :seon.cluster.agent/id}]
+  {:malli/schema [:=> [:cat :seon.agent/blueprint-request] :map]}
+  [{handle :seon.turn.loop/cluster agent-id :seon.agent/id}]
   ;; Every proc in this agent's graph carries the cluster's environment
   ;; SCOPED to this agent, so work leaving a proc on any thread still names
   ;; which cluster and which agent it belongs to.
   (let [environment (env/scope (env/of handle)
-                               {:seon.cluster.agent/id agent-id})]
+                               {:seon.agent/id agent-id})]
     (cond->
      {:procs
-      {::mailbox
+      {:seon.agent/mailbox
        {:proc (seon.flow/var-process
                #'mailbox-step :io
                (env/carry {:seon.cluster.wake/channel
                            (:seon.cluster.wake/channel handle)}
                           environment))}
-       ::turn
+       :seon.agent/turn
        {:proc (seon.flow/var-process
                #'turn/step :io
                (env/carry {:seon.turn.loop/cluster handle
-                           :seon.cluster.agent/id agent-id}
+                           :seon.agent/id agent-id}
                           environment))
-        :chan-opts {::episode {:buf-or-n (async/sliding-buffer 1)}}}
-       ::schedule
+        :chan-opts {:seon.agent/episode {:buf-or-n (async/sliding-buffer 1)}}}
+       :seon.agent/schedule
        {:proc (seon.flow/var-process
                #'schedule/schedule-step :io
                (env/carry {:seon.turn.loop/cluster handle
-                           :seon.cluster.agent/id agent-id
+                           :seon.agent/id agent-id
                            :seon.schedule/channel
                            (:seon.schedule/channel handle)}
                           environment))}}
-      :conns [[[::mailbox ::episode] [::turn ::episode]]]}
+      :conns [[[:seon.agent/mailbox :seon.agent/episode] [:seon.agent/turn :seon.agent/episode]]]}
       (:seon.flow/executor handle)
       (assoc :io-exec (:seon.flow/executor handle)))))
 
@@ -444,21 +444,21 @@
 
 (defn routing
   "A fresh routing entry: the process-local map atom arming rebuilds.
-  `::armed` by agent id (the management view); `::channels` by
+  `:seon.agent/armed` by agent id (the management view); `:seon.agent/channels` by
   recipient ENTITY id (the wake handler's one-lookup delivery);
-  `::fault-channel` set once when the cluster's fan-out stands, read by
+  `:seon.agent/fault-channel` set once when the cluster's fan-out stands, read by
   every later arm."
-  {:malli/schema [:=> [:cat] :seon.cluster.agent/routing]}
+  {:malli/schema [:=> [:cat] :seon.agent/routing]}
   []
-  (atom {::armed {} ::channels {}}))
+  (atom {:seon.agent/armed {} :seon.agent/channels {}}))
 
 (defn armed
   "The armed entry for `agent-id`, or nil."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/routing
-                       :seon.cluster.agent/id]
-                  [:maybe :seon.cluster.agent/armed]]}
+  {:malli/schema [:=> [:cat :seon.agent/routing
+                       :seon.agent/id]
+                  [:maybe :seon.agent/armed]]}
   [routing agent-id]
-  (get-in @routing [::armed agent-id]))
+  (get-in @routing [:seon.agent/armed agent-id]))
 
 (declare submit-source-in-projection)
 
@@ -471,8 +471,8 @@
   agent graph. A supplied starting namespace is the caller's parse-time
   decision; the run transaction refuses if the agent's assignment changed."
   {:malli/schema
-   [:=> [:catn [:request :seon.cluster.agent/source-submission-request]]
-    [:or :seon.cluster.agent/source-submission-result :seon.error/value]]}
+   [:=> [:catn [:request :seon.agent/source-submission-request]]
+    [:or :seon.agent/source-submission-result :seon.error/value]]}
   [{handle :seon.turn.loop/cluster :as request}]
   ;; The submission thread otherwise pays the cold projection rebuild
   ;; (measured 728 → 147 ms per source turn); the handle carries its world.
@@ -484,8 +484,8 @@
 
 (defn- submit-source-in-projection
   [{handle :seon.turn.loop/cluster
-    routing :seon.cluster.agent/routing
-    agent-id :seon.cluster.agent/id
+    routing :seon.agent/routing
+    agent-id :seon.agent/id
     starting-ns :seon.turn/starting-ns
     text :seon.cluster.reply/text}]
   (let [connection (:seon.db/connection handle)
@@ -496,8 +496,8 @@
           (db/q '[:find ?namespace-name .
                 :in $ ?agent-id
                 :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                [?agent :seon.cluster.agent/namespace ?namespace]
+                [?agent :seon.agent/id ?agent-id]
+                [?agent :seon.agent/namespace ?namespace]
                 [?namespace :seon.ns/name ?namespace-name]]
                 database agent-id))]
     (cond
@@ -505,15 +505,15 @@
 
       (nil? namespace-name)
       (error/diagnostic
-       {:seon.error/kind ::no-such-agent
+       {:seon.error/kind :seon.agent/no-such-agent
         :seon.error/message
         "Source submission requires an agent with an assigned namespace."
-        :seon.error/diagnostic-layer ::source-submission
+        :seon.error/diagnostic-layer :seon.agent/source-submission
         :seon.error/diagnostic-operation `submit-source!
-        :seon.error/diagnostic-member :seon.cluster.agent/namespace
+        :seon.error/diagnostic-member :seon.agent/namespace
         :seon.error/diagnostic-expected :seon.ns/name
         :seon.error/diagnostic-offending agent-id
-        :seon.error/diagnostic-cause ::no-such-agent
+        :seon.error/diagnostic-cause :seon.agent/no-such-agent
         :seon.error/diagnostic-evidence nil})
 
       :else
@@ -535,7 +535,7 @@
                     (turn/system-run-tx
                      database
                      (merge (dissoc staged-reply :seon.blob/staged-writes)
-                            {:seon.cluster.agent/id agent-id
+                            {:seon.agent/id agent-id
                              :seon.turn/id run-id
                              :seon.db.process/id
                              (:seon.db.process/id handle)
@@ -549,20 +549,20 @@
               (let [channel
                     (or (:seon.cluster.wake/channel (armed routing agent-id))
                         (:seon.cluster.wake/channel handle))]
-                (if (async/offer! channel ::wake)
+                (if (async/offer! channel :seon.agent/wake)
                   {:seon.turn/id run-id}
                   (error/diagnostic
-                   {:seon.error/kind ::source-submission-undeliverable
+                   {:seon.error/kind :seon.agent/source-submission-undeliverable
                     :seon.error/message
                     "The source run committed, but its wake was not delivered."
-                    :seon.error/diagnostic-layer ::source-submission
+                    :seon.error/diagnostic-layer :seon.agent/source-submission
                     :seon.error/diagnostic-operation `submit-source!
                     :seon.error/diagnostic-member
                     :seon.cluster.wake/channel
-                    :seon.error/diagnostic-expected ::wake
+                    :seon.error/diagnostic-expected :seon.agent/wake
                     :seon.error/diagnostic-offending run-id
                     :seon.error/diagnostic-cause
-                    ::source-submission-undeliverable
+                    :seon.agent/source-submission-undeliverable
                     :seon.error/diagnostic-evidence
                     {:seon.turn/id run-id}}))))))))))
 
@@ -584,8 +584,8 @@
   the entry BEFORE closing the channel — that ordering is what lets
   `wake/delivery` read a closed reachable route as the fence rather
   than as a teardown race."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/routing
-                       :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.agent/routing
+                       :seon.agent/id]
                   :boolean]}
   [routing agent-id]
   (boolean
@@ -595,10 +595,10 @@
 
 (defn channels
   "The current entity-id → mailbox-channel map, for `wake/route!`."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/routing]
+  {:malli/schema [:=> [:cat :seon.agent/routing]
                   [:map-of :int :seon.flow/channel]]}
   [routing]
-  (::channels @routing))
+  (:seon.agent/channels @routing))
 
 (defn fenced-route?
   "True when `channel` is the CURRENT route for `agent-eid` and closed.
@@ -606,13 +606,13 @@
   This is the delivery-side quarantine predicate. Identity matters: a
   stale channel retained by a caller after re-arm is not the agent's
   fence, and a closed non-agent route is not represented here at all."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/routing
+  {:malli/schema [:=> [:cat :seon.agent/routing
                        :int
                        :seon.flow/channel]
                   :boolean]}
   [routing agent-eid channel]
   (boolean
-   (and (identical? channel (get (::channels @routing) agent-eid))
+   (and (identical? channel (get (:seon.agent/channels @routing) agent-eid))
         (async.protocols/closed? channel))))
 
 (defn arm!
@@ -634,22 +634,22 @@
   second caller someone would have to write. Refuses an agent id with
   no committed entity — the armer derives its set from facts, so a
   missing entity is a caller bug, never a nil routing key."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/arm-request]
-                  :seon.cluster.agent/armed]}
+  {:malli/schema [:=> [:cat :seon.agent/arm-request]
+                  :seon.agent/armed]}
   [{handle :seon.turn.loop/cluster
-    agent-id :seon.cluster.agent/id
-    routing :seon.cluster.agent/routing}]
+    agent-id :seon.agent/id
+    routing :seon.agent/routing}]
   (or (armed routing agent-id)
       (let [connection (:seon.db/connection handle)
             eid (db/q '[:find ?agent .
                        :in $ ?id
-                       :where [?agent :seon.cluster.agent/id ?id]]
+                       :where [?agent :seon.agent/id ?id]]
                      @connection agent-id)
             _ (when (nil? eid)
                 (throw (ex-info "arm! refused: no such agent in facts."
-                                {:seon.error/kind ::no-such-agent
-                                 :seon.cluster.agent/id agent-id
-                                 :seon.cluster.agent/no-such-agent agent-id})))
+                                {:seon.error/kind :seon.agent/no-such-agent
+                                 :seon.agent/id agent-id
+                                 :seon.agent/no-such-agent agent-id})))
             wake-channel (async/chan (async/sliding-buffer 1))
             schedule-channel (async/chan (async/sliding-buffer 1))
             completion (async/chan 1)
@@ -659,76 +659,76 @@
             (:seon.config.agent/turn-completion-backstop-ms
              (merge (config/effective @connection (:seon.cluster/name handle))
                     (ai/agent-overlay @connection agent-id)))
-            _ (async/>!! completion ::ready)
+            _ (async/>!! completion :seon.agent/ready)
             agent-handle (assoc handle
                                 :seon.sci.eval/agent-ctx
                                 (:seon.sci.eval/ctx
                                  (sci.eval/fork-for-turn
                                   {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                                    :seon.db/db @connection
-                                   :seon.cluster.agent/id agent-id}))
+                                   :seon.agent/id agent-id}))
                                 :seon.cluster.wake/armer-channel
                                 (:seon.cluster.wake/channel handle)
                                 :seon.cluster.wake/channel wake-channel
                                 :seon.schedule/channel schedule-channel
                                 :seon.turn.loop/completion completion
-                                ::fault-channel (::fault-channel @routing)
-                                ::turn-backstop-state turn-backstop-state
+                                :seon.agent/fault-channel (:seon.agent/fault-channel @routing)
+                                :seon.agent/turn-backstop-state turn-backstop-state
                                 :seon.config.agent/turn-completion-backstop-ms
                                 turn-completion-backstop-ms
-                                :seon.cluster.agent/turn-stopped turn-stopped)
+                                :seon.agent/turn-stopped turn-stopped)
             {graph :seon.flow/graph}
             (seon.flow/start-graph!
              {:seon.flow/graph-definition
               (graph-definition
                {:seon.turn.loop/cluster agent-handle
-                :seon.cluster.agent/id agent-id})
+                :seon.agent/id agent-id})
               :seon.flow/joins
-              {::error-fanout
+              {:seon.agent/error-fanout
                (fn [{started :seon.flow/started}]
                  (seon.flow/join-error-fanout!
                   {:seon.flow/started started
-                   :seon.flow/fault-channel (::fault-channel @routing)
-                   :seon.flow/tag {:seon.cluster.agent/id agent-id}}))}})
-            entry {:seon.cluster.agent/id agent-id
-                   :seon.cluster.agent/eid eid
+                   :seon.flow/fault-channel (:seon.agent/fault-channel @routing)
+                   :seon.flow/tag {:seon.agent/id agent-id}}))}})
+            entry {:seon.agent/id agent-id
+                   :seon.agent/eid eid
                    :seon.turn.loop/cluster agent-handle
                    :seon.flow/graph graph
                    :seon.cluster.wake/channel wake-channel
                    :seon.schedule/channel schedule-channel
                    :seon.turn.loop/completion completion
-                   ::turn-backstop-state turn-backstop-state
-                   :seon.cluster.agent/turn-stopped turn-stopped}]
+                   :seon.agent/turn-backstop-state turn-backstop-state
+                   :seon.agent/turn-stopped turn-stopped}]
         (swap! routing
                (fn [current]
                  (-> current
-                     (assoc-in [::armed agent-id] entry)
-                     (assoc-in [::channels eid] wake-channel))))
+                     (assoc-in [:seon.agent/armed agent-id] entry)
+                     (assoc-in [:seon.agent/channels eid] wake-channel))))
         ;; the arm prime — every mailbox arm primes exactly once
-        (async/offer! wake-channel ::wake)
+        (async/offer! wake-channel :seon.agent/wake)
         entry)))
 
 (defn- await-turn-completion!
   [routing entry]
   (let [completion (:seon.turn.loop/completion entry)
-        turn-stopped (:seon.cluster.agent/turn-stopped entry)
+        turn-stopped (:seon.agent/turn-stopped entry)
         {connection :seon.db/connection
          process :seon.db.process/id}
         (:seon.turn.loop/cluster entry)]
     (if-some [terminal (or (async/poll! completion)
                            (async/poll! turn-stopped))]
       terminal
-      (let [agent-id (:seon.cluster.agent/id entry)
+      (let [agent-id (:seon.agent/id entry)
             database @connection
-            run-id (turn/open-for-agent database [:seon.cluster.agent/id agent-id])
+            run-id (turn/open-for-agent database [:seon.agent/id agent-id])
             timeout-ms
             (:seon.config.agent/turn-completion-backstop-ms
              (:seon.turn.loop/cluster entry))
-            active-backstop-state (::turn-backstop-state entry)
+            active-backstop-state (:seon.agent/turn-backstop-state entry)
             active-backstop
             (when active-backstop-state @active-backstop-state)]
         (if active-backstop
-          (let [failure-channel (::failure-channel active-backstop)
+          (let [failure-channel (:seon.agent/failure-channel active-backstop)
                 [value selected]
                 (async/alts!! [completion turn-stopped failure-channel]
                               :priority true)]
@@ -747,19 +747,19 @@
               (let [failure
                     (let [diagnostic
                           (turn/turn-completion-error
-                           agent-id run-id timeout-ms ::disarm ::turn-completed
+                           agent-id run-id timeout-ms :seon.agent/disarm :seon.agent/turn-completed
                            [:seon.turn.loop/completion
-                            :seon.cluster.agent/turn-stopped])]
+                            :seon.agent/turn-stopped])]
                       (ex-info (:seon.error/message diagnostic) diagnostic))
                     fault
                     (cond->
-                     {::flow/pid ::turn
+                     {::flow/pid :seon.agent/turn
                       ::flow/status :stopping
-                      ::flow/op ::turn-completion-backstop
+                      ::flow/op :seon.agent/turn-completion-backstop
                       ::flow/ex failure
-                      :seon.cluster.agent/id agent-id}
+                      :seon.agent/id agent-id}
                       run-id (assoc :seon.turn/id run-id))]
-                (async/offer! (::fault-channel @routing) fault)
+                (async/offer! (:seon.agent/fault-channel @routing) fault)
                 (binding [*out* *err*]
                   (println "SEON CORE FAULT (agent stop backstop):"
                            (ex-message failure)
@@ -789,21 +789,21 @@
   recognizable to `wake/delivery` without a flag. Closing first would
   put an ordinary teardown into the same state and the recognition
   would become a guess."
-  {:malli/schema [:=> [:cat :seon.cluster.agent/disarm-request] :nil]}
-  [{agent-id :seon.cluster.agent/id
-    routing :seon.cluster.agent/routing}]
+  {:malli/schema [:=> [:cat :seon.agent/disarm-request] :nil]}
+  [{agent-id :seon.agent/id
+    routing :seon.agent/routing}]
   (when-let [entry (armed routing agent-id)]
     (flow/stop (:seon.flow/graph entry))
     (await-turn-completion! routing entry)
     (swap! routing
            (fn [current]
              (-> current
-                 (update ::armed dissoc agent-id)
-                 (update ::channels dissoc
-                         (:seon.cluster.agent/eid entry)))))
+                 (update :seon.agent/armed dissoc agent-id)
+                 (update :seon.agent/channels dissoc
+                         (:seon.agent/eid entry)))))
     (async/close! (:seon.cluster.wake/channel entry))
     (async/close! (:seon.turn.loop/completion entry))
-    (async/close! (:seon.cluster.agent/turn-stopped entry)))
+    (async/close! (:seon.agent/turn-stopped entry)))
   nil)
 
 ;;; ---------------------------------------------------------------------------
@@ -814,7 +814,7 @@
   "The armer transform, in Flow's four arities.
   Derive-all under a payload-free wake: (agents in facts) − (armed
   set), arm each, sorted for determinism. The wake set grows by
-  `:seon.cluster.agent/id` — a committed agent creation IS an arm wake
+  `:seon.agent/id` — a committed agent creation IS an arm wake
   — and the listener also offers here when it sees a `to`-ref with no
   routing entry (the created-and-messaged-in-one-commit belt).
   Coalescing on its sliding-1 in-port is safe by the standard argument.
@@ -834,45 +834,45 @@
     :workload :io
     :ping-map-fn (fn [state]
                    (assoc {}
-                          ::armed-count
-                          (count (::armed @(:seon.cluster.agent/routing
+                          :seon.agent/armed-count
+                          (count (:seon.agent/armed @(:seon.agent/routing
                                             state)))))})
   ([args]
    (assoc args
-          ::flow/in-ports {::arm (:seon.cluster.wake/channel
+          ::flow/in-ports {:seon.agent/arm (:seon.cluster.wake/channel
                                   (:seon.turn.loop/cluster args))}))
   ([state transition]
    (when (= ::flow/stop transition)
      (async/put! (:seon.turn.loop/completion
                   (:seon.turn.loop/cluster state))
-                 ::stopped))
+                 :seon.agent/stopped))
    state)
   ([state _input message]
    (cond
      (nil? message)
      [state nil]
 
-     (::quiesce message)
+     (:seon.agent/quiesce message)
      (do
-       (async/put! (::quiesce message) ::quiesced)
+       (async/put! (:seon.agent/quiesce message) :seon.agent/quiesced)
        [state nil])
 
      :else
      (let [handle (:seon.turn.loop/cluster state)
-           routing (:seon.cluster.agent/routing state)
+           routing (:seon.agent/routing state)
            connection (:seon.db/connection handle)
            db @connection
            agents (db/q '[:find [?id ...]
-                         :where [_ :seon.cluster.agent/id ?id]]
+                         :where [_ :seon.agent/id ?id]]
                        db)
-           unarmed (remove #(contains? (::armed @routing) %) agents)
+           unarmed (remove #(contains? (:seon.agent/armed @routing) %) agents)
            non-root-agents (remove #{"root"} agents)
            first-agent (when (= 1 (count non-root-agents))
                          (first non-root-agents))]
        (doseq [agent-id (sort unarmed)]
          (arm! {:seon.turn.loop/cluster handle
-                :seon.cluster.agent/id agent-id
-                :seon.cluster.agent/routing routing}))
+                :seon.agent/id agent-id
+                :seon.agent/routing routing}))
        ;; Supervision is a fact-derived transition, never a wait inside this
        ;; proc. Agent creation and every run closure wake the armer; each pass
        ;; either commits the now-eligible transition or parks for the next
@@ -889,7 +889,7 @@
                       database (bootstrap/run-id first-agent)))
                root-eid
                (db/q '[:find ?root .
-                       :where [?root :seon.cluster.agent/id "root"]]
+                       :where [?root :seon.agent/id "root"]]
                      database)
                root-idle?
                (and root-eid
@@ -912,11 +912,11 @@
                      (throw
                       (ex-info
                        "Root's first-agent supervision run did not commit."
-                       {:seon.error/kind ::supervision-not-committed
-                        :seon.cluster.agent/supervision-not-committed true
+                       {:seon.error/kind :seon.agent/supervision-not-committed
+                        :seon.agent/supervision-not-committed true
                         :seon.error/message
                         "Root's first-agent supervision run did not commit."
                         :seon.error/data result}))))
                  (when-let [root (armed routing "root")]
-                   (async/offer! (:seon.cluster.wake/channel root) ::wake)))))))
+                   (async/offer! (:seon.cluster.wake/channel root) :seon.agent/wake)))))))
        [state nil]))))

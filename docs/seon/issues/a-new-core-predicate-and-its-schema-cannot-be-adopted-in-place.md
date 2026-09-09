@@ -41,3 +41,12 @@ than from agent-authored input — the non-loading resolver exists to stop an
 authored form loading arbitrary code, which is not this case. Until then, a
 change that pairs a new predicate with its declaration needs the development
 cluster stopped and started, which the edit hook cannot do.
+
+## Observation 2026-09-09 — context blocks
+
+After `105acca21`, default publication refused at schema population with
+`Predicate seon.edit/valid-form-operation? has no admitted callable in the corpus projection.`
+A supported JVM evaluation reloaded `seon.edit`, `seon.fs`, `seon.shell`,
+then their `my.*` predicate registration call sites successfully. No default
+process lifecycle action was taken. A fresh scratch fork had already
+compiled and tested those same predicate declarations successfully.

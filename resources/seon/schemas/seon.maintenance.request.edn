@@ -63,8 +63,8 @@
                              :seon.schedule.fire/nominal-at]
                             [:seon.schedule.fire/observed-at
                              :seon.schedule.fire/observed-at]
-                            [:seon.cluster.agent/id
-                             :seon.cluster.agent/id]
+                            [:seon.agent/id
+                             :seon.agent/id]
                             [:seon.boot/cluster-name
                              :seon.boot/cluster-name]
                             [:seon.operator/repository-root

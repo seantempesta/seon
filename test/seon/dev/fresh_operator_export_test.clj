@@ -78,7 +78,7 @@
               (is (= "root"
                      (db/q '[:find ?id .
                              :in $ ?id
-                             :where [?agent :seon.cluster.agent/id ?id]]
+                             :where [?agent :seon.agent/id ?id]]
                            @connection "root")))
               (finally
                 (d/release connection))))

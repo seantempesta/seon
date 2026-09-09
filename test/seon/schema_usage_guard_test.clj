@@ -256,14 +256,14 @@
                                     unrelated-key [:int {:seon.db/index true}]})
         (db/transact! connection [{:seon.ns/name namespace-name
                                    :seon.ns/source "(ns my.agents.schema-usage-guard)"}
-                                  {:seon.cluster.agent/id agent-id
-                                   :seon.cluster.agent/namespace
+                                  {:seon.agent/id agent-id
+                                   :seon.agent/namespace
                                    [:seon.ns/name namespace-name]}])
         (db/transact! connection [{base-key 7}])
         (db/transact!
          connection
          (turn/open-tx {:seon.turn/id run-id
-                       :seon.turn/agent [:seon.cluster.agent/id agent-id]
+                       :seon.turn/agent [:seon.agent/id agent-id]
                        :seon.turn/opened-at (java.util.Date.)}))
         (testing "current data answers with the guard's typed refusal"
           (let [refusal

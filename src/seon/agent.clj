@@ -6,7 +6,7 @@
 
 (defn settings
   "Read your setting overrides; omitted settings inherit the cluster defaults."
-  {:malli/schema [:=> [:cat :seon.db/db :seon.cluster.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
                   [:or :seon.config/agent-overlay :seon.error/value]]}
   [database agent-id]
   (ai/agent-overlay database agent-id))
@@ -14,11 +14,11 @@
 (defn- update-settings-call
   [database agent-id overrides]
   (let [agent (db/pull database '[:db/id {:seon.agent/settings [:db/id]}]
-                       [:seon.cluster.agent/id agent-id])]
+                       [:seon.agent/id agent-id])]
     (when-not (:db/id agent)
       (throw (ex-info "The agent whose settings were requested does not exist."
-                      {:seon.error/kind :seon.cluster.agent/no-such-agent
-                       :seon.cluster.agent/no-such-agent agent-id})))
+                      {:seon.error/kind :seon.agent/no-such-agent
+                       :seon.agent/no-such-agent agent-id})))
     (let [component (or (get-in agent [:seon.agent/settings :db/id]) "agent-settings")
           attributes (ai/agent-setting-attributes database)
           _ (when (:seon.error/kind attributes)
@@ -34,14 +34,14 @@
   settings without an override inherit the cluster defaults. Return the
   resulting overrides. The writer updates the one owned component."
   {:malli/schema [:=> [:cat :seon.config/agent-overlay
-                      :seon.db/connection :seon.cluster.agent/id]
+                      :seon.db/connection :seon.agent/id]
                   [:or :seon.config/agent-overlay :seon.error/value]]}
   [overrides connection agent-id]
   (let [result (db/transact! connection
                              {:tx-data [[:db.fn/call #'update-settings-call
                                          agent-id overrides]]
                               :tx-meta {:seon.db/user
-                                        [:seon.cluster.agent/id agent-id]}})]
+                                        [:seon.agent/id agent-id]}})]
     (if (:seon.error/kind result)
       result
       (settings (:db-after result) agent-id))))

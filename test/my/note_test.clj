@@ -12,8 +12,8 @@
   (support/with-database
     (fn [connection]
       (db/transact! connection
-                    [{:seon.cluster.agent/id "alice"}
-                     {:seon.cluster.agent/id "bob"}
+                    [{:seon.agent/id "alice"}
+                     {:seon.agent/id "bob"}
                      {:seon.cluster.message/id "subject-1"}])
       (f connection))))
 
@@ -23,7 +23,7 @@
       (is (= {:my.note/id "design"
               :my.note/agent
               (db/q '[:find ?agent .
-                      :where [?agent :seon.cluster.agent/id "alice"]]
+                      :where [?agent :seon.agent/id "alice"]]
                     @connection)
               :my.note/content "Prefer one current fact."
               :my.note/about

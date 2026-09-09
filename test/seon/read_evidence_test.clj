@@ -13,10 +13,10 @@
                (db/transact!
                 connection
                 [{:seon.cluster/name "read-evidence"}
-                 {:seon.cluster.agent/id "juniper"}
-                 {:seon.cluster.agent/id "root"}
+                 {:seon.agent/id "juniper"}
+                 {:seon.agent/id "root"}
                  {:seon.cluster.message/id "opening"
-                  :seon.cluster.message/to [:seon.cluster.agent/id "juniper"]
+                  :seon.cluster.message/to [:seon.agent/id "juniper"]
                   :seon.cluster.message/at (java.util.Date. 0)
                   :seon.cluster.message/content "Opening message"}]))))
      (let [ctx (test-support/fork-cluster-ctx connection)
@@ -27,7 +27,7 @@
               {:seon.sci.eval/ctx ctx
                :seon.db/connection connection
                :seon.db/db @connection
-               :seon.cluster.agent/id "juniper"
+               :seon.agent/id "juniper"
                :seon.cluster.eval/source "(my.message/inbox (seon.db/db) \"juniper\")"
                :seon.cluster.eval/ns [:seon.ns/name 'user]
                :seon.sci.admit/caps (config/result-caps (config/defaults))
@@ -39,7 +39,7 @@
                             (mapcat #(get-in % [:datahike.read/dependency-plan
                                                :datahike.query.dependency/sources])
                                     evidence))
-           juniper (db/q '[:find ?e . :where [?e :seon.cluster.agent/id "juniper"]]
+           juniper (db/q '[:find ?e . :where [?e :seon.agent/id "juniper"]]
                          @connection)]
        (is (nil? (:seon.error/kind evaluation)) (pr-str evaluation))
        (is (= "Opening message"
@@ -54,7 +54,7 @@
                  (db/transact!
                   connection
                   [{:seon.cluster.message/id "next"
-                    :seon.cluster.message/to [:seon.cluster.agent/id recipient]
+                    :seon.cluster.message/to [:seon.agent/id recipient]
                     :seon.cluster.message/at (java.util.Date. 1)
                     :seon.cluster.message/content "Next message"}]))))
        ;; Remove replay inputs as data: these assertions must be decided by

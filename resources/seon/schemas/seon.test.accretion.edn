@@ -189,13 +189,13 @@
                          [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                          [:seon.db/db :seon.db/database-value]
                          [:seon.db/connection :seon.db/connection]
-                         [:seon.cluster.agent/id :seon.cluster.agent/id]],
+                         [:seon.agent/id :seon.agent/id]],
                         :candidate-request
                         [:map
                          [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                          [:seon.db/db :seon.db/database-value]
                          [:seon.db/connection :seon.db/connection]
-                         [:seon.cluster.agent/id :seon.cluster.agent/id]
+                         [:seon.agent/id :seon.agent/id]
                          [:seon.cluster.eval/source
                           :seon.cluster.eval/source]
                          [:seon.test.accretion/gate-set

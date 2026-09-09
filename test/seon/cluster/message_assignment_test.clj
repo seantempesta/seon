@@ -16,12 +16,12 @@
   (test-support/with-database
    (fn [connection]
      (db/transact! connection
-                 [{:seon.cluster.agent/id "alice"}
-                  {:seon.cluster.agent/id "bob"}
+                 [{:seon.agent/id "alice"}
+                  {:seon.agent/id "bob"}
                   {:seon.error/id "failure-17"}
                   {:seon.turn/id "red-run"
                    :seon.turn/agent
-                   [:seon.cluster.agent/id "alice"]
+                   [:seon.agent/id "alice"]
                    :seon.turn/opened-at now}
                   {:seon.cluster.eval/id "receipt-17"
                    :seon.cluster.eval/run
@@ -38,7 +38,7 @@
   [run-id content]
   {:my.message/value
    (seon.cluster.message/send "bob" content "failure-17")
-   :seon.cluster.agent/id "alice"
+   :seon.agent/id "alice"
    :seon.turn/id run-id
    :seon.cluster.eval/ordinal 0
    :seon.cluster.message/at now
@@ -96,7 +96,7 @@
             @connection
             {:my.message/value
              (seon.cluster.message/decline "alice" "receipt-17" reason)
-             :seon.cluster.agent/id "bob"
+             :seon.agent/id "bob"
              :seon.turn/id "declination-run"
              :seon.cluster.eval/ordinal 0
              :seon.cluster.message/at now
@@ -110,8 +110,8 @@
                 (db/q '[:find (count ?declination) .
                        :where
                        [?problem :seon.cluster.eval/id "receipt-17"]
-                       [?planner :seon.cluster.agent/id "alice"]
-                       [?owner :seon.cluster.agent/id "bob"]
+                       [?planner :seon.agent/id "alice"]
+                       [?owner :seon.agent/id "bob"]
                        [?assignment :seon.cluster.message/about ?problem]
                        [?assignment :seon.cluster.message/from ?planner]
                        [?assignment :seon.cluster.message/to ?owner]
@@ -166,7 +166,7 @@
                 (db/q '[:find (count ?message) .
                        :where
                        [?failure :seon.error/id "failure-17"]
-                       [?recipient :seon.cluster.agent/id "bob"]
+                       [?recipient :seon.agent/id "bob"]
                        [?message :seon.cluster.message/about ?failure]
                        [?message :seon.cluster.message/to ?recipient]]
                      @connection))

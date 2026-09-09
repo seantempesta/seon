@@ -127,7 +127,7 @@
         row-ids (::row-ids spec)
         row-transaction
         {:tx-data (::rows spec)
-         :tx-meta {:seon.db/user [:seon.cluster.agent/id agent-id]}}
+         :tx-meta {:seon.db/user [:seon.agent/id agent-id]}}
         sources
         [(str "(seon.db/transact! " (pr-str row-transaction) ")")
          (str "(seon.db/q "
@@ -173,7 +173,7 @@
         creation-tx
         (mapcat (fn [spec]
                   (agent/creation-tx
-                   {:seon.cluster.agent/id (::agent-id spec)
+                   {:seon.agent/id (::agent-id spec)
                     :seon.ns/name (::namespace spec)
                     :seon.cluster/name cluster-name}))
                 specs)
@@ -188,20 +188,20 @@
 (defn- pause-scenario-mailboxes!
   [instance specs]
   (let [handle (:seon.turn.loop/cluster instance)
-        routing (:seon.cluster.agent/routing instance)
+        routing (:seon.agent/routing instance)
         quiesced (async/promise-chan)]
     ;; The armer channel orders this request after the creation wake. Its
     ;; acknowledgement therefore proves every scenario agent has an entry.
     (async/>!! (:seon.cluster.wake/channel handle)
-               {::agent/quiesce quiesced})
+               {:seon.agent/quiesce quiesced})
     (await-channel! quiesced "scenario agents armed")
     (doseq [spec specs]
       (let [entry (agent/armed routing (::agent-id spec))
             graph (:seon.flow/graph entry)]
         (is (some? entry) "the armer published the scenario agent")
-        (flow/pause-proc graph ::agent/mailbox)
+        (flow/pause-proc graph :seon.agent/mailbox)
         (is (= :paused
-               (::flow/status (flow/ping-proc graph ::agent/mailbox)))
+               (::flow/status (flow/ping-proc graph :seon.agent/mailbox)))
             "the mailbox is paused before planned work can deliver a wake")))))
 
 (defn- seed-scenario-runs!
@@ -216,7 +216,7 @@
          (fn [spec]
            (turn/system-run-tx
             database
-            {:seon.cluster.agent/id (::agent-id spec)
+            {:seon.agent/id (::agent-id spec)
              :seon.turn/id (::run-id spec)
              :seon.db.process/id process
              :seon.turn/opened-at now
@@ -246,7 +246,7 @@
          (fn [spec]
            (let [work-item (turn/next-agent-work
                             @connection
-                            {:seon.cluster.agent/id (::agent-id spec)
+                            {:seon.agent/id (::agent-id spec)
                              :seon.db.process/id process})]
              (is (= :resume (:seon.turn.work/situation work-item))
                  "a caller-planned run begins at the resume boundary")
@@ -298,7 +298,7 @@
           :where
           [?run :seon.turn/id ?run-id]
           [?run :seon.turn/agent ?agent]
-          [?agent :seon.cluster.agent/id ?agent-id]
+          [?agent :seon.agent/id ?agent-id]
           [?receipt :seon.cluster.eval/run ?run]
           [?receipt :seon.cluster.eval/id ?receipt-id]
           [?receipt :seon.cluster.eval/ordinal ?ordinal]]
@@ -387,7 +387,7 @@
                 :where
                 [?row :seon.test.run/id ?row-id ?tx true]
                 [?tx :seon.db/user ?agent ?tx true]
-                [?agent :seon.cluster.agent/id ?agent-id]]
+                [?agent :seon.agent/id ?agent-id]]
               (db/history database) row-ids)
         expected
         (into #{}
@@ -430,9 +430,9 @@
             :where
             [?message :seon.cluster.message/id ?message-id]
             [?message :seon.cluster.message/from ?from]
-            [?from :seon.cluster.agent/id ?from-id]
+            [?from :seon.agent/id ?from-id]
             [?message :seon.cluster.message/to ?to]
-            [?to :seon.cluster.agent/id ?to-id]]
+            [?to :seon.agent/id ?to-id]]
           database message-ids)))
 
 (defn- assert-ring!
@@ -460,7 +460,7 @@
    (db/q '[:find [?message-id ...]
            :in $ ?agent-id
            :where
-           [?agent :seon.cluster.agent/id ?agent-id]
+           [?agent :seon.agent/id ?agent-id]
            (or-join [?message ?agent]
                     [?message :seon.cluster.message/to ?agent]
                     [?message :seon.cluster.message/from ?agent])
@@ -477,7 +477,7 @@
       :seon.db/connection
       (:seon.boot/cluster-connection instance)
       :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
-      :seon.cluster.agent/id agent-id
+      :seon.agent/id agent-id
       :seon.sci.admit/caps (config/result-caps settings)
       :seon.sci.eval/time-limit-ms
       (:seon.config.eval/time-limit-ms settings)

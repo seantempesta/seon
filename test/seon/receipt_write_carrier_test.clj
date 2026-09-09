@@ -27,12 +27,12 @@
            ordinal 0
            receipt-id (pr-str [run-id ordinal])
            now (java.util.Date. 1785000000000)]
-       (db/transact! connection [{:seon.cluster.agent/id agent-id}])
+       (db/transact! connection [{:seon.agent/id agent-id}])
        (db/transact!
         connection
         (turn/open-tx
          {:seon.turn/id run-id
-          :seon.turn/agent [:seon.cluster.agent/id agent-id]
+          :seon.turn/agent [:seon.agent/id agent-id]
           :seon.turn/opened-at now}))
        (db/transact!
         connection
@@ -49,18 +49,18 @@
                  {:tx-data
                   [{:my.note/id "receipt-carrier"
                     :my.note/agent
-                    [:seon.cluster.agent/id agent-id]
+                    [:seon.agent/id agent-id]
                     :my.note/content "written in evaluation"}]
                   :tx-meta
                   {:seon.db/user
-                   [:seon.cluster.agent/id agent-id]}})
+                   [:seon.agent/id agent-id]}})
                 ")")
                :seon.sci.eval/ctx (evaluation-context connection)
                :seon.sci.admit/caps caps
                :seon.sci.eval/time-limit-ms 2000
                :seon.config/on-core-error :panic
                :seon.boot/cluster-name "receipt-write-carrier-test"
-               :seon.cluster.agent/id agent-id
+               :seon.agent/id agent-id
                :seon.turn/id run-id
                :seon.cluster.eval/ordinal ordinal})]
          (testing "every write during evaluation names its receipt on the transaction"
@@ -75,16 +75,16 @@
                      [?tx :seon.db/receipt ?receipt]
                      [?receipt :seon.cluster.eval/id ?receipt-id]
                      [?tx :seon.db/user ?agent]
-                     [?agent :seon.cluster.agent/id ?agent-id]]
+                     [?agent :seon.agent/id ?agent-id]]
                    @connection "receipt-carrier")))))
        (db/transact! connection
-                     [{:seon.cluster.agent/id system-agent-id}])
+                     [{:seon.agent/id system-agent-id}])
        (testing "a system write outside receipt custody asserts no receipt"
          (is (nil?
               (db/q
                '[:find ?receipt .
                  :in $ ?agent-id
                  :where
-                 [?agent :seon.cluster.agent/id ?agent-id ?tx]
+                 [?agent :seon.agent/id ?agent-id ?tx]
                  [?tx :seon.db/receipt ?receipt]]
                @connection system-agent-id))))))))

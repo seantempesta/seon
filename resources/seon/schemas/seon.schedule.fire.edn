@@ -25,7 +25,7 @@
                      [:map
                       [:seon.schedule.task/id :seon.schedule.task/id]
                       [:seon.schedule.fire/id :seon.schedule.fire/id]
-                      [:seon.cluster.agent/id :seon.cluster.agent/id]
+                      [:seon.agent/id :seon.agent/id]
                       [:seon.fn/sym :seon.fn/sym]
                       [:seon.schedule.fire/nominal-at
                        :seon.schedule.fire/nominal-at]

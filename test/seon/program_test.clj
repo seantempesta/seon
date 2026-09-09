@@ -806,8 +806,8 @@
            :seon.ns/source "(ns my.agents.registration-test)"}
           {:seon.ns/name 'my.agents.someone-else
            :seon.ns/source "(ns my.agents.someone-else)"}
-          {:seon.cluster.agent/id "registration-test"
-           :seon.cluster.agent/namespace namespace-ref}
+          {:seon.agent/id "registration-test"
+           :seon.agent/namespace namespace-ref}
           {:seon.fn/sym function-sym
            :seon.fn/ns namespace-ref
            :seon.fn/source "(defn same-name [] 1)"
@@ -821,7 +821,7 @@
          connection
          (turn/open-tx {:seon.turn/id "registration-delete"
                        :seon.turn/agent
-                       [:seon.cluster.agent/id "registration-test"]
+                       [:seon.agent/id "registration-test"]
                        :seon.turn/opened-at now}))
         (db/transact!
          connection

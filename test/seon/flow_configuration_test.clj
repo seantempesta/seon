@@ -111,7 +111,7 @@
                       :seon.config/on-core-error :record
                       :seon.config.error/recurrence-limit 3
                       :seon.config.message/max-chain 64})
-                    :seon.cluster.agent/id "census"})]]
+                    :seon.agent/id "census"})]]
                 proc-facts
                 (into
                  []

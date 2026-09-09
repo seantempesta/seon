@@ -31,8 +31,8 @@
    :seon.cluster.message/at
    :seon.cluster.message/content
    :my.message/reason
-   {:seon.cluster.message/to [:db/id :seon.cluster.agent/id]}
-   {:seon.cluster.message/from [:db/id :seon.cluster.agent/id]}
+   {:seon.cluster.message/to [:db/id :seon.agent/id]}
+   {:seon.cluster.message/from [:db/id :seon.agent/id]}
    {:seon.cluster.message/about [:db/id]}])
 
 (def ^:private receipt-selector
@@ -65,8 +65,8 @@
     [:db/id :seon.turn/id :seon.turn/opened-at
      {:seon.turn/agent
       [:db/id
-       :seon.cluster.agent/id
-       {:seon.cluster.agent/namespace [:db/id :seon.ns/name]}]}]}])
+       :seon.agent/id
+       {:seon.agent/namespace [:db/id :seon.ns/name]}]}]}])
 
 (def ^:private undisposed-run-selector
   [:db/id
@@ -99,7 +99,7 @@
         '[:find ?message ?at ?ordinal ?tx
           :in $ ?agent-id
           :where
-          [?agent :seon.cluster.agent/id ?agent-id]
+          [?agent :seon.agent/id ?agent-id]
           (or-join [?message ?agent]
                    [?message :seon.cluster.message/to ?agent]
                    [?message :seon.cluster.message/from ?agent])
@@ -117,7 +117,7 @@
         '[:find ?receipt ?at ?id
           :in $ % ?agent-id ?bootstrap-run-id
           :where
-          [?agent :seon.cluster.agent/id ?agent-id]
+          [?agent :seon.agent/id ?agent-id]
           (active-run ?run ?agent ?bootstrap-run-id false)
           [?receipt :seon.cluster.eval/run ?run]
           [?receipt :seon.cluster.eval/at ?at]
@@ -132,7 +132,7 @@
          '[:find ?run ?at ?id
            :in $ ?agent-id
            :where
-           [?agent :seon.cluster.agent/id ?agent-id]
+           [?agent :seon.agent/id ?agent-id]
            [?run :seon.turn/agent ?agent]
            [?run :seon.turn/undisposed-at ?at]
            [?run :seon.turn/id ?id]]
@@ -145,7 +145,7 @@
   (db/q '[:find [?receipt ...]
          :in $ % ?agent-id ?bootstrap-run-id
          :where
-         [?agent :seon.cluster.agent/id ?agent-id]
+         [?agent :seon.agent/id ?agent-id]
          (active-run ?run ?agent ?bootstrap-run-id true)
          [?receipt :seon.cluster.eval/run ?run]]
        db active-runs-rules agent-id (bootstrap/run-id agent-id)))
@@ -303,9 +303,9 @@
       ::at (:seon.cluster.message/at message)
       ::content (:seon.cluster.message/content message)
       ::from (get-in message [:seon.cluster.message/from
-                              :seon.cluster.agent/id])
+                              :seon.agent/id])
       ::to (get-in message [:seon.cluster.message/to
-                            :seon.cluster.agent/id])
+                            :seon.agent/id])
       ::about (get identities about-eid)
       ::about-ref? (some? about-eid)
       ::reason (:my.message/reason message)}
@@ -340,7 +340,7 @@
      (or (get-in receipt [:seon.cluster.eval/ns :seon.ns/name])
          (get-in receipt [:seon.cluster.eval/run
                           :seon.turn/agent
-                          :seon.cluster.agent/namespace
+                          :seon.agent/namespace
                           :seon.ns/name])
          'user)
      ::read-basis (:seon.cluster.eval/read-basis-transaction receipt)
@@ -614,7 +614,7 @@
 (defn- reasoning-attempts
   [unit]
   (let [db (:seon.db/db unit)
-        agent-id (:seon.cluster.agent/id unit)
+        agent-id (:seon.agent/id unit)
         selected-run-id (::selected-run-id unit)
         connection (:seon.db/connection unit)]
     (if (and db agent-id)
@@ -630,7 +630,7 @@
             (db/q '[:find [?attempt ...]
                    :in $ ?agent-id
                    :where
-                   [?agent :seon.cluster.agent/id ?agent-id]
+                   [?agent :seon.agent/id ?agent-id]
                    [?run :seon.turn/agent ?agent]
                    [?run :seon.turn/attempts ?attempt]
                    (or [?attempt :seon.ai.attempt/reasoning]
@@ -705,7 +705,7 @@
   "The shared source of transcript entries, supplied evaluations or stored history."
   [unit]
   (let [db (:seon.db/db unit)
-        agent-id (:seon.cluster.agent/id unit)
+        agent-id (:seon.agent/id unit)
         candidate-count (admit/required-cap
                          (:seon.sci.admit/caps unit)
                          :seon.config.eval.result/max-nodes)
@@ -759,7 +759,7 @@
 (defn- projection
   [unit]
   (let [db (:seon.db/db unit)
-        agent-id (:seon.cluster.agent/id unit)
+        agent-id (:seon.agent/id unit)
         entries (if (or (some? (:seon.turn.loop/evaluated-sources unit))
                         (and db agent-id))
                   (candidate-history unit)
@@ -784,13 +784,13 @@
   (let [db (:seon.db/db unit)
         agent (:seon.turn/agent unit)
         agent-ref (if (map? agent) (:db/id agent) agent)
-        supplied-agent-id (when (map? agent) (:seon.cluster.agent/id agent))
+        supplied-agent-id (when (map? agent) (:seon.agent/id agent))
         queried (when (and (nil? supplied-agent-id)
                            db (integer? agent-ref))
                   (db/q '[:find ?agent-id .
                           :in $ ?agent
                           :where
-                          [?agent :seon.cluster.agent/id ?agent-id]]
+                          [?agent :seon.agent/id ?agent-id]]
                         db agent-ref))]
     {::selected-run-id (:seon.turn/id unit)
      ::selected-agent-id
@@ -807,7 +807,7 @@
     :seon.error/diagnostic-operation 'seon.render.transcript/render-run
     :seon.error/diagnostic-member :seon.turn/turn
     :seon.error/diagnostic-expected
-    [:seon.db/db :seon.turn/id :seon.cluster.agent/id]
+    [:seon.db/db :seon.turn/id :seon.agent/id]
     :seon.error/diagnostic-offending
     (select-keys unit [:seon.turn/id :seon.turn/agent])
     :seon.error/diagnostic-cause ::selected-run-unavailable
@@ -825,7 +825,7 @@
     (cond
       identity-error identity-error
       (and (:seon.db/db unit) run-id agent-id)
-      (let [unit (assoc (assoc unit :seon.cluster.agent/id agent-id)
+      (let [unit (assoc (assoc unit :seon.agent/id agent-id)
                         ::selected-run-id run-id)]
         (render-ai unit))
       :else (missing-selected-run unit identities))))
@@ -861,13 +861,13 @@
   {:malli/schema [:=> [:cat :seon.render/unit] [:vector :map]]}
   [unit]
   (let [db (:seon.db/db unit)
-        agent-id (:seon.cluster.agent/id unit)
+        agent-id (:seon.agent/id unit)
         namespace-name
         (db/q '[:find ?name .
                 :in $ ?agent-id
                 :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                [?agent :seon.cluster.agent/namespace ?namespace]
+                [?agent :seon.agent/id ?agent-id]
+                [?agent :seon.agent/namespace ?namespace]
                 [?namespace :seon.ns/name ?name]]
               db agent-id)
         candidates (candidate-history unit)
@@ -915,7 +915,7 @@
     (cond
       identity-error identity-error
       (and (:seon.db/db unit) run-id agent-id)
-      (let [unit (assoc (assoc unit :seon.cluster.agent/id agent-id)
+      (let [unit (assoc (assoc unit :seon.agent/id agent-id)
                         ::selected-run-id run-id)]
         [:section {:class "seon-run-transcript"}
          (turn/render-html unit)
@@ -980,14 +980,14 @@
   identity, so nothing is silently dropped."
   {:malli/schema [:=> [:cat :seon.render.transcript/history-request]
                   [:or :seon.render.transcript/history :seon.error/value]]}
-  [{database :seon.db/db agent-id :seon.cluster.agent/id}]
+  [{database :seon.db/db agent-id :seon.agent/id}]
   (let [effective (agent-config database)
         limit (long (:seon.config.render.agent/max-children effective))
         caps (config/result-caps effective)
         rows (db/q {:query '[:find ?run ?opened
                              :in $ ?agent-id
                              :where
-                             [?agent :seon.cluster.agent/id ?agent-id]
+                             [?agent :seon.agent/id ?agent-id]
                              [?run :seon.turn/agent ?agent]
                              [?run :seon.turn/id _]
                              [?run :seon.turn/opened-at ?opened]]
@@ -1007,13 +1007,13 @@
                                 :seon.render.transcript/entries
                                 (history-entries
                                  {:seon.db/db database
-                                  :seon.cluster.agent/id agent-id
+                                  :seon.agent/id agent-id
                                   :seon.sci.admit/caps caps
                                   ::selected-run-id
                                   (:seon.turn/id row)}))))))
                   newest)
             omitted (- total (count runs))]
-        (cond-> {:seon.cluster.agent/id agent-id
+        (cond-> {:seon.agent/id agent-id
                  :seon.render.transcript/runs runs}
           (pos? omitted)
           (assoc :seon.render.transcript/older-runs
@@ -1025,7 +1025,7 @@
                   :seon.render.data/next-offset (count runs)
                   :seon.render.profile/id :seon.render.profile/agent
                   :seon.print/requery-id
-                  [:seon.cluster.agent/id agent-id]}))))))
+                  [:seon.agent/id agent-id]}))))))
 
 (defn- run-heading
   [run]
@@ -1071,12 +1071,12 @@
 (defn- runs-agent-id
   "The agent these runs belong to, read from the runs themselves."
   [database runs]
-  (or (some :seon.cluster.agent/id
+  (or (some :seon.agent/id
             (keep :seon.turn/agent runs))
       (when-let [eid (some #(get-in % [:seon.turn/agent :db/id]) runs)]
         (let [found (db/q '[:find ?id .
                             :in $ ?agent
-                            :where [?agent :seon.cluster.agent/id ?id]]
+                            :where [?agent :seon.agent/id ?id]]
                           database eid)]
           (when-not (:seon.error/kind found) found)))))
 
@@ -1089,7 +1089,7 @@
         agent-id (runs-agent-id database rows)]
     (if agent-id
       (format-history-ai (agent-history {:seon.db/db database
-                                        :seon.cluster.agent/id agent-id}))
+                                        :seon.agent/id agent-id}))
       "")))
 
 (defn render-history-html
@@ -1110,7 +1110,7 @@
         agent-id (runs-agent-id database rows)
         derived (when agent-id
                   (agent-history {:seon.db/db database
-                                  :seon.cluster.agent/id agent-id}))]
+                                  :seon.agent/id agent-id}))]
     (cond
       (nil? agent-id)
       [:section {:class "seon-family-entry seon-run-history"}

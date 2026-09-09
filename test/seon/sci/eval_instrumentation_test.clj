@@ -49,7 +49,7 @@
                    connection
                    [{:seon.cluster.message/id message-id
                      :seon.cluster.message/to
-                     [:seon.cluster.agent/id "root"]
+                     [:seon.agent/id "root"]
                      :seon.cluster.message/content
                      "Complete one instrumented turn."
                      :seon.cluster.message/at (Date.)}])

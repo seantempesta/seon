@@ -55,7 +55,7 @@
   ordinary flat error value.
 
   AN AGENT EVALUATES IN ITS ASSIGNED NAMESPACE, by construction. The eval
-  reads `:seon.cluster.agent/namespace` from the database and binds sci's
+  reads `:seon.agent/namespace` from the database and binds sci's
   own `*ns*` there for the whole form, so a `defn` lands where the prompt
   says it lands and the model never needs to write `(in-ns …)` — which is
   what the first live drive tried, and what failed with `Can't
@@ -258,14 +258,14 @@
   assignment is not unique, so several agents may answer with the same
   namespace, and the namespace's one steward is a separate fact."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.agent/id]
+                       :seon.agent/id]
                   [:maybe :seon.ns/name]]}
   [db agent-id]
   (db/q '[:find ?namespace-name .
           :in $ ?agent-id
           :where
-          [?agent :seon.cluster.agent/id ?agent-id]
-          [?agent :seon.cluster.agent/namespace ?namespace]
+          [?agent :seon.agent/id ?agent-id]
+          [?agent :seon.agent/namespace ?namespace]
           [?namespace :seon.ns/name ?namespace-name]]
         db agent-id))
 
@@ -1547,7 +1547,7 @@
   (when-let [rows (seq (db/q '[:find ?evaluation ?value
                                :in $ ?agent-id ?attribute
                                :where
-                               [?agent :seon.cluster.agent/id ?agent-id]
+                               [?agent :seon.agent/id ?agent-id]
                                [?run :seon.turn/agent ?agent]
                                [?evaluation :seon.cluster.eval/run ?run]
                                [?evaluation ?attribute ?value]]
@@ -1616,7 +1616,7 @@
   [{base-ctx :seon.sci.eval/ctx
     agent-ctx :seon.sci.eval/agent-ctx
     db :seon.db/db
-    agent-id :seon.cluster.agent/id}]
+    agent-id :seon.agent/id}]
   (let [ctx (if agent-ctx
               (receive-base! agent-ctx base-ctx)
               (cond-> (assoc (sci/fork base-ctx)
@@ -2039,7 +2039,7 @@
                   :seon.sci.eval/evaluation]}
   [{:keys [:seon.cluster.eval/source :seon.sci.admit/caps]
     ctx :seon.sci.eval/ctx
-    agent-id :seon.cluster.agent/id
+    agent-id :seon.agent/id
     run-id :seon.turn/id
     form-ordinal :seon.cluster.eval/ordinal
     cluster-name :seon.boot/cluster-name
@@ -2058,7 +2058,7 @@
                        (:seon.db/db request)
                        (assoc :seon.db/db (:seon.db/db request))
                        agent-id
-                       (assoc :seon.cluster.agent/id agent-id)
+                       (assoc :seon.agent/id agent-id)
                        run-id
                        (assoc :seon.turn/id run-id)
                        (some? form-ordinal)
@@ -2136,13 +2136,13 @@
                           :seon.env/environment
                           (some-> (env/of evaluation-ctx)
                                   (env/scope
-                                   {:seon.cluster.agent/id agent-id
+                                   {:seon.agent/id agent-id
                                     :seon.turn/id run-id
                                     :seon.cluster.eval/ordinal form-ordinal}))
                           :seon.db/connection connection
                           :seon.turn/id run-id
                           :seon.cluster.eval/ordinal form-ordinal
-                          :seon.cluster.agent/id agent-id
+                          :seon.agent/id agent-id
                           :seon.flow/work-launcher work-launcher
                           :seon.boot/cluster-name cluster-name
                           :seon.sci.admit/caps caps
@@ -2423,7 +2423,7 @@
   [{base-ctx :seon.sci.eval/ctx
     database :seon.db/db
     connection :seon.db/connection
-    agent-id :seon.cluster.agent/id
+    agent-id :seon.agent/id
     source :seon.cluster.eval/source
     test-symbols :seon.test.accretion/gate-set
     analyzed-row :seon.program/row
@@ -2432,7 +2432,7 @@
              {:seon.sci.eval/ctx base-ctx
               :seon.db/db database
               :seon.db/connection connection
-              :seon.cluster.agent/id agent-id})
+              :seon.agent/id agent-id})
         evaluation
         (evaluate (assoc request
                          :seon.sci.eval/ctx ctx

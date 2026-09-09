@@ -181,7 +181,7 @@
                  {:seon.sci.eval/ctx ctx
                   :seon.db/db @connection
                   :seon.db/connection connection
-                  :seon.cluster.agent/id "root"
+                  :seon.agent/id "root"
                   :seon.cluster.eval/source
                   "; generated opening non-declaration\n:opening-probe"
                   :seon.sci.admit/caps caps
@@ -1168,8 +1168,8 @@
             namespace-name 'fixture.empty-agent
             _ (db/transact!
                connection
-               [{:seon.cluster.agent/id agent-id
-                 :seon.cluster.agent/namespace
+               [{:seon.agent/id agent-id
+                 :seon.agent/namespace
                  {:seon.ns/name namespace-name}}])
             base (eval/build-base-ctx)
             _ (eval/acquire! {:seon.sci.eval/ctx base
@@ -1179,12 +1179,12 @@
              {:seon.sci.eval/ctx base
               :seon.db/db @connection
               :seon.db/connection connection
-              :seon.cluster.agent/id agent-id})
+              :seon.agent/id agent-id})
             turn-ctx (:seon.sci.eval/ctx fork-result)
             evaluation
             (eval/evaluate
              {:seon.sci.eval/ctx turn-ctx
-              :seon.cluster.agent/id agent-id
+              :seon.agent/id agent-id
               :seon.cluster.eval/ns [:seon.ns/name namespace-name]
               :seon.cluster.eval/source "(dir fixture.empty-agent)"
               :seon.sci.admit/caps caps
@@ -1285,8 +1285,8 @@
             _
             (db/transact!
              connection
-             [{:seon.cluster.agent/id "interrupt-author"
-               :seon.cluster.agent/namespace
+             [{:seon.agent/id "interrupt-author"
+               :seon.agent/namespace
                {:seon.ns/name 'authored.interrupt
                 :seon.ns/source "(ns authored.interrupt)"}}
               {:seon.fn/sym "authored.interrupt/spin"
@@ -1300,7 +1300,7 @@
                (pr-str ["interrupt-author" "authored.interrupt/spin#root"])
                :seon.def/id "authored.interrupt/spin#root"
                :seon.def/agent
-               [:seon.cluster.agent/id "interrupt-author"]
+               [:seon.agent/id "interrupt-author"]
                :seon.def/ns [:seon.ns/name 'authored.interrupt]
                :seon.def/name 'spin#root
                :seon.def/value-edn root-edn
@@ -1338,8 +1338,8 @@
                                    ['acquire.poison/good]))))]
         (db/transact!
          connection
-         [{:seon.cluster.agent/id agent-id
-           :seon.cluster.agent/namespace
+         [{:seon.agent/id agent-id
+           :seon.agent/namespace
            {:seon.ns/name namespace-name
             :seon.ns/source "(ns acquire.poison)"}}
           {:seon.fn/sym "acquire.poison/bad"
@@ -1361,7 +1361,7 @@
           {:seon.def/key
            (pr-str [agent-id "acquire.poison/good#root"])
            :seon.def/id "acquire.poison/good#root"
-           :seon.def/agent [:seon.cluster.agent/id agent-id]
+           :seon.def/agent [:seon.agent/id agent-id]
            :seon.def/ns [:seon.ns/name namespace-name]
            :seon.def/name 'good#root
            :seon.def/value-edn good-root-edn
@@ -1416,8 +1416,8 @@
             {:seon.boot/cluster-name "contract-acquire"
              :seon.config/manifest
              (assoc caps :seon.config/on-core-error :panic)}))
-          {:seon.cluster.agent/id "contract-author"
-           :seon.cluster.agent/namespace
+          {:seon.agent/id "contract-author"
+           :seon.agent/namespace
            {:seon.ns/name 'authored.contract
             :seon.ns/source "(ns authored.contract)"}}
           {:seon.fn/sym "authored.contract/accept"
@@ -1430,7 +1430,7 @@
           {:seon.def/key
            (pr-str ["contract-author" "authored.contract/accept#root"])
            :seon.def/id "authored.contract/accept#root"
-           :seon.def/agent [:seon.cluster.agent/id "contract-author"]
+           :seon.def/agent [:seon.agent/id "contract-author"]
            :seon.def/ns [:seon.ns/name 'authored.contract]
            :seon.def/name 'accept#root
            :seon.def/value-edn root-edn
@@ -1494,7 +1494,7 @@
             _ (db/transact!
                connection
                (agent/creation-tx
-                {:seon.cluster.agent/id agent-id
+                {:seon.agent/id agent-id
                  :seon.ns/name assigned-namespace
                  :seon.cluster/name cluster-name}))
             ctx (eval/cluster-ctx @connection connection)
@@ -1505,7 +1505,7 @@
             assigned-evaluation
             (eval/evaluate
              {:seon.sci.eval/ctx ctx
-              :seon.cluster.agent/id agent-id
+              :seon.agent/id agent-id
               :seon.cluster.eval/source "(ns-name *ns*)"
               :seon.sci.admit/caps caps
               :seon.sci.eval/time-limit-ms 2000
@@ -1540,7 +1540,7 @@
             evaluation
             (eval/evaluate
              {:seon.sci.eval/ctx ctx
-              :seon.cluster.agent/id "scoped-agent"
+              :seon.agent/id "scoped-agent"
               :seon.turn/id "scoped-run"
               :seon.cluster.eval/ordinal 7
               :seon.cluster.eval/source "(seon.run/complete \"done\")"
@@ -1550,11 +1550,11 @@
         (is (= {:my.run/disposition :completed
                 :my.run/result "done"}
                (:seon.sci.admit/value evaluation)))
-        (is (some #(= {:seon.cluster.agent/id "scoped-agent"
+        (is (some #(= {:seon.agent/id "scoped-agent"
                        :seon.turn/id "scoped-run"
                        :seon.cluster.eval/ordinal 7}
                       (select-keys %
-                                   [:seon.cluster.agent/id
+                                   [:seon.agent/id
                                     :seon.turn/id
                                     :seon.cluster.eval/ordinal]))
                   @seen)
@@ -1643,16 +1643,16 @@
       (test-support/seed-cluster! connection "host-walk")
       (db/transact! connection
                   (agent/creation-tx
-                   {:seon.cluster.agent/id "host-walker"
+                   {:seon.agent/id "host-walker"
                     :seon.cluster/name "host-walk"
                     :seon.ns/name 'my.agents.host-walker}))
       (let [ctx (eval/cluster-ctx @connection connection)
             request
             {:seon.db/db @connection
              :seon.db/connection connection
-             :seon.cluster.agent/id "host-walker"
+             :seon.agent/id "host-walker"
              :seon.render.walk/lookup
-             [:seon.cluster.agent/id "host-walker"]
+             [:seon.agent/id "host-walker"]
              :seon.render/output :seon.render/ai
              :seon.render/distance 2
              :seon.sci.admit/caps caps

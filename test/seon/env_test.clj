@@ -61,8 +61,8 @@
   (testing "scoping may narrow only turn-layer members"
     (let [environment (sut/environment {:seon.boot/cluster-name "scope"})]
       (is (= "agent-a"
-             (:seon.cluster.agent/id
-              (sut/scope environment {:seon.cluster.agent/id "agent-a"}))))
+             (:seon.agent/id
+              (sut/scope environment {:seon.agent/id "agent-a"}))))
       (is (= :seon.env/unscopable-member
              (:seon.error/kind
               (sut/scope environment {:seon.db/connection ::not-a-connection})))))))

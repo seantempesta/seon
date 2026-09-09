@@ -83,13 +83,13 @@
   [connection task-id handler]
   (db/transact!
    connection
-   [{:seon.cluster.agent/id "root"}
+   [{:seon.agent/id "root"}
     {:seon.fn/sym handler}
     {:seon.schedule/id (str task-id "/schedule")
      :seon.schedule/expression "* * * * *"
      :seon.schedule/zone-id "UTC"}
     {:seon.schedule.task/id task-id
-     :seon.schedule.task/owner [:seon.cluster.agent/id "root"]
+     :seon.schedule.task/owner [:seon.agent/id "root"]
      :seon.schedule.task/function [:seon.fn/sym handler]
      :seon.schedule.task/schedule
      [:seon.schedule/id (str task-id "/schedule")]}]))
@@ -155,7 +155,7 @@
                        :seon.db/connection
                        :seon.schedule.task/id
                        :seon.schedule.fire/id
-                       :seon.cluster.agent/id
+                       :seon.agent/id
                        :seon.fn/sym
                        :seon.schedule.fire/nominal-at
                        :seon.schedule.fire/observed-at)
@@ -192,7 +192,7 @@
           (is (= 1 (count-with database :seon.schedule.fire/agent))
               "one firing, one wake datom")
           (is (= [(db/q '[:find ?agent . :where
-                          [?agent :seon.cluster.agent/id "root"]]
+                          [?agent :seon.agent/id "root"]]
                         database)]
                  (db/q '[:find [?agent ...] :where
                          [_ :seon.schedule.fire/agent ?agent]]
@@ -236,7 +236,7 @@
             (merge (dissoc (execution-context) :seon.turn.loop/cluster)
                    {:seon.schedule.task/id task-id
                     :seon.schedule.fire/id fire-id
-                    :seon.cluster.agent/id "root"
+                    :seon.agent/id "root"
                     :seon.fn/sym "seon.schedule-test/successful-handler"
                     :seon.schedule.fire/nominal-at nominal-at
                     :seon.schedule.fire/observed-at observed-at})]
@@ -313,6 +313,6 @@
            definition
            (agent/graph-definition
             {:seon.turn.loop/cluster handle
-             :seon.cluster.agent/id "root"})]
-       (is (= #{::agent/mailbox ::agent/turn ::agent/schedule}
+             :seon.agent/id "root"})]
+       (is (= #{:seon.agent/mailbox :seon.agent/turn :seon.agent/schedule}
               (set (keys (:procs definition)))))))))

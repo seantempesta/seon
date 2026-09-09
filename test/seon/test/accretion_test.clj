@@ -166,8 +166,8 @@
     (fn [connection]
       (db/transact!
        connection
-       [{:seon.cluster.agent/id "candidate-author"
-         :seon.cluster.agent/namespace
+       [{:seon.agent/id "candidate-author"
+         :seon.agent/namespace
          {:seon.ns/name 'fixture.candidate
           :seon.ns/source
           (str "(ns fixture.candidate "
@@ -212,7 +212,7 @@
              {:seon.sci.eval/ctx parent
               :seon.db/db @connection
               :seon.db/connection connection
-              :seon.cluster.agent/id "candidate-author"
+              :seon.agent/id "candidate-author"
               :seon.cluster.eval/source
               (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                    "target [x] (inc x))")
@@ -254,8 +254,8 @@
     (fn [connection]
       (db/transact!
        connection
-       [{:seon.cluster.agent/id "auto-check-author"
-         :seon.cluster.agent/namespace
+       [{:seon.agent/id "auto-check-author"
+         :seon.agent/namespace
          {:seon.ns/name 'fixture.auto-check
           :seon.ns/source "(ns fixture.auto-check)"}}
         {:seon.fn/sym "fixture.auto-check/capability"
@@ -267,7 +267,7 @@
                {:seon.sci.eval/ctx parent
                 :seon.db/db @connection
                 :seon.db/connection connection
-                :seon.cluster.agent/id "auto-check-author"
+                :seon.agent/id "auto-check-author"
                 :seon.cluster.eval/source source
                 :seon.test.accretion/gate-set []
                 :seon.sci.eval/time-limit-ms 2000

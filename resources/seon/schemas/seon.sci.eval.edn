@@ -118,9 +118,9 @@
                  [:seon.db/db
                   {:optional true}
                   :seon.db/database-value]
-                 [:seon.cluster.agent/id
+                 [:seon.agent/id
                   {:optional true}
-                  :seon.cluster.agent/id]
+                  :seon.agent/id]
                  [:seon.turn/id
                   {:optional true}
                   :seon.turn/id]
@@ -145,7 +145,7 @@
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                  [:seon.sci.eval/agent-ctx {:optional true} :seon.sci.eval/ctx]
                  [:seon.db/db :seon.db/database-value]
-                 [:seon.cluster.agent/id :seon.cluster.agent/id]
+                 [:seon.agent/id :seon.agent/id]
                  ;; The run whose already settled evaluations this fork binds
                  ;; back as result/eN handles. Absent when no run is in
                  ;; effect, and then the fork simply binds none.

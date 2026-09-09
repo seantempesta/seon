@@ -27,7 +27,7 @@
 ;; mixed union), so decoding really happens and the test cannot pass by
 ;; skipping the walk entirely.
 (def ^:private narrow-attributes
-  [:seon.cluster.agent/id
+  [:seon.agent/id
    :seon.cluster.registry/from])
 
 (def ^:private wide-attributes
@@ -95,7 +95,7 @@
         wide-attributes
         (fn [connection]
           (db/transact! connection
-                        [{:seon.cluster.agent/id "agent-a"
+                        [{:seon.agent/id "agent-a"
                           :seon.cluster.registry/from :core
                           :seon.cluster.message/id "message-1"
                           :seon.cluster.message/to "agent-a"
@@ -110,7 +110,7 @@
                           [{:seon.cluster.message/id (str "extra-" index)
                             :seon.cluster.message/content "x"}]))
           (let [database (db/db connection)
-                agent-ref [:seon.cluster.agent/id "agent-a"]]
+                agent-ref [:seon.agent/id "agent-a"]]
             (doseq [[operation thunk]
                     [["pull '[*]" #(db/pull database '[*] agent-ref)]
                      ["pull-many '[*]"
@@ -132,11 +132,11 @@
     (with-database
       narrow-attributes
       (fn [connection]
-        (db/transact! connection [{:seon.cluster.agent/id "agent-a"}])
+        (db/transact! connection [{:seon.agent/id "agent-a"}])
         (let [database (db/db connection)]
           (is (zero?
                (reads-of
-                #(db/q '[:find ?e :where [?e :seon.cluster.agent/id _]]
+                #(db/q '[:find ?e :where [?e :seon.agent/id _]]
                        database)))))))))
 
 (deftest edn-backed-attributes-still-round-trip
@@ -145,12 +145,12 @@
       narrow-attributes
       (fn [connection]
         (let [report (db/transact! connection
-                                   [{:seon.cluster.agent/id "agent-a"
+                                   [{:seon.agent/id "agent-a"
                                      :seon.cluster.registry/from :core}])]
           (is (nil? (:seon.error/kind report))
               (str "the EDN-backed write must commit: " report)))
         (let [database (db/db connection)
-              agent-ref [:seon.cluster.agent/id "agent-a"]]
+              agent-ref [:seon.agent/id "agent-a"]]
           (is (= :core
                  (:seon.cluster.registry/from
                   (db/pull database '[*] agent-ref))))

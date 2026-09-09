@@ -37,7 +37,7 @@
    :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
    :seon.sci.eval/time-limit-ms 1000
    :seon.config/on-core-error :record
-   :seon.cluster.agent/id agent-id
+   :seon.agent/id agent-id
    :seon.sci.admit/caps render-caps})
 
 (defn- html-message-ids
@@ -55,7 +55,7 @@
   (db/transact!
    connection
    (agent/creation-tx
-    {:seon.cluster.agent/id agent-id
+    {:seon.agent/id agent-id
      :seon.ns/name namespace-name
      :seon.cluster/name cluster-name})))
 
@@ -82,8 +82,8 @@
                (db/q '[:find [?agent-id ...]
                        :where
                        [?namespace :seon.ns/name streams.test.unique]
-                       [?agent :seon.cluster.agent/namespace ?namespace]
-                       [?agent :seon.cluster.agent/id ?agent-id]]
+                       [?agent :seon.agent/namespace ?namespace]
+                       [?agent :seon.agent/id ?agent-id]]
                      @connection)]
            (testing "the Datahike writer serializes the unique collision"
              (is (= 1 (count refusals)))
@@ -111,7 +111,7 @@
              (message/delivery
               @connection
               {:my.message/value value
-               :seon.cluster.agent/id sender
+               :seon.agent/id sender
                :seon.turn/id "streams-test-message-run"
                :seon.cluster.eval/ordinal 1
                :seon.cluster.message/at at
@@ -125,7 +125,7 @@
                (db/q '[:find ?id ?content ?ordinal
                        :in $ ?recipient
                        :where
-                       [?agent :seon.cluster.agent/id ?recipient]
+                       [?agent :seon.agent/id ?recipient]
                        [?message :seon.cluster.message/to ?agent]
                        [?message :seon.cluster.message/id ?id]
                        [?message :seon.cluster.message/content ?content]

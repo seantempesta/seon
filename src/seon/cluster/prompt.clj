@@ -46,7 +46,7 @@
        :seon.cluster.prompt/missing-cluster agent-id
        :seon.error/message
        "The prompt's database has no effective cluster configuration."
-       :seon.error/data {:seon.cluster.agent/id agent-id}}
+       :seon.error/data {:seon.agent/id agent-id}}
 
       :else
       (let [effective (config/effective database cluster-name)]
@@ -198,7 +198,7 @@
   [database request]
   (validate-request! request)
   (let [run-id (:seon.turn/id request)
-        agent-id (:seon.cluster.agent/id request)
+        agent-id (:seon.agent/id request)
         run (db/pull database [:seon.turn/background-results]
                      [:seon.turn/id run-id])
         _ (or (message/trigger database run-id)

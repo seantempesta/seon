@@ -77,7 +77,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private attributes
-  [:seon.cluster.agent/id :seon.turn/id :seon.turn/agent
+  [:seon.agent/id :seon.turn/id :seon.turn/agent
    :seon.turn/opened-at :seon.cluster.eval/ordinal])
 
 (defn- with-connection [body]
@@ -104,7 +104,7 @@
   (with-connection
     (fn [connection]
       (let [outcome (db/transact! connection
-                                     [{:seon.cluster.agent/id "agent-a"}])]
+                                     [{:seon.agent/id "agent-a"}])]
         (is (map? outcome))
         (is (contains? outcome :db-after) "the report, not a wrapper")
         (is (nil? (:seon.error/kind outcome)))))))
@@ -135,7 +135,7 @@
 (deftest nothing-throws-out-of-the-wrapper
   (with-connection
     (fn [connection]
-      (doseq [tx-data [[{:seon.cluster.agent/id "agent-b"}]
+      (doseq [tx-data [[{:seon.agent/id "agent-b"}]
                        [[:db.fn/call #'refusing-call {}]]
                        [{:seon.cluster.eval/ordinal "nope"}]
                        [[:db/add "nonsense" :nothing/here 1]]]]

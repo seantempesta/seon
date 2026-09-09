@@ -179,13 +179,13 @@
                 (db/transact! connection []))
              "the classified exception supplies its message; a deeper wrapper cannot replace it")))
      (db/transact! connection
-                   [{:seon.cluster.agent/id "busy-agent"}])
+                   [{:seon.agent/id "busy-agent"}])
      (is (map? (db/transact!
                 connection
                 (turn/open-tx
                  {:seon.turn/id "already-open"
                   :seon.turn/agent
-                  [:seon.cluster.agent/id "busy-agent"]
+                  [:seon.agent/id "busy-agent"]
                   :seon.turn/opened-at (java.util.Date.)}))))
      (let [result
            (db/transact!
@@ -193,7 +193,7 @@
             (turn/open-tx
              {:seon.turn/id "contending-run"
               :seon.turn/agent
-              [:seon.cluster.agent/id "busy-agent"]
+              [:seon.agent/id "busy-agent"]
               :seon.turn/opened-at (java.util.Date.)}))]
        (is (= :seon.turn/refused (:seon.error/kind result)))
        (is (= :seon.turn/agent-already-running
@@ -288,7 +288,7 @@
 (deftest instrumented-wildcard-pull-keeps-unparsed-database-fields-ordinary
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection [{:seon.cluster.agent/id "wildcard-agent"}])
+     (db/transact! connection [{:seon.agent/id "wildcard-agent"}])
      ;; THE WORKER'S ENTERING WRAPPERS, RESTORED BELOW. A pooled worker runs
      ;; many tests per JVM and `instrument/remove!` is total by design, so a
      ;; bare `remove!` in this `finally` left the worker with 926 wrappers
@@ -304,9 +304,9 @@
        (instrument/apply! {:seon.config/on-core-error :panic})
        (try
          (is (= "wildcard-agent"
-                (:seon.cluster.agent/id
+                (:seon.agent/id
                  (db/pull @connection '[*]
-                          [:seon.cluster.agent/id "wildcard-agent"]))))
+                          [:seon.agent/id "wildcard-agent"]))))
          (finally
            (instrument/remove!)
            (doseq [[instrumented-var root] entering-roots]
@@ -385,7 +385,7 @@
      (let [database @connection
            forms
            [['[:find [?id ...]
-               :where [?entity :seon.cluster.agent/id ?id]]
+               :where [?entity :seon.agent/id ?id]]
              [database]]
             ['[:find ?result .
                :where
@@ -394,7 +394,7 @@
              [database]]
             ['[:find ?entity .
                :in $ ?id
-               :where [?entity :seon.cluster.agent/id ?id]]
+               :where [?entity :seon.agent/id ?id]]
              [database "missing-agent"]]]]
        (doseq [[query arguments] forms]
          (is (= (apply d/q query arguments)
@@ -513,7 +513,7 @@
                        :seon.db/read-evidence %)
                      evidence))
          (db/transact! connection
-                       [{:seon.cluster.agent/id "unrelated-agent"}])
+                       [{:seon.agent/id "unrelated-agent"}])
          (is (db/read-evidence-current? @connection evidence)
              "an unrelated attribute revision retains the renderer read")
          (db/transact! connection [{:seon.cluster/name "evidence-b"}])
@@ -838,7 +838,7 @@
 
 (deftest an-agent-namespace-is-shared-and-is-not-an-identity
   ;; ASSIGNMENT IS NOT IDENTITY. This test used to assert a unique rejection
-  ;; on `:seon.cluster.agent/namespace`; the declaration says the opposite —
+  ;; on `:seon.agent/namespace`; the declaration says the opposite —
   ;; "not unique — several agents may share one" — and the installed schema
   ;; agrees with the declaration, so the expectation was stale rather than
   ;; the behaviour wrong. The one agent a namespace answers for is its
@@ -848,27 +848,27 @@
      (db/transact!
       connection
       [{:seon.ns/name 'my.agents.db-shared}
-       {:seon.cluster.agent/id "db-shared-first"
-        :seon.cluster.agent/namespace
+       {:seon.agent/id "db-shared-first"
+        :seon.agent/namespace
         [:seon.ns/name 'my.agents.db-shared]}])
      (let [accepted
            (binding [db/*conn* connection]
              (db/transact!
-              [{:seon.cluster.agent/id "db-shared-second"
-                :seon.cluster.agent/namespace
+              [{:seon.agent/id "db-shared-second"
+                :seon.agent/namespace
                 [:seon.ns/name 'my.agents.db-shared]}]))]
        (is (nil? (:seon.error/kind accepted))
            "a second agent assigned the same namespace commits")
        (is (nil? (get-in (:schema @connection)
-                         [:seon.cluster.agent/namespace :db/unique]))
+                         [:seon.agent/namespace :db/unique]))
            "because the installed schema declares no uniqueness on it")
        (is (= #{"db-shared-first" "db-shared-second"}
               (set (db/q '[:find [?id ...]
                            :in $ ?namespace-name
                            :where
                            [?namespace :seon.ns/name ?namespace-name]
-                           [?agent :seon.cluster.agent/namespace ?namespace]
-                           [?agent :seon.cluster.agent/id ?id]]
+                           [?agent :seon.agent/namespace ?namespace]
+                           [?agent :seon.agent/id ?id]]
                          @connection 'my.agents.db-shared)))
            "and both agents are found by the namespace they share")))))
 
@@ -920,13 +920,13 @@
    (fn [connection]
      (db/transact!
       connection
-      [{:seon.cluster.agent/id "db-cas-owner"}])
+      [{:seon.agent/id "db-cas-owner"}])
      (let [rejected
            (db/transact!
             connection
             [[:db.fn/cas
-              [:seon.cluster.agent/id "db-cas-owner"]
-              :seon.cluster.agent/id
+              [:seon.agent/id "db-cas-owner"]
+              :seon.agent/id
               "not-the-current-id"
               "db-cas-replacement"]])
            data (:seon.error/data rejected)]
@@ -965,19 +965,19 @@
   [connection]
   (db/transact!
    connection
-   [{:seon.cluster.agent/id "db-diff-alice"}
-    {:seon.cluster.agent/id "db-diff-bob"}
+   [{:seon.agent/id "db-diff-alice"}
+    {:seon.agent/id "db-diff-bob"}
     {:seon.cluster.message/id "db-diff-m1"
      :seon.cluster.message/to
-     [:seon.cluster.agent/id "db-diff-bob"]
+     [:seon.agent/id "db-diff-bob"]
      :seon.cluster.message/from
-     [:seon.cluster.agent/id "db-diff-alice"]
+     [:seon.agent/id "db-diff-alice"]
      :seon.cluster.message/content "hello"
      :seon.cluster.message/at
      #inst "2026-08-13T20:00:00.000-00:00"}
     {:seon.cluster.message/id "db-diff-m2"
      :seon.cluster.message/to
-     [:seon.cluster.agent/id "db-diff-bob"]
+     [:seon.agent/id "db-diff-bob"]
      :seon.cluster.message/content "removed"
      :seon.cluster.message/at
      #inst "2026-08-13T20:01:00.000-00:00"}]))
@@ -995,7 +995,7 @@
           [:seon.cluster.message/id "db-diff-m2"]]
          {:seon.cluster.message/id "db-diff-m3"
           :seon.cluster.message/to
-          [:seon.cluster.agent/id "db-diff-bob"]
+          [:seon.agent/id "db-diff-bob"]
           :seon.cluster.message/content "added"
           :seon.cluster.message/at
           #inst "2026-08-13T20:02:00.000-00:00"}])
@@ -1130,17 +1130,17 @@
   (test-support/with-database
    (fn [connection]
      (db/transact! connection
-                   [{:seon.cluster.agent/id "identity-admission-present"}])
+                   [{:seon.agent/id "identity-admission-present"}])
      (let [unknown-attribute
            (db/q '[:find ?entity
-                   :where [?entity :seon.cluster.agent/idd _]]
+                   :where [?entity :seon.agent/idd _]]
                  @connection)
            wrong-pull
            (db/pull @connection '[*]
-                    [:seon.cluster.agent/id 'identity-admission-present])
+                    [:seon.agent/id 'identity-admission-present])
            wrong-entity
            (db/entity @connection
-                      [:seon.cluster.agent/id 'identity-admission-present])]
+                      [:seon.agent/id 'identity-admission-present])]
        (testing "an uninstalled query attribute names registered candidates"
          (is (= :seon.db/invalid-read (:seon.error/kind unknown-attribute)))
          (is (= diagnostic-fields
@@ -1149,10 +1149,10 @@
                 (get-in unknown-attribute
                         [:seon.error/data
                          :seon.error/diagnostic-operation])))
-         (is (= :seon.cluster.agent/idd
+         (is (= :seon.agent/idd
                 (get-in unknown-attribute
                         [:seon.error/data :seon.error/diagnostic-member])))
-         (is (some #{:seon.cluster.agent/id}
+         (is (some #{:seon.agent/id}
                    (get-in unknown-attribute
                            [:seon.error/data :seon.error/diagnostic-evidence
                             :seon.db/registered-candidates]))))
@@ -1169,22 +1169,22 @@
                   (get-in result
                           [:seon.error/data :seon.error/diagnostic-expected
                            :db/valueType])))
-           (is (= {:seon.db/attribute :seon.cluster.agent/id
+           (is (= {:seon.db/attribute :seon.agent/id
                    :seon.db/value 'identity-admission-present}
                   (get-in result
                           [:seon.error/data
                            :seon.error/diagnostic-offending])))))
        (testing "valid absence remains ordinary absence"
          (is (nil? (db/pull @connection '[*]
-                            [:seon.cluster.agent/id
+                            [:seon.agent/id
                              "identity-admission-missing"])))
          (is (nil? (db/entity @connection
-                              [:seon.cluster.agent/id
+                              [:seon.agent/id
                                "identity-admission-missing"])))
          (is (= #{}
                 (db/q '[:find ?entity
                         :where
-                        [?entity :seon.cluster.agent/id
+                        [?entity :seon.agent/id
                          "identity-admission-missing"]]
                       @connection))))))))
 
@@ -1221,7 +1221,7 @@
   (test-support/with-database
    (fn [connection]
      (db/transact! connection
-                   [{:seon.cluster.agent/id "temporal-schema-present"}])
+                   [{:seon.agent/id "temporal-schema-present"}])
      (let [database @connection
            basis (db/basis-t database)
            views [(db/history database)
@@ -1231,11 +1231,11 @@
          (testing (str (class view))
            (let [installed
                  (db/q '[:find ?entity
-                         :where [?entity :seon.cluster.agent/id _]]
+                         :where [?entity :seon.agent/id _]]
                        view)
                  uninstalled
                  (db/q '[:find ?entity
-                         :where [?entity :seon.cluster.agent/idd _]]
+                         :where [?entity :seon.agent/idd _]]
                        view)]
              (is (not= :seon.db/invalid-read (:seon.error/kind installed))
                  "an installed attribute is never classified as uninstalled")
@@ -1253,10 +1253,10 @@
             [(db/q @connection
                    '[:find ?entity
                      :where
-                     [?entity :seon.cluster.agent/id "root"
+                     [?entity :seon.agent/id "root"
                       ?transaction true :extra]])
              'seon.db/q
-             '[?entity :seon.cluster.agent/id "root"
+             '[?entity :seon.agent/id "root"
                ?transaction true :extra]]]]
        (doseq [[result operation member] cases]
          (is (contains? #{:seon.db/invalid-read
@@ -1279,7 +1279,7 @@
        ;; could compute anything about it.
        (doseq [[thunk operation path]
                [[#(db/pull @connection
-                           {:eid [:seon.cluster.agent/id "root"]})
+                           {:eid [:seon.agent/id "root"]})
                  'seon.db/pull [:selector]]
                 [#(db/transact! connection {:not-tx-data []})
                  'seon.db/transact! [:tx-data]]]]

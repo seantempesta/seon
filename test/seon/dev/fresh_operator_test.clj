@@ -1408,7 +1408,7 @@
                :seon.dev.fresh-operator-test/agent-count
                (datahike.api/q
                 '[:find (count ?e) .
-                  :where [?e :seon.cluster.agent/id]]
+                  :where [?e :seon.agent/id]]
                 @connection#)})))]
     (edn/read-string (prepl-eval advertisement form))))
 

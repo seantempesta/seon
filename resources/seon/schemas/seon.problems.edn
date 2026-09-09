@@ -1,7 +1,7 @@
-#:seon.problems{:author :seon.cluster.agent/id,
+#:seon.problems{:author :seon.agent/id,
                 :deferred-agent
                 [:map
-                 [:seon.cluster.agent/id :seon.cluster.agent/id]
+                 [:seon.agent/id :seon.agent/id]
                  [:seon.turn.work/episode-runs
                   :seon.turn.work/episode-runs]
                  [:seon.problems/deferred-count [:int {:min 1}]]],
@@ -25,7 +25,7 @@
                 :failed-run
                 [:map
                  [:seon.turn/id :seon.turn/id]
-                 [:seon.cluster.agent/id :seon.cluster.agent/id]
+                 [:seon.agent/id :seon.agent/id]
                  [:seon.turn/error :seon.turn/error]],
                 :form-problem
                 [:map
@@ -36,8 +36,8 @@
                   :seon.cluster.eval/ordinal]
                  [:seon.cluster.eval/source
                   :seon.cluster.eval/source]
-                 [:seon.cluster.agent/id :seon.cluster.agent/id]
-                 [:seon.problems/author :seon.cluster.agent/id]
+                 [:seon.agent/id :seon.agent/id]
+                 [:seon.problems/author :seon.agent/id]
                  [:seon.error/kind :seon.error/kind]
                  [:seon.cluster.eval/error :seon.cluster.eval/error]],
                 :form-problem-request

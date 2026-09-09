@@ -19,7 +19,7 @@
       (db/transact!
        connection
        (agent/creation-tx
-        {:seon.cluster.agent/id "alice"
+        {:seon.agent/id "alice"
          :seon.cluster/name "test"
          :seon.ns/name 'my.agents.alice}))
       (is (= "alice" (agent/steward-of @connection 'my.agents.alice)))
@@ -27,8 +27,8 @@
       (is (= 'my.agents.alice
              (db/q '[:find ?name .
                     :where
-                    [?agent :seon.cluster.agent/id "alice"]
-                    [?agent :seon.cluster.agent/namespace ?namespace]
+                    [?agent :seon.agent/id "alice"]
+                    [?agent :seon.agent/namespace ?namespace]
                     [?namespace :seon.ns/name ?name]]
                   @connection))))))
 
@@ -39,19 +39,19 @@
       (db/transact!
        connection
        (agent/creation-tx
-        {:seon.cluster.agent/id "alice"
+        {:seon.agent/id "alice"
          :seon.cluster/name "test"
          :seon.ns/name 'my.agents.alice}))
       (db/transact! connection
                   [{:seon.ns/name 'my.agents.reassigned}
-                   {:seon.cluster.agent/id "alice"
-                    :seon.cluster.agent/namespace
+                   {:seon.agent/id "alice"
+                    :seon.agent/namespace
                     [:seon.ns/name 'my.agents.reassigned]}])
       (is (= 'my.agents.reassigned
              (db/q '[:find ?name .
                     :where
-                    [?agent :seon.cluster.agent/id "alice"]
-                    [?agent :seon.cluster.agent/namespace ?namespace]
+                    [?agent :seon.agent/id "alice"]
+                    [?agent :seon.agent/namespace ?namespace]
                     [?namespace :seon.ns/name ?name]]
                   @connection))
           "assignment moved")
@@ -68,14 +68,14 @@
       (db/transact!
        connection
        (agent/creation-tx
-        {:seon.cluster.agent/id "alice"
+        {:seon.agent/id "alice"
          :seon.cluster/name "test"
          :seon.ns/name 'my.agents.shared}))
       (let [result
             (db/transact!
              connection
              (agent/creation-tx
-              {:seon.cluster.agent/id "bob"
+              {:seon.agent/id "bob"
                :seon.cluster/name "test"
                :seon.ns/name 'my.agents.shared}))]
         (is (nil? (:seon.error/kind result))
@@ -85,8 +85,8 @@
                            :in $ ?namespace-name
                            :where
                            [?namespace :seon.ns/name ?namespace-name]
-                           [?agent :seon.cluster.agent/namespace ?namespace]
-                           [?agent :seon.cluster.agent/id ?agent-id]]
+                           [?agent :seon.agent/namespace ?namespace]
+                           [?agent :seon.agent/id ?agent-id]]
                          @connection 'my.agents.shared)))
             "both agents are assigned the one namespace")
         (is (= "alice" (agent/steward-of @connection 'my.agents.shared))
@@ -94,7 +94,7 @@
             displace it")))))
 
 ;;; OWNERSHIP IS THE STEWARD FACT, AND ONLY THAT. The problem line used to
-;;; invert `:seon.cluster.agent/namespace`, which is assignment: it is not
+;;; invert `:seon.agent/namespace`, which is assignment: it is not
 ;;; unique, so `example.assigned` below — a namespace an agent merely works
 ;;; in, that nobody stewards — answered "owned" and the problem the report
 ;;; exists to raise went silent. That is the absence-reads-as-health class.
@@ -112,17 +112,17 @@
                    {:seon.ns/name 'example.owned
                     :seon.ns/source "(ns example.owned)"
                     :seon.schema.admission/source :agent}
-                   {:seon.cluster.agent/id "owner"
+                   {:seon.agent/id "owner"
 
-                    :seon.cluster.agent/namespace
+                    :seon.agent/namespace
                     [:seon.ns/name 'example.owned]}
-                   {:seon.cluster.agent/id "worker"
+                   {:seon.agent/id "worker"
 
-                    :seon.cluster.agent/namespace
+                    :seon.agent/namespace
                     [:seon.ns/name 'example.assigned]}])
       (db/transact! connection
                   [[:db/add [:seon.ns/name 'example.owned] :seon.ns/steward
-                    [:seon.cluster.agent/id "owner"]]])
+                    [:seon.agent/id "owner"]]])
       (let [value (found connection)
             log-line (problems/log-report value)]
         (is (= [{:seon.ns/name 'example.assigned}

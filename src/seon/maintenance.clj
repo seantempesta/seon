@@ -228,7 +228,7 @@
   (->> (db/q '[:find ?task ?task-id ?function
                :in $
                :where
-               [?owner :seon.cluster.agent/id "root"]
+               [?owner :seon.agent/id "root"]
                [?task :seon.schedule.task/owner ?owner]
                [?task :seon.schedule.task/id ?task-id]
                [?task :seon.schedule.task/function ?function-row]

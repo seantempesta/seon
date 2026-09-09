@@ -715,7 +715,7 @@
              turn/next-agent-work
              (fn [_db _request]
                (db/transact! connection
-                                [{:seon.cluster.agent/id "root"}])
+                                [{:seon.agent/id "root"}])
                nil)
              flow/stop
              (fn [graph]
@@ -727,7 +727,7 @@
             ;; entry, exactly where the listener would deliver it
             (async/offer! (:seon.cluster.wake/channel
                            (seon.cluster.agent/armed
-                            (:seon.cluster.agent/routing instance)
+                            (:seon.agent/routing instance)
                             "root"))
                           ::in-flight-transaction)
             (is (.await pass-entered 5 TimeUnit/SECONDS)
@@ -842,7 +842,7 @@
             restarted (cluster/start! request)]
         (try
           (testing "an older complete corpus is a sovereign cluster world"
-            (is (some? (:seon.cluster.agent/routing restarted)))
+            (is (some? (:seon.agent/routing restarted)))
             (is (= stale-digest
                    (db/q '[:find ?digest .
                           :where [_ :seon.source/digest ?digest]]
@@ -1338,7 +1338,7 @@
                     :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
                     :seon.sci.eval/time-limit-ms 1000
                     :seon.config/on-core-error :record
-                    :seon.cluster.agent/id "root"
+                    :seon.agent/id "root"
                     :seon.sci.admit/caps
                     (config/result-caps (config/defaults))})
                   build-index (.indexOf session "(defn largest")
@@ -1715,8 +1715,8 @@
             connection (:seon.boot/cluster-connection instance)
             now (java.util.Date.)]
         (await-bootstrap! connection "root")
-        (db/transact! connection [{:seon.cluster.agent/id "alice"}
-                                  {:seon.cluster.agent/id "bob"}])
+        (db/transact! connection [{:seon.agent/id "alice"}
+                                  {:seon.agent/id "bob"}])
         ;; the CONTROL, seeded in the same generation and identical
         ;; except for how it ends: a run that closed the ordinary way.
         ;; Without it, "recovery marked the run" proves nothing — the
@@ -1726,16 +1726,16 @@
         ;; anywhere durable, so the honesty claim died with its JVM)
         (db/transact! connection
                     [{:seon.turn/id "run-clean"
-                      :seon.turn/agent [:seon.cluster.agent/id "bob"]
+                      :seon.turn/agent [:seon.agent/id "bob"]
                       :seon.turn/opened-at now
                       :seon.turn/closed-at now}])
         (db/transact! connection
                     [{:seon.turn/id "run-crashed"
-                      :seon.turn/agent [:seon.cluster.agent/id "alice"]
+                      :seon.turn/agent [:seon.agent/id "alice"]
                       :seon.turn/opened-at now
 
                       :seon.turn/plan-digest (apply str (repeat 64 "a"))}
-                     {:seon.cluster.agent/id "alice"
+                     {:seon.agent/id "alice"
                       }
                      ;; dangling = started with no terminal fact —
                      ;; running IS that absence, there is no status

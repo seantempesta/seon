@@ -11,7 +11,7 @@
                [:seon.render/context-action :seon.render/context-action]
                [:seon.db/connection :seon.db/connection]
                [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-               [:seon.cluster.agent/id :seon.cluster.agent/id]
+               [:seon.agent/id :seon.agent/id]
                [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]],
               :context-request [:or :seon.cluster.prompt/request
                                 :seon.render/context-change-request],

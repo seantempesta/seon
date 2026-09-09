@@ -121,7 +121,7 @@
   (first
    (db/q '[:find [?agent ...]
            :in $ ?agent-id
-           :where [?agent :seon.cluster.agent/id ?agent-id]]
+           :where [?agent :seon.agent/id ?agent-id]]
          database agent-id)))
 
 (defn- note-eid
@@ -135,7 +135,7 @@
 (defn- add-note-call
   [database request]
   (let [id (:my.note/id request)
-        agent-id (:seon.cluster.agent/id request)
+        agent-id (:seon.agent/id request)
         agent-entity (agent-eid database agent-id)
         existing (note-eid database id)
         existing-agent
@@ -150,7 +150,7 @@
       (refuse! :my.note/agent-not-found
                agent-id
                (str "There is no agent named " (pr-str agent-id) ".")
-               {:seon.cluster.agent/id agent-id}))
+               {:seon.agent/id agent-id}))
     (when (and existing (not= agent-entity existing-agent))
       (refuse! :my.note/identity-owned-by-another-agent
                id
@@ -169,7 +169,7 @@
 (defn- forget-note-call
   [database request]
   (let [id (:my.note/id request)
-        agent-id (:seon.cluster.agent/id request)
+        agent-id (:seon.agent/id request)
         agent-entity (agent-eid database agent-id)
         note (note-eid database id)
         owner
@@ -188,7 +188,7 @@
                id
                (str "Note " (pr-str id) " belongs to another agent.")
                {:my.note/id id
-                :seon.cluster.agent/id agent-id}))
+                :seon.agent/id agent-id}))
     [[:db.fn/retractEntity note]]))
 
 (defn- transact-note!
@@ -196,14 +196,14 @@
   (db/transact!
    connection
    {:tx-data tx-data
-    :tx-meta {:seon.db/user [:seon.cluster.agent/id agent-id]}}))
+    :tx-meta {:seon.db/user [:seon.agent/id agent-id]}}))
 
 (defn- add-note!
   [id content about? about connection agent-id]
   (let [request
         (cond-> {:my.note/id id
                  :my.note/content content
-                 :seon.cluster.agent/id agent-id}
+                 :seon.agent/id agent-id}
           about? (assoc :my.note/about about))
         result
         (transact-note!
@@ -220,10 +220,10 @@
   {:malli/schema
    [:function
     [:=> [:cat :my.note/id :my.note/content
-          :seon.db/connection :seon.cluster.agent/id]
+          :seon.db/connection :seon.agent/id]
      [:or :my.note/note :seon.error/value]]
     [:=> [:cat :my.note/id :my.note/content :my.note/about
-          :seon.db/connection :seon.cluster.agent/id]
+          :seon.db/connection :seon.agent/id]
      [:or :my.note/note :seon.error/value]]]}
   ([id content connection agent-id]
    (add-note! id content false nil connection agent-id))
@@ -233,27 +233,27 @@
 (defn forget!
   "Forget one current note while retaining its Datahike history."
   {:malli/schema
-   [:=> [:cat :my.note/id :seon.db/connection :seon.cluster.agent/id]
+   [:=> [:cat :my.note/id :seon.db/connection :seon.agent/id]
     [:or :my.note/id :seon.error/value]]}
   [id connection agent-id]
   (let [result
         (transact-note!
          connection agent-id
          [[:db.fn/call #'forget-note-call
-           {:my.note/id id :seon.cluster.agent/id agent-id}]])]
+           {:my.note/id id :seon.agent/id agent-id}]])]
     (if (error-value? result) result id)))
 
 (defn notes
   "List this agent's bounded current notes in identity order."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.cluster.agent/id]
+   [:=> [:cat :seon.db/database-value :seon.agent/id]
     [:or :my.note/notes :seon.error/value]]}
   [database agent-id]
   (let [rows
         (db/q '[:find ?id ?note
                 :in $ ?agent-id
                 :where
-                [?agent :seon.cluster.agent/id ?agent-id]
+                [?agent :seon.agent/id ?agent-id]
                 [?note :my.note/agent ?agent]
                 [?note :my.note/id ?id]]
               database agent-id)]

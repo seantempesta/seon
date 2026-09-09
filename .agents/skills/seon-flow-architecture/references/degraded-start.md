@@ -23,7 +23,7 @@ Start diagnosis with the exception's `:seon.boot/instance`. If another
     :seon.store/store
     :seon.boot/cluster-connection
     :seon.boot/config-result
-    :seon.cluster.agent/routing
+    :seon.agent/routing
     :seon.render.web/served
     :seon.boot/ready-ms]))
 ```

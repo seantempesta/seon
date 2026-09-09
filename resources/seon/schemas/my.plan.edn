@@ -38,7 +38,7 @@
            {:seon.db/attributes true,
             :description
             "The agent's one owned plan component."}
-           [:seon.cluster.agent/id :seon.cluster.agent/id]
+           [:seon.agent/id :seon.agent/id]
            [:seon.agent/plan {:optional true} :seon.agent/plan]],
           :parent-step
           [:and
@@ -137,7 +137,7 @@
           [:map
            {:description
             "The derived current projection of one agent-owned plan component tree, read by both projections from the same function."}
-           [:seon.cluster.agent/id :seon.cluster.agent/id]
+           [:seon.agent/id :seon.agent/id]
            [:my.plan/objective {:optional true} :my.plan/objective]
            [:my.plan/steps :my.plan/render-steps]
            [:my.plan/ready :my.plan/ready]
@@ -169,7 +169,7 @@
           :request
           [:map
            [:seon.db/db :seon.db/database-value]
-           [:seon.cluster.agent/id :seon.cluster.agent/id]],
+           [:seon.agent/id :seon.agent/id]],
           :item-request
           [:map
            [:seon.db/db :seon.db/database-value]
@@ -227,6 +227,6 @@
           :subject-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan subject that does not exist"} [:my.plan/subject-not-found :my.plan/subject-not-found] [:seon.error/message :seon.error/message]],
           :unusable-current-step [:= true],
           :unusable-current-step-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a current step that is not an open step of this plan"} [:my.plan/unusable-current-step :my.plan/unusable-current-step] [:seon.error/message :seon.error/message]]
- :add-request [:map [:my.plan.item/id :my.plan.item/id] [:my.plan.item/title :my.plan.item/title] [:seon.db/connection :seon.db/connection] [:seon.cluster.agent/id :seon.cluster.agent/id]]
- :complete-request [:map [:my.plan.item/id :my.plan.item/id] [:my.plan.item/completed-at {:optional true} :my.plan.item/completed-at] [:seon.db/connection :seon.db/connection] [:seon.cluster.agent/id :seon.cluster.agent/id]]
- :start-request [:map [:my.plan.item/id :my.plan.item/id] [:seon.db/connection :seon.db/connection] [:seon.cluster.agent/id :seon.cluster.agent/id]]}
+ :add-request [:map [:my.plan.item/id :my.plan.item/id] [:my.plan.item/title :my.plan.item/title] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
+ :complete-request [:map [:my.plan.item/id :my.plan.item/id] [:my.plan.item/completed-at {:optional true} :my.plan.item/completed-at] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
+ :start-request [:map [:my.plan.item/id :my.plan.item/id] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]}

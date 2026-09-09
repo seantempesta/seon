@@ -35,12 +35,12 @@
       connection
       [{:seon.ns/name 'my.gen.planner}
        {:seon.ns/name 'my.gen.alpha}
-       {:seon.cluster.agent/id "planner"
-        :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.planner]}
-       {:seon.cluster.agent/id "alpha"
-        :seon.cluster.agent/namespace [:seon.ns/name 'my.gen.alpha]}
+       {:seon.agent/id "planner"
+        :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
+       {:seon.agent/id "alpha"
+        :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
        {:seon.turn/id run-id
-        :seon.turn/agent [:seon.cluster.agent/id "planner"]
+        :seon.turn/agent [:seon.agent/id "planner"]
         :seon.turn/opened-at now
         :seon.turn/plan-digest "resume-artifact-digest"}])
      (db/transact!
@@ -84,7 +84,7 @@
             @connection
             {:my.message/value
              (seon.cluster.message/send "alpha" "stale assignment" "resume-problem-1")
-             :seon.cluster.agent/id "planner"
+             :seon.agent/id "planner"
              :seon.turn/id "stale-assignment-run"
              :seon.cluster.eval/ordinal 0
              :seon.cluster.message/at now

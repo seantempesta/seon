@@ -19,7 +19,7 @@ The would-be system turn has no help/instructions, exposes a raw identity pull, 
 - `src/seon/db.clj` owns pulls and read evidence; `src/seon/plan.clj` owns the moved plan queries, transactions, and render functions. No alternate storage family was introduced.
 - With the live database's projection explicitly supplied, JVM `my.plan/blocked` returned ordinary maps containing dependency strings under `:my.plan.item/needs`. That attribute declares stored refs. The AI projection treated these strings as entity refs and failed. Derived summaries now carry the existing `:my.plan/needs` stable-reference maps.
 
-## Slice 1 — in progress
+## Slice 1 — `105acca21`
 
 Positional operations move to system namespaces; `my.*` exposes request-map calls. Fully namespaced keys remain mandatory; §18's abbreviated key examples do not introduce unqualified attributes. The section's blanket request-map rule governs its two positional plan examples.
 
@@ -44,6 +44,68 @@ Verification and live adoption results will be recorded with the slice commit. S
   complete; visual layout and browser repaint are not claimed.
 
 While slice 1 ran, owner commits `02c77c542` and `0b3d31b26` amended §18/18a.
-The original assignment and amended help/scenario requirements differ; the
-owner was asked asynchronously which governs the remaining slices.
-- Path-limited platform gate passed; exact tally is recorded in the slice commit message.
+The owner explicitly selected the amended requirements at 11:22; §18 and
+§18a were reread end to end before continuing.
+- Path-limited platform gate passed: 83 tests / 490 assertions / zero failures or errors. Slice commit: `105acca21`.
+
+## Slice 2 — agent attribute family
+
+All agent attribute and contract keys move to `:seon.agent/*`, including
+call-preparation inputs, lifecycle graph arguments, stored refs, fixture
+writers, query readers, and tests. The existing `seon.cluster.agent`
+namespace remains the lifecycle owner. Its schema resource merges into
+`resources/seon/schemas/seon.agent.edn`; there is one declaration population.
+
+**RESET NEEDED**: the rename changes stored identity and ref attributes.
+Default must be reforked once by the orchestrator, batching pending schema
+changes. This lane does not stop, restart, or refork default.
+
+The default adoption attempt after slice 1 refused at schema population:
+`Predicate seon.edit/valid-form-operation? has no admitted callable in the corpus projection.`
+The supported JVM REPL loaded the moved predicate owners and registration
+call sites successfully. This is the previously recorded boundary in
+`docs/seon/issues/a-new-core-predicate-and-its-schema-cannot-be-adopted-in-place.md`.
+The default HTTP page still showed old blocked ExceptionInfo objects and
+`(my.message/inbox {})` at that observation; no successful adoption is claimed.
+
+Fresh scratch publication `6aa1977d-e2e7-55a5-b435-bb333566f307` booted
+with the renamed identity installed. The maintained Juniper installer
+returned objective `Improve Juniper context inspection`. HTTP debug output
+was 65,159 bytes and showed `[:seon.agent/id "juniper"]` plus bare inbox
+reads. An explicit JVM read returned:
+
+```clojure
+{:identity {:seon.agent/id "juniper"
+            :seon.agent/namespace {:seon.ns/name my.agents.juniper}}
+ :blocked [{:my.plan.item/id "juniper/compare-changed-results"
+            :my.plan.item/title "Compare refreshed results"
+            :my.plan.item/expected-result "The comparison shows the previous and refreshed results together, with the relevant changed input."
+            :my.plan/needs [{:my.plan.item/id "juniper/render-plan"}]}
+           {:my.plan.item/id "juniper/try-live-turn"
+            :my.plan.item/title "Try the assembled context in a live agent turn"
+            :my.plan.item/expected-result "Juniper identifies the current step and records a truthful plan update from the assembled context."
+            :my.plan/needs [{:my.plan.item/id "juniper/compare-changed-results"}]}]
+ :renamed-id-installed true}
+```
+
+The later default adoption attempt encountered the renamed population while
+its loaded contracts still referenced `:seon.cluster.agent/routing`; it
+refused with `:malli.core/invalid-schema`. No successful default adoption
+is claimed. This reinforces the RESET NEEDED boundary.
+
+The expanded rename gate also exposed stale message-surface expectations
+from slice 1. Those tests now expect one request-map arity, generated map
+reply examples, and a successful bare inbox call. Their real SCI fixture
+now initializes the cluster environment through `config/apply!`. The
+overlay test now checks its stated guarantee (every AI dial is overridable)
+without incorrectly forbidding the declared evaluation and turn overrides.
+
+### Slice 2 verification
+
+- Corrected message fast loop: 20 tests / 59 assertions / zero failures or errors.
+- Final path-limited gate: 45 tests / 167 assertions / zero failures or errors.
+- Path-limited platform gate: 83 tests / 490 assertions / zero failures or errors.
+- Default remained live after the refused adoption: HTTP debug response
+  71,308 bytes, old identity keys still present, four `ExceptionInfo`
+  occurrences across the displayed projections.
+- Test workers were capped at 3. No default lifecycle operation occurred.

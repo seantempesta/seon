@@ -1266,7 +1266,7 @@
            (sut/join-error-fanout!
             {::sut/started {:error-chan source}
              ::sut/fault-channel fault-channel
-             ::sut/tag {:seon.cluster.agent/id (str "agent-" ordinal)}}))
+             ::sut/tag {:seon.agent/id (str "agent-" ordinal)}}))
          (range source-count)
          sources)]
     (try
@@ -1280,7 +1280,7 @@
                           ::tagged-agent-fault)))
                   (range source-count))]
         (is (= (set (map #(str "agent-" %) (range source-count)))
-               (into #{} (map :seon.cluster.agent/id) faults))
+               (into #{} (map :seon.agent/id) faults))
             "every source fault retains its agent provenance"))
       (is (= baseline (async-mixed-platform-threads))
           "parking one fan-out per agent adds no platform worker")

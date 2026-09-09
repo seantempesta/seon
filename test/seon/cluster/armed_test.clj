@@ -94,7 +94,7 @@
   (db/q '[:find [(pull ?message [*]) ...]
          :in $ ?agent-id
          :where
-         [?agent :seon.cluster.agent/id ?agent-id]
+         [?agent :seon.agent/id ?agent-id]
          [?message :seon.cluster.message/to ?agent]]
        db agent-id))
 
@@ -113,7 +113,7 @@
         something real rather than something hoped for"
           (is (= "root"
                  (db/q '[:find ?id . :in $ ?id
-                        :where [?agent :seon.cluster.agent/id ?id]]
+                        :where [?agent :seon.agent/id ?id]]
                       @connection "root"))))
         (testing "root owns the five queryable maintenance tasks"
           (is (= #{["root/maintenance/footprint"
@@ -128,7 +128,7 @@
                     "root/maintenance/compact-schedule"]}
                  (db/q '[:find ?task-id ?schedule-id
                          :where
-                         [?owner :seon.cluster.agent/id "root"]
+                         [?owner :seon.agent/id "root"]
                          [?task :seon.schedule.task/owner ?owner]
                          [?task :seon.schedule.task/id ?task-id]
                          [?task :seon.schedule.task/schedule ?schedule]
@@ -138,21 +138,21 @@
           (is (= :running
                  (:clojure.core.async.flow/status
                   (flow/ping-proc (:seon.flow/graph instance)
-                                  :seon.cluster.agent/armer)))))
+                                  :seon.agent/armer)))))
         (testing "and the root agent has its OWN armed graph (F1): the
         armer's boot prime derived the agent set from facts and armed
         one graph per agent, mailbox and turn procs both running"
-          (let [routing (:seon.cluster.agent/routing instance)
+          (let [routing (:seon.agent/routing instance)
                 entry (seon.cluster.agent/armed routing "root")]
             (is (some? entry))
             (is (= :running
                    (:clojure.core.async.flow/status
                     (flow/ping-proc (:seon.flow/graph entry)
-                                    :seon.cluster.agent/mailbox))))
+                                    :seon.agent/mailbox))))
             (is (= :running
                    (:clojure.core.async.flow/status
                     (flow/ping-proc (:seon.flow/graph entry)
-                                    :seon.cluster.agent/turn))))))
+                                    :seon.agent/turn))))))
         (testing "and the fault path exists — this is D4"
           (is (some? (:seon.flow/error-fanout instance)))
           (is (some? (:seon.flow/fault-channel
@@ -216,7 +216,7 @@
                   :seon.config/on-core-error
                   (:seon.config/on-core-error handle)
                   :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
-                  :seon.cluster.agent/id agent-id}))
+                  :seon.agent/id agent-id}))
               definition
               (request left-handle "root"
                        (str
@@ -251,7 +251,7 @@
       (with-cluster
         "idle"
         (fn [instance]
-          (let [routing (:seon.cluster.agent/routing instance)
+          (let [routing (:seon.agent/routing instance)
                 entry (seon.cluster.agent/armed routing "root")
                 derived (CountDownLatch. 1)
                 next-agent-work turn/next-agent-work
@@ -260,7 +260,7 @@
                             (db/q '[:find (count ?run) .
                                    :in $ ?agent-id
                                    :where
-                                   [?agent :seon.cluster.agent/id ?agent-id]
+                                   [?agent :seon.agent/id ?agent-id]
                                    [?run :seon.turn/agent ?agent]]
                                  @connection "root"))]
             (is (= 1 (run-count))
@@ -303,7 +303,7 @@
             (:seon.db/connection
              (:seon.turn.loop/cluster request))
             [{:seon.cluster.message/id "boot-window-message"
-              :seon.cluster.message/to [:seon.cluster.agent/id "root"]
+              :seon.cluster.message/to [:seon.agent/id "root"]
               :seon.cluster.message/content "answer during boot"
               :seon.cluster.message/at (Date.)}])
            entry))
@@ -344,7 +344,7 @@
     (fn [instance]
       (let [connection (:seon.boot/cluster-connection instance)
             handle (:seon.turn.loop/cluster instance)
-            routing (:seon.cluster.agent/routing instance)
+            routing (:seon.agent/routing instance)
             entry (seon.cluster.agent/armed routing "root")
             graph (:seon.flow/graph entry)]
         ;; INJECTED AT THE REAL SEAM: the turn proc's transform calls
@@ -362,14 +362,14 @@
               (is (= ::injected (:seon.error/kind fact)))
               (is (= "clojure.lang.ExceptionInfo"
                      (:seon.error/throwable-class fact)))
-              (is (= :seon.cluster.agent/turn (:seon.error/proc fact)))
+              (is (= :seon.agent/turn (:seon.error/proc fact)))
               (is (= "root"
                      (db/q '[:find ?agent-id .
                             :in $ ?error-id
                             :where
                             [?error :seon.error/id ?error-id]
                             [?error :seon.error/agent ?agent]
-                            [?agent :seon.cluster.agent/id ?agent-id]]
+                            [?agent :seon.agent/id ?agent-id]]
                           @connection (:seon.error/id fact)))
                   "the fault arrived TAGGED with its agent — structural
                    provenance from the error-channel join, never a
@@ -427,7 +427,7 @@
           (async/offer! (:seon.cluster.wake/channel entry) ::after)
           (is (= :running
                  (:clojure.core.async.flow/status
-                  (flow/ping-proc graph :seon.cluster.agent/turn
+                  (flow/ping-proc graph :seon.agent/turn
                                   :timeout-ms 5000))))
           (is (empty? (filter #(= :seon.flow/fault-channel-overflow
                                   (:seon.error/kind %))
@@ -476,7 +476,7 @@
             (is (true? @injected?)
                 "the fault was injected at the first resume transition")
             (is (= ::first-cluster-proc-fault (:seon.error/kind fact)))
-            (is (= :seon.cluster.agent/armer (:seon.error/proc fact)))
+            (is (= :seon.agent/armer (:seon.error/proc fact)))
             (is (= (:seon.db.process/id
                     (:seon.turn.loop/cluster instance))
                    (:seon.error/process fact))

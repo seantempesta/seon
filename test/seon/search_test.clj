@@ -156,7 +156,7 @@
             (db/transact!
              connection
              [{:db/id "fixture-search-agent"
-               :seon.cluster.agent/id "fixture-search-agent"}
+               :seon.agent/id "fixture-search-agent"}
               {:seon.cluster.instruction/id :fixture-search-instruction
                :seon.cluster.instruction/text "crossfamilysearchneedle"}
               {:seon.cluster.message/id "fixture-search-message"

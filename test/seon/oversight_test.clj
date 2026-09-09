@@ -32,7 +32,7 @@
              :seon.oversight/turn-passes 0} "mid-turn"]]]
     (let [unit {:seon.render/value
                 {:seon.oversight/agents
-                 [(merge {:seon.cluster.agent/id "observed"
+                 [(merge {:seon.agent/id "observed"
                           :seon.turn.work/episode-runs 0}
                          observations)]
                  :seon.oversight/plumbing
@@ -118,7 +118,7 @@
           (is (= `oversight/ai-story (:seon.render/ai built)))
           (is (= `oversight/html-table (:seon.render/html built)))
           (is (= ["root"]
-                 (mapv :seon.cluster.agent/id
+                 (mapv :seon.agent/id
                        (:seon.oversight/agents value))))
           (is (not-any? #(contains? % :seon.oversight/state)
                         (concat (:seon.oversight/agents value) plumbing))
@@ -153,10 +153,10 @@
                  (oversight/ai-story
                   {:seon.render/value
                    {:seon.oversight/agents
-                    [{:seon.cluster.agent/id "agent-b"
+                    [{:seon.agent/id "agent-b"
                       :seon.turn/id "run-3"
                       :seon.turn.work/episode-runs 3}
-                     {:seon.cluster.agent/id "agent-c"
+                     {:seon.agent/id "agent-c"
                       :seon.oversight/turn-passes 0
                       :seon.turn.work/episode-runs 0}]}}))))
         (testing "the seeded block reaches the real root-page wire"

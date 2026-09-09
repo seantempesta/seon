@@ -125,14 +125,14 @@
   "The agent that sent `message-id`, or nil when it came from outside."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.message/id]
-                  [:maybe :seon.cluster.agent/id]]}
+                  [:maybe :seon.agent/id]]}
   [db message-id]
   (db/q '[:find ?agent-id .
          :in $ ?message-id
          :where
          [?message :seon.cluster.message/id ?message-id]
          [?message :seon.cluster.message/from ?agent]
-         [?agent :seon.cluster.agent/id ?agent-id]]
+         [?agent :seon.agent/id ?agent-id]]
        db message-id))
 
 (defn reply
@@ -175,7 +175,7 @@
                        :seon.cluster.message/reply-request]
                   [:maybe :my.message/message]]}
   [db {:keys [:seon.cluster.message/trigger :my.run/result
-              :seon.cluster.agent/id]}]
+              :seon.agent/id]}]
   (let [asker (and trigger (sender db trigger))
         answering-us? (and trigger
                            (= id (some->> (caused-by db trigger)
@@ -192,7 +192,7 @@
   [db agent-id]
   (some? (db/q '[:find ?agent .
                 :in $ ?id
-                :where [?agent :seon.cluster.agent/id ?id]]
+                :where [?agent :seon.agent/id ?id]]
               db agent-id)))
 
 (defn- message-id
@@ -275,7 +275,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.message/inbound-request]
                   :seon.cluster.message/inbound]}
-  [db {:keys [:seon.cluster.agent/id
+  [db {:keys [:seon.agent/id
               :seon.cluster.message/inbound-content
               :seon.cluster.message/at
               :seon.config.eval.result/max-string]}]
@@ -285,13 +285,13 @@
      :seon.error/message
      (str "There is no agent named \"" id
           "\" in this cluster, so nothing was sent to it.")
-     :seon.error/data {:seon.cluster.agent/id id}
+     :seon.error/data {:seon.agent/id id}
      :seon.cluster.message/unknown-recipient id}
 
     (str/blank? inbound-content)
     {:seon.error/kind ::blank-content
      :seon.error/message "A message must contain some text."
-     :seon.error/data {:seon.cluster.agent/id id}
+     :seon.error/data {:seon.agent/id id}
      :seon.cluster.message/blank-content true}
 
     (> (count inbound-content) max-string)
@@ -301,13 +301,13 @@
      (str "This message is " (count inbound-content)
           " characters; the configured limit is " max-string ".")
      :seon.error/data
-     {:seon.cluster.agent/id id
+     {:seon.agent/id id
       :seon.config.eval.result/max-string max-string}}
 
     :else
     [{:seon.cluster.message/id (inbound-message-id db 0)
       :seon.cluster.message/ordinal 0
-      :seon.cluster.message/to [:seon.cluster.agent/id id]
+      :seon.cluster.message/to [:seon.agent/id id]
       :seon.cluster.message/content inbound-content
       :seon.cluster.message/at at}]))
 
@@ -326,12 +326,12 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.message/delivery-request]
                   :seon.cluster.message/delivery]}
-  [db {:keys [:my.message/value :seon.cluster.agent/id
+  [db {:keys [:my.message/value :seon.agent/id
               :seon.turn/id :seon.cluster.eval/ordinal
               :seon.cluster.message/at :seon.cluster.message/trigger
               :seon.config.message/max-chain]
        :as request}]
-  (let [sender (:seon.cluster.agent/id request)
+  (let [sender (:seon.agent/id request)
         run-id (:seon.turn/id request)
         candidates (if (vector? value) value [value])
         ;; a run whose trigger cannot be found starts a fresh chain at
@@ -358,7 +358,7 @@
          (str "Messaging is unbounded in this cluster — "
               ":seon.config.message/max-chain is absent, so nothing was "
               "delivered.")
-         :seon.error/data {:seon.cluster.agent/id sender
+         :seon.error/data {:seon.agent/id sender
                            :seon.turn/id run-id}
          :seon.cluster.message/no-limit true}]}
 
@@ -372,7 +372,7 @@
               " agent-to-agent hops without a human, over the limit of "
               max-chain ". Nothing was delivered.")
          :seon.error/data {:seon.config.message/max-chain max-chain
-                           :seon.cluster.agent/id sender
+                           :seon.agent/id sender
                            :seon.turn/id run-id}}]}
 
       :else
@@ -391,7 +391,7 @@
                       (str "There is no agent named \"" to
                            "\" in this cluster, so nothing was sent to it.")
                       :seon.error/data {:my.message/to to
-                                        :seon.cluster.agent/id sender
+                                        :seon.agent/id sender
                                         :seon.turn/id run-id}
                       :seon.cluster.message/unknown-recipient to})
              (let [about-identity (:my.message/about candidate)
@@ -401,7 +401,7 @@
                  (update delivered :seon.error/values conj
                          (update about :seon.error/data
                                  merge
-                                 {:seon.cluster.agent/id sender
+                                 {:seon.agent/id sender
                                   :seon.turn/id run-id}))
                  (update
                   delivered
@@ -414,9 +414,9 @@
                        (:seon.cluster.message/about about) to)
                       (message-id run-id ordinal index))
                     :seon.cluster.message/to
-                    [:seon.cluster.agent/id to]
+                    [:seon.agent/id to]
                     :seon.cluster.message/from
-                    [:seon.cluster.agent/id sender]
+                    [:seon.agent/id sender]
                     :seon.cluster.message/content
                     (or (:my.message/content candidate) reason)
                     :seon.cluster.message/ordinal index
@@ -439,12 +439,12 @@
 
 (defn- agent-reference-id
   [database reference]
-  (or (:seon.cluster.agent/id reference)
+  (or (:seon.agent/id reference)
       (let [entity-id
         (cond
           (map? reference)
-          (or (when-let [entry (find reference :seon.cluster.agent/id)]
-                [:seon.cluster.agent/id (val entry)])
+          (or (when-let [entry (find reference :seon.agent/id)]
+                [:seon.agent/id (val entry)])
               (:db/id reference))
 
           :else reference)]
@@ -452,7 +452,7 @@
           (let [result
                 (db/q '[:find ?id .
                         :in $ ?agent
-                        :where [?agent :seon.cluster.agent/id ?id]]
+                        :where [?agent :seon.agent/id ?id]]
                       database entity-id)]
             (when-not (:seon.error/kind result)
               result))))))
@@ -677,8 +677,8 @@
     :seon.cluster.message/content
     :seon.cluster.message/at
     :seon.cluster.message/ordinal
-    {:seon.cluster.message/to [:seon.cluster.agent/id]}
-    {:seon.cluster.message/from [:seon.cluster.agent/id]}
+    {:seon.cluster.message/to [:seon.agent/id]}
+    {:seon.cluster.message/from [:seon.agent/id]}
     {:seon.cluster.message/caused-by [:seon.cluster.message/id]}
     :seon.cluster.message/about
     :my.message/reason])
@@ -689,7 +689,7 @@
 
 (defn- endpoint-id
   [message endpoint]
-  (get-in message [endpoint :seon.cluster.agent/id]))
+  (get-in message [endpoint :seon.agent/id]))
 
 (defn- admitted-message
   [message]
@@ -697,13 +697,13 @@
     (cond-> (-> message
                 (update :seon.cluster.message/to
                         (fn [endpoint]
-                          [:seon.cluster.agent/id
-                           (:seon.cluster.agent/id endpoint)])))
+                          [:seon.agent/id
+                           (:seon.agent/id endpoint)])))
       (:seon.cluster.message/from message)
       (update :seon.cluster.message/from
               (fn [endpoint]
-                [:seon.cluster.agent/id
-                 (:seon.cluster.agent/id endpoint)]))
+                [:seon.agent/id
+                 (:seon.agent/id endpoint)]))
 
       (:seon.cluster.message/caused-by message)
       (update :seon.cluster.message/caused-by
@@ -727,7 +727,7 @@
   [database agent-id]
   (db/q '[:find ?agent .
           :in $ ?agent-id
-          :where [?agent :seon.cluster.agent/id ?agent-id]]
+          :where [?agent :seon.agent/id ?agent-id]]
         database agent-id))
 
 (defn- inbox-message-eids
@@ -760,14 +760,14 @@
    [:function
     [:=> [:cat :my.message/inbox-request]
      [:or :my.message/inbox :seon.error/value]]
-    [:=> [:cat :seon.db/database-value :seon.cluster.agent/id]
+    [:=> [:cat :seon.db/database-value :seon.agent/id]
      [:or :my.message/inbox :seon.error/value]]
     [:=> [:cat :my.message/inbox-options
-          :seon.db/database-value :seon.cluster.agent/id]
+          :seon.db/database-value :seon.agent/id]
      [:or :my.message/inbox :seon.error/value]]]}
   ([request]
    (inbox* (:seon.db/db request)
-           (:seon.cluster.agent/id request)
+           (:seon.agent/id request)
            (:seon.db/since request)))
   ([database agent-id]
    (inbox* database agent-id nil))

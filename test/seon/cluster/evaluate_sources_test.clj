@@ -23,7 +23,7 @@
                        :seon.config/manifest {}}))])
      (db/transact! connection
                    (agent/creation-tx
-                    {:seon.cluster.agent/id "preview-batch-agent"
+                    {:seon.agent/id "preview-batch-agent"
                      :seon.ns/name 'my.agents.preview-batch
                      :seon.cluster/name "preview-batch"}))
      ;; THE RUN AND ITS EVALUATION ROWS EXIST BEFORE ANY FORM RUNS, exactly
@@ -33,7 +33,7 @@
      (db/transact! connection
                    [{:seon.turn/id "preview-run"
                      :seon.turn/agent
-                     [:seon.cluster.agent/id "preview-batch-agent"]
+                     [:seon.agent/id "preview-batch-agent"]
                      :seon.turn/opened-at (java.util.Date.)}])
      (db/transact! connection
                    (into []
@@ -55,7 +55,7 @@
                    {:seon.sci.eval/ctx base
                     :seon.db/db database
                     :seon.db/connection connection
-                    :seon.cluster.agent/id "preview-batch-agent"})
+                    :seon.agent/id "preview-batch-agent"})
            defaults (config/defaults)
            channel (async/chan 1)
            cluster (merge defaults
@@ -69,11 +69,11 @@
                            :seon.sci.admit/caps (config/result-caps defaults)
                            :seon.config.eval/time-limit-ms 2000
                            :seon.config/on-core-error :panic})
-           raw-source (str "(seon.db/pull [:seon.cluster.agent/id] [:seon.cluster.agent/id \"later-agent\"])\n"
+           raw-source (str "(seon.db/pull [:seon.agent/id] [:seon.agent/id \"later-agent\"])\n"
                          "(in-ns 'preview.batch-next)\n"
                          "(+ 1 2)\n"
                          "(inc " earlier-handle ")\n"
-                         "(seon.db/pull [:seon.cluster.agent/id] [:seon.cluster.agent/id \"later-agent\"])\n"
+                         "(seon.db/pull [:seon.agent/id] [:seon.agent/id \"later-agent\"])\n"
                          "(apply str (repeat 50000 \"x\"))\n"
                          "(throw (ex-info \"preview failure\" {}))")
            sources (turn/planned-sources
@@ -97,13 +97,13 @@
                     (is (= 1700 (:seon.sci.eval/time-limit-ms request)))
                     (let [result (original-evaluate request)]
                       (when (= 1 (swap! evaluations inc))
-                        (db/transact! connection [{:seon.cluster.agent/id "later-agent"}]))
+                        (db/transact! connection [{:seon.agent/id "later-agent"}]))
                       result))]
                  (turn/evaluate-sources
                   {:seon.turn.loop/cluster cluster
                    :seon.db/db database
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
-                   :seon.cluster.agent/id "preview-batch-agent"
+                   :seon.agent/id "preview-batch-agent"
                    :seon.turn/id "preview-run"
                    :seon.cluster.eval/ordinal 0
                    :seon.ns/name 'my.agents.preview-batch
@@ -123,11 +123,11 @@
            (is (seq (get-in (first outcomes) [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence])))
            (is (= 1 @writes) "only the deliberate concurrent database change was written")
            (is (nil? db/*read-database*) "the failing evaluation restores read custody")
-           (is (= {:seon.cluster.agent/id "later-agent"}
+           (is (= {:seon.agent/id "later-agent"}
                   (binding [db/*conn* connection]
-                    (db/pull [:seon.cluster.agent/id] [:seon.cluster.agent/id "later-agent"]))
+                    (db/pull [:seon.agent/id] [:seon.agent/id "later-agent"]))
                   (binding [db/*conn* connection db/*read-database* database]
-                    (db/pull @connection [:seon.cluster.agent/id] [:seon.cluster.agent/id "later-agent"]))))
+                    (db/pull @connection [:seon.agent/id] [:seon.agent/id "later-agent"]))))
            (is (= (db/q '[:find (count ?run) . :where [?run :seon.turn/id]] database)
                   (db/q '[:find (count ?run) . :where [?run :seon.turn/id]] @connection)))
            (is (every? #(inst? (get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/at])) outcomes))
@@ -137,12 +137,12 @@
                       (db/transact! connection
                                     (turn/open-tx
                                      {:seon.turn/id "active-during-add"
-                                      :seon.turn/agent [:seon.cluster.agent/id "preview-batch-agent"]
+                                      :seon.turn/agent [:seon.agent/id "preview-batch-agent"]
                                       :seon.turn/opened-at closed-at})))))
            (let [request {:seon.turn.loop/cluster cluster
                           :seon.db/db database
                           :seon.turn/id "saved-preview"
-                          :seon.turn/agent [:seon.cluster.agent/id "preview-batch-agent"]
+                          :seon.turn/agent [:seon.agent/id "preview-batch-agent"]
                           :seon.turn/starting-ns [:seon.ns/name 'my.agents.preview-batch]
                           :seon.turn/reply raw-source
                           :seon.turn/opened-at opened-at
@@ -181,7 +181,7 @@
 
              (is (nil?
                    (turn/open-for-agent @connection
-                                       [:seon.cluster.agent/id "preview-batch-agent"])))
+                                       [:seon.agent/id "preview-batch-agent"])))
              (is (= (count outcomes) (count receipts)))
              (is (= (mapv #(turn/receipt-identity "saved-preview" %) (range (count outcomes)))
                     (mapv :seon.cluster.eval/id receipts)))

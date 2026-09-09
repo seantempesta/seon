@@ -19,16 +19,16 @@
      (flow/pause (:graph context))
      (db/transact! connection
                    [{:seon.cluster.message/id "context-probe-message"
-                     :seon.cluster.message/to [:seon.cluster.agent/id "root"]
+                     :seon.cluster.message/to [:seon.agent/id "root"]
                      :seon.cluster.message/at (java.util.Date.)
                      :seon.cluster.message/content "A caller-owned context."}
                     {:seon.turn/id "context-probe"
-                     :seon.turn/agent [:seon.cluster.agent/id "root"]
+                     :seon.turn/agent [:seon.agent/id "root"]
                      :seon.turn/opened-at (java.util.Date.)}])
      (let [ctx (:ctx context)
            request {:seon.db/db @connection
                     :seon.db/connection connection
-                    :seon.cluster.agent/id "root"
+                    :seon.agent/id "root"
                     :seon.turn/id "context-probe"
                     :seon.sci.eval/ctx ctx
                     :seon.sci.admit/caps (config/result-caps (config/defaults))
@@ -130,7 +130,7 @@
            (is (pos? initial))
            (db/transact! connection
                          [{:seon.cluster.message/id "identity-cache-message"
-                           :seon.cluster.message/to [:seon.cluster.agent/id "root"]
+                           :seon.cluster.message/to [:seon.agent/id "root"]
                            :seon.cluster.message/at (java.util.Date.)
                            :seon.cluster.message/content "A newly connected message."}])
            (let [after (#'web-test/fetch server "/agent/root/debug")]

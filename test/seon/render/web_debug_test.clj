@@ -18,11 +18,11 @@
            (db/transact!
             connection
             [{:seon.ns/name 'my.agents.history-probe}
-             {:seon.cluster.agent/id "history-probe"
-              :seon.cluster.agent/namespace [:seon.ns/name 'my.agents.history-probe]
+             {:seon.agent/id "history-probe"
+              :seon.agent/namespace [:seon.ns/name 'my.agents.history-probe]
               :seon.agent/plan {:my.plan/objective "An anonymous component"}}
              {:seon.turn/id "history-probe-turn"
-              :seon.turn/agent [:seon.cluster.agent/id "history-probe"]
+              :seon.turn/agent [:seon.agent/id "history-probe"]
               :seon.turn/opened-at (java.util.Date. 0)}
              {:seon.cluster.eval/id "history-probe-evaluation"
               :seon.cluster.eval/run [:seon.turn/id "history-probe-turn"]
@@ -33,7 +33,7 @@
            _ (is (nil? (:seon.error/kind written)))
            database @connection
            agent-row (db/pull database '[:db/id {:seon.agent/plan [:db/id]}]
-                          [:seon.cluster.agent/id "history-probe"])
+                          [:seon.agent/id "history-probe"])
            agent-eid (:db/id agent-row)
            component-eid (get-in agent-row [:seon.agent/plan :db/id])
            request {:seon.db/db database
@@ -50,7 +50,7 @@
               (:seon.render.history/bytes (first history))))
        (is (= history
               (walk/history (assoc request :seon.render.walk/lookup
-                                   [:seon.cluster.agent/id "history-probe"]))))
+                                   [:seon.agent/id "history-probe"]))))
        (let [changed (db/transact! connection
                                   [[:db/add component-eid :my.plan/objective
                                     "The current component changed"]])]
@@ -132,20 +132,20 @@
       :seon.schema/form
       (pr-str [:map {:seon.db/attributes true
                      :seon.render/units [::_left ::_right]}
-               [:seon.cluster.agent/id :seon.cluster.agent/id]])}]}
+               [:seon.agent/id :seon.agent/id]])}]}
    (fn [connection]
      (db/transact! connection
-                   [{:seon.cluster.agent/id "relationships"}
-                    {::left [:seon.cluster.agent/id "relationships"]}
-                    {::right [:seon.cluster.agent/id "relationships"]}
-                    {::hidden [:seon.cluster.agent/id "relationships"]}])
+                   [{:seon.agent/id "relationships"}
+                    {::left [:seon.agent/id "relationships"]}
+                    {::right [:seon.agent/id "relationships"]}
+                    {::hidden [:seon.agent/id "relationships"]}])
      (let [database @connection
            projection (schema/projection-from-database database)
            result (schema/call-with-projection
                    projection
                    #(#'web/acquire-debug-data
                      projection database
-                     {:seon.render.debug/subject [:seon.cluster.agent/id "relationships"]
+                     {:seon.render.debug/subject [:seon.agent/id "relationships"]
                       :seon.render.data/limit 1
                       :seon.render.data/max-ref-attributes 1
                       :seon.render.data/max-result-weight 4000
@@ -193,7 +193,7 @@
        (is (str/includes? (pr-str preview) "A declared fault card."))))))
 
 (deftest debug-links-omit-defaults-and-round-trip-every-override
-  (let [subject [:seon.cluster.agent/id "juniper"]
+  (let [subject [:seon.agent/id "juniper"]
         viewer 'my.agents.juniper]
     (doseq [query [{} {"details" "true" "output" ":seon.render/ai"
                       "limit" "17" "maxWork" "31" "offset" "3"
@@ -210,7 +210,7 @@
   (support/with-database
    (fn [connection]
      (db/transact! connection [{:seon.cluster/name "identity-blocks"}
-                              {:seon.cluster.agent/id "identity-blocks"}])
+                              {:seon.agent/id "identity-blocks"}])
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            projection (schema/projection-from-database database)
@@ -224,11 +224,11 @@
                     :seon.render/profile (render/agent-render-profile effective)
                     :seon.render/captured-calls (atom {})
                     :seon.render/captured-invocations (atom {})}
-           entity {:seon.cluster.agent/id "identity-blocks"}
+           entity {:seon.agent/id "identity-blocks"}
            declared (#'web/declared-entity-units projection database entity)
            html (#'web/debug-found-values-html
                  projection request
-                 {:seon.render.debug/subject [:seon.cluster.agent/id "identity-blocks"]}
+                 {:seon.render.debug/subject [:seon.agent/id "identity-blocks"]}
                  entity declared
                  {:seon.render.data/incoming {:seon.render.data/complete? true}}
                  {} {} nil nil)
@@ -236,7 +236,7 @@
                        (keep #(when (and (vector? %) (= :article (first %)))
                                 (:data-seon-unit (second %))))
                        (tree-seq coll? seq html))]
-       (is (= [":seon.cluster.agent/agent" ":seon.agent/plan"
+       (is (= [":seon.agent/agent" ":seon.agent/plan"
                ":seon.agent/settings"] units))
        (is (str/includes? (pr-str html) "seon.cluster.agent/render-identity-ai"))
        (is (str/includes? (pr-str html) "seon.cluster.agent/render-identity-html"))))))
