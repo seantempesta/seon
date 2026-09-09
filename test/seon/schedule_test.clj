@@ -10,7 +10,7 @@
             [seon.schedule :as schedule]
             [seon.schema :as schema]
             [seon.cluster.wake :as wake]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
             [seon.test-support :as test-support])
   (:import [java.time Instant]
            [java.util Date]))
@@ -198,7 +198,7 @@
                          [_ :seon.schedule.fire/agent ?agent]]
                        database))
               "pointing at the task's owner, so the router needs no query")
-          (is (empty? (work/unanswered-wakes database "root" {}))
+          (is (empty? (turn/unanswered-wakes database "root" {}))
               "and it derives no turn-opening work"))
         (is (= 0 (schedule/fire-due! connection "root" observed-at
                                      (execution-context))))

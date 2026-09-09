@@ -32,7 +32,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
             [seon.schema]
@@ -254,7 +254,7 @@
           (let [routing (:seon.cluster.agent/routing instance)
                 entry (seon.cluster.agent/armed routing "root")
                 derived (CountDownLatch. 1)
-                next-agent-work work/next-agent-work
+                next-agent-work turn/next-agent-work
                 connection (:seon.boot/cluster-connection instance)
                 run-count (fn []
                             (db/q '[:find (count ?run) .
@@ -265,7 +265,7 @@
                                  @connection "root"))]
             (is (= 1 (run-count))
                 "the one local bootstrap plan is the only durable run")
-            (with-redefs [work/next-agent-work
+            (with-redefs [turn/next-agent-work
                           (fn [& arguments]
                             (let [result (apply next-agent-work arguments)]
                               (.countDown derived)
@@ -282,12 +282,12 @@
   (let [name "arming-window"
         root (str "tmp/armed-test/" name)
         primed (CountDownLatch. 1)
-        next-agent-work work/next-agent-work
+        next-agent-work turn/next-agent-work
         arm! agent/arm!]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
     (with-redefs
-      [work/next-agent-work
+      [turn/next-agent-work
        (fn [& arguments]
          (let [result (apply next-agent-work arguments)]
            (.countDown primed)
@@ -351,7 +351,7 @@
         ;; `next-agent-work`, so a throw there is a throw inside a
         ;; running flow proc — the exact path §1.2's report shapes come
         ;; from. Nothing here touches the error channel by hand.
-        (with-redefs [work/next-agent-work
+        (with-redefs [turn/next-agent-work
                       (fn [& _]
                         (throw (ex-info "injected core fault"
                                         {:seon.error/kind ::injected})))]

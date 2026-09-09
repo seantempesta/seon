@@ -11,7 +11,7 @@
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
             [seon.context :as context]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.config :as config]
             [seon.error :as error]
             [seon.print :as print]
@@ -575,7 +575,7 @@
   evaluations are ordinary transcript entries rendered by `seon.repl/text`;
   the run entry says only what the run itself says."
   [_unit entry _detail]
-  (or (run/render-ai (::entity entry)) ""))
+  (or (turn/render-ai (::entity entry)) ""))
 
 (defn- entry-name
   [entry]
@@ -720,7 +720,7 @@
                              :seon.cluster.eval/source
                              (:seon.cluster.eval/source form)
                              :seon.cluster.eval/id
-                             (run/receipt-identity
+                             (turn/receipt-identity
                               (:seon.turn/id unit) ordinal)
                              :seon.cluster.eval/ordinal ordinal
                              :seon.cluster.eval/ns
@@ -918,7 +918,7 @@
       (let [unit (assoc (assoc unit :seon.cluster.agent/id agent-id)
                         ::selected-run-id run-id)]
         [:section {:class "seon-run-transcript"}
-         (run/render-html unit)
+         (turn/render-html unit)
          (render-html unit)])
       :else (missing-selected-run unit identities))))
 

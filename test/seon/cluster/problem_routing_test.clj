@@ -4,7 +4,7 @@
             [seon.db :as db]
             [my.message :as my.message]
             [seon.cluster.message :as message]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
             [seon.print :as print]
             [seon.problems :as problems]
             [seon.schema :as schema]
@@ -181,7 +181,7 @@
        (is (= {:seon.turn.work/form-state :unrouted-red
                :seon.turn.work/settled? false}
               (select-keys
-               (work/form-settlement @connection "form-0")
+               (turn/form-settlement @connection "form-0")
                [:seon.turn.work/form-state
                 :seon.turn.work/settled?]))
            "the red problem still keeps its plan unsettled")))))
@@ -243,7 +243,7 @@
                "declination-6"
                (my.message/decline
                 "planner" "problem-6" "The required contract is absent."))
-     (let [settlement (work/plan-settlement @connection run-id)
+     (let [settlement (turn/plan-settlement @connection run-id)
            forms (:seon.turn.work/forms settlement)]
        (is (= [:unevaluated
                :running
@@ -265,4 +265,4 @@
                        :seon.turn/closed-at now]])
          (is (false?
               (:seon.turn.work/settled?
-               (work/plan-settlement @connection run-id)))))))))
+               (turn/plan-settlement @connection run-id)))))))))

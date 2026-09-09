@@ -54,8 +54,8 @@
             [seon.blob :as blob]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.message :as message]
-            [seon.cluster.loop :as loop]
-            [seon.turn :as run]
+            [seon.turn :as turn]
+
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
@@ -1449,7 +1449,7 @@
                ::owner-not-ensured nil)
               (binding [db/*read-evidence-sink* observed]
                 (let [evaluated
-                      (loop/preview-sources
+                      (turn/preview-sources
                        {:seon.turn.loop/cluster (:seon.turn.loop/cluster request)
                         :seon.db/db database
                         :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
@@ -2049,17 +2049,17 @@
 (defn- unsettled-stream?
   "True when a stream entry's run has no settled terminal fact at `db`.
 
-  The provider reply settles as a frozen plan (`::run/plan-digest`) or
-  a durable `::run/error`; `::run/closed-at` covers a run terminated by
+  The provider reply settles as a frozen plan (`:seon.turn/plan-digest`) or
+  a durable `:seon.turn/error`; `:seon.turn/closed-at` covers a run terminated by
   another path. A missing run is not live. This presence gate makes a
   delayed partial incapable of repainting over its settled facts."
   [db stream]
   (when-let [run-id (:seon.turn/id stream)]
-    (let [row (db/pull db [:db/id ::run/plan-digest ::run/error ::run/closed-at]
-                      [::run/id run-id])]
+    (let [row (db/pull db [:db/id :seon.turn/plan-digest :seon.turn/error :seon.turn/closed-at]
+                      [:seon.turn/id run-id])]
       (and (some? row)
            (not-any? #(contains? row %)
-                     [::run/plan-digest ::run/error ::run/closed-at])))))
+                     [:seon.turn/plan-digest :seon.turn/error :seon.turn/closed-at])))))
 
 (defn- derive-page
   [handle database streams profile registration-key retained-values derive-all? invalidate-calls?]

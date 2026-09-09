@@ -60,3 +60,18 @@ turn namespace attributes plus `:seon.ai.attempt/run` absent. The ordinary
 Juniper debug page returns HTTP 200, 52,752 bytes; history is a vector of one
 evaluation and provider usage remains zero. The settings component disabled
 the credential variable before fixture messages were installed.
+
+## Loop/work schema and proc move, 2026-09-09
+
+Default PID 77143 adopted and published
+`6aa136b4-9bf0-5042-bed0-dda843e7ad25` after unused alias declarations were
+removed from the merged namespace. `seon.turn/step` resolves, but the running
+instance still carries the old `:seon.cluster.loop/cluster` handle key.
+Debug HTTP returned **500 / 314 bytes**, naming `seon.turn/preview-sources`
+and missing nested inputs under `:seon.turn.loop/cluster` (cluster name,
+wake channel, completion, error recurrence limit, and two more).
+
+Fresh construction on the same rename served **200 / 42,913 bytes**, with
+four Juniper evaluations and zero provider attempts. **RESET NEEDED for
+`7004818dc`** remains; successful source adoption does not reconstruct a
+captured service/graph input. The lane did not operate default's lifecycle.

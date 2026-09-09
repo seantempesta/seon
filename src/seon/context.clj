@@ -42,7 +42,7 @@
   — capture with no attempt row, evidence the call may never have
   fired; kill after — today's attempt-row story. Nothing re-executes."
   (:require [seon.ai.tokens :as tokens]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.db :as db]
             [seon.id :as id]
             [seon.error :as error]
@@ -141,7 +141,7 @@
                ::foreign-run
                (not (:seon.turn/closed-at run-data)) ::run-open
                (empty? evaluations) ::no-evaluations
-               (not-every? run/terminal? evaluations) ::unfinished-evaluation)]
+               (not-every? turn/terminal? evaluations) ::unfinished-evaluation)]
     {:agent-data agent-data
      :run-data run-data
      :evaluation-refs evaluation-refs
@@ -348,7 +348,7 @@
                ::foreign-run
                (not= 1 (count baseline-runs)) ::contribution-run-ambiguous
                (and in-memory?
-                    (not-every? #(run/terminal? (:seon.sci.eval/evaluation %))
+                    (not-every? #(turn/terminal? (:seon.sci.eval/evaluation %))
                                 evaluated-sources))
                ::unfinished-evaluation
                (:rule eligibility) (:rule eligibility))]

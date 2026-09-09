@@ -4,8 +4,8 @@
             [seon.blob :as blob]
             [my.agent :as my.agent]
             [seon.cluster.agent :as agent]
-            [seon.cluster.loop :as loop]
-            [seon.turn :as run]
+            [seon.turn :as turn]
+
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.admit :as admit]
@@ -39,7 +39,7 @@
                    (into []
                          (map (fn [ordinal]
                                 {:seon.cluster.eval/id
-                                 (run/receipt-identity "preview-run" ordinal)
+                                 (turn/receipt-identity "preview-run" ordinal)
                                  :seon.cluster.eval/run
                                  [:seon.turn/id "preview-run"]
                                  :seon.cluster.eval/ordinal ordinal
@@ -49,7 +49,7 @@
                          connection "preview-batch-agent")
      (let [database @connection
            earlier-handle
-           (admit/result-handle (run/receipt-identity "preview-run" 2))
+           (admit/result-handle (turn/receipt-identity "preview-run" 2))
            base (support/fork-cluster-ctx connection)
            forked (sci.eval/fork-for-turn
                    {:seon.sci.eval/ctx base
@@ -76,7 +76,7 @@
                          "(seon.db/pull [:seon.cluster.agent/id] [:seon.cluster.agent/id \"later-agent\"])\n"
                          "(apply str (repeat 50000 \"x\"))\n"
                          "(throw (ex-info \"preview failure\" {}))")
-           sources (loop/planned-sources
+           sources (turn/planned-sources
                     raw-source
                     'my.agents.preview-batch
                     (:seon.config.eval.result/max-source (config/result-caps defaults)))
@@ -99,7 +99,7 @@
                       (when (= 1 (swap! evaluations inc))
                         (db/transact! connection [{:seon.cluster.agent/id "later-agent"}]))
                       result))]
-                 (loop/evaluate-sources
+                 (turn/evaluate-sources
                   {:seon.turn.loop/cluster cluster
                    :seon.db/db database
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
@@ -135,7 +135,7 @@
                                      :seon.turn/closed-at closed-at}])
            (is (nil? (:seon.error/kind
                       (db/transact! connection
-                                    (run/open-tx
+                                    (turn/open-tx
                                      {:seon.turn/id "active-during-add"
                                       :seon.turn/agent [:seon.cluster.agent/id "preview-batch-agent"]
                                       :seon.turn/opened-at closed-at})))))
@@ -148,7 +148,7 @@
                           :seon.turn/opened-at opened-at
                           :seon.turn/closed-at closed-at
                           :seon.turn.loop/evaluated-sources outcomes}
-                 prepared (run/record-evaluated-tx request)
+                 prepared (turn/record-evaluated-tx request)
                  _refusal (is (:seon.error/kind
                                (db/transact! connection (:seon.db/tx-data prepared))))
                  _close (db/transact!
@@ -173,17 +173,17 @@
              (is (nil? (:seon.error/kind committed)) (pr-str (select-keys committed [:seon.error/kind :seon.error/message :seon.turn/refused])))
              (is (= "saved-preview"
                     (:seon.turn/id
-                     (db/pull (run/opening-db @connection "saved-preview")
+                     (db/pull (turn/opening-db @connection "saved-preview")
                               [:seon.turn/id]
                               [:seon.turn/id "saved-preview"]))))
              (is (= raw-source (:seon.turn/reply saved)))
              (is (= closed-at (:seon.turn/closed-at saved)))
 
              (is (nil?
-                   (run/open-for-agent @connection
+                   (turn/open-for-agent @connection
                                        [:seon.cluster.agent/id "preview-batch-agent"])))
              (is (= (count outcomes) (count receipts)))
-             (is (= (mapv #(run/receipt-identity "saved-preview" %) (range (count outcomes)))
+             (is (= (mapv #(turn/receipt-identity "saved-preview" %) (range (count outcomes)))
                     (mapv :seon.cluster.eval/id receipts)))
              (is (= (mapv #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/at]) outcomes)
                     (mapv :seon.cluster.eval/at receipts)))

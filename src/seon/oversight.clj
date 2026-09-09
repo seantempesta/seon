@@ -26,7 +26,7 @@
             [clojure.datafy :as datafy]
             [clojure.string :as str]
             [seon.cluster.agent :as agent]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render.block :as block]))
@@ -130,7 +130,7 @@
              (get-in mailbox [::flow/outs ::agent/episode])))]
     (cond-> {:seon.cluster.agent/id agent-id
              :seon.turn.work/episode-runs
-             (work/episode-runs db agent-id)}
+             (turn/episode-runs db agent-id)}
       run-id
       (assoc :seon.turn/id run-id)
 

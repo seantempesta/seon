@@ -54,7 +54,7 @@ Do not flatten four distinct executor roles into “the executor”:
 | core.async default/root-held `:io` | core.async memoized virtual-per-task when available, cached-platform fallback | every current production graph's `:io` proc loop, including work launcher, cluster, agent, and fault graphs | `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:82-105`; `src/seon/cluster.clj:158-182,1079-1096`; `src/seon/cluster/agent.clj:337-390`; `src/seon/flow.clj:381-423,626-666` |
 | process-root `:compute` | Seon fixed platform pool, size `availableProcessors` | work-launcher graph `:compute` transforms | `src/seon/cluster.clj:158-182`; `src/seon/flow.clj:381-423` |
 | core.async default `:compute` | core.async memoized cached platform pool | any graph with a `:compute` proc and no `:compute-exec` override | `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:91-105`; `reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:145-148` |
-| work task executor | Seon virtual-thread-per-task | submitted SCI evaluation tasks | `src/seon/flow.clj:135-137,199-229,401-430`; `src/seon/cluster/loop.clj:559-590` |
+| work task executor | Seon virtual-thread-per-task | submitted SCI evaluation tasks | `src/seon/flow.clj:135-137,199-229,401-430` |
 
 Core.async constructs and memoizes the default executors at
 `reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:71-105`;
@@ -93,8 +93,10 @@ still consume application-level admission and retain their live state.
 ## The bounded submission owner
 
 `seon.flow/submit!!` is the one public submission operation
-(`src/seon/flow.clj:652-683`). The production turn path uses it at
-`src/seon/cluster/loop.clj:559-590`; do not evaluate inline on the turn proc.
+(`src/seon/flow.clj:814`). The current turn path evaluates SCI inline
+(`src/seon/turn.clj:4283`); the earlier claim that turns use the launcher
+was false. This boundary is recorded in
+`docs/seon/issues/turn-evaluations-bypass-work-submission.md`.
 
 The launcher owns:
 

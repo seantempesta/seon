@@ -292,7 +292,7 @@
   ;; `schema/declaration-population` falls through to
   ;; `seon.schema.edn/packaged-forms`, which re-reads and re-validates every
   ;; schema resource from the classpath (~14 ms). Per attribute that turned
-  ;; `seon.cluster.work-test/situation-totality-property` into a suite wedge
+  ;; `seon.turn-work-test/situation-totality-property` into a suite wedge
   ;; that never finished inside the 300 s liveness backstop
   ;; (docs/prds/sci-execution-runtime/research/parallel-turns-hang-cause-2026-08-07.md).
   ;; One resolution per transaction is the wanted behavior, and it must not

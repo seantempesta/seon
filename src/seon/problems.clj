@@ -62,7 +62,7 @@
   committed; the next caller re-derives it from the same facts."
   (:require [clojure.string :as str]
             [seon.db :as db]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
             [seon.error :as error]
             [seon.schema.edn :as schema.edn]))
 
@@ -185,13 +185,13 @@
         admitted (:seon.sci.admit/value evaluation)
         ordinary-error (:seon.cluster.eval/error evaluation)
         interrupted? (boolean (:seon.cluster.eval/interrupted-at evaluation))
-        unbound? (work/unbound-value? admitted)
+        unbound? (turn/unbound-value? admitted)
         red? (or ordinary-error interrupted? unbound?)
-        scoped? (work/planner-scoped-attempt? db id)
+        scoped? (turn/planner-scoped-attempt? db id)
         artifact? (and red?
-                       (work/resume-artifact? db id ordinal interrupted?))]
+                       (turn/resume-artifact? db id ordinal interrupted?))]
     (when (and scoped? red? (not artifact?))
-      (let [owner-id (work/form-owner db form)
+      (let [owner-id (turn/form-owner db form)
             author-id
             (db/q '[:find ?author-id .
                    :in $ ?form
@@ -207,8 +207,8 @@
                       (when unbound?
                         "The admitted result contains an unbound var.")
                       "The evaluation was interrupted.")]
-        {:seon.problems/id (work/problem-id id ordinal)
-         :seon.cluster.eval/id (work/problem-id id ordinal)
+        {:seon.problems/id (turn/problem-id id ordinal)
+         :seon.cluster.eval/id (turn/problem-id id ordinal)
          :seon.turn/id id
          :seon.cluster.eval/ordinal ordinal
          :seon.cluster.eval/source
@@ -249,11 +249,11 @@
             db)
        sort
        (keep (fn [agent-id]
-               (let [deferred (work/deferred-triggers db agent-id)]
+               (let [deferred (turn/deferred-triggers db agent-id)]
                  (when (seq deferred)
                    {:seon.cluster.agent/id agent-id
                     :seon.turn.work/episode-runs
-                    (work/episode-runs db agent-id)
+                    (turn/episode-runs db agent-id)
                     :seon.problems/deferred-count (count deferred)}))))
        vec))
 

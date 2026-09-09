@@ -28,17 +28,16 @@
   - `::turn` — one episode pass per signal, the central pass's proven
     shape narrowed to one agent: settle this agent's orphan, pin ONE
     database value, derive `next-agent-work`, execute the situation
-    through the surviving `seon.cluster.loop/turn` owner (custody law,
+    through the surviving `seon.turn/turn` owner (custody law,
     pre-provider capture, terminal transactions all unchanged), then
     self-rewake into this agent's OWN mailbox when more remains.
   - `::schedule` — one disposable timer and fact listener scoped to this
     agent. It derives due nominal instants, atomically commits fire+message,
     and waits on `:io`; it never polls another agent's schedules.
 
-  Evals are NOT a proc here: the turn's resume branch submits every form
-  through this cluster's `seon.flow/submit!!` launcher. That owner admits
-  at most configured C eval lifetimes with Q more queued, runs admitted
-  tasks on virtual threads, and returns the evaluator's flat value.
+  Evaluation currently runs inline in the turn proc. The separate bounded
+  work launcher remains available through `seon.flow/submit!!`; the turn
+  does not presently enter it. See the recorded work-submission issue.
   `:mixed` appears nowhere — `var-process` refuses it at construction.
 
   THE GRAPH IS DERIVED STATE — never stored, always re-derivable from
@@ -68,9 +67,7 @@
             [clojure.string :as str]
             [seon.bootstrap :as bootstrap]
             [seon.ai :as ai]
-            [seon.cluster.loop :as cluster.loop]
-            [seon.turn :as run]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
             [seon.blob :as blob]
@@ -82,8 +79,7 @@
             [seon.schedule :as schedule]
             [seon.sci.eval :as sci.eval]
             [seon.schema.edn :as schema.edn])
-  (:import [java.util Date]
-           [java.util.concurrent Executor]))
+  (:import [java.util Date]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -393,270 +389,6 @@
    [(update state ::deliveries inc)
     {::episode [::wake]}]))
 
-(defn- open-run-id
-  "The id of the agent's open turn, or nil.
-  The turn proc's ping-state derivation — the current run rides in
-  `::flow/state`, which is what retired the serial-dependent global
-  query F2 §3.3 deleted."
-  [db agent-id]
-  (db/q '[:find ?id .
-         :in $ ?agent-id
-         :where
-         [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.turn/agent ?agent]
-         (not [?run :seon.turn/closed-at])
-         [?run :seon.turn/id ?id]]
-       db agent-id))
-
-(defn- turn-completion-backstop-failure
-  [agent-id run-id timeout-ms operation expected events]
-  (let [evidence
-        (cond->
-         {:seon.cluster.agent/id agent-id
-          :seon.config.agent/turn-completion-backstop-ms timeout-ms
-          :seon.cluster.agent/completion-events events}
-          run-id (assoc :seon.turn/id run-id))
-        diagnostic
-        (error/diagnostic
-         (cond->
-          {:seon.error/kind ::turn-completion-backstop
-           :seon.error/message
-           (str "Agent " (pr-str agent-id)
-                (if run-id
-                  (str " run " (pr-str run-id))
-                  " with no observable open turn")
-                " did not publish turn completion within " timeout-ms " ms.")
-           :seon.cluster.agent/id agent-id
-           :seon.cluster.agent/turn-completion-backstop agent-id
-           :seon.config.agent/turn-completion-backstop-ms timeout-ms
-           :seon.error/diagnostic-layer ::agent-graph
-           :seon.error/diagnostic-operation operation
-           :seon.error/diagnostic-member :seon.turn.loop/completion
-           :seon.error/diagnostic-expected expected
-           :seon.error/diagnostic-offending evidence
-           :seon.error/diagnostic-cause ::turn-completion-backstop
-           :seon.error/diagnostic-evidence evidence}
-           run-id (assoc :seon.turn/id run-id)))]
-    (ex-info (:seon.error/message diagnostic) diagnostic)))
-
-(defn- await-turn-permit!
-  [state]
-  (let [{connection :seon.db/connection
-         cluster-name :seon.cluster/name
-         process :seon.db.process/id
-         completion :seon.turn.loop/completion
-         executor :seon.flow/executor
-         fault-channel :seon.cluster.agent/fault-channel
-         carried-timeout-ms
-         :seon.config.agent/turn-completion-backstop-ms
-         backstop-state :seon.cluster.agent/turn-backstop-state}
-        (:seon.turn.loop/cluster state)
-        agent-id (:seon.cluster.agent/id state)
-        database @connection
-        run-id (open-run-id database agent-id)
-        timeout-ms
-        (or (:seon.config.agent/turn-completion-backstop-ms
-             (ai/agent-overlay database agent-id))
-            carried-timeout-ms
-            (:seon.config.agent/turn-completion-backstop-ms
-             (config/effective database cluster-name)))
-        [value selected]
-        (async/alts!! [completion (async/timeout timeout-ms)] :priority true)]
-    (if (= selected completion)
-      {::turn-permit value
-       ::connection connection
-       ::process process
-       ::executor executor
-       ::fault-channel fault-channel
-       ::backstop-state backstop-state
-       ::agent-id agent-id
-       ::timeout-ms timeout-ms
-       ;; WHAT THE BOUND IS ARMED AGAINST, carried. The run this pass is
-       ;; about is not known until the pass derives its work, so the
-       ;; subject is published here and set there — never re-read when
-       ;; the bound FIRES, which is the owner law's pre-read: custody is
-       ;; legitimately released in between, so two firings described two
-       ;; different worlds and a sliding-1 fault channel kept whichever
-       ;; arrived last.
-       ::run-id (atom run-id)}
-      (throw
-       (turn-completion-backstop-failure
-        agent-id run-id timeout-ms ::turn-start ::turn-permit
-        [:seon.turn.loop/completion])))))
-
-(defn- offer-turn-backstop-fault!
-  [{::keys [fault-channel agent-id timeout-ms] armed-run ::run-id}]
-  (let [run-id @armed-run
-        failure
-        (turn-completion-backstop-failure
-         agent-id run-id timeout-ms ::turn-transform ::turn-terminal
-         [:seon.turn.loop/completion])
-        fault
-        (cond->
-         {::flow/pid ::turn
-          ::flow/status :running
-          ::flow/op ::turn-completion-backstop
-          ::flow/ex failure
-          :seon.cluster.agent/id agent-id}
-          run-id (assoc :seon.turn/id run-id))]
-    (when-not (and fault-channel (async/offer! fault-channel fault))
-      (binding [*out* *err*]
-        (println "SEON CORE FAULT (agent turn backstop):"
-                 (ex-message failure))
-        (flush)))
-    failure))
-
-(defn- arm-turn-completion-backstop!
-  "Arm the live bound after the ready permit is consumed.
-
-  Success cancels only after the permit is republished. An escaped transform
-  republishes the permit for lifecycle progress but deliberately leaves this
-  observer armed, so quiescence cannot hide the failed turn."
-  [{::keys [executor timeout-ms backstop-state] :as turn-bound}]
-  (when-not (instance? Executor executor)
-    (throw
-     (ex-info "An active agent turn requires its carried IO executor."
-              {:seon.error/kind ::turn-completion-backstop
-               :seon.cluster.agent/id (::agent-id turn-bound)
-               :seon.cluster.agent/turn-completion-backstop
-               (::agent-id turn-bound)})))
-  (let [cancel (async/chan 1)
-        timeout (async/timeout timeout-ms)
-        failure-channel (async/promise-chan)
-        backstop {::cancel cancel
-                  ::failure-channel failure-channel}]
-    (when backstop-state
-      (reset! backstop-state backstop))
-    (.execute
-     ^Executor executor
-     ^Runnable
-     (fn []
-       (let [[_ selected] (async/alts!! [cancel timeout] :priority true)]
-         (if (= selected timeout)
-           ;; Retain the fired bound in `backstop-state`: disarm joins this
-           ;; same failure instead of racing it with a second timer/fault.
-           (async/put! failure-channel
-                       (offer-turn-backstop-fault! turn-bound))
-           (when backstop-state
-             (compare-and-set! backstop-state backstop nil))))))
-    backstop))
-
-(defn turn-step
-  "The turn transform, in Flow's four arities: ONE episode pass.
-  Settle this agent's orphan (the wedge fence, per-agent), pin one
-  database value, derive `next-agent-work`, run the situation through
-  `seon.cluster.loop/turn` — the surviving owner of open/call/resume/
-  close, the pass-local custody law, the pre-provider capture, and the
-  resume branch's mandatory `seon.flow/submit!!` eval hop — then
-  `offer!` one wake into this agent's OWN mailbox when
-  `more-agent-work?`. Coalescing on sliding-1 keeps the rewake
-  non-recursive. Failures inside the pass stay VALUES (the existing
-  `refused!`/`error-tx` owners); a Throwable that escapes anyway is a
-  core fault and rides this graph's error channel into the cluster's
-  fault committer, tagged with the agent. The completion channel is an
-  armed-ready permit: arm publishes it before Flow scheduling, an active
-  transform holds it under the construction-time completion backstop, and
-  `finally` republishes it without an interruptible park. A successful pass
-  then cancels the bound; an escaped pass leaves it armed. Disarm consumes the
-  permit or joins that same active bound, so it waits for real active work
-  without depending on a proc that may never have started."
-  {:malli/schema [:function
-                  [:=> [:cat] [:map]]
-                  [:=> [:cat :map] :map]
-                  [:=> [:cat :map :keyword] :map]
-                  [:=> [:cat :map :keyword :any]
-                   [:tuple :map [:maybe [:map-of :keyword [:vector :some]]]]]]}
-  ([]
-   {:ins {::episode "One payload-free episode signal from the mailbox."}
-    :outs {}
-    :workload :io
-    :ping-map-fn (fn [state]
-                   (select-keys state [:seon.turn/id]))})
-  ([args]
-   args)
-  ([state transition]
-   (when (= ::flow/stop transition)
-     (async/offer!
-      (:seon.cluster.agent/turn-stopped
-       (:seon.turn.loop/cluster state))
-      ::stopped))
-   state)
-  ([state _input _message]
-   (let [cluster (:seon.turn.loop/cluster state)
-         completion (:seon.turn.loop/completion cluster)]
-     (if-some [turn-bound (await-turn-permit! state)]
-       (let [backstop (arm-turn-completion-backstop! turn-bound)
-             succeeded? (volatile! false)]
-        (try
-          (let [result
-                (let [agent-id (:seon.cluster.agent/id state)
-                      connection (:seon.db/connection cluster)
-                      process (:seon.db.process/id cluster)
-                      now (Date.)
-                      request {:seon.cluster.agent/id agent-id
-                               :seon.db.process/id process}
-               ;; ONE database value for the derivation
-                      next (work/next-agent-work @connection request)
-                      ;; THE BOUND LEARNS ITS SUBJECT HERE, once, from
-                      ;; the derivation that decided it. `:open` mints
-                      ;; its run inside the turn, so the report supplies
-                      ;; it below; every other situation names it now.
-                      _ (when-let [derived (:seon.turn/id next)]
-                          (reset! (::run-id turn-bound) derived))]
-                  (if (nil? next)
-                    [(dissoc state :seon.turn/id)
-                     nil]
-                    (let [report (cluster.loop/turn
-                                  {:seon.turn.loop/cluster cluster
-                                   :seon.turn.work/next next}
-                                  now)
-                          _ (when-let [opened (:seon.turn/id report)]
-                              (reset! (::run-id turn-bound) opened))]
-               ;; Run closure is an armer wake because first-agent
-               ;; supervision is derived from closed-run and root-idle facts.
-               ;; The signal is disposable: the armer re-derives the complete
-               ;; supervision transition from the current database value.
-                      (when (and
-                             (= :closed (:seon.turn.loop/outcome report))
-                             (:seon.cluster.wake/armer-channel cluster))
-                        (async/offer!
-                         (:seon.cluster.wake/armer-channel cluster)
-                         ::wake))
-               ;; self-rewake into this agent's OWN mailbox, coalescing on
-               ;; its (sliding-buffer 1): it cannot recurse, because the pass
-               ;; is only re-entered after this transform returns
-                      (when (work/more-agent-work? @connection request)
-                        (async/offer!
-                         (:seon.cluster.wake/channel cluster) ::wake))
-                      ;; THE PASS REPORTS THE RUN IT TURNED, not whatever
-                      ;; the database says is held now: the turn may have
-                      ;; closed and released custody, and re-deriving here
-                      ;; made the ping state disagree with the report in
-                      ;; exactly that ordinary case.
-                      [(let [run-id (:seon.turn/id report)]
-                         (cond-> (dissoc state :seon.turn/id)
-                           run-id (assoc :seon.turn/id run-id)))
-                ;; flow's own report channel: observation, never a dependency
-                       {::flow/report [report]}])))]
-           (vreset! succeeded? true)
-           result)
-         (finally
-           (if (async/offer! completion ::ready)
-             (when @succeeded?
-               (async/offer! (::cancel backstop) ::completed)
-               (when-let [backstop-state
-                          (:seon.cluster.agent/turn-backstop-state cluster)]
-                 (compare-and-set! backstop-state backstop nil)))
-             (throw
-              (ex-info
-               "The agent turn could not publish its terminal completion."
-               {:seon.error/kind ::turn-completion-undeliverable
-                :seon.cluster.agent/id
-                (:seon.cluster.agent/id state)
-                :seon.cluster.agent/turn-completion-undeliverable
-                (:seon.cluster.agent/id state)}))))))
-       [state nil]))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The ONE blueprint
 ;;; ---------------------------------------------------------------------------
@@ -689,7 +421,7 @@
                           environment))}
        ::turn
        {:proc (seon.flow/var-process
-               #'turn-step :io
+               #'turn/step :io
                (env/carry {:seon.turn.loop/cluster handle
                            :seon.cluster.agent/id agent-id}
                           environment))
@@ -788,19 +520,19 @@
       (let [max-source
             (get-in handle [:seon.sci.admit/caps
                             :seon.config.eval.result/max-source])
-            sources (cluster.loop/planned-sources text namespace-name max-source)]
+            sources (turn/planned-sources text namespace-name max-source)]
         (if (:seon.error/kind sources)
           sources
-          (let [run-id (run/next-id database (:seon.cluster/name handle) agent-id)
+          (let [run-id (turn/next-id database (:seon.cluster/name handle) agent-id)
                 now (Date.)
-                staged-reply (run/stage-reply! connection text)
+                staged-reply (turn/stage-reply! connection text)
                 outcome
                 (blob/with-publication!
                  connection (:seon.blob/staged-writes staged-reply)
                  #(db/transact!
                    connection
                    {:tx-data
-                    (run/system-run-tx
+                    (turn/system-run-tx
                      database
                      (merge (dissoc staged-reply :seon.blob/staged-writes)
                             {:seon.cluster.agent/id agent-id
@@ -810,7 +542,7 @@
                              :seon.turn/opened-at now
                              :seon.turn/starting-ns
                              [:seon.ns/name namespace-name]
-                             :seon.turn/plan-digest (run/plan-digest sources)
+                             :seon.turn/plan-digest (turn/plan-digest sources)
                              :seon.turn/sources sources}))}))]
             (if (:seon.error/kind outcome)
               outcome
@@ -840,7 +572,7 @@
   DERIVED from the two process-local artifacts that already exist —
   presence of the routing entry and the channel's own `closed?` — so
   there is no quarantine flag, no fenced-id set, and nothing to keep in
-  sync. The state is real and is the one `seon.cluster.loop`'s terminal
+  sync. The state is real and is the one `seon.turn`'s terminal
   settlement fence creates: the agent must take no further pass over
   its still-running receipt until boot recovery marks that receipt
   interrupted, so its mailbox is closed IN PLACE while its entry stays,
@@ -988,7 +720,7 @@
       terminal
       (let [agent-id (:seon.cluster.agent/id entry)
             database @connection
-            run-id (open-run-id database agent-id)
+            run-id (turn/open-for-agent database [:seon.cluster.agent/id agent-id])
             timeout-ms
             (:seon.config.agent/turn-completion-backstop-ms
              (:seon.turn.loop/cluster entry))
@@ -1013,10 +745,12 @@
                     (= selected turn-stopped))
               value
               (let [failure
-                    (turn-completion-backstop-failure
-                     agent-id run-id timeout-ms ::disarm ::turn-completed
-                     [:seon.turn.loop/completion
-                      :seon.cluster.agent/turn-stopped])
+                    (let [diagnostic
+                          (turn/turn-completion-error
+                           agent-id run-id timeout-ms ::disarm ::turn-completed
+                           [:seon.turn.loop/completion
+                            :seon.cluster.agent/turn-stopped])]
+                      (ex-info (:seon.error/message diagnostic) diagnostic))
                     fault
                     (cond->
                      {::flow/pid ::turn

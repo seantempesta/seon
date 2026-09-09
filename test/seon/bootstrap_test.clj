@@ -7,8 +7,8 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as cluster.agent]
-            [seon.turn :as run]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
+
             [seon.config :as config]
             [seon.db :as db]
             [seon.render.walk :as walk]
@@ -78,7 +78,7 @@
         (is (= {:seon.turn.work/situation :generate
                 :seon.turn/id run-id
                 :seon.cluster.agent/id agent-id}
-               (work/next-agent-work
+               (turn/next-agent-work
                 @connection {:seon.cluster.agent/id agent-id
                              :seon.db.process/id process})))))))
 
@@ -116,7 +116,7 @@
                       :seon.config/on-core-error :record}))]
           (db/transact!
            connection
-           (run/append-generated-tx
+           (turn/append-generated-tx
             {:seon.turn/id (bootstrap/run-id agent-id)
              :seon.db.process/id cluster/boot-process-identity
              :seon.cluster.eval/at (java.util.Date.)
@@ -125,7 +125,7 @@
              :seon.ns/name namespace-name}))
           (db/transact!
            connection
-           (run/receipt-settle-tx
+           (turn/receipt-settle-tx
             {:seon.turn/id (bootstrap/run-id agent-id)
              :seon.cluster.eval/ordinal 0
              :seon.cluster.eval/result-edn (pr-str node)}))

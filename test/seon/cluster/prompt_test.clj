@@ -12,8 +12,8 @@
             [seon.cluster.prompt :as prompt]
             [seon.render :as render]
             [seon.sci.kernel :as kernel]
-            [seon.cluster.loop :as loop]
-            [seon.turn :as run]
+            [seon.turn :as turn]
+
             [seon.blob :as blob]
             [seon.test-support :as support])
   (:import [java.util Date]))
@@ -34,7 +34,7 @@
                  :seon.db.process/id cluster/boot-process-identity
                  :seon.sci.eval/ctx ctx})]
     (try
-      (let [preview (loop/preview-sources
+      (let [preview (turn/preview-sources
                      {:seon.turn.loop/cluster handle
                       :seon.db/db @connection
                       :seon.sci.eval/ctx ctx
@@ -42,7 +42,7 @@
                       :seon.ns/name 'my.agents.walker
                       :seon.cluster.reply/text source
                       :seon.sci.admit/caps caps})
-            prepared (run/record-evaluated-tx
+            prepared (turn/record-evaluated-tx
                        {:seon.turn.loop/cluster handle
                         :seon.db/db @connection
                         :seon.turn/id run-id

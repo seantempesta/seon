@@ -13,7 +13,7 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [malli.instrument :as mi]
-            [seon.cluster.loop :as cluster.loop]
+            [seon.turn :as turn]
             [seon.config :as config]
             [seon.flow :as sut]
             [seon.schema :as schema]
@@ -734,7 +734,7 @@
                  :seon.config.flow.compute/concurrency 1)})
         (try
           (let [evaluation
-                (#'cluster.loop/submit-evaluation!!
+                (#'turn/submit-evaluation!!
                  {:seon.env/environment environment
                   :seon.flow/work-launcher @test-work-launcher}
                  sci.eval/evaluate

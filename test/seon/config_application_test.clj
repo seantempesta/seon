@@ -330,7 +330,7 @@
                     @connection)))
             (is (= 6
                    ((var-get
-                     (ns-resolve 'seon.cluster.work 'max-episode-runs))
+                     (ns-resolve 'seon.turn 'max-episode-runs))
                     @connection))))
           (finally
             (cluster/stop! instance))))

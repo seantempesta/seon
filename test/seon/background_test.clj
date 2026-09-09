@@ -1,8 +1,8 @@
 (ns seon.background-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [seon.turn :as run]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
+
             [seon.db :as db]
             [seon.render.walk :as walk]
             [seon.test-support :as support])
@@ -31,13 +31,13 @@
            :seon.effect/to [:seon.cluster.agent/id "background-agent"]}])
         (is (= {:seon.turn.work/situation :open
                 :seon.cluster.agent/id "background-agent"}
-               (work/next-agent-work
+               (turn/next-agent-work
                 @connection
                 {:seon.cluster.agent/id "background-agent"
                  :seon.db.process/id "process"})))
         (db/transact!
          connection
-         (run/open-tx
+         (turn/open-tx
           {:seon.turn/id "result-run"
            :seon.turn/agent
            [:seon.cluster.agent/id "background-agent"]

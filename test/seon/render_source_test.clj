@@ -4,7 +4,7 @@
             [clojure.test :refer [deftest is testing]]
             [seon.blob :as blob]
             [seon.cluster.agent :as agent]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
@@ -62,7 +62,7 @@
                            :seon.cluster/name "memory-preview"})
                          [{:my.plan.item/id "preview-item" :my.plan.item/title "Before"}]))
      (db/transact! connection
-                   (run/open-tx
+                   (turn/open-tx
                     {:seon.turn/id "agent-is-busy"
                      :seon.turn/agent [:seon.cluster.agent/id "memory-preview-agent"]
                      :seon.turn/opened-at (java.util.Date.)}))

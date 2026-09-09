@@ -1,8 +1,8 @@
-(ns seon.cluster.work-test
+(ns seon.turn-work-test
   "Sealed acceptance draft for the resume derivation (N3, C8).
 
   DRAFT FOR ORCHESTRATOR SEAL (drafted 2026-07-27). The implementation
-  lane makes these green by implementing `seon.cluster.work` ONLY —
+  lane makes these green by implementing `seon.turn` ONLY —
   schemas and tests are byte-sealed.
 
   The acceptance surface is EXHAUSTIVE, not sampled. `next-agent-work`'s
@@ -24,7 +24,7 @@
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
             [my.agent :as my.agent]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
             [seon.schema]
             [seon.test-support :as support])
   (:import [java.util Date]))
@@ -323,14 +323,14 @@
         (configure-cap! connection 100)
         (build connection)
         (let [db (db/db connection)
-              derived (work/next-agent-work db request)]
+              derived (turn/next-agent-work db request)]
           (testing label
             (if (nil? expect)
               (is (nil? derived) "must derive idle")
               (is (= (into {} (remove (comp nil? val)) expect)
                      (into {} (remove (comp nil? val)) derived))))
             (testing "and more-agent-work? never disagrees with it"
-              (is (= (some? derived) (work/more-agent-work? db request))))
+              (is (= (some? derived) (turn/more-agent-work? db request))))
             (testing "and the situation validates against its own schema"
               (when derived
                 (is (seon.schema/valid-candidate-value?
@@ -355,9 +355,9 @@
               :seon.turn/id run-id
               :seon.cluster.agent/id agent-id
               :seon.cluster.eval/ordinal 0}
-             (work/next-agent-work @connection request)))
+             (turn/next-agent-work @connection request)))
       (terminal-receipt! connection 0 "{:introduced 'my.run}")
-      (let [derived (work/next-agent-work @connection request)]
+      (let [derived (turn/next-agent-work @connection request)]
         (is (= {:seon.turn.work/situation :generate
                 :seon.turn/id run-id
                 :seon.cluster.agent/id agent-id}
@@ -379,12 +379,12 @@
               :seon.turn/id run-id
               :seon.cluster.agent/id agent-id
               :seon.cluster.eval/ordinal 1}
-             (work/next-agent-work @connection request)))
+             (turn/next-agent-work @connection request)))
       (terminal-receipt! connection 1)
       (is (= {:seon.turn.work/situation :close
               :seon.turn/id run-id
               :seon.cluster.agent/id agent-id}
-             (work/next-agent-work @connection request)))
+             (turn/next-agent-work @connection request)))
       ;; ONE ENTITY PER (run, ordinal): the comment-only ordinal HAS an
       ;; evaluation entity — that is the durable input — and it never
       ;; acquires a terminal fact, which is what "never becomes work" means.
@@ -411,15 +411,15 @@
           (add-outside-trigger! connection message-id now)
           (closed-run! connection "refused-run" message-id results now)
           (let [db @connection
-                derived (work/next-agent-work db request)]
-            (is (empty? (work/unanswered-triggers db agent-id))
+                derived (turn/next-agent-work db request)]
+            (is (empty? (turn/unanswered-triggers db agent-id))
                 "the refused run answered its external trigger")
             (is (nil? derived)
                 "a refusal does not self-wake a corrective turn")
-            (is (false? (work/more-agent-work? db request)))
+            (is (false? (turn/more-agent-work? db request)))
             (add-outside-trigger! connection "concurrent-message"
                                   (Date. 1700000000001))
-            (let [next-trigger (work/next-agent-work @connection request)]
+            (let [next-trigger (turn/next-agent-work @connection request)]
               (is (= {:seon.turn.work/situation :open
                       :seon.cluster.agent/id agent-id
                       :seon.cluster.message/id "concurrent-message"}
@@ -476,14 +476,14 @@
                    "1")))
               (when closed? (close-run! connection))
               (let [db (db/db connection)
-                    derived (work/next-agent-work db request)
+                    derived (turn/next-agent-work db request)
                     situation (:seon.turn.work/situation derived)
                     answered-closed? (and closed? triggered? trigger-first?)]
                 (and
                  ;; TOTAL: only the four situations, or idle
                  (contains? #{:resume :call :open :close nil} situation)
                  ;; the rewake predicate never drifts from the derivation
-                 (= (some? derived) (work/more-agent-work? db request))
+                 (= (some? derived) (turn/more-agent-work? db request))
                  ;; a derived situation always validates its own schema
                  (or (nil? derived)
                      (seon.schema/valid-candidate-value?
@@ -517,18 +517,18 @@
       (testing "a wake newer than every turn is unanswered"
         (is (= [message-id]
                (mapv :seon.cluster.message/id
-                     (work/unanswered-triggers (db/db connection) agent-id))))
-        (is (= 0 (work/latest-answering-turn-t (db/db connection) agent-id))
+                     (turn/unanswered-triggers (db/db connection) agent-id))))
+        (is (= 0 (turn/latest-answering-turn-t (db/db connection) agent-id))
             "no turn, no basis"))
       (let [wake-t (:seon.wake/t
-                    (first (work/unanswered-wakes
+                    (first (turn/unanswered-wakes
                             (db/db connection) agent-id {})))]
         (open-run! connection {})
         (testing "opening a turn answers it — the turn's own transaction
                   is the basis, and no reference was written"
           (let [database (db/db connection)]
-            (is (empty? (work/unanswered-triggers database agent-id)))
-            (is (< wake-t (work/latest-answering-turn-t database agent-id))
+            (is (empty? (turn/unanswered-triggers database agent-id)))
+            (is (< wake-t (turn/latest-answering-turn-t database agent-id))
                 "the wake arrived before the turn that answered it")
             (is (nil? (:seon.turn/trigger
                        (db/pull database [:seon.turn/trigger]
@@ -536,7 +536,7 @@
                 "and no run attribute records the answer"))))
       (testing "a wake asserted after the turn is unanswered again"
         (close-run! connection)
-        (is (empty? (work/unanswered-triggers (db/db connection) agent-id))
+        (is (empty? (turn/unanswered-triggers (db/db connection) agent-id))
             "the first wake stays answered")
         (db/transact! connection
                     [{:seon.cluster.message/id "message-3"
@@ -546,7 +546,7 @@
                       :seon.cluster.message/at now}])
         (is (= ["message-3"]
                (mapv :seon.cluster.message/id
-                     (work/unanswered-triggers (db/db connection) agent-id))))))))
+                     (turn/unanswered-triggers (db/db connection) agent-id))))))))
 
 (deftest only-a-turn-whose-reply-came-from-a-model-attempt-answers
   ;; THE CLASS, measured live before it was fixed: a turn that never
@@ -576,9 +576,9 @@
            :seon.turn/closed-at now}])
         (is (= [message-id]
                (mapv :seon.cluster.message/id
-                     (work/unanswered-triggers (db/db connection) agent-id)))
+                     (turn/unanswered-triggers (db/db connection) agent-id)))
             "the message it had nothing to do with is still unanswered")
-        (is (zero? (work/latest-answering-turn-t (db/db connection)
+        (is (zero? (turn/latest-answering-turn-t (db/db connection)
                                                  agent-id))))
       (testing "a turn whose only attempt failed answers nothing"
         (db/transact!
@@ -595,17 +595,17 @@
                  :seon.ai.attempt/error [:seon.error/id "provider-failure"])])
         (is (= [message-id]
                (mapv :seon.cluster.message/id
-                     (work/unanswered-triggers (db/db connection) agent-id)))
+                     (turn/unanswered-triggers (db/db connection) agent-id)))
             "the wake was never shown to a model")
-        (is (zero? (work/latest-answering-turn-t (db/db connection)
+        (is (zero? (turn/latest-answering-turn-t (db/db connection)
                                                  agent-id))))
       (testing "the failed attempt cannot authorize another turn"
-        (is (nil? (work/next-agent-work (db/db connection) request))))
+        (is (nil? (turn/next-agent-work (db/db connection) request))))
       (testing "a turn whose attempt succeeded answers"
         (open-run! connection {})
         (let [database (db/db connection)]
-          (is (empty? (work/unanswered-triggers database agent-id)))
-          (is (pos? (work/latest-answering-turn-t database agent-id))))))))
+          (is (empty? (turn/unanswered-triggers database agent-id)))
+          (is (pos? (turn/latest-answering-turn-t database agent-id))))))))
 
 (deftest two-wakes-in-one-transaction-are-one-turn
   ;; THE CLASS: selecting ONE unanswered item per turn paid the model
@@ -626,21 +626,21 @@
          :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
          :seon.cluster.message/content "b"
          :seon.cluster.message/at now}])
-      (let [wakes (work/unanswered-wakes (db/db connection) agent-id {})]
+      (let [wakes (turn/unanswered-wakes (db/db connection) agent-id {})]
         (is (= 2 (count wakes)) "both are unanswered")
         (is (apply = (map :seon.wake/t wakes))
             "and they share one transaction, which is the whole point"))
       (is (= :open (:seon.turn.work/situation
-                    (work/next-agent-work (db/db connection)
+                    (turn/next-agent-work (db/db connection)
                                           {:seon.cluster.agent/id agent-id
                                            :seon.db.process/id process})))
           "one turn opens")
       (open-run! connection {})
       (close-run! connection)
       (let [database (db/db connection)]
-        (is (empty? (work/unanswered-wakes database agent-id {}))
+        (is (empty? (turn/unanswered-wakes database agent-id {}))
             "and that ONE turn answered both")
-        (is (nil? (work/next-agent-work database
+        (is (nil? (turn/next-agent-work database
                                         {:seon.cluster.agent/id agent-id
                                          :seon.db.process/id process}))
             "no second paid call")))))
@@ -662,13 +662,13 @@
          :seon.cluster.message/at (Date. 1700000000002)}])
       (is (= ["mid-turn"]
              (mapv :seon.cluster.message/id
-                   (work/unanswered-triggers (db/db connection) agent-id)))
+                   (turn/unanswered-triggers (db/db connection) agent-id)))
           "it is newer than the open turn's own transaction")
       (close-run! connection)
       (is (= {:seon.turn.work/situation :open
               :seon.cluster.agent/id agent-id
               :seon.cluster.message/id "mid-turn"}
-             (work/next-agent-work (db/db connection)
+             (turn/next-agent-work (db/db connection)
                                    {:seon.cluster.agent/id agent-id
                                     :seon.db.process/id process}))
           "and it opens the next turn"))))
@@ -682,10 +682,10 @@
     (fn [connection]
       (configure-cap! connection 2)
       (add-outside-trigger! connection "human-1" now)
-      (is (zero? (work/episode-runs (db/db connection) agent-id))
+      (is (zero? (turn/episode-runs (db/db connection) agent-id))
           "an outside wake arrived and no turn has answered it")
       (closed-run! connection "turn-1" "human-1" [1] now)
-      (is (= 1 (work/episode-runs (db/db connection) agent-id)))
+      (is (= 1 (turn/episode-runs (db/db connection) agent-id)))
       (closed-run! connection "turn-2" "human-1" [1] now)
       ;; an agent-sent message, asserted AFTER the second turn: an
       ;; INSIDE wake by its own declaration, unanswered by `:t`
@@ -697,24 +697,24 @@
          :seon.cluster.message/content "keep going"
          :seon.cluster.message/at (Date. 1700000000002)}])
       (let [database (db/db connection)]
-        (is (= 2 (work/episode-runs database agent-id))
+        (is (= 2 (turn/episode-runs database agent-id))
             "the inside wake did not refill the bound")
-        (is (nil? (work/next-agent-work database
+        (is (nil? (turn/next-agent-work database
                                         {:seon.cluster.agent/id agent-id
                                          :seon.db.process/id process}))
             "AT the cap an inside wake opens nothing — this is what stops
              a fault about an agent's own code looping forever")
         (is (= ["self-1"]
                (mapv :seon.cluster.message/id
-                     (work/deferred-triggers database agent-id)))
+                     (turn/deferred-triggers database agent-id)))
             "it is deferred, and the deferral is a derivation with
              nothing stored"))
       (my.agent/settings! {:seon.config.run/max-episode-runs 3} connection agent-id)
       (is (= :open (:seon.turn.work/situation
-                    (work/next-agent-work @connection request)))
+                    (turn/next-agent-work @connection request)))
           "the agent component override changes the live admission bound")
       (my.agent/settings! {:seon.config.run/max-episode-runs 2} connection agent-id)
-      (is (nil? (work/next-agent-work @connection request)))
+      (is (nil? (turn/next-agent-work @connection request)))
       (db/transact!
        connection
        [{:seon.cluster.message/id "human-2"
@@ -722,10 +722,10 @@
          :seon.cluster.message/content "new instruction"
          :seon.cluster.message/at (Date. 1700000000003)}])
       (let [database (db/db connection)]
-        (is (zero? (work/episode-runs database agent-id))
+        (is (zero? (turn/episode-runs database agent-id))
             "an outside wake ARRIVING is the reset; there is no reset code")
         (is (= :open (:seon.turn.work/situation
-                      (work/next-agent-work
+                      (turn/next-agent-work
                        database {:seon.cluster.agent/id agent-id
                                  :seon.db.process/id process})))
             "and the agent hears it")))))
@@ -742,5 +742,5 @@
                       :seon.cluster.message/at at}]))
       (is (= ["m-1" "m-2" "m-3"]
              (mapv :seon.cluster.message/id
-                   (work/unanswered-triggers (db/db connection) agent-id)))
+                   (turn/unanswered-triggers (db/db connection) agent-id)))
           "commit order is not arrival order; the fact carries the time"))))

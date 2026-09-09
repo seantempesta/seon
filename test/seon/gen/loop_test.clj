@@ -32,9 +32,9 @@
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.cluster.loop :as cluster.loop]
+            [seon.turn :as turn]
             [seon.cluster.message :as message]
-            [seon.cluster.work :as work]
+
             [seon.config :as config]
             [seon.flow :as seon.flow]
             [seon.render :as render]
@@ -237,14 +237,14 @@
           (let [at (Date. (+ (inst-ms now) (* 1000 (long passes))))
                 work (some (fn [agent-id]
 
-                             (work/next-agent-work
+                             (turn/next-agent-work
                               @connection
                               {:seon.cluster.agent/id agent-id
                                :seon.db.process/id process
                                :seon.turn.work/now at}))
                            (agent-ids @connection))]
             (when work
-              (cluster.loop/turn {:seon.turn.loop/cluster cluster
+              (turn/turn {:seon.turn.loop/cluster cluster
                                   :seon.turn.work/next work}
                                  at)
               (recur (inc passes))))))
@@ -378,7 +378,7 @@
   (into {}
         (map (juxt :seon.cluster.eval/ordinal
                    :seon.turn.work/form-state))
-        (:seon.turn.work/forms (work/plan-settlement db run-id))))
+        (:seon.turn.work/forms (turn/plan-settlement db run-id))))
 
 (defn- ambiguous-identities
   "Identity strings this database gives to more than one entity.
@@ -512,9 +512,9 @@
 
          (testing "each red form is addressed to the agent that owns the
                    namespace it was written in"
-           (is (= #{["alpha" (work/problem-id run-id 2)]
-                    ["beta" (work/problem-id run-id 5)]
-                    ["planner" (work/problem-id run-id 5)]}
+           (is (= #{["alpha" (turn/problem-id run-id 2)]
+                    ["beta" (turn/problem-id run-id 5)]
+                    ["planner" (turn/problem-id run-id 5)]}
                   (assignments db run-id))
                "the two repairs follow parse-time ownership; beta's
                 ordinary transcript includes the problem identity, so its
@@ -528,7 +528,7 @@
                                       [?about :seon.cluster.eval/id ?receipt-id]
                                       [?m :seon.cluster.message/about ?about
                                        ?tx]]
-                                    db (work/problem-id run-id 2))]
+                                    db (turn/problem-id run-id 2))]
              (is (= [2]
                     (db/q '[:find [?ordinal ...]
                            :in $ ?tx
@@ -578,7 +578,7 @@
          (testing "the plan is NOT settled, and no agent's completion
                    can make it so"
            (is (false? (:seon.turn.work/settled?
-                        (work/plan-settlement db run-id))))
+                        (turn/plan-settlement db run-id))))
            (is (some? (db/q '[:find ?closed .
                              :in $ ?run-id
                              :where
@@ -594,7 +594,7 @@
            ;; for reasons that have nothing to do with it. Here the
            ;; drive has stopped, so the basis is decisive.
            (let [before (:max-tx @connection)]
-             (work/plan-settlement @connection run-id)
+             (turn/plan-settlement @connection run-id)
              (is (= before (:max-tx @connection))
                  "plan settlement is a pure function of a database
                   value; deriving it can never commit")))
@@ -610,7 +610,7 @@
                             [?m :seon.cluster.message/to ?to]
                             [?to :seon.cluster.agent/id "alpha"]
                             [?m :seon.cluster.message/id ?id]]
-                          db (work/problem-id run-id 2))))
+                          db (turn/problem-id run-id 2))))
                "the assignment is one hop from the human-shaped goal")))))))
 
 (deftest a-result-built-on-a-failed-form-is-red-and-routes
@@ -653,7 +653,7 @@
               routes like any other red form — no string matching, and no
               run completing on a value that references nothing")
          (is (false? (:seon.turn.work/settled?
-                      (work/plan-settlement db run-id)))))))))
+                      (turn/plan-settlement db run-id)))))))))
 
 (deftest a-silent-owner-leaves-the-plan-unsettled-forever
   ;; S6's adversarial history, as a required proof: the owner that never
@@ -691,7 +691,7 @@
                      db))
              "the planner said it was finished")
          (is (false? (:seon.turn.work/settled?
-                      (work/plan-settlement db run-id)))
+                      (turn/plan-settlement db run-id)))
              "and the facts contradict it — an unsettled routed problem
               keeps the plan open no matter what the reply says")
          (is (= #{:routed}

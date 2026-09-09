@@ -33,3 +33,15 @@ Test-base/fixture acquisition and the Konserve/Datahike store seam.
 Probe simultaneous canonical-base acquisitions with bounded completion;
 identify the file mutation owner and preserve all reachable keys throughout
 connection. A passing isolated rerun alone does not establish parallel safety.
+
+## Recurrence in the namespace move — 2026-09-09
+
+Snapshot `e9d7f62a43db5bf3e2e9a20591d37c9a224aa7459a02284ab3cce60e21ae2de2`,
+root `tmp/test-runs/run.krpVAa`: `seon.turn-work-test/situation-totality-property`
+raised `NoSuchFileException` for base store key
+`40c4dc77-b976-4c53-a5d6-9a7f212d48b9`, through the same filestore migration,
+tiered sync, and connector frames. Log `tmp/turn-namespace-gate.log:376`.
+This invocation used one worker but overlapped a separate one-worker platform
+gate. Its isolated confirmation passed. The removing actor remains unknown;
+this evidence does not attribute the loss to either runner or to GC.
+The lane repeats the final gate and platform serially after the source fix.

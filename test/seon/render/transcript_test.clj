@@ -10,8 +10,8 @@
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.agent :as agent]
-            [seon.cluster.loop :as loop]
-            [seon.turn :as run]
+            [seon.turn :as turn]
+
             [seon.config :as config]
             [seon.render :as render]
             [seon.render.block :as block]
@@ -80,10 +80,10 @@
         {:seon.render.transcript/selected-run-id "selected-run"
          :seon.render.transcript/selected-agent-id "selected-agent"
          :seon.render.transcript/selected-run-error nil})
-       #'run/render-ai (constantly "Run selected-run · opened at epoch")
+       #'turn/render-ai (constantly "Run selected-run · opened at epoch")
        #'transcript/render-ai
        (constantly "my.agents.selected=> (+ 1 2)\n3")
-       #'run/render-html
+       #'turn/render-html
        (constantly [:article {:class "seon-run-status"} "Run selected-run"])
        #'transcript/render-html
        (constantly [:section {:class "seon-transcript"} "(+ 1 2)\n3"])}
@@ -1290,7 +1290,7 @@
                       "(set! *print-length* 2)\n"
                       "(vec (range 40))\n"
                       "(/ 1 0)")
-           sources (loop/planned-sources
+           sources (turn/planned-sources
                     reply
                     'my.agents.one-grammar
                     (:seon.config.eval.result/max-source
@@ -1304,7 +1304,7 @@
                  [sci.eval/evaluate (fn [request]
                                       (swap! evaluations inc)
                                       (original-evaluate request))]
-                 (loop/evaluate-sources
+                 (turn/evaluate-sources
                   {:seon.turn.loop/cluster cluster
                    :seon.db/db database
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
@@ -1312,7 +1312,7 @@
                    :seon.cluster.eval/ordinal 0
                    :seon.ns/name 'my.agents.one-grammar
                    :seon.cluster.reply/sources sources}))
-               prepared (run/record-evaluated-tx
+               prepared (turn/record-evaluated-tx
                          {:seon.turn.loop/cluster cluster
                           :seon.db/db database
                           :seon.turn/id "one-grammar-stored"
@@ -1352,7 +1352,7 @@
                                      [:db/id :seon.cluster.eval/id :seon.cluster.eval/result-edn
                                       :seon.cluster.eval/result-blob]
                                      [:seon.cluster.eval/id
-                                      (run/receipt-identity
+                                      (turn/receipt-identity
                                        "one-grammar-stored" ordinal)])]
                          (when (and (int? (:db/id stored))
                                     (admit/restorable-node
@@ -1469,7 +1469,7 @@
              (let [setter (db/pull stored-db
                                    [:seon.print/length :seon.print/level]
                                    [:seon.cluster.eval/id
-                                    (run/receipt-identity
+                                    (turn/receipt-identity
                                      "one-grammar-stored" 3)])]
                (is (= 2 (:seon.print/length setter))
                    "the evaluation that set *print-length* stores what it set"))
@@ -1482,7 +1482,7 @@
              (let [follower (db/pull stored-db
                                      [:seon.print/length]
                                      [:seon.cluster.eval/id
-                                      (run/receipt-identity
+                                      (turn/receipt-identity
                                        "one-grammar-stored" 4)])
                    clipped (nth stored-bytes 4)]
                (is (= 2 (:seon.print/length follower))

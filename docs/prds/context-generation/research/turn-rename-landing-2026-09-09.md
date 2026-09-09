@@ -1333,3 +1333,215 @@ context compaction at 10:24 UTC; no implementation continued past the bound.
 This commit owns the schema identity replacement, all its readers, the
 canonical agent fixture corrections above, and these evidence artifacts.
 The production namespace move remains sub-slice (b).
+
+## Slice 6(b–c): one turn namespace — 2026-09-09
+
+Started 10:24:13 UTC; deadline 10:54:13 UTC. Entering HEAD `7004818dc` is
+slice 6(a), green before its bound; **RESET NEEDED for `7004818dc`**.
+
+Choice: merge work derivation, loop transitions, and the per-agent Flow
+step into `seon.turn`, exactly as the PRD §0c rename table says: “one owner
+`seon.turn`.” Section 16 already places the debug controls there. A new
+`seon.turn.loop` Clojure namespace would retain the split the table removes.
+The schema families from (a) stay `seon.turn.loop/*` and `seon.turn.work/*`.
+No attribute semantics or production execution behavior changes in (b).
+
+The moved proc retains every `seon.cluster.agent/*` lifecycle key, its four
+Flow arities, completion bound, and Var reference from the agent blueprint.
+The shared completion diagnostic is a contracted value function; the caller
+still constructs the same exception. The existing open-turn query replaces
+the duplicate private query. Equal private value readers merge once.
+
+Dependency ledger: Flow's lifecycle arities and Var-driven transforms
+(`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:168`,
+`src/seon/flow.clj:123`); first-party blueprint now references `seon.turn/step`.
+Bootstrap, prompt, context, problems, and SCI evaluation already read turn
+facts; their execution entries resolve at the call boundary to avoid require
+cycles, following the existing virtual/system-turn idiom. Source-string
+aliases such as agent-authored `(run/complete ...)` remain unchanged.
+
+The AGENTS vocabulary row lands with actual proc, work, transition and graph
+links in this same commit; it does not claim the full additive-context
+algorithm. The stale claim that the production turn enters the work launcher
+is falsified at the actual SCI call and recorded separately in
+`docs/seon/issues/turn-evaluations-bypass-work-submission.md`.
+
+Live default before publication: PID 77143, adopted and published both
+`6aa12c95-3d0a-523e-8163-d25fed55798c`; `seon.turn/step` absent. This names
+the old-program boundary, not proof of these edits. Default lifecycle was
+not operated by this lane.
+
+Fast-loop probe: **81 tests / 685 assertions, zero failures/errors**, including
+the relocated loop/work namespaces, canonical agent fixture, and turn writer.
+The virtual-turn regression retains cold **3 transactions / 23 datoms** and
+warm three-form **3 / 45**, with matching evaluation IDs across reforks.
+The prior failed owned schema gate roots were removed after confirming no
+process held their paths; inherited `build/`, `workers/`, and
+`config/virtual-turns.edn` remain untouched.
+
+Fresh-reset proof uses the committed schema seed probe unchanged, on owned
+root `tmp/turn-namespace-root`, cluster `turn-schema`, published source
+`6aa134ee-8491-5bd4-92d7-2312ef98f6f7` (digest
+`f52ab933d6f2ae15f67a081eb04a0689e25b74c65fc643baa74fe5152d0370a3`).
+Global no-provider config precedes agent creation, and the settings component
+is installed before the maintained Juniper fixture. Immediate result:
+seeded true, no-provider true, attempts 0, faults 0. Later:
+`seon.turn/step` loaded, four Juniper evaluations, attempts 0. This ordinary
+fresh fork has no development-adoption receipt; its published base is named
+above. Scratch debug HTTP **200 / 42,913 bytes / 0.890051 seconds**.
+Default's still-earlier page returned **200 / 42,898 bytes / 0.055984 seconds**.
+
+Browser-paint evidence is unavailable: CUA lists no browser surfaces and
+`cua.getApp("com.google.Chrome")` returns `cgWindowNotFound`. HTTP and
+renderer regressions do not stand in for observed paint. Scratch remains
+reported degraded; this rename does not claim its older evaluation faults
+are resolved.
+
+The final gate also includes the full `seon.cluster.boot-test` namespace,
+because its reload-order regression must lose the duplicate namespace left
+by the merge. The earlier five-namespace gate remains supplementary.
+
+The first in-place publication refused while compiling the agent graph:
+`Unable to resolve var: turn/step in this context` at
+`seon/cluster/agent.clj:423:15`. Inspection found five unnecessary `:as-alias`
+requires on the merged namespace. They were unused (all crossing calls were
+already fully qualified `requiring-resolve`), but the program graph recorded
+them as require edges, creating cycles for reload ordering. Removing those
+unused declarations preserves execution behavior and the actual dependency
+DAG. The final gate and publication retry below use that correction.
+
+The first five-namespace gate was **138 tests / 1,035 assertions, one failure**.
+Its generated work test encountered a missing *published-base store file*,
+not a work-derivation counterexample: key
+`40c4dc77-b976-4c53-a5d6-9a7f212d48b9` in cache
+`e9d7f62a43db5bf3e2e9a20591d37c9a224aa7459a02284ab3cce60e21ae2de2`.
+The isolated confirmation passed. Exact connection stack and concurrent-run
+qualification are appended to the existing
+`docs/seon/issues/parallel-test-base-connect-can-lose-a-filestore-key.md`.
+No foreign session or fixture owner was edited. The final gate uses one
+worker, with its separate platform run serialized after it.
+
+Owned scratch cleanup: PID 25334 terminated through root-scoped `down`,
+operator reported flock free, process table confirmed exit, and
+`tmp/turn-namespace-root` was deleted without following symlinks. No default
+lifecycle operation was issued.
+
+The corrected publication converged: adopted and published both
+`6aa136b4-9bf0-5042-bed0-dda843e7ad25`, source digest
+`23ffcf62691cb471202f0890f7605ac20b170939b45e396d792debdb4e521701`.
+The log orders `seon.turn` before `seon.cluster.agent`, and `seon.turn/step`
+resolves in default. Default still holds the old cluster-handle key.
+Post-adoption debug HTTP is **500 / 314 bytes / 0.108573 seconds**:
+`seon.turn/preview-sources` refuses missing nested inputs under the renamed
+cluster key. **RESET NEEDED for `7004818dc` still applies**, despite the
+successful source adoption. The existing captured-service-input issue has
+this exact recurrence; the fresh-construction HTTP 200 proof is above.
+
+The optional six-namespace sweep on the superseded alias-bearing candidate
+(`run.IcaLSN`) was stopped through its launcher after collecting boot-test
+confirmations; it is not a current-bytes gate or a full-boot green claim.
+Confirmed red there before stopping: `a-delayed-stop-never-kills-a-replacement`,
+`a-failed-stop-remains-addressable-and-retryable`,
+`a-generated-prefix-resumes-on-the-same-run-after-jvm-kill`,
+`boot-order-completes-in-one-start`, and
+`development-adoption-targets-one-of-two-cohosted-clusters`,
+`explicit-refork-destroys-the-old-branch-and-forks-current-source`, and
+`incompatible-sovereign-schema-refusal-steers-the-operator` (all under
+`seon.cluster.boot-test`). The runner was confirming
+`incremental-source-refresh-preserves-agreement-across-real-edits` when stopped.
+The redundant six-namespace current-candidate launch `run.MPN2XC` was also
+stopped before its tally. Neither interrupted run is reported green, and no
+foreign cause is inferred from them. Their launchers exited 143.
+
+The final committed-byte gate is the explicit turn/loop/work/agent/web
+selection below, plus platform. The changed reload-order fixture's purpose
+is additionally verified live by the corrected declaration ordering and
+successful default adoption; the entire boot namespace remains outside this
+final gate. No production behavior is changed to accommodate old assertions.
+
+The three superseded owned gate roots (`run.krpVAa`, `run.IcaLSN`,
+`run.MPN2XC`) were removed after their launchers exited and the process table
+showed no holders. Their logs and the exact state above retain the evidence.
+
+Final selected current-bytes gate completed **10:44:31 UTC**:
+**138 tests / 1,035 assertions, zero failures/errors**, using
+`SEON_TEST_WORKERS=1 bin/test --paths <this commit's paths> --
+seon.turn-loop-test seon.turn-work-test seon.cluster.agent-test seon.turn-test
+seon.render.web-test`. The successful runner root removed itself. The
+separate final platform command starts only after that runner has exited.
+
+Exact owned paths for the namespace/vocabulary commit:
+
+```text
+.agents/skills/llm-providers/SKILL.md
+.agents/skills/seon-flow-architecture/references/workloads-and-scheduling.md
+AGENTS.md
+docs/prds/context-generation/research/turn-rename-landing-2026-09-09.md
+docs/seon/issues/development-adoption-retains-old-web-service-inputs.md
+docs/seon/issues/parallel-test-base-connect-can-lose-a-filestore-key.md
+resources/seon/schemas/seon.turn.loop.edn
+resources/seon/schemas/seon.wake.edn
+src/seon/ai.clj
+src/seon/bootstrap.clj
+src/seon/cluster.clj
+src/seon/cluster/agent.clj
+src/seon/cluster/loop.clj
+src/seon/cluster/wake.clj
+src/seon/cluster/work.clj
+src/seon/context.clj
+src/seon/eval/drive.clj
+src/seon/oversight.clj
+src/seon/problems.clj
+src/seon/render/transcript.clj
+src/seon/render/web.clj
+src/seon/turn.clj
+test/seon/ai_stream_fold_test.clj
+test/seon/background_test.clj
+test/seon/blob_threshold_test.clj
+test/seon/bootstrap_test.clj
+test/seon/cluster/agent_test.clj
+test/seon/cluster/armed_test.clj
+test/seon/cluster/boot_test.clj
+test/seon/cluster/evaluate_sources_test.clj
+test/seon/cluster/loop_test.clj
+test/seon/cluster/message_test.clj
+test/seon/cluster/problem_routing_test.clj
+test/seon/cluster/prompt_test.clj
+test/seon/cluster/resume_artifact_routing_test.clj
+test/seon/cluster/turn_test.clj
+test/seon/cluster/wake_test.clj
+test/seon/cluster/work_test.clj
+test/seon/concurrency_independence_test.clj
+test/seon/concurrency_streams_test.clj
+test/seon/config_application_test.clj
+test/seon/db_test.clj
+test/seon/effect_test.clj
+test/seon/flow_test.clj
+test/seon/fn_test.clj
+test/seon/gen/loop_test.clj
+test/seon/no_provider_test.clj
+test/seon/program_test.clj
+test/seon/receipt_write_carrier_test.clj
+test/seon/render/transcript_test.clj
+test/seon/render_coverage_test.clj
+test/seon/render_source_test.clj
+test/seon/schedule_test.clj
+test/seon/schema/datahike_test.clj
+test/seon/schema_usage_guard_test.clj
+test/seon/sci/eval_test.clj
+test/seon/turn_loop_test.clj
+test/seon/turn_work_test.clj
+docs/seon/issues/turn-evaluations-bypass-work-submission.md
+docs/seon/issues/browser-ui-observation-has-no-accessible-window.md
+```
+
+Final serialized platform gate: **83 tests / 490 assertions, zero
+failures/errors**, launcher exit 0; successful root `run.HIWn3u` removed
+itself. Every owned launcher and scratch JVM is now ended. Both required
+sub-slices reached their selected green gates before their 30-minute bounds.
+Sub-slice (b) adds no schema incompatibility beyond `7004818dc`; its namespace,
+proc, callers, tests, and landed AGENTS vocabulary row commit together.
+
+Read the named landing authorities and requested turn PRD sections end to
+end, including the binding rename table and §16; applied the repository
+Clojure, schema, Datahike, fixture, REPL, and Flow instructions.

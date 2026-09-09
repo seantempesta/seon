@@ -21,7 +21,7 @@
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.cluster.agent :as agent]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
             [seon.blob :as blob]
             [seon.db :as db]
             [seon.env :as env]
@@ -1005,7 +1005,7 @@
            admitted)
         "the real evaluation preserves a value-level marker; no error string
          is parsed")
-    (is (work/unbound-value? admitted))
+    (is (turn/unbound-value? admitted))
     (is (nil? (:seon.cluster.eval/error bare))
         "sci produced a value; E2-PRIME, not the evaluator, classifies it red")))
 

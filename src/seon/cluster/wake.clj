@@ -95,12 +95,12 @@
   property lift (`seon.schema/canonical-schema-rows` ->
   `seon.schema.datahike/storable-properties-in`), so declaring a new
   wake source is one property in one schema resource, and this
-  derivation, `route!`'s dispatch and `seon.cluster.work`'s answeredness
+  derivation, `route!`'s dispatch and `seon.turn`'s answeredness
   all learn it with no code change.
 
   The disjointness property (C2) still needs two COMPUTED sets to
   compare rather than one list to believe — this against
-  `seon.cluster.loop/committed-attributes` — and both sides are now
+  `seon.turn/committed-attributes` — and both sides are now
   derivations rather than one derivation and one hand list.
 
   Reads a database value because the declaration IS a fact. Direct
@@ -145,7 +145,7 @@
   repair carries `:seon.error/steward`, and an effect the agent itself
   requested carries `:seon.effect/to`. One query over
   `:seon.wake/inside`, so the rule that used to be a hard-coded
-  from-or-about pair inside `seon.cluster.work` is now a declaration
+  from-or-about pair inside `seon.turn` is now a declaration
   each family owns."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   :seon.cluster.wake/attributes]}
@@ -289,7 +289,7 @@
   simply has no entry and the armer belt takes the wake. A channel
   still REACHABLE through the routing map and already closed was
   therefore closed by the one thing that closes a mailbox in place: the
-  terminal-settlement fence in `seon.cluster.loop`, which stops the
+  terminal-settlement fence in `seon.turn`, which stops the
   agent taking another pass over its still-running receipt before boot
   recovery marks it interrupted. `agent/fenced-route?` derives that
   exact delivery-side state; `agent/fenced?` is its management view.
@@ -413,7 +413,7 @@
                   :seon.cluster.wake/route ::search}))))
            ;; A DECLARATION CHANGE RE-DERIVES THE SET, HERE, ON THE REPORT'S
            ;; OWN `:db-after`. The set used to be frozen at registration
-           ;; while `seon.cluster.work` re-derived per call, so one live
+           ;; while `seon.turn` re-derived per call, so one live
            ;; schema change left two answers to one question and an openable
            ;; wake nothing would ever deliver — with no refusal and no fault
            ;; (measured: verify-listened-attributes-2026-09-08 §1c). The

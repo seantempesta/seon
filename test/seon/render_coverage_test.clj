@@ -5,7 +5,7 @@
             [seon.ai.tokens :as tokens]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]

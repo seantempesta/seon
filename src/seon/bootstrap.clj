@@ -4,7 +4,7 @@
             [my.plan :as plan]
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.db :as db]
             [seon.id :as id]
             [seon.render :as render]
@@ -43,7 +43,7 @@
        :seon.error/message (str "No agent has id " (pr-str agent-id) ".")
        :seon.error/data {:seon.cluster.agent/id agent-id}}
       (let [namespace (:seon.cluster.agent/namespace agent)
-            run (when-let [id (run/open-for-agent database [:seon.cluster.agent/id agent-id])]
+            run (when-let [id (turn/open-for-agent database [:seon.cluster.agent/id agent-id])]
                   (db/pull database
                            '[:seon.turn/id
                              {:seon.turn/trigger [:seon.cluster.message/id]}]
@@ -55,7 +55,7 @@
                                [?config :seon.config.run/max-episode-runs ?limit]]
                       database))
             turns-used
-            ((requiring-resolve 'seon.cluster.work/episode-runs)
+            ((requiring-resolve 'seon.turn/episode-runs)
              database agent-id)
             ;; UNREAD AND THE TURN BOUND ARE ONE DERIVATION, BY `:t`.
             ;; A message is unanswered exactly while its transaction is
@@ -64,7 +64,7 @@
             ;; agent. Neither is stored and neither is counted here.
             unread
             (count ((requiring-resolve
-                     'seon.cluster.work/unanswered-triggers)
+                     'seon.turn/unanswered-triggers)
                     database agent-id))]
         (cond->
          {:seon.cluster.agent/id agent-id
@@ -744,7 +744,7 @@
                  :seon.ns/name 'my.agents.root}))]
     (if (or already-open? (empty? sources))
       []
-      (run/system-run-tx
+      (turn/system-run-tx
        database
        {:seon.cluster.agent/id "root"
         :seon.turn/id run-id
@@ -797,7 +797,7 @@
          :seon.cluster.message/content (task-message)
          :seon.cluster.message/at opened-at}]
     (into [namespace-row message-row]
-          (run/generated-run-tx
+          (turn/generated-run-tx
            db
            {:seon.cluster.agent/id agent-id
             :seon.turn/id id

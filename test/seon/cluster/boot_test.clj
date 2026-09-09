@@ -24,9 +24,9 @@
             [seon.cluster.source :as source]
             [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.cluster.store :as store]
-            [seon.cluster.work :as work]
+
             [seon.config :as config]
             [seon.db :as db]
             [seon.fn :as seon.fn]
@@ -712,7 +712,7 @@
                (let [outcome (original-transact! conn tx-data)]
                  (deliver transaction-outcome outcome)
                  outcome))
-             work/next-agent-work
+             turn/next-agent-work
              (fn [_db _request]
                (db/transact! connection
                                 [{:seon.cluster.agent/id "root"}])
@@ -980,18 +980,18 @@
           "an existing namespace without classpath source cannot be required")
       (is (#'cluster/reloadable-namespace? 'seon.cluster))
       (finally (remove-ns namespace-name))))
-  ;; The observed failure: alphabetical reload put seon.cluster.loop before
-  ;; seon.turn, and the reloaded loop failed on run's new Var.
+  ;; Dependencies reload before their consumers after the turn owners merge.
+
   (testing "a changed callee reloads before every changed caller, ties by name"
-    (is (= '[my.plan seon.turn seon.cluster.loop seon.cluster]
+    (is (= '[my.plan seon.turn seon.cluster]
            (cluster/reload-order
-            '#{seon.cluster.loop seon.cluster my.plan seon.turn}
-            '{seon.cluster.loop #{seon.turn}
-              seon.cluster #{seon.cluster.loop seon.turn seon.db}}))))
+            '#{seon.turn seon.cluster my.plan}
+            '{seon.turn #{my.plan}
+              seon.cluster #{seon.turn seon.db}}))))
   (testing "requires outside the changed set do not block reload"
-    (is (= '[seon.cluster.loop]
-           (cluster/reload-order '#{seon.cluster.loop}
-                                 '{seon.cluster.loop #{seon.turn}}))))
+    (is (= '[seon.turn]
+           (cluster/reload-order '#{seon.turn}
+                                 '{seon.turn #{seon.turn}}))))
   (testing "no edges is plain name order and an empty set is empty"
     (is (= '[a.b a.c] (cluster/reload-order '#{a.c a.b} {})))
     (is (= [] (cluster/reload-order #{} {})))))
@@ -1771,7 +1771,7 @@
                         (db/pull @connection '[*]
                                  [:seon.turn/id "run-crashed"]))))
             (is (str/includes?
-                 (run/render-ai
+                 (turn/render-ai
                   (assoc (db/pull @connection '[*]
                                   [:seon.turn/id "run-crashed"])
                          :seon.db/db @connection))

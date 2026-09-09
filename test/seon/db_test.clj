@@ -5,7 +5,7 @@
             [datahike.pull-api :as pull-api]
             [my.message :as message]
             [seon.config :as config]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.db :as db]
             [seon.instrument :as instrument]
             [seon.render :as render]
@@ -182,7 +182,7 @@
                    [{:seon.cluster.agent/id "busy-agent"}])
      (is (map? (db/transact!
                 connection
-                (run/open-tx
+                (turn/open-tx
                  {:seon.turn/id "already-open"
                   :seon.turn/agent
                   [:seon.cluster.agent/id "busy-agent"]
@@ -190,7 +190,7 @@
      (let [result
            (db/transact!
             connection
-            (run/open-tx
+            (turn/open-tx
              {:seon.turn/id "contending-run"
               :seon.turn/agent
               [:seon.cluster.agent/id "busy-agent"]

@@ -26,7 +26,7 @@
             [seon.cluster.process :as cluster.process]
             [seon.cluster.wake :as wake]
             [seon.error :as error]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test.check.generators :as gen]
@@ -2091,7 +2091,7 @@
         operations (into (schedule/recover-tx db now)
                          (mapcat
                           (fn [run-id]
-                            (run/recover-tx
+                            (turn/recover-tx
                              {:seon.turn/id run-id
                               :seon.turn/now now})))
                          open-runs)]

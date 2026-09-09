@@ -4,7 +4,7 @@
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.store :as store]
             [seon.db :as db]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
             [seon.id :as id]
@@ -431,7 +431,7 @@
            [:seon.ns/name namespace-name]}])
         (db/transact!
          connection
-         (run/open-tx
+         (turn/open-tx
           {:seon.turn/id run-id
            :seon.turn/agent
            [:seon.cluster.agent/id "call-edges-agent"]
@@ -439,7 +439,7 @@
 
         (db/transact!
          connection
-         (run/plan-tx
+         (turn/plan-tx
           {:seon.turn/id run-id
            :seon.db.process/id process
            :seon.turn/starting-ns [:seon.ns/name namespace-name]
@@ -448,13 +448,13 @@
            [{:seon.cluster.eval/source source}]}))
         (db/transact!
          connection
-         (run/receipt-start-tx
+         (turn/receipt-start-tx
           {:seon.turn/id run-id
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (java.util.Date.)}))
         (db/transact!
          connection
-         (run/receipt-settle-tx
+         (turn/receipt-settle-tx
           @connection
           {:seon.turn/id run-id
            :seon.cluster.eval/ordinal 0
@@ -470,7 +470,7 @@
                                    :seon.test/subject}
                                  ?attribute)]]
                    @connection
-                   (run/receipt-identity run-id 0)))
+                   (turn/receipt-identity run-id 0)))
             "ordinary eval rows carry no duplicate program-graph facts")))))
 
 (deftest settled-agent-form-has-static-index-edge-parity
@@ -511,7 +511,7 @@
              [:seon.ns/name namespace-name]}])
           (db/transact!
            connection
-           (run/open-tx
+           (turn/open-tx
             {:seon.turn/id "settlement-parity-run"
              :seon.turn/agent
              [:seon.cluster.agent/id "settlement-parity-agent"]
@@ -519,7 +519,7 @@
 
           (db/transact!
            connection
-           (run/plan-tx
+           (turn/plan-tx
             {:seon.turn/id "settlement-parity-run"
              :seon.db.process/id "settlement-parity-process"
              :seon.turn/starting-ns
@@ -529,14 +529,14 @@
              [{:seon.cluster.eval/source source}]}))
           (db/transact!
            connection
-           (run/receipt-start-tx
+           (turn/receipt-start-tx
             {:seon.turn/id "settlement-parity-run"
              :seon.cluster.eval/ordinal 0
              :seon.cluster.eval/at (java.util.Date.)}))
           (let [settlement
                 (db/transact!
                  connection
-                 (run/receipt-settle-tx
+                 (turn/receipt-settle-tx
                   @connection
                   {:seon.turn/id "settlement-parity-run"
                    :seon.cluster.eval/ordinal 0
@@ -590,7 +590,7 @@
                             "sample.settlement-parity/contracted")
                 form-facts
                 (edge-facts :seon.cluster.eval/id
-                            (run/receipt-identity "settlement-parity-run" 0))]
+                            (turn/receipt-identity "settlement-parity-run" 0))]
             (is (= expected program-facts))
             (is (nil? form-facts)
                 "the definition row is the sole owner of graph facts")
@@ -601,7 +601,7 @@
                            [?form :seon.cluster.eval/id ?form-id]
                            [?form :seon.cluster.eval/author ?author]]
                          @connection
-                         (run/receipt-identity
+                         (turn/receipt-identity
                           "settlement-parity-run" 0)))
                 "the authored form and its queryable edges settle together")))))))
 
@@ -1457,15 +1457,15 @@
       (let [database @connection
             evaluate (production-callers database "seon.sci.eval/evaluate")
             sources (production-callers database
-                                        "seon.cluster.loop/evaluate-sources")
+                                        "seon.turn/evaluate-sources")
             previews (production-callers database
-                                         "seon.cluster.loop/preview-sources")]
+                                         "seon.turn/preview-sources")]
         (testing "the turn's edge to the evaluator is visible to the graph"
-          (is (contains? evaluate "seon.cluster.loop/evaluate-sources")
+          (is (contains? evaluate "seon.turn/evaluate-sources")
               (pr-str evaluate)))
         (testing "no second function evaluates agent source"
-          (is (= #{"seon.cluster.loop/resume-turn"
-                   "seon.cluster.loop/preview-sources"}
+          (is (= #{"seon.turn/resume-turn"
+                   "seon.turn/preview-sources"}
                  sources)
               (pr-str sources)))
         (testing "the page and system turn reuse the same evaluation path"

@@ -9,7 +9,7 @@
             [my.message :as my.message]
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render.transcript :as transcript]
@@ -133,7 +133,7 @@
                      database recipient)
                trigger-ids
                (mapv :seon.cluster.message/id
-                     (work/unanswered-triggers database recipient))
+                     (turn/unanswered-triggers database recipient))
                request (transcript-unit connection recipient)
                ai (transcript/render-ai request)
                html-ids (html-message-ids

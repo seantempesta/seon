@@ -32,7 +32,7 @@
             [org.httpkit.server :as http]
             [seon.ai :as ai]
             [seon.blob :as blob]
-            [seon.cluster.loop]
+            [seon.turn]
             [seon.config :as config]
             [seon.test-support :as support])
   (:import [java.util Date]))
@@ -346,7 +346,7 @@
             (db/transact! connection
                         [{:seon.cluster.agent/id "status-agent"}
                          {:seon.turn/id "status-run"}])
-            ((ns-resolve 'seon.cluster.loop 'record-attempt!)
+            ((ns-resolve 'seon.turn 'record-attempt!)
              {:seon.db/connection connection
               :seon.db.process/id "process/status-test"
               :seon.config.error/recurrence-limit 3
@@ -389,7 +389,7 @@
                           :seon.turn/id "reasoning-run"
                           :seon.cluster.agent/id "reasoning-agent"}]
         (doseq [[ordinal reasoning] [[0 inline-reasoning] [1 large]]]
-          ((ns-resolve 'seon.cluster.loop 'record-attempt!)
+          ((ns-resolve 'seon.turn 'record-attempt!)
            cluster
            (assoc base-request
                   :seon.ai.attempt/ordinal ordinal

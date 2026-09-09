@@ -6,7 +6,7 @@
             [clojure.test.check.properties :as prop]
             [malli.core :as m]
             [seon.db :as db]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.fn.schema-shape :as schema-shape]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -588,8 +588,8 @@
           (let [data (refusal-data
                       #(row-tx @connection {:seon.turn/id "absent"}
                                changed))]
-            (is (= ::run/refused (:seon.error/kind data)))
-            (is (= ::run/run-opening-basis-unreadable (:seon.turn/rule data))
+            (is (= :seon.turn/refused (:seon.error/kind data)))
+            (is (= :seon.turn/run-opening-basis-unreadable (:seon.turn/rule data))
                 "the refusal names the unreadable basis, not a concurrent definition")))
         (is (= (:seon.fn/source original)
                (:seon.fn/source
@@ -819,13 +819,13 @@
            :seon.test/source "(clojure.test/deftest same-name)"}])
         (db/transact!
          connection
-         (run/open-tx {:seon.turn/id "registration-delete"
+         (turn/open-tx {:seon.turn/id "registration-delete"
                        :seon.turn/agent
                        [:seon.cluster.agent/id "registration-test"]
                        :seon.turn/opened-at now}))
         (db/transact!
          connection
-         (run/receipt-start-tx
+         (turn/receipt-start-tx
           {:seon.turn/id "registration-delete"
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at now}))
@@ -836,7 +836,7 @@
                 "(ns-unmap 'my.agents.registration-test 'same-name)"
                 :seon.program/ns namespace-ref}
                deletion))
-        (db/transact! connection (run/receipt-settle-tx settlement))
+        (db/transact! connection (turn/receipt-settle-tx settlement))
         ;; Ruling 47 makes program identities permanent: ns-unmap retracts
         ;; definition facts, not the identity row (nor a retained ns ref).
         (doseq [[identity-attribute namespace-attribute]

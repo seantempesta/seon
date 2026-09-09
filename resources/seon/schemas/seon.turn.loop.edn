@@ -21,7 +21,7 @@
                       :seon.config/on-core-error]
                      [:seon.config.error/recurrence-limit
                       :seon.config.error/recurrence-limit]
-                     ;; the fault family's own bound. `seon.cluster.loop`,
+                     ;; the fault family's own bound. `seon.turn`,
                      ;; `seon.schedule` and `seon.cluster` all read it OFF
                      ;; THIS HANDLE and hand it to `seon.error/prepare`,
                      ;; whose contract requires an integer, so leaving it

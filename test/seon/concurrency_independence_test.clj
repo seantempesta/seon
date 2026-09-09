@@ -17,9 +17,9 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.cluster.loop :as loop]
-            [seon.turn :as run]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
+
+
             [seon.config :as config]
             [seon.db :as db]
             [seon.eval.drive :as drive]
@@ -214,7 +214,7 @@
         run-tx
         (mapcat
          (fn [spec]
-           (run/system-run-tx
+           (turn/system-run-tx
             database
             {:seon.cluster.agent/id (::agent-id spec)
              :seon.turn/id (::run-id spec)
@@ -244,7 +244,7 @@
         work-items
         (mapv
          (fn [spec]
-           (let [work-item (work/next-agent-work
+           (let [work-item (turn/next-agent-work
                             @connection
                             {:seon.cluster.agent/id (::agent-id spec)
                              :seon.db.process/id process})]
@@ -261,7 +261,7 @@
          completed
          (try
            {:seon.turn.loop/report
-            (loop/turn {:seon.turn.loop/cluster handle
+            (turn/turn {:seon.turn.loop/cluster handle
                         :seon.turn.work/next work-item}
                        (Date.))}
            (catch Throwable failure
@@ -451,7 +451,7 @@
       (is (= #{(::incoming-message-id spec)}
              (into #{}
                    (map :seon.cluster.message/id)
-                   (work/unanswered-triggers database (::agent-id spec))))
+                   (turn/unanswered-triggers database (::agent-id spec))))
           "the paused mailbox leaves exactly the declared incoming ring message"))))
 
 (defn- agent-message-ids

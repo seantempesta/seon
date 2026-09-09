@@ -4,7 +4,7 @@
             [seon.db :as db]
             [my.message :as my.message]
             [seon.cluster.message :as message]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
             [seon.problems :as problems]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
@@ -92,5 +92,5 @@
        (db/transact! connection (:seon.cluster.message/rows delivery)))
      (is (= :unrouted-red
             (:seon.turn.work/form-state
-             (work/form-settlement @connection "resume-receipt-1")))
+             (turn/form-settlement @connection "resume-receipt-1")))
          "even a stale/manual assignment cannot turn X2 into routed"))))

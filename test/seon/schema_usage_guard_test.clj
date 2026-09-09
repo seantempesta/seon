@@ -4,7 +4,7 @@
             [datahike.api :as d]
             [seon.db :as db]
             [datahike.db.interface :as dbi]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]))
@@ -42,7 +42,7 @@
 
 (defn- row-tx
   ([row] (row-tx {} row))
-  ([request row] [[:db.fn/call #'run/row-tx request row]]))
+  ([request row] [[:db.fn/call #'turn/row-tx request row]]))
 
 (defn- schema-row
   [schema-key definition]
@@ -262,7 +262,7 @@
         (db/transact! connection [{base-key 7}])
         (db/transact!
          connection
-         (run/open-tx {:seon.turn/id run-id
+         (turn/open-tx {:seon.turn/id run-id
                        :seon.turn/agent [:seon.cluster.agent/id agent-id]
                        :seon.turn/opened-at (java.util.Date.)}))
         (testing "current data answers with the guard's typed refusal"

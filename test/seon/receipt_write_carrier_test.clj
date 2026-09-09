@@ -1,7 +1,7 @@
 (ns seon.receipt-write-carrier-test
   "Regression for receipt provenance on agent-authored database writes."
   (:require [clojure.test :refer [deftest is testing]]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -30,14 +30,14 @@
        (db/transact! connection [{:seon.cluster.agent/id agent-id}])
        (db/transact!
         connection
-        (run/open-tx
-         {::run/id run-id
-          ::run/agent [:seon.cluster.agent/id agent-id]
-          ::run/opened-at now}))
+        (turn/open-tx
+         {:seon.turn/id run-id
+          :seon.turn/agent [:seon.cluster.agent/id agent-id]
+          :seon.turn/opened-at now}))
        (db/transact!
         connection
-        (run/receipt-start-tx
-         {::run/id run-id
+        (turn/receipt-start-tx
+         {:seon.turn/id run-id
           :seon.cluster.eval/ordinal ordinal
           :seon.cluster.eval/at now}))
        (let [evaluation

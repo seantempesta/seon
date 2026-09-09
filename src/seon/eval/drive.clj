@@ -10,7 +10,7 @@
             [seon.cluster :as cluster]
             [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
-            [seon.cluster.work :as work]
+            [seon.turn :as turn]
             [seon.config :as config]
             [seon.print :as print]
             [seon.render.transcript :as transcript])
@@ -268,7 +268,7 @@
                 db run-ids))
           0)
         idle? (and (seq run-ids)
-                   (nil? (work/next-agent-work
+                   (nil? (turn/next-agent-work
                           db
                           {:seon.cluster.agent/id agent-id
                            :seon.db.process/id process})))]

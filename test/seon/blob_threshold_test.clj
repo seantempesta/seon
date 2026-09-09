@@ -7,7 +7,7 @@
   missing, and settlement is not allowed to make a third answer out of it."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.blob :as blob]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.admit :as admit]
@@ -28,7 +28,7 @@
 (defn- settlement
   [connection evaluation]
   (let [staged
-        (run/settlement-projection
+        (turn/settlement-projection
          (support/cluster-handle
           {:seon.db/connection connection
            :seon.sci.admit/caps caps})

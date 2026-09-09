@@ -23,9 +23,9 @@
             [seon.db :as db]
             [seon.id :as id]
             [my.message :as my.message]
-            [seon.cluster.loop :as cluster.loop]
+            [seon.turn :as turn]
             [seon.cluster.message :as message]
-            [seon.turn :as run]
+
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.render.route :as route]
@@ -109,7 +109,7 @@
          :seon.cluster.message/content "hello"
          :seon.cluster.message/at now}])
       (let [source (message/render-ai {:seon.cluster.message/id "message-1"})
-            planned (cluster.loop/planned-sources source 'my.agents.alice 4096)
+            planned (turn/planned-sources source 'my.agents.alice 4096)
             evaluated
             (sci.eval/evaluate
              {:seon.cluster.eval/source
@@ -612,7 +612,7 @@
                                    (wake/wake-attributes (db/db connection))))
             "a delivery writes a wake attribute — that IS the transport")
         (is (empty? (set/intersection written
-                                      (cluster.loop/committed-attributes)))
+                                      (turn/committed-attributes)))
             "and it shares nothing with the loop's routine bookkeeping,
              so an ordinary turn still cannot wake itself")))))
 
@@ -679,7 +679,7 @@
       (let [report
             (db/transact!
              connection
-             (run/open-tx
+             (turn/open-tx
               {:seon.turn/id "r-1"
                :seon.turn/agent
                [:seon.cluster.agent/id "alice"]

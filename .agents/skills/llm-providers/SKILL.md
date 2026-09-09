@@ -16,7 +16,7 @@ verified baseline and source inventory are in
 ## Working rules
 
 - Read `src/seon/ai.clj:339-408,477-555,589-625,856-917`,
-  `src/seon/cluster/loop.clj:1371-1414`, and
+  `src/seon/turn.clj:4050-4096`, and
   `resources/seon/schemas/seon.ai.edn:1-191` plus
   `resources/seon/schemas/seon.config.ai.edn:1-80` before changing the provider
   seam.
@@ -28,7 +28,7 @@ verified baseline and source inventory are in
   circuit breaker, or second model registry.
 - Capture and reuse the exact rendered prompt. The loop commits the capture
   before calling the provider and passes only that string as `:seon.ai/prompt`
-  (`src/seon/cluster/loop.clj:1371-1414`;
+  (`src/seon/turn.clj:4050-4096`;
   `resources/seon/schemas/seon.context.capture.edn:1-26`).
 - Do not claim cross-turn cache stability today. Ordering is deterministic, but
   rendered text starts with a changing database basis and ends with basis plus

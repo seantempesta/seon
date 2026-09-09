@@ -4,7 +4,7 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.core :as datahike]
             [sci.core :as sci]
-            [seon.turn :as run]
+            [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -681,7 +681,7 @@
       (db/transact! connection [(cluster-config 600000)
                                 {:seon.turn/id "effect-run"}
                                 {:seon.cluster.eval/id
-                                 (run/receipt-identity "effect-run" 3)
+                                 (turn/receipt-identity "effect-run" 3)
                                  :seon.cluster.eval/run
                                  [:seon.turn/id "effect-run"]
                                  :seon.cluster.eval/ordinal 3
@@ -722,10 +722,10 @@
         (db/transact! connection [{:seon.cluster.agent/id "effect-agent"}])
         (db/transact!
          connection
-         (run/open-tx
-          {::run/id "effect-run"
-           ::run/agent [:seon.cluster.agent/id "effect-agent"]
-           ::run/opened-at opened-at}))
+         (turn/open-tx
+          {:seon.turn/id "effect-run"
+           :seon.turn/agent [:seon.cluster.agent/id "effect-agent"]
+           :seon.turn/opened-at opened-at}))
 
         (install-capability! connection)
         (db/transact!
@@ -739,15 +739,15 @@
            :seon.effect/opened-at now}])
         (db/transact!
          connection
-         (run/recover-tx
-          {::run/id "effect-run"
+         (turn/recover-tx
+          {:seon.turn/id "effect-run"
 
-           ::run/now now}))
+           :seon.turn/now now}))
         (let [receipt (db/pull @connection '[*]
                                [:seon.effect/id
                                 (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
           (is (= now (:seon.effect/interrupted-at receipt)))
           (is (nil? (:seon.effect/result-edn receipt)))
-          (is (some? (::run/closed-at
+          (is (some? (:seon.turn/closed-at
                       (db/pull @connection '[*]
                                [:seon.turn/id "effect-run"])))))))))

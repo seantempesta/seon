@@ -2,9 +2,9 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.ai :as ai]
             [seon.cluster.agent :as agent]
-            [seon.cluster.loop :as loop]
-            [seon.cluster.work :as work]
-            [seon.turn :as run]
+            [seon.turn :as turn]
+
+
             [seon.config :as config]
             [seon.db :as db]
             [seon.test-support :as support]))
@@ -44,18 +44,18 @@
                        :seon.config.error/recurrence-limit 3
                        :seon.config.message/max-chain 8})
              request {:seon.cluster.agent/id agent-id}
-             step! #(loop/turn {:seon.turn.loop/cluster cluster
+             step! #(turn/turn {:seon.turn.loop/cluster cluster
                                 :seon.turn.work/next %} now)]
          (is (nil? (:seon.config.ai/no-provider
                     (ai/agent-overlay @connection agent-id))))
          (is (nil? (:seon.config.ai/no-provider
                     (config/effective @connection cluster-name))))
          (is (= :open (:seon.turn.work/situation
-                        (work/next-agent-work @connection request))))
-         (step! (work/next-agent-work @connection request))
+                        (turn/next-agent-work @connection request))))
+         (step! (turn/next-agent-work @connection request))
          (is (= :call (:seon.turn.work/situation
-                        (work/next-agent-work @connection request))))
-         (step! (work/next-agent-work @connection request))
+                        (turn/next-agent-work @connection request))))
+         (step! (turn/next-agent-work @connection request))
          (is (= [:seon.ai/no-credential]
                 (db/q '[:find [?kind ...] :where
                         [_ :seon.error/kind ?kind]] @connection)))
@@ -63,16 +63,16 @@
                          [?attempt :seon.ai.attempt/id]] @connection)))
          (is (= 1 (db/q '[:find (count ?turn) . :where
                          [?turn :seon.turn/closed-at]] @connection)))
-         (is (nil? (work/next-agent-work @connection request)))
-         (is (false? (work/more-agent-work? @connection request)))
-         (is (seq (work/unanswered-wakes @connection agent-id {})))
+         (is (nil? (turn/next-agent-work @connection request)))
+         (is (false? (turn/more-agent-work? @connection request)))
+         (is (seq (turn/unanswered-wakes @connection agent-id {})))
          (db/transact! connection
                        [{:seon.cluster.message/id "new-outside-trigger"
                          :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
                          :seon.cluster.message/content "Configuration repaired; try again."
                          :seon.cluster.message/at now}])
          (is (= :open (:seon.turn.work/situation
-                        (work/next-agent-work @connection request)))))))))
+                        (turn/next-agent-work @connection request)))))))))
 
 (deftest settings-select-a-real-virtual-turn-without-provider-attempts
   (support/with-database
@@ -99,7 +99,7 @@
                       :seon.cluster.message/content "Take a virtual turn."
                       :seon.cluster.message/at now}])
            opened (db/transact! connection
-                    (run/open-tx
+                    (turn/open-tx
                      {:seon.turn/id turn-id
                       :seon.turn/agent [:seon.cluster.agent/id agent-id]
                       :seon.turn/trigger [:seon.cluster.message/id "no-provider-message"]
@@ -114,7 +114,7 @@
                      :seon.sci.admit/caps (config/result-caps (config/defaults))
                      :seon.config.error/recurrence-limit 3
                      :seon.config.message/max-chain 8})
-           report (loop/turn
+           report (turn/turn
                    {:seon.turn.loop/cluster cluster
                     :seon.turn.work/next
                     {:seon.turn.work/situation :call

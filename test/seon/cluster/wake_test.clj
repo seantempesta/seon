@@ -25,7 +25,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
-            [seon.cluster.loop :as cluster.loop]
+            [seon.turn :as turn]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.error :as error]
@@ -137,7 +137,7 @@
   (with-connection
     (fn [connection]
       (let [wakes (wake/wake-attributes (db/db connection))
-            commits (cluster.loop/committed-attributes)]
+            commits (turn/committed-attributes)]
         (is (seq wakes) "the routed set is not empty")
         (is (seq commits) "and neither is the committed set")
         (is (empty? (set/intersection wakes commits))
@@ -464,7 +464,7 @@
   ;; transaction's go block BEFORE (deliver p tx-report)
   ;; (writer.cljc:384-386), so an escaping exception means the
   ;; committing caller waits forever. What CHANGED is the verdict on a
-  ;; closed mailbox. `seon.cluster.loop`'s terminal settlement fence
+  ;; closed mailbox. `seon.turn`'s terminal settlement fence
   ;; closes an agent's mailbox in place so it takes no further pass over
   ;; a still-running receipt; committing that very fault also commits
   ;; its explanation message, so routing used to turn the quarantine
@@ -634,7 +634,7 @@
     (with-connection
       (fn [connection]
         (let [wakes (wake/wake-attributes (db/db connection))
-              commits (cluster.loop/committed-attributes)]
+              commits (turn/committed-attributes)]
           (is (every? (fn [attribute] (not (contains? commits attribute)))
                       wakes))
           (is (every? (fn [attribute] (not (contains? wakes attribute)))
