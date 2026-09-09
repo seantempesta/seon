@@ -41,3 +41,14 @@ test acquires each graph, fanout, server, wedge, and executor inside that
 scope; every cleanup runs even when an earlier cleanup throws. The focused
 Flow namespace and full gate leave no live test-owned process, graph, server,
 or executor.
+
+## Repair in progress — 2026-09-08
+
+The fixture now acquires its launcher, HTTP client, fanout, monitor, and
+WebSocket inside nested `with-open` scopes. A small `test-support/closeable`
+adapter carries the value and its release function; Clojure's existing macro
+owns cleanup ordering and exception unwinding. The class regression injects
+setup/body failure after each acquisition count and cleanup failures at every
+resource, asserting that each acquired resource closes once and no later one
+opens. HTTP and WebSocket waits use declared event bounds. Verification is
+running; the note remains open until the isolated gate passes.

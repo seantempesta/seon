@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, test, runtime]
 ---
@@ -22,4 +22,13 @@ throw, and verify exact restoration; production removal must preserve wrappers.
 The registry and instrument tests already follow this ownership rule.
 
 Evidence and exact protected handoffs:
-[registry landing](../../prds/context-generation/research/cluster-scoped-registry-landing-2026-09-08.md).
+[registry landing](../../../prds/context-generation/research/cluster-scoped-registry-landing-2026-09-08.md).
+
+## Resolution — 2026-09-09 issues sweep
+
+Fixed by `2531b2e70`: the preservation fixture unwraps through Malli and
+restores the exact entering callable roots and function-schema registry.
+The owning [support restoration landing](../../../prds/context-generation/research/support-restore-landing-2026-09-08.md)
+records the class regression, scoped gate (9 tests / 82 assertions), and
+platform gate (82 tests / 486 assertions), all green. The current fixture
+retains that implementation. This note was left open after its fix.

@@ -551,3 +551,71 @@ Maintenance live proof: default MCP hot-reloaded `seon.schedule`, re-armed its
 contracts from the database projection, and returned error id `9246b3fdc7b8`,
 length 12, valid hex. The complete reload/re-arm/probe took 21,829 ms. This is
 a hot-Var proof; it does not claim full development adoption or browser paint.
+
+The next Flow fixture gate (`run.72XcCa`) measured 178,522 ms waiting for the
+shared dependency-cache lock, then 2,107 ms holding it. Its own JVM thread dump
+identified `FileChannel.lock` at `dev_cache.clj:411`, before the coordinator.
+The wait completed before an attempted termination; that attempt found no such
+process and stopped nothing. The gate continued. The new dependency-cache-lock
+issue records the missing preparation bound and the existing dependency's
+capture-before-drain behavior; no foreign process was altered.
+
+The default refusal probe changed from `[:error :warning]` (3 ms) to `[:error]`
+after hot reload and re-arming (21,747 ms). The existing publication regression
+now produces a real unrelated lint warning and asserts the refusal contains
+only its blocking findings. The fn/analyzer isolated gate is running.
+
+The current on-disk AGENTS.md has now been read end to end, completing the
+middle section separately after the large combined output was truncated. Its
+current no-restart/default rule was observed; this lane never restarted or
+reforked default. The new resource fixture class is documented in AGENTS.md
+and the testing skill together.
+
+Further armed fixture findings: the fn/analyzer gate ran 37 tests / 191
+assertions, 5 failures and 4 errors. Invalid fixture inputs and a real nil
+callback supplied by `index!` explain those findings; the indexing-fixture issue
+records the fixes. A later Flow gate ran 29 tests / 252 assertions, zero
+failures and one error: its bare evaluator fixture constructed a context inside
+a one-second submission bound, then supplied no namespace to the timeout
+outcome. It now acquires the real canonical SCI context first and carries its
+namespace/database without increasing the deadline. The transform-failure
+fixture separately preserves lifecycle arities. The combined owner gate is
+running; these newer fixes are not yet claimed green.
+
+## Resume verification — 2026-09-09
+
+Read the selected-source fixture boundary note and issues README end to end,
+plus current runner-base-cache, turn-cut and support-restoration summaries.
+The resumed fn slice landed as `10b034289`. Initial selected gate on
+`4c3468faf` ran 30 tests / 174 assertions, one failure: settlement still
+supplied retired `:seon.cluster.eval/result-edn`. It refused with
+`no-terminal-fact`; the fixture then queried with an absent entity and
+printed unrelated program facts. The corrected fixture supplies
+`:seon.eval/value`, asserts settlement admission, and requires its queried
+entity to exist. Final selected gate: 30 tests / 175 assertions, zero
+failures/errors; coordinator/tests 51 seconds. Native clj-kondo in that
+selected snapshot: 0 errors / 532 warnings, 3,562 ms. Shared-tree lint
+reported 12 unresolved references during the concurrent turn rename; no
+foreign source was edited to satisfy that scan.
+
+Disposition: both `fn-test-selected-source-gate-retains-invalid-fixtures`
+and `indexing-fixtures-refuse-before-testing-indexing` are resolved and
+archived. `test-instrumentation-preservation-still-uses-cluster-remove` is
+also archived: owning commit `2531b2e70` already proved exact restoration
+with scoped 9/82 and platform 82/486 green gates. The Flow resource and
+transform-fixture notes remain open pending their own final gate.
+
+Default PID 87173 answered MCP metadata inspection in 1 ms. HTTP `/`
+returned 200, 817,528 bytes, in 2.058548 seconds. These are read-only
+connectivity observations, not a claim of adoption or browser paint.
+Default was never stopped, reforked, or restarted.
+
+`bin/issues-index --check` remains red on existing note metadata, closed
+notes outside archive, missing schedule rows, and stale schedule rows.
+The owner's index was preserved. The top fault-storage blocker requires
+blob/retention integration and production collection evidence; its older
+inline clipping prescription conflicts with the current PRD and is not
+implemented by this lane. The registered-render selection blocker overlaps
+uncommitted render-owner edits and is left open. The runner wedge note
+requires review against the current exact-process-exit exchange before
+claiming closure. This is continued triage, not a completed sweep.

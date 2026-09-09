@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, testing, contracts, fixtures]
 ---
@@ -36,3 +36,14 @@ but their independent gate is red; they remain uncommitted under the
 assignment's explicit “gate and commit, or explain” alternative. This is
 not an attribution of these failures to the production diff. Reconcile and
 gate the fixture changes in their owning slice before landing it.
+
+## Resolution — 2026-09-09
+
+Fixed in `10b034289`. The exact selected gate
+`bin/test --paths src/seon/fn.clj test/seon/fn_test.clj -- seon.fn-test`
+passed 30 tests / 175 assertions, zero failures/errors. The remaining
+settlement fixture used retired `:seon.cluster.eval/result-edn`; supplying
+`:seon.eval/value` admits settlement and installs its definition. It now
+asserts the settlement refusal separately and refuses a missing fixture
+entity before querying edges, avoiding the enormous unrelated graph dump.
+Selected-snapshot native clj-kondo: zero errors (532 warnings).
