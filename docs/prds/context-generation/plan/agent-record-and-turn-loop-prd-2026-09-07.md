@@ -1144,20 +1144,40 @@ The generator therefore emits `(my.message/inbox)`, never `{}`.
 the agent could have typed; the shown text is what it sees; nothing else
 enters the prompt:
 
-1. `(help)` — what a system help does: prints the situation and the rules
-   (you are at a Clojure REPL in your namespace; reply with forms only;
-   each form returns `#:seon.repl{…}`; `(dir ns)`/`(doc sym)` return data;
-   your plan is your instructions; before each form write a `;;` comment
-   saying what you are about to do and why — that is your planning; how a
-   turn ends) and returns the topic list; `(help :plan)` etc. return data.
-   Its read evidence is the code version: it re-emits only when help
-   changes.
+1. `(help)` — ONE value, no topics (owner, 2026-09-09): a `:seon.help` map,
+   one single-line string per key — `:where`, `:reply` (thinking comments
+   then forms), `:response` (the `#:seon.repl` map), `:results`
+   (`result/e…` is a real symbol: evaluate, pass, dig with `get-in`),
+   `:documentation` (`dir`/`doc` return data), `:plan` (the plan is the
+   instructions; `:done-when`; `complete!`), `:messages` (inbox/send; a
+   message is NOT the end of a turn), `:database` (q / pull / transact!,
+   database supplied), `:definitions` (contracted defn and deftest become
+   durable rows; `(my.test/run)`), `:errors` (errors are data), `:session`
+   (each reply is a turn; `:turns-left` in settings counts down;
+   `(my.agent/done)` ends the session early), and `:tools` — DERIVED from
+   the agent-facing namespaces' first docstring lines, never authored. Its
+   read evidence is the code version.
 2. `(my.agent/identity)` → `{:id :namespace :steward}`.
 3. `(my.plan/items)` → every item: id, title, state, done-when, needs.
 4. `(my.message/inbox)` → unread, oldest first: `{:from :at :content :id}`;
    `[]` when empty (the form still teaches).
 5. `(my.agent/settings)` → the overrides only. No attribute dump.
 6. The history: previous turns' evaluations, bytes unchanged (§14).
+
+**Stability is storage, not stripping.** The generate function re-evaluates
+a form only when its read evidence changed since its stored `:t`; an
+unchanged form renders its stored evaluation, `:ms` and handle included.
+Bytes are stable by construction. After compaction every form genuinely
+runs again, so handles and `:ms` genuinely differ; nothing is preserved or
+stripped (this replaces §16a's option list: raw honest output, no hacks).
+
+**Settings show `:turns-left`**, derived from turns taken this session
+against `max-episode-runs`.
+
+**Teaching the database by example.** When the agent's namespace declares
+schema keys, turn 0 emits one query over them in the thinking voice ("What
+data is in my namespace?" → a count per declared attribute), derived from
+the schema rows. No declared keys, no form.
 
 **Thinking comments.** Generated comments are written in the agent's own
 first-person voice, stating intent before the form ("I should check my
@@ -1172,11 +1192,11 @@ derived from the title, position appended), `(my.plan/update! {:id …})`,
 `(my.plan/complete! "id")`, `(my.plan/current! "id")`. `(dir my.plan)`
 lists these first.
 
-**The scenario (fixture).** Root's message: define a contracted function
-`largest` in your namespace returning the row with the greatest
-`:example/amount`, write a test for it, run the test, reply with its stored
-contract. The plan holds those steps, current first. Every step is
-checkable by query: a `:seon.fn` row with `:seon.fn/spec`, a `:seon.test`
-row and its result, a message from juniper to root. Probe residue never
-enters the fixture.
+**The scenario (fixture).** The fixture declares a small dataset under
+Juniper's namespace as schema and facts (`:example/order` rows with
+`:example/amount` and `:example/customer`). Root's message: "Which
+customer has the largest total? Add an order of 40 for them and tell me
+the new total." The plan holds those steps, current first: query, aggregate,
+transact, re-query, reply, done. Every step is checkable by query. Nothing
+in the code is tuned to this scenario; the fixture is data.
 
