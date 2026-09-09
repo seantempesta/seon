@@ -31,7 +31,7 @@
   belongs to no form: a comment renders above the prompt, so attaching
   it to the form it followed inverted the agent's own authorship order
   in its rendered session. It stays in the durable reply text
-  (`:seon.cluster.run/reply`) and nowhere else.
+  (`:seon.turn/reply`) and nowhere else.
 
   EVERY PLAN SOURCE CARRIES A READER EVENT, and that is the invariant
   this namespace exists to keep. A comment-only plan source has no
@@ -276,7 +276,7 @@
         ;; form's comment made the agent's own rendered session invert what it
         ;; wrote: text authored after a form appeared above it. The prose is
         ;; not lost — the whole reply is already a durable fact
-        ;; (`:seon.cluster.run/reply`, staged by `seon.cluster.run/stage-reply!`
+        ;; (`:seon.turn/reply`, staged by `seon.turn/stage-reply!`
         ;; before any form is frozen), so dropping it here removes a wrong
         ;; placement, not a record. Prose alone was once its own plan source,
         ;; which is the shape that recorded a form row no receipt could settle;

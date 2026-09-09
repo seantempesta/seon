@@ -77,8 +77,8 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private attributes
-  [:seon.cluster.agent/id :seon.cluster.run/id :seon.cluster.run/agent
-   :seon.cluster.run/opened-at :seon.cluster.eval/ordinal])
+  [:seon.cluster.agent/id :seon.turn/id :seon.turn/agent
+   :seon.turn/opened-at :seon.cluster.eval/ordinal])
 
 (defn- with-connection [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
@@ -96,9 +96,9 @@
   "A transaction function that refuses, exactly as N2's transitions do."
   [_db request]
   (throw (ex-info "transition refused"
-                  {:seon.error/kind :seon.cluster.run/refused
-                   :seon.cluster.run/rule :seon.cluster.run/ineligible
-                   :seon.cluster.run/request request})))
+                  {:seon.error/kind :seon.turn/refused
+                   :seon.turn/rule :seon.turn/ineligible
+                   :seon.turn/request request})))
 
 (deftest a-committed-transaction-returns-its-report
   (with-connection
@@ -115,12 +115,12 @@
       (let [outcome (db/transact!
                      connection
                      [[:db.fn/call #'refusing-call {:probe true}]])]
-        (is (= :seon.cluster.run/refused (:seon.error/kind outcome))
+        (is (= :seon.turn/refused (:seon.error/kind outcome))
             "the transition's own kind, verbatim")
-        (is (= :seon.cluster.run/ineligible
-               (:seon.cluster.run/rule outcome))
+        (is (= :seon.turn/ineligible
+               (:seon.turn/rule outcome))
             "and its own rule — what makes a fence test honest")
-        (is (= {:probe true} (:seon.cluster.run/request outcome)))))))
+        (is (= {:probe true} (:seon.turn/request outcome)))))))
 
 (deftest a-datahike-abort-is-distinguishable-from-ours
   (with-connection

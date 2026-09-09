@@ -7,7 +7,7 @@
   missing, and settlement is not allowed to make a third answer out of it."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.blob :as blob]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.admit :as admit]

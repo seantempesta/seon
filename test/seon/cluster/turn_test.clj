@@ -29,7 +29,7 @@
             [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
             [seon.cluster.reply :as reply]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
@@ -507,7 +507,7 @@
                   "no error and no cut instant anywhere — presence is
                    the state"))
             (is (some? (db/q '[:find ?c . :where
-                              [_ :seon.cluster.run/closed-at ?c]] @connection))
+                              [_ :seon.turn/closed-at ?c]] @connection))
                 "and the run closed")))))))
 
 (deftest agent-code-with-defn-and-println-folds-green-without-in-ns
@@ -550,7 +550,7 @@
               (is (= "counting 12 in my.agents.agent-a" (str/trim output)))))
           (testing "and the disposition closed the run"
             (is (some? (db/q '[:find ?c . :where
-                              [_ :seon.cluster.run/closed-at ?c]]
+                              [_ :seon.turn/closed-at ?c]]
                             @connection)))))))))
 
 (deftest mixed-plan-publishes-only-the-contracted-function
@@ -1756,29 +1756,29 @@
           (drive! cluster 4))
         (testing "the run closed rather than sitting claimed"
           (is (some? (db/q '[:find ?c . :where
-                            [_ :seon.cluster.run/closed-at ?c]] @connection)))
+                            [_ :seon.turn/closed-at ?c]] @connection)))
           )
         (testing "and WHY is readable from the database"
           (is (re-find #"DEEPSEEK_API_KEY"
                        (db/q '[:find ?e . :where
-                              [_ :seon.cluster.run/error ?e]] @connection))))
+                              [_ :seon.turn/error ?e]] @connection))))
         (testing "so the agent's next prompt tells it what happened"
           ;; the NEXT prompt belongs to the next held run: open it the
           ;; way the loop does — the run carries the trigger and the
           ;; agent pointer names the run
           (db/transact! connection
-                      {:tx-data [{:seon.cluster.run/id "run-next"
-                                  :seon.cluster.run/agent
+                      {:tx-data [{:seon.turn/id "run-next"
+                                  :seon.turn/agent
                                   [:seon.cluster.agent/id "agent-a"]
-                                  :seon.cluster.run/trigger
+                                  :seon.turn/trigger
                                   [:seon.cluster.message/id "m-1"]
-                                  :seon.cluster.run/opened-at (Date.)}
+                                  :seon.turn/opened-at (Date.)}
                                  {:seon.cluster.agent/id "agent-a"
                                   }]})
           (is (re-find #"DEEPSEEK_API_KEY"
                        (:seon.cluster.prompt/text
                         (prompt/prompt @connection
-                                       {:seon.cluster.run/id "run-next"
+                                       {:seon.turn/id "run-next"
                                         :seon.cluster.agent/id "agent-a"
                                         :seon.db/connection connection
                                         :seon.sci.admit/caps
@@ -1835,13 +1835,13 @@
            :seon.cluster.message/at now}])
         (db/transact!
          connection
-         [{:seon.cluster.run/id route-run
-           :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-           :seon.cluster.run/trigger
+         [{:seon.turn/id route-run
+           :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+           :seon.turn/trigger
            [:seon.cluster.message/id "route-goal"]
-           :seon.cluster.run/opened-at now
+           :seon.turn/opened-at now
 
-           :seon.cluster.run/plan-digest "route-digest"}])
+           :seon.turn/plan-digest "route-digest"}])
         (db/transact!
          connection
          (into
@@ -1852,13 +1852,13 @@
             }]
           cat
           [(run/receipt-start-tx
-            {:seon.cluster.run/id route-run
+            {:seon.turn/id route-run
              :seon.cluster.eval/ordinal 0
              :seon.cluster.eval/at now
              :seon.cluster.eval/source unbound-source
              :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]})
            (run/receipt-start-tx
-            {:seon.cluster.run/id route-run
+            {:seon.turn/id route-run
              :seon.cluster.eval/ordinal 1
              :seon.cluster.eval/at now
              :seon.cluster.eval/source "42"
@@ -1868,7 +1868,7 @@
                {:seon.cluster.loop/cluster cluster
                 :seon.cluster.work/next
                 {:seon.cluster.work/situation :resume
-                 :seon.cluster.run/id route-run
+                 :seon.turn/id route-run
                  :seon.cluster.agent/id "agent-a"
                  :seon.cluster.eval/ordinal 0}}
                now)
@@ -1876,7 +1876,7 @@
               (->> (db/q '[:find [(pull ?receipt [*]) ...]
                           :in $ ?run-id
                           :where
-                          [?run :seon.cluster.run/id ?run-id]
+                          [?run :seon.turn/id ?run-id]
                           [?receipt :seon.cluster.eval/run ?run]]
                         @connection route-run)
                    (sort-by :seon.cluster.eval/ordinal))]
@@ -1901,7 +1901,7 @@
                  (db/q '[:find (count ?tx) .
                         :in $ ?run-id
                         :where
-                        [?run :seon.cluster.run/id ?run-id]
+                        [?run :seon.turn/id ?run-id]
                         [?receipt :seon.cluster.eval/run ?run]
                         [?receipt :seon.cluster.eval/error _ ?tx]]
                       @connection route-run))
@@ -1951,7 +1951,7 @@
                (db/q '[:find [?source ...]
                       :where
                       [?agent :seon.cluster.agent/id "agent-a"]
-                      [?run :seon.cluster.run/agent ?agent]
+                      [?run :seon.turn/agent ?agent]
                       [?form :seon.cluster.eval/run ?run]
                       [?form :seon.cluster.eval/source ?source]]
                      @connection))
@@ -1959,21 +1959,21 @@
           (is (= (count (db/q '[:find [?form ...]
                                :where
                                [?agent :seon.cluster.agent/id "agent-a"]
-                               [?run :seon.cluster.run/agent ?agent]
+                               [?run :seon.turn/agent ?agent]
                                [?form :seon.cluster.eval/run ?run]]
                              @connection))
                  (count (db/q '[:find [?receipt ...]
                                :where
                                [?agent :seon.cluster.agent/id "agent-a"]
-                               [?run :seon.cluster.run/agent ?agent]
+                               [?run :seon.turn/agent ?agent]
                                [?receipt :seon.cluster.eval/run ?run]]
                              @connection)))
               "forms and receipts agree, which is the whole invariant")
           (let [error (db/q '[:find ?message .
                              :where
                              [?agent :seon.cluster.agent/id "agent-a"]
-                             [?run :seon.cluster.run/agent ?agent]
-                             [?run :seon.cluster.run/error ?message]]
+                             [?run :seon.turn/agent ?agent]
+                             [?run :seon.turn/error ?message]]
                            @connection)]
             (is (string? error) "the run records WHY it settled nothing")
             (is (str/includes? error "prose")
@@ -1981,8 +1981,8 @@
           (is (some? (db/q '[:find ?closed .
                             :where
                             [?agent :seon.cluster.agent/id "agent-a"]
-                            [?run :seon.cluster.run/agent ?agent]
-                            [?run :seon.cluster.run/closed-at ?closed]]
+                            [?run :seon.turn/agent ?agent]
+                            [?run :seon.turn/closed-at ?closed]]
                           @connection))
               "the run still closes — loudly, with its reason recorded")
           (let [rendered
@@ -2029,13 +2029,13 @@
                     :where
                     [?form :seon.cluster.eval/source ?source]
                     [?form :seon.cluster.eval/run ?run]
-                    [?run :seon.cluster.run/id ?run-id]]
+                    [?run :seon.turn/id ?run-id]]
                   @connection reply-text)
             receipt
             (db/q '[:find (pull ?receipt [*]) .
                     :in $ ?run-id
                     :where
-                    [?run :seon.cluster.run/id ?run-id]
+                    [?run :seon.turn/id ?run-id]
                     [?receipt :seon.cluster.eval/run ?run]]
                   @connection run-id)
             ;; the receipt stores the admitted projection; read the value back
@@ -2045,8 +2045,8 @@
             (db/q '[:find (pull ?attempt [*]) .
                     :in $ ?run-id
                     :where
-                    [?run :seon.cluster.run/id ?run-id]
-                    [?attempt :seon.ai.attempt/run ?run]]
+                    [?run :seon.turn/id ?run-id]
+                    [?run :seon.turn/attempts ?attempt]]
                   @connection run-id)]
         (testing "the unreadable outcome is one form with one receipt"
           (is (= [:open :call]
@@ -2057,21 +2057,21 @@
                  (db/q '[:find (count ?form) .
                          :in $ ?run-id
                          :where
-                         [?run :seon.cluster.run/id ?run-id]
+                         [?run :seon.turn/id ?run-id]
                          [?form :seon.cluster.eval/run ?run]]
                        @connection run-id)))
           (is (= 1
                  (db/q '[:find (count ?receipt) .
                          :in $ ?run-id
                          :where
-                         [?run :seon.cluster.run/id ?run-id]
+                         [?run :seon.turn/id ?run-id]
                          [?receipt :seon.cluster.eval/run ?run]]
                        @connection run-id)))
           (is (some? (db/q '[:find ?closed .
                             :in $ ?run-id
                             :where
-                            [?run :seon.cluster.run/id ?run-id]
-                            [?run :seon.cluster.run/closed-at ?closed]]
+                            [?run :seon.turn/id ?run-id]
+                            [?run :seon.turn/closed-at ?closed]]
                           @connection run-id))))
         (testing "the receipt is the typed refusal and retains exact source"
           (is (= :seon.sci.reader/unreadable
@@ -2088,7 +2088,7 @@
                  (db/q '[:find ?kind .
                          :in $ ?run-id
                          :where
-                         [?run :seon.cluster.run/id ?run-id]
+                         [?run :seon.turn/id ?run-id]
                          [?form :seon.cluster.eval/run ?run]
                          [?receipt :seon.cluster.eval/run ?run]
                          [?receipt :seon.error/kind ?kind]]
@@ -2103,19 +2103,19 @@
         (testing "the next prompt renders both correction inputs"
           (db/transact!
            connection
-           {:tx-data [{:seon.cluster.run/id "run-after-unreadable"
-                       :seon.cluster.run/agent
+           {:tx-data [{:seon.turn/id "run-after-unreadable"
+                       :seon.turn/agent
                        [:seon.cluster.agent/id "agent-a"]
-                       :seon.cluster.run/trigger
+                       :seon.turn/trigger
                        [:seon.cluster.message/id "m-1"]
-                       :seon.cluster.run/opened-at (Date.)}
+                       :seon.turn/opened-at (Date.)}
                       {:seon.cluster.agent/id "agent-a"
                        }]})
           (let [next-prompt
                 (:seon.cluster.prompt/text
                  (prompt/prompt
                   @connection
-                  {:seon.cluster.run/id "run-after-unreadable"
+                  {:seon.turn/id "run-after-unreadable"
                    :seon.cluster.agent/id "agent-a"
                    :seon.db/connection connection
                    :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
@@ -2144,7 +2144,7 @@
                    (mapv :seon.cluster.work/situation reports))
                 "no separate close pass — the disposition closed it")
             (is (some? (db/q '[:find ?closed .
-                              :where [_ :seon.cluster.run/closed-at ?closed]]
+                              :where [_ :seon.turn/closed-at ?closed]]
                             @connection))
                 "the run closed in the SAME transaction as its receipt")))))))
 
@@ -2199,7 +2199,7 @@
                          [?receipt :seon.cluster.eval/interrupted-at _ ?tx]
                          [?receipt :seon.cluster.eval/error _ ?tx]
                          [?receipt :seon.cluster.eval/output _ ?tx]
-                         [?run :seon.cluster.run/closed-at _ ?tx]
+                         [?run :seon.turn/closed-at _ ?tx]
                          [?schema :seon.schema/key
                           :my.agents.agent-a/combined-receipt ?tx]]
                        @connection)]
@@ -2252,8 +2252,8 @@
                              @connection))
                 "no error facts — the old path committed one per pass")
             (is (nil? (db/q '[:find ?a . :where
-                             [?turn :seon.cluster.run/agent ?a]
-                             (not [?turn :seon.cluster.run/closed-at])] @connection))
+                             [?turn :seon.turn/agent ?a]
+                             (not [?turn :seon.turn/closed-at])] @connection))
                 "the agent has no open turn, so another wake can open one")
             (is (str/includes?
                  (db/q '[:find ?edn . :where
@@ -2347,14 +2347,14 @@
   DURABLE row rather than the value the loop happened to hold, so the
   assertion proves the fact was committed before the prose was derived."
   [db error-id]
-  (let [pulled (db/pull db '[* {:seon.error/run [:seon.cluster.run/id]
+  (let [pulled (db/pull db '[* {:seon.error/run [:seon.turn/id]
                                :seon.error/agent [:seon.cluster.agent/id]}]
                        [:seon.error/id error-id])]
     (cond-> (dissoc pulled :db/id)
       (:seon.error/run pulled)
       (assoc :seon.error/run
-             [:seon.cluster.run/id
-              (:seon.cluster.run/id (:seon.error/run pulled))])
+             [:seon.turn/id
+              (:seon.turn/id (:seon.error/run pulled))])
       (:seon.error/agent pulled)
       (assoc :seon.error/agent
              [:seon.cluster.agent/id
@@ -2484,7 +2484,7 @@
               "partial output remains an ordinary completion, not a failure")
           (is (some? (db/q '[:find ?digest .
                             :where
-                            [?run :seon.cluster.run/plan-digest ?digest]]
+                            [?run :seon.turn/plan-digest ?digest]]
                           database))
               "the already-arrived completion still settles as the plan"))))))
 
@@ -2630,7 +2630,7 @@
                 "a failover waits for nothing"))
           (testing "the run proceeded on the backup's answer"
             (is (some? (db/q '[:find ?d . :where
-                              [_ :seon.cluster.run/plan-digest ?d]]
+                              [_ :seon.turn/plan-digest ?d]]
                             @connection)))))))))
 
 (def ^:private turn-evidence-partitions
@@ -2802,7 +2802,7 @@
         (let [rows (attempt-rows @connection)
               actual (mapv actual-attempt-shape rows)
               run-row (db/q '[:find (pull ?run [*]) .
-                             :where [?run :seon.cluster.run/id _]]
+                             :where [?run :seon.turn/id _]]
                            @connection)]
           (and
            (= attempts actual)
@@ -2817,10 +2817,10 @@
            (= (vec (range (count rows)))
               (mapv :seon.ai.attempt/ordinal rows))
            (every? #(not (contains? % :seon.ai/disposition)) rows)
-           (contains? run-row :seon.cluster.run/closed-at)
+           (contains? run-row :seon.turn/closed-at)
            (= 1 (work/episode-runs @connection "agent-a"))
            (= succeeded?
-              (contains? run-row :seon.cluster.run/plan-digest))))))))
+              (contains? run-row :seon.turn/plan-digest))))))))
 
 (deftest generated-model-attempt-traces-preserve-presence-and-episode-laws
   (test-support/assert-check!
@@ -2876,7 +2876,7 @@
                              @connection)))))
           (testing "the run still completed — sending is not finishing"
             (is (some? (db/q '[:find ?c . :where
-                              [_ :seon.cluster.run/closed-at ?c]]
+                              [_ :seon.turn/closed-at ?c]]
                             @connection))))
           (testing "message and receipt rode ONE transaction"
             ;; asked from the MESSAGE's transaction rather than by
@@ -3030,7 +3030,7 @@
         (is (= 1 (count (attempt-rows @connection)))
             "and the durable attempt chain agrees")
         (is (some? (db/q '[:find ?c . :where
-                          [_ :seon.cluster.run/closed-at ?c]] @connection))
+                          [_ :seon.turn/closed-at ?c]] @connection))
             "the turn ran to completion")))))
 
 ;;; ---------------------------------------------------------------------------
@@ -3042,7 +3042,7 @@
   (->> (db/q '[:find [(pull ?receipt [*]) ...]
                :in $ ?run-id
                :where
-               [?run :seon.cluster.run/id ?run-id]
+               [?run :seon.turn/id ?run-id]
                [?receipt :seon.cluster.eval/run ?run]]
              database run-id)
        (remove run/terminal?)
@@ -3054,9 +3054,9 @@
   [connection run-id]
   (db/transact!
    connection
-   (run/recover-tx {:seon.cluster.run/id run-id
+   (run/recover-tx {:seon.turn/id run-id
 
-                    :seon.cluster.run/now (Date. 1700000001000)})))
+                    :seon.turn/now (Date. 1700000001000)})))
 
 (deftest turn-intent-is-the-complete-crash-falsifier
   (testing "a cut immediately after intent names the run, trigger, and every ordinal"
@@ -3068,7 +3068,7 @@
                                     :seon.cluster.work/next open-work}
                                    now)
               call-work (work/next-agent-work @connection (request connection))
-              run-id (:seon.cluster.run/id call-work)
+              run-id (:seon.turn/id call-work)
               evaluations (atom 0)
               cut? (atom true)
               transact! db/transact!
@@ -3097,14 +3097,14 @@
                    :seon.cluster.work/next call-work}
                   now))))
           (let [run-row (db/pull @connection
-                                 [:seon.cluster.run/reply
-                                  {:seon.cluster.run/trigger
+                                 [:seon.turn/reply
+                                  {:seon.turn/trigger
                                    [:seon.cluster.message/id]}]
-                                 [:seon.cluster.run/id run-id])]
+                                 [:seon.turn/id run-id])]
             (is (= "(+ 1 1)\n(+ 2 2)\n(+ 3 3)"
-                   (:seon.cluster.run/reply run-row)))
+                   (:seon.turn/reply run-row)))
             (is (= "m-1"
-                   (get-in run-row [:seon.cluster.run/trigger
+                   (get-in run-row [:seon.turn/trigger
                                     :seon.cluster.message/id])))
             (is (= [0 1 2] (unsettled-ordinals @connection run-id)))
             (is (zero? @evaluations)))
@@ -3121,7 +3121,7 @@
                                     :seon.cluster.work/next open-work}
                                    now)
               call-work (work/next-agent-work @connection (request connection))
-              run-id (:seon.cluster.run/id call-work)
+              run-id (:seon.turn/id call-work)
               evaluations (atom 0)
               bind! sci.eval/bind-result!]
           (is (thrown-with-msg?
@@ -3228,7 +3228,7 @@
                            (subvec receipts 1 5))))
               (is (= original
                      (db/q '[:find ?reply .
-                             :where [_ :seon.cluster.run/reply ?reply]]
+                             :where [_ :seon.turn/reply ?reply]]
                            @connection))
                   "raw intent provenance remains the original reply")
               (is (str/includes? rendered
@@ -3371,15 +3371,15 @@
          (run/generated-run-tx
           @connection
           {:seon.cluster.agent/id "agent-a"
-           :seon.cluster.run/id run-id
+           :seon.turn/id run-id
            :seon.db.process/id process
-           :seon.cluster.run/opened-at now
-           :seon.cluster.run/starting-ns
+           :seon.turn/opened-at now
+           :seon.turn/starting-ns
            [:seon.ns/name 'my.agents.agent-a]}))
         (db/transact!
          connection
          (run/append-generated-tx
-          {:seon.cluster.run/id run-id
+          {:seon.turn/id run-id
            :seon.db.process/id process
            :seon.cluster.eval/at now
            :seon.cluster.eval/ordinal 0
@@ -3388,7 +3388,7 @@
         (db/transact!
          connection
          (run/receipt-settle-tx
-          {:seon.cluster.run/id run-id
+          {:seon.turn/id run-id
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/result-edn "{:introduced 'my.run}"}))
         (let [request {:seon.cluster.agent/id "agent-a"
@@ -3407,18 +3407,18 @@
           ;; caller is `bootstrap/seed-tx`, whose run id always makes
           ;; `generate-turn`'s bootstrap? arm true.
           (is (= :closed (:seon.cluster.loop/outcome report)))
-          (is (inst? (:seon.cluster.run/closed-at
-                      (db/pull @connection [:seon.cluster.run/closed-at]
-                               [:seon.cluster.run/id run-id]))))
+          (is (inst? (:seon.turn/closed-at
+                      (db/pull @connection [:seon.turn/closed-at]
+                               [:seon.turn/id run-id]))))
           (is (not= run-id
-                    (:seon.cluster.run/id (work/next-agent-work @connection
+                    (:seon.turn/id (work/next-agent-work @connection
                                                                request)))
               "a closed generated run derives no further work of its own")
           (is (= :system
                  (db/q '[:find ?author .
                          :in $ ?run-id
                          :where
-                         [?run :seon.cluster.run/id ?run-id]
+                         [?run :seon.turn/id ?run-id]
                          [?form :seon.cluster.eval/run ?run]
                          [?form :seon.cluster.eval/ordinal 0]
                          [?form :seon.cluster.eval/author ?author]]
@@ -3434,15 +3434,15 @@
          (run/generated-run-tx
           @connection
           {:seon.cluster.agent/id "agent-a"
-           :seon.cluster.run/id run-id
+           :seon.turn/id run-id
            :seon.db.process/id process
-           :seon.cluster.run/opened-at now
-           :seon.cluster.run/starting-ns
+           :seon.turn/opened-at now
+           :seon.turn/starting-ns
            [:seon.ns/name 'my.agents.agent-a]}))
         (db/transact!
          connection
          (run/append-generated-tx
-          {:seon.cluster.run/id run-id
+          {:seon.turn/id run-id
            :seon.db.process/id process
            :seon.cluster.eval/at now
            :seon.cluster.eval/ordinal 0
@@ -3451,7 +3451,7 @@
         (db/transact!
          connection
          (run/receipt-settle-tx
-          {:seon.cluster.run/id run-id
+          {:seon.turn/id run-id
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/result-edn "{:introduced 'my.run}"}))
         (let [request {:seon.cluster.agent/id "agent-a"
@@ -3472,14 +3472,14 @@
               run-state
               (db/pull @connection
                        [:seon.cluster.work/situation
-                        :seon.cluster.run/closed-at
-                        :seon.cluster.run/error]
-                       [:seon.cluster.run/id run-id])]
+                        :seon.turn/closed-at
+                        :seon.turn/error]
+                       [:seon.turn/id run-id])]
           (is (= :error (:seon.cluster.loop/outcome report)))
           (is (not= :call (:seon.cluster.work/situation run-state)))
-          (is (some? (:seon.cluster.run/closed-at run-state)))
+          (is (some? (:seon.turn/closed-at run-state)))
           (is (= (:seon.error/message failure)
-                 (:seon.cluster.run/error run-state))))))))
+                 (:seon.turn/error run-state))))))))
 
 (deftest generated-phase-failures-converge-through-one-terminal-exit
   (with-cluster fake-evaluate
@@ -3505,10 +3505,10 @@
                                              failed-phase}}]
               (db/transact!
                connection
-               [{:seon.cluster.run/id run-id
-                 :seon.cluster.run/agent
+               [{:seon.turn/id run-id
+                 :seon.turn/agent
                  [:seon.cluster.agent/id "agent-a"]
-                 :seon.cluster.run/opened-at now
+                 :seon.turn/opened-at now
                  }
                 {:seon.cluster.agent/id "agent-a"
                  }])
@@ -3516,7 +3516,7 @@
                 (db/transact!
                  connection
                  (run/receipt-start-tx
-                  {:seon.cluster.run/id run-id
+                  {:seon.turn/id run-id
                    :seon.cluster.eval/ordinal 0
                    :seon.cluster.eval/at now})))
               (let [settled
@@ -3524,7 +3524,7 @@
                      (cond-> {:seon.cluster.loop/cluster cluster
                               :seon.cluster.loop/now now
                               :seon.cluster.agent/id "agent-a"
-                              :seon.cluster.run/id run-id
+                              :seon.turn/id run-id
                               :seon.error/value failure}
                        evaluation?
                        (assoc :seon.cluster.eval/ordinal 0)))
@@ -3533,7 +3533,7 @@
                      (db/q '[:find (count ?receipt) .
                              :in $ ?run-id
                              :where
-                             [?run :seon.cluster.run/id ?run-id]
+                             [?run :seon.turn/id ?run-id]
                              [?receipt :seon.cluster.eval/run ?run]]
                            @connection run-id)
                      0)]
@@ -3543,15 +3543,15 @@
                     (db/q '[:find (count ?closed) .
                             :in $ ?run-id
                             :where
-                            [?run :seon.cluster.run/id ?run-id]
-                            [?run :seon.cluster.run/closed-at ?closed]]
+                            [?run :seon.turn/id ?run-id]
+                            [?run :seon.turn/closed-at ?closed]]
                           @connection run-id))
                  (= (if evaluation? 1 0) receipt-count)
                  (= 1
                     (db/q '[:find (count ?error) .
                             :in $ ?run-id
                             :where
-                            [?run :seon.cluster.run/id ?run-id]
+                            [?run :seon.turn/id ?run-id]
                             [?error :seon.error/run ?run]]
                           @connection run-id))))))
           :seed 2026080601)
@@ -3606,9 +3606,9 @@
         ;; a held run whose creating transaction names NO trigger — the
         ;; caller-bug state `::no-trigger` seals
         (db/transact! connection
-                    [{:seon.cluster.run/id "run-untriggered"
-                      :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-                      :seon.cluster.run/opened-at now
+                    [{:seon.turn/id "run-untriggered"
+                      :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+                      :seon.turn/opened-at now
                       }
                      {:seon.cluster.agent/id "agent-a"
                       }])
@@ -3618,7 +3618,7 @@
                         {:seon.cluster.loop/cluster cluster
                          :seon.cluster.work/next
                          {:seon.cluster.work/situation :call
-                          :seon.cluster.run/id "run-untriggered"
+                          :seon.turn/id "run-untriggered"
                           :seon.cluster.agent/id "agent-a"}}
                         (Date.))]
             (is (= :error (:seon.cluster.loop/outcome report))
@@ -3930,7 +3930,7 @@
                              :in $ ?agent-id
                              :where
                              [?agent :seon.cluster.agent/id ?agent-id]
-                             [?run :seon.cluster.run/agent ?agent]
+                             [?run :seon.turn/agent ?agent]
                              [?form :seon.cluster.eval/run ?run]
                              [?form :seon.cluster.eval/source ?source]]
                            @connection agent-id)
@@ -3939,7 +3939,7 @@
                              :in $ ?agent-id
                              :where
                              [?agent :seon.cluster.agent/id ?agent-id]
-                             [?run :seon.cluster.run/agent ?agent]
+                             [?run :seon.turn/agent ?agent]
                              [?e :seon.cluster.eval/run ?run]
                              [?e :seon.cluster.eval/result-edn ?edn]]
                            @connection agent-id)]
@@ -3970,7 +3970,7 @@
                                (:seon.cluster.agent/id pending))
                     "exactly one newest snapshot, whichever agent won
                      the race — the other's next chunk repaired it")
-                (is (string? (:seon.cluster.run/id pending))
+                (is (string? (:seon.turn/id pending))
                     "the partial names the run whose terminal facts
                      supersede it")
                 (is (map? (:seon.ai/partial pending))

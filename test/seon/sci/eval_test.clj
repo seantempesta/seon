@@ -1541,7 +1541,7 @@
             (eval/evaluate
              {:seon.sci.eval/ctx ctx
               :seon.cluster.agent/id "scoped-agent"
-              :seon.cluster.run/id "scoped-run"
+              :seon.turn/id "scoped-run"
               :seon.cluster.eval/ordinal 7
               :seon.cluster.eval/source "(my.run/complete \"done\")"
               :seon.sci.admit/caps caps
@@ -1551,11 +1551,11 @@
                 :my.run/result "done"}
                (:seon.sci.admit/value evaluation)))
         (is (some #(= {:seon.cluster.agent/id "scoped-agent"
-                       :seon.cluster.run/id "scoped-run"
+                       :seon.turn/id "scoped-run"
                        :seon.cluster.eval/ordinal 7}
                       (select-keys %
                                    [:seon.cluster.agent/id
-                                    :seon.cluster.run/id
+                                    :seon.turn/id
                                     :seon.cluster.eval/ordinal]))
                   @seen)
             "SCI's actual call-preparation hook sees this form's turn members")))))
@@ -2167,16 +2167,16 @@
            :seon.cluster/name "result-rehydration"}])
         (db/transact!
          connection
-         [{:seon.cluster.run/id "rehydration-run"
-           :seon.cluster.run/agent [:seon.cluster.agent/id "rehydrator"]
-           :seon.cluster.run/opened-at (java.util.Date.)}
+         [{:seon.turn/id "rehydration-run"
+           :seon.turn/agent [:seon.cluster.agent/id "rehydrator"]
+           :seon.turn/opened-at (java.util.Date.)}
           ;; TWO RUNS OF ONE AGENT, both at ordinal 0. Under the ordinal
           ;; spelling this replaced they were one name for two values.
-          {:seon.cluster.run/id "rehydration-run-2"
-           :seon.cluster.run/agent [:seon.cluster.agent/id "rehydrator"]
-           :seon.cluster.run/opened-at (java.util.Date.)}
+          {:seon.turn/id "rehydration-run-2"
+           :seon.turn/agent [:seon.cluster.agent/id "rehydrator"]
+           :seon.turn/opened-at (java.util.Date.)}
           {:seon.cluster.eval/id "[\"rehydration-run\" 0]"
-           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run"]
+           :seon.cluster.eval/run [:seon.turn/id "rehydration-run"]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (java.util.Date.)
            :seon.cluster.eval/source "[1 2 3]"
@@ -2187,14 +2187,14 @@
                 "#:seon.print{:face :seon.print/number, :value 3}]}")}
           ;; A node that kept only a name never held the value.
           {:seon.cluster.eval/id "[\"rehydration-run\" 1]"
-           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run"]
+           :seon.cluster.eval/run [:seon.turn/id "rehydration-run"]
            :seon.cluster.eval/ordinal 1
            :seon.cluster.eval/at (java.util.Date.)
            :seon.cluster.eval/source "(atom 1)"
            :seon.cluster.eval/result-edn
            "#:seon.print{:face :seon.print/object, :name \"clojure.lang.Atom\"}"}
           {:seon.cluster.eval/id "[\"rehydration-run-2\" 0]"
-           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run-2"]
+           :seon.cluster.eval/run [:seon.turn/id "rehydration-run-2"]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (java.util.Date.)
            :seon.cluster.eval/source "[4 5]"
@@ -2207,7 +2207,7 @@
           ;; so there is nothing for the fork to bind and a later form
           ;; naming it gets sci's ordinary unresolved symbol.
           {:seon.cluster.eval/id "[\"rehydration-run-2\" 1]"
-           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run-2"]
+           :seon.cluster.eval/run [:seon.turn/id "rehydration-run-2"]
            :seon.cluster.eval/ordinal 1
            :seon.cluster.eval/at (java.util.Date.)
            :seon.cluster.eval/source "(range)"
@@ -2215,7 +2215,7 @@
            :seon.eval/size 8388608}
           ;; And the other reason: the walk could only describe the value.
           {:seon.cluster.eval/id "[\"rehydration-run-2\" 2]"
-           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run-2"]
+           :seon.cluster.eval/run [:seon.turn/id "rehydration-run-2"]
            :seon.cluster.eval/ordinal 2
            :seon.cluster.eval/at (java.util.Date.)
            :seon.cluster.eval/source "(async/chan)"
@@ -2238,7 +2238,7 @@
                      :seon.db/db database
                      :seon.db/connection connection
                      :seon.cluster.agent/id "rehydrator"
-                     :seon.cluster.run/id "rehydration-run-2"}))]
+                     :seon.turn/id "rehydration-run-2"}))]
           (is (not= first-handle second-handle)
               "two runs at ordinal 0 mint two handles, never one")
           (is (every? #(= 'result (symbol (namespace %)))

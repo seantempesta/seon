@@ -243,7 +243,7 @@
                    @connection
                    (request
                     [{:seon.config/cluster "two"
-                      :seon.cluster.run/id "also-two"}])))))))
+                      :seon.turn/id "also-two"}])))))))
       (testing "the same upsert handle appears twice"
         (doseq [size [1 8 12]
                 ordinals [(range size) (reverse (range size))]]

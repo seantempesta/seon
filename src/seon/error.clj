@@ -231,10 +231,10 @@
   [source failure]
   (or (when (map? source) (not-empty (:seon.error/message source)))
       (when (and (map? source)
-                 (:seon.cluster.run/rule source)
-                 (:seon.cluster.run/transition source))
-        (str (:seon.cluster.run/transition source) " was refused by "
-             (:seon.cluster.run/rule source) "."))
+                 (:seon.turn/rule source)
+                 (:seon.turn/transition source))
+        (str (:seon.turn/transition source) " was refused by "
+             (:seon.turn/rule source) "."))
       (when failure
         (let [deepest (root-cause failure)]
           (or (not-empty (ex-message deepest))
@@ -497,7 +497,7 @@
   [{:seon.error/keys [source id at process basis-t]
     evidence-bytes :seon.config.error/max-evidence-bytes
     :seon.sci.admit/keys [caps]
-    run-id :seon.cluster.run/id
+    run-id :seon.turn/id
     agent-id :seon.cluster.agent/id}]
   (let [failure (throwable source)
         class-name (when failure (.getName (class failure)))
@@ -555,7 +555,7 @@
           (:seon.instrument/arm instrument-data)
           (assoc :seon.instrument/arm (:seon.instrument/arm instrument-data))
           basis-t (assoc :seon.error/basis-t basis-t)
-          run-id (assoc :seon.error/run [:seon.cluster.run/id run-id])
+          run-id (assoc :seon.error/run [:seon.turn/id run-id])
           agent-id (assoc :seon.error/agent
                           [:seon.cluster.agent/id agent-id]))
         fact (fit-fact-payload
@@ -600,7 +600,7 @@
     and `cid`, each present exactly when the arriving shape carried it;
   - computes `signature` as `sha-256` over
     `[process, class, kind, top frame]`;
-  - emits `run` and `agent` as lookup refs (`[:seon.cluster.run/id id]`)
+  - emits `run` and `agent` as lookup refs (`[:seon.turn/id id]`)
     exactly when the request supplied those ids.
 
   `id`, `at` and `process` are the caller's: identity and the clock are
@@ -685,13 +685,13 @@
         source (if (:seon.error/data-edn fact)
                  (fact-source fact)
                  fact)
-        request (:seon.cluster.run/request source)
-        transition (:seon.cluster.run/transition source)
+        request (:seon.turn/request source)
+        transition (:seon.turn/transition source)
         operation (or (some-> transition name) "transition")
-        run-id (or (:seon.cluster.run/id request)
-                   (:seon.cluster.run/id source)
+        run-id (or (:seon.turn/id request)
+                   (:seon.turn/id source)
                    (second (:seon.error/run fact)))
-        rule (:seon.cluster.run/rule source)]
+        rule (:seon.turn/rule source)]
     (str "The " operation (when run-id (str " of " run-id))
          " was refused atomically by " rule
          ". Nothing from this " operation " committed. Re-read the run before"
@@ -767,7 +767,7 @@
            " one backup attempt. Answer the unchanged user request below; do"
            " not wait for or reconstruct a primary response.")
 
-      (= kind :seon.cluster.run/refused)
+      (= kind :seon.turn/refused)
       (refusal-prose fact)
 
       ;; The latest occurrence's OWN message and run ride this clause. An
@@ -904,13 +904,13 @@
        (when op (str "op=" op))
        (when cid (str "cid=" cid))
        (str "run=" (or (second run)
-                       (get-in source [:seon.cluster.run/request
-                                       :seon.cluster.run/id])
+                       (get-in source [:seon.turn/request
+                                       :seon.turn/id])
                        "-"))
-       (when-let [rule (:seon.cluster.run/rule source)] (str "rule=" rule))
-       (when-let [transition (:seon.cluster.run/transition source)]
+       (when-let [rule (:seon.turn/rule source)] (str "rule=" rule))
+       (when-let [transition (:seon.turn/transition source)]
          (str "transition=" transition))
-       (when (= kind :seon.cluster.run/refused) "committed=false")
+       (when (= kind :seon.turn/refused) "committed=false")
        (when-let [phase (:seon.ai/error-class data)] (str "phase=" phase))
        (when (contains? data :seon.ai/request-transmitted?)
          (str "transmitted=" (:seon.ai/request-transmitted? data)))
@@ -1120,7 +1120,7 @@
        evidence-bytes :seon.config.error/max-evidence-bytes
        supplied-fact :seon.error/fact
        :seon.sci.admit/keys [caps]
-       run-id :seon.cluster.run/id
+       run-id :seon.turn/id
        agent-id :seon.cluster.agent/id
        escalate-to :seon.config.error/escalate-to
        limit :seon.config.error/recurrence-limit}]
@@ -1140,15 +1140,15 @@
                            evidence-bytes}
                     basis-t (assoc :seon.error/basis-t basis-t)
                     (and run-id
-                         (entity-exists? db :seon.cluster.run/id run-id))
-                    (assoc :seon.cluster.run/id run-id)
+                         (entity-exists? db :seon.turn/id run-id))
+                    (assoc :seon.turn/id run-id)
                     (and agent-id
                          (entity-exists? db :seon.cluster.agent/id agent-id))
                     (assoc :seon.cluster.agent/id agent-id))))
         fact (cond-> fact
                (and (:seon.error/run fact)
                     (not (entity-exists?
-                          db :seon.cluster.run/id
+                          db :seon.turn/id
                           (second (:seon.error/run fact)))))
                (dissoc :seon.error/run)
 
@@ -1373,11 +1373,11 @@
   (let [eid (cond
               (map? reference) (:db/id reference)
               (integer? reference) reference)]
-    (or (:seon.cluster.run/id reference)
+    (or (:seon.turn/id reference)
         (when eid
-          (let [row (db/pull database [:seon.cluster.run/id] eid)]
+          (let [row (db/pull database [:seon.turn/id] eid)]
             (when-not (:seon.error/kind row)
-              (:seon.cluster.run/id row)))))))
+              (:seon.turn/id row)))))))
 
 (defn render-faults-html
   "`:seon.render/html` — the faults recorded against one agent, newest first.
@@ -1426,7 +1426,7 @@
                                           :seon.render.route/data
                                           {}
                                           {:entity
-                                           (pr-str [:seon.cluster.run/id
+                                           (pr-str [:seon.turn/id
                                                     run-id])})}
                                (str "in run " run-id)]])))))
             faults)

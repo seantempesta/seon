@@ -24,7 +24,7 @@
             [seon.cluster.source :as source]
             [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.cluster.store :as store]
             [seon.cluster.work :as work]
             [seon.config :as config]
@@ -143,8 +143,8 @@
      (db/q '[:find ?closed-at .
             :in $ ?run-id
             :where
-            [?run :seon.cluster.run/id ?run-id]
-            [?run :seon.cluster.run/closed-at ?closed-at]]
+            [?run :seon.turn/id ?run-id]
+            [?run :seon.turn/closed-at ?closed-at]]
           db (bootstrap/run-id agent-id)))))
 
 (defn- write-source!
@@ -981,17 +981,17 @@
       (is (#'cluster/reloadable-namespace? 'seon.cluster))
       (finally (remove-ns namespace-name))))
   ;; The observed failure: alphabetical reload put seon.cluster.loop before
-  ;; seon.cluster.run, and the reloaded loop failed on run's new Var.
+  ;; seon.turn, and the reloaded loop failed on run's new Var.
   (testing "a changed callee reloads before every changed caller, ties by name"
-    (is (= '[my.plan seon.cluster.run seon.cluster.loop seon.cluster]
+    (is (= '[my.plan seon.turn seon.cluster.loop seon.cluster]
            (cluster/reload-order
-            '#{seon.cluster.loop seon.cluster my.plan seon.cluster.run}
-            '{seon.cluster.loop #{seon.cluster.run}
-              seon.cluster #{seon.cluster.loop seon.cluster.run seon.db}}))))
+            '#{seon.cluster.loop seon.cluster my.plan seon.turn}
+            '{seon.cluster.loop #{seon.turn}
+              seon.cluster #{seon.cluster.loop seon.turn seon.db}}))))
   (testing "requires outside the changed set do not block reload"
     (is (= '[seon.cluster.loop]
            (cluster/reload-order '#{seon.cluster.loop}
-                                 '{seon.cluster.loop #{seon.cluster.run}}))))
+                                 '{seon.cluster.loop #{seon.turn}}))))
   (testing "no edges is plain name order and an empty set is empty"
     (is (= '[a.b a.c] (cluster/reload-order '#{a.c a.b} {})))
     (is (= [] (cluster/reload-order #{} {})))))
@@ -1347,13 +1347,13 @@
               (is (= (db/q '[:find (count ?form) .
                              :in $ ?run-id
                              :where
-                             [?run :seon.cluster.run/id ?run-id]
+                             [?run :seon.turn/id ?run-id]
                              [?form :seon.cluster.eval/run ?run]]
                            database run-id)
                      (db/q '[:find (count ?receipt) .
                              :in $ ?run-id
                              :where
-                             [?run :seon.cluster.run/id ?run-id]
+                             [?run :seon.turn/id ?run-id]
                              [?receipt :seon.cluster.eval/run ?run]]
                            database run-id))
                   "every successful form settles with a real receipt")
@@ -1363,7 +1363,7 @@
                    (db/q '[:find ?error
                            :in $ ?run-id
                            :where
-                           [?run :seon.cluster.run/id ?run-id]
+                           [?run :seon.turn/id ?run-id]
                            [?error :seon.error/run ?run]]
                          database run-id))
                   "an agent evaluation error never enters the core-fault family")))
@@ -1640,7 +1640,7 @@
              (db/q '[:find ?receipt .
                      :in $ ?run-id
                      :where
-                     [?run :seon.cluster.run/id ?run-id]
+                     [?run :seon.turn/id ?run-id]
                      [?receipt :seon.cluster.eval/run ?run]
                      [?receipt :seon.cluster.eval/ordinal 1]
                      (or [?receipt :seon.cluster.eval/result-edn _]
@@ -1648,17 +1648,17 @@
                    database run-id)))
           (let [database @connection
                 run (db/pull database
-                             '[:seon.cluster.run/id
-                               :seon.cluster.run/closed-at
-                               {:seon.cluster.run/trigger
+                             '[:seon.turn/id
+                               :seon.turn/closed-at
+                               {:seon.turn/trigger
                                 [:seon.cluster.message/id]}]
-                             [:seon.cluster.run/id run-id])
+                             [:seon.turn/id run-id])
                 ordinals
                 (db/q {:query
                        '[:find [?ordinal ...]
                          :in $ ?run-id
                          :where
-                         [?run :seon.cluster.run/id ?run-id]
+                         [?run :seon.turn/id ?run-id]
                          [?form :seon.cluster.eval/run ?run]
                          [?form :seon.cluster.eval/ordinal ?ordinal]]
                        :args [database run-id]
@@ -1668,10 +1668,10 @@
                       (db/q '[:find [?kind ...]
                               :where [_ :seon.error/kind ?kind]]
                             database))]
-            (is (= run-id (:seon.cluster.run/id run)))
-            (is (nil? (:seon.cluster.run/closed-at run)))
+            (is (= run-id (:seon.turn/id run)))
+            (is (nil? (:seon.turn/closed-at run)))
             (is (= (bootstrap/task-message-id "root")
-                   (get-in run [:seon.cluster.run/trigger
+                   (get-in run [:seon.turn/trigger
                                 :seon.cluster.message/id])))
             (is (= [0 1] (vec (take 2 (sort ordinals)))))
             (is (= [run-id]
@@ -1679,8 +1679,8 @@
                            :in $ ?trigger-id
                            :where
                            [?trigger :seon.cluster.message/id ?trigger-id]
-                           [?run :seon.cluster.run/trigger ?trigger]
-                           [?run :seon.cluster.run/id ?run-id]]
+                           [?run :seon.turn/trigger ?trigger]
+                           [?run :seon.turn/id ?run-id]]
                          database (bootstrap/task-message-id "root"))))
             (is (not (contains? error-kinds
                                 :seon.bootstrap/prefix-drift)))
@@ -1725,22 +1725,22 @@
         ;; 2026-08-08: `945f3226` closed by recovery with no marker
         ;; anywhere durable, so the honesty claim died with its JVM)
         (db/transact! connection
-                    [{:seon.cluster.run/id "run-clean"
-                      :seon.cluster.run/agent [:seon.cluster.agent/id "bob"]
-                      :seon.cluster.run/opened-at now
-                      :seon.cluster.run/closed-at now}])
+                    [{:seon.turn/id "run-clean"
+                      :seon.turn/agent [:seon.cluster.agent/id "bob"]
+                      :seon.turn/opened-at now
+                      :seon.turn/closed-at now}])
         (db/transact! connection
-                    [{:seon.cluster.run/id "run-crashed"
-                      :seon.cluster.run/agent [:seon.cluster.agent/id "alice"]
-                      :seon.cluster.run/opened-at now
+                    [{:seon.turn/id "run-crashed"
+                      :seon.turn/agent [:seon.cluster.agent/id "alice"]
+                      :seon.turn/opened-at now
 
-                      :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))}
+                      :seon.turn/plan-digest (apply str (repeat 64 "a"))}
                      {:seon.cluster.agent/id "alice"
                       }
                      ;; dangling = started with no terminal fact —
                      ;; running IS that absence, there is no status
                      {:seon.cluster.eval/id "e-0"
-                      :seon.cluster.eval/run [:seon.cluster.run/id "run-crashed"]
+                      :seon.cluster.eval/run [:seon.turn/id "run-crashed"]
                       :seon.cluster.eval/ordinal 0
                       :seon.cluster.eval/source "(+ 1 1)"
                       :seon.cluster.eval/at now}])
@@ -1761,19 +1761,19 @@
           (testing "and the run is CLOSED with its plan intact —
                     recovery ends custody and no plan form can execute"
             (is (some? (db/q (quote [:find ?c . :where
-                                    [_ :seon.cluster.run/closed-at ?c]])
+                                    [_ :seon.turn/closed-at ?c]])
                             @connection)))
             (is (some? (db/q (quote [:find ?d . :where
-                                    [_ :seon.cluster.run/plan-digest ?d]])
+                                    [_ :seon.turn/plan-digest ?d]])
                             @connection))))
           (testing "boot closes the interrupted turn and preserves the clean turn"
-            (is (inst? (:seon.cluster.run/closed-at
+            (is (inst? (:seon.turn/closed-at
                         (db/pull @connection '[*]
-                                 [:seon.cluster.run/id "run-crashed"]))))
+                                 [:seon.turn/id "run-crashed"]))))
             (is (str/includes?
                  (run/render-ai
                   (assoc (db/pull @connection '[*]
-                                  [:seon.cluster.run/id "run-crashed"])
+                                  [:seon.turn/id "run-crashed"])
                          :seon.db/db @connection))
                  "interrupted")))
           (testing "and the instance reports what recovery did"

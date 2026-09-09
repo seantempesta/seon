@@ -4,7 +4,7 @@
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.store :as store]
             [seon.db :as db]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
             [seon.id :as id]
@@ -399,8 +399,8 @@
 (deftest planned-form-authorship-has-exactly-two-first-party-constructors
   (test-support/with-database
     (fn [connection]
-      (is (= #{"seon.cluster.run/plan-tx"
-               "seon.cluster.run/system-plan-tx"}
+      (is (= #{"seon.turn/plan-tx"
+               "seon.turn/system-plan-tx"}
              (set
               (db/q '[:find [?caller-symbol ...]
                       :in $ ?target-symbol
@@ -409,7 +409,7 @@
                       [?caller :seon.fn/calls ?target]
                       [?caller :seon.fn/sym ?caller-symbol]]
                     @connection
-                    "seon.cluster.run/plan-tx-for-author")))))))
+                    "seon.turn/plan-tx-for-author")))))))
 
 (deftest settled-form-records-calls-across-every-program-namespace
   (test-support/with-database
@@ -432,31 +432,31 @@
         (db/transact!
          connection
          (run/open-tx
-          {:seon.cluster.run/id run-id
-           :seon.cluster.run/agent
+          {:seon.turn/id run-id
+           :seon.turn/agent
            [:seon.cluster.agent/id "call-edges-agent"]
-           :seon.cluster.run/opened-at (java.util.Date.)}))
+           :seon.turn/opened-at (java.util.Date.)}))
 
         (db/transact!
          connection
          (run/plan-tx
-          {:seon.cluster.run/id run-id
+          {:seon.turn/id run-id
            :seon.db.process/id process
-           :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
-           :seon.cluster.run/plan-digest "call-edges-digest"
-           :seon.cluster.run/sources
+           :seon.turn/starting-ns [:seon.ns/name namespace-name]
+           :seon.turn/plan-digest "call-edges-digest"
+           :seon.turn/sources
            [{:seon.cluster.eval/source source}]}))
         (db/transact!
          connection
          (run/receipt-start-tx
-          {:seon.cluster.run/id run-id
+          {:seon.turn/id run-id
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (java.util.Date.)}))
         (db/transact!
          connection
          (run/receipt-settle-tx
           @connection
-          {:seon.cluster.run/id run-id
+          {:seon.turn/id run-id
            :seon.cluster.eval/ordinal 0
            :seon.eval/value ":done"}))
         (is (empty?
@@ -512,25 +512,25 @@
           (db/transact!
            connection
            (run/open-tx
-            {:seon.cluster.run/id "settlement-parity-run"
-             :seon.cluster.run/agent
+            {:seon.turn/id "settlement-parity-run"
+             :seon.turn/agent
              [:seon.cluster.agent/id "settlement-parity-agent"]
-             :seon.cluster.run/opened-at (java.util.Date.)}))
+             :seon.turn/opened-at (java.util.Date.)}))
 
           (db/transact!
            connection
            (run/plan-tx
-            {:seon.cluster.run/id "settlement-parity-run"
+            {:seon.turn/id "settlement-parity-run"
              :seon.db.process/id "settlement-parity-process"
-             :seon.cluster.run/starting-ns
+             :seon.turn/starting-ns
              [:seon.ns/name namespace-name]
-             :seon.cluster.run/plan-digest "settlement-parity-digest"
-             :seon.cluster.run/sources
+             :seon.turn/plan-digest "settlement-parity-digest"
+             :seon.turn/sources
              [{:seon.cluster.eval/source source}]}))
           (db/transact!
            connection
            (run/receipt-start-tx
-            {:seon.cluster.run/id "settlement-parity-run"
+            {:seon.turn/id "settlement-parity-run"
              :seon.cluster.eval/ordinal 0
              :seon.cluster.eval/at (java.util.Date.)}))
           (let [settlement
@@ -538,7 +538,7 @@
                  connection
                  (run/receipt-settle-tx
                   @connection
-                  {:seon.cluster.run/id "settlement-parity-run"
+                  {:seon.turn/id "settlement-parity-run"
                    :seon.cluster.eval/ordinal 0
                    :seon.eval/value ":defined"
                    :seon.program/row indexed}))]

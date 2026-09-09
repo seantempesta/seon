@@ -214,7 +214,7 @@
   [connection]
   {:seon.db/connection connection
    :seon.cluster.agent/id "web-agent"
-   :seon.cluster.run/id "web-receipt-run"
+   :seon.turn/id "web-receipt-run"
    :seon.cluster.eval/ordinal 0
    :seon.boot/cluster-name "default"
    :seon.sci.admit/caps
@@ -352,8 +352,8 @@
                    {:seon.config/cluster "default"}
                    (config base-url))
             {:seon.cluster.agent/id "web-agent"}
-            {:seon.cluster.run/id "web-receipt-run"
-             :seon.cluster.run/agent
+            {:seon.turn/id "web-receipt-run"
+             :seon.turn/agent
              [:seon.cluster.agent/id "web-agent"]}])
           (let [result
                 (with-redefs-fn
@@ -394,8 +394,8 @@
                    (config base-url)
                    {:seon.config.web/max-inline-bytes 4096})
             {:seon.cluster.agent/id "web-agent"}
-            {:seon.cluster.run/id "web-receipt-run"
-             :seon.cluster.run/agent
+            {:seon.turn/id "web-receipt-run"
+             :seon.turn/agent
              [:seon.cluster.agent/id "web-agent"]}])
           (let [context (effect-context connection)
                 [text-result binary-result]

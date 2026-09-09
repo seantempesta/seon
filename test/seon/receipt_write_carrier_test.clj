@@ -1,7 +1,7 @@
 (ns seon.receipt-write-carrier-test
   "Regression for receipt provenance on agent-authored database writes."
   (:require [clojure.test :refer [deftest is testing]]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -61,7 +61,7 @@
                :seon.config/on-core-error :panic
                :seon.boot/cluster-name "receipt-write-carrier-test"
                :seon.cluster.agent/id agent-id
-               :seon.cluster.run/id run-id
+               :seon.turn/id run-id
                :seon.cluster.eval/ordinal ordinal})]
          (testing "every write during evaluation names its receipt on the transaction"
            (is (nil? (:seon.cluster.eval/error evaluation)))

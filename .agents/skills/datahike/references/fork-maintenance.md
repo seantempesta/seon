@@ -43,7 +43,7 @@ Both currently select
 | Writer and ordered persistence | `reference-code/datahike/src/datahike/api/impl.cljc:30-48`; `reference-code/datahike/src/datahike/writer.cljc:85-220,363-387`; `reference-code/datahike/src/datahike/writing.cljc:497-552,862-879` | `test/seon/cluster/store_test.clj:94-126,164-203` |
 | Store create/reopen | `reference-code/datahike/src/datahike/connector.cljc:183-237,275-365` | `src/seon/cluster/store.clj:155-183,266-398`; `test/seon/cluster/store_test.clj:94-162,248-266,380-390` |
 | Branch identity and roster | `reference-code/datahike/src/datahike/store.cljc:50-61`; `reference-code/datahike/src/datahike/versioning.cljc:179-203,207-214,237-321` | `src/seon/cluster/store.clj:288-398`; `test/seon/cluster/store_test.clj:107-162,380-390` |
-| Schema removal | `reference-code/datahike/src/datahike/db/transaction.cljc:136-142,276-305` | `src/seon/cluster/run.clj:645-742`; `test/seon/schema_usage_guard_test.clj:80-397` |
+| Schema removal | `reference-code/datahike/src/datahike/db/transaction.cljc:136-142,276-305` | `src/seon/turn.clj:1275-1305`; `test/seon/schema_usage_guard_test.clj:80-397` |
 | Test launchers | `reference-code/datahike/bb.edn:46-51`; `reference-code/datahike/bb/src/tools/test.clj:8-13`; `reference-code/datahike/tests.edn:1-30` | `bin/test`; `test/seon/datahike_fork_test.clj:1-50` |
 
 ## Planner entry point

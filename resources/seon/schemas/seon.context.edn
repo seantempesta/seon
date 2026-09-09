@@ -1,12 +1,12 @@
 #:seon.context{:capture-request
                [:or
                 [:map
-                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.turn/id :seon.turn/id]
                  [:seon.cluster.prompt/rendered-context
                   :seon.cluster.prompt/rendered-context]
                  ]
                 [:map
-                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.turn/id :seon.turn/id]
                  [:seon.db/db :seon.db/database-value]
                  [:seon.error/value :seon.error/value]
                  ]],
@@ -31,12 +31,12 @@
                :append-request
                [:map
                 [:seon.cluster.agent/id :seon.cluster.agent/id]
-                [:seon.cluster.run/id :seon.cluster.run/id]
+                [:seon.turn/id :seon.turn/id]
                 [:seon.context.contribution/id :seon.context.contribution/id]],
                :compact-request
                [:map
                 [:seon.cluster.agent/id :seon.cluster.agent/id]
-                [:seon.cluster.run/id :seon.cluster.run/id]
+                [:seon.turn/id :seon.turn/id]
                 [:seon.context.contribution/id :seon.context.contribution/id]
                 [:seon.context.contribution/evaluations
                  :seon.context.contribution/evaluations]],
@@ -47,7 +47,7 @@
                :comparison-request
                [:map
                 [:seon.cluster.agent/id :seon.cluster.agent/id]
-                [:seon.cluster.run/id :seon.cluster.run/id]
+                [:seon.turn/id :seon.turn/id]
                 [:seon.cluster.loop/evaluated-sources {:optional true}
                  :seon.cluster.loop/evaluated-sources]
                 [:seon.context.contribution/id :seon.context.contribution/id]],

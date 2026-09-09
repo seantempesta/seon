@@ -60,7 +60,7 @@
               [:map
                [:seon.db/connection
                 :seon.db/connection]
-               [:seon.cluster.run/id :seon.cluster.run/id]
+               [:seon.turn/id :seon.turn/id]
                [:seon.cluster.eval/ordinal
                 :seon.cluster.eval/ordinal]
                [:seon.boot/cluster-name :seon.boot/cluster-name]

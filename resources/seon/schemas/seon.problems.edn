@@ -15,7 +15,7 @@
                 :errored-receipt
                 [:map
                  [:seon.cluster.eval/id :seon.cluster.eval/id]
-                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.turn/id :seon.turn/id]
                  [:seon.cluster.eval/ordinal
                   :seon.cluster.eval/ordinal]
                  [:seon.cluster.eval/source
@@ -24,14 +24,14 @@
                  [:seon.cluster.eval/error :seon.cluster.eval/error]],
                 :failed-run
                 [:map
-                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.turn/id :seon.turn/id]
                  [:seon.cluster.agent/id :seon.cluster.agent/id]
-                 [:seon.cluster.run/error :seon.cluster.run/error]],
+                 [:seon.turn/error :seon.turn/error]],
                 :form-problem
                 [:map
                  [:seon.problems/id :seon.problems/id]
                  [:seon.cluster.eval/id :seon.cluster.eval/id]
-                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.turn/id :seon.turn/id]
                  [:seon.cluster.eval/ordinal
                   :seon.cluster.eval/ordinal]
                  [:seon.cluster.eval/source
@@ -42,7 +42,7 @@
                  [:seon.cluster.eval/error :seon.cluster.eval/error]],
                 :form-problem-request
                 [:map
-                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.turn/id :seon.turn/id]
                  [:seon.cluster.eval/ordinal
                   :seon.cluster.eval/ordinal]
                  [:seon.sci.eval/evaluation

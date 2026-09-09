@@ -234,7 +234,7 @@ wakes' results answers them; opening alone does not. System turn 0 stores
 the opening. Before each agent turn, the since-diff checks every distinct
 read form's latest evaluation and appends changed reads in a system turn;
 writes and effects never rerun. The partial owner is
-`src/seon/turn.clj:137`; its existence is not full-loop proof.
+`src/seon/turn.clj:1992`; its existence is not full-loop proof.
 
 **Errors are two classes, never mixed.** An agent mistake becomes a flat
 `:seon.error` value the agent sees — nothing throws into the loop. A core
@@ -305,7 +305,7 @@ registry before declaring a key.
 
 ```clojure
 ;; which tests exercise this function? — a query, not a naming convention:
-(seon.fn/tests-reaching (seon.db/db) "seon.cluster.run/open-tx")
+(seon.fn/tests-reaching (seon.db/db) "seon.turn/open-tx")
 ;; Illustrative Datalog clause (not a standalone executable form):
 ;; which functions need cluster custody? — declared arity input-refs:
 [?f :seon.fn.arity/input-refs :seon.db/connection]
@@ -451,7 +451,7 @@ genuinely mean key membership and the collection is a map or set.
 
 **The `my.*` / `seon.*` split is surface versus owner, never duplication:**
 a capability has ONE durable fact family and ONE system-side owning
-mechanism (`seon.cluster.message`, `seon.cluster.run`), and `my.<name>` is
+mechanism (`seon.cluster.message`, `seon.turn`), and `my.<name>` is
 the thin agent-facing protocol over those same facts — reads through
 `seon.db`, effects as returned values the run loop interprets. Finding two
 namespaces for one noun is the ruled layering; finding two FACT families or
@@ -544,11 +544,11 @@ writing.
 | every `fn` body entrance | where sci calls the `:interrupt-fn` | safepoint |
 | `ctx`, `fork` | sci's own names (`reference-code/sci/src/sci/core.cljc`) | warm base, the agent's world |
 | `:io` / `:compute` / `:mixed` | core.async's workload tags: `:io` may block but not compute, `:compute` must not block (`reference-code/core.async/.../impl/dispatch.clj`) | eval pool, wait pool |
-| **[TARGET]** turn | An agent's ordered evaluations and any provider attempts; open means no closing fact, enforced at the writer. Target owner `seon.turn`; process custody stamps are retired ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)) | run, `seon.cluster.run`, `:seon.cluster.run/process` |
+| turn | An agent's ordered evaluations and any provider attempts; open means no `:seon.turn/closed-at`, enforced at the writer. `seon.turn` owns the transitions; its schema declares the transcript render pair ([open?](src/seon/turn.clj:184), [open-call](src/seon/turn.clj:368), [schema](resources/seon/schemas/seon.turn.edn:1)); process provenance rides execution requests, never the turn entity. | run, `seon.cluster.run`, `:seon.cluster.run/process` |
 | accretion / breakage | a change that requires no more and provides no less | graduation, nursery |
 | **[TARGET]** source initialization rows, transaction data | Static source population is admitted transaction data; the agent's opening is separately evaluated and stored as system turn 0 ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `src/seon/bootstrap.clj`) | bootstrap-plan rows, seed bundle |
 | process record, generation, (pid, start-instant) | operator-managed process descriptors (`script/seon/fresh_operator.clj` ↔ `src/seon/cluster/process.clj`) | orphan registry, liveness flag |
-| **[TARGET]** system turn | An ordinary turn with a reply and no provider attempt; "system" is derived, never stamped. Opening and changed reads are stored evaluations; a system turn holding wakes' results answers them under the `:t` rule ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); SCI evaluation: `reference-code/sci/src/sci/core.cljc:352`) | generated opening episode, generated run |
+| system turn | An ordinary turn with a reply and no provider attempt; "system" is derived, never stamped. `seon.turn/system-turn` computes the opening and changed reads and optionally stores their evaluations ([owner](src/seon/turn.clj:1992), [debug controls](src/seon/render/web.clj:2465)); the wake-answering `:t` rule remains specified by [turn PRD §14](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md). | generated opening episode, generated run |
 | **[TARGET]** turn loop | The per-agent proc advances ordinary system and agent turns. Before an agent turn it applies the since-query diff to every distinct read form's latest evaluation; writes and effects never rerun ([turn PRD §13–§15](docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); current owner `src/seon/cluster/loop.clj`, target `seon.turn`) | run loop, driver, driving |
 | `seon.effect`, `effect/request!` | the one system-side owner every CAPABILITY request enters (fs, web, llm, db writes) — about effects crossing out, never about which functions an agent may call | the door, capability dispatch |
 | every function is callable | an agent may call ANY function in its cluster's program graph; what differs per agent is only what is RENDERED into its context, which never gates execution | toolkit, grants, allowlist |

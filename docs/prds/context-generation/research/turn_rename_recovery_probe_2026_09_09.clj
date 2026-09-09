@@ -1,6 +1,6 @@
 (ns turn-rename-recovery-probe-2026-09-09
   (:require [datahike.api]
-            [seon.cluster.run]
+            [seon.turn]
             [seon.db]
             [seon.operator]))
 
@@ -13,28 +13,28 @@
       report (datahike.api/with
               before
               [{:seon.cluster.agent/id id}
-               {:seon.cluster.run/id id
-                :seon.cluster.run/agent [:seon.cluster.agent/id id]
-                :seon.cluster.run/opened-at now
+               {:seon.turn/id id
+                :seon.turn/agent [:seon.cluster.agent/id id]
+                :seon.turn/opened-at now
                 :seon.cluster.work/situation :generate}
                {:seon.cluster.eval/id (str id "-unfinished")
-                :seon.cluster.eval/run [:seon.cluster.run/id id]
+                :seon.cluster.eval/run [:seon.turn/id id]
                 :seon.cluster.eval/ordinal 0
                 :seon.cluster.eval/source "(+ 1 1)"}])
       database (:db-after report)
-      operations (seon.cluster.run/recover-call
+      operations (seon.turn/recover-call
                   database
-                  {:seon.cluster.run/id id
-                   :seon.cluster.run/now now})
+                  {:seon.turn/id id
+                   :seon.turn/now now})
       after (:db-after (datahike.api/with database operations))
-      turn (seon.db/pull after '[*] [:seon.cluster.run/id id])
+      turn (seon.db/pull after '[*] [:seon.turn/id id])
       evaluation (seon.db/pull after '[*]
                               [:seon.cluster.eval/id (str id "-unfinished")])]
-  {:seon.test/closed (= now (:seon.cluster.run/closed-at turn))
+  {:seon.test/closed (= now (:seon.turn/closed-at turn))
    :seon.test/interrupted (= now (:seon.cluster.eval/interrupted-at evaluation))
    :seon.test/idempotent
-   (empty? (seon.cluster.run/recover-call
-             after {:seon.cluster.run/id id :seon.cluster.run/now now}))
+   (empty? (seon.turn/recover-call
+             after {:seon.turn/id id :seon.turn/now now}))
    :seon.test/default-unchanged (= (seon.db/basis-t before)
                                   (seon.db/basis-t @connection))
    :seon.test/only-close-and-evaluation (= 2 (count operations))

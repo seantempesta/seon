@@ -3,7 +3,7 @@
                       {:seon.db/attributes true,
                        :seon.render/units
                        [:seon.cluster.message/_to
-                        :seon.cluster.run/_agent
+                        :seon.turn/_agent
                         :seon.error/_agent],
                        :seon.render/ai
                        seon.cluster.agent/render-identity-ai,
@@ -52,7 +52,7 @@
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
                       [:seon.ns/name :seon.ns/name]
                       [:seon.cluster/name :seon.cluster/name]
-                      [:seon.cluster.run/id :seon.cluster.run/id]],
+                      [:seon.turn/id :seon.turn/id]],
                      :creation-tx :seon.store/transaction-data,
                      :disarm-request
                      [:map
@@ -88,12 +88,12 @@
                       [:seon.cluster.agent/routing
                        :seon.cluster.agent/routing]
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
-                      [:seon.cluster.run/starting-ns {:optional true}
-                       :seon.cluster.run/starting-ns]
+                      [:seon.turn/starting-ns {:optional true}
+                       :seon.turn/starting-ns]
                       [:seon.cluster.reply/text :seon.cluster.reply/text]],
                      :source-submission-result
                      [:map
-                      [:seon.cluster.run/id :seon.cluster.run/id]],
+                      [:seon.turn/id :seon.turn/id]],
                      ;; The live value returned by `(help)`. These are
                      ;; projections of current facts, never attributes stored
                      ;; on the agent. Adding a member here is how the generated
@@ -117,11 +117,11 @@
                       [:seon.cluster.agent/open-run-ref
                        {:optional true}
                        :seon.cluster.agent/open-run-ref]
-                      [:seon.cluster.run/trigger
+                      [:seon.turn/trigger
                        {:optional true}
-                       :seon.cluster.run/trigger]
-                      [:seon.cluster.run/turns-remaining
-                       :seon.cluster.run/turns-remaining]
+                       :seon.turn/trigger]
+                      [:seon.turn/turns-remaining
+                       :seon.turn/turns-remaining]
                       [:seon.cluster.agent/protocol-namespaces
                        :seon.cluster.agent/protocol-namespaces]],
                      :no-such-agent :seon.cluster.agent/id

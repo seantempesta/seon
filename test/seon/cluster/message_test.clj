@@ -24,7 +24,7 @@
             [my.message :as my.message]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.message :as message]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.render.route :as route]
@@ -354,7 +354,7 @@
                   @connection
                   (cond-> {:my.message/value value
                            :seon.cluster.agent/id sender
-                           :seon.cluster.run/id run
+                           :seon.turn/id run
                            :seon.cluster.eval/ordinal ordinal
                            :seon.cluster.message/at now
                            :seon.config.message/max-chain chain}
@@ -532,7 +532,7 @@
                         recipients)
             request (cond-> {:my.message/value value
                              :seon.cluster.agent/id sender
-                             :seon.cluster.run/id run-id
+                             :seon.turn/id run-id
                              :seon.cluster.eval/ordinal ordinal
                              :seon.cluster.message/at now
                              :seon.config.message/max-chain chain-limit}
@@ -652,12 +652,12 @@
     (fn [connection]
       (ask! connection "m-0" "alice" "hello")
       (db/transact! connection
-                  [{:seon.cluster.run/id "r-1"
-                    :seon.cluster.run/agent
+                  [{:seon.turn/id "r-1"
+                    :seon.turn/agent
                     [:seon.cluster.agent/id "alice"]
-                    :seon.cluster.run/trigger
+                    :seon.turn/trigger
                     [:seon.cluster.message/id "m-0"]
-                    :seon.cluster.run/opened-at now}])
+                    :seon.turn/opened-at now}])
       (is (= "m-0" (message/trigger @connection "r-1"))
           "the cause is an ordinary run fact")
       (is (nil? (message/trigger @connection "no-such-run"))))))
@@ -679,12 +679,12 @@
             (db/transact!
              connection
              (run/open-tx
-              {:seon.cluster.run/id "r-1"
-               :seon.cluster.run/agent
+              {:seon.turn/id "r-1"
+               :seon.turn/agent
                [:seon.cluster.agent/id "alice"]
-               :seon.cluster.run/trigger
+               :seon.turn/trigger
                [:seon.cluster.message/id "m-0"]
-               :seon.cluster.run/opened-at now}))
+               :seon.turn/opened-at now}))
             transaction (:max-tx (:db-after report))]
         (is (nil? (db/pull @connection '[*] transaction))
             "the HISTORY-OFF database has no transaction entity")
@@ -932,7 +932,7 @@
 (deftest reverse-agent-concerns-are-schema-declarations
   (let [forms (schema.edn/packaged-forms)
         units (:seon.render/units (second (:seon.cluster.agent/agent forms)))]
-    (is (= [:seon.cluster.message/_to :seon.cluster.run/_agent :seon.error/_agent]
+    (is (= [:seon.cluster.message/_to :seon.turn/_agent :seon.error/_agent]
            units))
     (is (not-any? (set units)
                   [:seon.def/_agent :seon.def/_ns

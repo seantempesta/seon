@@ -289,14 +289,14 @@
            connection
            [{:seon.config/cluster "default"
              :seon.config.eval.result/blob-threshold 4096}
-            {:seon.cluster.run/id "shell-time-limit"}])
+            {:seon.turn/id "shell-time-limit"}])
           (let [effective-map
                 (effective root
                            {:seon.config.shell/time-limit-ms 750
                             :seon.config.shell/termination-grace-ms 100})
                 context
                 {:seon.db/connection connection
-                 :seon.cluster.run/id "shell-time-limit"
+                 :seon.turn/id "shell-time-limit"
                  :seon.cluster.eval/ordinal 0
                  :seon.boot/cluster-name "default"
                  :seon.sci.admit/caps (config/result-caps effective-map)

@@ -74,8 +74,8 @@ Recovery does not replay an interrupted effect, form-source suffix, or turn.
 Reopening the database marks dangling receipts interrupted, rebuilds graphs,
 and lets the agent adapt from durable facts.
 
-Read `src/seon/cluster/run.clj:866-930` and the boot recovery position at
-`src/seon/cluster.clj:1322-1328`. The database records what settled; absence or
+Read `src/seon/turn.clj:1681-1705` and the boot recovery position at
+`src/seon/cluster.clj:2075-2101`. The database records what settled; absence or
 an interrupted receipt is evidence for the next agent decision, not authority
 for an automatic retry.
 

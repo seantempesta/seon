@@ -11,7 +11,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster.agent :as agent]
             [seon.cluster.loop :as loop]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.config :as config]
             [seon.render :as render]
             [seon.render.block :as block]
@@ -70,8 +70,8 @@
   (let [selected-identities
         (ns-resolve 'seon.render.transcript 'selected-run-identities)
         unit {:seon.db/db ::database
-              :seon.cluster.run/id "selected-run"
-              :seon.cluster.run/agent
+              :seon.turn/id "selected-run"
+              :seon.turn/agent
               {:seon.cluster.agent/id "selected-agent"}
               :seon.sci.admit/caps caps}]
     (with-redefs-fn
@@ -158,11 +158,11 @@
       (db/transact!
        connection
        [{:seon.cluster.agent/id agent-id}
-        {:seon.cluster.run/id "terminal-values"
-         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-         :seon.cluster.run/opened-at (java.util.Date. 0)}
+        {:seon.turn/id "terminal-values"
+         :seon.turn/agent [:seon.cluster.agent/id agent-id]
+         :seon.turn/opened-at (java.util.Date. 0)}
         {:seon.cluster.eval/id "terminal-result"
-         :seon.cluster.eval/run [:seon.cluster.run/id "terminal-values"]
+         :seon.cluster.eval/run [:seon.turn/id "terminal-values"]
          :seon.cluster.eval/ordinal 0
          :seon.cluster.eval/at (java.util.Date. 1)
          :seon.cluster.eval/read-basis-transaction 17
@@ -170,13 +170,13 @@
          :seon.cluster.eval/result-edn "1"
          :seon.cluster.eval/source "(swap! executions inc)"}
         {:seon.cluster.eval/id "terminal-error"
-         :seon.cluster.eval/run [:seon.cluster.run/id "terminal-values"]
+         :seon.cluster.eval/run [:seon.turn/id "terminal-values"]
          :seon.cluster.eval/ordinal 1
          :seon.cluster.eval/at (java.util.Date. 2)
          :seon.cluster.eval/error "stored error"
          :seon.cluster.eval/source "(throw (Exception. \"source error\"))"}
         {:seon.cluster.eval/id "terminal-string"
-         :seon.cluster.eval/run [:seon.cluster.run/id "terminal-values"]
+         :seon.cluster.eval/run [:seon.turn/id "terminal-values"]
          :seon.cluster.eval/ordinal 2
          :seon.cluster.eval/at (java.util.Date. 3)
          :seon.cluster.eval/result-edn
@@ -184,7 +184,7 @@
                   :seon.print/value "alpha\nbeta"})
          :seon.cluster.eval/source "(identity \"alpha\\nbeta\")"}
         {:seon.cluster.eval/id "terminal-nested-string"
-         :seon.cluster.eval/run [:seon.cluster.run/id "terminal-values"]
+         :seon.cluster.eval/run [:seon.turn/id "terminal-values"]
          :seon.cluster.eval/ordinal 3
          :seon.cluster.eval/at (java.util.Date. 4)
          :seon.cluster.eval/result-edn
@@ -208,8 +208,8 @@
                             (receipt-render unit))]
               (transcript/render-run-ai
                (assoc (unit connection)
-                      :seon.cluster.run/id "terminal-values"
-                      :seon.cluster.run/agent
+                      :seon.turn/id "terminal-values"
+                      :seon.turn/agent
                       {:seon.cluster.agent/id agent-id})))]
         (is (= 4 @receipt-calls))
         ;; ONE FORM PER PROMPT LINE, one response map under it. Printed
@@ -345,11 +345,11 @@
      :seon.cluster.message/about [:seon.problems/id "problem-transcript"]
      :seon.cluster.message/content "Repair the owning namespace."
      :seon.cluster.message/at (at 1000)}
-    {:seon.cluster.run/id "run-result"
-     :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-     :seon.cluster.run/opened-at (at 1500)}
+    {:seon.turn/id "run-result"
+     :seon.turn/agent [:seon.cluster.agent/id agent-id]
+     :seon.turn/opened-at (at 1500)}
     {:seon.cluster.eval/id "eval-result"
-     :seon.cluster.eval/run [:seon.cluster.run/id "run-result"]
+     :seon.cluster.eval/run [:seon.turn/id "run-result"]
      :seon.cluster.eval/ordinal 0
      :seon.cluster.eval/at (at 2000)
      :seon.cluster.eval/comment ";; calculate the answer"
@@ -368,11 +368,11 @@
      :seon.cluster.message/to [:seon.cluster.agent/id peer-id]
      :seon.cluster.message/content "Check the repaired namespace."
      :seon.cluster.message/at (at 3000)}
-    {:seon.cluster.run/id "run-wait"
-     :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-     :seon.cluster.run/opened-at (at 3250)}
+    {:seon.turn/id "run-wait"
+     :seon.turn/agent [:seon.cluster.agent/id agent-id]
+     :seon.turn/opened-at (at 3250)}
     {:seon.cluster.eval/id "eval-wait"
-     :seon.cluster.eval/run [:seon.cluster.run/id "run-wait"]
+     :seon.cluster.eval/run [:seon.turn/id "run-wait"]
      :seon.cluster.eval/ordinal 0
      :seon.cluster.eval/at (at 3500)
      :seon.cluster.eval/result-edn
@@ -385,11 +385,11 @@
      :seon.cluster.message/content "I cannot make the requested edit."
      :my.message/reason "The namespace is owned by another agent."
      :seon.cluster.message/at (at 4000)}
-    {:seon.cluster.run/id "run-error"
-     :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-     :seon.cluster.run/opened-at (at 4250)}
+    {:seon.turn/id "run-error"
+     :seon.turn/agent [:seon.cluster.agent/id agent-id]
+     :seon.turn/opened-at (at 4250)}
     {:seon.cluster.eval/id "eval-error"
-     :seon.cluster.eval/run [:seon.cluster.run/id "run-error"]
+     :seon.cluster.eval/run [:seon.turn/id "run-error"]
      :seon.cluster.eval/ordinal 0
      :seon.cluster.eval/at (at 4500)
      :seon.cluster.eval/result-edn
@@ -467,12 +467,12 @@
       (db/transact!
        connection
        [{:seon.cluster.agent/id agent-id}
-        {:seon.cluster.run/id "run-error-without-triage"
-         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-         :seon.cluster.run/opened-at (at 0)}
+        {:seon.turn/id "run-error-without-triage"
+         :seon.turn/agent [:seon.cluster.agent/id agent-id]
+         :seon.turn/opened-at (at 0)}
         {:seon.cluster.eval/id "eval-error-without-triage"
          :seon.cluster.eval/run
-         [:seon.cluster.run/id "run-error-without-triage"]
+         [:seon.turn/id "run-error-without-triage"]
          :seon.cluster.eval/ordinal 0
          :seon.cluster.eval/at (at 1000)
          :seon.cluster.eval/error "No such namespace: missing.function"
@@ -550,12 +550,12 @@
            (let [row-id (pr-str [bootstrap-run-id ordinal])]
              [{:seon.cluster.eval/id row-id
                :seon.cluster.eval/run
-               [:seon.cluster.run/id bootstrap-run-id]
+               [:seon.turn/id bootstrap-run-id]
                :seon.cluster.eval/ordinal ordinal
                :seon.cluster.eval/source (str "(identity " ordinal ")")}
               {:seon.cluster.eval/id row-id
                :seon.cluster.eval/run
-               [:seon.cluster.run/id bootstrap-run-id]
+               [:seon.turn/id bootstrap-run-id]
                :seon.cluster.eval/ordinal ordinal
                :seon.cluster.eval/at (at 0)
                :seon.cluster.eval/result-edn (pr-str ordinal)}]))
@@ -580,9 +580,9 @@
     (db/transact!
      connection
      (into [{:seon.cluster.agent/id agent-id}
-            {:seon.cluster.run/id bootstrap-run-id
-             :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-             :seon.cluster.run/opened-at (at 0)}
+            {:seon.turn/id bootstrap-run-id
+             :seon.turn/agent [:seon.cluster.agent/id agent-id]
+             :seon.turn/opened-at (at 0)}
             {:seon.cluster.message/id (bootstrap/task-message-id agent-id)
              :seon.cluster.message/to
              [:seon.cluster.agent/id agent-id]
@@ -649,56 +649,56 @@
         (db/transact!
          connection
          [{:seon.cluster.agent/id agent-id}
-          {:seon.cluster.run/id bootstrap-run-id
-           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-           :seon.cluster.run/opened-at (at 0)}
+          {:seon.turn/id bootstrap-run-id
+           :seon.turn/agent [:seon.cluster.agent/id agent-id]
+           :seon.turn/opened-at (at 0)}
           {:seon.cluster.eval/id "bootstrap-receipt"
-           :seon.cluster.eval/run [:seon.cluster.run/id bootstrap-run-id]
+           :seon.cluster.eval/run [:seon.turn/id bootstrap-run-id]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (at 1)
            :seon.cluster.eval/result-edn ":bootstrap"
            :seon.cluster.eval/source "(identity :bootstrap)"}
 
-          {:seon.cluster.run/id "original"
-           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-           :seon.cluster.run/opened-at (at 100)}
+          {:seon.turn/id "original"
+           :seon.turn/agent [:seon.cluster.agent/id agent-id]
+           :seon.turn/opened-at (at 100)}
           {:seon.cluster.eval/id "original-receipt"
-           :seon.cluster.eval/run [:seon.cluster.run/id "original"]
+           :seon.cluster.eval/run [:seon.turn/id "original"]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (at 101)
            :seon.cluster.eval/result-edn ":original"
            :seon.cluster.eval/source "(identity :original)"}
           {:seon.cluster.eval/id "original-comment"
-           :seon.cluster.eval/run [:seon.cluster.run/id "original"]
+           :seon.cluster.eval/run [:seon.turn/id "original"]
            :seon.cluster.eval/ordinal 1
            :seon.cluster.eval/at (at 102)
            :seon.cluster.eval/source "; original comment"}
 
-          {:seon.cluster.run/id "curated"
-           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-           :seon.cluster.run/opened-at (at 200)
-           :seon.cluster.run/supersedes
-           [[:seon.cluster.run/id "original"]]}
+          {:seon.turn/id "curated"
+           :seon.turn/agent [:seon.cluster.agent/id agent-id]
+           :seon.turn/opened-at (at 200)
+           :seon.turn/supersedes
+           [[:seon.turn/id "original"]]}
           {:seon.cluster.eval/id "curated-receipt"
-           :seon.cluster.eval/run [:seon.cluster.run/id "curated"]
+           :seon.cluster.eval/run [:seon.turn/id "curated"]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (at 201)
            :seon.cluster.eval/result-edn ":curated"
            :seon.cluster.eval/source "(identity :curated)"}
 
-          {:seon.cluster.run/id "proof"
-           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-           :seon.cluster.run/opened-at (at 300)
-           :seon.cluster.run/supersedes
-           [[:seon.cluster.run/id "curated"]]}
+          {:seon.turn/id "proof"
+           :seon.turn/agent [:seon.cluster.agent/id agent-id]
+           :seon.turn/opened-at (at 300)
+           :seon.turn/supersedes
+           [[:seon.turn/id "curated"]]}
           {:seon.cluster.eval/id "proof-receipt"
-           :seon.cluster.eval/run [:seon.cluster.run/id "proof"]
+           :seon.cluster.eval/run [:seon.turn/id "proof"]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (at 301)
            :seon.cluster.eval/result-edn ":proof"
            :seon.cluster.eval/source "(identity :proof)"}
           {:seon.cluster.eval/id "proof-comment"
-           :seon.cluster.eval/run [:seon.cluster.run/id "proof"]
+           :seon.cluster.eval/run [:seon.turn/id "proof"]
            :seon.cluster.eval/ordinal 1
            ;; every entry the history orders carries the instant it orders by
            :seon.cluster.eval/at (at 302)
@@ -730,11 +730,11 @@
          :seon.cluster.message/about [:seon.test/sym "target-fact"]
          :seon.cluster.message/content "Inspect the test fact."
          :seon.cluster.message/at (at 0)}
-        {:seon.cluster.run/id "run-malformed"
-         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-         :seon.cluster.run/opened-at (at 500)}
+        {:seon.turn/id "run-malformed"
+         :seon.turn/agent [:seon.cluster.agent/id agent-id]
+         :seon.turn/opened-at (at 500)}
         {:seon.cluster.eval/id "eval-malformed"
-         :seon.cluster.eval/run [:seon.cluster.run/id "run-malformed"]
+         :seon.cluster.eval/run [:seon.turn/id "run-malformed"]
          :seon.cluster.eval/ordinal 0
          :seon.cluster.eval/at (at 1000)
          :seon.cluster.eval/result-edn "{"
@@ -807,11 +807,11 @@
         (db/transact!
          connection
          [{:seon.cluster.agent/id agent-id}
-          {:seon.cluster.run/id "run-capped"
-           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-           :seon.cluster.run/opened-at (at 0)}
+          {:seon.turn/id "run-capped"
+           :seon.turn/agent [:seon.cluster.agent/id agent-id]
+           :seon.turn/opened-at (at 0)}
           {:seon.cluster.eval/id "eval-capped"
-           :seon.cluster.eval/run [:seon.cluster.run/id "run-capped"]
+           :seon.cluster.eval/run [:seon.turn/id "run-capped"]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at (at 1000)
            :seon.cluster.eval/result-edn (pr-str result)
@@ -841,11 +841,11 @@
       (db/transact!
        connection
        [{:seon.cluster.agent/id agent-id}
-        {:seon.cluster.run/id "run-missing"
-         :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-         :seon.cluster.run/opened-at (at 0)}
+        {:seon.turn/id "run-missing"
+         :seon.turn/agent [:seon.cluster.agent/id agent-id]
+         :seon.turn/opened-at (at 0)}
         {:seon.cluster.eval/id "eval-missing"
-         :seon.cluster.eval/run [:seon.cluster.run/id "run-missing"]
+         :seon.cluster.eval/run [:seon.turn/id "run-missing"]
          :seon.cluster.eval/ordinal 0
          :seon.cluster.eval/at (at 1000)
          :seon.eval/missing :over-bound
@@ -863,7 +863,7 @@
       (let [reasoning "First line of thought\nThen the detail."
             digest (apply str (repeat 64 "d"))
             base-attempt
-            {:seon.ai.attempt/run [:seon.cluster.run/id "run-reasoning"]
+            {:seon.turn/_attempts [:seon.turn/id "run-reasoning"]
              :seon.ai.attempt/at (at 500)
              :seon.ai/endpoint "https://provider.invalid"
              :seon.ai/model "fixture-thinking"
@@ -871,9 +871,9 @@
         (db/transact!
          connection
          [{:seon.cluster.agent/id agent-id}
-          {:seon.cluster.run/id "run-reasoning"
-           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-           :seon.cluster.run/opened-at (at 0)}
+          {:seon.turn/id "run-reasoning"
+           :seon.turn/agent [:seon.cluster.agent/id agent-id]
+           :seon.turn/opened-at (at 0)}
           (assoc base-attempt
                  :seon.ai.attempt/id "reasoning-inline"
                  :seon.ai.attempt/ordinal 0)])
@@ -1009,11 +1009,11 @@
                    (str "(identity " source-index ")"))]
       ;; ONE ENTITY PER (run, ordinal): the frozen source rides the
       ;; evaluation it belongs to.
-      [{:seon.cluster.run/id run-id
-        :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-        :seon.cluster.run/opened-at event-at}
+      [{:seon.turn/id run-id
+        :seon.turn/agent [:seon.cluster.agent/id agent-id]
+        :seon.turn/opened-at event-at}
        (cond-> {:seon.cluster.eval/id id
-                :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+                :seon.cluster.eval/run [:seon.turn/id run-id]
                 :seon.cluster.eval/ordinal 0
                 :seon.cluster.eval/source source
                 :seon.cluster.eval/at event-at}
@@ -1149,12 +1149,12 @@
                                :seon.cluster.eval/comment
                                :seon.cluster.eval/output
                                {:seon.cluster.eval/ns [:seon.ns/name]}
-                               {:seon.cluster.eval/run [:seon.cluster.run/id]}]
+                               {:seon.cluster.eval/run [:seon.turn/id]}]
                               evaluation)
                in-memory
                (assoc selected
-                      :seon.cluster.run/id
-                      (get-in facts [:seon.cluster.eval/run :seon.cluster.run/id])
+                      :seon.turn/id
+                      (get-in facts [:seon.cluster.eval/run :seon.turn/id])
                       :seon.cluster.loop/evaluated-sources
                       [{:seon.cluster.eval/ordinal (:seon.cluster.eval/ordinal facts)
                         :seon.cluster.loop/admitted-form
@@ -1193,13 +1193,13 @@
         (mapcat
          (fn [ordinal]
            (let [run-id (str "history-run-" ordinal)]
-             [{:seon.cluster.run/id run-id
-               :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-               :seon.cluster.run/opened-at (java.util.Date. (* 1000 ordinal))
-               :seon.cluster.run/closed-at
+             [{:seon.turn/id run-id
+               :seon.turn/agent [:seon.cluster.agent/id agent-id]
+               :seon.turn/opened-at (java.util.Date. (* 1000 ordinal))
+               :seon.turn/closed-at
                (java.util.Date. (+ 500 (* 1000 ordinal)))}
               {:seon.cluster.eval/id (str "history-eval-" ordinal)
-               :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+               :seon.cluster.eval/run [:seon.turn/id run-id]
                :seon.cluster.eval/ordinal 0
                :seon.cluster.eval/at (java.util.Date. (+ 100 (* 1000 ordinal)))
                :seon.cluster.eval/result-edn (str (inc ordinal))
@@ -1212,16 +1212,16 @@
             ai (transcript/format-history-ai derived)
             rows (db/pull-many
                   database
-                  '[:db/id :seon.cluster.run/id :seon.cluster.run/opened-at
-                    :seon.cluster.run/closed-at :seon.cluster.run/agent]
+                  '[:db/id :seon.turn/id :seon.turn/opened-at
+                    :seon.turn/closed-at :seon.turn/agent]
                   (mapv :db/id
-                        (:seon.cluster.run/_agent
-                         (db/pull database [:seon.cluster.run/_agent]
+                        (:seon.turn/_agent
+                         (db/pull database [:seon.turn/_agent]
                                   [:seon.cluster.agent/id agent-id]))))
             html (transcript/render-history-html rows database)]
         (testing "runs come back newest first"
           (is (= ["history-run-2" "history-run-1" "history-run-0"]
-                 (mapv :seon.cluster.run/id runs))))
+                 (mapv :seon.turn/id runs))))
         (testing "the AI projection is the run loop's own bytes"
           (is (str/includes? ai "Run history-run-2, opened "))
           (is (str/includes? ai "=> (+ 2 1)\n#:seon.repl{:value 3")
@@ -1235,7 +1235,7 @@
           (is (= "Historical run — its results are stored, not fresh"
                  (last (nth (nth html 3) 2))))
           (is (str/includes? (hiccup/->string html) "(+ 2 1)"))
-          (is (= (mapv :seon.cluster.run/id runs)
+          (is (= (mapv :seon.turn/id runs)
                  (into [] (comp (drop 3) (map #(last (last (nth % 3)))))
                        html))
               "one entry per derived run, in the derivation's order"))))))
@@ -1315,14 +1315,14 @@
                prepared (run/record-evaluated-tx
                          {:seon.cluster.loop/cluster cluster
                           :seon.db/db database
-                          :seon.cluster.run/id "one-grammar-stored"
-                          :seon.cluster.run/agent
+                          :seon.turn/id "one-grammar-stored"
+                          :seon.turn/agent
                           [:seon.cluster.agent/id "one-grammar-agent"]
-                          :seon.cluster.run/starting-ns
+                          :seon.turn/starting-ns
                           [:seon.ns/name 'my.agents.one-grammar]
-                          :seon.cluster.run/reply reply
-                          :seon.cluster.run/opened-at opened-at
-                          :seon.cluster.run/closed-at (java.util.Date.)
+                          :seon.turn/reply reply
+                          :seon.turn/opened-at opened-at
+                          :seon.turn/closed-at (java.util.Date.)
                           :seon.cluster.loop/evaluated-sources outcomes})
                committed (blob/with-publication!
                            connection (:seon.blob/staged-writes prepared)
@@ -1361,7 +1361,7 @@
                      (range (count outcomes)))
                page-unit (assoc (unit connection)
                                 :seon.cluster.agent/id "one-grammar-agent"
-                                :seon.cluster.run/id "one-grammar-stored"
+                                :seon.turn/id "one-grammar-stored"
                                 :seon.cluster.loop/evaluated-sources
                                 (mapv (fn [outcome handle]
                                         (-> outcome

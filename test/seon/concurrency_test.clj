@@ -71,9 +71,9 @@
   (let [event (async/promise-chan)
         listener (random-uuid)
         closed (fn [database]
-                 (:seon.cluster.run/closed-at
-                  (db/pull database [:seon.cluster.run/closed-at]
-                           [:seon.cluster.run/id run-id])))]
+                 (:seon.turn/closed-at
+                  (db/pull database [:seon.turn/closed-at]
+                           [:seon.turn/id run-id])))]
     (d/listen connection listener
               #(when (closed (:db-after %)) (async/offer! event true)))
     (try
@@ -117,7 +117,7 @@
                             (:seon.cluster.agent/routing instance)
                             :seon.cluster.agent/id agent-id
                             :seon.cluster.reply/text source})
-                   run-id (:seon.cluster.run/id result)]
+                   run-id (:seon.turn/id result)]
                (when-not run-id
                  (throw (ex-info "Concurrent source submission refused" result)))
                (schema/call-with-projection-state
@@ -129,19 +129,19 @@
                    ::run run-id
                    ::turn
                    (db/pull @connection
-                            [:seon.cluster.run/opened-at :seon.cluster.run/closed-at
-                             :seon.cluster.run/reply
-                             {:seon.cluster.run/agent [:seon.cluster.agent/id]}]
-                            [:seon.cluster.run/id run-id])
+                            [:seon.turn/opened-at :seon.turn/closed-at
+                             :seon.turn/reply
+                             {:seon.turn/agent [:seon.cluster.agent/id]}]
+                            [:seon.turn/id run-id])
                    ::attempts
                    (db/q '[:find (count ?attempt) . :in $ ?id
-                           :where [?turn :seon.cluster.run/id ?id]
-                           [?attempt :seon.ai.attempt/run ?turn]]
+                           :where [?turn :seon.turn/id ?id]
+                           [?turn :seon.turn/attempts ?attempt]]
                          @connection run-id)
                    ::evaluations
                    (db/q '[:find (pull ?e [*])
                            :in $ ?run-id
-                           :where [?r :seon.cluster.run/id ?run-id]
+                           :where [?r :seon.turn/id ?run-id]
                            [?e :seon.cluster.eval/run ?r]]
                          @connection run-id)})))))
          subjects)]
@@ -237,11 +237,11 @@
                   (doseq [result (::results wave)]
                     (let [evaluations (map first (::evaluations result))]
                       (is (zero? (or (::attempts result) 0)))
-                      (is (some? (:seon.cluster.run/closed-at (::turn result))))
-                      (is (some? (:seon.cluster.run/opened-at (::turn result))))
-                      (is (string? (:seon.cluster.run/reply (::turn result))))
+                      (is (some? (:seon.turn/closed-at (::turn result))))
+                      (is (some? (:seon.turn/opened-at (::turn result))))
+                      (is (string? (:seon.turn/reply (::turn result))))
                       (is (= (::agent result)
-                             (get-in result [::turn :seon.cluster.run/agent
+                             (get-in result [::turn :seon.turn/agent
                                              :seon.cluster.agent/id])))
                       (is (= 1 (count evaluations)))
                       (is (= (str (::cluster result) "/" (::agent result) "/" ordinal)

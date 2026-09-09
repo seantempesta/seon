@@ -76,8 +76,8 @@
            (db/q '[:find ?closed-at .
                   :in $ ?run-id
                   :where
-                  [?run :seon.cluster.run/id ?run-id]
-                  [?run :seon.cluster.run/closed-at ?closed-at]]
+                  [?run :seon.turn/id ?run-id]
+                  [?run :seon.turn/closed-at ?closed-at]]
                 db (bootstrap/run-id "root"))))
         (body instance)
         (finally
@@ -199,8 +199,8 @@
              (db/q '[:find ?closed-at .
                     :in $ ?run-id
                     :where
-                    [?run :seon.cluster.run/id ?run-id]
-                    [?run :seon.cluster.run/closed-at ?closed-at]]
+                    [?run :seon.turn/id ?run-id]
+                    [?run :seon.turn/closed-at ?closed-at]]
                   db (bootstrap/run-id "root")))))
         (let [left-handle (:seon.cluster.loop/cluster left)
               right-handle (:seon.cluster.loop/cluster right)
@@ -261,7 +261,7 @@
                                    :in $ ?agent-id
                                    :where
                                    [?agent :seon.cluster.agent/id ?agent-id]
-                                   [?run :seon.cluster.run/agent ?agent]]
+                                   [?run :seon.turn/agent ?agent]]
                                  @connection "root"))]
             (is (= 1 (run-count))
                 "the one local bootstrap plan is the only durable run")
@@ -319,16 +319,16 @@
                  (fn [database]
                    (db/q
                     '[:find (pull ?run
-                                  [:seon.cluster.run/id
-                                   {:seon.cluster.run/trigger
+                                  [:seon.turn/id
+                                   {:seon.turn/trigger
                                     [:seon.cluster.message/id]}]) .
                       :in $ ?message-id
                       :where
                       [?message :seon.cluster.message/id ?message-id]
-                      [?run :seon.cluster.run/trigger ?message]]
+                      [?run :seon.turn/trigger ?message]]
                     database "boot-window-message")))]
             (is (= "boot-window-message"
-                   (get-in run [:seon.cluster.run/trigger
+                   (get-in run [:seon.turn/trigger
                                 :seon.cluster.message/id]))
                 "the committed message opened a run without a later wake"))
           (finally

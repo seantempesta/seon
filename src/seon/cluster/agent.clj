@@ -69,7 +69,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.ai :as ai]
             [seon.cluster.loop :as cluster.loop]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
@@ -293,9 +293,9 @@
            " unread message"
            (when-not (= 1 (:seon.cluster.agent/unread-message-count situation))
              "s")
-           ". " (:seon.cluster.run/turns-remaining situation)
+           ". " (:seon.turn/turns-remaining situation)
            " turns remain in this episode."
-           (when-let [trigger (:seon.cluster.run/trigger situation)]
+           (when-let [trigger (:seon.turn/trigger situation)]
              (str " This run exists because of " (pr-str trigger) "."))
            "\nInjected callables: help — " (doc-line #'bootstrap/help)
            " dir — " (doc-line #'bootstrap/dir)
@@ -310,7 +310,7 @@
   (when-let [agent-id (:seon.cluster.agent/id unit)]
     (str "Agent " agent-id " · namespace " (:seon.ns/name unit)
          " · cluster " (:seon.cluster/name unit)
-         " · bootstrap run " (:seon.cluster.run/id unit) ".")))
+         " · bootstrap run " (:seon.turn/id unit) ".")))
 
 (defn render-creation-html
   "`:seon.render/html` — the compact agent-creation result card."
@@ -324,7 +324,7 @@
       [:div [:dt "Namespace"] [:dd [:code (str (:seon.ns/name unit))]]]
       [:div [:dt "Cluster"] [:dd (:seon.cluster/name unit)]]
       [:div [:dt "Bootstrap run"]
-       [:dd [:code (:seon.cluster.run/id unit)]]]]]))
+       [:dd [:code (:seon.turn/id unit)]]]]]))
 
 (defn assigned-to
   "Agent ids assigned to work in `namespace-name`, sorted; empty when none.
@@ -403,9 +403,9 @@
          :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.cluster.run/agent ?agent]
-         (not [?run :seon.cluster.run/closed-at])
-         [?run :seon.cluster.run/id ?id]]
+         [?run :seon.turn/agent ?agent]
+         (not [?run :seon.turn/closed-at])
+         [?run :seon.turn/id ?id]]
        db agent-id))
 
 (defn- turn-completion-backstop-failure
@@ -415,7 +415,7 @@
          {:seon.cluster.agent/id agent-id
           :seon.config.agent/turn-completion-backstop-ms timeout-ms
           :seon.cluster.agent/completion-events events}
-          run-id (assoc :seon.cluster.run/id run-id))
+          run-id (assoc :seon.turn/id run-id))
         diagnostic
         (error/diagnostic
          (cond->
@@ -436,7 +436,7 @@
            :seon.error/diagnostic-offending evidence
            :seon.error/diagnostic-cause ::turn-completion-backstop
            :seon.error/diagnostic-evidence evidence}
-           run-id (assoc :seon.cluster.run/id run-id)))]
+           run-id (assoc :seon.turn/id run-id)))]
     (ex-info (:seon.error/message diagnostic) diagnostic)))
 
 (defn- await-turn-permit!
@@ -498,7 +498,7 @@
           ::flow/op ::turn-completion-backstop
           ::flow/ex failure
           :seon.cluster.agent/id agent-id}
-          run-id (assoc :seon.cluster.run/id run-id))]
+          run-id (assoc :seon.turn/id run-id))]
     (when-not (and fault-channel (async/offer! fault-channel fault))
       (binding [*out* *err*]
         (println "SEON CORE FAULT (agent turn backstop):"
@@ -571,7 +571,7 @@
     :outs {}
     :workload :io
     :ping-map-fn (fn [state]
-                   (select-keys state [:seon.cluster.run/id]))})
+                   (select-keys state [:seon.turn/id]))})
   ([args]
    args)
   ([state transition]
@@ -601,16 +601,16 @@
                       ;; the derivation that decided it. `:open` mints
                       ;; its run inside the turn, so the report supplies
                       ;; it below; every other situation names it now.
-                      _ (when-let [derived (:seon.cluster.run/id next)]
+                      _ (when-let [derived (:seon.turn/id next)]
                           (reset! (::run-id turn-bound) derived))]
                   (if (nil? next)
-                    [(dissoc state :seon.cluster.run/id)
+                    [(dissoc state :seon.turn/id)
                      nil]
                     (let [report (cluster.loop/turn
                                   {:seon.cluster.loop/cluster cluster
                                    :seon.cluster.work/next next}
                                   now)
-                          _ (when-let [opened (:seon.cluster.run/id report)]
+                          _ (when-let [opened (:seon.turn/id report)]
                               (reset! (::run-id turn-bound) opened))]
                ;; Run closure is an armer wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.
@@ -633,9 +633,9 @@
                       ;; closed and released custody, and re-deriving here
                       ;; made the ping state disagree with the report in
                       ;; exactly that ordinary case.
-                      [(let [run-id (:seon.cluster.run/id report)]
-                         (cond-> (dissoc state :seon.cluster.run/id)
-                           run-id (assoc :seon.cluster.run/id run-id)))
+                      [(let [run-id (:seon.turn/id report)]
+                         (cond-> (dissoc state :seon.turn/id)
+                           run-id (assoc :seon.turn/id run-id)))
                 ;; flow's own report channel: observation, never a dependency
                        {::flow/report [report]}])))]
            (vreset! succeeded? true)
@@ -754,7 +754,7 @@
   [{handle :seon.cluster.loop/cluster
     routing :seon.cluster.agent/routing
     agent-id :seon.cluster.agent/id
-    starting-ns :seon.cluster.run/starting-ns
+    starting-ns :seon.turn/starting-ns
     text :seon.cluster.reply/text}]
   (let [connection (:seon.db/connection handle)
         database @connection
@@ -804,21 +804,21 @@
                      database
                      (merge (dissoc staged-reply :seon.blob/staged-writes)
                             {:seon.cluster.agent/id agent-id
-                             :seon.cluster.run/id run-id
+                             :seon.turn/id run-id
                              :seon.db.process/id
                              (:seon.db.process/id handle)
-                             :seon.cluster.run/opened-at now
-                             :seon.cluster.run/starting-ns
+                             :seon.turn/opened-at now
+                             :seon.turn/starting-ns
                              [:seon.ns/name namespace-name]
-                             :seon.cluster.run/plan-digest (run/plan-digest sources)
-                             :seon.cluster.run/sources sources}))}))]
+                             :seon.turn/plan-digest (run/plan-digest sources)
+                             :seon.turn/sources sources}))}))]
             (if (:seon.error/kind outcome)
               outcome
               (let [channel
                     (or (:seon.cluster.wake/channel (armed routing agent-id))
                         (:seon.cluster.wake/channel handle))]
                 (if (async/offer! channel ::wake)
-                  {:seon.cluster.run/id run-id}
+                  {:seon.turn/id run-id}
                   (error/diagnostic
                    {:seon.error/kind ::source-submission-undeliverable
                     :seon.error/message
@@ -832,7 +832,7 @@
                     :seon.error/diagnostic-cause
                     ::source-submission-undeliverable
                     :seon.error/diagnostic-evidence
-                    {:seon.cluster.run/id run-id}}))))))))))
+                    {:seon.turn/id run-id}}))))))))))
 
 (defn fenced?
   "True when this agent is QUARANTINED: armed, routed, mailbox closed.
@@ -1024,7 +1024,7 @@
                       ::flow/op ::turn-completion-backstop
                       ::flow/ex failure
                       :seon.cluster.agent/id agent-id}
-                      run-id (assoc :seon.cluster.run/id run-id))]
+                      run-id (assoc :seon.turn/id run-id))]
                 (async/offer! (::fault-channel @routing) fault)
                 (binding [*out* *err*]
                   (println "SEON CORE FAULT (agent stop backstop):"
@@ -1150,8 +1150,8 @@
                 (db/q '[:find ?closed .
                         :in $ ?run-id
                         :where
-                        [?run :seon.cluster.run/id ?run-id]
-                        [?run :seon.cluster.run/closed-at ?closed]]
+                        [?run :seon.turn/id ?run-id]
+                        [?run :seon.turn/closed-at ?closed]]
                       database (bootstrap/run-id first-agent)))
                root-eid
                (db/q '[:find ?root .
@@ -1162,8 +1162,8 @@
                     (nil?
                      (db/q '[:find ?run .
                              :in $ ?root
-                             :where [?run :seon.cluster.run/agent ?root]
-                             (not [?run :seon.cluster.run/closed-at])]
+                             :where [?run :seon.turn/agent ?root]
+                             (not [?run :seon.turn/closed-at])]
                            database root-eid)))]
            (when (and worker-closed? root-idle?)
              (let [supervision-tx

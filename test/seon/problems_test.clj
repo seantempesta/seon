@@ -95,21 +95,21 @@
 (defn- commit-failed-run!
   [connection]
   (db/transact! connection
-              [{:seon.cluster.run/id "run-failed"
-                :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-                :seon.cluster.run/opened-at now
-                :seon.cluster.run/closed-at now
-                :seon.cluster.run/error "the model did not answer"}]))
+              [{:seon.turn/id "run-failed"
+                :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+                :seon.turn/opened-at now
+                :seon.turn/closed-at now
+                :seon.turn/error "the model did not answer"}]))
 
 (defn- commit-errored-receipt!
   [connection]
   (db/transact! connection
-              [{:seon.cluster.run/id "run-with-receipt"
-                :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-               :seon.cluster.run/opened-at now
-                :seon.cluster.run/closed-at now}
+              [{:seon.turn/id "run-with-receipt"
+                :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+               :seon.turn/opened-at now
+                :seon.turn/closed-at now}
                {:seon.cluster.eval/id "receipt-1"
-                :seon.cluster.eval/run [:seon.cluster.run/id "run-with-receipt"]
+                :seon.cluster.eval/run [:seon.turn/id "run-with-receipt"]
                 :seon.cluster.eval/ordinal 0
                 :seon.cluster.eval/at now
                 ;; the error's presence IS the errored state
@@ -161,7 +161,7 @@
             :seon.error/capped? false}
            (select-keys optional-error-evidence optional-attributes))
     run? (assoc :seon.error/run
-                [:seon.cluster.run/id "generated-error-run"])
+                [:seon.turn/id "generated-error-run"])
     agent? (assoc :seon.error/agent
                   [:seon.cluster.agent/id "agent-a"])))
 
@@ -328,9 +328,9 @@
        (fn [connection]
          (db/transact!
           connection
-          [{:seon.cluster.run/id "generated-error-run"
-            :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-            :seon.cluster.run/opened-at now}])
+          [{:seon.turn/id "generated-error-run"
+            :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+            :seon.turn/opened-at now}])
          (let [facts (mapv (fn [ordinal attribution]
                              (generated-error-fact
                               ordinal optional-attributes attribution))
@@ -384,8 +384,8 @@
     (fn [connection]
       (commit-failed-run! connection)
       (let [entry (first (:seon.problems/failed-runs (found connection)))]
-        (is (= "run-failed" (:seon.cluster.run/id entry)))
-        (is (= "the model did not answer" (:seon.cluster.run/error entry)))))))
+        (is (= "run-failed" (:seon.turn/id entry)))
+        (is (= "the model did not answer" (:seon.turn/error entry)))))))
 
 (deftest an-errored-receipt-is-a-problem-without-being-a-fault
   (with-db
@@ -394,7 +394,7 @@
       (let [value (found connection)
             entry (first (:seon.problems/errored-receipts value))]
         (is (= "receipt-1" (:seon.cluster.eval/id entry)))
-        (is (= "run-with-receipt" (:seon.cluster.run/id entry)))
+        (is (= "run-with-receipt" (:seon.turn/id entry)))
         (is (= 0 (:seon.cluster.eval/ordinal entry)))
         (is (str/includes? (:seon.cluster.eval/error entry) "widgets"))
         (is (= "(widgets)" (:seon.cluster.eval/source entry)))

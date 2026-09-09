@@ -56,3 +56,19 @@ or returning to a worker. Observation failures must fail explicitly, never
 satisfy a completion predicate. Keep error-data decoding separate from
 saved shown text and live result-object inspection. Gate each changed
 consumer namespace before claiming its conversion complete.
+
+## Rename-slice observation, 2026-09-09 07:57 UTC
+
+The extra `seon.render.transcript-test` fast probe reports 64 failures and
+8 errors across the combined 67-test / 548-assertion invocation with
+`seon.turn-test` and `seon.cluster.loop-test`. Every reported failure/error
+is in the transcript namespace; its fixtures still supply removed result
+EDN fields and expect supersession/history behavior retired by the PRD.
+The provider reasoning test using the renamed component relation passes.
+This is not a green transcript-suite claim. The rename gate remains the
+explicit turn, loop, and web namespaces; repairing these observation
+contracts belongs to the existing consumer-fixture issue.
+
+Evidence: `tmp/turn-attempts-fast.log`; the rename landing note records the
+committed source and the narrower required gate. Preserve the distinction
+between actual shown text and old serialized-node fixtures when converting.

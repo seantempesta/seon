@@ -345,7 +345,7 @@
           (fn [connection]
             (db/transact! connection
                         [{:seon.cluster.agent/id "status-agent"}
-                         {:seon.cluster.run/id "status-run"}])
+                         {:seon.turn/id "status-run"}])
             ((ns-resolve 'seon.cluster.loop 'record-attempt!)
              {:seon.db/connection connection
               :seon.db.process/id "process/status-test"
@@ -354,7 +354,7 @@
              {:seon.ai/target target
               :seon.error/value failure
               :seon.ai.attempt/sent-body sent-body
-              :seon.cluster.run/id "status-run"
+              :seon.turn/id "status-run"
               :seon.cluster.agent/id "status-agent"
               :seon.ai.attempt/ordinal 0}
              (Date. 1785319000000))
@@ -374,7 +374,7 @@
       (db/transact! connection
                   [{:seon.config.eval.result/blob-threshold 65536}
                    {:seon.cluster.agent/id "reasoning-agent"}
-                   {:seon.cluster.run/id "reasoning-run"}])
+                   {:seon.turn/id "reasoning-run"}])
       (let [inline-reasoning "private reasoning"
             large (apply str (repeat 65537 "x"))
             cluster {:seon.db/connection connection
@@ -386,7 +386,7 @@
                            :seon.ai/model "fixture"}
                           :seon.ai/settings
                           (ai/settings (support/effective-config) {})
-                          :seon.cluster.run/id "reasoning-run"
+                          :seon.turn/id "reasoning-run"
                           :seon.cluster.agent/id "reasoning-agent"}]
         (doseq [[ordinal reasoning] [[0 inline-reasoning] [1 large]]]
           ((ns-resolve 'seon.cluster.loop 'record-attempt!)

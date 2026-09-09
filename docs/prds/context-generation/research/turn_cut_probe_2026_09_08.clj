@@ -38,10 +38,10 @@
                 (when (:seon.error/kind submitted)
                   (throw (ex-info "Source submission refused." submitted)))
                 (let [deadline (async/timeout 20000)
-                      lookup [:seon.cluster.run/id (:seon.cluster.run/id submitted)]]
+                      lookup [:seon.turn/id (:seon.turn/id submitted)]]
                   (loop []
-                    (when-not (:seon.cluster.run/closed-at
-                               (db/pull @connection [:seon.cluster.run/closed-at] lookup))
+                    (when-not (:seon.turn/closed-at
+                               (db/pull @connection [:seon.turn/closed-at] lookup))
                       (let [[_ port] (async/alts!! [changed deadline])]
                         (when (= port deadline)
                           (throw (ex-info "Source turn did not close." submitted)))
@@ -53,11 +53,11 @@
                     (throw (ex-info "Source turn did not finish its proc pass." submitted)))
                   (async/offer! completion permit))
                 (db/pull @connection
-                         [:seon.cluster.run/id :seon.cluster.run/closed-at
+                         [:seon.turn/id :seon.turn/closed-at
                           {:seon.cluster.eval/_run
                            [:seon.cluster.eval/ordinal :seon.cluster.eval/source :seon.cluster.eval/result-edn
                             :seon.cluster.eval/error]}]
-                         [:seon.cluster.run/id (:seon.cluster.run/id submitted)]))
+                         [:seon.turn/id (:seon.turn/id submitted)]))
               (finally
                 (d/unlisten connection listener)
                 (async/close! changed)))))]

@@ -7,7 +7,7 @@
 #   bin/test --full                 # platform tier, then every test
 #   bin/test --platform             # the moving-part regressions alone
 #   bin/test --changed PATH [...]   # platform tier, then tests reaching PATHs
-#   bin/test seon.cluster.run-test  # run exactly these namespaces, every test
+#   bin/test seon.turn-test  # run exactly these namespaces, every test
 #   bin/test --result-cluster scratch [namespaces...]
 #
 # Every tiered invocation runs the declared `:seon.test/platform` moving-part

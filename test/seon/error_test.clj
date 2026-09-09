@@ -252,7 +252,7 @@
                     {:error :transact/cas}
                     (ex-info "the transition refused"
                              {:seon.error/kind kind
-                              :seon.cluster.run/id "run-9"}))))
+                              :seon.turn/id "run-9"}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Generators — honest, by constructing the real things
@@ -262,7 +262,7 @@
   (gen/fmap (fn [[message kind]]
               (ex-info message {:seon.error/kind kind}))
             (gen/tuple (gen/not-empty gen/string-alphanumeric)
-                       (gen/elements [:seon.cluster.run/refused
+                       (gen/elements [:seon.turn/refused
                                       :seon.db/rejected
                                       :seon.ai/timeout
                                       :seon.boot/refused]))))
@@ -287,9 +287,9 @@
 
 (def ^:private refusal-gen
   (gen/fmap (fn [kind] (ex-data (ex-cause (ex-cause (refused-chain kind)))))
-            (gen/elements [:seon.cluster.run/not-the-holder
-                           :seon.cluster.run/run-closed
-                           :seon.cluster.run/agent-pointer-broken])))
+            (gen/elements [:seon.turn/not-the-holder
+                           :seon.turn/run-closed
+                           :seon.turn/agent-pointer-broken])))
 
 (def ^:private unclassifiable-gen
   "Family 4 by exclusion — nothing recognizes these, and normalization
@@ -317,7 +317,7 @@
           (let [fact (error/normalize
                       (request source
                                (when attributed?
-                                 {:seon.cluster.run/id "run-9"
+                                 {:seon.turn/id "run-9"
                                   :seon.cluster.agent/id "agent-3"})))
                 ;; the codec ran: the projection READS BACK as EDN. The
                 ;; read is the assertion — a projection that did not
@@ -509,14 +509,14 @@
   ;; sentence can appear.
   (let [fact (error/normalize
               (request (transform-error
-                        (refused-chain :seon.cluster.run/not-the-holder))))]
+                        (refused-chain :seon.turn/not-the-holder))))]
     (is (= "the transition refused" (:seon.error/message fact)))))
 
 (deftest the-kind-comes-from-the-deepest-ex-data
   (let [fact (error/normalize
               (request (transform-error
-                        (refused-chain :seon.cluster.run/not-the-holder))))]
-    (is (= :seon.cluster.run/not-the-holder (:seon.error/kind fact))
+                        (refused-chain :seon.turn/not-the-holder))))]
+    (is (= :seon.turn/not-the-holder (:seon.error/kind fact))
         "the wrappers carry :error and {} — the rule is at the bottom")))
 
 (deftest an-unclassifiable-source-is-fail-closed-never-absent
@@ -529,11 +529,11 @@
 (deftest attribution-is-a-lookup-ref-or-nothing
   (let [with (error/normalize (request {:seon.error/kind :seon.db/rejected
                                         :seon.error/message "no"}
-                                       {:seon.cluster.run/id "run-9"
+                                       {:seon.turn/id "run-9"
                                         :seon.cluster.agent/id "agent-3"}))
         without (error/normalize (request {:seon.error/kind :seon.db/rejected
                                            :seon.error/message "no"}))]
-    (is (= [:seon.cluster.run/id "run-9"] (:seon.error/run with)))
+    (is (= [:seon.turn/id "run-9"] (:seon.error/run with)))
     (is (= [:seon.cluster.agent/id "agent-3"] (:seon.error/agent with)))
     (is (not (contains? without :seon.error/run)))
     (is (not (contains? without :seon.error/agent))
@@ -566,8 +566,8 @@
 
 (defn- fact []
   (error/normalize (request (transform-error (refused-chain
-                                              :seon.cluster.run/not-the-holder))
-                            {:seon.cluster.run/id "run-9"
+                                              :seon.turn/not-the-holder))
+                            {:seon.turn/id "run-9"
                              :seon.cluster.agent/id "agent-3"})))
 
 (defn- rendered
@@ -669,10 +669,10 @@
       (is (str/includes? prose "path 42"))))
   (testing "refusal names the transition, rule, and atomic result"
     (let [prose (error/refusal-prose
-                 {:seon.cluster.run/refused true
-                  :seon.cluster.run/id "run-7"
-                  :seon.cluster.run/rule :seon.cluster.run/not-holder
-                  :seon.cluster.run/transition :seon.cluster.run/close
+                 {:seon.turn/refused true
+                  :seon.turn/id "run-7"
+                  :seon.turn/rule :seon.turn/not-holder
+                  :seon.turn/transition :seon.turn/close
                   :seon.error/message "The run is held elsewhere."})]
       (is (str/includes? prose "close of run-7"))
       (is (str/includes? prose "Nothing from this close committed"))))
@@ -870,7 +870,7 @@
         (let [[_ messages] (commit! connection
                                     (transform-error (ex-info "boom" {}))
                                     {:seon.cluster.agent/id "agent-3"
-                                     :seon.cluster.run/id "run-9"})]
+                                     :seon.turn/id "run-9"})]
           (is (= {"agent-3" 1} messages))))))
   (with-db
     (fn [connection]
@@ -878,10 +878,10 @@
       say what happened, so the fact is recorded and nobody is mailed"
         (let [[facts messages]
               (commit! connection
-                       {:seon.error/kind :seon.cluster.run/not-the-holder
+                       {:seon.error/kind :seon.turn/not-the-holder
                         :seon.error/message "the run is held by another process"}
                        {:seon.cluster.agent/id "agent-3"
-                        :seon.cluster.run/id "run-9"})]
+                        :seon.turn/id "run-9"})]
           (is (= 1 facts))
           (is (= {} messages)))))))
 
@@ -937,7 +937,7 @@
     (fn [connection]
       (let [source (transform-error (ex-info "boom" {}))
             request (commit-request source {:seon.cluster.agent/id "agent-3"
-                                            :seon.cluster.run/id "run-9"})
+                                            :seon.turn/id "run-9"})
             tx (error/commit-tx @connection request)]
         ;; the SAME request committed twice: re-execution after a crash
         ;; must upsert, never double-send

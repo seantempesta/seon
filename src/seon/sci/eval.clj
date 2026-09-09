@@ -1551,7 +1551,7 @@
                                :in $ ?agent-id ?attribute
                                :where
                                [?agent :seon.cluster.agent/id ?agent-id]
-                               [?run :seon.cluster.run/agent ?agent]
+                               [?run :seon.turn/agent ?agent]
                                [?evaluation :seon.cluster.eval/run ?run]
                                [?evaluation ?attribute ?value]]
                              db agent-id attribute))]
@@ -2043,7 +2043,7 @@
   [{:keys [:seon.cluster.eval/source :seon.sci.admit/caps]
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
-    run-id :seon.cluster.run/id
+    run-id :seon.turn/id
     form-ordinal :seon.cluster.eval/ordinal
     cluster-name :seon.boot/cluster-name
     work-launcher :seon.flow/work-launcher
@@ -2063,7 +2063,7 @@
                        agent-id
                        (assoc :seon.cluster.agent/id agent-id)
                        run-id
-                       (assoc :seon.cluster.run/id run-id)
+                       (assoc :seon.turn/id run-id)
                        (some? form-ordinal)
                        (assoc :seon.cluster.eval/ordinal form-ordinal))
         turn-environment
@@ -2140,10 +2140,10 @@
                           (some-> (env/of evaluation-ctx)
                                   (env/scope
                                    {:seon.cluster.agent/id agent-id
-                                    :seon.cluster.run/id run-id
+                                    :seon.turn/id run-id
                                     :seon.cluster.eval/ordinal form-ordinal}))
                           :seon.db/connection connection
-                          :seon.cluster.run/id run-id
+                          :seon.turn/id run-id
                           :seon.cluster.eval/ordinal form-ordinal
                           :seon.cluster.agent/id agent-id
                           :seon.flow/work-launcher work-launcher

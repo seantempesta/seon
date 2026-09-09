@@ -2,7 +2,7 @@
  :seon.eval.drive/value :seon.schema/value
  :seon.eval.drive/evaluation
  [:map
-  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.turn/id :seon.turn/id]
   [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
   [:seon.cluster.eval/source :seon.cluster.eval/source]
   [:seon.eval/value :seon.eval/value]
@@ -10,7 +10,7 @@
   [:seon.cluster.eval/error :seon.cluster.eval/error]
   [:seon.error/kind :seon.error/kind]
   [:seon.cluster.eval/at :seon.cluster.eval/at]]
- :seon.eval.drive/run-ids [:vector :seon.cluster.run/id]
+ :seon.eval.drive/run-ids [:vector :seon.turn/id]
  :seon.eval.drive/run-cap [:int {:min 1}]
  :seon.eval.drive/outcome [:enum :completed :capped :stopped :undisposed]
  :seon.eval.drive/terminal-state

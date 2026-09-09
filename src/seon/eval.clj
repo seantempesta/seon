@@ -42,8 +42,8 @@
                     :in $ ?agent-id
                     :where
                     [?agent :seon.cluster.agent/id ?agent-id]
-                    [?turn :seon.cluster.run/agent ?agent]
-                    [?turn :seon.cluster.run/id ?turn-id ?t]
+                    [?turn :seon.turn/agent ?agent]
+                    [?turn :seon.turn/id ?turn-id ?t]
                     [?evaluation :seon.cluster.eval/run ?turn]
                     [?evaluation :seon.cluster.eval/id _ ?evaluation-t]
                     [?evaluation :seon.cluster.eval/ordinal ?ordinal]]

@@ -51,20 +51,20 @@
                      [:resume
                       [:map
                        [:seon.cluster.work/situation [:= :resume]]
-                       [:seon.cluster.run/id :seon.cluster.run/id]
+                       [:seon.turn/id :seon.turn/id]
                        [:seon.cluster.agent/id :seon.cluster.agent/id]
                        [:seon.cluster.eval/ordinal
                         :seon.cluster.eval/ordinal]]]
                      [:call
                       [:map
                        [:seon.cluster.work/situation [:= :call]]
-                       [:seon.cluster.run/id :seon.cluster.run/id]
+                       [:seon.turn/id :seon.turn/id]
                        [:seon.cluster.agent/id
                         :seon.cluster.agent/id]]]
                      [:generate
                       [:map
                        [:seon.cluster.work/situation [:= :generate]]
-                       [:seon.cluster.run/id :seon.cluster.run/id]
+                       [:seon.turn/id :seon.turn/id]
                        [:seon.cluster.agent/id
                         :seon.cluster.agent/id]]]
                      [:open
@@ -77,13 +77,13 @@
                      [:close
                       [:map
                        [:seon.cluster.work/situation [:= :close]]
-                       [:seon.cluster.run/id :seon.cluster.run/id]
+                       [:seon.turn/id :seon.turn/id]
                        [:seon.cluster.agent/id
                         :seon.cluster.agent/id]]]],
                     :now :inst,
                     :plan-settlement
                     [:map
-                     [:seon.cluster.run/id :seon.cluster.run/id]
+                     [:seon.turn/id :seon.turn/id]
                      [:seon.cluster.work/forms
                       [:vector :seon.cluster.work/form-settlement]]
                      [:seon.cluster.work/settled?

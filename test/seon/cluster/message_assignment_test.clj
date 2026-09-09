@@ -19,13 +19,13 @@
                  [{:seon.cluster.agent/id "alice"}
                   {:seon.cluster.agent/id "bob"}
                   {:seon.error/id "failure-17"}
-                  {:seon.cluster.run/id "red-run"
-                   :seon.cluster.run/agent
+                  {:seon.turn/id "red-run"
+                   :seon.turn/agent
                    [:seon.cluster.agent/id "alice"]
-                   :seon.cluster.run/opened-at now}
+                   :seon.turn/opened-at now}
                   {:seon.cluster.eval/id "receipt-17"
                    :seon.cluster.eval/run
-                   [:seon.cluster.run/id "red-run"]
+                   [:seon.turn/id "red-run"]
                    :seon.cluster.eval/ordinal 0
                    :seon.cluster.eval/at now
                    :seon.error/kind :seon.sci.eval/evaluation-failed
@@ -39,7 +39,7 @@
   {:my.message/value
    (my.message/send "bob" content "failure-17")
    :seon.cluster.agent/id "alice"
-   :seon.cluster.run/id run-id
+   :seon.turn/id run-id
    :seon.cluster.eval/ordinal 0
    :seon.cluster.message/at now
    :seon.config.message/max-chain 16})
@@ -97,7 +97,7 @@
             {:my.message/value
              (my.message/decline "alice" "receipt-17" reason)
              :seon.cluster.agent/id "bob"
-             :seon.cluster.run/id "declination-run"
+             :seon.turn/id "declination-run"
              :seon.cluster.eval/ordinal 0
              :seon.cluster.message/at now
              :seon.config.message/max-chain 16})

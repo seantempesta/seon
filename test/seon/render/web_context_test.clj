@@ -22,14 +22,14 @@
                      :seon.cluster.message/to [:seon.cluster.agent/id "root"]
                      :seon.cluster.message/at (java.util.Date.)
                      :seon.cluster.message/content "A caller-owned context."}
-                    {:seon.cluster.run/id "context-probe"
-                     :seon.cluster.run/agent [:seon.cluster.agent/id "root"]
-                     :seon.cluster.run/opened-at (java.util.Date.)}])
+                    {:seon.turn/id "context-probe"
+                     :seon.turn/agent [:seon.cluster.agent/id "root"]
+                     :seon.turn/opened-at (java.util.Date.)}])
      (let [ctx (:ctx context)
            request {:seon.db/db @connection
                     :seon.db/connection connection
                     :seon.cluster.agent/id "root"
-                    :seon.cluster.run/id "context-probe"
+                    :seon.turn/id "context-probe"
                     :seon.sci.eval/ctx ctx
                     :seon.sci.admit/caps (config/result-caps (config/defaults))
                     :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)

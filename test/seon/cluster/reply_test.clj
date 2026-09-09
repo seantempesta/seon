@@ -256,7 +256,7 @@
 ;;; form's prompt line. Folding prose written AFTER the last form into that
 ;;; form's comment therefore inverted the agent's own authorship order in the
 ;;; session it reads back: text it wrote last appeared first. The whole reply
-;;; is already durable (`:seon.cluster.run/reply`), so the parser keeps the
+;;; is already durable (`:seon.turn/reply`), so the parser keeps the
 ;;; placement honest by attaching only what precedes a form.
 (deftest a-forms-comment-is-only-the-prose-written-above-it
   (doseq [[text expected]

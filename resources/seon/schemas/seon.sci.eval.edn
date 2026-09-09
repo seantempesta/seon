@@ -121,9 +121,9 @@
                  [:seon.cluster.agent/id
                   {:optional true}
                   :seon.cluster.agent/id]
-                 [:seon.cluster.run/id
+                 [:seon.turn/id
                   {:optional true}
-                  :seon.cluster.run/id]
+                  :seon.turn/id]
                  [:seon.cluster.eval/ordinal
                   {:optional true}
                   :seon.cluster.eval/ordinal]
@@ -149,9 +149,9 @@
                  ;; The run whose already settled evaluations this fork binds
                  ;; back as result/eN handles. Absent when no run is in
                  ;; effect, and then the fork simply binds none.
-                 [:seon.cluster.run/id
+                 [:seon.turn/id
                   {:optional true}
-                  :seon.cluster.run/id]
+                  :seon.turn/id]
                  [:seon.db/connection
                   {:optional true}
                   :seon.db/connection]],

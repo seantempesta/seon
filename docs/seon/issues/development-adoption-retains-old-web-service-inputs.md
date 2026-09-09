@@ -43,3 +43,20 @@ usage rows remained zero. The scratch JVM was downed and its worktree removed.
 This confirms the failing default request is the captured pre-change input;
 it does not justify weakening the current contract. Default's reset remains
 pending with the owner.
+
+## Turn namespace reset boundary, 2026-09-09
+
+After the custody refork (default PID 38717), the turn namespace publication
+reaches loaded definitions and refuses `seon.env/advance-projection!` with
+`invalid-input: must hold one immutable replacement environment`. The old
+HTTP service then returns HTTP 500, 200 bytes: `seon.cluster.loop/preview-sources`
+reports missing renamed starting-ns/opened-at/closed-at output keys. Source
+convergence cannot be claimed after this refusal. RESET NEEDED accompanies
+the rename commit; default was not operated by the lane.
+
+Fresh construction in `tmp/turn-rename-wt` verifies the new component
+`:seon.turn/attempts` as cardinality-many/ref/isComponent=true and the old
+turn namespace attributes plus `:seon.ai.attempt/run` absent. The ordinary
+Juniper debug page returns HTTP 200, 52,752 bytes; history is a vector of one
+evaluation and provider usage remains zero. The settings component disabled
+the credential variable before fixture messages were installed.

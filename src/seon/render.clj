@@ -126,7 +126,7 @@
                              [:seon.db/db
                               :seon.sci.eval/ctx
                               :seon.cluster.agent/id
-                              :seon.cluster.run/id
+                              :seon.turn/id
                               :seon.render.call/id
                               :seon.sci.admit/caps
                               :seon.sci.eval/time-limit-ms
@@ -1374,7 +1374,7 @@
                        (not= rendered (:seon.render.call/output previous))
                        call-id
                        captured-calls
-                       (:seon.cluster.run/id request)
+                       (:seon.turn/id request)
                        (:seon.db/connection request))
               (swap! captured-calls assoc-in [call-id :seon.db/tx-data]
                      [(render-cost-fact request selected output rendered)]))
@@ -1612,8 +1612,8 @@
                      {:seon.db/db db
                       :seon.sci.eval/ctx (:seon.sci.eval/ctx *walk-context*)
                       :seon.cluster.agent/id agent-id
-                      :seon.cluster.run/id
-                      (:seon.cluster.run/id *walk-context*)
+                      :seon.turn/id
+                      (:seon.turn/id *walk-context*)
                       :seon.render/retained-calls
                       (:seon.render/retained-calls *walk-context*)
                       :seon.render/captured-calls

@@ -55,7 +55,7 @@
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.message :as message]
             [seon.cluster.loop :as loop]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
@@ -1467,7 +1467,7 @@
                 (transcript/render-ai
                  (-> request
                      (merge preview)
-                     (assoc :seon.cluster.run/id (:seon.render.call/source-run-id preview))))))
+                     (assoc :seon.turn/id (:seon.render.call/source-run-id preview))))))
             evidence
             (into (db/read-evidence @observed {:seon.db/retain-read-results? true})
                   (mapcat #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
@@ -2054,7 +2054,7 @@
   another path. A missing run is not live. This presence gate makes a
   delayed partial incapable of repainting over its settled facts."
   [db stream]
-  (when-let [run-id (:seon.cluster.run/id stream)]
+  (when-let [run-id (:seon.turn/id stream)]
     (let [row (db/pull db [:db/id ::run/plan-digest ::run/error ::run/closed-at]
                       [::run/id run-id])]
       (and (some? row)

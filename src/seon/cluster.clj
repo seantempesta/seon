@@ -26,7 +26,7 @@
             [seon.cluster.process :as cluster.process]
             [seon.cluster.wake :as wake]
             [seon.error :as error]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test.check.generators :as gen]
@@ -2080,8 +2080,8 @@
         now (java.util.Date.)
         open-runs (db/q '[:find [?run-id ...]
                          :where
-                         [?run :seon.cluster.run/id ?run-id]
-                         (not [?run :seon.cluster.run/closed-at _])]
+                         [?run :seon.turn/id ?run-id]
+                         (not [?run :seon.turn/closed-at _])]
                        db)
         ;; the decision moved INSIDE the transaction (custody revision,
         ;; Revision 4): `recover-call` reads each run's receipts at
@@ -2092,13 +2092,13 @@
                          (mapcat
                           (fn [run-id]
                             (run/recover-tx
-                             {:seon.cluster.run/id run-id
-                              :seon.cluster.run/now now})))
+                             {:seon.turn/id run-id
+                              :seon.turn/now now})))
                          open-runs)]
     (when (seq operations)
       (require-committed!
        (db/transact! connection operations)
-       {:seon.boot/population :seon.cluster.run/recovery}))
+       {:seon.boot/population :seon.turn/recovery}))
     {:seon.boot/recovered-runs (count open-runs)
      :seon.boot/recovery-operations (count operations)}))
 
@@ -2223,7 +2223,7 @@
             :seon.cluster/name (:seon.cluster/name request)
             :seon.ns/name namespace-name
             :seon.db.process/id process
-            :seon.cluster.run/opened-at now}))))
+            :seon.turn/opened-at now}))))
 
 (defn ensure-entity!
   "Create one absent agent atomically and return its durable useful identity.
@@ -2258,8 +2258,8 @@
             (db/q '[:find ?agent-id .
                     :in $ ?run-id
                     :where
-                    [?run :seon.cluster.run/id ?run-id]
-                    [?run :seon.cluster.run/agent ?agent]
+                    [?run :seon.turn/id ?run-id]
+                    [?run :seon.turn/agent ?agent]
                     [?agent :seon.cluster.agent/id ?agent-id]]
                   database bootstrap-run-id)
             namespace-name
@@ -2270,7 +2270,7 @@
           {:seon.cluster.agent/id agent-id
            :seon.ns/name namespace-name
            :seon.cluster/name cluster-name
-           :seon.cluster.run/id bootstrap-run-id}
+           :seon.turn/id bootstrap-run-id}
           {:seon.error/kind :seon.cluster.agent/creation-incomplete
            :seon.cluster.agent/creation-incomplete agent-id
            :seon.error/message
@@ -2364,9 +2364,9 @@
          :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.cluster.run/agent ?agent]
-         (not [?run :seon.cluster.run/closed-at])
-         [?run :seon.cluster.run/id ?id]]
+         [?run :seon.turn/agent ?agent]
+         (not [?run :seon.turn/closed-at])
+         [?run :seon.turn/id ?id]]
        db agent-id))
 
 (defn- previously-reported-fault-signature?
@@ -2428,7 +2428,7 @@
             (:seon.config.error/escalate-to dials)
             (assoc :seon.config.error/escalate-to
                    (:seon.config.error/escalate-to dials))
-            run-id (assoc :seon.cluster.run/id run-id)
+            run-id (assoc :seon.turn/id run-id)
             agent-id (assoc :seon.cluster.agent/id agent-id))
           ;; The fault family's own bound decides how much evidence the
           ;; durable fact keeps; the blob threshold decides where the

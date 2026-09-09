@@ -1,7 +1,7 @@
 (ns seon.background-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.cluster.work :as work]
             [seon.db :as db]
             [seon.render.walk :as walk]
@@ -16,9 +16,9 @@
          connection
          [{:seon.cluster.agent/id "background-agent"}
           {:seon.fn/sym "my.example/background-call"}
-          {:seon.cluster.run/id "origin-run"}
+          {:seon.turn/id "origin-run"}
           {:seon.effect/id "background-effect"
-           :seon.effect/run [:seon.cluster.run/id "origin-run"]
+           :seon.effect/run [:seon.turn/id "origin-run"]
            :seon.effect/owner [:seon.fn/sym "my.example/background-call"]
            :seon.effect/form-ordinal 0
            :seon.effect/ordinal 0
@@ -38,18 +38,18 @@
         (db/transact!
          connection
          (run/open-tx
-          {:seon.cluster.run/id "result-run"
-           :seon.cluster.run/agent
+          {:seon.turn/id "result-run"
+           :seon.turn/agent
            [:seon.cluster.agent/id "background-agent"]
-           :seon.cluster.run/opened-at now}))
+           :seon.turn/opened-at now}))
         (let [opened
               (db/pull
                @connection
-               [{:seon.cluster.run/background-results
+               [{:seon.turn/background-results
                  [:seon.effect/id]}]
-               [:seon.cluster.run/id "result-run"])]
+               [:seon.turn/id "result-run"])]
           (is (= #{"background-effect"}
                  (into #{}
                        (map :seon.effect/id)
-                       (:seon.cluster.run/background-results opened))))
-          (is (nil? (:seon.cluster.run/trigger opened))))))))
+                       (:seon.turn/background-results opened))))
+          (is (nil? (:seon.turn/trigger opened))))))))

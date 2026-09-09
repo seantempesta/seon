@@ -11,7 +11,7 @@
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
             [seon.context :as context]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.config :as config]
             [seon.error :as error]
             [seon.print :as print]
@@ -62,19 +62,19 @@
    :seon.error/kind
    {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
    {:seon.cluster.eval/run
-    [:db/id :seon.cluster.run/id :seon.cluster.run/opened-at
-     {:seon.cluster.run/agent
+    [:db/id :seon.turn/id :seon.turn/opened-at
+     {:seon.turn/agent
       [:db/id
        :seon.cluster.agent/id
        {:seon.cluster.agent/namespace [:db/id :seon.ns/name]}]}]}])
 
 (def ^:private undisposed-run-selector
   [:db/id
-   :seon.cluster.run/id
-   :seon.cluster.run/opened-at
-   :seon.cluster.run/closed-at
-   :seon.cluster.run/plan-digest
-   :seon.cluster.run/undisposed-at])
+   :seon.turn/id
+   :seon.turn/opened-at
+   :seon.turn/closed-at
+   :seon.turn/plan-digest
+   :seon.turn/undisposed-at])
 
 (def ^:private reasoning-attempt-selector
   [:db/id
@@ -83,14 +83,14 @@
    :seon.ai.attempt/reasoning
    :seon.ai.attempt/reasoning-blob
    :seon.ai.attempt/reasoning-size
-   {:seon.ai.attempt/run [:db/id :seon.cluster.run/id]}])
+   {:seon.turn/_attempts [:db/id :seon.turn/id]}])
 
 (def ^:private active-runs-rules
   '[[(active-run ?run ?agent ?bootstrap-run-id ?pinned?)
-     [?run :seon.cluster.run/agent ?agent]
-     [?run :seon.cluster.run/id ?run-id]
+     [?run :seon.turn/agent ?agent]
+     [?run :seon.turn/id ?run-id]
      (not-join [?run]
-               [_ :seon.cluster.run/supersedes ?run])
+               [_ :seon.turn/supersedes ?run])
      [(= ?run-id ?bootstrap-run-id) ?pinned?]]])
 
 (defn- recent-message-rows
@@ -133,9 +133,9 @@
            :in $ ?agent-id
            :where
            [?agent :seon.cluster.agent/id ?agent-id]
-           [?run :seon.cluster.run/agent ?agent]
-           [?run :seon.cluster.run/undisposed-at ?at]
-           [?run :seon.cluster.run/id ?id]]
+           [?run :seon.turn/agent ?agent]
+           [?run :seon.turn/undisposed-at ?at]
+           [?run :seon.turn/id ?id]]
          :args [db agent-id]
          :order-by '[?at :desc ?id :desc]
          :limit limit}))
@@ -207,7 +207,7 @@
                   '[:find ?receipt ?ordinal
                     :in $ ?run-id
                     :where
-                    [?run :seon.cluster.run/id ?run-id]
+                    [?run :seon.turn/id ?run-id]
                     [?receipt :seon.cluster.eval/run ?run]
                     [?receipt :seon.cluster.eval/ordinal ?ordinal]]
                   :args [db run-id]
@@ -327,19 +327,19 @@
      ;; wrote it, which is exactly what the retired `:input` kind used.
      ::at (or (:seon.cluster.eval/at receipt)
               (get-in receipt [:seon.cluster.eval/run
-                               :seon.cluster.run/opened-at]))
+                               :seon.turn/opened-at]))
      ::ordinal ordinal
      ::run-id (get-in receipt [:seon.cluster.eval/run
-                               :seon.cluster.run/id])
+                               :seon.turn/id])
      ::run-opened-at (get-in receipt [:seon.cluster.eval/run
-                                      :seon.cluster.run/opened-at])
+                                      :seon.turn/opened-at])
      ;; ONE ENTITY PER (run, ordinal): the frozen source is this evaluation's
      ;; own attribute, not a twin form entity joined by ordinal.
      ::source (:seon.cluster.eval/source receipt)
      ::namespace
      (or (get-in receipt [:seon.cluster.eval/ns :seon.ns/name])
          (get-in receipt [:seon.cluster.eval/run
-                          :seon.cluster.run/agent
+                          :seon.turn/agent
                           :seon.cluster.agent/namespace
                           :seon.ns/name])
          'user)
@@ -363,10 +363,10 @@
   [run]
   {::kind :run
    ::entity run
-   ::id (:seon.cluster.run/id run)
-   ::at (:seon.cluster.run/undisposed-at run)
-   ::run-id (:seon.cluster.run/id run)
-   ::run-opened-at (:seon.cluster.run/opened-at run)})
+   ::id (:seon.turn/id run)
+   ::at (:seon.turn/undisposed-at run)
+   ::run-id (:seon.turn/id run)
+   ::run-opened-at (:seon.turn/opened-at run)})
 
 (defn- entry-order
   [entry]
@@ -622,8 +622,8 @@
             (db/q '[:find [?attempt ...]
                     :in $ ?run-id
                     :where
-                    [?run :seon.cluster.run/id ?run-id]
-                    [?attempt :seon.ai.attempt/run ?run]
+                    [?run :seon.turn/id ?run-id]
+                    [?run :seon.turn/attempts ?attempt]
                     (or [?attempt :seon.ai.attempt/reasoning]
                         [?attempt :seon.ai.attempt/reasoning-blob])]
                   db selected-run-id)
@@ -631,8 +631,8 @@
                    :in $ ?agent-id
                    :where
                    [?agent :seon.cluster.agent/id ?agent-id]
-                   [?run :seon.cluster.run/agent ?agent]
-                   [?attempt :seon.ai.attempt/run ?run]
+                   [?run :seon.turn/agent ?agent]
+                   [?run :seon.turn/attempts ?attempt]
                    (or [?attempt :seon.ai.attempt/reasoning]
                        [?attempt :seon.ai.attempt/reasoning-blob])]
                   db agent-id))
@@ -646,8 +646,8 @@
                        {::kind :attempt
                         ::id (:seon.ai.attempt/id attempt)
                         ::at (:seon.ai.attempt/at attempt)
-                        ::run-id (get-in attempt [:seon.ai.attempt/run
-                                                  :seon.cluster.run/id])
+                        ::run-id (get-in attempt [:seon.turn/_attempts 0
+                                                  :seon.turn/id])
                         ::reasoning reasoning}))))
            (sort-by entry-order)
            vec)
@@ -721,7 +721,7 @@
                              (:seon.cluster.eval/source form)
                              :seon.cluster.eval/id
                              (run/receipt-identity
-                              (:seon.cluster.run/id unit) ordinal)
+                              (:seon.turn/id unit) ordinal)
                              :seon.cluster.eval/ordinal ordinal
                              :seon.cluster.eval/ns
                              {:seon.ns/name
@@ -752,7 +752,7 @@
                        (get-in evaluation [:seon.print/options
                                            :seon.print/level])))))
            evaluated-sources)
-          (history db (:seon.cluster.run/id unit) agent-id
+          (history db (:seon.turn/id unit) agent-id
                    candidate-count (::selected-run-id unit)
                    (:seon.context.contribution/evaluations unit)))))
 
@@ -782,7 +782,7 @@
 (defn- selected-run-identities
   [unit]
   (let [db (:seon.db/db unit)
-        agent (:seon.cluster.run/agent unit)
+        agent (:seon.turn/agent unit)
         agent-ref (if (map? agent) (:db/id agent) agent)
         supplied-agent-id (when (map? agent) (:seon.cluster.agent/id agent))
         queried (when (and (nil? supplied-agent-id)
@@ -792,7 +792,7 @@
                           :where
                           [?agent :seon.cluster.agent/id ?agent-id]]
                         db agent-ref))]
-    {::selected-run-id (:seon.cluster.run/id unit)
+    {::selected-run-id (:seon.turn/id unit)
      ::selected-agent-id
      (or supplied-agent-id (when-not (:seon.error/kind queried) queried))
      ::selected-run-error (when (:seon.error/kind queried) queried)}))
@@ -805,11 +805,11 @@
     "The selected run is unavailable because its run, agent, or database identity is missing."
     :seon.error/diagnostic-layer :render
     :seon.error/diagnostic-operation 'seon.render.transcript/render-run
-    :seon.error/diagnostic-member :seon.cluster.run/run
+    :seon.error/diagnostic-member :seon.turn/turn
     :seon.error/diagnostic-expected
-    [:seon.db/db :seon.cluster.run/id :seon.cluster.agent/id]
+    [:seon.db/db :seon.turn/id :seon.cluster.agent/id]
     :seon.error/diagnostic-offending
-    (select-keys unit [:seon.cluster.run/id :seon.cluster.run/agent])
+    (select-keys unit [:seon.turn/id :seon.turn/agent])
     :seon.error/diagnostic-cause ::selected-run-unavailable
     :seon.error/diagnostic-evidence identities}))
 
@@ -945,7 +945,7 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The history unit
 ;;;
-;;; `:seon.cluster.run/_agent` is the agent's own REPL past. It reaches both
+;;; `:seon.turn/_agent` is the agent's own REPL past. It reaches both
 ;;; projections through ONE derivation — `history-entries`, the same function
 ;;; and the same result printer the run loop itself uses — so what a person
 ;;; reads on the page and what an agent reads in its context are the same
@@ -967,10 +967,10 @@
       (config/defaults))))
 
 (def ^:private history-run-selector
-  [:seon.cluster.run/id
-   :seon.cluster.run/opened-at
-   :seon.cluster.run/closed-at
-   :seon.cluster.run/error])
+  [:seon.turn/id
+   :seon.turn/opened-at
+   :seon.turn/closed-at
+   :seon.turn/error])
 
 (defn agent-history
   "This agent's own submitted forms and their stored results, newest run first.
@@ -988,9 +988,9 @@
                              :in $ ?agent-id
                              :where
                              [?agent :seon.cluster.agent/id ?agent-id]
-                             [?run :seon.cluster.run/agent ?agent]
-                             [?run :seon.cluster.run/id _]
-                             [?run :seon.cluster.run/opened-at ?opened]]
+                             [?run :seon.turn/agent ?agent]
+                             [?run :seon.turn/id _]
+                             [?run :seon.turn/opened-at ?opened]]
                     :args [database agent-id]
                     :order-by '[?opened :desc ?run :desc]})]
     (if (:seon.error/kind rows)
@@ -1010,7 +1010,7 @@
                                   :seon.cluster.agent/id agent-id
                                   :seon.sci.admit/caps caps
                                   ::selected-run-id
-                                  (:seon.cluster.run/id row)}))))))
+                                  (:seon.turn/id row)}))))))
                   newest)
             omitted (- total (count runs))]
         (cond-> {:seon.cluster.agent/id agent-id
@@ -1029,10 +1029,10 @@
 
 (defn- run-heading
   [run]
-  (str "Run " (:seon.cluster.run/id run)
-       (when-let [opened (:seon.cluster.run/opened-at run)]
+  (str "Run " (:seon.turn/id run)
+       (when-let [opened (:seon.turn/opened-at run)]
          (str ", opened " (pr-str opened)))
-       (if-let [closed (:seon.cluster.run/closed-at run)]
+       (if-let [closed (:seon.turn/closed-at run)]
          (str ", closed " (pr-str closed))
          ", still open")
        "."))
@@ -1058,9 +1058,9 @@
                   (str/join
                    "\n"
                    (cond-> [(run-heading run)]
-                     (:seon.cluster.run/error run)
+                     (:seon.turn/error run)
                      (conj (str "It did not run: "
-                                (:seon.cluster.run/error run)))
+                                (:seon.turn/error run)))
                      :always
                      (into (map :seon.render.history/bytes)
                            (:seon.render.transcript/entries run)))))
@@ -1072,8 +1072,8 @@
   "The agent these runs belong to, read from the runs themselves."
   [database runs]
   (or (some :seon.cluster.agent/id
-            (keep :seon.cluster.run/agent runs))
-      (when-let [eid (some #(get-in % [:seon.cluster.run/agent :db/id]) runs)]
+            (keep :seon.turn/agent runs))
+      (when-let [eid (some #(get-in % [:seon.turn/agent :db/id]) runs)]
         (let [found (db/q '[:find ?id .
                             :in $ ?agent
                             :where [?agent :seon.cluster.agent/id ?id]]
@@ -1134,7 +1134,7 @@
                           (when (not= 1 total) "s") ")")]]
                (map
                 (fn [run]
-                  (let [closed? (some? (:seon.cluster.run/closed-at run))
+                  (let [closed? (some? (:seon.turn/closed-at run))
                         entries (:seon.render.transcript/entries run)]
                     (cond->
                      [:article {:class "seon-run-history-entry"}
@@ -1142,13 +1142,13 @@
                        (if closed?
                          "Historical run — its results are stored, not fresh"
                          "Open run")]
-                      [:h3 [:code (:seon.cluster.run/id run)]]
+                      [:h3 [:code (:seon.turn/id run)]]
                       [:p {:class "seon-run-history-window"}
                        (run-heading run)]]
-                      (:seon.cluster.run/error run)
+                      (:seon.turn/error run)
                       (conj [:p {:class "seon-run-history-error"}
                              (str "It did not run: "
-                                  (:seon.cluster.run/error run))])
+                                  (:seon.turn/error run))])
                       (seq entries)
                       (conj [:pre {:class "seon-run-history-transcript"}
                              [:code

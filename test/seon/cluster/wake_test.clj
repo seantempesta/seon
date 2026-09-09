@@ -58,10 +58,10 @@
 (defn- run-tx
   "A commit of attributes a TURN writes — the other side of C2."
   [id]
-  [{:seon.cluster.run/id id
-    :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-    :seon.cluster.run/opened-at (Date.)
-    :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))}])
+  [{:seon.turn/id id
+    :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+    :seon.turn/opened-at (Date.)
+    :seon.turn/plan-digest (apply str (repeat 64 "a"))}])
 
 (defn- route-probe!
   "Register the production listener with this test's own channels.

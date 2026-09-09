@@ -73,14 +73,14 @@
   The `:open` transition commits this connection with the run itself,
   so the cause is equally available in temporal and non-temporal
   databases."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.run/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn/id]
                   [:maybe :seon.cluster.message/id]]}
   [db run-id]
   (db/q '[:find ?message-id .
          :in $ ?run-id
          :where
-         [?run :seon.cluster.run/id ?run-id]
-         [?run :seon.cluster.run/trigger ?message]
+         [?run :seon.turn/id ?run-id]
+         [?run :seon.turn/trigger ?message]
          [?message :seon.cluster.message/id ?message-id]]
        db run-id))
 
@@ -325,12 +325,12 @@
                        :seon.cluster.message/delivery-request]
                   :seon.cluster.message/delivery]}
   [db {:keys [:my.message/value :seon.cluster.agent/id
-              :seon.cluster.run/id :seon.cluster.eval/ordinal
+              :seon.turn/id :seon.cluster.eval/ordinal
               :seon.cluster.message/at :seon.cluster.message/trigger
               :seon.config.message/max-chain]
        :as request}]
   (let [sender (:seon.cluster.agent/id request)
-        run-id (:seon.cluster.run/id request)
+        run-id (:seon.turn/id request)
         candidates (if (vector? value) value [value])
         ;; a run whose trigger cannot be found starts a fresh chain at
         ;; one hop — the same depth as answering a human, because that
@@ -357,7 +357,7 @@
               ":seon.config.message/max-chain is absent, so nothing was "
               "delivered.")
          :seon.error/data {:seon.cluster.agent/id sender
-                           :seon.cluster.run/id run-id}
+                           :seon.turn/id run-id}
          :seon.cluster.message/no-limit true}]}
 
       (> depth max-chain)
@@ -371,7 +371,7 @@
               max-chain ". Nothing was delivered.")
          :seon.error/data {:seon.config.message/max-chain max-chain
                            :seon.cluster.agent/id sender
-                           :seon.cluster.run/id run-id}}]}
+                           :seon.turn/id run-id}}]}
 
       :else
       (reduce
@@ -390,7 +390,7 @@
                            "\" in this cluster, so nothing was sent to it.")
                       :seon.error/data {:my.message/to to
                                         :seon.cluster.agent/id sender
-                                        :seon.cluster.run/id run-id}
+                                        :seon.turn/id run-id}
                       :seon.cluster.message/unknown-recipient to})
              (let [about-identity (:my.message/about candidate)
                    about (when about-identity
@@ -400,7 +400,7 @@
                          (update about :seon.error/data
                                  merge
                                  {:seon.cluster.agent/id sender
-                                  :seon.cluster.run/id run-id}))
+                                  :seon.turn/id run-id}))
                  (update
                   delivered
                   :seon.cluster.message/rows

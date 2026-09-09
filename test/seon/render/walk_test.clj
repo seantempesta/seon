@@ -37,11 +37,11 @@
    [{:seon.ns/name agent-namespace}
     {:seon.cluster.agent/id agent-id
      :seon.cluster.agent/namespace [:seon.ns/name agent-namespace]}
-    {:seon.cluster.run/id "render-walk-run"
-     :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-     :seon.cluster.run/opened-at (at 0)}
+    {:seon.turn/id "render-walk-run"
+     :seon.turn/agent [:seon.cluster.agent/id agent-id]
+     :seon.turn/opened-at (at 0)}
     {:seon.cluster.eval/id "render-walk-eval"
-     :seon.cluster.eval/run [:seon.cluster.run/id "render-walk-run"]
+     :seon.cluster.eval/run [:seon.turn/id "render-walk-run"]
      :seon.cluster.eval/ordinal 0
      :seon.cluster.eval/at (at 1)
      :seon.cluster.eval/ns [:seon.ns/name agent-namespace]
@@ -55,7 +55,7 @@
      (db/transact!
       connection
       [{:db/id "identityless-run"
-        :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]}])
+        :seon.turn/agent [:seon.cluster.agent/id agent-id]}])
      (let [database @connection
            identity-attributes (db/populated-identity-attributes database)
            units (walk/neighborhood
@@ -73,7 +73,7 @@
                          [attribute (get entity attribute)]))
                      identity-attributes)))]
        (testing "the reverse-ref run is addressed by its declared identity"
-         (is (some #(= [:seon.cluster.run/id "render-walk-run"]
+         (is (some #(= [:seon.turn/id "render-walk-run"]
                        (:seon.render.walk/lookup %))
                    units)))
        (testing "a raw eid survives only when the entity has no identity"
@@ -148,7 +148,7 @@
       connection
       (mapv (fn [ordinal]
               {:seon.cluster.eval/id (str "render-walk-eval-" ordinal)
-               :seon.cluster.eval/run [:seon.cluster.run/id "render-walk-run"]
+               :seon.cluster.eval/run [:seon.turn/id "render-walk-run"]
                :seon.cluster.eval/ordinal ordinal
                :seon.cluster.eval/at (at (+ 10 ordinal))
                :seon.cluster.eval/ns [:seon.ns/name agent-namespace]

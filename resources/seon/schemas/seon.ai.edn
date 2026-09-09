@@ -7,7 +7,6 @@
             :seon.render/ai seon.ai/attempt-ai,
             :seon.render/html seon.ai/attempt-html}
            [:seon.ai.attempt/id :seon.ai.attempt/id]
-           [:seon.ai.attempt/run :seon.ai.attempt/run]
            [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
            [:seon.ai.attempt/at :seon.ai.attempt/at]
            [:seon.ai/endpoint :seon.ai/endpoint]

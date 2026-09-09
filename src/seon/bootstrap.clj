@@ -4,7 +4,7 @@
             [my.plan :as plan]
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.db :as db]
             [seon.render :as render]
             [seon.render.walk :as walk]
@@ -44,9 +44,9 @@
       (let [namespace (:seon.cluster.agent/namespace agent)
             run (when-let [id (run/open-for-agent database [:seon.cluster.agent/id agent-id])]
                   (db/pull database
-                           '[:seon.cluster.run/id
-                             {:seon.cluster.run/trigger [:seon.cluster.message/id]}]
-                           [:seon.cluster.run/id id]))
+                           '[:seon.turn/id
+                             {:seon.turn/trigger [:seon.cluster.message/id]}]
+                           [:seon.turn/id id]))
             turn-limit
             (or (:seon.config.run/max-episode-runs (ai/agent-overlay database agent-id))
                 (db/q '[:find ?limit .
@@ -70,7 +70,7 @@
           :seon.cluster.agent/namespace-ref
           [:seon.ns/name (:seon.ns/name namespace)]
           :seon.cluster.agent/unread-message-count (long unread)
-          :seon.cluster.run/turns-remaining
+          :seon.turn/turns-remaining
           (long (max 0 (- (or turn-limit 0) turns-used)))
           :seon.cluster.agent/protocol-namespaces
           (->> (:seon.ns/requires namespace)
@@ -79,12 +79,12 @@
                vec)}
           run
           (assoc :seon.cluster.agent/open-run-ref
-                 [:seon.cluster.run/id
-                  (:seon.cluster.run/id run)])
-          (:seon.cluster.run/trigger run)
-          (assoc :seon.cluster.run/trigger
+                 [:seon.turn/id
+                  (:seon.turn/id run)])
+          (:seon.turn/trigger run)
+          (assoc :seon.turn/trigger
                  [:seon.cluster.message/id
-                  (get-in run [:seon.cluster.run/trigger
+                  (get-in run [:seon.turn/trigger
                                :seon.cluster.message/id])]))))))
 
 (defmacro dir
@@ -100,7 +100,7 @@
 (defn run-id
   "The deterministic id of an agent's system-authored bootstrap run."
   {:malli/schema [:=> [:cat :seon.cluster.agent/id]
-                  :seon.cluster.run/id]}
+                  :seon.turn/id]}
   [agent-id]
   (str "bootstrap:" agent-id))
 
@@ -553,7 +553,7 @@
                '[:find ?ordinal ?source ?result
                  :in $ ?run-id
                  :where
-                 [?run :seon.cluster.run/id ?run-id]
+                 [?run :seon.turn/id ?run-id]
                  [?form :seon.cluster.eval/run ?run]
                  [?form :seon.cluster.eval/ordinal ?ordinal]
                  [?form :seon.cluster.eval/source ?source]
@@ -593,7 +593,7 @@
                                     {::prefix-drift true
                                      :seon.error/kind ::prefix-drift
                                      :seon.error/message message
-                                     :seon.cluster.run/id run-id
+                                     :seon.turn/id run-id
                                      :seon.cluster.eval/source source}))))
                       {:seon.repl/key (:seon.repl/key candidate)
                        :seon.sci.admit/print-node (edn/read-string result)}))
@@ -614,14 +614,14 @@
                       {::prefix-drift true
                        :seon.error/kind ::prefix-drift
                        :seon.error/message message
-                       :seon.cluster.run/id run-id
+                       :seon.turn/id run-id
                        :seon.bootstrap/expected expected-sources
                        :seon.bootstrap/actual prior-sources}))))
         (nth episode index nil)))))
 
 (defn next-entry
   "Derive the next generated entry from receipts already stored on the run."
-  {:malli/schema [:=> [:cat :seon.render.walk/request :seon.cluster.run/id]
+  {:malli/schema [:=> [:cat :seon.render.walk/request :seon.turn/id]
                   [:or :nil :seon.repl/entry :seon.error/value]]}
   [request run-id]
   (let [projection
@@ -637,7 +637,7 @@
 
 (defn supervision-run-id
   "The deterministic identity of root's first-agent supervision run."
-  {:malli/schema [:=> [:cat] :seon.cluster.run/id]}
+  {:malli/schema [:=> [:cat] :seon.turn/id]}
   []
   "bootstrap-supervision:root")
 
@@ -647,7 +647,7 @@
           :in $ ?agent-id
           :where
           [?agent :seon.cluster.agent/id ?agent-id]
-          [?run :seon.cluster.run/agent ?agent]
+          [?run :seon.turn/agent ?agent]
           [?form :seon.cluster.eval/run ?run]
           [?form :seon.cluster.eval/ordinal ?ordinal]
           [?form :seon.cluster.eval/source ?source]
@@ -697,20 +697,20 @@
   acquire ordinary execution receipts."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.db.process/id
-                       :seon.cluster.run/opened-at
+                       :seon.turn/opened-at
                        :seon.cluster.agent/id]
                   :seon.store/transaction-data]}
   [database process opened-at agent-id]
   (let [run-id (supervision-run-id)
         already-open? (some? (db/pull database [:db/id]
-                                      [:seon.cluster.run/id run-id]))
+                                      [:seon.turn/id run-id]))
         read? (not (root-read-agent-history? database))
         send? (not (root-messaged-agent? database))
         read-expression
         (str "(db/q {:query '[:find ?at ?source ?result "
              ":in $ ?agent-id :where "
              "[?agent :seon.cluster.agent/id ?agent-id] "
-             "[?run :seon.cluster.run/agent ?agent] "
+             "[?run :seon.turn/agent ?agent] "
              "[?form :seon.cluster.eval/run ?run] "
              "[?form :seon.cluster.eval/ordinal ?ordinal] "
              "[?form :seon.cluster.eval/source ?source] "
@@ -746,12 +746,12 @@
       (run/system-run-tx
        database
        {:seon.cluster.agent/id "root"
-        :seon.cluster.run/id run-id
+        :seon.turn/id run-id
         :seon.db.process/id process
-        :seon.cluster.run/opened-at opened-at
-        :seon.cluster.run/starting-ns [:seon.ns/name 'my.agents.root]
-        :seon.cluster.run/plan-digest (digest-value sources)
-        :seon.cluster.run/sources sources}))))
+        :seon.turn/opened-at opened-at
+        :seon.turn/starting-ns [:seon.ns/name 'my.agents.root]
+        :seon.turn/plan-digest (digest-value sources)
+        :seon.turn/sources sources}))))
 
 (defn seed-tx
   "Transaction data opening, claiming, and freezing one bootstrap run."
@@ -764,13 +764,13 @@
       [:seon.cluster/name :seon.cluster/name]
       [:seon.ns/name :seon.ns/name]
       [:seon.db.process/id :seon.db.process/id]
-      [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]]]
+      [:seon.turn/opened-at :seon.turn/opened-at]]]
     :seon.store/transaction-data]}
   [db
    {agent-id :seon.cluster.agent/id
     namespace-name :seon.ns/name
     process :seon.db.process/id
-    opened-at :seon.cluster.run/opened-at}]
+    opened-at :seon.turn/opened-at}]
   (let [id (run-id agent-id)
         message-id (task-message-id agent-id)
         namespace-row
@@ -799,10 +799,10 @@
           (run/generated-run-tx
            db
            {:seon.cluster.agent/id agent-id
-            :seon.cluster.run/id id
+            :seon.turn/id id
             :seon.db.process/id process
-            :seon.cluster.run/opened-at opened-at
-            :seon.cluster.run/trigger
+            :seon.turn/opened-at opened-at
+            :seon.turn/trigger
             [:seon.cluster.message/id message-id]
-            :seon.cluster.run/starting-ns
+            :seon.turn/starting-ns
             [:seon.ns/name namespace-name]}))))

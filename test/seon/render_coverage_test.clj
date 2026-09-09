@@ -5,7 +5,7 @@
             [seon.ai.tokens :as tokens]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -73,17 +73,17 @@
       :seon.cluster/name cluster-name
       :seon.ns/name 'my.agents.render-coverage})
     [{:seon.fn/sym owner-symbol}
-     {:seon.cluster.run/id run-id
-      :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]}
+     {:seon.turn/id run-id
+      :seon.turn/agent [:seon.cluster.agent/id agent-id]}
      {:seon.effect/id "effect-pending"
-      :seon.effect/run [:seon.cluster.run/id run-id]
+      :seon.effect/run [:seon.turn/id run-id]
       :seon.effect/owner [:seon.fn/sym owner-symbol]
       :seon.effect/form-ordinal 3
       :seon.effect/ordinal 0
       :seon.effect/request-edn request-edn
       :seon.effect/opened-at opened-at}
      {:seon.effect/id "effect-returned"
-      :seon.effect/run [:seon.cluster.run/id run-id]
+      :seon.effect/run [:seon.turn/id run-id]
       :seon.effect/owner [:seon.fn/sym owner-symbol]
       :seon.effect/form-ordinal 3
       :seon.effect/ordinal 1
@@ -95,7 +95,7 @@
       :seon.effect/duration-ms 12
       :seon.effect/settled-at settled-at}
      {:seon.effect/id "effect-interrupted"
-      :seon.effect/run [:seon.cluster.run/id run-id]
+      :seon.effect/run [:seon.turn/id run-id]
       :seon.effect/owner [:seon.fn/sym owner-symbol]
       :seon.effect/form-ordinal 3
       :seon.effect/ordinal 2
@@ -160,7 +160,7 @@
            (render/render-call
             (assoc (render-request database ctx value)
                    :seon.db/connection connection
-                   :seon.cluster.run/id run-id
+                   :seon.turn/id run-id
                    :seon.render/output :seon.render/ai
                    :seon.render/profile profile
                    :seon.render.call/id agent-call-id
@@ -377,7 +377,7 @@
      (db/transact!
       connection
       [{:seon.ai.attempt/id "re-entrance-attempt"
-        :seon.ai.attempt/run [:seon.cluster.run/id run-id]
+        :seon.turn/_attempts [:seon.turn/id run-id]
         :seon.ai.attempt/ordinal 0
         :seon.ai.attempt/at opened-at
         :seon.ai/endpoint "https://provider.invalid"

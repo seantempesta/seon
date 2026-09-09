@@ -18,7 +18,7 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.loop :as loop]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
@@ -76,8 +76,8 @@
      (db/q '[:find ?closed-at .
              :in $ ?run-id
              :where
-             [?run :seon.cluster.run/id ?run-id]
-             [?run :seon.cluster.run/closed-at ?closed-at]]
+             [?run :seon.turn/id ?run-id]
+             [?run :seon.turn/closed-at ?closed-at]]
            database (bootstrap/run-id "root")))))
 
 (defn- with-cluster
@@ -217,14 +217,14 @@
            (run/system-run-tx
             database
             {:seon.cluster.agent/id (::agent-id spec)
-             :seon.cluster.run/id (::run-id spec)
+             :seon.turn/id (::run-id spec)
              :seon.db.process/id process
-             :seon.cluster.run/opened-at now
-             :seon.cluster.run/starting-ns
+             :seon.turn/opened-at now
+             :seon.turn/starting-ns
              [:seon.ns/name (::namespace spec)]
-             :seon.cluster.run/plan-digest
+             :seon.turn/plan-digest
              (digest-value (::sources spec))
-             :seon.cluster.run/sources (::sources spec)}))
+             :seon.turn/sources (::sources spec)}))
          specs)
         result
         (db/transact!
@@ -285,8 +285,8 @@
            (db/q '[:find [?run-id ...]
                    :in $ [?run-id ...]
                    :where
-                   [?run :seon.cluster.run/id ?run-id]
-                   [?run :seon.cluster.run/closed-at _]]
+                   [?run :seon.turn/id ?run-id]
+                   [?run :seon.turn/closed-at _]]
                  database run-ids)]
        (when (= (set run-ids) (set closed))
          closed)))))
@@ -296,8 +296,8 @@
   (db/q '[:find ?receipt-id ?run-id ?agent-id ?ordinal
           :in $ [?run-id ...]
           :where
-          [?run :seon.cluster.run/id ?run-id]
-          [?run :seon.cluster.run/agent ?agent]
+          [?run :seon.turn/id ?run-id]
+          [?run :seon.turn/agent ?agent]
           [?agent :seon.cluster.agent/id ?agent-id]
           [?receipt :seon.cluster.eval/run ?run]
           [?receipt :seon.cluster.eval/id ?receipt-id]
@@ -320,7 +320,7 @@
            (db/q '[:find ?run-id ?ordinal ?value
                    :in $ [?run-id ...] ?attribute
                    :where
-                   [?run :seon.cluster.run/id ?run-id]
+                   [?run :seon.turn/id ?run-id]
                    [?receipt :seon.cluster.eval/run ?run]
                    [?receipt :seon.cluster.eval/ordinal ?ordinal]
                    [?receipt ?attribute ?value]]
@@ -352,10 +352,10 @@
   [database specs]
   (doseq [spec specs]
     (let [turn (db/pull database
-                        [:seon.cluster.run/id :seon.cluster.run/closed-at]
-                        [:seon.cluster.run/id (::run-id spec)])]
-      (is (= (::run-id spec) (:seon.cluster.run/id turn)))
-      (is (inst? (:seon.cluster.run/closed-at turn))))))
+                        [:seon.turn/id :seon.turn/closed-at]
+                        [:seon.turn/id (::run-id spec)])]
+      (is (= (::run-id spec) (:seon.turn/id turn)))
+      (is (inst? (:seon.turn/closed-at turn))))))
 
 (defn- assert-concurrent-progress!
   [database specs]
@@ -364,8 +364,8 @@
         (db/q '[:find ?run-id ?receipt-tx ?close-tx
                 :in $ [?run-id ...]
                 :where
-                [?run :seon.cluster.run/id ?run-id]
-                [?run :seon.cluster.run/closed-at _ ?close-tx]
+                [?run :seon.turn/id ?run-id]
+                [?run :seon.turn/closed-at _ ?close-tx]
                 [?receipt :seon.cluster.eval/run ?run]
                 [?receipt :seon.cluster.eval/result-edn _ ?receipt-tx]]
               database run-ids)
@@ -517,7 +517,7 @@
 (defn- assert-plan-results!
   [database specs]
   (let [receipts-by-run
-        (group-by :seon.cluster.run/id
+        (group-by :seon.turn/id
                   (drive/run-receipts database (mapv ::run-id specs)))]
     (doseq [spec specs]
       (let [by-ordinal
@@ -573,21 +573,21 @@
             interrupted-at (Date.)]
         (db/transact!
          connection
-         [{:seon.cluster.run/id run-id}
+         [{:seon.turn/id run-id}
           {:seon.cluster.eval/id (pr-str [run-id 0])
-           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+           :seon.cluster.eval/run [:seon.turn/id run-id]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/result-edn "42"}
           {:seon.cluster.eval/id (pr-str [run-id 1])
-           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+           :seon.cluster.eval/run [:seon.turn/id run-id]
            :seon.cluster.eval/ordinal 1
            :seon.cluster.eval/error "failed"}
           {:seon.cluster.eval/id (pr-str [run-id 2])
-           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+           :seon.cluster.eval/run [:seon.turn/id run-id]
            :seon.cluster.eval/ordinal 2
            :seon.error/kind :user-input}
           {:seon.cluster.eval/id (pr-str [run-id 3])
-           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+           :seon.cluster.eval/run [:seon.turn/id run-id]
            :seon.cluster.eval/ordinal 3
            :seon.cluster.eval/interrupted-at interrupted-at}])
         (is (= #{[run-id 1 :seon.cluster.eval/error "failed"]

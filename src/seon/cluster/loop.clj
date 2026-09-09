@@ -44,7 +44,7 @@
             [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
             [seon.cluster.reply :as reply]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
@@ -191,7 +191,7 @@
   ;; retracts. Reading the entity maps rather than filtering the
   ;; registry by namespace keeps out the things that live in those
   ;; namespaces without being attributes: the entity maps themselves,
-  ;; and derived values like `:seon.cluster.run/missing-results`.
+  ;; and derived values like `:seon.turn/missing-results`.
   ;;
   ;; Note what this set can and cannot prove. It is the right input for
   ;; the wake/commit disjointness property, but it CANNOT by itself
@@ -206,7 +206,7 @@
                          (schema/schema-definition entity))))
               (filter vector?)
               (map first))
-        [:seon.cluster.run/run
+        [:seon.turn/turn
          :seon.cluster.eval/receipt
          ;; every model attempt is a durable row this loop writes, so it
          ;; belongs in the declared write set — and the class-killer
@@ -429,7 +429,7 @@
     cluster ::cluster
     asked ::asked
     agent-id :seon.cluster.agent/id
-    run-id :seon.cluster.run/id
+    run-id :seon.turn/id
     ordinal :seon.cluster.eval/ordinal
     now ::now
     problem :seon.problems/form-problem
@@ -439,7 +439,7 @@
           (db/q '[:find ?receipt .
                   :in $ ?run-id ?ordinal
                   :where
-                  [?run :seon.cluster.run/id ?run-id]
+                  [?run :seon.turn/id ?run-id]
                   [?receipt :seon.cluster.eval/run ?run]
                   [?receipt :seon.cluster.eval/ordinal ?ordinal]]
                 db run-id ordinal))
@@ -452,7 +452,7 @@
                       (dissoc asked :my.message/about)
                       asked)
                     :seon.cluster.agent/id agent-id
-                    :seon.cluster.run/id run-id
+                    :seon.turn/id run-id
                     :seon.cluster.eval/ordinal ordinal
                     :seon.cluster.message/at now
                     :seon.config.message/max-chain
@@ -467,7 +467,7 @@
             (fn [failure]
               (error-tx cluster db failure now
                         {:seon.cluster.agent/id agent-id
-                         :seon.cluster.run/id run-id})))
+                         :seon.turn/id run-id})))
            (:seon.error/values delivery))}))
 
 (defn- phase
@@ -485,7 +485,7 @@
   [{cluster ::cluster
     now ::now
     agent-id :seon.cluster.agent/id
-    run-id :seon.cluster.run/id
+    run-id :seon.turn/id
     process :seon.db.process/id
     ordinal :seon.cluster.eval/ordinal
     evaluation :seon.sci.eval/evaluation
@@ -516,7 +516,7 @@
         (db/q '[:find (max ?ordinal) .
                 :in $ ?run-id
                 :where
-                [?run :seon.cluster.run/id ?run-id]
+                [?run :seon.turn/id ?run-id]
                 [?form :seon.cluster.eval/run ?run]
                 [?form :seon.cluster.eval/ordinal ?ordinal]]
               database run-id)
@@ -525,8 +525,8 @@
          (db/q '[:find ?form .
                  :in $ ?run-id ?ordinal
                  :where
-                 [?run :seon.cluster.run/id ?run-id]
-                 [?run :seon.cluster.run/trigger _]
+                 [?run :seon.turn/id ?run-id]
+                 [?run :seon.turn/trigger _]
                  [?form :seon.cluster.eval/run ?run]
                  [?form :seon.cluster.eval/ordinal ?ordinal]
                  [?form :seon.cluster.eval/author :agent]]
@@ -550,7 +550,7 @@
                   ::cluster cluster
                   ::asked asked
                   :seon.cluster.agent/id agent-id
-                  :seon.cluster.run/id run-id
+                  :seon.turn/id run-id
                   :seon.cluster.eval/ordinal ordinal
                   ::now now}
            problem (assoc :seon.problems/form-problem problem)
@@ -559,7 +559,7 @@
         (run/settlement-projection cluster evaluation)
         receipt
         (run/evaluation-facts
-         (cond-> {:seon.cluster.run/id run-id
+         (cond-> {:seon.turn/id run-id
                   :seon.db.process/id process
                   :seon.cluster.eval/ordinal ordinal
                   :seon.sci.eval/evaluation evaluation
@@ -572,11 +572,11 @@
                    (contains? #{:completed :wait}
                               (:my.run/disposition settled)))
            (run/close-tx
-            (cond-> {:seon.cluster.run/id run-id
+            (cond-> {:seon.turn/id run-id
                      :seon.db.process/id process
-                     :seon.cluster.run/closed-at now}
+                     :seon.turn/closed-at now}
               undisposed?
-              (assoc :seon.cluster.run/undisposed-at now))))
+              (assoc :seon.turn/undisposed-at now))))
          (:seon.cluster.message/rows delivery)
          (:seon.error/values-tx delivery))
         tx-data (if batch?
@@ -667,13 +667,13 @@
   (let [recording
         (error-tx cluster database source now
                   (cond-> {:seon.cluster.agent/id agent-id}
-                    run-id (assoc :seon.cluster.run/id run-id)))
+                    run-id (assoc :seon.turn/id run-id)))
         value (error/value (first recording))
         receipt-tx
         (when ordinal
           (run/receipt-settle-tx
            database
-            {:seon.cluster.run/id run-id
+            {:seon.turn/id run-id
              :seon.cluster.eval/ordinal ordinal
              :seon.eval/value (pr-str value)
              :seon.cluster.eval/error (:seon.error/message value)
@@ -683,13 +683,13 @@
      (into [] cat
            [receipt-tx
             (when (and run-id (not ordinal))
-              [[:db/add [:seon.cluster.run/id run-id]
-                :seon.cluster.run/error (:seon.error/message value)]])
+              [[:db/add [:seon.turn/id run-id]
+                :seon.turn/error (:seon.error/message value)]])
             (when run-id
               (run/close-tx
-               {:seon.cluster.run/id run-id
+               {:seon.turn/id run-id
                 :seon.db.process/id process
-                :seon.cluster.run/closed-at now}))
+                :seon.turn/closed-at now}))
             recording])}))
 
 (defn- settle-batch-refusal!
@@ -698,12 +698,12 @@
   (let [connection (:seon.db/connection cluster)
         {now ::now
          agent-id :seon.cluster.agent/id
-         run-id :seon.cluster.run/id}
+         run-id :seon.turn/id}
         (first requests)
         process (:seon.db.process/id cluster)
         recording (error-tx cluster @connection refusal now
                             {:seon.cluster.agent/id agent-id
-                             :seon.cluster.run/id run-id})
+                             :seon.turn/id run-id})
         value (error/value (first recording))
         serialized (pr-str value)
         receipts
@@ -723,9 +723,9 @@
         {:tx-data
          (into (run/receipt-settle-batch-tx receipts)
                cat
-               [(run/close-tx {:seon.cluster.run/id run-id
+               [(run/close-tx {:seon.turn/id run-id
                                :seon.db.process/id process
-                               :seon.cluster.run/closed-at now})
+                               :seon.turn/closed-at now})
                 recording])}
         outcome (db/transact! connection transaction)]
     (when (:seon.error/kind outcome)
@@ -756,7 +756,7 @@
   [{cluster ::cluster
     now ::now
     agent-id :seon.cluster.agent/id
-    run-id :seon.cluster.run/id
+    run-id :seon.turn/id
     ordinal :seon.cluster.eval/ordinal
     evaluation :seon.sci.eval/evaluation
     failure :seon.error/value
@@ -798,7 +798,7 @@
            (ex-info "Terminal refusal settlement was refused."
                     {:seon.error/kind ::terminal-refusal-settlement-refused
                      :seon.cluster.loop/terminal-refusal-settlement-refused
-                     (:seon.cluster.run/rule outcome)
+                     (:seon.turn/rule outcome)
                      ::settlement refused
                      ::refused-outcome outcome})))
         (assoc refusal
@@ -830,8 +830,8 @@
    (count (db/q '[:find ?attempt
                  :in $ ?run-id
                  :where
-                 [?run :seon.cluster.run/id ?run-id]
-                 [?attempt :seon.ai.attempt/run ?run]]
+                 [?run :seon.turn/id ?run-id]
+                 [?run :seon.turn/attempts ?attempt]]
                db run-id))))
 
 ;;; The transport-phase evidence the leaf recorded, carried onto the
@@ -885,12 +885,12 @@
   [{:keys [:seon.ai/target :seon.ai/settings
            :seon.ai.attempt/ordinal :seon.error/value
            :seon.ai.attempt/failover-from :seon.ai.attempt/delay-ms]
-    run-id :seon.cluster.run/id
+    run-id :seon.turn/id
     agent-id :seon.cluster.agent/id
     evidence ::attempt-evidence}]
   (cond-> (merge {:seon.ai/target target
                   :seon.ai/settings settings
-                  :seon.cluster.run/id run-id
+                  :seon.turn/id run-id
                   :seon.cluster.agent/id agent-id
                   :seon.ai.attempt/ordinal ordinal}
                  evidence)
@@ -931,7 +931,7 @@
   [cluster request now]
   (let [{target :seon.ai/target
          failure :seon.error/value
-         run-id :seon.cluster.run/id
+         run-id :seon.turn/id
          agent-id :seon.cluster.agent/id
          ordinal :seon.ai.attempt/ordinal
          usage :seon.ai/usage
@@ -956,7 +956,7 @@
                           (blob/stage! connection reasoning-content))
         reasoning-blob (:seon.blob/digest reasoning-stage)
         attribution {:seon.cluster.agent/id agent-id
-                     :seon.cluster.run/id run-id}
+                     :seon.turn/id run-id}
         failure-recording (when failure
                             (error-tx cluster db failure now attribution))
         truncation-recording
@@ -969,7 +969,7 @@
                           truncation-recording))
         row (cond-> (merge
                      {:seon.ai.attempt/id (attempt-id run-id ordinal)
-                      :seon.ai.attempt/run [:seon.cluster.run/id run-id]
+                      :seon.turn/_attempts [:seon.turn/id run-id]
                       :seon.ai.attempt/ordinal ordinal
                       :seon.ai.attempt/at now
                       :seon.ai/endpoint (:seon.ai/endpoint target)
@@ -1037,7 +1037,7 @@
                              {:seon.cluster.eval/ns [:seon.ns/name]}]) ...]
                :in $ ?run-id
                :where
-               [?run :seon.cluster.run/id ?run-id]
+               [?run :seon.turn/id ?run-id]
                [?evaluation :seon.cluster.eval/run ?run]]
              db run-id)
        (sort-by :seon.cluster.eval/ordinal)
@@ -1062,8 +1062,8 @@
       (db/q '[:find ?starting-ns .
               :in $ ?run-id
               :where
-              [?run :seon.cluster.run/id ?run-id]
-              [?run :seon.cluster.run/starting-ns ?namespace]
+              [?run :seon.turn/id ?run-id]
+              [?run :seon.turn/starting-ns ?namespace]
               [?namespace :seon.ns/name ?starting-ns]]
             db run-id)))
 
@@ -1074,7 +1074,7 @@
     cluster ::cluster
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
-    run-id :seon.cluster.run/id
+    run-id :seon.turn/id
     form-ordinal :seon.cluster.eval/ordinal}]
   (merge form
          (cond->
@@ -1088,7 +1088,7 @@
            (:seon.config.eval/time-limit-ms cluster)
            :seon.config/on-core-error
            (:seon.config/on-core-error cluster)}
-           run-id (assoc :seon.cluster.run/id run-id)
+           run-id (assoc :seon.turn/id run-id)
            (:seon.flow/work-launcher cluster)
            (assoc :seon.flow/work-launcher
                   (:seon.flow/work-launcher cluster)))))
@@ -1111,19 +1111,19 @@
     ;; `::agent-already-running` is what stops two openers, and the
     ;; derivation is what stops a second turn for an answered wake.
     ;;
-    ;; `:seon.cluster.run/trigger` is retained as PROVENANCE ONLY — the
+    ;; `:seon.turn/trigger` is retained as PROVENANCE ONLY — the
     ;; oldest message wake this turn opened for, which the page and the
     ;; context still name. It decides nothing.
     (let [id (str (random-uuid))
           open-request
           (cond->
-           {:seon.cluster.run/id id
-            :seon.cluster.run/agent
+           {:seon.turn/id id
+            :seon.turn/agent
             [:seon.cluster.agent/id agent-id]
-            :seon.cluster.run/opened-at now}
+            :seon.turn/opened-at now}
             (:seon.cluster.message/id work)
             (assoc
-             :seon.cluster.run/trigger
+             :seon.turn/trigger
              [:seon.cluster.message/id
               (:seon.cluster.message/id work)]))
           outcome (db/transact!
@@ -1150,7 +1150,7 @@
   (let [connection (:seon.db/connection cluster)
         process (:seon.db.process/id cluster)
         agent-id (:seon.cluster.agent/id work)
-        run-id (:seon.cluster.run/id work)]
+        run-id (:seon.turn/id work)]
     ;; THE PAID CALL, and the ONE place a second one is ever made.
     ;;
     ;; NOTHING RE-CALLS A REQUEST THAT MAY HAVE BEEN TRANSMITTED. That
@@ -1202,14 +1202,14 @@
                  (fn [snapshot]
                    (async/offer! stream-channel
                                  {:seon.cluster.agent/id agent-id
-                                  :seon.cluster.run/id run-id
+                                  :seon.turn/id run-id
                                   :seon.ai/partial snapshot})))
           fail!
           (fn [failure]
             (settle! {::cluster cluster
                       ::now now
                       :seon.cluster.agent/id agent-id
-                      :seon.cluster.run/id run-id
+                      :seon.turn/id run-id
                       :seon.error/value failure})
             (report :error 0))
           freeze!
@@ -1231,9 +1231,9 @@
                   staged-reply (run/stage-reply! connection reply-text)
                   plan-request
                   (merge (dissoc staged-reply :seon.blob/staged-writes)
-                         {:seon.cluster.run/id run-id
+                         {:seon.turn/id run-id
                           :seon.db.process/id process
-                          :seon.cluster.run/plan-digest
+                          :seon.turn/plan-digest
                           (run/plan-digest sources)
                           ;; ONE ENTITY PER (run, ordinal): freezing the plan
                           ;; IS minting the evaluations, source and author and
@@ -1242,7 +1242,7 @@
                           ;; about, and the first ordinal is derived inside
                           ;; the transaction rather than assumed out here.
                           :seon.cluster.eval/at now
-                          :seon.cluster.run/sources sources})
+                          :seon.turn/sources sources})
                   intent-tx (run/plan-tx plan-request)
                   outcome
                   (blob/with-publication!
@@ -1273,7 +1273,7 @@
           rendered
           (phase
            #(prompt/prompt prompt-db
-                           {:seon.cluster.run/id run-id
+                           {:seon.turn/id run-id
                             :seon.cluster.agent/id agent-id
                             :seon.db/connection connection
                             :seon.sci.admit/caps
@@ -1299,14 +1299,14 @@
            connection
            (context/capture-tx
             (if (:seon.error/kind rendered)
-              {:seon.cluster.run/id run-id
+              {:seon.turn/id run-id
                ;; The immutable opening value the refused derivation used,
                ;; never a fresh connection deref after the fact.
                :seon.db/db (if (:seon.error/kind prompt-db)
                              observed-db
                              prompt-db)
                :seon.error/value rendered}
-              {:seon.cluster.run/id run-id
+              {:seon.turn/id run-id
                :seon.cluster.prompt/rendered-context rendered})))
           ;; THE EXACT-TEXT HANDOFF: the loop extracts the rendered
           ;; text and alone places that string in `:seon.ai/prompt` —
@@ -1355,7 +1355,7 @@
                                        (cond->
                                         {:seon.ai/target target
                                          :seon.ai/settings settings
-                                         :seon.cluster.run/id run-id
+                                         :seon.turn/id run-id
                                          :seon.cluster.agent/id agent-id
                                          :seon.ai.attempt/ordinal ordinal
                                          ::attempt-evidence evidence}
@@ -1442,7 +1442,7 @@
     snapshot :seon.db/db
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
-    run-id :seon.cluster.run/id
+    run-id :seon.turn/id
     first-ordinal :seon.cluster.eval/ordinal
     sources :seon.cluster.reply/sources
     starting-namespace :seon.ns/name}]
@@ -1470,7 +1470,7 @@
                         :seon.sci.eval/ctx ctx
                         :seon.cluster.agent/id agent-id
                         :seon.cluster.eval/ordinal ordinal
-                        :seon.cluster.run/id run-id})
+                        :seon.turn/id run-id})
                              :seon.db/db database
                              :seon.render/profile
                              (render/request-profile
@@ -1553,9 +1553,9 @@
              :seon.ns/name namespace-name
              :seon.cluster.reply/sources sources})
            :seon.cluster.agent/id agent-id
-           :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
-           :seon.cluster.run/opened-at opened-at
-           :seon.cluster.run/closed-at (Date.)
+           :seon.turn/starting-ns [:seon.ns/name namespace-name]
+           :seon.turn/opened-at opened-at
+           :seon.turn/closed-at (Date.)
            :seon.db/db database})))))
 
 (defn- resume-turn
@@ -1563,7 +1563,7 @@
   [{cluster ::cluster work ::work now ::now report ::report}]
   (let [connection (:seon.db/connection cluster)
         agent-id (:seon.cluster.agent/id work)
-        run-id (:seon.cluster.run/id work)
+        run-id (:seon.turn/id work)
         base-ctx (:seon.sci.eval/ctx cluster)
         forked
         (phase #(sci.eval/fork-for-turn
@@ -1571,7 +1571,7 @@
                   :seon.db/db @connection
                   :seon.db/connection connection
                   :seon.cluster.agent/id agent-id
-                  :seon.cluster.run/id run-id}
+                  :seon.turn/id run-id}
                    (:seon.sci.eval/agent-ctx cluster)
                    (assoc :seon.sci.eval/agent-ctx
                           (:seon.sci.eval/agent-ctx cluster)))))
@@ -1582,7 +1582,7 @@
         (settle! {::cluster cluster
                   ::now now
                   :seon.cluster.agent/id agent-id
-                  :seon.cluster.run/id run-id
+                  :seon.turn/id run-id
                   :seon.error/value failure})
         (report :error 0))
       (let [{ctx :seon.sci.eval/ctx} forked
@@ -1595,7 +1595,7 @@
                {::cluster cluster
                 :seon.sci.eval/ctx ctx
                 :seon.cluster.agent/id agent-id
-                :seon.cluster.run/id run-id
+                :seon.turn/id run-id
                 :seon.cluster.eval/ordinal first-ordinal
                 :seon.ns/name (or (fold-namespace database run-id evaluations
                                                  first-ordinal)
@@ -1630,7 +1630,7 @@
             (settle! {::cluster cluster
                       ::now now
                       :seon.cluster.agent/id agent-id
-                      :seon.cluster.run/id run-id
+                      :seon.turn/id run-id
                       :seon.error/value analyzed})
             (report :error (count evaluated)))
           (let [evaluated
@@ -1664,14 +1664,14 @@
                          (phase
                           #(problems/form-problem
                             database
-                            {:seon.cluster.run/id run-id
+                            {:seon.turn/id run-id
                              :seon.cluster.eval/ordinal ordinal
                              :seon.sci.eval/evaluation evaluation}))]
                      (cond->
                       {::cluster cluster
                        ::now now
                        :seon.cluster.agent/id agent-id
-                       :seon.cluster.run/id run-id
+                       :seon.turn/id run-id
                        :seon.cluster.eval/ordinal ordinal
                        :seon.sci.eval/evaluation evaluation
                        :seon.cluster.message/trigger trigger}
@@ -1708,8 +1708,8 @@
   [{cluster ::cluster work ::work now ::now report ::report}]
   (let [outcome (db/transact!
                  (:seon.db/connection cluster)
-                 (run/close-tx {:seon.cluster.run/id (:seon.cluster.run/id work)
-                                :seon.cluster.run/closed-at now}))]
+                 (run/close-tx {:seon.turn/id (:seon.turn/id work)
+                                :seon.turn/closed-at now}))]
     (if (:seon.error/kind outcome)
       (do (settle! {::cluster cluster ::now now
                      :seon.cluster.agent/id (:seon.cluster.agent/id work)
@@ -1723,13 +1723,13 @@
   (let [connection (:seon.db/connection cluster)
         process (:seon.db.process/id cluster)
         agent-id (:seon.cluster.agent/id work)
-        run-id (:seon.cluster.run/id work)
+        run-id (:seon.turn/id work)
         ordinal
         (long
          (or (db/q '[:find (count ?form) .
                     :in $ ?run-id
                     :where
-                    [?run :seon.cluster.run/id ?run-id]
+                    [?run :seon.turn/id ?run-id]
                     [?form :seon.cluster.eval/run ?run]]
                   @connection run-id)
              0))
@@ -1760,7 +1760,7 @@
         (settle! {::cluster cluster
                   ::now now
                   :seon.cluster.agent/id agent-id
-                  :seon.cluster.run/id run-id
+                  :seon.turn/id run-id
                   :seon.error/value entry})
         (report :error 0))
 
@@ -1776,15 +1776,15 @@
             (db/transact!
              connection
              (run/close-tx
-              {:seon.cluster.run/id run-id
+              {:seon.turn/id run-id
                :seon.db.process/id process
-               :seon.cluster.run/closed-at now}))]
+               :seon.turn/closed-at now}))]
         (if (:seon.error/kind terminal)
           (do
             (settle! {::cluster cluster
                       ::now now
                       :seon.cluster.agent/id agent-id
-                      :seon.cluster.run/id run-id
+                      :seon.turn/id run-id
                       :seon.error/value terminal})
             (report :error 0))
           (report :closed 0)))
@@ -1794,7 +1794,7 @@
             (db/transact!
              connection
              (run/append-generated-tx
-              (cond-> {:seon.cluster.run/id run-id
+              (cond-> {:seon.turn/id run-id
                        :seon.db.process/id process
                        :seon.cluster.eval/at now
                        :seon.cluster.eval/ordinal ordinal
@@ -1814,7 +1814,7 @@
             (settle! {::cluster cluster
                       ::now now
                       :seon.cluster.agent/id agent-id
-                      :seon.cluster.run/id run-id
+                      :seon.turn/id run-id
                       :seon.error/value appended})
             (report :error 0))
           (resume-turn
@@ -1850,14 +1850,14 @@
   [{:keys [:seon.cluster.loop/cluster] work :seon.cluster.work/next}
    now]
   (let [agent-id (:seon.cluster.agent/id work)
-        run-id (:seon.cluster.run/id work)
+        run-id (:seon.turn/id work)
         report (fn [outcome forms-run]
                  (cond-> {:seon.cluster.agent/id agent-id
                           :seon.cluster.work/situation
                           (:seon.cluster.work/situation work)
                           :seon.cluster.loop/forms-run forms-run
                           :seon.cluster.loop/outcome outcome}
-                   run-id (assoc :seon.cluster.run/id run-id)))
+                   run-id (assoc :seon.turn/id run-id)))
         request {::cluster cluster
                  ::work work
                  ::now now

@@ -90,7 +90,7 @@
                      :where
                      [?attempt :seon.ai/model ?model]
                      [?attempt :seon.ai.attempt/usage-edn ?usage-edn]
-                     [?attempt :seon.ai.attempt/run ?run]
+                     [?run :seon.turn/attempts ?attempt]
                      [?capture :seon.context.capture/run ?run]
                      [?capture :seon.ai.tokens/characters ?characters]]
                    database model)]
@@ -197,12 +197,12 @@
                   :seon.cluster.prompt/result]}
   [database request]
   (validate-request! request)
-  (let [run-id (:seon.cluster.run/id request)
+  (let [run-id (:seon.turn/id request)
         agent-id (:seon.cluster.agent/id request)
-        run (db/pull database [:seon.cluster.run/background-results]
-                     [:seon.cluster.run/id run-id])
+        run (db/pull database [:seon.turn/background-results]
+                     [:seon.turn/id run-id])
         _ (or (message/trigger database run-id)
-              (seq (:seon.cluster.run/background-results run))
+              (seq (:seon.turn/background-results run))
               (refuse! ::no-trigger
                        "Prompt request's held run has no trigger or background result."))
         settings (effective-ai-settings database agent-id)]

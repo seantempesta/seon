@@ -7,7 +7,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as cluster.agent]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.cluster.work :as work]
             [seon.config :as config]
             [seon.db :as db]
@@ -49,20 +49,20 @@
             result (cluster/ensure-entity! connection process request)
             run-id (bootstrap/run-id agent-id)
             run (db/pull @connection
-                         '[:seon.cluster.run/id
+                         '[:seon.turn/id
                            :seon.cluster.work/situation
-                           :seon.cluster.run/plan-digest
+                           :seon.turn/plan-digest
                            {:seon.cluster.eval/_run
                             [:seon.cluster.eval/ordinal
                              :seon.cluster.eval/author
                              :seon.cluster.eval/source]}
-                           {:seon.cluster.run/trigger
+                           {:seon.turn/trigger
                             [:seon.cluster.message/id
                              :seon.cluster.message/content]}]
-                         [:seon.cluster.run/id run-id])]
-        (is (= run-id (:seon.cluster.run/id result)))
+                         [:seon.turn/id run-id])]
+        (is (= run-id (:seon.turn/id result)))
 
-        (is (nil? (:seon.cluster.run/plan-digest run))
+        (is (nil? (:seon.turn/plan-digest run))
             "a generated run has no frozen authored plan")
         (is (= :generate (:seon.cluster.work/situation run)))
         ;; ONE ENTITY PER (run, ordinal): the evaluations point AT the run,
@@ -70,13 +70,13 @@
         (is (empty? (:seon.cluster.eval/_run run))
             "creation admits no evaluation outside the generator")
         (is (= (bootstrap/task-message-id agent-id)
-               (get-in run [:seon.cluster.run/trigger
+               (get-in run [:seon.turn/trigger
                             :seon.cluster.message/id])))
         (is (= (bootstrap/task-message)
-               (get-in run [:seon.cluster.run/trigger
+               (get-in run [:seon.turn/trigger
                             :seon.cluster.message/content])))
         (is (= {:seon.cluster.work/situation :generate
-                :seon.cluster.run/id run-id
+                :seon.turn/id run-id
                 :seon.cluster.agent/id agent-id}
                (work/next-agent-work
                 @connection {:seon.cluster.agent/id agent-id
@@ -117,7 +117,7 @@
           (db/transact!
            connection
            (run/append-generated-tx
-            {:seon.cluster.run/id (bootstrap/run-id agent-id)
+            {:seon.turn/id (bootstrap/run-id agent-id)
              :seon.db.process/id cluster/boot-process-identity
              :seon.cluster.eval/at (java.util.Date.)
              :seon.cluster.eval/ordinal 0
@@ -126,7 +126,7 @@
           (db/transact!
            connection
            (run/receipt-settle-tx
-            {:seon.cluster.run/id (bootstrap/run-id agent-id)
+            {:seon.turn/id (bootstrap/run-id agent-id)
              :seon.cluster.eval/ordinal 0
              :seon.cluster.eval/result-edn (pr-str node)}))
           (let [post-receipt-pull
@@ -142,7 +142,7 @@
                    (db/q '[:find ?source .
                            :in $ ?run-id
                            :where
-                           [?run :seon.cluster.run/id ?run-id]
+                           [?run :seon.turn/id ?run-id]
                            [?form :seon.cluster.eval/run ?run]
                            [?form :seon.cluster.eval/ordinal 0]
                            [?form :seon.cluster.eval/source ?source]]
@@ -384,7 +384,7 @@
               (db/q '[:find [?source ...]
                       :in $ ?run-id
                       :where
-                      [?run :seon.cluster.run/id ?run-id]
+                      [?run :seon.turn/id ?run-id]
                       [?form :seon.cluster.eval/run ?run]
                       [?form :seon.cluster.eval/source ?source]]
                     @connection (bootstrap/supervision-run-id))]

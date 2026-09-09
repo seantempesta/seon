@@ -111,8 +111,8 @@
               :in $ ?message-id
               :where
               [?message :seon.cluster.message/id ?message-id]
-              [?run :seon.cluster.run/trigger ?message]
-              [?run :seon.cluster.run/id ?run-id ?opened-tx]]
+              [?run :seon.turn/trigger ?message]
+              [?run :seon.turn/id ?run-id ?opened-tx]]
             db message-id)
        (sort-by second)
        (mapv first)))
@@ -126,7 +126,7 @@
                 [?function :seon.fn/ns ?namespace]
                 [?function :seon.fn/sym ?sym ?tx]
                 [?function :seon.fn/spec ?spec]
-                [?run :seon.cluster.run/id ?run-id]
+                [?run :seon.turn/id ?run-id]
                 [?receipt :seon.cluster.eval/run ?run]
                 [?receipt :seon.cluster.eval/ordinal ?ordinal]
                 [?receipt :seon.eval/value _ ?tx]]
@@ -135,7 +135,7 @@
          (mapv (fn [[sym spec run-id ordinal]]
                  {:seon.fn/sym sym
                   :seon.fn/spec spec
-                  :seon.cluster.run/id run-id
+                  :seon.turn/id run-id
                   :seon.cluster.eval/ordinal ordinal})))
     []))
 

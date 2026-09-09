@@ -8,7 +8,7 @@
             [seon.db :as db]
             [seon.ai :as ai]
             [seon.cluster.message :as message]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.cluster.wake :as wake]
             [seon.schema.edn :as schema.edn]
             [seon.sci.reader :as reader]))
@@ -27,7 +27,7 @@
   "The agent's open turn, derived from its owning ref and closed-at."
   [database agent-id]
   (when-let [id (run/open-for-agent database [:seon.cluster.agent/id agent-id])]
-    (db/pull database '[*] [:seon.cluster.run/id id])))
+    (db/pull database '[*] [:seon.turn/id id])))
 
 (defn- evaluable-source?
   [source]
@@ -55,7 +55,7 @@
   (->> (db/q '[:find ?ordinal ?source
                :in $ ?run-id
                :where
-               [?run :seon.cluster.run/id ?run-id]
+               [?run :seon.turn/id ?run-id]
                [?evaluation :seon.cluster.eval/run ?run]
                [?evaluation :seon.cluster.eval/ordinal ?ordinal]
                [?evaluation :seon.cluster.eval/source ?source]
@@ -91,7 +91,7 @@
 
 (defn problem-id
   "The receipt identity naming one form's derived problem."
-  {:malli/schema [:=> [:cat :seon.cluster.run/id
+  {:malli/schema [:=> [:cat :seon.turn/id
                        :seon.cluster.eval/ordinal]
                   :seon.problems/id]}
   [run-id ordinal]
@@ -104,7 +104,7 @@
   either the depth-zero goal message itself or a later caused-by message.
   A triggerless historical run has no membership edge and fails closed."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.run/id]
+                       :seon.turn/id]
                   :boolean]}
   [db run-id]
   (some? (message/trigger db run-id)))
@@ -131,7 +131,7 @@
   A directly interrupted receipt and every later ordinal after an interrupted
   prefix are excluded from owner routing; neither says owner code is wrong."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.run/id
+                       :seon.turn/id
                        :seon.cluster.eval/ordinal :boolean]
                   :boolean]}
   [db run-id ordinal interrupted?]
@@ -140,7 +140,7 @@
        (db/q '[:find ?receipt .
               :in $ ?run-id ?ordinal
               :where
-              [?run :seon.cluster.run/id ?run-id]
+              [?run :seon.turn/id ?run-id]
               [?receipt :seon.cluster.eval/run ?run]
               [?receipt :seon.cluster.eval/ordinal ?prior]
               [(< ?prior ?ordinal)]
@@ -167,7 +167,7 @@
                :in $ ?form
                :where
                [?form :seon.cluster.eval/run ?run]
-               [?run :seon.cluster.run/agent ?author]
+               [?run :seon.turn/agent ?author]
                [?author :seon.cluster.agent/id ?author-id]]
              db form-eid))))
 
@@ -185,7 +185,7 @@
          :in $ ?form
          :where
          [?form :seon.cluster.eval/run ?run]
-         [?run :seon.cluster.run/id ?run-id]]
+         [?run :seon.turn/id ?run-id]]
        db (:db/id form)))
 
 (defn- assignment-facts
@@ -196,7 +196,7 @@
                :in $ ?form
                :where
                [?form :seon.cluster.eval/run ?run]
-               [?run :seon.cluster.run/agent ?author]]
+               [?run :seon.turn/agent ?author]]
              db evaluation-eid)
         owner-eid
         (db/q '[:find ?owner .
@@ -273,21 +273,21 @@
 (defn plan-settlement
   "Every form state and whether all forms of `run-id` are settled."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.run/id]
+                       :seon.turn/id]
                   :seon.cluster.work/plan-settlement]}
   [db run-id]
   (let [form-ids
         (db/q '[:find ?form-id ?ordinal
                :in $ ?run-id
                :where
-               [?run :seon.cluster.run/id ?run-id]
+               [?run :seon.turn/id ?run-id]
                [?form :seon.cluster.eval/run ?run]
                [?form :seon.cluster.eval/id ?form-id]
                [?form :seon.cluster.eval/ordinal ?ordinal]]
              db run-id)
         forms (mapv (fn [[form-id _]] (form-settlement db form-id))
                     (sort-by second form-ids))]
-    {:seon.cluster.run/id run-id
+    {:seon.turn/id run-id
      :seon.cluster.work/forms forms
      :seon.cluster.work/settled?
      (every? :seon.cluster.work/settled? forms)}))
@@ -387,8 +387,8 @@
               :in $ ?agent-id ?since
               :where
               [?agent :seon.cluster.agent/id ?agent-id]
-              [?run :seon.cluster.run/agent ?agent]
-              [?run :seon.cluster.run/id _ ?tx]
+              [?run :seon.turn/agent ?agent]
+              [?run :seon.turn/id _ ?tx]
               [(>= ?tx ?since)]]
             db agent-id (outside-wake-t db agent-id))
       0))
@@ -465,26 +465,26 @@
   One place decides, so `:resume` always carries a real ordinal and
   `:close` never carries one."
   [db run agent-id]
-  (let [run-id (:seon.cluster.run/id run)]
+  (let [run-id (:seon.turn/id run)]
     (if-let [ordinal (next-ordinal db run-id)]
       {:seon.cluster.work/situation :resume
-       :seon.cluster.run/id run-id
+       :seon.turn/id run-id
        :seon.cluster.agent/id agent-id
        :seon.cluster.eval/ordinal ordinal}
       {:seon.cluster.work/situation :close
-       :seon.cluster.run/id run-id
+       :seon.turn/id run-id
        :seon.cluster.agent/id agent-id})))
 
 (defn- resume-or-generate
   [db run agent-id]
-  (let [run-id (:seon.cluster.run/id run)]
+  (let [run-id (:seon.turn/id run)]
     (if-let [ordinal (next-ordinal db run-id)]
       {:seon.cluster.work/situation :resume
-       :seon.cluster.run/id run-id
+       :seon.turn/id run-id
        :seon.cluster.agent/id agent-id
        :seon.cluster.eval/ordinal ordinal}
       {:seon.cluster.work/situation :generate
-       :seon.cluster.run/id run-id
+       :seon.turn/id run-id
        :seon.cluster.agent/id agent-id})))
 
 (defn next-agent-work
@@ -512,7 +512,7 @@
       ;; is started is what makes the busy fence mean anything
       (some? run)
       (cond
-        (:seon.cluster.run/plan-digest run)
+        (:seon.turn/plan-digest run)
         (fold-or-close db run agent-id)
 
         (= :generate (:seon.cluster.work/situation run))
@@ -520,7 +520,7 @@
 
         (= :call (:seon.cluster.work/situation run))
         {:seon.cluster.work/situation :call
-         :seon.cluster.run/id (:seon.cluster.run/id run)
+         :seon.turn/id (:seon.turn/id run)
          :seon.cluster.agent/id agent-id}
 
         :else nil)
@@ -585,9 +585,9 @@
               :in $ ?agent-id
               :where
               [?agent :seon.cluster.agent/id ?agent-id]
-              [?run :seon.cluster.run/agent ?agent]
-              [?run :seon.cluster.run/id _ ?tx]
-              [?attempt :seon.ai.attempt/run ?run]
+              [?run :seon.turn/agent ?agent]
+              [?run :seon.turn/id _ ?tx]
+              [?run :seon.turn/attempts ?attempt]
               (not [?attempt :seon.ai.attempt/error _])]
             db agent-id)
       0))

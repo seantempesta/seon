@@ -55,7 +55,7 @@
                            :seon.fn/sym)
      :run (ref-attribute database
                          (:seon.effect/run unit)
-                         :seon.cluster.run/id)}))
+                         :seon.turn/id)}))
 
 (defn render-ai
   "`:seon.render/ai` — one effect receipt, derived from terminal attributes."
@@ -379,8 +379,8 @@
                :seon.error/diagnostic-offending ::pending
                :seon.error/diagnostic-evidence
                {:seon.effect/id effect-id
-                :seon.cluster.run/id
-                (:seon.cluster.run/id *request-context*)}}
+                :seon.turn/id
+                (:seon.turn/id *request-context*)}}
               :seon.await/future task})]
         (when (:seon.error/kind result)
           (.cancel task true))
@@ -623,7 +623,7 @@
                          (:seon.sci.admit/caps dials))}
                        marker))
                (let [effect-id
-                     (pr-str [(:seon.cluster.run/id *request-context*)
+                     (pr-str [(:seon.turn/id *request-context*)
                               (:seon.cluster.eval/ordinal *request-context*)
                               effect-ordinal])
                      result-ref [:seon.effect/id effect-id]
@@ -632,8 +632,8 @@
                      (cond->
                       {:seon.effect/id effect-id
                        :seon.effect/run
-                       [:seon.cluster.run/id
-                        (:seon.cluster.run/id *request-context*)]
+                       [:seon.turn/id
+                        (:seon.turn/id *request-context*)]
                        :seon.effect/owner [:seon.fn/sym (str owner-sym)]
                        :seon.effect/form-ordinal
                        (:seon.cluster.eval/ordinal *request-context*)

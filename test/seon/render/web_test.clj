@@ -302,10 +302,10 @@ handle))}}
   "Open a minimal run row for one renderer presence-gate test."
   [connection run-id]
   (db/transact! connection
-              [{:seon.cluster.run/id run-id
-                :seon.cluster.run/agent
+              [{:seon.turn/id run-id
+                :seon.turn/agent
                 [:seon.cluster.agent/id agent-id]
-                :seon.cluster.run/opened-at (java.util.Date.)}]))
+                :seon.turn/opened-at (java.util.Date.)}]))
 
 (defn- client [] (.build (HttpClient/newBuilder)))
 
@@ -822,7 +822,7 @@ handle))}}
                                         :where [['?e '?a]]}
                                        :args [database attribute]})
                                 0))]
-                {:runs (total :seon.cluster.run/id)
+                {:runs (total :seon.turn/id)
                  :evaluations (total :seon.cluster.eval/id)
                  :forms (total :seon.cluster.eval/ordinal)
                  :faults (total :seon.error/id)}))
@@ -840,7 +840,7 @@ handle))}}
         (db/transact! connection
                       [{:seon.cluster.eval/id "inspection-counts-e0"
                         :seon.cluster.eval/run
-                        [:seon.cluster.run/id "inspection-counts"]
+                        [:seon.turn/id "inspection-counts"]
                         :seon.cluster.eval/ordinal 0}])
         (inspect!)
         (is (= 200 (.statusCode (fetch server "/agent/root/debug?prompt=true"))))
@@ -1180,11 +1180,13 @@ handle))}}
                        (recur)
                        true)))
                  [:closed-debug-registration-removed])
+                (let [initial-calls (get @calls 'my.plan)]
+                  (is (pos? initial-calls) "the initial page was derived")
                 (reset! phase 1)
                 (is (async/offer! (:runtime-eval-channel context)
                                   :seon.render.web/runtime-eval))
                 (read-until! active-view "seon.flow-runtime-phase-1")
-                (is (= 1 (get @calls 'my.plan))
+                (is (= initial-calls (get @calls 'my.plan))
                     "the closed page was not derived for the code event")
                 (let [reopened (open-feed server (feed-url "my.plan"))]
                   (try
@@ -1192,7 +1194,7 @@ handle))}}
                          (read-until! reopened "my.plan-runtime-phase-1")
                          "my.plan-runtime-phase-1")
                         "reopen derives current code at an unchanged database basis")
-                    (is (= 2 (get @calls 'my.plan))
+                    (is (= (inc initial-calls) (get @calls 'my.plan))
                         "the closed page's old package was not reused")
                     (finally (.close reopened))))
                 (.close active-view)
@@ -1219,9 +1221,9 @@ handle))}}
                          (read-until! reopened "my.plan-runtime-phase-2")
                          "my.plan-runtime-phase-2")
                         "a new subscriber after an unwatched event derives current code")
-                    (is (= 3 (get @calls 'my.plan))
+                    (is (= (+ 2 initial-calls) (get @calls 'my.plan))
                         "no package survived the zero-watcher code event")
-                    (finally (.close reopened))))
+                    (finally (.close reopened)))))
                 (finally (.close active-view))))))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -1540,10 +1542,10 @@ handle))}}
         (open-run! connection run-a)
         (db/transact! connection
                     [{:seon.cluster.agent/id "agent-b"}
-                     {:seon.cluster.run/id run-b
-                      :seon.cluster.run/agent
+                     {:seon.turn/id run-b
+                      :seon.turn/agent
                       [:seon.cluster.agent/id "agent-b"]
-                      :seon.cluster.run/opened-at (java.util.Date.)}])
+                      :seon.turn/opened-at (java.util.Date.)}])
         (let [tab (open-feed server (str "/feed/" agent-id))]
         (try
           (is (not (str/includes? (read-complete-paint! tab connection)
@@ -1555,7 +1557,7 @@ handle))}}
 
           (async/offer! (:stream-channel context)
                         {:seon.cluster.agent/id agent-id
-                         :seon.cluster.run/id run-a
+                         :seon.turn/id run-a
                          :seon.ai/partial {:seon.ai/text "A half reply"
                                            :seon.ai/tokens 3}})
           (let [partial (read-until! tab "A half reply")]
@@ -1566,7 +1568,7 @@ handle))}}
           ;; changes B's transient entry but cannot carry semantics for A.
           (async/offer! (:stream-channel context)
                         {:seon.cluster.agent/id "agent-b"
-                         :seon.cluster.run/id run-b
+                         :seon.turn/id run-b
                          :seon.ai/partial {:seon.ai/text "B newest"
                                            :seon.ai/tokens 2}})
           (await-ping! context
@@ -1576,8 +1578,8 @@ handle))}}
           ;; The frozen plan is the settled provider reply fact. Its
           ;; normal database wake is the stream terminal.
           (db/transact! connection
-                      [[:db/add [:seon.cluster.run/id run-a]
-                        :seon.cluster.run/plan-digest
+                      [[:db/add [:seon.turn/id run-a]
+                        :seon.turn/plan-digest
                         (apply str (repeat 64 "a"))]])
           (await-ping! context
                        #(zero? (:seon.render.web/streaming-agents %))
@@ -1592,7 +1594,7 @@ handle))}}
             (let [before (derivations context)]
               (async/offer! (:stream-channel context)
                             {:seon.cluster.agent/id agent-id
-                             :seon.cluster.run/id run-a
+                             :seon.turn/id run-a
                              :seon.ai/partial {:seon.ai/text "too late"
                                                :seon.ai/tokens 99}})
               (await-ping! context
@@ -1618,7 +1620,7 @@ handle))}}
                        [:first-tab-derived])
           (async/offer! (:stream-channel context)
                         {:seon.cluster.agent/id agent-id
-                         :seon.cluster.run/id run-id
+                         :seon.turn/id run-id
                          :seon.ai/partial {:seon.ai/text "not durable"
                                            :seon.ai/tokens 2}})
           (is (str/includes? (read-until! first-tab "not durable")

@@ -7,7 +7,7 @@
 (defn- request
   [agent-id run-id contribution-id]
   {:seon.cluster.agent/id agent-id
-   :seon.cluster.run/id run-id
+   :seon.turn/id run-id
    :seon.context.contribution/id contribution-id})
 
 (defn- append-call
@@ -36,10 +36,10 @@
                    {:seon.cluster.agent/id "selection-b"}]
                   (concat
                    (map (fn [[agent-id run-id closed?]]
-                          (cond-> {:seon.cluster.run/id run-id
-                                   :seon.cluster.run/agent
+                          (cond-> {:seon.turn/id run-id
+                                   :seon.turn/agent
                                    [:seon.cluster.agent/id agent-id]}
-                            closed? (assoc :seon.cluster.run/closed-at
+                            closed? (assoc :seon.turn/closed-at
                                            #inst "2026-09-06T00:00:00Z")))
                         runs)
                    (for [[_ run-id _] runs
@@ -47,7 +47,7 @@
                          ordinal [0 1]]
                      (cond-> {:seon.cluster.eval/id (str run-id "-" ordinal)
                               :seon.cluster.eval/run
-                              [:seon.cluster.run/id run-id]
+                              [:seon.turn/id run-id]
                               :seon.cluster.eval/ordinal ordinal}
                        (not= "selection-pending" run-id)
                        (assoc :seon.cluster.eval/result-edn (pr-str ordinal)))))))
@@ -133,18 +133,18 @@
            _ (db/transact!
               connection
               [{:seon.cluster.agent/id "compact-agent"}
-               {:seon.cluster.run/id "compact-before"
-                :seon.cluster.run/agent
+               {:seon.turn/id "compact-before"
+                :seon.turn/agent
                 [:seon.cluster.agent/id "compact-agent"]
-                :seon.cluster.run/closed-at closed-at}
-               {:seon.cluster.run/id "compact-after"
-                :seon.cluster.run/agent
+                :seon.turn/closed-at closed-at}
+               {:seon.turn/id "compact-after"
+                :seon.turn/agent
                 [:seon.cluster.agent/id "compact-agent"]
-                :seon.cluster.run/closed-at closed-at}
+                :seon.turn/closed-at closed-at}
                {:seon.ns/name 'compact.context}
                {:seon.cluster.eval/id "compact-before-0"
                 :seon.cluster.eval/run
-                [:seon.cluster.run/id "compact-before"]
+                [:seon.turn/id "compact-before"]
                 :seon.cluster.eval/ordinal 0
                 :seon.cluster.eval/author :system
                 :seon.cluster.eval/source "(identity 1)"
@@ -152,7 +152,7 @@
                 :seon.cluster.eval/result-edn "1"}
                {:seon.cluster.eval/id "compact-after-0"
                 :seon.cluster.eval/run
-                [:seon.cluster.run/id "compact-after"]
+                [:seon.turn/id "compact-after"]
                 :seon.cluster.eval/ordinal 0
                 :seon.cluster.eval/author :system
                 :seon.cluster.eval/source "(identity 1)"

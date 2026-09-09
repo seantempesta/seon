@@ -18,10 +18,10 @@
                         [:seon.ns/name 'my.message]]}
     {:seon.cluster.agent/id "situation"
      :seon.cluster.agent/namespace [:seon.ns/name 'my.agents.situation]}
-    {:seon.cluster.run/id "situation-run"
-     :seon.cluster.run/agent [:seon.cluster.agent/id "situation"]
-     :seon.cluster.run/opened-at #inst "2026-08-12T12:00:00.000-00:00"
-     :seon.cluster.run/starting-ns [:seon.ns/name 'my.agents.situation]}
+    {:seon.turn/id "situation-run"
+     :seon.turn/agent [:seon.cluster.agent/id "situation"]
+     :seon.turn/opened-at #inst "2026-08-12T12:00:00.000-00:00"
+     :seon.turn/starting-ns [:seon.ns/name 'my.agents.situation]}
     {:seon.cluster.message/id "unread"
      :seon.cluster.message/to [:seon.cluster.agent/id "situation"]
      :seon.cluster.message/content "Read me"
@@ -39,8 +39,8 @@
                 [:seon.ns/name 'my.agents.situation]
                 :seon.cluster.agent/unread-message-count 1
                 :seon.cluster.agent/open-run-ref
-                [:seon.cluster.run/id "situation-run"]
-                :seon.cluster.run/turns-remaining 0
+                [:seon.turn/id "situation-run"]
+                :seon.turn/turns-remaining 0
                 :seon.cluster.agent/protocol-namespaces
                 ['my.message 'my.run]}
                situation))

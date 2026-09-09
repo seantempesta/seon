@@ -13,11 +13,11 @@
                                      evaluation-ids))
            seed (db/transact!
                  connection
-                 (into [{:seon.cluster.run/id run-id}]
+                 (into [{:seon.turn/id run-id}]
                        (map-indexed
                         (fn [ordinal id]
                           {:seon.cluster.eval/id id
-                           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
+                           :seon.cluster.eval/run [:seon.turn/id run-id]
                            :seon.cluster.eval/ordinal ordinal
                            :seon.cluster.eval/result-edn (pr-str ordinal)})
                         evaluation-ids)))
@@ -33,7 +33,7 @@
                        :seon.context.contribution/tokens 7
                        :seon.context.contribution/evaluations evaluation-refs}]}
            transaction (context/capture-tx
-                        {:seon.cluster.run/id run-id
+                        {:seon.turn/id run-id
                          :seon.cluster.prompt/rendered-context rendered})
            capture-id (:seon.context.capture/id (first transaction))
            committed (db/transact! connection transaction)

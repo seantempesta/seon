@@ -140,9 +140,9 @@
                              (contains? installed
                                         :seon.cluster.message/from)
                              (contains? installed
-                                        :seon.cluster.run/trigger))
+                                        :seon.turn/trigger))
                       (conj nested
-                            {(selector-key :seon.cluster.run/_trigger width)
+                            {(selector-key :seon.turn/_trigger width)
                              leaf})
                       nested)]
                 (into (into [:db/id] scalar-attributes)
@@ -316,7 +316,7 @@
                          (fn [result index connection]
                            (if-let [child
                                     (when (or (pos? remaining)
-                                              (= :seon.cluster.run/trigger
+                                              (= :seon.turn/trigger
                                                  (:seon.render.walk/attribute
                                                   connection)))
                                       (:seon.render.walk/pulled connection))]
@@ -488,7 +488,7 @@
                           [:seon.ns/_requires :seon.ns/requires true]]
                          connections)
                        (= :seon.cluster.message/from reached-by)
-                       [[:seon.cluster.run/_trigger :seon.cluster.run/trigger true]]
+                       [[:seon.turn/_trigger :seon.turn/trigger true]]
                        :else []))))))]
       (let [root (visit (:seon.render.walk/lookup request) distance nil)]
         (when db/*read-evidence-sink*

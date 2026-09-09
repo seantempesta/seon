@@ -16,12 +16,12 @@
               ["a-second" 1000 "a" [[0 "a2"]]]]]
        (db/transact!
         connection
-        (into [{:seon.cluster.run/id turn-id
-                :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-                :seon.cluster.run/opened-at (java.util.Date. timestamp)}]
+        (into [{:seon.turn/id turn-id
+                :seon.turn/agent [:seon.cluster.agent/id agent-id]
+                :seon.turn/opened-at (java.util.Date. timestamp)}]
               (map (fn [[ordinal source]]
                      {:seon.cluster.eval/id source
-                      :seon.cluster.eval/run [:seon.cluster.run/id turn-id]
+                      :seon.cluster.eval/run [:seon.turn/id turn-id]
                       :seon.cluster.eval/ordinal ordinal
                       :seon.cluster.eval/source source}) sources))))
      (let [basis (db/basis-t @connection)

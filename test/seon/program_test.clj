@@ -6,7 +6,7 @@
             [clojure.test.check.properties :as prop]
             [malli.core :as m]
             [seon.db :as db]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.fn.schema-shape :as schema-shape]
             [seon.program :as program]
             [seon.schema :as schema]
@@ -508,7 +508,7 @@
                         :seon.fn/private? false
                         :seon.fn/spec (pr-str spec)}
                        (parsed-contract function-symbol spec {}))
-            row-tx (ns-resolve 'seon.cluster.run 'row-tx)]
+            row-tx (ns-resolve 'seon.turn 'row-tx)]
         (db/transact! connection [{:seon.ns/name 'sample
                                    :seon.ns/source "(ns sample)"}])
         (db/transact! connection (row-tx @connection {} row))
@@ -537,8 +537,8 @@
             changed
             (assoc original :seon.fn/source
                    "(defn redefined {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
-            row-tx (ns-resolve 'seon.cluster.run 'row-tx)
-            declared-content (ns-resolve 'seon.cluster.run 'declared-content)]
+            row-tx (ns-resolve 'seon.turn 'row-tx)
+            declared-content (ns-resolve 'seon.turn 'declared-content)]
         (db/transact! connection [{:seon.ns/name 'sample
                                    :seon.ns/source "(ns sample)"}])
         (db/transact! connection (row-tx @connection {} original))
@@ -578,7 +578,7 @@
             changed
             (assoc original :seon.fn/source
                    "(defn unmeasured {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
-            row-tx (ns-resolve 'seon.cluster.run 'row-tx)]
+            row-tx (ns-resolve 'seon.turn 'row-tx)]
         (db/transact! connection [{:seon.ns/name 'sample
                                    :seon.ns/source "(ns sample)"}])
         (db/transact! connection (row-tx @connection {} original))
@@ -586,10 +586,10 @@
           (is (seq (row-tx @connection {} changed))))
         (testing "a request naming a run with no opening basis says so"
           (let [data (refusal-data
-                      #(row-tx @connection {:seon.cluster.run/id "absent"}
+                      #(row-tx @connection {:seon.turn/id "absent"}
                                changed))]
             (is (= ::run/refused (:seon.error/kind data)))
-            (is (= ::run/run-opening-basis-unreadable (:seon.cluster.run/rule data))
+            (is (= ::run/run-opening-basis-unreadable (:seon.turn/rule data))
                 "the refusal names the unreadable basis, not a concurrent definition")))
         (is (= (:seon.fn/source original)
                (:seon.fn/source
@@ -794,7 +794,7 @@
              (one-event
               "(ns-unmap 'my.agents.registration-test 'same-name)"))
             settlement
-            {:seon.cluster.run/id "registration-delete"
+            {:seon.turn/id "registration-delete"
              :seon.cluster.eval/ordinal 0
              :seon.cluster.eval/result-edn "nil"
              :seon.cluster.eval/ns
@@ -819,14 +819,14 @@
            :seon.test/source "(clojure.test/deftest same-name)"}])
         (db/transact!
          connection
-         (run/open-tx {:seon.cluster.run/id "registration-delete"
-                       :seon.cluster.run/agent
+         (run/open-tx {:seon.turn/id "registration-delete"
+                       :seon.turn/agent
                        [:seon.cluster.agent/id "registration-test"]
-                       :seon.cluster.run/opened-at now}))
+                       :seon.turn/opened-at now}))
         (db/transact!
          connection
          (run/receipt-start-tx
-          {:seon.cluster.run/id "registration-delete"
+          {:seon.turn/id "registration-delete"
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/at now}))
         (is (= {:seon.program/delete-identities

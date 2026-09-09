@@ -60,13 +60,13 @@
            "(swap! calls conj [root boundary command environment]) "
            "{:seon.dev.changed-test/status :passed})} "
            "#(do (gate \"/checkout\" "
-           "[\"src/seon/cluster/run.clj\" \"test/seon/fn_test.clj\"]) "
+           "[\"src/seon/turn.clj\" \"test/seon/fn_test.clj\"]) "
            "@calls))))")
           {:keys [exit out err]} (run-babashka expression)]
       (is (zero? exit) err)
       (is (= [["/checkout" :gate
                ["/checkout/bin/test"
-                "--changed" "src/seon/cluster/run.clj"
+                "--changed" "src/seon/turn.clj"
                 "--changed" "test/seon/fn_test.clj"]
                {}]]
              (edn/read-string out))))))

@@ -229,7 +229,7 @@
            {:seon.render/ai :seon.render/ai
             :seon.render/html :seon.render/html
             :seon.render/form :seon.render/form}
-           row-tx (ns-resolve 'seon.cluster.run 'row-tx)
+           row-tx (ns-resolve 'seon.turn 'row-tx)
            transact-row!
            (fn [row]
              (db/transact!
@@ -303,7 +303,7 @@
               :seon.cluster.message/id "m-1"
               :seon.cluster.message/content "do the thing"
               :seon.cluster.message/at (java.util.Date.)
-              :seon.cluster.run/id "run-1"
+              :seon.turn/id "run-1"
               ::title "Alpha"}
         nested {:seon.cluster.agent/id "agent-b"
                 :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.b}}]

@@ -36,9 +36,9 @@
          :seon.cluster.message/to
          :seon.cluster.message/content
          :seon.cluster.message/at
-         :seon.cluster.run/id
-         :seon.cluster.run/opened-at
-         :seon.cluster.run/plan-digest]))
+         :seon.turn/id
+         :seon.turn/opened-at
+         :seon.turn/plan-digest]))
 
 (defn- resource-reads
   "Schema resource reads performed while calling `thunk`, and its value."
@@ -101,9 +101,9 @@
                           :seon.cluster.message/to "agent-a"
                           :seon.cluster.message/content "hello"
                           :seon.cluster.message/at (java.util.Date.)
-                          :seon.cluster.run/id "run-1"
-                          :seon.cluster.run/opened-at (java.util.Date.)
-                          :seon.cluster.run/plan-digest
+                          :seon.turn/id "run-1"
+                          :seon.turn/opened-at (java.util.Date.)
+                          :seon.turn/plan-digest
                           (apply str (repeat 64 "a"))}])
           (dotimes [index 8]
             (db/transact! connection

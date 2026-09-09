@@ -380,3 +380,246 @@ service input. Fresh construction returned HTTP 200 as recorded above.
 Every owned shell has ended, and the isolated scratch root/worktree is gone.
 The tracked tree is committed; only the inherited untracked paths remain.
 The slice finished inside its 30-minute bound, without beginning slice 2.
+
+
+## Slice 2: turn namespace and component attempts, 2026-09-09
+
+Started 07:43:50 UTC; the slice deadline is 08:13:50 UTC. Read the named
+turn-cut handoff end to end, the turn PRD's requested sections (including
+§16), and AGENTS' copied §10 lane instructions. Slice 1 remains accepted.
+The original stash `39d1bf186` contains custody hunks, not the combined
+rename. Candidate `78c8fc1d6` was inspected for mechanical naming and the
+existing late-bound execution idiom; neither candidate was applied.
+
+**RESET NEEDED — the commit containing this rename.** The source namespace,
+writer API, schema resource, schema entity (`:seon.turn/turn`), and all
+owned callers now use `seon.turn`. Existing debug controls are merged into
+that owner. The four calls into loop/agent/SCI execution resolve at invocation
+time to avoid their load-time cycle; they still receive all environment and
+request inputs explicitly. No compatibility namespace remains. The writer
+tests are merged into `seon.turn-test`, retaining the real recovery model.
+
+The attempt relation moves from `:seon.ai.attempt/run` to the component
+set `:seon.turn/attempts`. The AI owner retains every attempt fact; there
+is one relation, not two mirrored edges. Writer maps use Datahike's reverse
+ref syntax, queries follow the forward component edge, and the reasoning
+pull accounts for a reverse pull's vector. Dependency ledger: Datahike
+`db/transaction.cljc:728–770` owns reverse-map expansion;
+`src/seon/cluster/loop.clj:972` writes it and
+`src/seon/render/transcript.clj:626–650` reads it.
+
+The writer still has existing non-custody fields needed by its current
+callers: `starting-ns` and `plan-digest` in reply preparation/settlement,
+`background-results` in `unanswered-background-results`, `supersedes` in
+transcript selection, and error/undisposed facts in the work query. Their
+removal is not silently claimed by a namespace rename. Request-map keys
+remain in-memory contracts. Three-write collapse and stable-id rollout are
+not attempted. The virtual-turn observation is now four transactions with
+1/16/5/2 datoms (24 total), including the metadata-only first transaction.
+
+### Exact scope and foreign boundary
+
+The required gate runs in `tmp/turn-rename-wt`, detached from `a991283de`,
+with HEAD plus only the paths below. `reference-code` is linked. The
+concurrent `ordered-episode` edit in `src/seon/render/walk.clj`, its
+`resources/seon/schemas/seon.repl.edn` change, and untracked
+`test/seon/render/episode_test.clj` are excluded. Only the three renamed
+attribute references in the walk owner belong to this slice. The foreign
+test still contains four old turn references and is not edited by this lane.
+Inherited untracked `build/`, `workers/`, and `config/virtual-turns.edn` are
+preserved. Documentation/probe additions accompany the implementation; the
+code gate's exact snapshot digest is recorded below.
+
+```text
+.agents/skills/datahike/references/fork-maintenance.md
+.agents/skills/seon-flow-architecture/references/decisions.md
+AGENTS.md
+bin/test
+docs/prds/context-generation/research/turn-rename-landing-2026-09-09.md
+docs/prds/context-generation/research/turn_cut_probe_2026_09_08.clj
+docs/prds/context-generation/research/turn_namespace_probe_2026_09_09.clj
+docs/prds/context-generation/research/turn_rename_recovery_probe_2026_09_09.clj
+docs/seon/issues/dependency-resolution-can-race-maven-model-validation.md
+docs/seon/issues/development-adoption-retains-old-web-service-inputs.md
+docs/seon/issues/parallel-test-base-connect-can-lose-a-filestore-key.md
+docs/seon/issues/turn-consumer-fixtures-read-retired-result-storage.md
+resources/seon/schemas/seon.ai.attempt.edn
+resources/seon/schemas/seon.ai.edn
+resources/seon/schemas/seon.cluster.agent.edn
+resources/seon/schemas/seon.cluster.eval.edn
+resources/seon/schemas/seon.cluster.loop.edn
+resources/seon/schemas/seon.cluster.message.edn
+resources/seon/schemas/seon.cluster.prompt.edn
+resources/seon/schemas/seon.cluster.run.edn
+resources/seon/schemas/seon.cluster.work.edn
+resources/seon/schemas/seon.context.edn
+resources/seon/schemas/seon.effect.edn
+resources/seon/schemas/seon.env.edn
+resources/seon/schemas/seon.error.edn
+resources/seon/schemas/seon.eval.drive.edn
+resources/seon/schemas/seon.problems.edn
+resources/seon/schemas/seon.render.edn
+resources/seon/schemas/seon.render.transcript.edn
+resources/seon/schemas/seon.sci.eval.edn
+resources/seon/schemas/seon.turn.edn
+src/seon/bootstrap.clj
+src/seon/bootstrap_drive.clj
+src/seon/cluster.clj
+src/seon/cluster/agent.clj
+src/seon/cluster/loop.clj
+src/seon/cluster/message.clj
+src/seon/cluster/prompt.clj
+src/seon/cluster/reply.clj
+src/seon/cluster/run.clj
+src/seon/cluster/wake.clj
+src/seon/cluster/work.clj
+src/seon/context.clj
+src/seon/effect.clj
+src/seon/error.clj
+src/seon/eval.clj
+src/seon/eval/drive.clj
+src/seon/oversight.clj
+src/seon/problems.clj
+src/seon/render.clj
+src/seon/render/transcript.clj
+src/seon/render/walk.clj
+src/seon/render/web.clj
+src/seon/sci/eval.clj
+src/seon/turn.clj
+test/my/background_test.clj
+test/seon/agent_situation_test.clj
+test/seon/ai_stream_fold_test.clj
+test/seon/background_blob_test.clj
+test/seon/background_test.clj
+test/seon/blob_threshold_test.clj
+test/seon/bootstrap_test.clj
+test/seon/cluster/agent_test.clj
+test/seon/cluster/armed_test.clj
+test/seon/cluster/boot_test.clj
+test/seon/cluster/evaluate_sources_test.clj
+test/seon/cluster/loop_test.clj
+test/seon/cluster/message_assignment_test.clj
+test/seon/cluster/message_test.clj
+test/seon/cluster/problem_routing_test.clj
+test/seon/cluster/program_restart_test.clj
+test/seon/cluster/prompt_test.clj
+test/seon/cluster/reply_test.clj
+test/seon/cluster/resume_artifact_routing_test.clj
+test/seon/cluster/run_test.clj
+test/seon/cluster/store_transact_test.clj
+test/seon/cluster/turn_test.clj
+test/seon/cluster/wake_test.clj
+test/seon/cluster/work_test.clj
+test/seon/concurrency_independence_test.clj
+test/seon/concurrency_streams_test.clj
+test/seon/concurrency_test.clj
+test/seon/context_capture_test.clj
+test/seon/context_selection_test.clj
+test/seon/db/declaration_population_test.clj
+test/seon/db_test.clj
+test/seon/dev/changed_test_test.clj
+test/seon/effect_test.clj
+test/seon/error_test.clj
+test/seon/eval/drive_test.clj
+test/seon/eval_test.clj
+test/seon/fn_test.clj
+test/seon/gen/loop_test.clj
+test/seon/oversight_test.clj
+test/seon/problems_test.clj
+test/seon/program_test.clj
+test/seon/receipt_write_carrier_test.clj
+test/seon/reconcile_test.clj
+test/seon/render/root_pull_test.clj
+test/seon/render/transcript_run_test.clj
+test/seon/render/transcript_test.clj
+test/seon/render/walk_test.clj
+test/seon/render/web_context_test.clj
+test/seon/render/web_test.clj
+test/seon/render_coverage_test.clj
+test/seon/render_simplification_test.clj
+test/seon/render_source_test.clj
+test/seon/schedule_test.clj
+test/seon/schema/datahike_test.clj
+test/seon/schema/program_test.clj
+test/seon/schema_usage_guard_test.clj
+test/seon/sci/eval_test.clj
+test/seon/sci/reader_test.clj
+test/seon/shell/jvm_test.clj
+test/seon/turn_test.clj
+test/seon/web/jvm_test.clj
+```
+
+### Verification and observed refusals
+
+- Corrected turn-only fast run: 22 tests / 237 assertions, zero failures/errors.
+- First three-namespace fast run loaded a mechanical test typo
+  (`seon.cluster.turn/*`); it reported 105 tests / 700 assertions,
+  26 failures / 7 errors. The typo is corrected, not accepted as evidence.
+- First isolated gate: 105 tests / 701 assertions, three failures and one
+  error. The error was the parallel fixture-base acquisition recorded in
+  `parallel-test-base-connect-can-lose-a-filestore-key.md`. The web test
+  counted initial paints absolutely; it now captures the positive initial
+  count after registration closes and verifies zero additional closed-page
+  derivations, then one per reopen. The property remains a real call-count
+  observation, not a constant or a removed assertion.
+- One gate attempt failed during Maven classpath acquisition; its exact
+  exception is recorded in `dependency-resolution-can-race-maven-model-validation.md`.
+- A subsequent static-analysis refusal identified an out-of-scope local
+  binding introduced while adjusting that web test. The lexical scope was
+  corrected; clj-kondo reports zero errors (11 existing warnings in that file).
+- Additional turn/loop/transcript fast probe: 67 tests / 548 assertions,
+  64 failures / 8 errors, all reported in the transcript namespace's old
+  result/history fixtures. The updated existing consumer-fixture issue names
+  this boundary; no claim of a green transcript suite is made. Its attempt
+  reasoning case passes with the component relation.
+
+### Fresh live proof
+
+Owned `custody` boot in `tmp/turn-rename-wt`: HTTP 7872, PREPL 55069.
+Published source `6aa1111c-7976-5c81-9aa0-c1da5e548f4c`, source digest
+`8470e263d2199dfacc73ed23ccb3e7c7165acb045a4074f673c3bd110a4472f5`.
+This is a fresh ordinary fork; it has no development-adoption commit stamp.
+The existing committed settings-first probe creates Juniper's settings
+component with `SEON_DESIGN_LAB_NO_CREDENTIAL` before seeding messages.
+`turn_namespace_probe_2026_09_09.clj` then reports component ref/many=true,
+zero retired turn attributes, retired attempt ref absent, a vector of one
+evaluation from `seon.eval/of-agent`, and zero provider usage rows.
+
+- `/ns/my.agents.juniper/debug`: HTTP 200, 52,752 bytes, 1.419858 seconds.
+- `/ns/my.agents.juniper/debug?prompt=true`: HTTP 200, 62,181 bytes,
+  1.902879 seconds; stored evaluation entries and all three controls are
+  present. Plan and sample messages appear; neither page reports a missing
+  required key. Provider usage is still zero after both requests.
+- Browser paint is unavailable: CUA exposes no browsers and native Chrome
+  returns `cgWindowNotFound` (-10005). These are HTTP/content observations.
+
+Default's adoption refused at `seon.env/advance-projection!` after loaded
+definitions. Its debug response is HTTP 500, 200 bytes, naming the old
+`preview-sources` result missing renamed keys. A later comparison probe also
+refused; convergence is not claimed. The existing development-adoption issue
+records the boundary. No default stop/refork/restart was performed.
+
+### Final gates, 2026-09-09 08:05 UTC
+
+**Slice 2 is green.** Exact program/test snapshot:
+`6d8d2580b161d95aa9cd8d63773ae68dc58d4180777d5115ffefd2155d351ae9`.
+
+- `SEON_TEST_WORKERS=1 bin/test --paths <the owned paths above> --
+  seon.turn-test seon.cluster.loop-test seon.render.web-test`: **105 tests /
+  702 assertions, zero failures/errors**. Log `tmp/turn-rename-gate-final.log`;
+  successful root `run.kE7f9u` removed by the runner.
+- `SEON_TEST_WORKERS=1 bin/test --platform --paths <the owned paths above>`:
+  **83 tests / 490 assertions, zero failures/errors**. Log
+  `tmp/turn-rename-platform-final.log`; successful root `run.LQcV0I` removed.
+
+The earlier transcript namespace failures remain explicitly outside these
+green claims. The fresh page also reproduces the already-filed
+`blocked-plan-values-refuse-pull-during-ai-projection.md` defect, which is
+updated in this commit in addition to the path inventory above.
+
+Owned scratch JVM PID 46431 was downed through `bin/seon --root
+tmp/turn-rename-wt down`; the operator reports its flock free. The commit
+reads the path-limited owned snapshot using Git's `--work-tree` option,
+leaving the foreign working-tree episode hunks intact. No shared source
+file is restored or replaced to construct that commit. Final commit ID,
+default publication observation, and root/shell cleanup follow below.

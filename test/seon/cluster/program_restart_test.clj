@@ -76,8 +76,8 @@
          :in $ ?agent-id ?bootstrap-run-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.cluster.run/agent ?agent]
-         [?run :seon.cluster.run/id ?run-id]
+         [?run :seon.turn/agent ?agent]
+         [?run :seon.turn/id ?run-id]
          [(not= ?run-id ?bootstrap-run-id)]
          [?receipt :seon.cluster.eval/run ?run]]
        db agent-id (bootstrap/run-id agent-id)))
@@ -92,8 +92,8 @@
          :in $ ?agent-id ?bootstrap-run-id ?ordinal
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.cluster.run/agent ?agent]
-         [?run :seon.cluster.run/id ?run-id]
+         [?run :seon.turn/agent ?agent]
+         [?run :seon.turn/id ?run-id]
          [(not= ?run-id ?bootstrap-run-id)]
          [?receipt :seon.cluster.eval/run ?run]
          [?receipt :seon.cluster.eval/ordinal ?ordinal]
@@ -105,9 +105,9 @@
   [db]
   (db/q '[:find ?agent-id .
          :where
-         [?run :seon.cluster.run/agent ?agent]
+         [?run :seon.turn/agent ?agent]
          [?agent :seon.cluster.agent/id ?agent-id]
-         (not [?run :seon.cluster.run/closed-at _])]
+         (not [?run :seon.turn/closed-at _])]
        db))
 
 (defn- agent-open-run?
@@ -117,8 +117,8 @@
           :in $ ?agent-id
           :where
           [?agent :seon.cluster.agent/id ?agent-id]
-          [?run :seon.cluster.run/agent ?agent]
-          (not [?run :seon.cluster.run/closed-at _])]
+          [?run :seon.turn/agent ?agent]
+          (not [?run :seon.turn/closed-at _])]
         db agent-id)))
 
 (defn- agent-authored-closed-run-count
@@ -127,10 +127,10 @@
          :in $ ?agent-id ?bootstrap-run-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.cluster.run/agent ?agent]
-         [?run :seon.cluster.run/id ?run-id]
+         [?run :seon.turn/agent ?agent]
+         [?run :seon.turn/id ?run-id]
          [(not= ?run-id ?bootstrap-run-id)]
-         [?run :seon.cluster.run/closed-at _]]
+         [?run :seon.turn/closed-at _]]
        db agent-id (bootstrap/run-id agent-id)))
 
 (defn- await-bootstrap!
@@ -138,9 +138,9 @@
   (await-commit!
    connection
    (fn [db]
-     (:seon.cluster.run/closed-at
-      (db/pull db [:seon.cluster.run/closed-at]
-              [:seon.cluster.run/id (bootstrap/run-id agent-id)])))
+     (:seon.turn/closed-at
+      (db/pull db [:seon.turn/closed-at]
+              [:seon.turn/id (bootstrap/run-id agent-id)])))
    (constantly nil)))
 
 (defn- authored-program-settled?
@@ -159,7 +159,7 @@
               (db/q '[:find [?result ...]
                      :where
                      [?agent :seon.cluster.agent/id "restart-b"]
-                     [?run :seon.cluster.run/agent ?agent]
+                     [?run :seon.turn/agent ?agent]
                      [?receipt :seon.cluster.eval/run ?run]
                      [?receipt :seon.cluster.eval/ordinal 0]
                      [?receipt :seon.cluster.eval/result-edn ?result]]

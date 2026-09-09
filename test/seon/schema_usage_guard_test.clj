@@ -4,7 +4,7 @@
             [datahike.api :as d]
             [seon.db :as db]
             [datahike.db.interface :as dbi]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]))
@@ -251,7 +251,7 @@
       (let [run-id "schema-usage-guard-run"
             agent-id "schema-usage-guard-agent"
             namespace-name 'my.agents.schema-usage-guard
-            request {:seon.cluster.run/id run-id}]
+            request {:seon.turn/id run-id}]
         (install-forms! connection {base-key (get forms base-key)
                                     unrelated-key [:int {:seon.db/index true}]})
         (db/transact! connection [{:seon.ns/name namespace-name
@@ -262,9 +262,9 @@
         (db/transact! connection [{base-key 7}])
         (db/transact!
          connection
-         (run/open-tx {:seon.cluster.run/id run-id
-                       :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-                       :seon.cluster.run/opened-at (java.util.Date.)}))
+         (run/open-tx {:seon.turn/id run-id
+                       :seon.turn/agent [:seon.cluster.agent/id agent-id]
+                       :seon.turn/opened-at (java.util.Date.)}))
         (testing "current data answers with the guard's typed refusal"
           (let [refusal
                 (transact-result
@@ -303,10 +303,10 @@
                  (row-tx request
                          (schema-row unrelated-key
                                      [:boolean {:seon.db/index true}])))]
-            (is (= :seon.cluster.run/refused
+            (is (= :seon.turn/refused
                    (get-in refusal [:error :seon.error/kind])))
-            (is (= :seon.cluster.run/program-row-changed-after-open
-                   (get-in refusal [:error :seon.cluster.run/rule]))
+            (is (= :seon.turn/program-row-changed-after-open
+                   (get-in refusal [:error :seon.turn/rule]))
                 "divergence from the opening basis is named as divergence")
             (is (= (pr-str [:string {:seon.db/index true}])
                    (:seon.schema/form

@@ -178,9 +178,9 @@
   (let [run-id
         (->> (db/q '[:find ?id ?opened
                     :where
-                    [?run :seon.cluster.run/id ?id]
-                    [?run :seon.cluster.run/opened-at ?opened]
-                    [?run :seon.cluster.run/agent ?agent]
+                    [?run :seon.turn/id ?id]
+                    [?run :seon.turn/opened-at ?opened]
+                    [?run :seon.turn/agent ?agent]
                     [?agent :seon.cluster.agent/id "planner"]]
                   database)
              (sort-by (comp inst-ms second))
@@ -191,7 +191,7 @@
            (db/q '[:find ?member
                    :in $ ?run-id ?attribute
                    :where
-                   [?run :seon.cluster.run/id ?run-id]
+                   [?run :seon.turn/id ?run-id]
                    [?member ?attribute ?run]]
                  database run-id attribute)))
         terminal-receipt-count
@@ -199,7 +199,7 @@
          (db/q '[:find ?receipt
                  :in $ ?run-id
                  :where
-                 [?run :seon.cluster.run/id ?run-id]
+                 [?run :seon.turn/id ?run-id]
                  [?receipt :seon.cluster.eval/run ?run]
                  (or [?receipt :seon.cluster.eval/result-edn _]
                      [?receipt :seon.cluster.eval/result-blob _]
@@ -351,7 +351,7 @@
         (db/q '[:find ?ordinal ?namespace-name
                :in $ ?run-id
                :where
-               [?run :seon.cluster.run/id ?run-id]
+               [?run :seon.turn/id ?run-id]
                [?form :seon.cluster.eval/run ?run]
                [?form :seon.cluster.eval/ordinal ?ordinal]
                [?form :seon.cluster.eval/ns ?namespace]
@@ -364,7 +364,7 @@
   (set (db/q '[:find ?to-id ?receipt-id
               :in $ ?run-id
               :where
-              [?run :seon.cluster.run/id ?run-id]
+              [?run :seon.turn/id ?run-id]
               [?receipt :seon.cluster.eval/run ?run]
               [?receipt :seon.cluster.eval/id ?receipt-id]
               [?m :seon.cluster.message/about ?receipt]
@@ -426,7 +426,7 @@
         (db/q '[:find [?value ...]
                :in $ ?run-id
                :where
-               [?run :seon.cluster.run/id ?run-id]
+               [?run :seon.turn/id ?run-id]
                (or-join [?run ?value]
                         (and [?form :seon.cluster.eval/run ?run]
                              [?form :seon.cluster.eval/id ?value])
@@ -481,7 +481,7 @@
            (is (= 7 (count (db/q '[:find ?f
                                   :in $ ?run-id
                                   :where
-                                  [?run :seon.cluster.run/id ?run-id]
+                                  [?run :seon.turn/id ?run-id]
                                   [?f :seon.cluster.eval/run ?run]]
                                 db run-id)))
                "seven forms froze and every form has evaluation truth"))
@@ -491,7 +491,7 @@
                 (db/q '[:find ?edn .
                        :in $ ?run-id
                        :where
-                       [?run :seon.cluster.run/id ?run-id]
+                       [?run :seon.turn/id ?run-id]
                        [?r :seon.cluster.eval/run ?run]
                        [?r :seon.cluster.eval/ordinal 1]
                        [?r :seon.cluster.eval/result-edn ?edn]]
@@ -504,7 +504,7 @@
            (is (= 7 (count (db/q '[:find ?r
                                   :in $ ?run-id
                                   :where
-                                  [?run :seon.cluster.run/id ?run-id]
+                                  [?run :seon.turn/id ?run-id]
                                   [?r :seon.cluster.eval/run ?run]]
                                 db run-id)))
                "one receipt per ordinal, including the ones after the
@@ -547,7 +547,7 @@
          ;; `:seon.cluster.message/ambiguous-about` — loudly, into an
          ;; error fact, which no assertion here was reading. The form
          ;; identity is now qualified by its own attribute
-         ;; (`seon.cluster.run/form-identity`), and this is the standing
+         ;; (`seon.turn/form-identity`), and this is the standing
          ;; proof that no OTHER family reintroduces the class: it runs
          ;; the resolver's own derivation over a real production drive
          ;; and scopes it BY QUERY to the strings this run minted, so a
@@ -569,7 +569,7 @@
            (is (some? (db/q '[:find ?error .
                              :in $ ?run-id
                              :where
-                             [?run :seon.cluster.run/id ?run-id]
+                             [?run :seon.turn/id ?run-id]
                              [?r :seon.cluster.eval/run ?run]
                              [?r :seon.cluster.eval/ordinal 5]
                              [?r :seon.cluster.eval/error ?error]]
@@ -582,8 +582,8 @@
            (is (some? (db/q '[:find ?closed .
                              :in $ ?run-id
                              :where
-                             [?run :seon.cluster.run/id ?run-id]
-                             [?run :seon.cluster.run/closed-at ?closed]]
+                             [?run :seon.turn/id ?run-id]
+                             [?run :seon.turn/closed-at ?closed]]
                            db run-id))
                "the planner's run closed normally — settlement is a
                 derivation over forms, never a run state"))
