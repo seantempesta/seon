@@ -37,7 +37,6 @@
   Crash walk: pure over a database value. Nothing here opens, commits or
   holds anything."
   (:require [clojure.string :as str]
-            [seon.context :as context]
             [seon.db :as db]
             [seon.print :as print]
             [seon.render :as render]
@@ -857,73 +856,22 @@
             fallback)))
 
 (defn- history-entries
-  "One prompt entry per rendered unit, carrying that unit's OWN bytes.
-
-  There is no second grammar here. A unit's `:seon.render/ai` producer is
-  what the agent reads — for a run that is `seon.render.transcript`'s
-  history, whose every evaluation comes from `seon.repl/text` — and this
-  function joins those renders into the ordered prompt without reformatting
-  one byte of them.
-
-  What it used to do instead: run a SECOND `:seon.render/form` neighbourhood
-  pass, `pr-str` the re-read form into a `ns=> ` line of its own, and staple
-  the `/ai` render underneath as a \"printed value\". The model therefore read
-  a prompt line the page never showed and the history unit never produced —
-  the exact second grammar this program exists to delete (audit B3, PRD §4,
-  ruling 44's retirement of `:seon.render/form`).
-
-  ADMISSION IS A FACT ABOUT THE RENDER, not the shape of a rendered form:
-  a unit contributes exactly when its own projection SUCCEEDED and produced
-  text. The old gate asked whether the `/form` producer had emitted a `seq?`,
-  so dropping that pass had to drop that gate with it.
-
-  A REFUSED RENDER IS NOT PROMPT CONTENT. `seon.render.walk/neighborhood`
-  substitutes the literal sentence `\"Renderer unavailable.\"` for a producer
-  that failed and records the failure on the unit as `:seon.error/value`;
-  splicing that sentence into the model's context tells the agent nothing it
-  can act on and hides which renderer broke. The failure already reaches the
-  owning agent as a message (`seon.render/…-unavailable`), which is where a
-  broken renderer belongs."
+  "Retain one successful projection under the rendered entity's identity."
   [request value-units captured]
-  (let [database (:seon.db/db request)
-        basis (db/basis-t database)]
+  (let [basis (db/basis-t (:seon.db/db request))]
     (into []
           (keep
            (fn [unit]
-             (let [rendered (:seon.render/output unit)]
-               (when (and (string? rendered)
-                          (seq rendered)
+             (let [rendered (:seon.render/output unit)
+                   lookup (:seon.render.walk/lookup unit)
+                   distance (:seon.render/distance unit)]
+               (when (and (string? rendered) (seq rendered)
                           (nil? (:seon.error/value unit)))
-                 (let [lookup (:seon.render.walk/lookup unit)
-                       distance (:seon.render/distance unit)
-                       message-eid
-                       (when (and (vector? lookup)
-                            (= :seon.cluster.message/id (first lookup)))
-                         (:db/id (db/entity database lookup)))
-                       current-task?
-                       (and message-eid
-                            (= :seon.context/current-trigger
-                               (context/message-custody
-                                database
-                                (:seon.cluster.run/id request)
-                                (:seon.cluster.agent/id request)
-                                message-eid)))]
-                   (cond->
-                    {:seon.render.history/call-id
-                     (if current-task?
-                       [::current-task (:seon.cluster.agent/id request)]
-                       [lookup (:seon.render.walk/path unit)])
-                     :seon.render.history/basis-transaction
-                     (observation-basis captured
-                                        [:seon.render/ai lookup distance]
-                                        basis)
-                     ;; THE SUBJECT IS THE UNIT'S OWN IDENTITY. Supersession
-                     ;; used to compare rendered forms, which meant a fact
-                     ;; question answered by the shape of a formatted value.
-                     :seon.render.history/subject lookup
-                     :seon.render.history/bytes rendered}
-                     current-task?
-                     (assoc :seon.render.history/current-task? true)))))))
+                 {:seon.render.history/call-id [lookup]
+                  :seon.render.history/basis-transaction
+                  (observation-basis captured [:seon.render/ai lookup distance] basis)
+                  :seon.render.history/subject lookup
+                  :seon.render.history/bytes rendered}))))
           value-units)))
 
 (defn history
@@ -962,5 +910,4 @@
                      (remove #(= root-lookup
                                  (first (:seon.render.history/call-id %))))
                      vec)]
-    (into (filterv (complement :seon.render.history/current-task?) generic)
-          (filter :seon.render.history/current-task? generic))))
+    generic))

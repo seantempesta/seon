@@ -38,16 +38,18 @@
           :errors (count (filter :error rows))})))))
 
 (defn submit-load!
-  "Submit finite computation to the two explicitly seeded probe agents."
-  [cluster-name]
-  (let [instance (get @runtime/running-instances cluster-name)]
-    (mapv #(turn/virtual-turn!
-            {:seon.cluster.loop/cluster (:seon.cluster.loop/cluster instance)
-             :seon.cluster.agent/routing (:seon.cluster.agent/routing instance)
-             :seon.cluster.agent/id %
-             :seon.cluster.reply/text
-             "(loop [n 1000000000] (if (zero? n) :page-feed-probe-complete (recur (dec n))))"})
-          ["juniper" "root"])))
+  "Submit bounded source work to the two explicitly seeded probe agents."
+  ([cluster-name]
+   (submit-load! cluster-name
+                 "(loop [n 1000000000] (if (zero? n) :page-feed-probe-complete (recur (dec n))))"))
+  ([cluster-name source]
+   (let [instance (get @runtime/running-instances cluster-name)]
+     (mapv #(turn/virtual-turn!
+             {:seon.cluster.loop/cluster (:seon.cluster.loop/cluster instance)
+              :seon.cluster.agent/routing (:seon.cluster.agent/routing instance)
+              :seon.cluster.agent/id %
+              :seon.cluster.reply/text source})
+           ["juniper" "root"]))))
 
 (defn observe-load!
   "Record open turns once per second without introducing write traffic."

@@ -88,12 +88,32 @@
                       :seon.render.walk/path []
                       :seon.render/distance 0
                       :seon.render/output "The component's shown text."}]
-                    (atom {}))]
+                    (atom {}))
+           alternate (#'walk/history-entries
+                       {:seon.db/db database}
+                       [{:seon.render.walk/lookup eid
+                         :seon.render.walk/path [:fixture/another-reference]
+                         :seon.render/distance 0
+                         :seon.render/output "The component's shown text."}]
+                       (atom {}))]
+       (is (= (:seon.render.history/call-id (first entries))
+              (:seon.render.history/call-id (first alternate))))
        (is (integer? eid))
        (is (= 1 (count entries)))
        (is (= eid (:seon.render.history/subject (first entries))))
        (is (= "The component's shown text."
               (:seon.render.history/bytes (first entries))))))))
+
+(deftest history-identity-survives-reference-path-and-basis-changes
+  (let [entry {:seon.render.history/call-id [42]
+               :seon.render.history/basis-transaction 1
+               :seon.render.history/bytes "The saved observation."}
+        repeated (assoc entry :seon.render.history/basis-transaction 2
+                              :seon.render.history/bytes "A later projection.")
+        later {:seon.render.history/call-id [43]
+               :seon.render.history/basis-transaction 2
+               :seon.render.history/bytes "The next evaluation."}]
+    (is (= [entry later] (web/append-history [entry] [repeated later])))))
 
 (deftest reverse-blocks-do-not-depend-on-the-graph-page
   (support/with-database

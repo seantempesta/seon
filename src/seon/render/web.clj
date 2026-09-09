@@ -1278,7 +1278,8 @@
                 (if (or (reverse-attribute? attribute)
                         (= attribute :seon.cluster.agent/agent)) [] [attribute])
                 :seon.render.data/offset 0}
-        value (if present? (connected-value related value) value)
+        value (if (and present? (not= attribute :seon.cluster.agent/agent))
+                (connected-value related value) value)
         experiments
         (when present?
           {:seon.render/ai
@@ -1377,7 +1378,7 @@
              agent?
              (conj (debug-found-value
                     projection render-request debug-request
-                    :seon.cluster.agent/agent acquisition true related
+                    :seon.cluster.agent/agent (apply dissoc acquisition components) true related
                     context-selection context-source-call)))
            (map (fn [attribute]
                   (let [entry (find (if (reverse-attribute? attribute)
@@ -2437,64 +2438,20 @@
      (when changed? packages)])))))
 
 (defn append-history
-  "Merge newly observed history into the retained prompt generation.
+  "Append newly observed identities, preserving every previously shown byte.
 
-   A logical call occupies one slot. An unchanged shown basis retains its
-   exact bytes in place; a changed basis replaces the old observation and is
-   appended after retained history. The current task is the final slot, and a
-   full re-walk cannot reintroduce the task that slot superseded.
-
-   Supersession compares `:seon.render.history/subject` — the superseded
-   unit's own lookup. It used to compare `:seon.render.history/form`, a
-   rendered form, which answered an identity question with the shape of a
-   formatted value; the form no longer exists because the prompt reads each
-   unit's own `:seon.render/ai` bytes (ruling 44)."
+  A reference path or database basis cannot make a stored evaluation new.
+  Later evaluations have their own identities; compaction discards the retained
+  generation rather than rewriting an earlier entry."
   {:malli/schema [:=> [:cat [:vector :map] [:vector :map]] [:vector :map]]}
   [entries observations]
-  (let [current-task? :seon.render.history/current-task?
-        current-observation (last (filter current-task? observations))
-        superseded-subjects
-        (if current-observation
-          (into #{}
-                (comp (filter current-task?)
-                      (map :seon.render.history/subject)
-                      (remove #{(:seon.render.history/subject
-                                 current-observation)}))
-                entries)
-          #{})
-        observations
-        (->> observations
-             (remove (fn [entry]
-                       (and (not (current-task? entry))
-                            (contains? superseded-subjects
-                                       (:seon.render.history/subject entry)))))
-             ((fn [observed]
-                (concat (remove current-task? observed)
-                        (filter current-task? observed)))))]
-    (reduce
-     (fn [retained observation]
-       (let [call-id (:seon.render.history/call-id observation)
-             basis (:seon.render.history/basis-transaction observation)
-             prior (some #(when (= call-id
-                                  (:seon.render.history/call-id %))
-                            %)
-                         retained)]
-         (cond
-           (and prior
-                (= basis (:seon.render.history/basis-transaction prior)))
-           retained
-
-           prior
-           (conj (into []
-                       (remove #(= call-id
-                                   (:seon.render.history/call-id %)))
-                       retained)
-                 observation)
-
-           :else
-           (conj retained observation))))
-     entries
-     observations)))
+  (reduce
+   (fn [retained observation]
+     (if (some #(= (:seon.render.history/call-id %)
+                   (:seon.render.history/call-id observation)) retained)
+       retained
+       (conj retained observation)))
+   entries observations))
 
 (defn- history-segments
   [entries]

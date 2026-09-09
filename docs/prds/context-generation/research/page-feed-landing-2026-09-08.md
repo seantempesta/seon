@@ -371,3 +371,57 @@ Cost-batching gate: path-limited `bin/test` with
 seon.render.web-debug-test` passed 20 tests, 81 assertions, zero failures/errors.
 The canonical paused-proc fixture records multiple real cost facts in exactly
 one transaction and independently obtains both context and HTTP200 on callers.
+
+### Prompt history and render-cost feedback
+
+The revised canonical prompt fixture evaluates a real read through SCI and records
+it through the ordinary writer before opening the held prompt run. The first
+fixture attempt incorrectly recorded while that run was already held: the writer
+refused it, so empty history was not a valid observation. The regression now
+refuses fixture setup loudly on that result. Assertions follow stored evaluations,
+unchanged historical bytes, contribution hashes/costs, and informational budgets
+under the settings component. They no longer expect a current-task slot or a new
+message to rewrite an earlier observation.
+
+History identity is the rendered entity, independent of reference path and a later
+database basis. New identities append; previously shown bytes remain unchanged.
+Repeated calls also exposed a feedback loop: recording another render cost for
+identical output advanced the database and invalidated a namespace read again.
+Cost recording now requires a non-nil changed output. The instrumented invocation
+probe observes no additional SCI invocation once those facts have been observed.
+The isolated pre-integration gate passed 26 tests, 160 assertions, zero failures
+or errors; the combined committed evaluation renderer is gated separately below.
+
+Default cold acquisition after the committed cost-batching hot reload measured
+331.908041 ms for 45760 characters; 12 warm samples measured
+28.306417–47.600458 ms with identical text in every comparison. This clears the
+2 s cold target on that observed dataset. The ready-file mode in
+`test/seon/render/page_feed_thread_probe.py` makes the virtual-thread sampling
+reproducible without relying on sequential tool calls overlapping accidentally.
+
+A CPU-heavy two-turn probe with three tabs and one-second basis writes falsified
+the combined limits: plain maximum 1067.611334 ms, first-event maximum
+2695.05625 ms, all HTTP200. A subsequent bounded shell-effect probe recorded both
+turns open for four consecutive one-second writes. Its 30 plain GETs were all
+HTTP200, maximum 757.632833 ms; the overlapping GET at epoch 1788926489545 took
+757.632833 ms. Its first-event maximum was still 3510.913 ms, so this run does
+**not** establish the SSE target under simultaneous turn traffic. Thread/sleep
+SCI attempts that closed before observation were rejected as overlap evidence.
+These negative measurements are retained alongside the passing isolated-write
+measurements, not averaged away.
+
+The additional scratch identity change passes only the scalar entity attributes
+to the grouped identity pair, leaving components in their own blocks. Chrome
+verified 1568 px blocks and two 762.609375 px columns, with no horizontal overflow.
+The cache-cleared GET took 2628.648208 ms and the warm GET 19.146625 ms, both200,
+1004703 bytes. This older scratch code did not include the subsequently committed
+lazy diagnostic-details change; it is not a latency claim for that combined page.
+
+![Scratch identity and component pairs](page-feed-identity-scalar-scratch-2026-09-08.png)
+
+The protected evaluation/render edits landed as `adfdcc839` while this work was
+isolated. The remaining hunks were applied against that commit after verifying
+those paths had no uncommitted edits. No foreign session or file was operated.
+
+Combined HEAD-plus-owned-paths gate after `adfdcc839`: 27 tests, 166 assertions,
+zero failures/errors across prompt, web context, debug, and namespace renderers.

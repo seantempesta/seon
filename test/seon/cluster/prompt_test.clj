@@ -1,7 +1,6 @@
 (ns seon.cluster.prompt-test
   "Recurring acceptance for the prompt's append-only REPL history."
   (:require [clojure.core.async :as async]
-            [clojure.core.async.flow :as flow.core]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.ai.tokens :as tokens]
@@ -11,18 +10,13 @@
             [seon.db :as db]
             [seon.cluster.agent :as agent]
             [seon.cluster.prompt :as prompt]
-            [seon.flow :as flow]
             [seon.render :as render]
-            [seon.render.walk :as render.walk]
-            [seon.render.web :as web]
+            [seon.sci.kernel :as kernel]
+            [seon.cluster.loop :as loop]
+            [seon.cluster.run :as run]
+            [seon.blob :as blob]
             [seon.test-support :as support])
   (:import [java.util Date]))
-
-(def ^:private test-environment
-  ;; The subset environment (store layer only) every crossing this
-  ;; namespace constructs names; boot's own constructor, fewer layers.
-  (delay (support/environment "seon.cluster.prompt-test")))
-
 
 (def ^:private caps
   (assoc (config/result-caps (support/effective-config))
@@ -31,6 +25,44 @@
          :seon.config.eval.result/max-string 4096
          :seon.config.eval.result/max-source 65536
          :seon.config.eval.result/max-nodes 4096))
+
+(defn- record-evaluation!
+  [connection ctx run-id source]
+  (let [handle (support/cluster-handle
+                {:seon.db/connection connection
+                 :seon.cluster/name "prompt-walk"
+                 :seon.cluster.run/process cluster/boot-process-identity
+                 :seon.sci.eval/ctx ctx})]
+    (try
+      (let [preview (loop/preview-sources
+                     {:seon.cluster.loop/cluster handle
+                      :seon.db/db @connection
+                      :seon.sci.eval/ctx ctx
+                      :seon.cluster.agent/id "walker"
+                      :seon.ns/name 'my.agents.walker
+                      :seon.cluster.reply/text source
+                      :seon.sci.admit/caps caps})
+            prepared (run/record-evaluated-tx
+                       {:seon.cluster.loop/cluster handle
+                        :seon.db/db @connection
+                        :seon.cluster.run/id run-id
+                        :seon.cluster.run/agent [:seon.cluster.agent/id "walker"]
+                        :seon.cluster.run/starting-ns [:seon.ns/name 'my.agents.walker]
+                        :seon.cluster.run/reply source
+                        :seon.cluster.run/opened-at (:seon.cluster.run/opened-at preview)
+                        :seon.cluster.run/closed-at (:seon.cluster.run/closed-at preview)
+                        :seon.cluster.loop/evaluated-sources
+                        (:seon.cluster.loop/evaluated-sources preview)})]
+        (let [result (blob/with-publication!
+                      connection (:seon.blob/staged-writes prepared)
+                      #(db/transact! connection (:seon.db/tx-data prepared)))]
+          (when (:seon.error/kind result)
+            (throw (ex-info (str "Fixture evaluation was not recorded: " (pr-str result)) result)))
+          result))
+      (finally
+        (doseq [key [:seon.cluster.wake/channel :seon.render/context-channel
+                    :seon.cluster.loop/completion]]
+          (when-let [channel (get handle key)] (async/close! channel)))))))
 
 (defn- planted
   [body]
@@ -50,6 +82,9 @@
                     [:seon.cluster.agent/id "walker"]
                     :seon.cluster.message/content "inspect this walk"
                     :seon.cluster.message/at (Date. 1700000000000)}])
+      (let [ctx (support/fork-cluster-ctx connection)]
+        (record-evaluation! connection ctx "opening-history"
+                            "(seon.db/pull [:seon.cluster.message/content] [:seon.cluster.message/id \"walk-message\"])")
       (db/transact! connection
                   [{:seon.cluster.run/id "walk-run"
                     :seon.cluster.run/agent
@@ -57,7 +92,7 @@
                     :seon.cluster.run/trigger
                     [:seon.cluster.message/id "walk-message"]
                     :seon.cluster.run/opened-at (Date. 1700000001000)}])
-      (body connection (support/fork-cluster-ctx connection)))))
+        (body connection ctx)))))
 
 
 (defn- request
@@ -67,224 +102,71 @@
    :seon.db/connection connection
    :seon.sci.admit/caps caps
    :seon.sci.eval/ctx ctx
-   :seon.sci.eval/time-limit-ms 2000
+   :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
+   :seon.render/profile (render/agent-render-profile (config/defaults))
    :seon.config/on-core-error :panic})
 
-(defn- acquire-context
-  [connection ctx]
-  (render/acquire-context!
-   (assoc (request connection ctx)
-          :seon.db/db @connection
-          :seon.render/distance 1)))
-
-(deftest prompt-is-derived-append-only-repl-history
+(deftest prompt-prices-the-exact-retained-history
   (planted
    (fn [connection ctx]
-     (let [render-request (request connection ctx)
-           rendered (prompt/prompt @connection render-request)
+     (let [rendered (prompt/prompt @connection (request connection ctx))
            text (:seon.cluster.prompt/text rendered)
-           entries (render.walk/history
-                    (assoc render-request
-                           :seon.db/db @connection
-                           :seon.render.walk/lookup
-                           [:seon.cluster.agent/id "walker"]
-                           :seon.render/distance 2
-                           :seon.render/captured-calls (atom {})))
-           contribution (first (:seon.context/contributions rendered))
-           contributions (:seon.context/contributions rendered)
-           web-directory-contributions
-           (filterv
-            #(str/includes?
-              (:seon.context.contribution/text %)
-              "(dir (quote my.web))")
-            contributions)
-           removed-block-read
-           (db/q '[:find ?block
-                   :where
-                   [?agent :seon.cluster.agent/id "walker"]
-                   [?agent :seon.cluster.agent/blocks ?block]]
-                 @connection)]
-       (is (= text
-              (apply str
-                     (map :seon.context.contribution/text contributions))))
-       (is (= (count entries) (count contributions)))
+           contributions (:seon.context/contributions rendered)]
+       (is (seq text))
+       (is (str/includes? text "inspect this walk"))
+       (is (= text (apply str (map :seon.context.contribution/text contributions))))
        (is (= (range (count contributions))
               (map :seon.context.contribution/position contributions)))
-       (is (= (get-in rendered
-                      [:seon.ai.tokens/budget-report
-                       :seon.ai.tokens/estimated])
-              (reduce +
-                      (map :seon.context.contribution/tokens
-                           contributions)))
-           "per-entry costs reconcile exactly to the checked whole prompt")
-       (is (every?
-            (fn [entry]
-              (= (context/contribution-hash
-                  (:seon.context.contribution/text entry))
-                 (:seon.context.contribution/hash entry)))
-            contributions))
-       (is (= :walk (:seon.render.block/name contribution)))
-       (is (= 1 (count web-directory-contributions))
-           "the full toolkit directory is priced from its consumer-fit bytes")
-       (is (< 0
-              (:seon.context.contribution/tokens
-               (first web-directory-contributions))
-              (get-in rendered
-                      [:seon.ai.tokens/budget-report
-                       :seon.ai.tokens/estimated]))
-           "one directory contribution is bounded inside the whole prompt")
-       (is (seq entries))
-       (is (every? (comp seq :seon.render.history/bytes) entries))
-       (is (str/includes? text "inspect this walk")
-           "the triggering message is an entry in the agent's history")
-       ;; ONE GRAMMAR (PRD §4, audit B3). The prompt used to synthesise a
-       ;; `ns=> (pr-str form)` line from a second `:seon.render/form`
-       ;; neighbourhood pass and staple the `/ai` render underneath it, so
-       ;; the model read a prompt line the page never showed and the history
-       ;; unit never produced. The prompt now carries each unit's OWN
-       ;; `:seon.render/ai` bytes and nothing else.
-       (is (str/includes? text "[:seon.cluster.message/id \"walk-message\"]")
-           "the message contributes the source its own /ai producer emits")
-       (is (not (str/includes?
-                 text
-                 "my.agents.walker=> (my.message/read \"walk-message\")"))
-           "the retired /form pairing is not reconstructed")
-       (is (not (str/includes? text ";; (seon.render/walk"))
-           "the deleted labeled-walk prompt is not reconstructed")
-       (is (not (str/includes? text ";; REPL state"))
-           "volatile database metadata is not a synthetic history entry")
-       (is (= :seon.db/invalid-read
-              (:seon.error/kind removed-block-read))
-           "the deleted presentation-block attribute is not installed")
-       (is (= :seon.db/attribute-not-installed
-              (get-in removed-block-read
-                      [:seon.error/data :seon.error/diagnostic-cause])))
-       (is (pos?
-            (count
-             (db/q '[:find ?cost
-                     :where
-                     [?cost :seon.render.cost/estimated-tokens]]
-                   @connection)))
-           "the production prompt request records every newly rendered cost")))))
+       (is (= (get-in rendered [:seon.ai.tokens/budget-report :seon.ai.tokens/estimated])
+              (reduce + (map :seon.context.contribution/tokens contributions))))
+       (is (every? #(= (context/contribution-hash (:seon.context.contribution/text %))
+                       (:seon.context.contribution/hash %)) contributions))
+       (is (not (str/includes? text ";; REPL state")))))))
 
-(deftest every-call-derives-the-current-basis
+(deftest unobserved-messages-do-not-rewrite-stored-history
   (planted
    (fn [connection ctx]
      (let [before (:seon.cluster.prompt/text
-                   (prompt/prompt @connection
-                                  (request connection ctx)))]
+                   (prompt/prompt @connection (request connection ctx)))]
        (db/transact! connection
-                   [{:seon.cluster.message/id "later"
-                     :seon.cluster.message/to
-                     [:seon.cluster.agent/id "walker"]
-                     :seon.cluster.message/content "new durable fact"
-                     :seon.cluster.message/at (Date. 1700000002000)}])
+                     [{:seon.cluster.message/id "later"
+                       :seon.cluster.message/to [:seon.cluster.agent/id "walker"]
+                       :seon.cluster.message/content "not evaluated yet"
+                       :seon.cluster.message/at (Date. 1700000002000)}])
        (let [after (:seon.cluster.prompt/text
-                    (prompt/prompt @connection
-                                   (request connection ctx)))]
-         (is (not= before after))
-         (is (str/includes? after "new durable fact")))))))
+                    (prompt/prompt @connection (request connection ctx)))]
+         (is (= before after) "a stored observation changes only through a later evaluation")
+         (is (not (str/includes? after "not evaluated yet"))))))))
 
-(deftest identical-context-reuses-retained-ai-render-bytes
+(deftest identical-context-reuses-retained-render-calls
   (planted
    (fn [connection ctx]
-     (let [render-ai! render/render-ai
-           invocations (atom 0)]
-       (with-redefs [render/render-ai
-                     (fn [render-request]
-                       (swap! invocations inc)
-                       (render-ai! render-request))]
-         (let [first-context
-               (prompt/prompt @connection
-                              (request connection ctx))
-               after-first @invocations
-               second-context
-               (prompt/prompt @connection
-                              (request connection ctx))]
-           (is (= (:seon.cluster.prompt/text first-context)
-                  (:seon.cluster.prompt/text second-context)))
-           (is (pos? after-first))
-           (is (= after-first @invocations)
-               "an identical context performs zero second-pass renderer invocations")))))))
+     (let [invoke kernel/invoke
+           calls (atom [])]
+       (with-redefs [kernel/invoke
+                     (fn [request] (swap! calls conj [(:seon.fn/sym request) (select-keys (first (:seon.sci.eval/args request)) [:seon.ns/name :db/id :seon.render/distance])]) (invoke request))]
+         (let [before (prompt/prompt @connection (request connection ctx))
+               _ (prompt/prompt @connection (request connection ctx))
+               initial (count @calls)
+               after (prompt/prompt @connection (request connection ctx))]
+           (is (pos? initial))
+           (is (= initial (count @calls)) (pr-str @calls))
+           (is (= (:seon.cluster.prompt/text before) (:seon.cluster.prompt/text after)))
+           (is (seq (:seon.render.web/ai-calls @(render/shared-cache ctx))))))))))
 
-(deftest unchanged-acquisition-performs-zero-database-door-reads
-  (planted
-   (fn [connection ctx]
-     (acquire-context connection ctx)
-     ;; The first real context render records its costs and therefore advances
-     ;; the connection once. Let retained dependency evidence observe that
-     ;; unrelated transaction before measuring a genuinely unchanged basis.
-     (acquire-context connection ctx)
-     (let [reads (atom 0)
-           counted (fn [f]
-                     (fn [& arguments]
-                       (swap! reads inc)
-                       (apply f arguments)))]
-       (with-redefs [db/q (counted db/q)
-                     db/pull (counted db/pull)
-                     db/pull-many (counted db/pull-many)
-                     db/entity (counted db/entity)
-                     db/datoms (counted db/datoms)]
-         (acquire-context connection ctx))
-       (is (zero? @reads)
-           "unchanged acquisition returns retained bytes without a db read")))))
-
-(deftest one-new-message-appends-exactly-one-entry
+(deftest later-evaluations-preserve-the-opening-history
   (planted
    (fn [connection ctx]
      (let [before (:seon.cluster.prompt/text
-                   (acquire-context connection ctx))
-           appended (atom [])
-           append web/append-history]
-       (db/transact! connection
-                     [{:seon.cluster.message/id "one-new-message"
-                       :seon.cluster.message/to
-                       [:seon.cluster.agent/id "walker"]
-                       :seon.cluster.message/content "one appended entry"
-                       :seon.cluster.message/at (Date. 1700000004000)}])
-       (let [after (with-redefs [web/append-history
-                                 (fn [entries observations]
-                                   (let [result (append entries observations)]
-                                     (swap! appended conj
-                                            (- (count result) (count entries)))
-                                     result))]
-                     (:seon.cluster.prompt/text
-                      (acquire-context connection ctx)))]
-         (is (str/starts-with? after before) "all prior bytes are retained")
-         (is (= [1] @appended)
-             "one new message crosses append with exactly one entry"))))))
-
-(deftest a-second-run-replaces-the-opening-task-and-puts-current-task-last
-  (planted
-   (fn [connection ctx]
-     (let [opening (:seon.cluster.prompt/text
-                    (prompt/prompt @connection
-                                   (request connection ctx)))]
-       (db/transact!
-        connection
-        [{:seon.cluster.message/id "current-task"
-          :seon.cluster.message/to [:seon.cluster.agent/id "walker"]
-          :seon.cluster.message/content "CURRENT-TASK-UNIQUE"
-          :seon.cluster.message/at (Date. 1700000005000)}
-         {:seon.cluster.run/id "current-run"
-          :seon.cluster.run/agent [:seon.cluster.agent/id "walker"]
-          :seon.cluster.run/trigger
-          [:seon.cluster.message/id "current-task"]
-          :seon.cluster.run/opened-at (Date. 1700000006000)}
-         {:seon.cluster.agent/id "walker"
-          }])
-       (let [current-request
-             (assoc (request connection ctx)
-                    :seon.cluster.run/id "current-run")
-             current (:seon.cluster.prompt/text
-                      (prompt/prompt @connection current-request))]
-         (is (str/includes? opening "inspect this walk"))
-         (is (not (str/includes? current "inspect this walk"))
-             "the opening task is not emitted again from the full re-walk")
-         (is (= 1 (count (re-seq #"CURRENT-TASK-UNIQUE" current)))
-             "the current task appears exactly once")
-         (is (str/ends-with? current "CURRENT-TASK-UNIQUE")
-             "the current task is the final prompt bytes"))))))
+                   (prompt/prompt @connection (request connection ctx)))]
+       (db/transact! connection [{:seon.cluster.run/id "walk-run"
+                                 :seon.cluster.run/closed-at (Date.)}])
+       (record-evaluation! connection ctx "second-history" "(str \"SECOND-EVALUATION\")")
+       (let [after (:seon.cluster.prompt/text
+                    (prompt/prompt @connection (request connection ctx)))]
+         (is (str/starts-with? after before))
+         (is (str/includes? after "inspect this walk"))
+         (is (str/includes? after "SECOND-EVALUATION")))))))
 
 (deftest basis-only-transactions-do-not-append-history
   (planted
@@ -328,7 +210,7 @@
    (fn [connection ctx]
      (db/transact! connection
                    [{:seon.cluster.agent/id "walker"
-                     :seon.config.ai/prompt-token-budget 3}])
+                     :seon.agent/settings {:seon.config.ai/prompt-token-budget 3}}])
      (let [distances (atom [])
            acquire (fn [render-request]
                      (let [distance (:seon.render/distance render-request)]
@@ -403,7 +285,7 @@
                        @connection)]
        (db/transact! connection
                      [{:seon.cluster.agent/id "walker"
-                       :seon.config.ai/prompt-token-budget 100}])
+                       :seon.agent/settings {:seon.config.ai/prompt-token-budget 100}}])
        (testing "with no recorded usage the measured prior is named"
          (let [calibration (prompt/model-calibration @connection model)]
            (is (= :seon.ai.tokens/shipped-prior

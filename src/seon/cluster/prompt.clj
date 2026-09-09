@@ -1,16 +1,9 @@
 (ns seon.cluster.prompt
-  "The prompt acquires one retained entity walk from the cluster render proc.
+  "The prompt derives retained history on the calling turn's thread.
 
-  The loop's call site is deliberately stable: it still asks `prompt` for
-  `{text, contributions, db}` and captures those exact bytes before the
-  provider call. Internally there is no block selection or composition. One
-  public `seon.render/walk` function returns the exact stable-prefix text and
-  the final REPL-state line carries volatile basis and time after the provider
-  cache boundary.
-
-  Prompt size remains measured in the provider's own units and returned as
-  an informative `seon.ai.tokens/budget-report`; it does not constrain the
-  rendered context during the current unlimited-render experiment."
+  It returns the exact text, ordered contribution measurements, and database
+  value supplied to the provider boundary. The token budget is informative;
+  prompt acquisition never clips or compacts history."
   (:require [clojure.edn :as edn]
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]

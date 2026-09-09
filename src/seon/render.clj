@@ -1367,6 +1367,8 @@
             ;; must never transact.
             (when (and (not reusable?)
                        (not invocation-reusable?)
+                       (some? rendered)
+                       (not= rendered (:seon.render.call/output previous))
                        call-id
                        captured-calls
                        (:seon.cluster.run/id request)
