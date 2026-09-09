@@ -7,6 +7,7 @@
             [seon.cluster.agent :as agent]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.eval :as evaluation]
             [seon.flow :as flow]
             [seon.test-support :as support]
             [seon.turn :as turn]))
@@ -107,6 +108,17 @@
                         :seon.cluster.agent/id id}))
          (submit "a")
          (submit "b")
+         (let [database @connection
+               basis (db/basis-t database)
+               saved (evaluation/of-agent database "a")]
+           (is (= 1 (count saved)))
+           (is (= "(+ 1 1)" (:seon.cluster.eval/source (first saved))))
+           (is (= 'my.agents.a
+                  (get-in (first saved) [:seon.cluster.eval/ns :seon.ns/name])))
+           (is (= saved (evaluation/of-agent database "a")))
+           (is (= basis (db/basis-t @connection)))
+           (is (= :seon.eval/agent-not-found
+                  (:seon.error/kind (evaluation/of-agent database "absent")))))
          (let [a (evaluations @connection "a")
                b (evaluations @connection "b")]
            (is (= 1 (count a)))

@@ -1,4 +1,23 @@
-#:seon.eval{:allocated-bytes :int,
+#:seon.eval{:entity
+            [:map
+             [:db/id :int]
+             [:t :seon.db/basis-t]
+             [:seon.cluster.eval/id :seon.cluster.eval/id]
+             [:seon.cluster.eval/run [:map [:db/id :int]]]
+             [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+             [:seon.cluster.eval/source {:optional true} :seon.cluster.eval/source]
+             [:seon.cluster.eval/at {:optional true} :inst]
+             [:seon.cluster.eval/ns {:optional true}
+              [:map [:seon.ns/name :seon.ns/name]]]
+             [:seon.cluster.eval/read-evidence {:optional true}
+              [:vector :seon.db/read-evidence]]
+             [:seon.cluster.eval/read-basis-transaction {:optional true}
+              :seon.db/basis-t]
+             [:seon.cluster.eval/result-edn {:optional true} :string]
+             [:seon.cluster.eval/output {:optional true} :string]
+             [:seon.cluster.eval/error {:optional true} :string]
+             [:seon.cluster.eval/interrupted-at {:optional true} :inst]],
+            :allocated-bytes :int,
             :duration-ms :int,
             :fn-entries :int,
             :host-interop-count [:int {:min 0}],

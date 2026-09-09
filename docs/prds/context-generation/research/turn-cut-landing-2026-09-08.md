@@ -7,6 +7,50 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
+## Evaluation query continuation, 2026-09-08
+
+The resumed tree has no uncommitted loop/run/SCI changes. The debug caller
+already names `seon.eval/of-agent`; its implementation now reads all saved
+evaluation entities in turn transaction and ordinal order, expands namespace
+and read-evidence refs, and distinguishes an absent agent from an empty history.
+This query is the first part of the evaluation storage cut, not a claim that
+shown-text storage or the attribute rename is complete.
+
+Default's advertisement reports PID 22932, PREPL 54281 and HTTP 7994. MCP
+`runtime_status` returned health and Flow `unknown`, with `Read timed out`.
+This recurrence is associated with the existing
+[live observation issue](../../../seon/issues/default-web-request-times-out-during-partial-adoption.md);
+it does not establish an adoption cause. That issue file is concurrently
+edited, so this observation is recorded here without changing its owner's hunk.
+
+The path-isolated gate passed **3 tests, 57 assertions, zero failures/errors**:
+one new query regression (5 assertions) and two inherited ordinary-proc tests
+(52 assertions, six added assertions). The query test proves transaction order
+despite reverse wall-clock timestamps and reverse entity insertion order,
+agent isolation, empty history, retention of unfinished evaluations, and no
+write. The ordinary-proc proof supplies real SCI outcomes and checks namespace
+expansion, repeatability, absent-agent diagnostics, and unchanged database basis.
+Fast iteration found one invalid output contract: a stored ref schema cannot
+describe expanded pull maps. The declared `:seon.eval/entity` query shape fixes
+that mismatch; the final fast run also passed 3 tests / 57 assertions.
+
+Development adoption then converged at source commit
+`6aa0cf6a-730f-5ba3-960e-f00e731bc9f6`, digest
+`7769bc5c1a72d7ce3bca8b85a91ffbe65db82cd47c89cdc111066a30979754b3`.
+The debug route returned HTTP 200 in 0.013723 seconds and its served HTML
+contains `47 evaluations · continuing`, with no unavailable-function line.
+MCP JVM evaluation returned 47 evaluations, the first source `(help)` at
+`:t 536870974`, and equal data on repeated queries. Before convergence the
+page briefly returned HTTP 500 from the old contract. The computer-use tool
+reported no browser available, so this is HTTP/HTML evidence, not a visual
+paint claim. No default lifecycle operation or provider call was made.
+
+This slice adds one public query (0 → 1 definitions), deletes no storage
+attributes, and adds no datoms or transactions per turn. Digest evaluation
+ids, shown-text storage, memory objects, family renames, and the remaining
+deletion rows are still unfinished. No RESET NEEDED line applies: this adds a
+non-stored query shape, and in-place adoption succeeded.
+
 ## Opening basis and curation cut, 2026-09-08 21:16 UTC
 
 The owned-path commit gate passed **51 tests, 441 assertions, zero
