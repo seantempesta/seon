@@ -347,3 +347,30 @@
          (spit "docs/prds/context-generation/research/context_cookbook_faults_2026_09_09.edn"
                (pr-str result))
          result)))))
+
+(defn probe-identity-shape!
+  "Compare the selected nested pull shape with the agent's shown value."
+  []
+  (let [database @(operator/connection "default")
+        projection (schema/projection-from-database database)]
+    (schema/call-with-projection
+     projection
+     (fn []
+       (let [raw (db/pull database
+                          '[:seon.agent/id {:seon.agent/namespace
+                                           [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]
+                          [:seon.agent/id "juniper"])
+             configuration (config/effective database "default")
+             shown (value/render-ai
+                    {:seon.db/db database :seon.agent/id "juniper"
+                     :seon.render.call/id [:context-cookbook/identity-shape]
+                     :seon.sci.admit/caps (config/result-caps configuration)
+                     :seon.render/profile (render/agent-render-profile configuration)
+                     :seon.render/value raw})
+             result {:raw raw :shown shown :bytes (byte-count shown)
+                     :basis (db/basis-t database)
+                     :shape-preserved? (= raw (read-string shown))}]
+         (assert (:shape-preserved? result))
+         (spit "docs/prds/context-generation/research/context_cookbook_identity_2026_09_09.edn"
+               (pr-str result))
+         result)))))

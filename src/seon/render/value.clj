@@ -206,20 +206,21 @@
 
 (defn- reference-identity
   [database value]
-  (let [identity-attributes (into []
+  (if (map? value)
+    value
+    (let [identity-attributes (into []
                                   (comp (filter (fn [[_ properties]]
                                                   (= :db.unique/identity (:db/unique properties))))
                                         (map first))
                                   (:schema database))
-        entity (if (map? value) value
-                   ((requiring-resolve 'seon.db/pull)
-                    database (into [:db/id] identity-attributes) value))]
+        entity ((requiring-resolve 'seon.db/pull)
+                database (into [:db/id] identity-attributes) value)]
     (or (some (fn [attribute]
                 (when-let [entry (find entity attribute)]
                   [attribute (val entry)]))
               (sort-by str identity-attributes))
         (when-let [eid (:db/id entity)] [:db/id eid])
-        value)))
+        value))))
 
 (defn- attribute-value
   [unit attribute value]

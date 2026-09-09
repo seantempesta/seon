@@ -1,0 +1,1 @@
+{:raw #:seon.agent{:id "juniper", :namespace #:seon.ns{:name my.agents.juniper, :steward #:seon.agent{:id "juniper"}}}, :shown "#:seon.agent{:id \"juniper\", :namespace #:seon.ns{:name my.agents.juniper,\n    :steward #:seon.agent{:id \"juniper\"}}}", :bytes 116, :basis 536870980, :shape-preserved? true}

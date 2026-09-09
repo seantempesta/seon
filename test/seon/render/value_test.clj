@@ -12,6 +12,7 @@
             [seon.render.value :as value]
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
+            [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
 
 (def ^:private caps
@@ -375,12 +376,37 @@
    (fn [connection]
      (let [database @connection
            target (db/pull database '[:db/id :seon.ns/name] [:seon.ns/name 'seon.print])
-           raw {:seon.ns/requires [target] :fixture/title "no render pair"}
+           raw {:seon.ns/requires [(:db/id target)] :fixture/title "no render pair"}
            request (assoc (probe-unit raw) :seon.db/db database)
            shown (edn/read-string (value/render-ai request))]
        (is (:db/id target) "the reference target must really exist")
        (is (= #{[:seon.ns/name 'seon.print]} (:seon.ns/requires shown)))
        (is (= "no render pair" (:fixture/title shown)))))))
+
+(deftest an-explicit-pull-keeps-its-nested-shape-in-shown-text
+  (support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "shape"})
+     (let [written (db/transact!
+                    connection
+                    [[:db/add "cluster" :seon.cluster/name "shape"]
+                     {:seon.agent/id "shape" :seon.agent/namespace [:seon.ns/name 'seon.print]}
+                     [:db/add [:seon.ns/name 'seon.print] :seon.ns/steward [:seon.agent/id "shape"]]])
+           _ (is (:db-after written) (pr-str written))
+           ctx (support/fork-cluster-ctx connection "shape")
+           configuration (support/effective-config)
+           result (evaluation/evaluate
+                   {:seon.cluster.eval/source
+                    "(seon.db/pull '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}] [:seon.agent/id \"shape\"])"
+                    :seon.sci.eval/ctx ctx :seon.db/db @connection
+                    :seon.sci.admit/caps (config/result-caps configuration)
+                    :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
+                    :seon.config/on-core-error :panic})
+           shown (:seon.eval/value result)
+           parsed (edn/read-string shown)]
+       (is (not (:seon.cluster.eval/error result)) (pr-str result))
+       (is (= "shape" (get-in parsed [:seon.agent/namespace :seon.ns/steward :seon.agent/id])) shown)
+       (is (= (:seon.sci.admit/value result) parsed) shown)))))
 
 (deftest large-values-have-bounded-ai-work-and-complete-html
   (doseq [[label raw terminal]

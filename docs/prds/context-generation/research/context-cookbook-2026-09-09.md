@@ -126,10 +126,28 @@ was committed. The source probe is `probe-fault-blocks!` in the retained script.
 Default adoption initially used the old schema coherence function and refused
 this pair's unit input. Reloading that owning namespace addressed the stale
 function, but another lifecycle operation then stopped default while our
-explicit adoption waited for the lock. That waiting client was canceled; this
-note claims hot-reloaded function outputs and isolated armed system-turn proof,
+explicit adoption waited for the lock. That waiting client exited with "Incremental source publication requires a running
+operator JVM"; this note claims hot-reloaded function outputs and isolated armed system-turn proof,
 not completed default adoption. RESET NEEDED: include this slice in the owner's
 batched publication/refork if the existing branch cannot adopt it.
+
+### Preserve selected reference shapes
+
+A non-component reference supplied as a map now keeps that selected shape.
+Bare entity ids still resolve to lookup refs. The old identity result dropped
+its selected steward and printed 73 bytes; the fresh default JVM now prints
+**116 bytes**, preserving the namespace and nested steward. The parsed shown
+text equals the actual selected value. [Exact result](context_cookbook_identity_2026_09_09.edn).
+The canonical regression executes the bare pull through the one SCI evaluation
+point. Fast gate: **26 tests / 132 assertions**; isolated gate: **26 / 136**;
+platform: **83 / 490**, all green. The returned-error diagnostic remains 131 bytes.
+The existing [identity/directory issue](../../../seon/issues/raw-identity-projection-hides-selected-steward.md)
+still owns the directory half; its selected-reference half is fixed here.
+
+After the externally operated default restart, the fault probe reran against
+basis 536870980: the same 240/2 and 243/79 byte pairs, unchanged default basis,
+and the speculative fault id absent. These are fresh-JVM observations. No lane
+lifecycle operation stopped, restarted, or reforked default.
 
 ### Current provider prompt
 
