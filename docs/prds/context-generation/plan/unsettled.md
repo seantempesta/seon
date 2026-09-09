@@ -686,3 +686,18 @@ half-edit. Measured targets in the issue.
 - Owner review point: when the cookbook's help and page slices land and
   the fixture is reseeded.
 
+## 2026-09-09 17:45 — check-in: forward progress, one lane running, data lane launched
+
+- Since 15:00: 14 source commits (cookbook ×11, loop-live ×1, transact-
+  feedback ×2); the live loop settles in 1–2 s (proven on default by a
+  transacted message); help carries the data-first rules; root sees its
+  agents; `dir` shows declared schemas; returned refusals render through
+  their pair. Chart PRD §16 now carries status per roadmap step.
+- context-cookbook: on its harness slice (score reporting regression),
+  then §14a (help render pair, settings effective values, turns block
+  HTML-only, "Context now", plan ids by example). data-lane launched at
+  high on roadmap 3–7 as one batched reset (ids, transaction-as-time,
+  addressable components, the inbox edge, the runtime component with the
+  turns inside it).
+- Owner review point: after the cookbook's §14a slice and a reseed.
+
