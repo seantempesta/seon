@@ -1,6 +1,6 @@
 --- a/src/seon/render/web.clj
 +++ b/src/seon/render/web.clj
-@@ -1247,7 +1247,8 @@
+@@ -1250,7 +1250,8 @@
                                            (forward-attribute attribute))
          root (:seon.render.debug/subject debug-request)
          cursor {:seon.render.data/path
@@ -10,7 +10,7 @@
                  :seon.render.data/offset 0}
          value (if present? (connected-value related value) value)
          experiments
-@@ -1327,12 +1328,26 @@
+@@ -1329,12 +1330,26 @@
                          (remove #{:db/id})
                          (remove declared)
                          distinct
@@ -39,7 +39,7 @@
             (map (fn [attribute]
                    (let [entry (find (if (reverse-attribute? attribute)
                                       reverse-values acquisition) attribute)]
-@@ -1340,7 +1355,7 @@
+@@ -1342,7 +1357,7 @@
                        projection render-request debug-request attribute
                        (when entry (val entry)) (some? entry) related
                        context-selection context-source-call))))
@@ -48,3 +48,23 @@
     (when-not (get-in observation [:seon.render.data/incoming
                                    :seon.render.data/complete?])
       [:p {:class "seon-debug-empty"}
+@@ -1615,9 +1630,16 @@
+                   declared-units
+                   (declared-entity-units projection database acquisition)
+                   reverse-units
+-                  (into (filterv reverse-attribute? declared-units)
+-                        (comp (map reverse-attribute) (distinct))
+-                        (sort (installed-ref-attributes database)))
++                  (into []
++                        (comp
++                         (map :seon.schema/key)
++                         (keep #(projection-form projection %))
++                         (map schema.form/attr-form-properties)
++                         (mapcat :seon.render/units)
++                         (filter reverse-attribute?)
++                         (distinct))
++                        (schema/matching-shapes-in
++                         projection (value/transacted acquisition database)))
+                   ;; ONE pull per declared reverse relationship, each asking
+                   ;; for the connected entities themselves: a relationship
+                   ;; too large for the declared work bound refuses as that

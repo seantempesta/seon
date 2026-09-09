@@ -526,20 +526,12 @@
              ": " content))))))
 
 (defn render-ai
-  "`:seon.render/ai` — source which reads and formats this message."
+  "Read this message as data, including its sender, time, and content."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/source]]}
   [unit]
   (when-let [id (get unit ::id)]
-    (pr-str
-     (list `format-ai
-           (list 'seon.db/pull
-                 '[:seon.cluster.message/id
-                   :seon.cluster.message/content
-                   {:seon.cluster.message/from
-                    [:db/id :seon.cluster.agent/id]}
-                   {:seon.cluster.message/to
-                    [:db/id :seon.cluster.agent/id]}]
-                 [::id id])))))
+    (str "; Read this message; reply with (my.message/send sender-id text message-id).\n"
+         (pr-str (list 'my.message/read id (list 'seon.db/db))))))
 
 (defn render-html
   "`:seon.render/html` — one message, with the same facts as its AI twin."
@@ -578,7 +570,11 @@
             (conj (let [instant (.toString (.toInstant ^java.util.Date at))]
                     [:time {:class "seon-message-at" :datetime instant}
                      instant])))
-          [:p {:class "seon-message-content"} content]]
+          [:p {:class "seon-message-content" :style {:white-space "pre-wrap"}} content]
+          [:p {:class "seon-message-reply"}
+           (if (and from (get unit ::id))
+             [:code (pr-str (list 'my.message/send from "Your reply" (get unit ::id)))]
+             "This message has no agent sender to address a reply to.")]]
           (or about caused-by-ref)
           (conj
            (cond->
@@ -611,22 +607,16 @@
 ;;; recorded in the research note.
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private inbox-source
-  (str ";; What have I been sent? Nothing stores an inbox: `my.message/inbox`\n"
-       ";; joins :seon.cluster.message/to against me and returns the messages\n"
-       ";; oldest first, so the newest one is the last printed. The empty\n"
-       ";; request map is the whole call — the database and I are supplied.\n"
-       (pr-str (list 'my.message/inbox {}))))
-
 (defn render-inbox-ai
-  "`:seon.render/ai` — source which lists the messages addressed to an agent.
-
-  Call preparation supplies the database and the calling agent to
-  `my.message/inbox`, so the same source is correct from either end of the
-  `to` reference."
+  "Read each acquired message once through its entity's AI pair."
   {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/source]}
-  [_recipient-or-inbox]
-  inbox-source)
+  [recipient-or-inbox]
+  (if (and (sequential? recipient-or-inbox)
+           (every? map? recipient-or-inbox))
+    (str/join "\n\n"
+              (keep render-ai
+                    (sort-by (juxt ::at ::id) recipient-or-inbox)))
+    "; Messages are read from the recipient's inbox.\n(my.message/inbox {})"))
 
 (defn- message-order
   [message]

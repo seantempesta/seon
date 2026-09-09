@@ -19,7 +19,7 @@ const fs = require('node:fs');
     fs.writeFileSync(`${prefix}.json`, JSON.stringify({url, blocks}, null, 2) + '\n');
     fs.writeFileSync(`${prefix}.txt`, await page.locator('body').innerText());
     await page.screenshot({path: `${prefix}.png`, fullPage: true});
-    for (const [name, selector] of [['identity', '.seon-agent-identity-entry'], ['plan', '.my-plan'], ['settings', '.seon-agent-settings']]) {
+    for (const [name, selector] of [['identity', '.seon-agent-identity-entry'], ['plan', '.my-plan'], ['settings', '.seon-agent-settings'], ['messages', '.seon-message-inbox']]) {
       const component = page.locator(selector).first();
       if (await component.count() && await component.isVisible()) {
         const bounds = await component.boundingBox();

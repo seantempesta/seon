@@ -315,3 +315,94 @@ removed after checking lane status and the process table. Their subjects
 had been re-observed by the passing final gates. Successful isolated roots
 were removed by the runner itself. Source symlinks were not followed during
 cleanup. Unrelated working edits and other lanes' roots were preserved.
+
+## Follow-up: message entities and declared reverse concerns
+
+The 18:10 assignment was probed on the live default page before editing.
+The registry probe returned the existing `:seon.render/units` schema (78 ms)
+and no declarations using it. This change reuses that property on the agent
+entity schema: message recipients, turns, and faults are its reverse concerns.
+No new property or production key roster was added. The PRD §13–§17 was
+read again; the previously requested authorities were read end to end during
+this lane's initial cuts.
+
+Dependency ledger: Datahike pull's reverse-ref semantics remain owned by
+`reference-code/datahike/src/datahike/pull_api.cljc`; the first-party consumer
+is `src/seon/render/web.clj:1617`. Authored Malli metadata is read through
+`src/seon/schema/form.cljc:17` (`attr-form-properties`), using the projection
+already handed to the caller. Message reads remain `my.message/read`, backed
+by `seon.db/pull`; `seon.cluster.message/render-inbox-ai` calls the message
+entity pair once per acquired message, ordered by its timestamp and id.
+
+The message teaching form now returns the durable message map, including
+sender, recipient, timestamp, content, and message identity. HTML keeps
+attribution and timestamp separate from authored content, preserves newlines,
+and shows the sender-addressed `my.message/send` expression with this message
+as `about`. An absent sender is stated explicitly; no recipient is invented.
+
+Protected integration: the updated
+[web hunk](components-web-proposed-2026-09-08.patch) is **not applied**. It
+includes the earlier scalar grouping and replaces discovery of every installed
+reverse ref with the matching entity schema's `:seon.render/units` declarations.
+Until page-feed integrates it, the live page can still show undeclared reverse
+refs and duplicate messages beneath the inbound request shape. The pair and
+schema declaration alone do not prove that page filtering has shipped.
+
+The stored `:seon.def/agent` and `:seon.def/ns` rows must be deleted by turn-cut
+under PRD §14/§15. They receive no render pair in this change. Admission source
+and route data refs likewise receive no concern declaration. The raw reference
+graph may still inspect connections; they are not agent concern blocks.
+
+Two old assertions in the protected history integration test still expect
+`seon.cluster.message/format-ai` (`test/seon/render/transcript_test.clj:430`
+and `:744`); when that integration is updated, they must expect
+`my.message/read` and a printed data result. No protected render source or test
+was edited here.
+
+The armed subject probe also exposed a stale generator producing nil for the
+required `:seon.config.message/max-chain` input. Its valid-history generator now
+uses positive bounds; this does not weaken the production contract. Explicit
+`(seon.db/db)` in the generated message read avoids relying on positional
+argument supply in the fixture and works through the ordinary SCI database API.
+
+Scratch verification used `tmp/components-root`, cluster `components`, HTTP
+7809, PREPL 57462, published source `6aa0cece-8ed0-5050-be6f-89eadade587c`.
+Juniper was reseeded (222 ms). The armer was paused before seeding; only root
+was armed. Root's already-started bootstrap added a task and a fault message;
+the final capture therefore contains four messages, including the two authored
+fixture messages. Root's scratch graph was subsequently paused as well. These
+are observed message contents, not a claim of healthy bootstrap execution.
+
+The final scratch message column contains four `my.message/read` evaluations,
+2,343 UTF-8 bytes including its `AI` label, and no generic printer fallback in
+the message HTML. Exact source is
+[recorded here](components-messages-scratch-2026-09-08.ai.clj); exact evaluated
+AI and HTML column text is in
+[the browser capture](components-messages-scratch-2026-09-08.json).
+The [message screenshot](components-messages-scratch-2026-09-08-messages.png)
+was opened and inspected; the [whole page](components-messages-scratch-2026-09-08.png)
+also records the remaining protected integration gaps.
+
+Exact first evaluated message bytes from that capture:
+
+```clojure
+; Read this message; reply with (my.message/send sender-id text message-id).
+my.agents.juniper=> (my.message/read "design-lab/root-to-juniper/1" (seon.db/db))
+#:seon.repl{:value #:seon.cluster.message{:at #inst "2026-09-06T19:35:00.000-00:00", :content
+  "Please make your current plan and the messages you receive easy to understand together. Start by inspecting the data connected to your agent entity.",
+  :from [:seon.cluster.agent/id "root"], :id "design-lab/root-to-juniper/1",
+  :to [:seon.cluster.agent/id "juniper"]}, :ms 99}
+```
+
+The isolated subject gate on HEAD `f01a9a824` plus only the three owned source,
+schema, and test paths passed **20 tests, 59 assertions**, zero failures/errors.
+The new test verifies that reverse concerns are actual schema declarations.
+
+The platform gate passed **82 tests, 486 assertions**, zero failures/errors,
+with `SEON_TEST_WORKERS=3` and `-XX:ActiveProcessorCount=6`. The browser's fault
+message was subsequently traced to the protected feed writer, **not** bootstrap
+execution: `web.clj:2865` casts an absent package basis number. The durable
+fault evidence and exact ownership boundary are filed in
+[the feed issue](../../../seon/issues/feed-writer-casts-an-absent-package-number.md).
+This corrects the provisional bootstrap attribution above; the message itself
+names the interrupted bootstrap turn, which is not the throwing function.

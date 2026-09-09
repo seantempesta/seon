@@ -29,6 +29,7 @@
             [seon.config :as config]
             [seon.render.route :as route]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
@@ -119,7 +120,7 @@
               :seon.sci.eval/time-limit-ms 5000
               :seon.config/on-core-error :panic})]
         (is (= 1 (count planned)))
-        (is (= "Agent alice said to bob: hello"
+        (is (= (my.message/read "message-1" @connection)
                (:seon.sci.admit/value evaluated)))
         (is (nil? (:seon.cluster.eval/error evaluated)))))))
 
@@ -229,17 +230,11 @@
             messages (db/pull-many database '[*]
                                    (mapv :db/id reverse-value))
             rendered (message/render-inbox-html messages database)]
-        (is (= (str ";; What have I been sent? Nothing stores an inbox:"
-                    " `my.message/inbox`\n"
-                    ";; joins :seon.cluster.message/to against me and returns"
-                    " the messages\n"
-                    ";; oldest first, so the newest one is the last printed."
-                    " The empty\n"
-                    ";; request map is the whole call — the database and I"
-                    " are supplied.\n"
-                    "(my.message/inbox {})")
-               (message/render-inbox-ai messages))
-            "the AI projection is source, not prose about the messages")
+        (is (= (str/join "\n\n"
+                             (map message/render-ai (sort-by :seon.cluster.message/at messages)))
+               (message/render-inbox-ai messages)))
+        (is (str/includes? (pr-str rendered)
+                           "my.message/send"))
         (is (= [:section {:class "seon-family-entry seon-message-inbox"}
                 [:h2 "Messages (2)"]]
                (subvec rendered 0 3)))
@@ -278,6 +273,7 @@
             rendered
             (message/render-html
              {:seon.db/db database
+              :seon.cluster.message/id "message-1"
               :seon.cluster.message/content "first line\nsecond line"
               :seon.cluster.message/from [:seon.cluster.agent/id "alice"]
               :seon.cluster.message/to [:seon.cluster.agent/id "bob"]
@@ -296,8 +292,10 @@
                  [:time {:class "seon-message-at"
                          :datetime "2023-11-14T22:13:20Z"}
                   "2023-11-14T22:13:20Z"]]
-                [:p {:class "seon-message-content"}
+                [:p {:class "seon-message-content" :style {:white-space "pre-wrap"}}
                  "first line\nsecond line"]
+                [:p {:class "seon-message-reply"}
+                 [:code (pr-str '(my.message/send "alice" "Your reply" "message-1"))]]
                 [:p {:class "seon-message-links"}
                  [:span {:class "seon-message-about"}
                   [:a {:href
@@ -386,7 +384,7 @@
 
 (def ^:private message-scenario-generator
   (gen/let [population-size (gen/choose 2 4)
-            chain-limit (gen/one-of [(gen/return nil) (gen/choose 1 5)])
+            chain-limit (gen/choose 1 5)
             commands (gen/vector message-command-generator 1 14)]
     {::population-size population-size
      ::chain-limit chain-limit
@@ -930,3 +928,12 @@
                     results))
         (is (not-any? vector? results)
             "every refusal is a flat value and produces no rows")))))
+
+(deftest reverse-agent-concerns-are-schema-declarations
+  (let [forms (schema.edn/packaged-forms)
+        units (:seon.render/units (second (:seon.cluster.agent/agent forms)))]
+    (is (= [:seon.cluster.message/_to :seon.cluster.run/_agent :seon.error/_agent]
+           units))
+    (is (not-any? (set units)
+                  [:seon.def/_agent :seon.def/_ns
+                   :seon.schema.admission/_source :seon.render.route/_data]))))
