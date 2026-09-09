@@ -105,7 +105,10 @@
             :settled
             [:map
              [:seon.repl/key :seon.repl/key]
-             [:seon.sci.admit/print-node :seon.print/node]],
+             [:seon.eval/value {:optional true} :seon.eval/value]
+             [:seon.cluster.eval/output {:optional true} :string]
+             [:seon.cluster.eval/error {:optional true} :string]
+             [:seon.sci.admit/print-node {:optional true} :seon.schema/value]],
             :pull-result
             [:map
              [:seon.repl/root-key :seon.repl/key]
