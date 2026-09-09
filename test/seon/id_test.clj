@@ -2,6 +2,17 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.id :as id]))
 
+(deftest data-shape-and-explicit-length-determine-identity
+  (is (= "ba7816bf8f01" (id/id 'abc)))
+  (is (= "ba7816bf" (id/id 'abc 8)))
+  (is (not= (id/id 'abc) (id/id "abc")))
+  (is (= (id/id ["turn" 2]) (id/evaluation "turn" 2)))
+  (is (= (id/id ["turn" 2] 8) (id/digest 8 ["turn" 2])))
+  (let [a (id/id) b (id/id)]
+    (is (id/valid? id/default-length a))
+    (is (id/valid? id/default-length b))
+    (is (not= a b))))
+
 (deftest an-evaluation-id-is-stable-short-and-a-symbol
   ;; THE CLASS: every stable identifier comes from the one derivation.
   (let [a (id/evaluation "cluster-default" "turn-1" 0)

@@ -7,6 +7,11 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+Data lane, 2026-09-09: MCP status selected default PID 92059, PREPL 53086,
+but health and Flow returned `unknown` with `Read timed out`. A subsequent
+JVM `(+ 1 1)` returned 2 in 1 ms; the immutable plan/schema query returned
+in 3 ms. No cause or Flow health is inferred. Default was not restarted.
+
 Transact-feedback, 2026-09-09: the initial MCP `runtime_status` selected
 default PID 37586, PREPL 61094, and reported health/flow `unknown` with
 `Read timed out`. Descriptor-only `bin/seon status` reported that process

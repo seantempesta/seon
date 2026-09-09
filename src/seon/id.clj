@@ -1,22 +1,18 @@
 (ns seon.id
-  "THE ONE IDENTITY DERIVATION. Every stable identifier in Seon that is not
-  a Datahike entity id comes from `digest`: the lowercase SHA-256 hex of the
-  ordered `pr-str` of its identity parts, truncated to `length` hex
-  characters. Same parts, same id, on every JVM and after every refork of
-  the same data (owner ruling, 2026-09-08: ids are stable digests; no
-  random generator, no per-family scheme, no second truncation anywhere).
-
-  `random-uuid` remains for a genuinely fresh EVENT with no identity of its
-  own (a fault occurrence, a tab opened). A thing that IS its parts — an
-  evaluation of ordinal N in turn T on branch B, a rendered value at a
-  path — takes `digest` of those parts, never a fresh random."
+  "One identity entry: `id` hashes the pr-str of data, or creates a fresh
+  event identity when called without data. Stable identities retain the
+  supplied data's shape; callers choose their own identity parts."
   (:require [clojure.string :as str])
   (:import [java.security MessageDigest]))
+
+(def default-length
+  "Default number of lowercase hexadecimal characters in an identity."
+  12)
 
 (def evaluation-length
   "Hex characters an evaluation id keeps: 48 bits, unique across every
   cluster one JVM will ever hold, short enough to read in a prompt."
-  12)
+  default-length)
 
 (defn sha-256
   "Lowercase SHA-256 hex digest of ordered byte arrays."
@@ -30,14 +26,27 @@
            (map #(format "%02x" (bit-and 0xff %))
                 (.digest digester)))))
 
+(defn id
+  "SHA-256 of (pr-str data), truncated to n characters (default 12).
+  With no arguments, mint a fresh event identity. Data is deliberately
+  polymorphic: scalars and collections are hashed exactly as printed."
+  {:malli/schema
+   [:function
+    [:=> [:cat] [:string {:min 12 :max 12}]]
+    [:=> [:cat :any] [:string {:min 12 :max 12}]]
+    [:=> [:cat :any [:int {:min 1 :max 64}]] [:string {:min 1 :max 64}]]]}
+  ([] (id (random-uuid)))
+  ([data] (id data default-length))
+  ([data n]
+   (subs (sha-256 [(.getBytes ^String (pr-str data) "UTF-8")]) 0 n)))
+
 (defn digest
   "The stable id of a thing that IS its `parts`: `length` hex characters of
   the SHA-256 over their ordered `pr-str`."
   {:malli/schema [:=> [:cat [:int {:min 1 :max 64}] [:sequential :any]]
                   [:string {:min 1 :max 64}]]}
   [length parts]
-  (subs (sha-256 [(.getBytes ^String (pr-str (vec parts)) "UTF-8")])
-        0 length))
+  (id (vec parts) length))
 
 (defn symbol-in
   "The readable symbol `ns/<letter><id>` for an id — a Clojure symbol may
