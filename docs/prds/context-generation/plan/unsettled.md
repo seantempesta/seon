@@ -399,3 +399,23 @@ half-edit. Measured targets in the issue.
   settings, messages, history; 22 printer fallbacks left (10 stored defs,
   12 non-concern reverse refs), both assigned.
 
+## 2026-09-08 19:15 — third landings; the page as measured
+
+- page-feed `77abbf43a` (adoption invalidates render caches — edit,
+  adopt, GET shows the new render), `1338b67b4` (only schema-declared
+  reverse concerns render; six blocks on default), `3fe446205` (combined
+  turn+write traffic: first SSE 691 ms max, plain GET 852 ms max).
+  Prompt expectations fixed in `22f6163e5`. Ended; scratch cleaned.
+- turn-cut `ff9507c1b`: private SCI objects stay in memory; evaluations
+  store shown text; stored-def rows gone. Running: `seon.turn` rename,
+  custody removal, delete rows.
+- hook-async resumed to finish and commit the asynchronous hook that has
+  served every lane uncommitted since 15:40, and `bin/seon status`
+  without the lifecycle lock.
+- Page read by the orchestrator: 153 KB, 0.31 s, one printer fallback,
+  zero stored-def rows. Blocks: identity, plan, settings, messages,
+  history (declared concerns only).
+- Residue still uncommitted from stopped lanes: bin/test, bin/test-fast,
+  bin/mcp-server, src/seon/fn.clj, src/seon/test/runner.clj (runner-base-
+  cache, test-fast, issues-sweep); reviewed and resumed next.
+
