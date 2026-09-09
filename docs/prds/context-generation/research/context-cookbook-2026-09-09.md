@@ -33,8 +33,10 @@ The later platform gate on HEAD `3d13aa0f7` failed two blob-reachability tests:
 A HEAD-only fast snapshot (`--paths AGENTS.md`, no snapshot differences) reproduced
 the same failures: 12 tests / 62 assertions. This excludes the cookbook changes;
 the exact boundary is [recorded as an issue](../../../seon/issues/platform-blob-reachability-fails-at-3d13aa0f7.md).
-The earlier platform gate on `eec1ca7c3` was green. No overall green platform
-claim is made for the current HEAD.
+The earlier platform gate on `eec1ca7c3` was green. After the owning lane's
+`24953d294` fixture correction, the platform gate with the final print, value,
+identity, and namespace paths passed: **83 tests / 490 assertions**, zero
+failures or errors. The earlier failure is retained as dated evidence.
 
 ### Identity and namespace code slice
 
@@ -290,9 +292,24 @@ The follow-up preserves the set type when the live input is a set and avoids
 traversing an uncounted component collection to discover positions. Its regression
 uses a lazy tail that throws if visited. Final value-renderer isolated gate:
 24 tests / 120 assertions, green, with `SEON_TEST_WORKERS=3`. The platform failure
-above was independently reproduced at HEAD without this slice's files. Live
-default verification after hot reload prints the set in position order and
-reading that text returns a set; [the actual result is retained](context_cookbook_set_2026_09_09.edn).
+above was independently reproduced at HEAD without this slice's files.
+
+The first set regression used names whose lexical order matched their positions;
+a live probe with `cookbook/a` at 2 and `cookbook/b` at 1 falsified its coverage.
+The print fitter and emitter sorted the set again. The corrected regression puts
+lexical and position order in opposition. The value renderer now marks its
+ordered set node, and both existing print stages preserve that order. Ordinary
+unordered sets still use canonical lexical order. Default's hot-reloaded and
+re-armed functions returned **118 bytes**, `cookbook/b` before `cookbook/a`,
+with both `:position-order?` and `:set-preserved?` true;
+[the actual result is retained](context_cookbook_set_2026_09_09.edn).
+The print regression fixture also used the retired serialized-result field;
+it now takes `:seon.sci.admit/print-node` from `admit-value`, as the existing
+cross-process print test already does. No production admission behavior changed.
+Corrected combined fast gate: **42 tests / 198 assertions**, green. Isolated
+`seon.render.value-test seon.print-test` gate: **42 tests / 202 assertions**,
+green. The final platform gate above includes the set-node schema and both
+print stages. All commands set `SEON_TEST_WORKERS=3`.
 
 ## Add a step
 

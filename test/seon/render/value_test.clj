@@ -72,8 +72,8 @@
 (deftest component-members-render-in-declared-position-order
   (support/with-database
    (fn [connection]
-     (let [rows [{:my.plan.item/id "order/second" :my.plan.item/position 2}
-                 {:my.plan.item/id "order/first" :my.plan.item/position 1}]
+     (let [rows [{:my.plan.item/id "order/a" :my.plan.item/position 2}
+                 {:my.plan.item/id "order/z" :my.plan.item/position 1}]
            render-rows (fn [members]
                          (edn/read-string
                           (value/render-ai
@@ -83,7 +83,7 @@
        (is (= (set rows) (:my.plan/steps (render-rows (set rows)))))
        (let [shown (value/render-ai (assoc (unit {:my.plan/steps (set rows)})
                                           :seon.db/db @connection))]
-         (is (< (str/index-of shown "order/first") (str/index-of shown "order/second"))))
+         (is (< (str/index-of shown "order/z") (str/index-of shown "order/a"))))
        (let [unordered [(first rows) (dissoc (second rows) :my.plan.item/position)]]
          (is (= unordered (:my.plan/steps (render-rows unordered)))))
        (let [visited? (atom false)

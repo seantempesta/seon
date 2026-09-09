@@ -810,10 +810,11 @@
                                         (if (vector? entry)
                                           [0 (order-key (first entry))] [1 ""])) %)))
                ::set
-               (update node ::items
+               (if (::ordered? node) node
+                 (update node ::items
                        #(vec (sort-by (fn [item]
                                         (if (= ::elided (::face item))
-                                          [1 ""] [0 (order-key item)])) %)))
+                                          [1 ""] [0 (order-key item)])) %))))
                node)]
    (if (and (contains? #{::vector ::list} (::face node))
            (zero? depth)
@@ -1187,10 +1188,11 @@
                                           [0 (emit-text (first entry) generated-item-options)]
                                           [1 ""])) %)))
                ::set
-               (update node ::items
+               (if (::ordered? node) node
+                 (update node ::items
                        #(vec (sort-by (fn [item]
                                         (if (= ::elided (::face item))
-                                          [1 ""] [0 (emit-text item generated-item-options)])) %)))
+                                          [1 ""] [0 (emit-text item generated-item-options)])) %))))
                node)
         face (::face node)
         path (or (:seon.render.data/path node) path)]

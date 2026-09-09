@@ -11,7 +11,6 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [sci.core :as sci]
-            [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.print :as print]
             [seon.render :as render]
@@ -44,12 +43,11 @@
 
 (defn- admitted-node
   [value]
-  (edn/read-string
-   (:seon.cluster.eval/result-edn
-    (admit/admit {:seon.sci.admit/value value
+  (:seon.sci.admit/print-node
+    (admit/admit-value {:seon.sci.admit/value value
                   :seon.sci.admit/interrupt-fn (fn [])
                   :seon.sci.admit/caps admission-caps
-                  :seon.config/on-core-error :record}))))
+                  :seon.config/on-core-error :record})))
 
 (defn- admitted-member-node
   "The print node for a value admitted as a MEMBER of an ordinary collection.

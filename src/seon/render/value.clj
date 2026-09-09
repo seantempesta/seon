@@ -343,6 +343,7 @@
         (or selected
          (cond-> {:seon.print/face face child-key children
                  :seon.render.data/path path}
+          (and set-value? (sorted? value)) (assoc :seon.print/ordered? true)
           total (assoc :seon.render.data/total total))))
 
       :else

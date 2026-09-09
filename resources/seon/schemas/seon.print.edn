@@ -37,6 +37,8 @@
              [:int
               {:min 0, :seon.config/dial true, :seon.print/default 8}],
              :namespace-maps? [:boolean #:seon.print{:default true}],
+             :ordered?
+             [:= {:description "The producer has ordered these set items; fitting and emission preserve that order."} true],
              :node-child
              ;; ONE NODE'S CHILD SLOT. The tree is validated by
              ;; `seon.print/node?`, one node at a time, so a child slot is a
@@ -114,6 +116,7 @@
               [:seon.print/set
                [:map
                 [:seon.print/face [:= :seon.print/set]]
+                [:seon.print/ordered? {:optional true} :seon.print/ordered?]
                 [:seon.print/items
                  [:vector :seon.print/node-child]]]]
               [:seon.print/map
