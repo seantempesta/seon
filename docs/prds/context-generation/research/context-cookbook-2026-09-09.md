@@ -22,11 +22,47 @@ Datahike transaction.cljc:640 (identity upsert), :738 (nested maps), :785 (cardi
 
 ## Transaction report proposal — pending db.clj ownership
 
-`src/seon/db.clj` is held by transact-feedback. The executable `report-face` hunk in the adjacent probe is the proposed agent-facing projection: `{:seon.db/tx t :seon.db/datoms [[e a v added?] ...]}`. It resolves e to an installed unique-identity lookup ref, consulting db-before for deleted identities; tempids are already resolved in tx-data. The next read is the db-after; tx-data already says what changed. Neither db-before nor db-after belongs in shown text. Keep the full report for system callers such as seon.agent/settings! that still consume db-after. Ref-valued identities currently print their resolved numeric target; the production face should recursively use the target identity with cycle protection.
+`src/seon/db.clj` is held by transact-feedback. The executable `report-face` hunk in the adjacent probe is the proposed agent-facing projection: `{:seon.db/tx t :seon.db/datoms [[e a v added?] ...]}`. It resolves e to an installed unique-identity lookup ref, consulting db-before for deleted identities; tempids are already resolved in tx-data. The next read is the db-after; tx-data already says what changed. Neither db-before nor db-after belongs in shown text. Keep the full report for system callers such as seon.agent/settings! that still consume db-after. The first measurements below print numeric targets inside ref-valued identities; the final probe follows those identities recursively with cycle protection and records its actual result at the end.
 
 ## Verification boundary
 
-The first batch exceeded the MCP 20-second request bound but completed and wrote its evidence file; a second session returned `(+ 1 1)` in 1 ms. No alternate transport was used. Default remains untouched. Schema-dependent blocks and reseeding require the chart data lane's landing and the owner's batched reset; RESET NEEDED when that schema commit is known.
+The first batch exceeded the MCP 20-second request bound but completed and wrote its evidence file; a second session returned `(+ 1 1)` in 1 ms. No alternate transport was used. These probes committed no database writes. Default was never stopped, restarted, or reforked. Schema-dependent blocks and reseeding require the chart data lane's landing and the owner's batched reset; RESET NEEDED when that schema commit is known.
+
+The later platform gate on HEAD `3d13aa0f7` failed two blob-reachability tests:
+83 tests / 490 assertions, two failures, both confirmed in isolated workers.
+A HEAD-only fast snapshot (`--paths AGENTS.md`, no snapshot differences) reproduced
+the same failures: 12 tests / 62 assertions. This excludes the cookbook changes;
+the exact boundary is [recorded as an issue](../../../seon/issues/platform-blob-reachability-fails-at-3d13aa0f7.md).
+The earlier platform gate on `eec1ca7c3` was green. No overall green platform
+claim is made for the current HEAD.
+
+### Identity and namespace code slice
+
+Identity now emits the finite raw pull from the cookbook. The namespace pair
+emits `(dir <namespace>)` even when empty, then the existing schema-derived count
+query when there are stored attributes. No second opening mechanism was added.
+The canonical system-turn regression executes these generated forms through real
+SCI and verifies the stored opening and retained read evidence.
+
+Fast gate: `seon.render.ns-test seon.help-test`, 10 tests / 118 assertions, green.
+Isolated gate with only `src/seon/cluster/agent.clj`, `src/seon/render/ns.clj`,
+`test/seon/render/ns_test.clj`, and `test/seon/help_test.clj`: 10 tests / 122
+assertions, green. Live default JVM calls after hot reload and re-arming returned
+the raw identity pull and `(dir my.agents.juniper)` followed by the count query.
+This proves those loaded functions; it does not rewrite default's stored opening.
+
+### Current provider prompt
+
+The complete [provider prompt](context_cookbook_prompt_2026_09_09.txt) was acquired
+through `seon.render/acquire-context!` and read end to end: **9,757 UTF-8 bytes**,
+nine stored evaluations. It contains the previous opening, repeated help/inbox,
+and `(+ 1 1)`. Old shown text still contains the earlier help markers and call
+shapes, as required by immutable history; hot-reloading renderers does not rewrite
+those evaluations. This is a baseline observation, not the final reseeded trial.
+No provider call was made. The canonical trial's six-source fixture precondition
+does not hold, and the chart schema work remains an explicit scope decision.
+The [capture script](context_cookbook_probe_2026_09_09.clj) and
+[render measurements](context_cookbook_render_2026_09_09.edn) retain the evidence.
 
 ## Identity
 
@@ -223,7 +259,7 @@ Actual JVM result (35 UTF-8 bytes; evidence [:index-patterns]):
 [["Ada" 115] ["Bea" 100] ["Cy" 40]]
 ```
 
-# Speculative writes
+## Speculative writes
 
 ## Component ordering implementation, first code slice
 
@@ -249,6 +285,14 @@ Remaining schema scope is an owner decision under AGENTS.md's design gate:
 current-schema raw forms now, the complete schema work here, or target patches
 pending the data lane. The absent schema is an implementation prerequisite;
 the concurrent db.clj transaction work remains protected.
+
+The follow-up preserves the set type when the live input is a set and avoids
+traversing an uncounted component collection to discover positions. Its regression
+uses a lazy tail that throws if visited. Final value-renderer isolated gate:
+24 tests / 120 assertions, green, with `SEON_TEST_WORKERS=3`. The platform failure
+above was independently reproduced at HEAD without this slice's files. Live
+default verification after hot reload prints the set in position order and
+reading that text returns a set; [the actual result is retained](context_cookbook_set_2026_09_09.edn).
 
 ## Add a step
 
@@ -383,4 +427,118 @@ Actual proposed report projection (439 UTF-8 bytes):
 
 ```clojure
 #:seon.db{:tx 536871176, :datoms [[536871176 :db/txInstant #inst "2026-09-09T21:23:29.428-00:00" true] [[:my.note/id "juniper/orders-observed"] :my.note/id "juniper/orders-observed" true] [[:my.note/id "juniper/orders-observed"] :my.note/agent 35984 true] [[:my.note/id "juniper/orders-observed"] :my.note/about 36397 true] [[:my.note/id "juniper/orders-observed"] :my.note/content "Read four orders; next compute customer totals." true]]}
+```
+
+## Target shapes after the speculative writes
+
+These reads execute on the final `:db-after` of the same nine-write `with` chain; they do not claim that target schema or wake behavior is installed on default.
+
+### Runtime after declaring a listen
+
+```clojure
+;; I should verify that my runtime contains the listen I added.
+(seon.db/pull database (quote [#:seon.agent{:runtime [#:seon.runtime{:listens [:seon.listen/attribute]}]}]) [:seon.agent/id "juniper"])
+```
+
+Actual result, 91 UTF-8 bytes:
+
+```clojure
+#:seon.agent{:runtime #:seon.runtime{:listens [#:seon.listen{:attribute :example/amount}]}}
+```
+
+### Target messages, reverse pull
+
+```clojure
+;; I should read root's incoming messages through seon.message/_to.
+(seon.db/pull database (quote [#:seon.message{:_to [:seon.message/id :seon.message/content #:seon.message{:from [:seon.agent/id]} #:seon.message{:about [:seon.message/id]}]}]) [:seon.agent/id "root"])
+```
+
+Actual result, 287 UTF-8 bytes:
+
+```clojure
+#:seon.message{:_to [#:seon.message{:id "c00cb001", :content "The query found Ada totals 115.", :from #:seon.agent{:id "juniper"}} #:seon.message{:id "c00cb002", :content "I will add 40 and read the new total.", :from #:seon.agent{:id "juniper"}, :about #:seon.message{:id "c00cb000"}}]}
+```
+
+### Completion instant
+
+```clojure
+;; I should derive the completion instant from its transaction ref.
+(seon.db/pull database (quote [:my.plan.item/id #:my.plan.item{:completed-tx [:db/txInstant]}]) [:my.plan.item/id "juniper/query"])
+```
+
+Actual result, 105 UTF-8 bytes:
+
+```clojure
+#:my.plan.item{:id "juniper/query", :completed-tx #:db{:txInstant #inst "2026-09-09T21:34:43.628-00:00"}}
+```
+
+### Removal verification
+
+```clojure
+;; I should verify the deleted item is absent, not merely detached from the plan.
+(seon.db/pull database [:my.plan.item/id] [:my.plan.item/id "juniper/verify"])
+```
+
+Actual result, 3 UTF-8 bytes:
+
+```clojure
+nil
+```
+
+### Plan membership after removal
+
+```clojure
+;; I should see the original six steps and the new current step after removing my probe item.
+(seon.db/pull database (quote [#:my.plan{:current-step [:my.plan.item/id]} #:my.plan{:steps [:my.plan.item/id :my.plan.item/position]}]) [:my.plan/agent [:seon.agent/id "juniper"]])
+```
+
+Actual result, 376 UTF-8 bytes:
+
+```clojure
+#:my.plan{:current-step #:my.plan.item{:id "juniper/aggregate"}, :steps [#:my.plan.item{:id "juniper/query", :position 0} #:my.plan.item{:id "juniper/transact", :position 2} #:my.plan.item{:id "juniper/aggregate", :position 1} #:my.plan.item{:id "juniper/reply", :position 4} #:my.plan.item{:id "juniper/requery", :position 3} #:my.plan.item{:id "juniper/done", :position 5}]}
+```
+
+### Handled question
+
+```clojure
+;; I should verify the question carries the transaction that handled it.
+(seon.db/pull database (quote [:seon.message/id #:seon.message{:read-tx [:db/txInstant]}]) [:seon.message/id "c00cb000"])
+```
+
+Actual result, 95 UTF-8 bytes:
+
+```clojure
+#:seon.message{:id "c00cb000", :read-tx #:db{:txInstant #inst "2026-09-09T21:34:43.632-00:00"}}
+```
+
+### Settings preservation
+
+```clojure
+;; I should see my changed time limit alongside the untouched overrides.
+(seon.db/pull database [:seon.config.eval/time-limit-ms :seon.config.ai/no-provider :seon.config.run/max-episode-runs] [:seon.config/agent [:seon.agent/id "juniper"]])
+```
+
+Actual result, 110 UTF-8 bytes:
+
+```clojure
+{:seon.config.eval/time-limit-ms 2500, :seon.config.ai/no-provider true, :seon.config.run/max-episode-runs 20}
+```
+
+### Saved note
+
+```clojure
+;; I should see my saved note linked to the query step.
+(seon.db/pull database (quote [:my.note/id :my.note/content #:my.note{:about [:my.plan.item/id]}]) [:my.note/id "juniper/orders-observed"])
+```
+
+Actual result, 144 UTF-8 bytes:
+
+```clojure
+#:my.note{:id "juniper/orders-observed", :content "Read four orders; next compute customer totals.", :about #:my.plan.item{:id "juniper/query"}}
+```
+
+The report prototype now follows ref-valued identities recursively, with a visited-entity set for cycles. Actual executed result, 183 UTF-8 bytes:
+
+```clojure
+#:seon.db{:tx 536871194, :datoms [[536871194 :db/txInstant #inst "2026-09-09T21:34:50.015-00:00" true] [[:my.plan/agent [:seon.agent/id "juniper"]] :my.plan/current-step 36399 true]]}
 ```

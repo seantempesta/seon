@@ -228,14 +228,22 @@
     (cond
       (and (:db/isComponent properties)
            (= :db.cardinality/many (:db/cardinality properties))
-           (coll? value) (seq value) (every? map? value))
-      (let [position (some (fn [key]
-                             (when (and (qualified-keyword? key)
-                                        (= "position" (name key))
-                                        (every? #(number? (get % key)) value))
-                               key))
+           (counted? value) (coll? value) (seq value) (every? map? value))
+      (let [position (some (fn [attribute-key]
+                             (when (and (qualified-keyword? attribute-key)
+                                        (= "position" (name attribute-key))
+                                        (every? #(number? (get % attribute-key)) value))
+                               attribute-key))
                            (sort-by str (keys (first value))))]
-        (if position (vec (sort-by position value)) value))
+        (cond
+          (nil? position) value
+          (set? value)
+          (into (sorted-set-by
+                 (fn [left right]
+                   (let [ordered (compare (get left position) (get right position))]
+                     (if (zero? ordered) (compare (pr-str left) (pr-str right)) ordered))))
+                value)
+          :else (vec (sort-by position value))))
 
       (and (= :db.type/ref (:db/valueType properties))
              (not (:db/isComponent properties)))
@@ -308,8 +316,9 @@
             entries (cond
                       map-value? (sort-by (comp key-text first)
                                          (map (fn [[k v]] [(key-node k) k v]) value))
-                      set-value? (sort-by (comp key-text first)
-                                         (map (fn [v] [(key-node v) v v]) value))
+                      set-value? (let [members (map (fn [v] [(key-node v) v v]) value)]
+                                   (if (sorted? value) members
+                                       (sort-by (comp key-text first) members)))
                       :else (map-indexed (fn [i v] [nil i v]) value))
             children
             (when-not selected

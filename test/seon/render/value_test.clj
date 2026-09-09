@@ -80,9 +80,22 @@
                            (assoc (unit {:my.plan/steps members})
                                   :seon.db/db @connection))))]
        (is (= (vec (reverse rows)) (:my.plan/steps (render-rows rows))))
-       (is (= (vec (reverse rows)) (:my.plan/steps (render-rows (set rows)))))
-       (let [partial [(first rows) (dissoc (second rows) :my.plan.item/position)]]
-         (is (= partial (:my.plan/steps (render-rows partial)))))
+       (is (= (set rows) (:my.plan/steps (render-rows (set rows)))))
+       (let [shown (value/render-ai (assoc (unit {:my.plan/steps (set rows)})
+                                          :seon.db/db @connection))]
+         (is (< (str/index-of shown "order/first") (str/index-of shown "order/second"))))
+       (let [unordered [(first rows) (dissoc (second rows) :my.plan.item/position)]]
+         (is (= unordered (:my.plan/steps (render-rows unordered)))))
+       (let [visited? (atom false)
+             uncounted (lazy-cat rows (lazy-seq (reset! visited? true)
+                                                (throw (ex-info "omitted tail" {}))))
+             profile (assoc (render/agent-render-profile (support/effective-config))
+                            :seon.render.profile/max-children 1)
+             shown (value/render-ai (assoc (unit {:my.plan/steps uncounted})
+                                          :seon.db/db @connection
+                                          :seon.render/profile profile))]
+         (is (string? shown))
+         (is (false? @visited?) "ordering does not realize an uncounted component tail"))
        (is (= rows
               (:fixture/rows
                (edn/read-string
