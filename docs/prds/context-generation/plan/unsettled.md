@@ -362,3 +362,22 @@ proc — and the render proc keeps one job, publishing deltas after a wake.
 edits verified on the lane's scratch root so `default` never shows a
 half-edit. Measured targets in the issue.
 
+## 2026-09-08 18:05 — landed: bottleneck dissolved; record = id, namespace, plan, settings
+
+- `985a830b5` (page-feed): pages and turn contexts derive on the caller's
+  thread with shared read evidence; the render proc's `::context` queue is
+  gone. Measured with two agent turns open and three tabs: plain page warm
+  55–81 ms (was 8.8 s); changed-content 2.1–2.4 s; feed first event
+  0.85–1.27 s under a write per second; context derivation median 243 ms,
+  cold 5.9 s. `baa1dde54`: every declared attribute and reverse concern
+  renders through schema-driven pairs.
+- `67fe1675d`, `e96001a7c`, `8b48a7c47` (components): retired agent keys
+  deleted (cluster, instructions, run); open turns derived; settings is one
+  component carrying the overlay; plan/settings/identity renders useful;
+  `doc`/`dir` return data. RESET NEEDED honoured: `default` reforked once
+  onto `6aa09695…`, Juniper reseeded; page 0.76 s, zero faults since boot.
+- `2531b2e70` (support-restore): platform tier green, 82/486.
+- Running: turn-cut (evaluation entity, `of-agent`, the one remaining
+  "Not yet available" line), page-feed (identity-grouping hunk, changed-
+  content and cold-context latencies, prompt test expectations).
+
