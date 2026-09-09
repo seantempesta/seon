@@ -435,3 +435,16 @@ half-edit. Measured targets in the issue.
   stable ids, compaction + three-transaction proof); hook-async (`bin/seon
   status` without the lock; landing note).
 
+## 2026-09-08 20:05 — asynchronous hook and lock-free status landed
+
+- hook-async `ef424c37c`, `e136c6af1`, `5944a2814`: five edits within
+  1.54 s share ONE adoption; the editor returns in 0.08–0.33 s; `bin/seon
+  status` answers in 0.24 s while an `init --dev` holds the lock. The
+  adoption tax that serialized seven lanes this afternoon is gone.
+  `seon-status-waits-on-the-lifecycle-lock` resolved.
+- Page on the fourth refork after reseed: 0.20 s, 47 KB, zero printer
+  fallbacks, zero faults since boot.
+- Running: turn-cut (rename/custody/ids/compaction proof);
+  runner-base-cache resumed to finish and commit the gate residue
+  (bin/test, runner.clj, test-fast, mcp-server, fn.clj).
+
