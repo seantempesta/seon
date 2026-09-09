@@ -1127,3 +1127,56 @@ these declarations. `my.plan` keeps today's agent-id argument and follows
 `:seon.agent/settings`; its keys and render pair derive in the existing
 `:seon.config/agent-overlay` schema. Agent completion and evaluation time
 limits are declared per-agent settings. No second overlay key list is added.
+
+## 18. The generated context, block by block (owner, 2026-09-09)
+
+**Names.** The record is one family: `:seon.agent/id`, `:seon.agent/namespace`
+(scalars), `:seon.agent/plan`, `:seon.agent/settings` (components).
+`:seon.cluster.agent/*` is retired. Concerns (messages, turns, faults) stay
+declared on the schema.
+
+**One shape for every `my.*` function:** an optional request map. A bare
+call is the call; defaults come from call preparation; arguments appear
+only when the agent passes them. Positional system shapes live in `seon.*`.
+The generator therefore emits `(my.message/inbox)`, never `{}`.
+
+**System turn 0 is exactly these evaluations, in order.** Each is a form
+the agent could have typed; the shown text is what it sees; nothing else
+enters the prompt:
+
+1. `(help)` — what a system help does: prints the situation and the rules
+   (you are at a Clojure REPL in your namespace; reply with forms only;
+   each form returns `#:seon.repl{…}`; `(dir ns)`/`(doc sym)` return data;
+   your plan is your instructions; before each form write a `;;` comment
+   saying what you are about to do and why — that is your planning; how a
+   turn ends) and returns the topic list; `(help :plan)` etc. return data.
+   Its read evidence is the code version: it re-emits only when help
+   changes.
+2. `(my.agent/identity)` → `{:id :namespace :steward}`.
+3. `(my.plan/items)` → every item: id, title, state, done-when, needs.
+4. `(my.message/inbox)` → unread, oldest first: `{:from :at :content :id}`;
+   `[]` when empty (the form still teaches).
+5. `(my.agent/settings)` → the overrides only. No attribute dump.
+6. The history: previous turns' evaluations, bytes unchanged (§14).
+
+**Thinking comments.** Generated comments are written in the agent's own
+first-person voice, stating intent before the form ("I should check my
+inbox for anything I need to respond to."), so the transcript teaches by
+example; the agent's own `;;` comments are stored on its evaluations and
+render back into history and HTML. No new mechanism.
+
+**Plan API, simplest defaults.** Reads: `(my.plan/items)` (the one the
+context emits), plus `current`/`ready`/`blocked` for programs. Writes, each
+returning the changed item: `(my.plan/add! {:title … :done-when …})` (id
+derived from the title, position appended), `(my.plan/update! {:id …})`,
+`(my.plan/complete! "id")`, `(my.plan/current! "id")`. `(dir my.plan)`
+lists these first.
+
+**The scenario (fixture).** Root's message: define a contracted function
+`largest` in your namespace returning the row with the greatest
+`:example/amount`, write a test for it, run the test, reply with its stored
+contract. The plan holds those steps, current first. Every step is
+checkable by query: a `:seon.fn` row with `:seon.fn/spec`, a `:seon.test`
+row and its result, a message from juniper to root. Probe residue never
+enters the fixture.
+
