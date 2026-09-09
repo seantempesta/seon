@@ -1,311 +1,317 @@
 ---
 type: prd
 status: working
-tags: [prd, agent-record, render, context-generation]
+tags: [prd, agent-record, render, context-generation, data-first]
 ---
 
-# The agent's data, item by item — storage, names, components, renders
+# The agent's data, item by item — data first
 
-Working PRD, iterated with the owner (2026-09-09). Inventory is grounded in
-the live schema of `default` on the ninth refork (pre-`:seon.agent` rename;
-attribute list at the end). Companion to the turn PRD §0, §4, §13–§18.
+Working PRD, iterated with the owner (2026-09-09, r2). Grounded in the live
+schema of `default` (attribute inventory at the end), in REPL probes on
+`default` this afternoon (`research/raw-data-forms-probe-2026-09-09.md`),
+in the read-evidence / wake / evaluation-point map
+(`src/seon/db.clj:335-781`, `src/seon/cluster/wake.clj:325-444`,
+`src/seon/turn.clj:4230-4315`), and in two Haiku comprehension trials
+(`scratchpad` trials, then the committed harness §18a).
 
-Six questions per item, from the owner:
+## 0. The rulings this revision applies (owner, 2026-09-09)
 
-1. Store it?
-2. Better name?
-3. Component (rendered together) or separate?
-4. What matters most to the agent and to a person?
-5. The AI projection: comments and forms that introduce it and show usage.
-6. The HTML projection: what a person cares about, expressed well.
+1. **Data, not verbs.** The agent reads its record with `seon.db/pull` and
+   `seon.db/q` and writes with `seon.db/transact!`. The generated context
+   shows those forms, so every block is also a schema lesson. `my.*`
+   shrinks to forms that carry a rule (`send`, `done`) and to `help`,
+   `dir`, `doc`; each is source the agent can read.
+2. **Time is the transaction.** No `:at`, `:completed-at`, `:read-at`
+   instants are written by agents. A fact that "happened now" is a ref to
+   the current transaction — `[:db/add e :my.plan.item/completed-tx
+   "datomic.tx"]` — and the instant derives from that transaction's
+   `:db/txInstant`. Proven on `default`: 2 datoms, derived instant exact.
+   (The reply reader accepts only `#inst`/`#uuid`; `(java.util.Date.)` is
+   not in the agent's SCI classes — `reader.cljc:24-30`, `eval.clj:227`.)
+3. **Ids.** One function: `(seon.id/id {:parts […] :length n})` — SHA-256
+   of the ordered parts, truncated to `n`; no parts → random of `n`.
+   Things that ARE their parts hash (evaluations 12, plan items by title
+   slug); genuine events are random (messages, 8).
+4. **Components are addressable.** A component the agent writes to
+   carries an identity derived from its owner (`:my.plan/agent` as a unique
+   identity ref), because a nested map under a cardinality-one component
+   REPLACES the component (probed: new plan entity, old orphaned with its
+   six steps). Upsert by identity is the only safe raw write.
+5. **Every read block is emitted once at turn 0, even when empty.**
+   `[]` teaches the form and establishes read evidence, so a later change
+   re-emits exactly that block (§14). No block appears for the first time
+   mid-history.
+6. **Exact evidence needs pattern-only queries.** `q` gets exact evidence
+   only when every `:where` clause is a pattern and `:find` has no `pull`
+   (`db.clj:335-372`); `pull` is exact for explicit finite selectors
+   (`db.clj:374-423`); `[*]`, recursion and `not`/`or` fall back to
+   attribute-level evidence (correct, coarse). Required platform work:
+   patterns inside `not`/`or` count as patterns; a `pull` in `:find` adds
+   its pull patterns. Until then generated queries are pattern-only.
+7. **Schema feedback at every seam** (§9 below).
+8. **Steps order.** Cardinality-many is a set (hash order: 0,2,1,4,3,5 on
+   `default`); `:my.plan.item/position` stays stored and the read sorts.
 
-The AI examples below are the bytes as the model would see them; the
-comment is the agent's own thinking voice; every form is one the agent
-could type. `<…>` marks a derived value.
+The AI examples below are the bytes as the model sees them; comments are
+the agent's own thinking; every form is one it could type.
 
 ---
 
 ## 1. Identity — `:seon.agent/id`, `:seon.agent/namespace`
 
-| | |
+| store | yes; the two scalars |
 |---|---|
-| store | yes; two scalars, the only ones on the record |
-| names | landed: `:seon.agent/id`, `:seon.agent/namespace` (rename `3f07beb88`) |
-| component | no; scalars many things need alone; rendered by the record's own pair |
-| matters | who am I, where do my forms evaluate, who is responsible for my namespace |
-
-AI
+| names | landed (`3f07beb88`) |
+| component | no |
+| matters | who am I, where my forms run, who stewards my namespace |
 
 ```clojure
 ;; Who am I, and where do my forms run?
-my.agents.juniper=> (my.agent/identity)
-#:seon.repl{:value {:id "juniper", :namespace my.agents.juniper, :steward "juniper"}}
+my.agents.juniper=> (seon.db/pull '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}] [:seon.agent/id "juniper"])
+#:seon.repl{:value #:seon.agent{:id "juniper", :namespace #:seon.ns{:name my.agents.juniper, :steward #:seon.agent{:id "juniper"}}}}
 ```
 
-HTML: name, namespace as a link to the namespace page, steward; one line.
-Nothing else.
+HTML: name, namespace link, steward. One line.
 
-## 2. Plan — component `:seon.agent/plan` → `:my.plan/objective`, `:my.plan/steps*`, `:my.plan/current-step`; items `:my.plan.item/*`
+## 2. Plan — component `:seon.agent/plan`; identity `:my.plan/agent`; items `:my.plan.item/*`
 
-| | |
-|---|---|
 | store | yes; the plan IS the instructions |
-| names | `:my.plan.item/expected-result` → `:done-when`; `:my.plan.item/description` keep; `:about` (subject ref) keep; `:position` → derived from order, not stored (open question) |
-| component | yes, one entity; rendered together, always |
-| matters | agent: which step is current and what done means; person: objective, progress, the tree with states and dependencies |
+|---|---|
+| names | `:my.plan.item/expected-result` → `:my.plan.item/done-when` (the wrapper invented `:done-when` without it existing — that projection layer goes); `:my.plan.item/completed-at` → `:completed-tx` (ref to the transaction); `:my.plan/agent` NEW unique identity ref; `position` stays |
+| component | yes; addressable by `[:my.plan/agent [:seon.agent/id "juniper"]]` |
+| matters | agent: current step and its done-when; person: objective, progress, the tree |
 
-AI (one form; `:state` derived: current / open / blocked / done)
+Read (one form; done = has `:completed-tx`; blocked = a `needs` item is not done; sorted):
 
 ```clojure
-;; What am I working on? The current step's :done-when is my instruction.
-my.agents.juniper=> (my.plan/items)
-#:seon.repl{:value [{:id "orders/largest-customer", :title "Find the customer with the largest order total", :state :current,
-                     :done-when "I know which :example/customer has the greatest sum of :example/amount"}
-                    {:id "orders/add", :title "Add an order of 40 for that customer", :state :open, :needs ["orders/largest-customer"]}
-                    {:id "orders/reply", :title "Tell root the new total", :state :open, :needs ["orders/add"]}]}
+;; What am I working on? A step is done when it has :completed-tx; blocked while a step it :needs is not done.
+my.agents.juniper=> (->> (seon.db/pull '[{:seon.agent/plan [:my.plan/objective {:my.plan/current-step [:my.plan.item/id]} {:my.plan/steps [:my.plan.item/id :my.plan.item/title :my.plan.item/done-when :my.plan.item/position {:my.plan.item/completed-tx [:db/txInstant]} {:my.plan.item/needs [:my.plan.item/id]}]}]}] [:seon.agent/id "juniper"]) :seon.agent/plan)
+#:seon.repl{:value #:my.plan{:objective "Which customer has the largest total? …", :current-step #:my.plan.item{:id "juniper/query"},
+  :steps [#:my.plan.item{:id "juniper/query", :title "Query the orders", :done-when "I have read the order ids, customers, and amounts.", :position 0}
+          #:my.plan.item{:id "juniper/aggregate", :title "Find the customer with the largest total", :done-when "…", :position 1, :needs [#:my.plan.item{:id "juniper/query"}]}
+          …]}}
 ```
 
-Writes teach themselves by returning the changed item:
-`(my.plan/complete! "orders/largest-customer")`, `(my.plan/add! {:title … :done-when …})`,
-`(my.plan/update! {:id … :title …})`, `(my.plan/current! "id")`.
+The value renderer sorts a component set by `:position` when every member
+carries one — a render rule, not a stored fact.
 
-HTML: objective as the heading; "current: <title>" with its done-when
-quoted; "n of m done"; then the steps as a list with state badges and
-"waits for …" links; descriptions collapsed. No entity ids anywhere.
+Writes, as data:
 
-## 3. Settings — component `:seon.agent/settings` (the `:seon.config.*` overlay) + derived `:turns-left`
+```clojure
+;; Query done: I read the orders. Mark the step complete with this transaction.
+(seon.db/transact! [[:db/add [:my.plan.item/id "juniper/query"] :my.plan.item/completed-tx "datomic.tx"]])
+;; Add a step to my plan (upsert into the existing plan by its identity).
+(seon.db/transact! [{:my.plan/agent [:seon.agent/id "juniper"]
+                     :my.plan/steps [{:my.plan.item/id "orders/verify" :my.plan.item/title "Verify the new total" :my.plan.item/done-when "…" :my.plan.item/position 6}]}])
+;; Make a step current.
+(seon.db/transact! [[:db/add [:my.plan/agent [:seon.agent/id "juniper"]] :my.plan/current-step [:my.plan.item/id "juniper/aggregate"]]])
+;; Remove a step (the item entity goes with it: it is a component).
+(seon.db/transact! [[:db/retract [:my.plan/agent [:seon.agent/id "juniper"]] :my.plan/steps [:my.plan.item/id "orders/verify"]]])
+```
 
-| | |
+Haiku wrote the completion and add forms correctly from the help alone
+(trial 3, 8/8 comprehension). `(doc my.plan)` shows exactly these.
+
+HTML: objective heading; current step with its done-when; n of m done;
+steps in position order with state badges and "waits for" links.
+
+## 3. Settings — component `:seon.agent/settings`; identity `:seon.config/agent`
+
+| store | overrides only; defaults are config facts |
 |---|---|
-| store | yes, the overrides only; defaults are config facts |
-| names | fine; the component name is the concern |
-| component | yes; rendered together |
-| matters | agent: turns left, time limit, whether a provider is on; person: the overrides and the effective values side by side |
-
-AI
+| names | grouped by namespace: provider `:seon.config.ai/*`, retry `:seon.config.ai.retry/*`, evaluation `:seon.config.eval/*`, budget `:seon.config.run/*`; `:seon.agent/turns-left` DERIVED |
+| component | yes; addressable by `[:seon.config/agent [:seon.agent/id "juniper"]]` |
+| matters | turns left, time limit, which provider; a person: override vs effective |
 
 ```clojure
 ;; My settings: only what differs from the defaults, and how many turns I have.
-my.agents.juniper=> (my.agent/settings)
-#:seon.repl{:value {:seon.config.ai/no-provider true, :seon.config.eval/time-limit-ms 2500, :turns-left 3}}
+my.agents.juniper=> (seon.db/pull '[{:seon.agent/settings [*]} :seon.agent/turns-left] [:seon.agent/id "juniper"])
+#:seon.repl{:value #:seon.agent{:settings #:seon.config{:ai/no-provider true, :eval/time-limit-ms 2500}, :turns-left 3}}
+;; Switch provider for my next turn.
+(seon.db/transact! [{:seon.config/agent [:seon.agent/id "juniper"] :seon.config.ai/model "deepseek-v4-flash" :seon.config.ai/no-provider false}])
 ```
 
-Never the attribute-name dump; `(dir my.agent)` is where that lives.
+The write's returned transaction report shows the datoms that changed;
+the settings block re-emits on the next system turn because its evidence
+changed, so old and new both sit in the history. The turn loop reads
+effective settings at turn open, so a provider change is live next turn.
 
-HTML: two columns, override / effective, one row per dial that differs;
-turns left as a number with the bound.
+HTML: override / effective columns per changed dial, grouped; turns left.
 
-## 4. Messages, inbound — `:seon.cluster.message/*` where `to` = me
+## 4. Runtime — ONE component `:seon.agent/runtime` (owner: "the runtime state should all be one collection")
 
-| | |
+| store | the open turn's id, opened-tx, trigger (the wake datom); the listens; turns taken this session (derived) |
 |---|---|
-| store | yes; the wake fact and the content |
-| names | `:seon.cluster.message/*` → `:seon.message/*` (same family move as the agent); `:my.message/reason` folds in; `:caused-by` keep (threading); `:ordinal` → derived from `at` (open question) |
-| component | no; a message is its own entity, a declared reverse concern on the agent |
-| matters | agent: what was I sent, by whom, what do they want; person: the thread |
-
-AI
+| names | NEW: `:seon.agent/runtime` component; `:seon.runtime/turn`, `/trigger`, `/listens`; retire `:seon.turn/plan-digest`, `supersedes`, `undisposed-at`, `background-results`, `error` |
+| component | yes; rendered together; the agent's turn is part of it |
+| matters | agent: am I mid-turn, what woke me, what I listen for; person: state, trigger, latency |
 
 ```clojure
-;; Anything in my inbox I need to respond to?
-my.agents.juniper=> (my.message/inbox)
-#:seon.repl{:value [{:from "root", :at #inst "2026-09-09T11:00:00Z", :id "root/orders",
-                     :content "Which customer has the largest order total? Add an order of 40 for them and tell me the new total."}]}
+;; Where is my turn, what woke me, and what am I listening for?
+my.agents.juniper=> (seon.db/pull '[{:seon.agent/runtime [{:seon.runtime/turn [:seon.turn/id {:seon.turn/opened-tx [:db/txInstant]}]} {:seon.runtime/trigger [*]} {:seon.runtime/listens [*]}]}] [:seon.agent/id "juniper"])
+#:seon.repl{:value #:seon.agent{:runtime #:seon.runtime{:turn #:seon.turn{:id "e1b2…", :opened-tx #:db{:txInstant #inst "…"}}, :trigger {:seon.message/to …}, :listens [{:seon.listen/attribute :seon.message/to} {:seon.listen/attribute :example/amount}]}}}
+;; Wake me when any order amount changes.
+(seon.db/transact! [{:seon.runtime/agent [:seon.agent/id "juniper"] :seon.runtime/listens [{:seon.listen/attribute :example/amount}]}])
 ```
 
-Unread only, oldest first; `[]` when empty (the form still teaches).
-Answered messages leave the inbox because the reply names them
-(`:caused-by`).
+A listen is an index pattern (attribute, optional entity, optional value)
+— the same shape read evidence stores. The cluster's one listener
+(`wake.clj:428-438`) unions them with the schema-declared listened
+attributes; the union is a map lookup per datom, computed outside the
+per-datom loop. Not a new mechanism.
 
-HTML: a thread: from, time, content; replies indented under what they
-answer; unread marked.
+HTML: state line (idle / turn open since …, woke on …), listens as chips.
 
-## 5. Messages, outbound — same entity, `from` = me
+## 5. Messages — `:seon.message/*` (family move from `:seon.cluster.message`)
 
-| | |
-|---|---|
-| store | yes (it is the same fact) |
-| component | no |
-| matters | agent: that it sent, and to whom (the returned value); person: the thread |
-
-AI: not a block; the write returns the fact:
-
-```clojure
-;; Root asked for the new total; I'll tell them.
-my.agents.juniper=> (my.message/send {:to "root" :content "Alice now totals 220." :about "root/orders"})
-#:seon.repl{:value {:id "juniper/…", :to "root", :at #inst "…"}}
-```
-
-## 6. Turns — `:seon.turn/id|agent|opened-at|closed-at|reply|attempts|trigger|starting-ns`
-
-| | |
-|---|---|
-| store | yes: id, agent, opened, closed, reply (+blob/size), attempts, trigger. DELETE: `plan-digest`, `supersedes`, `undisposed-at`, `background-results` (retired designs still in the schema), `error` (a fault is a fact of its own) |
-| names | `:seon.turn/*` landed; `reply` → keep |
-| component | attempts are a component of the turn; the turn is a concern of the agent |
-| matters | agent: nothing directly — it sees evaluations, not turns; person: when, why (trigger), how many attempts, the reply |
-
-AI: no block. Turns are invisible to the agent except as the grouping of
-its history (§7) and `:turns-left` (§3).
-
-HTML: the history grouped by turn: opened → trigger → attempts → reply →
-evaluations; a turn header line with duration.
-
-## 7. Evaluations — `:seon.eval/*` (turn, ordinal, comment, source, ns, ending-ns, shown text, out, error, duration, read evidence)
-
-| | |
-|---|---|
-| store | yes; this IS the history; shown text stored, the live object never |
-| names | landed family; `:seon.eval/value` (string) → `:shown` is the honest name (it is the shown text, not the value) |
-| component | ordered under the turn; rendered as the REPL transcript |
-| matters | agent: the exact transcript, unchanged bytes; person: the same, readable, with evidence behind a toggle |
-
-AI: the transcript itself, one entry per evaluation, in turn order:
-
-```clojure
-;; <the agent's own comment>
-my.agents.juniper=> <source>
-#:seon.repl{:value <shown>, :out "…", :error …, :result result/e…, :ms 9}
-```
-
-Nothing else is ever in the prompt.
-
-HTML: the same entries, monospace, comment above, error highlighted,
-evidence and basis behind "evidence".
-
-## 8. Provider attempts — `:seon.ai.attempt/*` (at, ordinal, finish-reason, usage, reasoning, sent-body, error, failover, settings)
-
-| | |
-|---|---|
-| store | yes but bounded: usage, finish reason, error, ordinal; `sent-body` NEVER (prompts are generated, not stored — owner 09-07); `reasoning` as a blob aged by size; `settings-edn` → a ref to the settings component's state, not a copy |
-| names | fine |
-| component | component of the turn |
-| matters | agent: nothing; person: cost, why it stopped, what failed, reasoning on demand |
-
-AI: none. HTML: per turn, a small line: model, tokens in/out, finish reason,
-duration; reasoning expandable.
-
-## 9. Faults — `:seon.error/*` with `agent` (happened to) and `steward` (routed to)
-
-| | |
-|---|---|
-| store | yes, with provenance; `data-edn/data-blob` bounded (landed) |
-| names | fine; `:seon.error/run` → `:seon.error/turn` (rename leftover) |
-| component | no; a concern of the agent it happened to and of the steward |
-| matters | agent: what failed, in which function, with what message — so it can fix or route around; person: the same, plus signature grouping and counts |
-
-AI (only when there are any; the block is the flat error value)
-
-```clojure
-;; Something failed in my namespace; I should read it before doing more.
-my.agents.juniper=> (my.agent/faults)
-#:seon.repl{:value [{:kind :seon.ai/no-credential, :message "The environment variable OPENROUTER_API_KEY is not set.", :at #inst "…", :in seon.ai/attempt}]}
-```
-
-HTML: cards: kind, message, when, function, turn link; repeats collapsed
-by signature with a count.
-
-## 10. Notes — `:my.note/*` (id, agent, about, content)
-
-| | |
-|---|---|
 | store | yes |
-| names | fine |
-| component | no; a concern |
-| matters | agent: its own notes about a subject; person: the notes |
-
-AI: no block by default (not needed to orient); `(my.note/notes)` when
-the agent wants them. HTML: list, newest first, subject links.
-
-## 11. Namespace — `:seon.ns/*` (name, doc, requires, aliases, steward) + the program rows it owns (`:seon.fn`, `:seon.schema`, `:seon.test`)
-
-| | |
 |---|---|
-| store | yes (program facts) |
-| names | fine |
-| component | no; the agent's namespace is a scalar ref; its contents are program rows |
-| matters | agent: what I have already defined here, what data I declared; person: the namespace page |
-
-AI (derived: a definitions line when any exist; the data query when
-schema keys are declared)
+| names | `:seon.message/id` (random 8), `/to` (listened), `/from`, `/content`, `/about` (the message answered), `/read-tx` (ref to the transaction that handled it). DELETE `/at` (derive from the creating transaction) and `/ordinal` (order by tx); `my.message/reason` folds into content |
+| component | no; a concern |
+| matters | agent: what I was sent and haven't handled; person: the thread |
 
 ```clojure
-;; What have I already defined here?
-my.agents.juniper=> (dir my.agents.juniper)
-#:seon.repl{:value [{:sym largest, :arglists ([rows]), :doc "Return the row with the greatest :example/amount."}]}
-;; What data is in my namespace?
-my.agents.juniper=> (seon.db/q '[:find (count ?e) . :where [?e :example/amount]])
-#:seon.repl{:value 6}
+;; Anything I have not handled yet?
+my.agents.juniper=> (seon.db/q '[:find [(pull ?m [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]) ...] :where [?m :seon.message/to [:seon.agent/id "juniper"]] (not [?m :seon.message/read-tx])])
+#:seon.repl{:value [#:seon.message{:id "a83d335a", :content "Which customer …", :from #:seon.agent{:id "root"}}]}
+;; Answer root; the same transaction marks the question handled.
+(seon.db/transact! [{:seon.message/id "9f2c41ab" :seon.message/to [:seon.agent/id "root"] :seon.message/from [:seon.agent/id "juniper"]
+                     :seon.message/content "Alice totals 220." :seon.message/about [:seon.message/id "a83d335a"]}
+                    [:db/add [:seon.message/id "a83d335a"] :seon.message/read-tx "datomic.tx"]])
 ```
 
-HTML: the namespace page: functions with first docstring lines, schemas,
-tests with last results.
+Transacting a map with `:to` IS sending: `:to` is the listened attribute.
+`(my.message/send {…})` remains as the form that mints the id and writes
+both facts; `(doc my.message/send)` shows the two entries above. The
+inbox query needs the `not`-clause evidence fix (§0.6) to be exact;
+until then it is attribute-exact.
 
-## 12. Wakes — `:seon.wake/listen|opens-turn?|inside` on attributes; answered derived by `:t`
+HTML: a thread; replies under what they answer; unhandled marked.
 
-| | |
+## 6. History — `:seon.turn/*` + `:seon.eval/*`
+
+| store | turns: id, agent, opened-tx, closed-tx, reply, attempts, trigger. Evaluations: ordinal, comment, source, ns, shown text, out, error, duration, read evidence |
 |---|---|
-| store | the DECLARATIONS on the schema, yes; the wake itself is the datom — nothing extra stored |
-| names | fine |
-| component | not data on the agent |
-| matters | agent: nothing to see (it sees the message / fault); person: "why did this turn open" |
+| names | `:seon.eval/value` → `/shown` (it is shown text, not the value); `opened-at`/`closed-at` → tx refs |
+| component | evaluations ordered under the turn; the turn a concern of the agent |
+| matters | agent: the exact transcript; person: the same, grouped by turn, evidence behind a toggle |
 
-AI: none. HTML: the turn header's trigger line ("woke on message
-root/orders").
+AI: the transcript itself — one REPL entry per evaluation, bytes fixed at
+evaluation time, never re-listed (turn PRD §14; the prompt is a fold over
+rows in turn order). HTML: grouped by turn with trigger, attempts, reply.
 
-## 13. Retired or to delete (still in the live schema)
+## 7. Provider attempts — `:seon.ai.attempt/*` (component of the turn)
 
-`:seon.turn/plan-digest`, `supersedes`, `undisposed-at`,
-`background-results`, `error`; `:seon.ai.attempt/sent-body`;
-`:seon.eval/missing`, `:seon.eval/size` (admission caps retired with
-result serialization); `:my.plan.item/position` if order derives;
-`:seon.cluster.message/ordinal` if `at` orders. Each deletion is a schema
-reset; batch them.
+| store | ordinal, finish reason, usage, error, failover. NEVER `sent-body` (prompts are generated). `reasoning` OFF by default; a settings dial keeps it bounded when wanted |
+|---|---|
+| matters | person only: cost, why it stopped, what failed |
 
----
+No AI block. HTML: one line per attempt under the turn.
 
-## Root — connected to every agent, without the explosion
+## 8. Faults — `:seon.error/*` (`agent` = happened to; `steward` = routed to)
 
-Root is an agent like any other (id, namespace, plan, settings, messages,
-history) with one extra concern: **the agents it supervises**. That concern
-renders as ONE line per agent, derived, never the agent's full context:
+| store | yes, bounded (landed) |
+|---|---|
+| names | `:seon.error/run` → `/turn` |
+| matters | agent: what failed, where, the flat error — flagged as its job; person: cards grouped by signature |
+
+```clojure
+;; Has anything in my namespace failed? Fixing it is my job before anything else.
+my.agents.juniper=> (seon.db/q '[:find [(pull ?f [:seon.error/kind :seon.error/message :seon.instrument/fn]) ...] :where [?f :seon.error/steward [:seon.agent/id "juniper"]]])
+#:seon.repl{:value []}
+```
+
+Emitted at turn 0 even when empty (§0.5); re-emits when a fault routes
+to the agent, with the comment above as the explicit flag.
+
+## 9. Schema feedback — where the schema shows itself (owner, 2026-09-09)
+
+Today `seon.db/transact!` validates nothing beyond Datahike's own
+unknown-attribute / value-type checks (`db.clj:2397`; no Malli pass).
+Rulings:
+
+1. **`transact!` validates before Datahike.** Every map and `:db/add`
+   value in the transaction is checked against the projection's attribute
+   forms; a map carrying an identity attribute is checked against its
+   entity schema. A refusal is data: `{:seon.error/kind :seon.db/invalid-write,
+   :seon.db/attribute k, :seon.schema/form <form>, :seon.db/offending v,
+   :seon.db/path […]}` plus the entity form when one applies. The agent
+   sees the schema in the same turn it broke it; no turn spent asking.
+2. **Unknown attributes name candidates** — `q`/`pull` already do
+   (`:seon.db/registered-candidates`); `transact!` does the same.
+3. **Contract violations carry the function's doc map** (`:summary
+   :body :example :in :out` with schema forms expanded), so an
+   instrumentation error teaches the call.
+4. **`(dir ns)`** returns `{:schemas {key form …} :functions [{:sym :in
+   :out :doc}]}` — each schema once, functions naming theirs.
+   **`(doc sym)`** returns the doc map. Docstring convention: line 1 the
+   summary; body; a final `Example:` form.
+5. **Declared schemas render.** When the agent's namespace declares
+   schema keys, turn 0 emits `(dir my.agents.juniper)` showing them, and
+   the data-count query over them.
+6. **Help says it once**: "A mistake returns :error data with the schema
+   you violated."
+
+## 10. Notes — `:my.note/*`
+
+Stays as data the agent transacts directly (`{:my.note/agent … :my.note/content … :my.note/about …}`);
+`(doc my.note)` shows the map. No block at turn 0 unless notes exist;
+then the same pattern as faults.
+
+## 11. Namespace — `:seon.ns/*` + program rows
+
+```clojure
+;; What have I already defined here, and what data did I declare?
+my.agents.juniper=> (dir my.agents.juniper)
+#:seon.repl{:value {:schemas {:example/order [:string {:seon.db/identity true}], :example/customer :string, :example/amount :int}, :functions []}}
+my.agents.juniper=> (seon.db/q '[:find ?a (count ?e) :in $ [?a ...] :where [?e ?a _]] [:example/order :example/customer :example/amount])
+#:seon.repl{:value [[:example/order 4] [:example/customer 4] [:example/amount 4]]}
+```
+
+Both derived from the schema rows; absent when none.
+
+## 12. Root — connected to every agent, one derived block
 
 ```clojure
 ;; How are my agents doing?
-my.agents.root=> (my.agent/all)
-#:seon.repl{:value [{:id "juniper", :namespace my.agents.juniper, :turns-left 3, :open-turn? false,
-                     :unread 1, :faults 0, :current "Find the customer with the largest order total"}]}
+my.agents.root=> (seon.db/q '[:find [(pull ?a [:seon.agent/id :seon.agent/turns-left {:seon.agent/runtime [{:seon.runtime/turn [:seon.turn/id]}]} {:seon.agent/plan [{:my.plan/current-step [:my.plan.item/title]}]}]) ...] :where [?a :seon.agent/id]])
 ```
 
-Detail is on demand, one agent at a time, through the same functions with
-an explicit id: `(my.plan/items {:agent "juniper"})`,
-`(my.message/inbox {:agent "juniper"})`, `(my.agent/faults {:agent "juniper"})`.
-Faults route to the steward, so root's own faults block already shows what
-it is responsible for. Messages to root aggregate in its inbox like anyone
-else's. Root's HTML page: its own record, then a table of agents (the same
-one-line fields, each a link to the agent's page).
+plus derived per-agent measures in the same block, computed by the render
+function from facts: unread messages, faults routed, last turn latency
+(closed-tx minus opened-tx), evaluations and total ms this session,
+provider tokens and cost from attempts, storage bytes (shown text + blobs),
+scheduled tasks. Cluster-wide, one more form: JVM heap and threads, store
+footprint, adopted commit, fault signatures with counts. CPU and memory
+per agent are not separable in one JVM; latency, cost, bytes are.
+Detail on demand with the same `pull`/`q` against any agent's record.
 
-That is the whole difference: one derived block, and the `:agent`
-argument on the ordinary functions. No separate root renderers.
+## 13. Retire / delete
 
-## Juniper — the general agent
+`:seon.turn/plan-digest`, `supersedes`, `undisposed-at`,
+`background-results`, `error`; `:seon.ai.attempt/sent-body`;
+`:seon.eval/missing`, `/size`; `:seon.cluster.message/at`, `/ordinal`;
+`:my.plan.item/completed-at` (→ `completed-tx`); `:my.plan.item/expected-result`
+(→ `done-when`). One batched reset.
 
-Exactly the blocks above in the §18 order: help, identity, plan, namespace
-definitions and data (when any), inbox, settings, then history. Faults and
-notes appear only when present. Nothing is special-cased.
+## 14. Trials so far
 
----
+| trial | model | help | result |
+|---|---|---|---|
+| A/B/C, wrapper forms | Haiku ×3 | map / printed / vector | 7/7 comprehension each; replies wrote the prompt marker (A,B), completed a step early (B), invented Datalog (C) |
+| C2, wrapper forms | Haiku | vector + 3 lines | 8/8; clean reply |
+| paid, wrapper forms | deepseek-v4-flash | vector | 10/12; wrote the marker AND fabricated a `#:seon.repl` response → reader rule §18b |
+| C3, raw data forms | Haiku | vector, data-first | 8/8; correct pull/q/transact/get-in; wrote `(now)` (my bad example) and completed a step early (line trimmed) |
 
-## Open questions for the owner
+## 15. Open for the owner
 
-1. `:my.plan.item/position` and `:seon.cluster.message/ordinal`: store, or
-   derive order from `at`/tree order?
-2. Attempts: keep `reasoning` at all (blob, aged), or drop?
-3. Faults in the agent's own context: always a block when present, or only
-   when routed to it as steward?
-4. Notes: a default block or on demand?
-5. Root's one-line summary fields: is `{:id :namespace :turns-left :open-turn? :unread :faults :current}` the right seven?
+1. Message ids random 8 (a message is an event), or hash of
+   `[from to content]` (identical messages merge)?
+2. Faults block at turn 0 for every agent, or only for stewards?
+3. Root's summary fields: the list in §12?
+4. `my.message/send` and `my.agent/done` remain as the only `my.*` writes;
+   `my.plan`/`my.note` become `doc`-only namespaces (examples), no functions?
 
-## Live attribute inventory (default, ninth refork, pre-rename)
+## Live attribute inventory (default, tenth refork)
 
-my.message/reason; my.note/{about,agent,content,id}; my.plan.item/{about,agent,completed-at,description,expected-result,id,needs*,position,steps*comp,title}; my.plan/{current-step,objective,steps*comp}; seon.agent/{plan comp,settings comp}; seon.ai.attempt/{at,delay-ms,error,failover-from,finish-reason,id,ordinal,reasoning,reasoning-blob,reasoning-size,sent-body,settings-edn,truncation,usage-edn}; seon.cluster.message/{about,at,caused-by,content,from,id,ordinal,to}; seon.config.agent/turn-completion-backstop-ms; seon.error/{agent,at,basis-t,capped?,cid,class,data-blob,data-edn,data-size,dropped-fault-count,dropped-fault-digest,id,kind,message,op,proc,process,refusal,refusal-shape,run,signature,steward,throwable-class}; seon.eval/{duration-ms,missing,size,value}; seon.ns/{aliases*comp,doc,imports*comp,name,refers*comp,requires*,source,steward}; seon.turn/{agent,attempts*comp,background-results*,closed-at,error,id,opened-at,plan-digest,reply,reply-blob,reply-size,starting-ns,supersedes*,trigger,undisposed-at}; seon.wake/{inside,listen,opens-turn?}.
+seon.agent/{id, namespace, plan comp, settings comp}; my.plan/{objective, steps*comp, current-step}; my.plan.item/{id, title, expected-result, description, about, position, needs*, completed-at, steps*comp, agent}; seon.cluster.message/{id, to, from, content, about, caused-by, at, ordinal}; seon.turn/{id, agent, opened-at, closed-at, reply, reply-blob, reply-size, attempts*comp, trigger, starting-ns, plan-digest, supersedes*, undisposed-at, background-results*, error}; seon.eval/{value, missing, size, duration-ms}; seon.ai.attempt/{…}; seon.error/{…}; my.note/{id, agent, about, content}; seon.ns/{…}; seon.wake/{listen, opens-turn?, inside}.

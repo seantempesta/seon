@@ -1259,3 +1259,25 @@ help wording fixes that; the mechanism does:
 
 The harness (§18a) reruns after every change to the reader or to help;
 its score is the record.
+
+### 18c. Data first (owner, 2026-09-09) — supersedes §18's block forms
+
+The generated context's read blocks are raw `seon.db/pull` and `seon.db/q`
+forms with explicit selectors; writes in help and `doc` are
+`seon.db/transact!` with maps, `[:db/add …]`, `[:db/retract …]`,
+`[:db.fn/retractEntity …]`. `my.*` keeps only forms that carry a rule
+(`my.message/send`, `my.agent/done`) plus `help`, `dir`, `doc`. Time is the
+transaction: "now" facts are refs to `"datomic.tx"` and instants derive
+from `:db/txInstant` (no clock function exists in the agent's context;
+the reader accepts only `#inst`). Components the agent writes to carry an
+identity derived from the owner (`:my.plan/agent`, `:seon.config/agent`,
+`:seon.runtime/agent`), because a nested map under a cardinality-one
+component replaces it. Every read block is emitted once at turn 0 even
+when empty. `transact!` validates against the projection before Datahike
+and refuses with the schema form; contract violations carry the doc map;
+`dir` lists schemas once. Exact read evidence requires pattern-only
+queries until `not`/`or` clauses and `pull`-in-`:find` contribute
+patterns (`db.clj:335-372`). The full item-by-item design is
+`agent-data-chart-prd-2026-09-09.md` r2; the Haiku trial on raw forms
+scored 8/8.
+
