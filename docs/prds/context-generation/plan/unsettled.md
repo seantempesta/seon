@@ -583,3 +583,16 @@ half-edit. Measured targets in the issue.
   (a generated form uses an alias root's namespace lacks) — assigned.
 - Running: loop-proof on the red assertions under the provisional ruling.
 
+## 2026-09-09 06:00 — the loop regression is green
+
+- loop-proof `595b0bf7c`: virtual turns consume additive saved history;
+  the prompt is the stored evaluations (no neighbourhood material outside
+  them); the ordinary graph path runs the since-diff and appends changed
+  reads as a system turn; wakes are answered by the `:t` rule; root's
+  opening generates fully qualified symbols. Compaction assertion follows
+  the provisional ruling (option 1). Scoped gate 135/1032, platform 83/490.
+  Fifteen files; no reset needed. Remaining limits in its note (model
+  history and private-read verification).
+- The owner's compaction ruling remains open; the PRD carries the
+  provisional choice marked as such.
+

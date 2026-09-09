@@ -1083,6 +1083,19 @@ Owned: the page and the controls by `record-render`; `seon.turn/system-turn`
 (compute, with `:write? false` for the preview), `seon.turn/virtual-turn!`,
 `seon.turn/compact!` by `turn-cut`. Both read this section as their spec.
 
+## 16a. Compaction and byte identity — PROVISIONAL (2026-09-09, owner to confirm)
+
+Prompt bytes carry `result/e<id>` handles (ids derive from turn identity via
+`seon.id/evaluation`) and measured `:ms`, so a regenerated opening after
+compaction cannot be byte-identical to the original. Provisional ruling,
+applied by `loop-proof` (`595b0bf7c`) so work continues: **exact bytes are
+guaranteed within one history generation** (the caching precondition of
+§14 holds between compactions); **after compaction, the regenerated
+history has identical forms and shown values with fresh handles and
+timings.** Alternatives recorded in
+`research/loop-proof-landing-2026-09-09.md`: strip handles/timings from
+prompt text, or retain original observations across compaction.
+
 ## 17. Components: merge similar data (owner, 2026-09-08)
 
 The record's scalars stay scalars (id, namespace: many things need them
