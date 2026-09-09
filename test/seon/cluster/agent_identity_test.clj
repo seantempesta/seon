@@ -105,8 +105,10 @@
             "the argumentless SCI call uses the one declared request-map arity")
         (is (every? :seon.fn.arity/output arities))
         (is (some? live))
-        (let [result (evaluate (agent/render-identity-ai
-                                {:seon.agent/id agent-id}))
+        (let [result (evaluate (str "(do\n"
+                                   (agent/render-identity-ai
+                                    {:seon.agent/id agent-id})
+                                   "\n)"))
               value (:seon.sci.admit/value result)]
           (is (= agent-id (:seon.agent/id value)))
           (is (= namespace-name (get-in value [:seon.agent/namespace :seon.ns/name])))

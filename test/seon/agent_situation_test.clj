@@ -27,7 +27,7 @@
      :seon.cluster.message/content "Read me"
      :seon.cluster.message/at #inst "2026-08-12T12:00:01.000-00:00"}]))
 
-(deftest help-is-the-live-derived-control-surface
+(deftest situation-is-the-live-derived-control-surface
   (support/with-database
     (fn [connection]
       (seed-situation! connection)
@@ -44,7 +44,7 @@
                 :seon.agent/protocol-namespaces
                 ['my.message 'my.run]}
                situation))
-        (is (= '(seon.bootstrap/situation)
+        (is (= '(seon.bootstrap/help-value)
                (macroexpand '(seon.bootstrap/help))))
         (is (= {:seon.repl/comment
                 "; A new run just opened. Why am I awake — do I have messages?"

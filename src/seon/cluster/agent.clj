@@ -192,7 +192,8 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [unit]
   (let [form (identity-form unit)]
-    (str (:seon.repl/comment form) "\n" (pr-str (:seon.repl/form form)))))
+    (str ";; I should understand how this REPL works before I act.\n(help)\n\n"
+         (:seon.repl/comment form) "\n" (pr-str (:seon.repl/form form)))))
 
 (defn render-id-ai
   "Read the identity concern from its identifying attribute."

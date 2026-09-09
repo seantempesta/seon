@@ -1496,6 +1496,10 @@
     (install-first-party-namespaces!
      ctx namespace-assertions source-for-transaction all-namespace-rows
      all-function-rows)
+    ;; The bare REPL name refers to the acquired macro itself. Keeping the
+    ;; boot-time copy here would preserve its old expansion after adoption.
+    (sci/add-namespace! ctx 'clojure.core
+                        {'help (sci/resolve ctx 'seon.bootstrap/help)})
     (let [functions-installed
           (reduce
            (fn [state namespace-name]

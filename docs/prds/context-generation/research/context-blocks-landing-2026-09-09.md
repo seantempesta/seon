@@ -109,3 +109,53 @@ without incorrectly forbidding the declared evaluation and turn overrides.
   71,308 bytes, old identity keys still present, four `ExceptionInfo`
   occurrences across the displayed projections.
 - Test workers were capped at 3. No default lifecycle operation occurred.
+
+Slice 2 commit: `3f07beb88` (**RESET NEEDED**). Its post-commit default
+adoption again refused; default's REPL returned `2` in 1 ms and its debug
+page remained available. No lifecycle operation was taken on default.
+
+## Slice 3 — one help value
+
+`seon.bootstrap/help` expands to the existing bootstrap owner's new
+`help-value` read. The value is the exact §18a vector, with the namespace
+substituted and Tools derived through the existing program-graph namespace
+query plus public function/doc facts. It prints no separate instruction
+text and has no topic dispatch. The identity renderer emits `(help)` first.
+
+A real SCI/system-turn regression verifies the first stored evaluation,
+13 one-line strings, all three ▲ warnings, derived Tools, no printed
+output, source-version read evidence, and unchanged saved timing/handle
+bytes. The test changes unrelated agent data (evidence stays current),
+then changes the help definition's source (evidence becomes stale).
+The fixed prose is read from its owning function's indexed source solely
+to record that dependency; it is not stored as another instruction row.
+
+Fast loop: 3 tests / 30 assertions / zero failures or errors. The first
+scratch adoption attempt encountered `Clj-kondo cache is locked by other
+thread or process`; the operation was retried without touching another
+session or its files.
+
+Live adoption falsified a second assumption: the qualified help macro was
+new, but the bare `clojure.core/help` still expanded to the boot-time
+`situation` call. Acquisition now binds the bare name to the acquired
+macro Var itself. The regression verifies that identity. The live probe
+after adoption returned exactly:
+
+```clojure
+[(seon.bootstrap/help-value) (seon.bootstrap/help-value)]
+```
+
+Scratch source commit `6aa19efc-cc73-565c-bc5c-0e45b413755f` was adopted
+in place. After compaction, system turn `fecf3fb45f4d` stored the new help
+vector first. Its debug HTTP response was 74,539 bytes; the stored help
+had all 13 lines, three ▲ warnings, a result handle and `:ms 94`. The
+would-be system turn was then empty because every read was unchanged.
+The old plan forms and settings keyword list remain for slice 4.
+
+Final focused gate: 6 tests / 57 assertions / zero failures or errors.
+Final platform gate: 83 tests / 490 assertions / zero failures or errors.
+Both gates capped workers at 3 and isolated only this slice's paths.
+The cache rebuild diagnosis and bounded retries are recorded in
+`docs/seon/issues/source-publication-cache-contention-hides-dependency-analysis-failure.md`.
+The normal publication classpath rebuild completed, followed by successful
+scratch adoption. No other lane's process was operated.

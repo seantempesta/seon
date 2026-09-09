@@ -1,6 +1,8 @@
 (ns seon.bootstrap
   "The live-fact generated bootstrap run shared by every new agent."
   (:require [clojure.edn :as edn]
+            [clojure.string :as str]
+            [seon.cluster.instruction :as instruction]
             [seon.plan :as plan]
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
@@ -13,16 +15,53 @@
             [seon.sci.kernel :as sci.kernel]))
 
 (defmacro help
-  "Read the calling agent's live situation.
-
-  Defs live in your SCI context for this JVM's life and are never persisted.
-
-  The returned situation is the generated opening's control surface. Its
-  schema members are the seeds: adding a derived member to that shape is how
-  the opening grows. The value is pulled live from current facts; no member is
-  copied onto the agent as stored presentation state."
+  "Return the calling agent's REPL instructions as one vector of lines."
   []
-  (list 'seon.bootstrap/situation))
+  (list 'seon.bootstrap/help-value))
+
+(defn help-value
+  "Read the REPL instructions and tools from this program version."
+  {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
+                  [:vector :string]]}
+  [database agent-id]
+  ;; The fixed prose belongs to this definition; the source read records
+  ;; its code version in the same dependency evidence as every other read.
+  (db/pull database [:seon.fn/source]
+           [:seon.fn/sym "seon.bootstrap/help-value"])
+  (let [namespace-name
+        (db/q '[:find ?name . :in $ ?id
+                :where [?agent :seon.agent/id ?id]
+                       [?agent :seon.agent/namespace ?namespace]
+                       [?namespace :seon.ns/name ?name]] database agent-id)
+        tools
+        (db/q '[:find ?name ?doc ?function-name
+                :in $ [?name ...]
+                :where [?namespace :seon.ns/name ?name]
+                       [(get-else $ ?namespace :seon.ns/doc "") ?doc]
+                       [?function :seon.fn/ns ?namespace]
+                       [?function :seon.fn/private? false]
+                       [?function :seon.fn/sym ?function-name]]
+              database (instruction/toolkit-namespaces database))]
+    [(str "You are at a Clojure REPL in your namespace " namespace-name
+          ". Every function in the program is callable.")
+     (str "Reply with ;; thinking comments, each followed by the form it plans. ▲ Send only comments and forms; the prompt " namespace-name "=> is drawn for you.")
+     "▲ Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
+     "Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value."
+     "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
+     "▲ When unsure how to call something, ask first: (dir my.plan) lists a namespace's functions as data; (doc seon.db/q) returns a docstring and contract as data."
+     "Your plan is your instructions: (my.plan/items). The current step's :done-when says what done means. (my.plan/complete! id) when it is."
+     "(my.message/inbox) is what you were sent. (my.message/send {:to \"root\" :content \"...\"}) sends. Sending a message does not end your turn."
+     "(seon.db/q '[:find ...]) queries, (seon.db/pull '[*] eid) reads one entity, (seon.db/transact! [{...}]) writes. The database is your cluster's and is supplied for you."
+     "A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours."
+     "A mistake returns :error data, never an exception. Read :seon.error/message and try again."
+     "Each reply is one turn. :turns-left in your settings counts down. (my.agent/done) ends your session early."
+     (str "Tools: "
+          (str/join "; "
+                    (for [[namespace-name rows] (sort-by key (group-by first tools))]
+                      (str namespace-name " — "
+                           (first (str/split-lines (second (first rows))))
+                           " (" (str/join ", " (sort (map #(name (symbol (nth % 2))) rows)))
+                           ")"))))]))
 
 (defn situation
   "Derive one agent's live opening seeds from current database facts."
