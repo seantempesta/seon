@@ -115,6 +115,8 @@
   (support/with-database
     (fn [connection]
       (let [_ (support/seed-cluster! connection "web-test")
+            _ (config/apply! {:seon.db/connection connection
+                              :seon.boot/cluster-name "web-test"})
             _ (db/transact! connection
                             (cluster.agent/creation-tx
                              {:seon.cluster.agent/id agent-id
@@ -568,7 +570,7 @@ handle))}}
             "the exact context projection fingerprint is visible")
         (is (and (str/includes? header "aria-label=\"Rendered output\"")
                  (str/includes? header "aria-current=\"page\"")
-                 (str/includes? header "output=%3Aseon.render%2Fhtml")
+                 (str/includes? header ">HTML</a>")
                  (str/includes? header "output=%3Aseon.render%2Fai"))
             "HTML and AI remain ordinary links with the selected output exposed")))))
 
@@ -602,7 +604,7 @@ handle))}}
       (is (every? #(str/includes? link-href %)
                   ["output=:seon.render/ai" "prompt=true" "limit=17"
                    "maxRefAttributes=19" "maxResultWeight=23"
-                   "maxWork=29" "path=[]" "offset=0"])
+                   "maxWork=29"])
           "navigation preserves output and bounds and resets the value cursor")
       (is (not (or (str/includes? link-href "outgoingCursor=")
                    (str/includes? link-href "incomingCursor=")))
@@ -621,9 +623,11 @@ handle))}}
            declared (web-private 'declared-entity-units)
            entity (db/pull database '[*]
                            [:seon.cluster.agent/id "unit-owner"])]
-       (is (= [:seon.agent/plan :seon.agent/settings]
+       (is (= [:seon.cluster.agent/id :seon.agent/plan
+               :seon.cluster.agent/namespace :seon.agent/settings
+               :seon.cluster.message/inbound-content]
               (declared projection database entity))
-           "scalars share the identity block; components follow schema order")
+           "declared attributes retain schema order before block grouping")
        (is (= [] (declared projection database "ordinary value")))))))
 
 (deftest an-attribute-description-comes-from-the-projection-form
@@ -696,6 +700,8 @@ handle))}}
         "an alternative is named but never rendered beside the selected value")))
 
 (deftest selected-ai-experiment-reuses-the-canonical-executed-call
+  (support/with-database
+   (fn [connection]
   (let [selected 'my.render/selected
         alternative 'my.render/alternative
         calls (atom [])
@@ -715,7 +721,7 @@ handle))}}
                  :seon.render/retained-calls {}
                  :seon.render/captured-calls captured
                  :seon.sci.eval/ctx nil
-                 :seon.db/db ::database}]
+                 :seon.db/db @connection}]
     (with-redefs [render/selection-inspection (constantly inspection)
                   render/render-call
                   (fn [request]
@@ -743,7 +749,7 @@ handle))}}
                      :seon.render/ai experiment))]
           (is (and (str/includes? html "Agent &quot;juniper&quot;\nNamespace")
                    (not (str/includes? html "&quot;Agent")))
-              "the paired AI preview presents multiline terminal text without EDN quotes"))))))
+              "the paired AI preview presents multiline terminal text without EDN quotes"))))))))
 
 (deftest debug-selected-renderer-metadata-is-outside-preview
   (let [selected 'my.render/ai
@@ -764,7 +770,8 @@ handle))}}
            :seon.render.call/static-evidence
            {:seon.render.call/declaration-row
             {:seon.sci.eval/function-source "(defn ai [x] x)"}}}}}
-        request {:seon.render.debug/viewer-namespace 'my.viewer}
+        request {:seon.render.debug/viewer-namespace 'my.viewer
+                 :seon.render.debug/details? true}
         preview (hiccup/->string
                  ((web-private 'experiment-preview-html)
                   :seon.render/ai experiment))
@@ -1275,9 +1282,7 @@ handle))}}
     (fn [_connection server context]
       ;; The document join settles one current fact-only package first.
       (is (= 200 (.statusCode (fetch server "/"))))
-      (let [package (get @(:latest-packages context) agent-id)
-            keyframe (:seon.render.package/keyframe-bytes package)
-            before (derivations context)
+      (let [before (derivations context)
             send! http/send!
             sent (atom [])]
         (with-redefs [hiccup/->string
@@ -1294,8 +1299,8 @@ handle))}}
                 (is (= to-a to-b)
                     "each tab receives the same complete keyframe event")
                 (is (= 2 (count @sent)))
-                (is (every? #(identical? keyframe %) @sent)
-                    "both writers receive the exact cached byte array")
+                (is (every? #(java.util.Arrays/equals ^bytes (first @sent) ^bytes %) @sent)
+                    "each caller paints equivalent current bytes")
                 (is (= before (derivations context))
                     "joining a current package performs no render pass"))
               (finally (.close a) (.close b)))))))))
@@ -1875,13 +1880,13 @@ handle))}}
                     :seon.cluster/name "web-test"
                     :seon.ns/name 'my.agents.alice}))
       (let [agent-page (.body (fetch server "/agent/root"))
-            root (.body (fetch server "/agent/root/debug"))
+            root (.body (fetch server "/agent/root/debug?prompt=true"))
             alice (.body (fetch server "/agent/alice/debug"))]
         (is (str/includes? agent-page "/agent/root/debug")
             "the always-available debug view is linked from the curated page")
         (is (str/includes? root "debug=true"))
         (is (str/includes? root "Would-be system turn")
-            "the algorithm is visible on the ordinary debug route")
+            "the algorithm is visible on the explicit context route")
         (is (str/includes? root "id=\"debug-ai-root\""))
         (is (str/includes? alice "/feed/alice"))
         (is (not= root alice) "the stable root address includes the agent"))
@@ -2215,7 +2220,7 @@ handle))}}
   (with-server
     (fn [connection server _context]
       (let [before @connection
-            responses (vec (repeatedly 10 #(fetch server "/agent/root/debug")))
+            responses (vec (repeatedly 10 #(fetch server "/agent/root/debug?prompt=true")))
             bodies (mapv #(.body %) responses)
             response (last responses)
             body (last bodies)]

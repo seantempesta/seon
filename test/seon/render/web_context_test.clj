@@ -1,11 +1,13 @@
 (ns seon.render.web-context-test
   "Callers derive with shared evidence while the tab delta proc is paused."
   (:require [clojure.core.async.flow :as flow]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
             [seon.render.web-test :as web-test]
+            [seon.render.web :as web]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support])
   (:import [java.net URI]
@@ -89,3 +91,50 @@
              (is (= 200 (.statusCode after)))
              (is (< initial @calls)
                  "adoption invalidates even without a proc wake or SCI snapshot replacement"))))))))
+
+(deftest the-context-algorithm-runs-only-when-requested
+  (#'web-test/with-server
+   (fn [_connection server _context]
+     (let [derive @#'web/debug-prompt
+           calls (atom 0)]
+       (with-redefs-fn {#'web/debug-prompt
+                       (fn [& args] (swap! calls inc) (apply derive args))}
+         (fn []
+           (let [ordinary (#'web-test/fetch server "/agent/root/debug")]
+             (is (= 200 (.statusCode ordinary)))
+             (is (zero? @calls))
+             (is (str/includes? (.body ordinary) "Inspect context algorithm"))
+             (is (not (str/includes? (.body ordinary) "Context now"))))
+           (let [explicit (#'web-test/fetch server "/agent/root/debug?prompt=true")]
+             (is (= 200 (.statusCode explicit)))
+             (is (pos? @calls))
+             (is (str/includes? (.body explicit) "Context now"))
+             (is (str/includes? (.body explicit) "Would-be system turn")))))))))
+
+(deftest a-new-message-does-not-reinvoke-the-identity-pair
+  (#'web-test/with-server
+   (fn [connection server context]
+     (flow/pause (:graph context))
+     (let [invoke kernel/invoke
+           calls (atom 0)]
+       (with-redefs [kernel/invoke
+                     (fn [request]
+                       (when (#{"seon.cluster.agent/render-identity-ai"
+                                "seon.cluster.agent/render-identity-html"}
+                              (str (:seon.fn/sym request)))
+                         (swap! calls inc))
+                       (invoke request))]
+         (let [before (#'web-test/fetch server "/agent/root/debug")
+               initial @calls]
+           (is (= 200 (.statusCode before)))
+           (is (pos? initial))
+           (db/transact! connection
+                         [{:seon.cluster.message/id "identity-cache-message"
+                           :seon.cluster.message/to [:seon.cluster.agent/id "root"]
+                           :seon.cluster.message/at (java.util.Date.)
+                           :seon.cluster.message/content "A newly connected message."}])
+           (let [after (#'web-test/fetch server "/agent/root/debug")]
+             (is (= 200 (.statusCode after)))
+             (is (str/includes? (.body after) "A newly connected message."))
+             (is (= initial @calls)
+                 "reverse concern changes are not inputs to the scalar identity pair"))))))))

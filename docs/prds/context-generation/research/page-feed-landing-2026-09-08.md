@@ -569,3 +569,50 @@ The screenshot was opened and inspected.
 The path-limited filtering gate passed11 tests/53 assertions, zero failures/errors.
 Its initial fast attempt caught an extra closing parenthesis in the edited test;
 that was corrected before the passing gate and successful scratch adoption.
+
+
+### Combined traffic: remove eager algorithm work and repair shared publication
+
+The virtual-thread samples identified `debug-prompt` in 13 of 30 active page
+stacks. Ordinary debug now renders the schema AI/HTML pairs; the already-declared
+`prompt=true` route explicitly derives the context algorithm. The identity pair
+receives scalar/ref identity data, excluding components and reverse concerns, so
+a message does not invalidate its inputs. Connected namespace values still render
+through the identity pair.
+
+The broader canonical HTTP fixture exposed missing effective configuration:
+`seed-cluster!` alone created cluster identity, but not its configuration facts.
+It now calls `config/apply!` before acquiring SCI, like production. A refused
+selection is displayed as its typed diagnostic rather than an empty-render claim.
+This correction made the adoption-invalidation regression exercise actual entity
+renderers, not just a context preview.
+
+The broad web gate also exposed old proc-state assumptions. Every caller shares
+page results; the delta proc must compare those results against its last published
+package even when that caller reused the result. First paints compare the retained
+stream fragment evidence with their fact-only input, so a cached partial is not
+restored. Runtime invalidation updates the shared cache rather than deleted proc
+fields. Finally, candidate reads use `seon.db/read-evidence-current?`; raw revision
+equality is insufficient for reads marked ineligible for revision-only caching.
+
+The first scratch combined probe had three tabs, 20 writes at one-second spacing,
+and two open source turns in the first recorded sample. First SSE maximum was
+1895.884916 ms across 25 samples; plain GET maximum was 1596.434167 ms while test
+JVMs were concurrently active. This is preliminary evidence, not the final default
+acceptance measurement. Default adoption and final gates are recorded below.
+
+
+The corrected fast loop passed 71 tests / 418 assertions. The final path-limited
+web gate passed 71 tests / 419 assertions, zero failures/errors, including the
+read-evidence authority correction. The isolated snapshot contained only
+`src/seon/render.clj`, `src/seon/render/web.clj`, and the three web test files
+against `7aa7c1625`; the render.clj overlay was the already-landed cache generation
+change. Main's newly concurrent render.clj edits were not copied or committed.
+Scratch adopted the final implementation as `6aa0e6eb-7909-5978-9258-8b1ee5726620`,
+digest `960b560e4b440ab4c61d98a25cef35bd832f56b031bcff51c1ef8a7c7be0d29c`.
+
+The preliminary scratch root already had an open root turn, so its second source
+submission was refused as already running. The retained EDN states this explicitly;
+only Juniper was newly submitted. Final default proof must check both submissions.
+
+![Paired blocks with explicit context inspection](page-feed-preview-scratch-2026-09-08.png)

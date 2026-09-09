@@ -233,3 +233,12 @@
                ":seon.agent/settings"] units))
        (is (str/includes? (pr-str html) "seon.cluster.agent/render-identity-ai"))
        (is (str/includes? (pr-str html) "seon.cluster.agent/render-identity-html"))))))
+
+(deftest a-refused-selection-is-not-reported-as-an-empty-render
+  (let [refusal {:seon.error/kind :seon.config/missing-effective
+                 :seon.error/message "The render profile is unavailable."}
+        html (#'web/experiment-preview-html
+              :seon.render/html
+              {:seon.render/selection {:seon.render.selection/selected refusal}})]
+    (is (str/includes? (pr-str html) "The render profile is unavailable."))
+    (is (not (str/includes? (pr-str html) "No render function produced")))))

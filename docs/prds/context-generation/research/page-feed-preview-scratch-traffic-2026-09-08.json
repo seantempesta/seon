@@ -1,0 +1,346 @@
+{
+  "base": "http://127.0.0.1:7749",
+  "gets": [
+    {
+      "status": 200,
+      "milliseconds": 1323.0921249999992
+    },
+    {
+      "status": 200,
+      "milliseconds": 1331.6512919999996
+    },
+    {
+      "status": 200,
+      "milliseconds": 1313.367209
+    }
+  ],
+  "events": [
+    {
+      "at": 1788929485365,
+      "status": 200,
+      "milliseconds": 13.874625000000378,
+      "event": "event: datastar-patch-elements",
+      "bytes": 105419
+    },
+    {
+      "at": 1788929486966,
+      "status": 200,
+      "milliseconds": 1895.8849160000009,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112763
+    },
+    {
+      "at": 1788929488863,
+      "status": 200,
+      "milliseconds": 1365.05825,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929490230,
+      "status": 200,
+      "milliseconds": 147.78054200000042,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929491232,
+      "status": 200,
+      "milliseconds": 146.730583999999,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929492235,
+      "status": 200,
+      "milliseconds": 205.7061249999988,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929493237,
+      "status": 200,
+      "milliseconds": 173.90541700000176,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929494238,
+      "status": 200,
+      "milliseconds": 170.7462919999998,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929495240,
+      "status": 200,
+      "milliseconds": 168.94237499999872,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929496242,
+      "status": 200,
+      "milliseconds": 167.53549999999814,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929497244,
+      "status": 200,
+      "milliseconds": 164.23812499999985,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929498246,
+      "status": 200,
+      "milliseconds": 166.66820899999948,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112757
+    },
+    {
+      "at": 1788929499248,
+      "status": 200,
+      "milliseconds": 180.58450000000084,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929500250,
+      "status": 200,
+      "milliseconds": 170.0409580000014,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112759
+    },
+    {
+      "at": 1788929501252,
+      "status": 200,
+      "milliseconds": 168.4213329999984,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929502254,
+      "status": 200,
+      "milliseconds": 170.8765420000018,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112758
+    },
+    {
+      "at": 1788929503256,
+      "status": 200,
+      "milliseconds": 189.7860409999994,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929504258,
+      "status": 200,
+      "milliseconds": 178.8610000000008,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929505260,
+      "status": 200,
+      "milliseconds": 180.10499999999956,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929506262,
+      "status": 200,
+      "milliseconds": 5.061832999999751,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929507264,
+      "status": 200,
+      "milliseconds": 4.630334000001312,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929508266,
+      "status": 200,
+      "milliseconds": 4.832957999999053,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929509268,
+      "status": 200,
+      "milliseconds": 170.27437499999724,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112760
+    },
+    {
+      "at": 1788929510270,
+      "status": 200,
+      "milliseconds": 102.60858299999381,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112757
+    },
+    {
+      "at": 1788929511272,
+      "status": 200,
+      "milliseconds": 4.430458000002545,
+      "event": "event: datastar-patch-elements",
+      "bytes": 112757
+    }
+  ],
+  "plain": [
+    {
+      "at": 1788929485365,
+      "status": 200,
+      "milliseconds": 1596.4341669999994,
+      "bytes": 119556
+    },
+    {
+      "at": 1788929486966,
+      "status": 200,
+      "milliseconds": 1314.0860409999987,
+      "bytes": 131377
+    },
+    {
+      "at": 1788929488863,
+      "status": 200,
+      "milliseconds": 885.4865840000002,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929490230,
+      "status": 200,
+      "milliseconds": 607.4673750000002,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929491232,
+      "status": 200,
+      "milliseconds": 223.47562499999913,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929492235,
+      "status": 200,
+      "milliseconds": 276.78662500000064,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929493237,
+      "status": 200,
+      "milliseconds": 247.17962500000067,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929494238,
+      "status": 200,
+      "milliseconds": 244.1463330000006,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929495240,
+      "status": 200,
+      "milliseconds": 240.80995900000198,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929496242,
+      "status": 200,
+      "milliseconds": 238.40770799999882,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929497244,
+      "status": 200,
+      "milliseconds": 235.20100000000093,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929498246,
+      "status": 200,
+      "milliseconds": 238.03316699999777,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929499248,
+      "status": 200,
+      "milliseconds": 255.3401249999988,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929500250,
+      "status": 200,
+      "milliseconds": 240.40391699999964,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929501252,
+      "status": 200,
+      "milliseconds": 251.32429200000115,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929502254,
+      "status": 200,
+      "milliseconds": 241.23241699999926,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929503256,
+      "status": 200,
+      "milliseconds": 274.38079199999993,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929504258,
+      "status": 200,
+      "milliseconds": 250.25816599999962,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929505260,
+      "status": 200,
+      "milliseconds": 259.8084999999992,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929506262,
+      "status": 200,
+      "milliseconds": 19.94383299999754,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929507264,
+      "status": 200,
+      "milliseconds": 20.341457999998966,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929508266,
+      "status": 200,
+      "milliseconds": 18.110875000002125,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929509268,
+      "status": 200,
+      "milliseconds": 483.5619169999991,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929510270,
+      "status": 200,
+      "milliseconds": 414.4025840000031,
+      "bytes": 143393
+    },
+    {
+      "at": 1788929511272,
+      "status": 200,
+      "milliseconds": 22.646915999997873,
+      "bytes": 143393
+    }
+  ]
+}

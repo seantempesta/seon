@@ -1118,6 +1118,7 @@
                    (get previews selected))]
     (cond
       (:seon.error/kind selection) (debug-value-html selection)
+      (:seon.error/kind selected) (debug-value-html selected)
       (nil? rendered)
       [:p {:class "seon-debug-empty"}
        "No render function produced a value for this projection."]
@@ -1278,8 +1279,7 @@
                 (if (or (reverse-attribute? attribute)
                         (= attribute :seon.cluster.agent/agent)) [] [attribute])
                 :seon.render.data/offset 0}
-        value (if (and present? (not= attribute :seon.cluster.agent/agent))
-                (connected-value related value) value)
+        value (if present? (connected-value related value) value)
         experiments
         (when present?
           {:seon.render/ai
@@ -1367,6 +1367,12 @@
                                    (when (:db/isComponent properties) attribute)))
                            (:schema (db/schema-database
                                      (:seon.db/db render-request)))))
+        identity-value (when agent?
+                         (into {}
+                               (remove (fn [[attribute _]]
+                                         (or (get components attribute)
+                                             (reverse-attribute? attribute))))
+                               acquisition))
         units (cond->> (concat declared-units additional)
                 agent? (filter #(or (reverse-attribute? %)
                                     (get components %))))]
@@ -1378,7 +1384,7 @@
              agent?
              (conj (debug-found-value
                     projection render-request debug-request
-                    :seon.cluster.agent/agent (apply dissoc acquisition components) true related
+                    :seon.cluster.agent/agent identity-value true related
                     context-selection context-source-call)))
            (map (fn [attribute]
                   (let [entry (find (if (reverse-attribute? attribute)
@@ -1809,10 +1815,11 @@
         prompt-id (str "debug-ai-"
                        (or (:seon.cluster.agent/id debug-request) "inspection"))
         prompt-result
-        (when-let [agent-id (:seon.cluster.agent/id debug-request)]
-          (debug-prompt db connection agent-id caps
-                        (assoc handle :seon.render/profile profile
-                                      :seon.cluster.loop/cluster handle)))
+        (when (:seon.render.debug/prompt? debug-request)
+          (when-let [agent-id (:seon.cluster.agent/id debug-request)]
+            (debug-prompt db connection agent-id caps
+                          (assoc handle :seon.render/profile profile
+                                        :seon.cluster.loop/cluster handle))))
         program-identity
         (debug-program-identity db (:seon.sci.eval/ctx handle))
         page
@@ -1966,24 +1973,14 @@
         (keep :seon.render.call/invocation-key)
         (mapcat vals (concat (vals calls) (vals ai-calls)))))
 
-(defn- evidence-revisions
-  [database call]
-  (mapv :datahike.read/revision
-        (:seon.render.call/read-evidence
-         (render/refresh-read-evidence database call))))
-
-(defn- retained-revisions
-  [call]
-  (mapv :datahike.read/revision (:seon.render.call/read-evidence call)))
-
 (defn- candidate-call-ids
   [calls database]
   (into #{}
         (keep (fn [[call-id call]]
                 (when (or (and (:seon.render.call/source call)
                                (nil? (:seon.render.call/output call)))
-                          (not= (retained-revisions call)
-                                (evidence-revisions database call)))
+                          (not (true? (db/read-evidence-current?
+                                       database (:seon.render.call/read-evidence call)))))
                   call-id)))
         calls))
 
@@ -2137,6 +2134,9 @@
                      (get-in streams [agent-id :seon.ai/partial])))
             root (refresh-root request retained call-id candidates)
             derive? (or derive-all?
+                        (not= [(get-in streams [agent-id :seon.ai/partial])]
+                              (get-in retained-values [::fragments registration-key
+                                                       stream-strip-id :seon.render.fragment/evidence]))
                         (:changed? root)
                         (seq (disj candidates call-id)))]
         (if derive?
@@ -2231,28 +2231,15 @@
   predicate existed to paper over."
   [state]
   (let [watched (watched-registration-keys
-                 (:seon.render.web/registration state))]
-    (assoc state
-           ::packages (select-keys (::packages state) watched)
-           ::fragments {}
-           ::calls
-           (reduce-kv
-            (fn [registrations registration-key calls]
-              (let [source-calls
-                    (into {}
-                          (comp
-                           (filter (comp :seon.render.call/source-run-id val))
-                           (map (fn [[call-id entry]]
-                                  [call-id
-                                   (dissoc entry
-                                           :seon.render/selection-input
-                                           :seon.render.call/output)])))
-                          calls)]
-                (cond-> registrations
-                  (seq source-calls) (assoc registration-key source-calls))))
-            {} (::calls state))
-           ::ai-calls {}
-           ::ai-entries {})))
+                 (:seon.render.web/registration state))
+        cache (render/shared-cache
+               (get-in state [:seon.cluster.loop/cluster :seon.sci.eval/ctx]))]
+    (swap! cache
+           (fn [retained]
+             (-> retained
+                 (update ::packages select-keys watched)
+                 (dissoc ::page-results ::calls ::fragments))))
+    state))
 
 (defn- failed-page-result
   "One page whose derivation threw: a committed fault and a visible section.
@@ -2400,9 +2387,7 @@
                 signatures)]))
          [{} (::invocations state) {}]
          watched)
-        paint-results (into {}
-                            (remove (comp ::retained-only? val))
-                            results)
+        paint-results results
         advanced
         (reduce-kv
          (fn [{latest :packages changed? :changed?}
@@ -3183,7 +3168,7 @@
         rendered-page (current-page render-context db [::debug-tab debug-request])
         feed-id (or agent-id (str viewer-namespace))
         prompt-section
-        (if agent-id
+        (if (and agent-id (:seon.render.debug/prompt? debug-request))
           [:section {:class "seon-debug-prompt-detail"}
            [:h2 "Agent context"]
            [:section {:class "seon-debug-pane seon-debug-pane-ai"}
@@ -3193,7 +3178,7 @@
                  :href (debug-page-url
                         debug-request
                         {:seon.render.debug/prompt? true})}
-             "include agent prompt comparison"]))
+             "Inspect context algorithm"]))
         page
         [[:section {:class "seon-debug"
                     :data-signals__ifmissing
