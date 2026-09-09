@@ -69,6 +69,26 @@
       (is (= rows (edn/read-string shown)) shown)
       (is (false? (get-in projection [:seon.render.value/options :seon.print/table?]))))))
 
+(deftest component-members-render-in-declared-position-order
+  (support/with-database
+   (fn [connection]
+     (let [rows [{:my.plan.item/id "order/second" :my.plan.item/position 2}
+                 {:my.plan.item/id "order/first" :my.plan.item/position 1}]
+           render-rows (fn [members]
+                         (edn/read-string
+                          (value/render-ai
+                           (assoc (unit {:my.plan/steps members})
+                                  :seon.db/db @connection))))]
+       (is (= (vec (reverse rows)) (:my.plan/steps (render-rows rows))))
+       (is (= (vec (reverse rows)) (:my.plan/steps (render-rows (set rows)))))
+       (let [partial [(first rows) (dissoc (second rows) :my.plan.item/position)]]
+         (is (= partial (:my.plan/steps (render-rows partial)))))
+       (is (= rows
+              (:fixture/rows
+               (edn/read-string
+                (value/render-ai
+                 (assoc (unit {:fixture/rows rows}) :seon.db/db @connection))))))))))
+
 (deftest declared-producers-still-have-absolute-precedence
   (support/with-database
    (fn [connection]

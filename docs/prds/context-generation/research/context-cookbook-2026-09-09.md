@@ -225,6 +225,31 @@ Actual JVM result (35 UTF-8 bytes; evidence [:index-patterns]):
 
 # Speculative writes
 
+## Component ordering implementation, first code slice
+
+`src/seon/render/value.clj` sorts a cardinality-many component collection when
+all maps carry the same numeric namespaced `position` key. A partial collection
+keeps its order; an ordinary vector outside a component keeps its order. The
+renderer derives component membership from the handed database schema. The
+canonical fixture regression covers vector and set inputs and both exclusions.
+
+`SEON_TEST_WORKERS=3 bin/test-fast --paths src/seon/render/value.clj test/seon/render/value_test.clj -- seon.render.value-test`:
+24 tests / 113 assertions, green.
+The corresponding `bin/test --paths … -- seon.render.value-test` isolated gate:
+24 tests / 117 assertions, green. `bin/test --paths … --platform`: exit 0.
+
+Live proof on default used a hot-reloaded `seon.render.value` namespace, followed
+by `seon.instrument/apply!` with the database projection. This is not an adoption
+claim: the edit-hook publication had timed out. Before and after shown text is
+373 UTF-8 bytes; positions changed from `0,2,1,4,3,5` to `0,1,2,3,4,5`.
+The observation pulled only item identity and position through the plan
+component, then called the real value renderer with the effective render profile.
+
+Remaining schema scope is an owner decision under AGENTS.md's design gate:
+current-schema raw forms now, the complete schema work here, or target patches
+pending the data lane. The absent schema is an implementation prerequisite;
+the concurrent db.clj transaction work remains protected.
+
 ## Add a step
 
 ```clojure

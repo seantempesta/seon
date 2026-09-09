@@ -225,12 +225,25 @@
   [unit attribute value]
   (let [database (:seon.db/db unit)
         properties (get-in database [:schema attribute])]
-    (if (and (= :db.type/ref (:db/valueType properties))
+    (cond
+      (and (:db/isComponent properties)
+           (= :db.cardinality/many (:db/cardinality properties))
+           (coll? value) (seq value) (every? map? value))
+      (let [position (some (fn [key]
+                             (when (and (qualified-keyword? key)
+                                        (= "position" (name key))
+                                        (every? #(number? (get % key)) value))
+                               key))
+                           (sort-by str (keys (first value))))]
+        (if position (vec (sort-by position value)) value))
+
+      (and (= :db.type/ref (:db/valueType properties))
              (not (:db/isComponent properties)))
       (if (= :db.cardinality/many (:db/cardinality properties))
         (into #{} (map #(reference-identity database %)) value)
         (reference-identity database value))
-      value)))
+
+      :else value)))
 
 (declare value-node)
 
