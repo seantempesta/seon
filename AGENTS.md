@@ -691,6 +691,13 @@ callable roots and Malli function-schema registry, including after a throw.
 The runner's drift detector remains the independent check; its automatic
 re-arm does not excuse a test leaving its worker unarmed.
 
+Acquire resources inside `with-open` scopes; use
+`seon.test-support/closeable` when release is a separate function. Setup failure
+and one failed cleanup must still release every earlier acquisition. Evaluation
+submission fixtures acquire their real SCI context before the timed submission
+and carry their namespace and database explicitly. Proc failure injection
+preserves lifecycle arities when the transform is its subject.
+
 Deeper mechanics: `.agents/skills/clojure-testing/SKILL.md`; a new fixture
 class updates both in the same commit.
 

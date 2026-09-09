@@ -6,8 +6,11 @@ description: "Test Seon with the canonical Datahike fixture, real SCI evaluation
 # Test the running contract
 
 The binding gate is [turn PRD §10](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
-A lane runs bare `bin/test`, its subject's explicit namespaces, and
-`bin/test --platform`. Never run `--all` or `--full` in a lane.
+A lane gates its owned changes with
+`bin/test --paths <owned files> -- <subject namespaces>` and runs
+`bin/test --paths <owned files> --platform` before reporting. This is the
+owner's 2026-09-08 paths-only refinement; foreign working-tree edits are not
+inputs to that snapshot. Never run `--all` or `--full` in a lane.
 
 ## Select and read the real gate
 
@@ -63,6 +66,15 @@ exception data, distinguishing committed and unknown results
 independently verify the database did not change. Checking only a throw
 does not establish atomic refusal.
 
+Acquire fixture resources in `with-open` scopes using
+`seon.test-support/closeable` for values with a separate release function
+(`test/seon/test_support.clj`, the adapter following the instrumentation fixture).
+Clojure's nested `finally` expansion owns reverse cleanup even when setup or
+another cleanup fails (`reference-code/clojure/src/clj/clojure/core.clj:3854`).
+The recurring test injects failures after each acquisition count and at each
+cleanup (`test/seon/test_support_test.clj`,
+`fixture-resources-close-through-setup-and-cleanup-failures`).
+
 ## Properties and instrumentation
 
 Derive inputs from fixed seeds. Do not read wall time or mint random
@@ -81,6 +93,17 @@ Run under the same contracts the cluster arms. Re-evaluating a Var
 strips its wrapper; the instrumentation owner documents re-arming with
 the supplied projection at `src/seon/instrument.clj:685`.
 Do not weaken contracts to make a stale fixture pass.
+
+Tests that deliberately change instrumentation use
+`seon.test-support/preserving-instrumentation-state`
+(`test/seon/test_support.clj`, the fixture following `seed-cluster!`). It
+restores the entering callable roots and Malli function-schema registry on
+both normal and exceptional exit. Malli's registry is the private atom at
+`reference-code/malli/src/malli/core.cljc:3061`; the existing context fixture
+uses this same shared owner. The platform regression removes real entering
+wrappers, throws, and proves those exact wrappers and schemas return. A
+runner re-arm is evidence of leaked test state, not a substitute for this
+cleanup.
 
 ## Turn and context regressions — target
 
