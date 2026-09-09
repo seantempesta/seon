@@ -6,6 +6,15 @@
             [seon.repl :as repl]
             [seon.sci.admit :as admit]))
 
+(deftest generated-source-uses-reader-syntax-without-changing-the-form
+  (let [form '(seon.db/pull '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name]}]
+                           [:seon.agent/id "juniper"])
+        source (binding [*print-namespace-maps* true *print-length* 1]
+                 (repl/source-text form))]
+    (is (= "(seon.db/pull '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name]}] [:seon.agent/id \"juniper\"])"
+           source))
+    (is (= form (read-string source)))))
+
 (deftest one-evaluation-emits-comment-prompt-and-response
   (testing "the comment sits above the prompt so the prompt holds one form"
     (let [emitted (repl/text

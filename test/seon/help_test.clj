@@ -18,11 +18,12 @@
    (fn [connection]
      (config/apply! {:seon.db/connection connection
                     :seon.boot/cluster-name "help"})
-     (db/transact! connection
-                   (into [{:seon.cluster/name "help"}]
+     (let [setup (db/transact! connection
+                   (into [[:db/add "cluster" :seon.cluster/name "help"]]
                          (agent/creation-tx {:seon.agent/id "help"
                                              :seon.ns/name 'my.agents.help
-                                             :seon.cluster/name "help"})))
+                                             :seon.cluster/name "help"})))]
+       (is (:db-after setup) (pr-str setup)))
      (db/transact! connection
                    [{:seon.agent/id "help"
                      :seon.agent/plan {:my.plan/objective "Verify the opening"}
@@ -52,7 +53,8 @@
                saved (first (evaluation/of-agent @connection "help"))
                lines (some-> (:seon.eval/value saved) edn/read-string)
                evidence (:seon.cluster.eval/read-evidence saved)
-               shown (repl/render-ai saved)]
+               shown (when saved (repl/render-ai saved))]
+           (is (some? saved) (pr-str {:opening opening :committed @committed}))
            (is (nil? (:seon.error/kind opening)) (pr-str opening))
            (is (nil? (:seon.turn/id opening))
                "a second real system pass committed while this pass evaluated")

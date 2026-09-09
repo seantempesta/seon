@@ -93,20 +93,26 @@
 
 (defn- install-namespace!
   [connection namespace-name source schema-rows function-rows]
-  (db/transact! connection
-              [(cond-> {:seon.ns/name namespace-name}
-                 source (assoc :seon.ns/source source))])
+  (is (:db-after
+       (db/transact! connection
+                     [(cond-> {:seon.ns/name namespace-name}
+                        source (assoc :seon.ns/source source))])))
   (when (seq schema-rows)
-    (db/transact! connection schema-rows))
+    (let [report (db/transact! connection
+                               (mapv #(assoc % :seon.schema.admission/source :core)
+                                     schema-rows))]
+      (is (:db-after report) (pr-str report))))
   (when (seq function-rows)
-    (db/transact! connection function-rows)))
+    (let [report (db/transact! connection function-rows)]
+      (is (:db-after report) (pr-str report)))))
 
 (defn- function-row
   [namespace-name function-name source options]
-  (merge {:seon.fn/sym (str namespace-name "/" function-name)
+  (merge (cond-> {:seon.fn/sym (str namespace-name "/" function-name)
+          :seon.schema.admission/source :core
           :seon.fn/ns [:seon.ns/name namespace-name]
-          :seon.fn/source source
           :seon.fn/private? false}
+           source (assoc :seon.fn/source source))
          options))
 
 (deftest bounded-read-refusals-remain-flat-errors

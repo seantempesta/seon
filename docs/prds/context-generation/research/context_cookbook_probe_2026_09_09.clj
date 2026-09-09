@@ -1,8 +1,16 @@
 (ns context-cookbook-probe-2026-09-09
   (:require [clojure.string :as str]
+            [clojure.walk :as walk]
             [datahike.api :as d]
+            [seon.config :as config]
             [seon.db :as db]
-            [seon.operator :as operator]))
+            [seon.eval :as evaluation]
+            [seon.operator :as operator]
+            [seon.operator.runtime :as runtime]
+            [seon.render :as render]
+            [seon.repl :as repl]
+            [seon.render.value :as value]
+            [seon.schema :as schema]))
 
 ; Execute through default's MCP JVM session. Every write below is d/with.
 ; The proposed attributes exist only in a speculative database value.
@@ -89,19 +97,25 @@
 
 (defn- report-face [report]
   (let [before (:db-before report) after (:db-after report)
-        identities (set (d/q '[:find [?a ...] :where [?e :db/ident ?a] [?e :db/unique :db.unique/identity]] after))
-        reference (fn [eid]
-                    (or (some (fn [database]
-                                (some (fn [datom] (when (identities (:a datom)) [(:a datom) (:v datom)]))
-                                      (sort-by (comp str :a) (d/datoms database :eavt eid))))
-                              [after before]) eid))]
-    {:seon.db/tx (get (:tempids report) :db/current-tx)
-     :seon.db/datoms (mapv (fn [datom] [(reference (:e datom)) (:a datom) (:v datom) (:added datom)]) (:tx-data report))}))
+        identities (set (d/q '[:find [?a ...] :where [?e :db/ident ?a] [?e :db/unique :db.unique/identity]] after))]
+    (letfn [(reference [eid visited]
+              (if (visited eid) eid
+                  (or (some (fn [database]
+                              (some (fn [datom]
+                                      (when (identities (:a datom))
+                                        [(:a datom)
+                                         (if (= :db.type/ref (get-in database [:schema (:a datom) :db/valueType]))
+                                           (reference (:v datom) (conj visited eid))
+                                           (:v datom))]))
+                                    (sort-by (comp str :a) (d/datoms database :eavt eid))))
+                            [after before]) eid)))]
+      {:seon.db/tx (get (:tempids report) :db/current-tx)
+       :seon.db/datoms (mapv (fn [datom] [(reference (:e datom) #{}) (:a datom) (:v datom) (:added datom)]) (:tx-data report))})))
 
 (defn- byte-count [text] (alength (.getBytes ^String text "UTF-8")))
 
 (defn run-probe!
-  "Execute the chart reads and speculative writes on default, retaining exact output bytes."
+  "Execute chart reads and speculative writes, retaining exact output bytes."
   []
   (let [connection (operator/connection "default") database @connection
         run-read (fn [[title thought form]]
@@ -126,24 +140,164 @@
     (spit "docs/prds/context-generation/research/context_cookbook_probe_2026_09_09.edn" (pr-str result))
     (mapv #(select-keys % [:title :bytes :evidence]) (concat read-results write-results))))
 
-(defn write-cookbook!
-  "Render retained results without re-executing their forms."
+(defn probe-proposed-reads!
+  "Read target-shaped speculative results and append their actual outputs."
   []
-  (let [result (read-string (slurp "docs/prds/context-generation/research/context_cookbook_probe_2026_09_09.edn"))
-        section (fn [{:keys [title thought form output bytes evidence executed]}]
-                  (str "\n## " title "\n\n```clojure\n;; " thought "\n" form "\n```\n\n"
-                       (when executed (str "Executed in the speculative chain: `" executed "`.\n\n"))
-                       "Actual " (if executed "proposed report projection" "JVM result") " (" bytes " UTF-8 bytes"
-                       (when evidence (str "; evidence " (pr-str evidence))) "):\n\n```clojure\n" output "\n```\n"))]
+  (let [connection (operator/connection "default")
+        initial (proposed-database @connection)
+        after (reduce (fn [database [_ _ tx]] (:db-after (d/with database tx))) initial writes)
+        forms
+        [["Runtime after declaring a listen" "I should verify that my runtime contains the listen I added."
+          '(seon.db/pull database '[{:seon.agent/runtime [{:seon.runtime/listens [:seon.listen/attribute]}]}] [:seon.agent/id "juniper"])]
+         ["Target messages, reverse pull" "I should read root's incoming messages through seon.message/_to."
+          '(seon.db/pull database '[{:seon.message/_to [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]} {:seon.message/about [:seon.message/id]}]}] [:seon.agent/id "root"])]
+         ["Completion instant" "I should derive the completion instant from its transaction ref."
+          '(seon.db/pull database '[:my.plan.item/id {:my.plan.item/completed-tx [:db/txInstant]}] [:my.plan.item/id "juniper/query"])]
+         ["Removal verification" "I should verify the deleted item is absent, not merely detached from the plan."
+          '(seon.db/pull database [:my.plan.item/id] [:my.plan.item/id "juniper/verify"])]
+         ["Plan membership after removal" "I should see the original six steps and the new current step after removing my probe item."
+          '(seon.db/pull database '[{:my.plan/current-step [:my.plan.item/id]} {:my.plan/steps [:my.plan.item/id :my.plan.item/position]}] [:my.plan/agent [:seon.agent/id "juniper"]])]
+         ["Handled question" "I should verify the question carries the transaction that handled it."
+          '(seon.db/pull database '[:seon.message/id {:seon.message/read-tx [:db/txInstant]}] [:seon.message/id "c00cb000"])]
+         ["Settings preservation" "I should see my changed time limit alongside the untouched overrides."
+          '(seon.db/pull database [:seon.config.eval/time-limit-ms :seon.config.ai/no-provider :seon.config.run/max-episode-runs] [:seon.config/agent [:seon.agent/id "juniper"]])]
+         ["Saved note" "I should see my saved note linked to the query step."
+          '(seon.db/pull database '[:my.note/id :my.note/content {:my.note/about [:my.plan.item/id]}] [:my.note/id "juniper/orders-observed"])]]
+        results (mapv (fn [[title thought form]]
+                        (let [output (pr-str ((eval (list 'fn ['database] form)) after))]
+                          {:title title :thought thought :form (pr-str form)
+                           :output output :bytes (byte-count output)})) forms)
+        face (report-face (d/with initial [[:db/add [:my.plan/agent [:seon.agent/id "juniper"]]
+                                            :my.plan/current-step [:my.plan.item/id "juniper/aggregate"]]]))
+        path "docs/prds/context-generation/research/context_cookbook_proposed_reads_2026_09_09.edn"]
+    (spit path (pr-str {:reads results :recursive-report face}))
     (spit "docs/prds/context-generation/research/context-cookbook-2026-09-09.md"
-          (str "---\ntype: research\nstatus: working\ntags: [agent-context, repl, render]\n---\n\n# Context cookbook — executed 2026-09-09\n\n"
-               "Read end to end: AGENTS.md (its opening copies turn PRD §10), the data chart r2 including its roadmap, raw-data-forms-probe-2026-09-09.md, and turn PRD §18–§18c. The plan README and working edge ground this slice.\n\n"
-               "Surface: MCP, cluster `default`, JVM mode, explicit `(seon.operator/connection \"default\")`; each read receives `database = @connection`. Basis " (:basis result) ". No database write was committed. Counts measure exact `pr-str` results, without a REPL envelope; they are not yet provider-prompt byte counts. The checked-in probe and EDN retain the complete forms and results.\n\n"
-               "The target schema is absent on default. The writes below actually ran through `datahike.api/with` on a speculative value derived from default, after the probe installed the explicitly listed proposed attributes there. These establish dependency semantics, not production schema validation, wake delivery, or live target-schema adoption. Event ids are fixed probe inputs; real messages mint fresh event ids.\n\n"
-               "## Read choice and evidence\n\nPull describes one known entity or a known set, including nested and reverse refs. Use q for value filters, joins, and aggregates; combine q with inner pull when both filtering and shaping. The live reverse message pull recorded index patterns and returned the incoming messages in one form. Pattern-only aggregate q also recorded index patterns. Inner pull and not recorded attribute-level evidence: correct but coarse. Explicit finite selectors recorded index patterns; wildcard/recursive selectors cannot make that claim. Source: src/seon/db.clj:335–423. Index-pattern presence means constraints at each pattern, not a fully joined result dependency. An invalid read is a refusal, never an empty healthy block.\n\n"
-               "## Dependency ledger\n\nDatahike transaction.cljc:640 (identity upsert), :738 (nested maps), :785 (cardinality-one replacement), :997 and :1059 (retractEntity versus retract); pull_api.cljc:304 (reverse refs and component collections). First-party idioms: seon.plan/render-plan-html resolves the plan owner; seon.agent/settings! consumes the full system transaction report; seon.db:335–423 captures read patterns. `datahike.api` has no entid function: use an identity pull.\n\n"
-               "## Transaction report proposal — pending db.clj ownership\n\n`src/seon/db.clj` is held by transact-feedback. The executable `report-face` hunk in the adjacent probe is the proposed agent-facing projection: `{:seon.db/tx t :seon.db/datoms [[e a v added?] ...]}`. It resolves e to an installed unique-identity lookup ref, consulting db-before for deleted identities; tempids are already resolved in tx-data. The next read is the db-after; tx-data already says what changed. Neither db-before nor db-after belongs in shown text. Keep the full report for system callers such as seon.agent/settings! that still consume db-after. Ref-valued identities currently print their resolved numeric target; the production face should recursively use the target identity with cycle protection.\n\n"
-               "## Verification boundary\n\nThe first batch exceeded the MCP 20-second request bound but completed and wrote its evidence file; a second session returned `(+ 1 1)` in 1 ms. No alternate transport was used. Default remains untouched. Schema-dependent blocks and reseeding require the chart data lane's landing and the owner's batched reset; RESET NEEDED when that schema commit is known.\n"
-               (str/join (map section (:reads result)))
-               "\n# Speculative writes\n"
-               (str/join (map section (:writes result)))))))
+          (str "\n## Target shapes after the speculative writes\n\n"
+               "These reads execute on the final `:db-after` of the same nine-write `with` chain; they do not claim that target schema or wake behavior is installed on default.\n"
+               (str/join (map (fn [{:keys [title thought form output] n :bytes}]
+                               (str "\n### " title "\n\n```clojure\n;; " thought "\n" form
+                                    "\n```\n\nActual result, " n " UTF-8 bytes:\n\n```clojure\n" output "\n```\n")) results))
+               "\nThe report prototype now follows ref-valued identities recursively, with a visited-entity set for cycles. Actual executed result, "
+               (byte-count (pr-str face)) " UTF-8 bytes:\n\n```clojure\n" (pr-str face) "\n```\n")
+          :append true)
+    (mapv #(select-keys % [:title :bytes]) results)))
+
+(defn probe-prompt!
+  "Save the current provider prompt and the real component rendering."
+  []
+  (let [connection (operator/connection "default") database @connection
+        projection (schema/projection-from-database database)
+        handle (:seon.turn.loop/cluster (get @runtime/running-instances "default"))]
+    (schema/call-with-projection
+     projection
+     (fn []
+       (let [configuration (config/effective database "default")
+             raw (db/pull database '[{:seon.agent/plan [{:my.plan/steps [:my.plan.item/id :my.plan.item/position]}]}] [:seon.agent/id "juniper"])
+             shown (value/render-ai {:seon.db/db database :seon.agent/id "juniper"
+                                     :seon.render.call/id [:context-cookbook/position]
+                                     :seon.sci.admit/caps (config/result-caps configuration)
+                                     :seon.render/value raw
+                                     :seon.render/profile (render/agent-render-profile configuration)})
+             evaluations (evaluation/of-agent database "juniper")
+             turn-id (:seon.turn/id (db/pull database [:seon.turn/id]
+                                            (get-in (last evaluations) [:seon.cluster.eval/run :db/id])))
+             prompt-result (render/acquire-context!
+                            (merge handle {:seon.db/db database :seon.agent/id "juniper"
+                                           :seon.turn/id turn-id
+                                           :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)}))
+             prompt (:seon.cluster.prompt/text prompt-result)
+             result (cond-> {:component-shown shown :source-count (count evaluations)
+                             :sources (mapv :seon.cluster.eval/source evaluations)}
+                      (string? shown) (assoc :component-bytes (byte-count shown))
+                      (string? prompt) (assoc :prompt-bytes (byte-count prompt))
+                      (not (string? prompt)) (assoc :prompt-refusal prompt-result))]
+         (when (string? prompt)
+           (spit "docs/prds/context-generation/research/context_cookbook_prompt_2026_09_09.txt" prompt))
+         (spit "docs/prds/context-generation/research/context_cookbook_render_2026_09_09.edn" (pr-str result))
+         result)))))
+
+(defn probe-result-projections!
+  "Verify loaded report and set rendering functions without committing a write."
+  []
+  (let [connection (operator/connection "default")
+        database @connection
+        configuration (config/effective database "default")
+        report (d/with database
+                       [[:db/add "cookbook-result" :my.plan.item/id "cookbook/result"]
+                        [:db/add "cookbook-result" :my.plan.item/title "Verify the output"]])
+        result ((ns-resolve 'seon.db 'transaction-result) report)
+        shown-report (pr-str result)
+        shown (value/render-ai
+               {:seon.db/db database :seon.agent/id "juniper"
+                :seon.render.call/id [:context-cookbook/set]
+                :seon.sci.admit/caps (config/result-caps configuration)
+                :seon.render/value
+                {:my.plan/steps #{{:my.plan.item/id "cookbook/a" :my.plan.item/position 2}
+                                  {:my.plan.item/id "cookbook/b" :my.plan.item/position 1}}}
+                :seon.render/profile (render/agent-render-profile configuration)})
+        evidence {:report shown-report :report-bytes (byte-count shown-report)
+                  :set-shown shown :set-bytes (byte-count shown)
+                  :position-order? (< (str/index-of shown "cookbook/b")
+                                      (str/index-of shown "cookbook/a"))
+                  :set-preserved? (set? (:my.plan/steps (read-string shown)))
+                  :default-unchanged? (= (db/basis-t database) (db/basis-t @connection))}]
+    (spit "docs/prds/context-generation/research/context_cookbook_results_2026_09_09.edn"
+          (pr-str evidence))
+    evidence))
+
+(defn- agent-form [form]
+  (walk/postwalk
+   (fn [value]
+     (if (and (seq? value) (#{'seon.db/pull 'seon.db/q} (first value)))
+       (apply list (remove #{'database} value))
+       value))
+   form))
+
+(defn- agent-source [form]
+  (repl/source-text (agent-form form)))
+
+(defn recheck-agent-forms!
+  "Execute bare reads beside explicit reads at one basis; speculate every write."
+  []
+  (let [connection (operator/connection "default")
+        database @connection
+        check-read
+        (fn [database [title thought original]]
+          (let [source (agent-source original)
+                sink (atom [])
+                explicit ((eval (list 'fn ['database] original)) database)
+                bare (binding [db/*conn* connection db/*read-database* database
+                               db/*read-evidence-sink* sink]
+                       (eval (read-string source)))
+                output (pr-str bare)]
+            (assert (= explicit bare) (str "Source changed the result: " title))
+            {:title title :thought thought :form source :output output
+             :bytes (byte-count output) :unchanged? true
+             :evidence (mapv #(if (seq (:seon.db/read-index-patterns %))
+                                :index-patterns :attribute-level) @sink)}))
+        read-results (mapv #(check-read database %) reads)
+        speculative
+        (reduce
+         (fn [{:keys [database results]} [title thought tx]]
+           (let [source (agent-source (list 'seon.db/transact! tx))
+                 parsed-tx (second (read-string source))
+                 _ (assert (= tx parsed-tx) (str "Source changed transaction data: " title))
+                 report (d/with database parsed-tx)
+                 output (pr-str ((ns-resolve 'seon.db 'transaction-result) report))]
+             {:database (:db-after report)
+              :results (conj results {:title title :thought thought :form source
+                                      :output output :bytes (byte-count output)
+                                      :unchanged? true})}))
+         {:database (proposed-database database) :results []} writes)
+        proposed-records
+        (:reads (read-string (slurp "docs/prds/context-generation/research/context_cookbook_proposed_reads_2026_09_09.edn")))
+        proposed-results
+        (mapv #(check-read (:database speculative)
+                          [(:title %) (:thought %) (read-string (:form %))])
+              proposed-records)
+        result {:basis (db/basis-t database) :reads read-results
+                :writes (:results speculative) :proposed-reads proposed-results}]
+    (spit "docs/prds/context-generation/research/context_cookbook_rechecked_2026_09_09.edn"
+          (pr-str result))
+    (mapv #(select-keys % [:title :bytes :unchanged?])
+          (concat read-results (:results speculative) proposed-results))))

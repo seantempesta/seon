@@ -73,6 +73,7 @@
             [seon.blob :as blob]
             [seon.env :as env]
             [seon.error :as error]
+            [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.render.route :as route]
             [seon.flow :as seon.flow]
@@ -191,7 +192,7 @@
   [unit]
   (let [form (identity-form unit)]
     (str ";; I should understand how this REPL works before I act.\n(help)\n\n"
-         (:seon.repl/comment form) "\n" (pr-str (:seon.repl/form form)))))
+         (:seon.repl/comment form) "\n" (repl/source-text (:seon.repl/form form)))))
 
 (defn render-id-ai
   "Read the identity concern from its identifying attribute."

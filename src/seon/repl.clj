@@ -21,14 +21,20 @@
   agent's own comment."
   (:require [clojure.edn :as edn]
             [clojure.main :as main]
+            [clojure.pprint :as pprint]
             [clojure.string :as str]
-            [seon.print :as print]
-            [seon.render.value :as value]
             [seon.schema.edn :as schema.edn]
-            [seon.sci.admit :as admit])
-  (:import [java.io PushbackReader StringReader]))
+            [seon.sci.admit :as admit]))
 
 (schema.edn/load! {})
+
+(defn source-text
+  "Print a generated form with reader quotes and explicit keyword keys."
+  {:malli/schema [:=> [:cat :seon.repl/expression] :seon.render/source]}
+  [form]
+  (binding [*print-namespace-maps* false *print-length* nil *print-level* nil
+            *print-readably* true]
+    (pprint/write form :stream nil :dispatch pprint/code-dispatch :right-margin 100)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The response map

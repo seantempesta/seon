@@ -11,6 +11,7 @@
             [malli.registry :as mr]
             [seon.ai.tokens :as tokens]
             [seon.cluster.agent :as agent]
+            [seon.repl :as repl]
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]))
 
@@ -872,10 +873,10 @@
                                                     [?schema :seon.schema/key ?key]]
                                            database namespace-name)))]
         (str ";; I should inspect what I have defined and which schemas I declared.\n"
-             (pr-str (list 'dir namespace-name))
+             (repl/source-text (list 'dir namespace-name))
              (when (seq attributes)
                (str "\n\n;; I should count the facts under my declared attributes.\n"
-               (pr-str (list 'seon.db/q
+               (repl/source-text (list 'seon.db/q
                              (list 'quote '[:find ?attribute (count ?entity)
                                             :in $ [?attribute ...]
                                             :where [?entity ?attribute _]])
