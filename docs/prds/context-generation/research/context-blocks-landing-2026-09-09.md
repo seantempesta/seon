@@ -556,3 +556,47 @@ A subsequent default capture matched every byte of the clean capture.
 The owned scratch cluster was downed and its holderless root removed;
 the two retained failed gate roots from earlier slices were also removed
 only after their subjects passed and no process held those roots.
+
+## 14:50 resume — slice 1: one opening generator
+
+Read both assigned blocker issues and PRD §18b end to end before editing.
+Read the Seon Clojure, REPL, testing, Datahike, web-rendering and Flow skills.
+The initial default capture had six stored evaluations with evidence counts
+`[4 1 4 3 6 1]`; the later 9,757-byte capture included an appended help read,
+a changed inbox containing a turn-backstop notice, and `(+ 1 1)`. Thus the
+claim that every stored opening lacked evidence was falsified for this
+capture. The source attribute is still `:seon.cluster.eval/read-evidence`.
+
+Dependency ledger: `seon.turn/evaluate-sources` binds the existing
+`seon.db/*read-evidence-sink*`; `seon.db/read-evidence` projects dependency
+plans and revisions from Datahike's evidence path; `record-evaluated-call`
+and `receipt-settle-call` persist those through the same component writer.
+The SCI owner is `reference-code/sci/src/sci/core.cljc` (`fork`/`intern`);
+Datahike's serial transaction owner is
+`reference-code/datahike/src/datahike/db/transaction.cljc` (`:db.fn/call`).
+No evaluator, cache, scheduler or result serialization was added.
+
+The missing production path was agent creation: `ensure-entity!` opens the
+bootstrap turn, whose separate legacy `bootstrap/next-entry` generator
+closed it with zero evaluations. The new real-graph regression failed two
+assertions before repair. `generate-turn` now obtains its forms from
+`declared-sources`, just like `system-turn`, then enters the existing
+`resume-turn` → `evaluate-sources` → settlement path. Fresh creation stores
+help, identity and inbox with evidence counts `[20 16 18]`; a following
+system pass appends nothing. The order fixture stores all six reads; its
+first ordinary wake retains each opening source exactly once, and the
+later single-read change appends only the inbox.
+
+Path-limited gate: **1 test / 98 assertions / zero failures or errors**.
+No schema change and no reset required for this slice. The separately
+reported cold scratch publication boundary is
+[the blank-commit issue](../../../seon/issues/cold-publication-returns-a-blank-commit-without-publishing.md).
+An initialization returned zero with no commit, then scratch boot refused
+its absent current-src branch and MCP reported a stale advertisement.
+The same selected source publishes and boots the isolated gate's base.
+No default lifecycle operation was performed.
+
+Slice-1 platform gate: **83 tests / 490 assertions / zero failures or
+errors**, with one worker. The selected snapshot included the generator
+and real-graph regression changes. Earlier scratch initialization failure
+remains explicitly separate from this gate's successful published-base boot.

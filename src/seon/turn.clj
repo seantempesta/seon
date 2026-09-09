@@ -4520,7 +4520,7 @@
       (report :closed 0))))
 
 (defn- generate-turn
-  "Append and execute one dependency-ready generated bootstrap form."
+  "Append one opening form from the shared system-turn source generator."
   [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report :as request}]
   (let [connection (:seon.db/connection cluster)
         process (:seon.db.process/id cluster)
@@ -4537,25 +4537,15 @@
              0))
         entry
         (phase
-         #((requiring-resolve 'seon.bootstrap/next-entry)
-           {:seon.db/db @connection
-            :seon.db/connection connection
-            :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
-            :seon.render.walk/lookup [:seon.agent/id agent-id]
-            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-            :seon.sci.eval/time-limit-ms
-            (:seon.config.eval/time-limit-ms cluster)
-            :seon.config/on-core-error (:seon.config/on-core-error cluster)
-            :seon.render/output :seon.render/form
-            ;; measured live 2026-08-29 on the ruling-47 population:
-            ;; distance 3 = 499 units / 28 s PER ADVANCE (the third hop
-            ;; explodes into every namespace's function detail), starving
-            ;; every armed backstop; distance 2 = 109 units / 1.2 s and
-            ;; keeps the toolkit hop. Ruling 46 already retired eager
-            ;; deep openings — the world arrives as affordances, not as
-            ;; a three-hop content walk.
-            :seon.render/distance 2}
-           run-id))]
+         #(let [database @connection
+                namespace-name ((requiring-resolve 'seon.sci.eval/agent-namespace)
+                                database agent-id)
+                declared (declared-sources cluster database agent-id namespace-name)]
+            (if (:seon.error/kind declared)
+              declared
+              (when-let [source (nth (:seon.turn/forms declared) ordinal nil)]
+                {:seon.repl/form (:seon.sci.reader/form (first (source-events source)))
+                 :seon.repl/comment (:seon.cluster.eval/comment source)}))))]
     (cond
       (:seon.error/kind entry)
       (do
@@ -4566,13 +4556,9 @@
                   :seon.error/value entry})
         (report :error 0))
 
-      ;; A GENERATED RUN THAT HAS NOTHING LEFT TO GENERATE IS FINISHED.
-      ;; The other arm — advancing a generated run to a model call — wrote
-      ;; the one `:generate` → `:call` edge that existed, and no production
-      ;; path ever reached it: `generated-run-tx`'s only caller is
-      ;; `seon.bootstrap/seed-tx`, whose run id is always
-      ;; `((requiring-resolve 'seon.bootstrap/run-id) agent-id)`. The dead branch and its transition
-      ;; are deleted rather than kept as a shape nothing can produce.
+      ;; Creation and later system turns derive their sources from the same
+      ;; record walk. resume-turn below enters evaluate-sources, which captures
+      ;; read evidence before the ordinary settlement writer persists it.
       (nil? entry)
       (let [terminal
             (db/transact!

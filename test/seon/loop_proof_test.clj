@@ -37,8 +37,6 @@
               (config/compile-manifest
                {:seon.boot/cluster-name "loop-proof"
                 :seon.config/manifest {:seon.config.ai/no-provider true}}))
-             {:seon.agent/id "juniper"
-              :seon.agent/namespace {:seon.ns/name 'my.agents.juniper}}
              {:seon.agent/id "other"
               :seon.agent/namespace {:seon.ns/name 'my.agents.other}}
              {:seon.agent/id "unobserved"
@@ -106,6 +104,29 @@
                        (swap! transactions conj report)
                        (async/offer! events true)))
            (try
+             (testing "agent creation uses the same retained-read opening"
+               (let [created (cluster/ensure-entity!
+                              connection cluster/boot-process-identity
+                              {:seon.agent/id "juniper" :seon.cluster/name "loop-proof"
+                               :seon.ns/name 'my.agents.juniper})
+                     bootstrap-id (:seon.turn/id created)
+                     closed? #(some? (:seon.turn/closed-at
+                                      (db/pull @connection [:seon.turn/closed-at]
+                                               [:seon.turn/id bootstrap-id])))]
+                 (is (string? bootstrap-id) (pr-str created))
+                 (agent/arm! {:seon.turn.loop/cluster handle
+                              :seon.agent/routing routing :seon.agent/id "juniper"})
+                 (support/await-event! events ::seeded-opening (fn [_] (closed?)))
+                 (agent/disarm! {:seon.agent/routing routing :seon.agent/id "juniper"})
+                 (let [saved (evaluation/of-agent @connection "juniper")
+                       refresh (turn/system-turn request)]
+                   (println {:seon.test/stage :creation
+                             :seon.test/reads (mapv (fn [entry]
+                                                    [(:seon.cluster.eval/source entry)
+                                                     (count (:seon.cluster.eval/read-evidence entry))]) saved)})
+                   (is (seq saved))
+                   (is (every? (comp seq :seon.cluster.eval/read-evidence) saved))
+                   (is (nil? (:seon.turn/id refresh)) (pr-str (:seon.turn/forms refresh))))))
              (fixture/install! handle routing)
              (testing "fresh opening and stable stored prompt"
                (let [first-id (turn/next-id @connection "loop-proof" "juniper")
@@ -120,6 +141,8 @@
                          "(my.message/inbox)" "(my.agent/settings)"]
                         (mapv :seon.cluster.eval/source (take 5 saved))))
                  (is (= 6 (count saved)))
+                 (is (every? (comp seq :seon.cluster.eval/read-evidence) saved)
+                     "every seeded read stores its dependency evidence")
                  (is (= 4 (count (db/q '[:find [?key ...] :in $ ?name :where
                                            [?n :seon.ns/name ?name]
                                            [?s :seon.schema/ns ?n]
@@ -154,6 +177,17 @@
                                (:seon.turn/forms unchanged)))
                    (is (nil? (:seon.turn/id unchanged)))
                    (is (= basis (db/basis-t @connection))))
+                 (testing "the first ordinary wake retains the seeded opening once"
+                   (agent/arm! {:seon.turn.loop/cluster handle
+                                :seon.agent/routing routing :seon.agent/id "juniper"})
+                   (fixture/submit! handle routing "(my.agent/done)")
+                   (agent/disarm! {:seon.agent/routing routing :seon.agent/id "juniper"})
+                   (let [after (evaluation/of-agent @connection "juniper")
+                         occurrences (frequencies (map :seon.cluster.eval/source after))]
+                     (doseq [entry saved]
+                       (is (= 1 (get occurrences (:seon.cluster.eval/source entry)))
+                           (pr-str occurrences)))
+                     (is (str/starts-with? (stored-text @connection) text))))
                  (turn/compact! {:seon.db/connection connection
                                  :seon.agent/id "juniper"})
                  (is (empty? (evaluation/of-agent @connection "juniper")))

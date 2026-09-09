@@ -36,3 +36,22 @@ line carrying `my.run`'s stale docstring and internal helpers.
 - Regression on the canonical fixture: seed, wake once, the prompt holds
   the opening exactly once; wake again with one changed read, exactly one
   system-turn evaluation appends.
+
+## Verified cause, 2026-09-09 resume
+
+The later default capture had evidence counts `[4 1 4 3 6 1]` on all six
+opening evaluations. Missing `:seon.eval/*` attributes alone did not establish
+missing evidence: the current owning attribute is
+`:seon.cluster.eval/read-evidence`. The fixture's `system-turn` path already
+uses `evaluate-sources` and its settlement writer.
+
+The newly exercised **agent-creation** path was different: its legacy
+`seon.bootstrap/next-entry` generator returned no entry, closed the bootstrap
+turn with zero evaluations, and the next system pass emitted the opening.
+The canonical real-graph regression failed two assertions before repair.
+Creation now uses `declared-sources`, the same generator as `system-turn`,
+and retains `resume-turn` → `evaluate-sources` → ordinary settlement. The
+regression also seeds the order fixture, wakes it once, verifies each opening
+source occurs exactly once, then changes one read and verifies one append.
+The remaining presentation defects below this issue's original observation
+are the next ordered slice; this note remains open until they are handled.
