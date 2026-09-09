@@ -90,10 +90,11 @@ See `README.md` for the convention.
 | [Carry agent routing into the virtual-turn control](virtual-turn-control-loses-agent-routing.md) | blocker | turn follow-up wave |
 | [Render walk-unit hiccup as markup, never escaped EDN text](walk-units-render-their-hiccup-as-escaped-edn-text.md) | blocker | ui verification wave |
 
-## Friction (163)
+## Friction (164)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [The help trial copies the prompt and invents results](help-trial-copies-prompt-and-invents-results.md) | friction | context-blocks lane (running, 2026-09-09) |
 | [A blocking realization is not bounded by admission's interrupt](a-blocking-realization-is-not-bounded-by-the-interrupt.md) | friction | issues sweep wave (2026-09-09) |
 | [Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md) | friction | live-drive context repair wave |
 | [A live cluster arms ten fewer contracts than it declares](a-live-cluster-arms-ten-fewer-contracts-than-it-declares.md) | friction | wave/contract-gate |

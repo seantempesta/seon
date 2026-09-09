@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [wave/agent-context, wave/unreadable-reply]
+tags: [issue, wave/agent-context, wave/unreadable-reply]
 ---
 
 # The help trial copies the prompt and invents results
