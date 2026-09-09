@@ -1,3 +1,9 @@
+---
+type: prd
+status: working
+tags: [prd, agent-record, render, context-generation]
+---
+
 # The agent's data, item by item — storage, names, components, renders
 
 Working PRD, iterated with the owner (2026-09-09). Inventory is grounded in
