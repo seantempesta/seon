@@ -85,10 +85,11 @@ See `README.md` for the convention.
 | [Resolve the declaration population once per admission, not once per node](value-admission-resolves-the-declaration-population-per-node.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Render walk-unit hiccup as markup, never escaped EDN text](walk-units-render-their-hiccup-as-escaped-edn-text.md) | blocker | ui verification wave |
 
-## Friction (157)
+## Friction (158)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
+| [Dependency resolution can fail in Maven model validation](dependency-resolution-can-race-maven-model-validation.md) | friction | runner follow-up wave (concurrent classpath builds) |
 | [A blocking realization is not bounded by admission's interrupt](a-blocking-realization-is-not-bounded-by-the-interrupt.md) | friction | issues sweep wave (2026-09-09) |
 | [Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md) | friction | live-drive context repair wave |
 | [A live cluster arms ten fewer contracts than it declares](a-live-cluster-arms-ten-fewer-contracts-than-it-declares.md) | friction | wave/contract-gate |
