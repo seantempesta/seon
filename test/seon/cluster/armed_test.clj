@@ -309,7 +309,7 @@
            entry))
        ai/complete
        (fn [_request]
-         {:seon.ai/text "(my.run/complete \"answered\")"})]
+         {:seon.ai/text "(seon.run/complete \"answered\")"})]
       (let [instance (cluster/start! {:seon.boot/cluster-name name
                                       :seon.boot/root root})]
         (try
@@ -459,7 +459,7 @@
           (armer-step state input message)))
        ai/complete
        (fn [_request]
-         {:seon.ai/text "(my.run/complete \"fault observed\")"})]
+         {:seon.ai/text "(seon.run/complete \"fault observed\")"})]
       (let [instance (cluster/start! {:seon.boot/cluster-name name
                                       :seon.boot/root root})]
         (try

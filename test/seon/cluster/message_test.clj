@@ -22,7 +22,7 @@
             [datahike.api :as d]
             [seon.db :as db]
             [seon.id :as id]
-            [my.message :as my.message]
+            [seon.cluster.message :as my.message]
             [seon.turn :as turn]
             [seon.cluster.message :as message]
 
@@ -296,7 +296,7 @@
                 [:p {:class "seon-message-content" :style {:white-space "pre-wrap"}}
                  "first line\nsecond line"]
                 [:p {:class "seon-message-reply"}
-                 [:code (pr-str '(my.message/send "alice" "Your reply" "message-1"))]]
+                 [:code (pr-str '(seon.cluster.message/send "alice" "Your reply" "message-1"))]]
                 [:p {:class "seon-message-links"}
                  [:span {:class "seon-message-about"}
                   [:a {:href
@@ -529,7 +529,7 @@
       (let [{::keys [sender trigger run-id ordinal chain-limit recipients]}
             (::data expected)
             value (mapv (fn [{::keys [to content]}]
-                          (my.message/send to content))
+                          (seon.cluster.message/send to content))
                         recipients)
             request (cond-> {:my.message/value value
                              :seon.cluster.agent/id sender
@@ -606,7 +606,7 @@
       (let [rows (:seon.cluster.message/rows
                   (deliver! connection
                             {:sender "alice" :trigger "m-0" :run "r-1"
-                             :value (my.message/send "bob" "hello bob")}))
+                             :value (seon.cluster.message/send "bob" "hello bob")}))
             written (into #{} (mapcat keys) rows)]
         (is (seq (set/intersection written
                                    (wake/wake-attributes (db/db connection))))
@@ -625,7 +625,7 @@
     (fn [connection]
       (ask! connection "m-0" "alice" "ask bob")
       (deliver! connection {:sender "alice" :trigger "m-0" :run "r-1"
-                            :value (my.message/send "bob" "how many?")})
+                            :value (seon.cluster.message/send "bob" "how many?")})
       (let [pulled (db/q '[:find (pull ?message [*]) .
                           :where
                           [?message :seon.cluster.message/content "how many?"]]
@@ -752,7 +752,7 @@
                                   connection
                                   {:sender sender :trigger trigger
                                    :run (str head "-r-" hop)
-                                   :value (my.message/send recipient "…")})
+                                   :value (seon.cluster.message/send recipient "…")})
                         rows (:seon.cluster.message/rows delivery)]
                     (if (and (seq rows) (< hop 200))
                       (recur (inc hop) recipient sender
@@ -774,7 +774,7 @@
     (fn [connection]
       (ask! connection "m-0" "alice" "ask bob")
       (deliver! connection {:sender "alice" :trigger "m-0" :run "r-1"
-                            :value (my.message/send "bob" "how many?")})
+                            :value (seon.cluster.message/send "bob" "how many?")})
       (is (= {:my.message/to "alice" :my.message/content "25"}
              (message/reply @connection
                             {:my.run/result "25"
@@ -806,10 +806,10 @@
     (fn [connection]
       (ask! connection "m-0" "alice" "ask bob")
       (deliver! connection {:sender "alice" :trigger "m-0" :run "r-1"
-                            :value (my.message/send "bob" "how many?")})
+                            :value (seon.cluster.message/send "bob" "how many?")})
       (deliver! connection {:sender "bob" :trigger (id/digest 12 [:seon.cluster.message/id "r-1" 0 0])
                             :run "r-2"
-                            :value (my.message/send "alice" "25")})
+                            :value (seon.cluster.message/send "alice" "25")})
       (is (nil? (message/reply @connection
                                {:my.run/result "There are 25."
                                 :seon.cluster.agent/id "alice"
@@ -824,7 +824,7 @@
       (fn [connection]
         (ask! connection "m-0" "bob" "ask alice something")
         (deliver! connection {:sender "bob" :trigger "m-0" :run "r-1"
-                              :value (my.message/send "alice" "how many?")})
+                              :value (seon.cluster.message/send "alice" "how many?")})
         (is (= "bob" (:my.message/to
                       (message/reply @connection
                                      {:my.run/result "25"

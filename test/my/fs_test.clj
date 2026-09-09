@@ -1,25 +1,26 @@
 (ns my.fs-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.fs :as owner]
+            [clojure.test :refer [deftest is testing]]
             [my.fs :as fs]
             [seon.schema :as schema]))
 
 (deftest relationship-predicates-require-one-declared-arm
   (testing "content is byte-honest and open to unrelated data"
-    (is (true? (fs/content? {:my.fs/text "hello"
+    (is (true? (owner/content? {:my.fs/text "hello"
                              :example/extra :ignored})))
-    (is (true? (fs/content? {:my.fs/bytes [0 255]})))
-    (is (true? (fs/content? {:seon.blob/digest (apply str (repeat 64 "a"))})))
-    (is (false? (fs/content? {})))
-    (is (false? (fs/content? {:my.fs/text "hello"
+    (is (true? (owner/content? {:my.fs/bytes [0 255]})))
+    (is (true? (owner/content? {:seon.blob/digest (apply str (repeat 64 "a"))})))
+    (is (false? (owner/content? {})))
+    (is (false? (owner/content? {:my.fs/text "hello"
                               :my.fs/bytes [104 101 108 108 111]}))))
   (testing "writes cannot request an unconditional overwrite"
-    (is (true? (fs/write-precondition?
+    (is (true? (owner/write-precondition?
                 {:my.fs/expected-absence? true
                  :example/extra :ignored})))
-    (is (true? (fs/write-precondition?
+    (is (true? (owner/write-precondition?
                 {:my.fs/expected-digest (apply str (repeat 64 "b"))})))
-    (is (false? (fs/write-precondition? {})))
-    (is (false? (fs/write-precondition?
+    (is (false? (owner/write-precondition? {})))
+    (is (false? (owner/write-precondition?
                  {:my.fs/expected-absence? true
                   :my.fs/expected-digest (apply str (repeat 64 "b"))})))))
   (testing "the registered request maps remain open"

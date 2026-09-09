@@ -23,7 +23,7 @@
             [datahike.api :as d]
             [seon.blob :as blob]
             [seon.db :as db]
-            [my.run :as my.run]
+            [seon.run :as my.run]
             [seon.ai :as ai]
             [seon.config :as config]
             [seon.cluster.agent :as cluster.agent]
@@ -258,7 +258,7 @@
         explicit {:my.message/to "agent-2" :my.message/content "explicit"}
         reply {:my.message/to "agent-3" :my.message/content "reply"}
         assignment {:my.message/to "agent-4" :my.message/content "repair"}
-        completed (my.run/complete "done")]
+        completed (seon.run/complete "done")]
     (with-redefs [turn/messages (fn [value]
                                          (when (= :explicit value) explicit))
                   message/reply (fn [actual-db request]
@@ -1060,9 +1060,9 @@
         "an optional properties map does not change the extracted entries")))
 
 (deftest a-disposition-is-read-only-when-it-really-is-one
-  (is (= (my.run/wait "later") (turn/disposition (my.run/wait "later"))))
-  (is (= (my.run/complete "done")
-         (turn/disposition (my.run/complete "done"))))
+  (is (= (seon.run/wait "later") (turn/disposition (seon.run/wait "later"))))
+  (is (= (seon.run/complete "done")
+         (turn/disposition (seon.run/complete "done"))))
   (testing "and anything else is not a disposition"
     (doseq [value [42 nil "done" {:my.run/disposition :invented}
                    {:seon.error/message "boom" :seon.error/kind :x}

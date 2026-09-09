@@ -17,8 +17,8 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
-            [my.message :as my.message]
-            [my.run :as my.run]
+            [seon.cluster.message :as my.message]
+            [seon.run :as my.run]
             [seon.ai :as ai]
             [seon.bootstrap :as bootstrap]
             [seon.flow :as seon.flow]
@@ -340,7 +340,7 @@
              "    {}\n"
              "    (apply max-key #(or (:example/amount %) 0) rows)))\n"
              "(doc my.agents.agent-a/largest)\n"
-             "(my.run/complete \"built largest\")")]
+             "(seon.run/complete \"built largest\")")]
         (with-redefs [ai/complete (fn [_] {:seon.ai/text source})]
           (let [reports (drive! cluster 10)
                 row (db/pull @connection
@@ -392,7 +392,7 @@
                          (str "(defn configured-inc "
                               "{:malli/schema [:=> [:cat :int] :int]} "
                               "[x] (inc x))\n"
-                              "(my.run/complete \"Installed.\")")})]
+                              "(seon.run/complete \"Installed.\")")})]
           (let [reports (drive! (dissoc cluster :seon.config.test/auto-check-cases) 10)
                 installed (db/pull @connection [:seon.fn/spec]
                                    [:seon.fn/sym "my.agents.agent-a/configured-inc"])
@@ -417,7 +417,7 @@
                                     "(do (seon.db/q '[:find [?id ...] "
                                     ":where [_ :seon.cluster.agent/id ?id]]) "
                                     "widgets)\n"
-                                    "(my.run/complete (str \"counted \" "
+                                    "(seon.run/complete (str \"counted \" "
                                     "(reduce + widgets)))")})]
           (let [reports (drive! cluster 10)]
             (is (= [:open :call]
@@ -443,7 +443,7 @@
                 (is (= '(1 2 3) (get results 1))
                     "form 1 SAW form 0's def — one ctx per run, not per
                      form — and its lazy sequence came back REALIZED")
-                (is (= (assoc (my.run/complete "counted 6")
+                (is (= (assoc (seon.run/complete "counted 6")
                               :my.run/delivered-to :outside)
                        (get results 2))
                     "and the disposition round-tripped through admission")))
@@ -522,7 +522,7 @@
                                (str "(defn widget-count [n] (* n 3))\n"
                                     "(println \"counting\" (widget-count 4)"
                                     " \"in\" (str *ns*))\n"
-                                    "(my.run/complete (str \"there are \""
+                                    "(seon.run/complete (str \"there are \""
                                     " (widget-count 4)))")})]
           (drive! cluster 10)
           (testing "every form ran and settled clean"
@@ -902,7 +902,7 @@
                  {:seon.ai/text
                   (if (= 1 (count @calls))
                     "(ns-unmap (quote seon.config) (quote defaults))"
-                    "(my.run/complete \"recovered\")")})
+                    "(seon.run/complete \"recovered\")")})
                db/transact!
                (fn [target transaction]
                  (let [tx-data (if (map? transaction)
@@ -1126,7 +1126,7 @@
                "(schema/register! ::nonnegative "
                "(vector :int {:min 0 :seon.db/index true}))\n"
                "(schema/register! ::label (vector :string {:min 1}))\n"
-               "(my.run/complete \"schemas committed\")")})]
+               "(seon.run/complete \"schemas committed\")")})]
           (drive! cluster 10)
           (let [db @connection
                 persistent-row
@@ -1191,7 +1191,7 @@
                "(schema/register! :shared.runtime/refined :string)\n"
                "(schema/register! :shared.runtime/refined :string)\n"
                "(schema/register! :shared.runtime/refined :int)\n"
-               "(my.run/complete \"refined\")")})]
+               "(seon.run/complete \"refined\")")})]
           (drive! cluster 10)
           (let [database @connection
                 row (db/pull database '[*] [:seon.schema/key schema-key])
@@ -1225,7 +1225,7 @@
                               (keep #(:error-kind (val %)))
                               receipts))
                 "no form was refused")
-            (is (= (assoc (my.run/complete "refined")
+            (is (= (assoc (seon.run/complete "refined")
                           :my.run/delivered-to :outside)
                    (get-in receipts [4 :result]))
                 "the run stayed open through the change and completed")))))))
@@ -1244,7 +1244,7 @@
                "(schema/register! :shared.runtime/unregister-me "
                "(vector :int {:seon.db/index true}))\n"
                "(schema/unregister! :shared.runtime/unregister-me)\n"
-               "(my.run/complete \"schema removed\")")})]
+               "(seon.run/complete \"schema removed\")")})]
           (drive! cluster 10)
           (let [db @connection
                 results
@@ -1410,7 +1410,7 @@
                "(vector :int {:min 0}))\n"
                "(schema/register! :seon.runtime.registration/a-only "
                ":keyword)\n"
-               "(my.run/complete \"cluster A registered\")")})]
+               "(seon.run/complete \"cluster A registered\")")})]
           (drive! cluster-a 10))
         (with-cluster
           (fn [cluster-b]
@@ -1423,7 +1423,7 @@
                      "(require '[seon.schema :as schema])\n"
                      "(schema/register! :seon.runtime.registration/shared "
                      "(vector :string {:min 1}))\n"
-                     "(my.run/complete \"cluster B registered\")")})]
+                     "(seon.run/complete \"cluster B registered\")")})]
                 (drive! cluster-b 10))
               (let [acquire
                     (fn [connection]
@@ -1464,9 +1464,9 @@
                      [(str
                        "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                        "persisted [x] (inc x))\n"
-                       "(my.run/complete \"published\")")
+                       "(seon.run/complete \"published\")")
                       (str
-                       "(my.run/complete "
+                       "(seon.run/complete "
                        "(str (my.agents.agent-a/persisted 41)))")])]
         (with-redefs [ai/complete
                       (fn [_]
@@ -1504,7 +1504,7 @@
              [(str
                "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                "strict [x] x)\n"
-               "(my.run/complete \"published\")")
+               "(seon.run/complete \"published\")")
               "(my.agents.agent-a/strict \"wrong\")"])]
         (db/transact!
          connection
@@ -1529,7 +1529,7 @@
                                           #(if (seq %) (subvec % 1) %))]
                           {:seon.ai/text
                            (or (first before)
-                               "(my.run/complete \"recovered\")")}))]
+                               "(seon.run/complete \"recovered\")")}))]
           (drive-agent! cluster "agent-a" 10)
           (db/transact!
            connection
@@ -1567,7 +1567,7 @@
                        "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                        "refused-live [x] (inc x))")
                       (str
-                       "(my.run/complete "
+                       "(seon.run/complete "
                        "(str (my.agents.agent-a/refused-live 41)))")])
             transact! db/transact!]
         (with-redefs
@@ -1912,7 +1912,7 @@
     (fn [cluster]
       (with-redefs [ai/complete
                     (fn [_] {:seon.ai/text
-                             "(+ 1 1)\n(my.run/complete \"two widgets\")"})]
+                             "(+ 1 1)\n(seon.run/complete \"two widgets\")"})]
         (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn "2"
                                :seon.sci.admit/value 2}]
           (let [connection (:seon.db/connection cluster)
@@ -2134,10 +2134,10 @@
   (with-cluster fake-evaluate
     (fn [cluster]
       (with-redefs [ai/complete
-                    (fn [_] {:seon.ai/text "(my.run/complete \"done\")"})]
+                    (fn [_] {:seon.ai/text "(seon.run/complete \"done\")"})]
         (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
-                               (pr-str (my.run/complete "done"))
-                               :seon.sci.admit/value (my.run/complete "done")}]
+                               (pr-str (seon.run/complete "done"))
+                               :seon.sci.admit/value (seon.run/complete "done")}]
           (let [connection (:seon.db/connection cluster)
                 reports (drive! cluster 10)]
             (is (= [:open :call]
@@ -2155,7 +2155,7 @@
   (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            result (my.run/complete "combined receipt")
+            result (seon.run/complete "combined receipt")
             result-edn (pr-str result)
             result-blob (apply str (repeat 64 "a"))
             row {:seon.schema/key
@@ -2165,7 +2165,7 @@
         (with-redefs [ai/complete
                       (fn [_]
                         {:seon.ai/text
-                         "(my.run/complete \"combined receipt\")"})
+                         "(seon.run/complete \"combined receipt\")"})
                       sci.eval/install-row!
                       (fn [request]
                         (swap! installed conj request))]
@@ -2235,10 +2235,10 @@
   (with-cluster fake-evaluate
     (fn [cluster]
       (with-redefs [ai/complete
-                    (fn [_] {:seon.ai/text "(my.run/wait \"need input\")"})]
+                    (fn [_] {:seon.ai/text "(seon.run/wait \"need input\")"})]
         (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
-                               (pr-str (my.run/wait "need input"))
-                               :seon.sci.admit/value (my.run/wait "need input")}]
+                               (pr-str (seon.run/wait "need input"))
+                               :seon.sci.admit/value (seon.run/wait "need input")}]
           (let [connection (:seon.db/connection cluster)
                 reports (drive! cluster 12)]
             (is (= [:open :call]
@@ -2368,10 +2368,10 @@
         (with-redefs [ai/complete
                       (recording-completer
                        requests
-                       [{:seon.ai/text "(my.run/complete \"one\")"}])]
+                       [{:seon.ai/text "(seon.run/complete \"one\")"}])]
           (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
-                                  (pr-str (my.run/complete "one"))
-                                  :seon.sci.admit/value (my.run/complete "one")}]
+                                  (pr-str (seon.run/complete "one"))
+                                  :seon.sci.admit/value (seon.run/complete "one")}]
             (drive! cluster 10)))
         (is (= 1 (count @requests)) "one request built, so one call made")
         (let [[row :as rows] (attempt-rows @connection)]
@@ -2403,13 +2403,13 @@
         (with-redefs [ai/complete
                       (recording-completer
                        requests
-                       [{:seon.ai/text "(my.run/complete \"one\")"
+                       [{:seon.ai/text "(seon.run/complete \"one\")"
                          :seon.ai/reasoning-content "private reasoning"
                          :seon.ai/usage usage
                          :seon.ai/finish-reason "stop"}])]
           (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
-                                  (pr-str (my.run/complete "one"))
-                                  :seon.sci.admit/value (my.run/complete "one")}]
+                                  (pr-str (seon.run/complete "one"))
+                                  :seon.sci.admit/value (seon.run/complete "one")}]
             (drive! cluster 10)))
         (let [[row :as rows] (attempt-rows @connection)]
           (is (= 1 (count rows)))
@@ -2445,13 +2445,13 @@
         (with-redefs [ai/complete
                       (recording-completer
                        requests
-                       [{:seon.ai/text "(my.run/complete \"partial\")"
+                       [{:seon.ai/text "(seon.run/complete \"partial\")"
                          :seon.ai/truncation truncation}])]
           (with-redefs [injected-evaluation
                         {:seon.cluster.eval/result-edn
-                         (pr-str (my.run/complete "partial"))
+                         (pr-str (seon.run/complete "partial"))
                          :seon.sci.admit/value
-                         (my.run/complete "partial")}]
+                         (seon.run/complete "partial")}]
             (drive! cluster 10)))
         (let [database @connection
               attempt-id
@@ -2574,11 +2574,11 @@
         (with-redefs [ai/complete
                       (recording-completer
                        requests
-                       [unpaid {:seon.ai/text "(my.run/complete \"backed up\")"}])]
+                       [unpaid {:seon.ai/text "(seon.run/complete \"backed up\")"}])]
           (with-redefs [injected-evaluation
                     {:seon.cluster.eval/result-edn
-                     (pr-str (my.run/complete "backed up"))
-                     :seon.sci.admit/value (my.run/complete "backed up")}]
+                     (pr-str (seon.run/complete "backed up"))
+                     :seon.sci.admit/value (seon.run/complete "backed up")}]
             (drive! cluster 10)))
         (let [[primary-request backup-request] @requests
               rows (attempt-rows @connection)
@@ -2689,7 +2689,7 @@
 (defn- turn-completion
   [{::keys [outcome] :as generated}]
   (if (= :success outcome)
-    {:seon.ai/text "(my.run/complete \"generated\")"}
+    {:seon.ai/text "(seon.run/complete \"generated\")"}
     (turn-failure-value generated)))
 
 (defn- oracle-disposition
@@ -2795,9 +2795,9 @@
         (with-redefs [ai/complete complete!]
           (with-redefs [injected-evaluation
                     {:seon.cluster.eval/result-edn
-                     (pr-str (my.run/complete "generated"))
+                     (pr-str (seon.run/complete "generated"))
                      :seon.sci.admit/value
-                     (my.run/complete "generated")}]
+                     (seon.run/complete "generated")}]
             (drive! cluster 12)))
         (let [rows (attempt-rows @connection)
               actual (mapv actual-attempt-shape rows)
@@ -2851,13 +2851,13 @@
                       (recording-completer
                        requests
                        [{:seon.ai/text
-                         (str "(my.message/send \"agent-b\" "
+                         (str "(seon.cluster.message/send \"agent-b\" "
                               "\"please count the widgets\")\n"
-                              "(my.run/complete \"asked agent-b\")")}
+                              "(seon.run/complete \"asked agent-b\")")}
                         {:seon.ai/text
-                         "(my.run/complete \"there are three widgets\")"}
+                         "(seon.run/complete \"there are three widgets\")"}
                         {:seon.ai/text
-                         "(my.run/complete \"accepted agent-b's answer\")"}])]
+                         "(seon.run/complete \"accepted agent-b's answer\")"}])]
           (drive! cluster 10)
           (is (= 3 (count @requests))
               "the outside, delegate, and reply triggers each make one call")
@@ -2914,8 +2914,8 @@
   (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            asked [(my.message/send "agent-b" "delivered together")
-                   (my.message/send "missing-agent" "refused together")]]
+            asked [(seon.cluster.message/send "agent-b" "delivered together")
+                   (seon.cluster.message/send "missing-agent" "refused together")]]
         (db/transact! connection [(agent-row "agent-b")])
         (with-redefs [ai/complete
                       (fn [_]
@@ -2974,8 +2974,8 @@
         (db/transact! connection [(agent-row "agent-b")])
         (with-redefs [ai/complete
                       (fn [_] {:seon.ai/text
-                               (str "(my.message/send \"agent-b\" \"hi\")\n"
-                                    "(my.run/complete \"tried\")")})]
+                               (str "(seon.cluster.message/send \"agent-b\" \"hi\")\n"
+                                    "(seon.run/complete \"tried\")")})]
           (drive! cluster 10)
           (is (empty? (db/q '[:find ?c :where
                              [?m :seon.cluster.message/content ?c]
@@ -3019,11 +3019,11 @@
         (with-redefs [ai/complete
                       (recording-completer
                        requests
-                       [{:seon.ai/text "(my.run/complete \"one\")"}])]
+                       [{:seon.ai/text "(seon.run/complete \"one\")"}])]
           (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
-                                  (pr-str (my.run/complete "one"))
+                                  (pr-str (seon.run/complete "one"))
                                   :seon.sci.admit/value
-                                  (my.run/complete "one")}]
+                                  (seon.run/complete "one")}]
             (drive! cluster 6)))
         (is (= 1 (count @requests))
             "zero duplicate provider dispatches across the interleaving")
@@ -3178,7 +3178,7 @@
                    "(repaired 2)\n"
                    "(+ 1 1)\n"
                    "(+ 2 2)\n"
-                   "(my.run/complete \"fixed\")")
+                   "(seon.run/complete \"fixed\")")
               eval-nanos (atom 0)
               reply-arrived (atom nil)
               read-sources reply/sources
@@ -3239,7 +3239,7 @@
     (with-cluster
       (fn [cluster]
         (let [connection (:seon.db/connection cluster)
-              source "(let [x 1)\n  x)\n(my.run/complete \"fixed\")"]
+              source "(let [x 1)\n  x)\n(seon.run/complete \"fixed\")"]
           (with-redefs [ai/complete (fn [_] {:seon.ai/text source})]
             (drive! cluster 6))
           (let [receipts (ordered-receipts @connection)]
@@ -3251,7 +3251,7 @@
     (with-cluster
       (fn [cluster]
         (let [connection (:seon.db/connection cluster)
-              source "{:a 1 :b}\n(+ 20 22)\n(my.run/complete \"continued\")"]
+              source "{:a 1 :b}\n(+ 20 22)\n(seon.run/complete \"continued\")"]
           (with-redefs [ai/complete (fn [_] {:seon.ai/text source})]
             (drive! cluster 6))
           (let [receipts (ordered-receipts @connection)]
@@ -3277,7 +3277,7 @@
              "(deftest extract-id-test (is (= 8 (extract-id {:id 7}))))\n"
              "(+ 40 2)\n"
              "(+ 42 1)\n"
-             "(my.run/complete \"indexed\")")]
+             "(seon.run/complete \"indexed\")")]
         (with-redefs [ai/complete (fn [_] {:seon.ai/text source})]
           (drive! cluster 12))
         (let [database @connection
@@ -3654,8 +3654,8 @@
         (with-redefs [ai/complete
                       (recording-completer
                        requests
-                       [{:seon.ai/text "(my.run/complete \"A settled\")"}
-                        {:seon.ai/text "(my.run/complete \"B settled\")"}])]
+                       [{:seon.ai/text "(seon.run/complete \"A settled\")"}
+                        {:seon.ai/text "(seon.run/complete \"B settled\")"}])]
           (let [call-a (turn/next-agent-work @connection
                                              (request connection))]
             (is (= :call (:seon.turn.work/situation call-a)))
@@ -3795,7 +3795,7 @@
             connection (:seon.db/connection cluster)
             proc (render-proc-for cluster)
             requests (atom [])
-            chunks ["(my.run/complete " "\"streamed" " home\")"]]
+            chunks ["(seon.run/complete " "\"streamed" " home\")"]]
         (try
           (with-redefs [ai/complete (streaming-completer requests chunks)]
             (let [basis-before (:max-tx @connection)
@@ -3902,8 +3902,8 @@
         (let [offer-results (atom [])
               completed-producers (atom #{})
               request-index (atom -1)
-              texts {"agent-a" "(my.run/complete \"alpha\")"
-                     "agent-b" "(my.run/complete \"beta\")"}
+              texts {"agent-a" "(seon.run/complete \"alpha\")"
+                     "agent-b" "(seon.run/complete \"beta\")"}
               completer
               (fn [request]
                 (let [sink (:seon.ai/sink request)
@@ -4013,7 +4013,7 @@
                         (apply original arguments))
                       ai/complete
                       (fn [_] {:seon.ai/text
-                               "(+ 1 1)\n(my.run/complete \"two\")"})]
+                               "(+ 1 1)\n(seon.run/complete \"two\")"})]
           (let [work (turn/next-agent-work @connection (request connection))
                 outcome (promise)
                 pass (Thread.

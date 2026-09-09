@@ -19,7 +19,7 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.db :as db]
-            [my.run :as my.run]
+            [seon.run :as my.run]
             [seon.ai :as ai]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
@@ -381,7 +381,7 @@
                   :seon.cluster.agent/routing routing
                   :seon.cluster.agent/id "contract-probe"
                   :seon.cluster.reply/text
-                  (str source "\n(my.run/complete \"Checked.\")")})
+                  (str source "\n(seon.run/complete \"Checked.\")")})
                 run-id (:seon.turn/id submission)
                 database
                 (await-database-state!
@@ -649,7 +649,7 @@
                           agent-ids))
         (with-redefs [ai/complete
                       (recording-completer
-                       ledger (fn [_] "(my.run/complete \"done\")"))]
+                       ledger (fn [_] "(seon.run/complete \"done\")"))]
           (try
             (doseq [agent-id agent-ids]
               (arm-one! connection ctx routing agent-id))
@@ -1173,7 +1173,7 @@
         (try
           (with-redefs [ai/complete
                         (recording-completer
-                         ledger (fn [_] "(my.run/complete \"done\")"))]
+                         ledger (fn [_] "(seon.run/complete \"done\")"))]
             (let [entry (arm-one! connection ctx routing "parked")]
               (testing "armed and idle: the arm prime's pass ran and
               spent nothing — the window is bounded by ping counts,
@@ -1228,7 +1228,7 @@
                           (swap! ledger conj request)
                           (.countDown provider-entered)
                           (test-support/await-event! release-provider ::release-provider)
-                          {:seon.ai/text "(my.run/complete \"done\")"})]
+                          {:seon.ai/text "(seon.run/complete \"done\")"})]
             (let [entry (arm-one! connection ctx routing "pausable")
                   graph (:seon.flow/graph entry)]
               (outside-trigger! connection "pausable"
@@ -1534,7 +1534,7 @@
                                    {:seon.cluster.eval/source
                                     "(+ 3 4)"}
                                    {:seon.cluster.eval/source
-                                    "(my.message/send \"waiting\" \"must not run\")"}]}))
+                                    "(seon.cluster.message/send \"waiting\" \"must not run\")"}]}))
         ;; ONE ENTITY PER (run, ordinal): the freeze minted all three
         ;; evaluations with their start instant, exactly as the turn's one
         ;; intent transaction does. Ordinal 0 settles; 1 and 2 stay running.
@@ -1552,7 +1552,7 @@
         (try
           (with-redefs [ai/complete
                         (recording-completer
-                         ledger (fn [_] "(my.run/complete \"done\")"))
+                         ledger (fn [_] "(seon.run/complete \"done\")"))
                         fixture-evaluate
                         (fn [request]
                           (swap! evaluation-sources conj
@@ -1735,7 +1735,7 @@
         (try
           (with-redefs [ai/complete
                         (recording-completer
-                         ledger (fn [_] "(my.run/complete \"done\")"))
+                         ledger (fn [_] "(seon.run/complete \"done\")"))
                         bootstrap/next-entry (constantly nil)]
             (wake/route! {:seon.cluster.wake/connection connection
                           :seon.cluster.wake/channels
@@ -1907,7 +1907,7 @@
         (try
           (with-redefs [ai/complete
                         (recording-completer
-                         ledger (fn [_] "(my.run/wait \"need input\")"))]
+                         ledger (fn [_] "(seon.run/wait \"need input\")"))]
             (let [events (database-events connection)
                   db
                   (try

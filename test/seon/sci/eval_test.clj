@@ -981,12 +981,12 @@
         "the evaluated registration remains isolated from global candidates")))
 
 (deftest the-dispositions-are-callable-and-come-back-as-values
-  (let [evaluation (run "(my.run/complete \"done\")")]
+  (let [evaluation (run "(seon.run/complete \"done\")")]
     (is (ok? evaluation))
     (is (= {:my.run/disposition :completed :my.run/result "done"}
            (:seon.sci.admit/value evaluation))
         "the loop reads its disposition out of exactly this"))
-  (let [evaluation (run "(my.run/wait \"later\")")]
+  (let [evaluation (run "(seon.run/wait \"later\")")]
     (is (= :wait (:my.run/disposition (:seon.sci.admit/value evaluation))))))
 
 (deftest an-unbound-var-remains-structured-after-production-admission
@@ -1543,7 +1543,7 @@
               :seon.cluster.agent/id "scoped-agent"
               :seon.turn/id "scoped-run"
               :seon.cluster.eval/ordinal 7
-              :seon.cluster.eval/source "(my.run/complete \"done\")"
+              :seon.cluster.eval/source "(seon.run/complete \"done\")"
               :seon.sci.admit/caps caps
               :seon.sci.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic})]

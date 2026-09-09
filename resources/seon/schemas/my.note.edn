@@ -5,18 +5,18 @@
           :note
           [:map
            {:seon.db/attributes true,
-            :seon.render/ai my.note/render-note-ai,
-            :seon.render/html my.note/render-note-html,
-            :seon.render/form my.note/render-note-form}
+            :seon.render/ai seon.note/render-note-ai,
+            :seon.render/html seon.note/render-note-html,
+            :seon.render/form seon.note/render-note-form}
            [:my.note/id :my.note/id]
            [:my.note/agent :my.note/agent]
            [:my.note/content :my.note/content]
            [:my.note/about {:optional true} :my.note/about]],
           :notes
           [:vector
-           {:seon.render/ai my.note/render-notes-ai,
-            :seon.render/html my.note/render-notes-html,
-            :seon.render/form my.note/render-notes-form}
+           {:seon.render/ai seon.note/render-notes-ai,
+            :seon.render/html seon.note/render-notes-html,
+            :seon.render/form seon.note/render-notes-form}
            :my.note/note],
           :agent-not-found :seon.cluster.agent/id,
           :agent-not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent that does not exist"} [:my.note/agent-not-found :my.note/agent-not-found] [:seon.error/message :seon.error/message]],
@@ -27,4 +27,6 @@
           :not-found :my.note/id,
           :not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the current note that does not exist"} [:my.note/not-found :my.note/not-found] [:seon.error/message :seon.error/message]],
           :not-owned :my.note/id,
-          :not-owned-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the note not owned by the caller"} [:my.note/not-owned :my.note/not-owned] [:seon.error/message :seon.error/message]]}
+          :not-owned-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the note not owned by the caller"} [:my.note/not-owned :my.note/not-owned] [:seon.error/message :seon.error/message]]
+ :my.note/add-request [:map [:my.note/id :my.note/id] [:my.note/content :my.note/content] [:my.note/about {:optional true} :my.note/about] [:seon.db/connection :seon.db/connection] [:seon.cluster.agent/id :seon.cluster.agent/id]]
+ :my.note/forget-request [:map [:my.note/id :my.note/id] [:seon.db/connection :seon.db/connection] [:seon.cluster.agent/id :seon.cluster.agent/id]]}

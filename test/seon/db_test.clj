@@ -3,7 +3,7 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
             [datahike.pull-api :as pull-api]
-            [my.message :as message]
+            [seon.cluster.message :as message]
             [seon.config :as config]
             [seon.turn :as turn]
             [seon.db :as db]

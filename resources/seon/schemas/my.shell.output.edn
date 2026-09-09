@@ -48,4 +48,4 @@
                        [:my.shell.output/blob :my.shell.output/blob]
                        [:my.shell.output/preview-complete?
                         :my.shell.output/preview-complete?]]]}
-                    my.shell/output?]]}
+                    seon.shell/output?]]}

@@ -2,7 +2,7 @@
   "The agent-owned plan component tree, its derivation, and its two projections."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [my.plan :as plan]
+            [seon.plan :as plan]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -146,7 +146,7 @@
                         {:my.plan.item/needs #{[:my.plan.item/id "prepare"]}})]
         (is (= [prepare] (plan/ready @connection "alice")))
         (is (= [verify] (plan/blocked @connection "alice")))
-        (is (= ["prepare"] (:my.plan.item/needs verify)))
+        (is (= ["prepare"] (mapv :my.plan.item/id (:my.plan/needs verify))))
         (is (= [prepare verify] (plan/steps @connection "alice")))
         (is (= :my.plan/not-owned
                (:seon.error/kind (plan/start! "prepare" connection "bob"))))
@@ -360,8 +360,8 @@
   (with-plan
     (fn [connection]
       (add connection "ship" "Ship the plan unit"
-           {:my.plan.item/about ['my.plan/plan! 'my.plan :my.plan.item/title]})
-      (is (= ["my.plan/plan!" 'my.plan :my.plan.item/title]
+           {:my.plan.item/about ['seon.plan/plan! 'my.plan :my.plan.item/title]})
+      (is (= ["seon.plan/plan!" 'my.plan :my.plan.item/title]
              (mapv (fn [subject]
                      (or (db/q '[:find ?function .
                                  :in $ ?subject
@@ -421,7 +421,7 @@
             explicit (evaluate "alice"
                                "(my.plan/plan {:seon.cluster.agent/id \"bob\"})")
             bob-text (evaluate "bob"
-                               "(my.plan/format-plan-ai (my.plan/plan {}))")]
+                               "(seon.plan/format-plan-ai (my.plan/plan {}))")]
         (is (= ["alice-work"] (ids (:my.plan/ready alice))))
         (is (= ["bob-work"] (ids (:my.plan/ready bob))))
         (is (= bob explicit)

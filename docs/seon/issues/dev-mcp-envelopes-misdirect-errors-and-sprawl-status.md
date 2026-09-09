@@ -262,3 +262,11 @@ REPL surface was therefore unavailable before any implementation work. The
 lane reported the absence immediately and confined subsequent live probes to
 its own isolated operator root; it did not build a replacement MCP sender or
 touch the shared cluster.
+
+## Context-blocks observation — 2026-09-09
+
+Default PID 40078 served the assigned Juniper debug page while the supported
+MCP runtime-status call returned health and Flow unknown with `Read timed out`.
+A subsequent supported JVM evaluation of `(+ 1 1)` returned 2 in 3 ms.
+No default lifecycle operation was performed. This independently reproduces
+the unavailable health observation above; it does not establish cluster death.

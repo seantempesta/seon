@@ -1,5 +1,6 @@
 (ns my.edit-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.edit :as owner]
+            [clojure.test :refer [deftest is testing]]
             [my.edit :as edit]
             [seon.schema :as schema]))
 
@@ -8,16 +9,16 @@
               :my.edit/expected-digest (apply str (repeat 64 "a"))
               :my.edit/form {:my.edit.form/head 'defn
                              :my.edit.form/name 'example}}]
-    (is (true? (edit/valid-form-operation?
+    (is (true? (owner/valid-form-operation?
                 (assoc base :my.edit/operation :replace
                        :my.edit/source "(defn example [] nil)"
                        :example/extra :ignored))))
-    (is (false? (edit/valid-form-operation?
+    (is (false? (owner/valid-form-operation?
                  (assoc base :my.edit/operation :replace
                         :my.edit/source "(defn example []"))))
-    (is (true? (edit/valid-form-operation?
+    (is (true? (owner/valid-form-operation?
                 (assoc base :my.edit/operation :delete))))
-    (is (false? (edit/valid-form-operation?
+    (is (false? (owner/valid-form-operation?
                  (assoc base :my.edit/operation :delete
                         :my.edit/source "(def example 1)"))))
     (testing "the registered request remains open"

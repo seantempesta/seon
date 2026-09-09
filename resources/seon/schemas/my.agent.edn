@@ -1,0 +1,3 @@
+{:my.agent/settings-request
+ [:map [:seon.db/connection :seon.db/connection]
+       [:seon.cluster.agent/id :seon.cluster.agent/id]]}

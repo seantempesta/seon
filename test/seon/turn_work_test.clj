@@ -23,7 +23,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
-            [my.agent :as my.agent]
+            [seon.agent :as my.agent]
             [seon.turn :as turn]
             [seon.schema]
             [seon.test-support :as support])

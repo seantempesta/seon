@@ -156,3 +156,30 @@
                  progress-backstop-ms ::progress-backstop-ms}]
    (delete-recursively-impl!
     root target progress! progress-backstop-ms)))
+
+(defn content?
+  "Whether a value names exactly one file-content source.
+
+  Takes a value and returns a boolean. This predicate validates text, bytes,
+  or blob-digest content for `write`."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (map? value)
+       (= 1
+          (count
+           (filter #(contains? value %)
+                   [:my.fs/text :my.fs/bytes :seon.blob/digest])))))
+
+
+(defn write-precondition?
+  "Whether a value names exactly one write precondition.
+
+  Takes a value and returns a boolean. This predicate validates an expected
+  absence or expected digest for `write`."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (map? value)
+       (= 1
+          (count
+           (filter #(contains? value %)
+                   [:my.fs/expected-absence? :my.fs/expected-digest])))))

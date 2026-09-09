@@ -17,7 +17,7 @@
    "(total-by-label [{:label \"user\" :amount 0}\n"
    "                 {:label \"user\" :amount 1}\n"
    "                 {:label \"agent\" :amount 77}])\n"
-   "(my.run/complete \"{\\\"user\\\" 1, \\\"agent\\\" 77}\")"))
+   "(seon.run/complete \"{\\\"user\\\" 1, \\\"agent\\\" 77}\")"))
 
 (deftest objective-catalog-is-the-five-ruled-fact-space-cases
   (is (= #{:o1 :o2 :o3 :o4 :o5} (set (keys drive/objectives))))

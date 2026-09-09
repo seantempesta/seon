@@ -8,7 +8,7 @@
   cannot."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [my.run :as run]
+            [seon.run :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
@@ -66,7 +66,7 @@
                "and the loop cannot mistake it for a disposition")))))))
 
 (deftest the-lifecycle-surface-has-two-actions-and-its-own-presentation
-  (is (= #{'wait 'complete 'render-namespace-ai 'walkthrough 'usage-form}
+  (is (= #{'wait 'complete 'render-namespace-ai 'usage-form}
          (set (keys (ns-publics 'my.run)))))
   (is (str/includes? (:doc (meta (the-ns 'my.run)))
                      "Every run ends by calling `complete` or `wait`"))

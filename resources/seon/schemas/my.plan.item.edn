@@ -56,8 +56,8 @@
                :item
                [:map
                 {:seon.db/attributes true,
-                 :seon.render/ai my.plan/render-item-ai,
-                 :seon.render/html my.plan/render-item-html,
+                 :seon.render/ai seon.plan/render-item-ai,
+                 :seon.render/html seon.plan/render-item-html,
                  :description
                  "One plan step's own attributes. Ownership is the incoming component edge from :my.plan/steps or :my.plan.item/steps, never a stored backlink."}
                 [:my.plan.item/id :my.plan.item/id]

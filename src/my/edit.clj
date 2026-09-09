@@ -5,22 +5,6 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
-(defn valid-form-operation?
-  "Whether a form-edit request has the required replacement source.
-
-  Takes a request value and returns a boolean. This predicate validates
-  `:my.edit/form-request`; call `form` to perform the edit."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [request]
-  (and (map? request)
-       (case (:my.edit/operation request)
-         (:replace :insert-before :insert-after)
-         (and (contains? request :my.edit/source)
-              (string? (:my.edit/source request))
-              (edit/single-form? (:my.edit/source request)))
-
-         :delete (not (contains? request :my.edit/source))
-         false)))
 
 (def ^:private digest-generator
   (gen/return (apply str (repeat 64 "0"))))
@@ -40,7 +24,7 @@
 
 (defonce ^:private _form-operation-predicate
   (schema/register-core-predicate!
-   'my.edit/valid-form-operation? valid-form-operation?))
+   'seon.edit/valid-form-operation? edit/valid-form-operation?))
 
 ;; The predicate must exist before seon.effect loads the schema population,
 ;; whose :my.edit/form-request declaration resolves this Var.

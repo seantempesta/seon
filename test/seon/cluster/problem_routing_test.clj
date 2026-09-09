@@ -2,7 +2,7 @@
   "Owner routing and the seven-state plan-settlement derivation."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
-            [my.message :as my.message]
+            [seon.cluster.message :as my.message]
             [seon.cluster.message :as message]
             [seon.turn :as turn]
             [seon.print :as print]
@@ -88,7 +88,7 @@
   (deliver! connection
             "planner"
             (str "assignment-" ordinal)
-            (my.message/send "alpha"
+            (seon.cluster.message/send "alpha"
                              (str "repair " ordinal)
                              (str "problem-" ordinal))))
 

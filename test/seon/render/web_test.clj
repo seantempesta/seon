@@ -881,7 +881,7 @@ handle))}}
   (support/with-database
     (fn [connection]
       (let [ctx (support/fork-cluster-ctx connection)
-            row (sci.kernel/program-function ctx 'my.plan/render-item-html)
+            row (sci.kernel/program-function ctx 'seon.plan/render-item-html)
             html (hiccup/->string
                   ((web-private 'debug-renderer-definition)
                    {:seon.render.call/static-evidence

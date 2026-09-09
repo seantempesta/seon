@@ -25,9 +25,12 @@
          #{{:db/id "current-item"
             :my.plan.item/id "juniper/render-plan"
             :my.plan.item/title "Render this plan clearly"
-            :my.plan.item/expected-result "The item is shown as data."}}}}])
+            :my.plan.item/expected-result "The item is shown as data."}
+           {:my.plan.item/id "juniper/verify"
+            :my.plan.item/title "Verify dependencies"
+            :my.plan.item/needs #{"current-item"}}}}}])
      (let [ctx (support/fork-cluster-ctx connection)
-           request {:seon.cluster.eval/source "(my.plan/current)"
+           request {:seon.cluster.eval/source "[(my.plan/current) (my.plan/blocked) (my.message/inbox) (my.agent/settings)]"
                     :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
                     :seon.cluster.agent/id "juniper"
                     :seon.sci.eval/ctx ctx
@@ -41,7 +44,11 @@
            shown (repl/value-text result)]
        (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
        (is (= "juniper/render-plan"
-              (get-in result [:seon.sci.admit/value :my.plan.item/id])))
+              (get-in result [:seon.sci.admit/value 0 :my.plan.item/id])))
+       (is (= [{:my.plan.item/id "juniper/render-plan"}]
+              (get-in result [:seon.sci.admit/value 1 0 :my.plan/needs])))
+       (is (= [] (get-in result [:seon.sci.admit/value 2])))
+       (is (not (str/includes? shown "ExceptionInfo")) shown)
        (is (string? shown))
        (is (str/includes? shown "juniper/render-plan") shown)
        (is (str/includes? shown "Render this plan clearly") shown)

@@ -2,7 +2,7 @@
   (:require [clojure.core.async :as async]
             [clojure.test :refer [deftest is]]
             [seon.blob :as blob]
-            [my.agent :as my.agent]
+            [seon.agent :as my.agent]
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
 

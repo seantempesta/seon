@@ -33,7 +33,7 @@
                (fn [request]
                  (async/offer! attempt-requests request)
                  {:seon.ai/text
-                  "(my.run/complete \"instrumented acquisition ran\")"})]
+                  "(seon.run/complete \"instrumented acquisition ran\")"})]
               (try
                 (let [applied
                       (instrument/apply!

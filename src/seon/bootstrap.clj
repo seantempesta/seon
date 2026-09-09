@@ -1,7 +1,7 @@
 (ns seon.bootstrap
   "The live-fact generated bootstrap run shared by every new agent."
   (:require [clojure.edn :as edn]
-            [my.plan :as plan]
+            [seon.plan :as plan]
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.turn :as turn]
@@ -725,14 +725,15 @@
         (if send?
           read-expression
           (str "(let [history " read-expression "] "
-               "(assoc (my.run/complete \"Read " agent-id
+               "(assoc (seon.run/complete \"Read " agent-id
                "'s recent history.\") :my.run/supervision history))"))
         send-expression
-        (str "(my.message/send " (pr-str agent-id)
-             " \"What are you doing?\")")
+        (pr-str (list 'my.message/send
+                      {:my.message/to agent-id
+                       :my.message/content "What are you doing?"}))
         send-source
         (str "(merge " send-expression
-             " (my.run/complete \"Read " agent-id
+             " (seon.run/complete \"Read " agent-id
              "'s recent history and asked what it is doing.\"))")
         sources
         (cond-> []

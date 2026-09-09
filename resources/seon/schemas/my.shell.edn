@@ -28,7 +28,7 @@
                [:map [:my.shell/stdin-text :my.shell/stdin-text]]
                [:map [:my.shell/stdin-bytes :my.shell/stdin-bytes]]
                [:map [:seon.blob/digest :seon.blob/digest]]]}
-             my.shell/stdin?]]
+             seon.shell/stdin?]]
            :stdin-bytes :my.fs/bytes
            :stdin-text :string
            :stdout :my.shell.output/value

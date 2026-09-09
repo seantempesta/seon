@@ -449,3 +449,20 @@
                    (line-range candidate-source start changed-end)
                    (context-window candidate-source start changed-end
                                    context-byte-limit))))))))
+
+(defn valid-form-operation?
+  "Whether a form-edit request has the required replacement source.
+
+  Takes a request value and returns a boolean. This predicate validates
+  `:my.edit/form-request`; call `form` to perform the edit."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [request]
+  (and (map? request)
+       (case (:my.edit/operation request)
+         (:replace :insert-before :insert-after)
+         (and (contains? request :my.edit/source)
+              (string? (:my.edit/source request))
+              (single-form? (:my.edit/source request)))
+
+         :delete (not (contains? request :my.edit/source))
+         false)))

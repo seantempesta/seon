@@ -54,7 +54,7 @@
     (gen/fmap (fn [k] {k [1 2 3]}) gen/keyword)
     (gen/fmap (fn [s] (list 'str s)) gen/string-alphanumeric)
     (gen/fmap (fn [n] (list 'defn 'f '[x] (list '+ 'x n))) gen/small-integer)
-    (gen/return '(my.run/wait "still working"))
+    (gen/return '(seon.run/wait "still working"))
     (gen/return '(let [y (* 2 3)] {:y y}))]))
 
 (deftest a-printed-plan-round-trips-through-the-splitter
@@ -130,10 +130,10 @@
   (testing "pure code keeps its exact ordered top-level sources"
     (let [text (str "(def widgets (map inc (range 3)))\n"
                     "widgets\n"
-                    "(my.run/complete \"counted 6\")")]
+                    "(seon.run/complete \"counted 6\")")]
       (is (= ["(def widgets (map inc (range 3)))"
               "widgets"
-              "(my.run/complete \"counted 6\")"]
+              "(seon.run/complete \"counted 6\")"]
              (sources text)))))
 
   (testing "pure prose is a refusal, never a form"
@@ -148,9 +148,9 @@
     (let [text (str "First I will add the values.\n"
                     "(+ 1 2)\n"
                     "Then I will finish.\n"
-                    "(my.run/complete \"3\")\n"
+                    "(seon.run/complete \"3\")\n"
                     "That is all.")]
-      (is (= ["(+ 1 2)" "(my.run/complete \"3\")"] (sources text)))
+      (is (= ["(+ 1 2)" "(seon.run/complete \"3\")"] (sources text)))
       (is (= ["; First I will add the values."
               "; Then I will finish."]
              (mapv :seon.cluster.eval/comment (reply/sources text)))
@@ -159,23 +159,23 @@
   (testing "the live word-salad reply freezes one form, not its 22 prose tokens"
     (let [text (str "I defined a function to sum integers from 1 to n, "
                     "called it with 10 to get 55, and reported the action.\n"
-                    "(my.run/complete \"reported\")")
+                    "(seon.run/complete \"reported\")")
           result (sources text)]
-      (is (= ["(my.run/complete \"reported\")"] result))
+      (is (= ["(seon.run/complete \"reported\")"] result))
       (is (= [(str "; I defined a function to sum integers from 1 to n, "
                    "called it with 10 to get 55, and reported the action.")]
              (mapv :seon.cluster.eval/comment (reply/sources text))))
-      (is (= '(my.run/complete "reported") (read-back (first result))))
+      (is (= '(seon.run/complete "reported") (read-back (first result))))
       (is (not-any? #{"I" "defined" "1" "10" "get" "55"} result)
           "none of the live prose tokens becomes its own plan source")))
 
   (testing "invalid prose tokens are comments while a same-line form survives"
-    (is (= ["(my.run/complete \"denied\")"]
-           (sources "denied /etc/hosts now.(my.run/complete \"denied\")")))
+    (is (= ["(seon.run/complete \"denied\")"]
+           (sources "denied /etc/hosts now.(seon.run/complete \"denied\")")))
     (is (= ["; denied /etc/hosts now."]
            (mapv :seon.cluster.eval/comment
                  (reply/sources
-                  "denied /etc/hosts now.(my.run/complete \"denied\")"))))))
+                  "denied /etc/hosts now.(seon.run/complete \"denied\")"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Attribution — the reader's namespace-in-effect, projected verbatim
@@ -326,9 +326,9 @@
 
 (deftest a-fenced-reply-retains-surrounding-prose-as-comments
   (let [text (str "Sure — here is the plan.\n\n"
-                  "```clojure\n(def a 1)\n(my.run/complete \"done\")\n```\n\n"
+                  "```clojure\n(def a 1)\n(seon.run/complete \"done\")\n```\n\n"
                   "Let me know if that works.")]
-    (is (= ["(def a 1)" "(my.run/complete \"done\")"] (sources text)))
+    (is (= ["(def a 1)" "(seon.run/complete \"done\")"] (sources text)))
     (is (= ["; Sure — here is the plan." nil]
            (mapv :seon.cluster.eval/comment (reply/sources text)))
         "prose above a form is its comment; prose after the last form is not")))
@@ -372,7 +372,7 @@
   (testing "so every recorded form can settle a receipt"
     (doseq [text [";; a note\n(def a 1)\n(inc a)"
                   "First I will add.\n(+ 1 2)\nThat is all."
-                  (str "<assistant1>\n(my.run/complete \"done\")\n"
+                  (str "<assistant1>\n(seon.run/complete \"done\")\n"
                        "That is everything I did.")
                   "Here:\n```clojure\n(+ 1 2)\n```\nDone."
                   "(ns my.gen.alpha)\n(def a 1)\nThat is all."]]

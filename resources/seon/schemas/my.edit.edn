@@ -14,7 +14,7 @@
   [:fn {:error/message
         "must pair :delete with no :my.edit/source, or a replace/insert operation with one readable Clojure form in :my.edit/source"
         :gen/gen my.edit/form-request-generator}
-   my.edit/valid-form-operation?]]
+   seon.edit/valid-form-operation?]]
  :my.edit/old-string [:string {:min 1}]
  :my.edit/new-string :string
  :my.edit/replace-all? :boolean

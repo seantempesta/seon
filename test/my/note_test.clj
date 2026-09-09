@@ -2,7 +2,7 @@
   "The minimal durable current-note home and its rebirth property."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [my.note :as note]
+            [seon.note :as note]
             [seon.db :as db]
             [seon.schema]
             [seon.test-support :as support]))

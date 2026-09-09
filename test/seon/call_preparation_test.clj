@@ -3,7 +3,7 @@
   from program facts, and the cluster-local cache's basis boundary."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [my.plan :as plan]
+            [seon.plan :as plan]
             [sci.core :as sci]
             [seon.call-preparation :as cp]
             [seon.db :as db]

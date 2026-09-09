@@ -221,8 +221,8 @@
                      "(clojure.core/ns-unmap "
                      "(find-ns 'my.agents.restart-a) "
                      "(symbol \"removed-before-restart\"))\n"
-                     "(my.run/complete \"program committed\")")
-                  "(my.run/complete \"unexpected agent\")")})]
+                     "(seon.run/complete \"program committed\")")
+                  "(seon.run/complete \"unexpected agent\")")})]
             (await-commit!
              connection
              authored-program-settled?
@@ -364,8 +364,8 @@
                 (if (= "restart-b" (active-agent-id @connection))
                   (str
                    "(my.agents.restart-a/persisted \"ok\")\n"
-                   "(my.run/complete \"restarted definition called\")")
-                  "(my.run/complete \"unexpected agent\")")})]
+                   "(seon.run/complete \"restarted definition called\")")
+                  "(seon.run/complete \"unexpected agent\")")})]
             (await-commit!
              connection
              restarted-call-present?

@@ -2,7 +2,7 @@
   "X2 keeps interrupted process history out of namespace-owner routing."
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
-            [my.message :as my.message]
+            [seon.cluster.message :as my.message]
             [seon.cluster.message :as message]
             [seon.turn :as turn]
             [seon.problems :as problems]
@@ -83,7 +83,7 @@
            (message/delivery
             @connection
             {:my.message/value
-             (my.message/send "alpha" "stale assignment" "resume-problem-1")
+             (seon.cluster.message/send "alpha" "stale assignment" "resume-problem-1")
              :seon.cluster.agent/id "planner"
              :seon.turn/id "stale-assignment-run"
              :seon.cluster.eval/ordinal 0

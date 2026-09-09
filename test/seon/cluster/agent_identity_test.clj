@@ -2,7 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.agent :as agent]
-            [my.agent :as my.agent]
+            [seon.agent :as my.agent]
             [seon.db :as db]
             [seon.config :as config]
             [seon.env :as env]
@@ -118,7 +118,7 @@
                 (evaluate "(my.agent/settings! {:seon.config.eval/time-limit-ms 1234})"))))
         (is (= {:seon.config.eval/time-limit-ms 1234}
                (:seon.sci.admit/value (evaluate "(my.agent/settings)"))))
-        (let [dials (:seon.sci.admit/value (evaluate (str "(do\n" (my.agent/render-settings-ai {}) "\n)")))]
+        (let [dials (:seon.sci.admit/value (evaluate (str "(do\n" (seon.agent/render-settings-ai {}) "\n)")))]
           (is (set? dials))
           (is (get dials :seon.config.run/max-episode-runs)))
         (is (= expected (:seon.sci.admit/value (evaluate "(seon.cluster.agent/whoami)"))))

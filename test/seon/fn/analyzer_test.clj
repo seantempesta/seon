@@ -205,7 +205,7 @@
           ["(defn broken [value]\n  (missing value))"
            "(str/join [\"kept\"])"
            "(read \"{:also :kept}\")"
-           "(my.run/complete \"done\")"
+           "(seon.run/complete \"done\")"
            "(other/private-helper 1)"
            "(my.run/complete)"
            "(broken)"]})]

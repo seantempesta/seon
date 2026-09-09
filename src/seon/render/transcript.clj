@@ -834,7 +834,7 @@
   "Return the ordinary message read form for one message entity."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
   [unit]
-  (list 'my.message/read (:seon.cluster.message/id unit)))
+  (list 'my.message/read {:my.message/id (:seon.cluster.message/id unit)}))
 
 (defn inbox-form
   "Return the ordinary inbox listing form for messages reached through `to`."
@@ -843,7 +843,7 @@
   ;; The empty request map names the call shape: `inbox` has a map arity
   ;; and a positional arity, so a bare call is ambiguous to call
   ;; preparation (it refused on the live page, 2026-09-08).
-  (list 'my.message/inbox {}))
+  (list 'my.message/inbox))
 
 (defn- entry-basis
   [db entry]

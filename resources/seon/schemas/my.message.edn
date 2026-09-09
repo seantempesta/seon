@@ -1,4 +1,5 @@
-{:my.message/about [:string {:min 1}],
+{:my.message/read-request [:map [:my.message/id :my.message/id] [:seon.db/db :seon.db/database-value]]
+ :my.message/about [:string {:min 1}],
  :my.message/content [:string {:min 1}],
  :my.message/from :seon.cluster.agent/id,
  :my.message/at :inst,

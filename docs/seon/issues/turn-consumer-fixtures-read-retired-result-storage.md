@@ -120,3 +120,19 @@ its one canonical regression verifies stored-history prompts and executes
 root's fully qualified generated query. Remaining legacy namespace results
 are not claimed green. Measurements are in the loop-proof landing note;
 the baseline log was `tmp/loop-proof-resume-baseline.log`.
+
+## Context-blocks HEAD-only verification — 2026-09-09
+
+A detached HEAD worktree at `0b3d31b26`, with the repository's reference-code
+linked, ran `SEON_TEST_WORKERS=3 bin/test-fast seon.call-preparation-test
+seon.bootstrap-test`: 24 tests, 123 assertions, 6 failures, 3 errors.
+These match the expanded context-blocks candidate gate's failures exactly.
+In addition to the previously recorded bootstrap observations, call-preparation
+has three stale probe expectations: `a-compiled-first-party-call-is-prepared`
+expects the full argument vector instead of the offending supplied value;
+`a-two-slot-arity-prepares-only-unique-partial-placements` passes an invalid
+schema form to `compilable-form`; `an-unavailable-supplier-refuses-before-the-body`
+constructs a preparation without its now-required basis, contract transaction,
+and arity facts. No production call-preparation code changed in that slice.
+The required request-map behavior is separately exercised through the real
+SCI evaluation and canonical fixture in `seon.sci.shown-text-test`.

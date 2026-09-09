@@ -137,9 +137,9 @@
          (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
               function-name " [x] (+ x " (+ 1000 (::index spec)) "))")
          (str "(" function-name " 1)")
-         (str "(my.message/send " (pr-str next-agent-id) " "
+         (str "(seon.cluster.message/send " (pr-str next-agent-id) " "
               (pr-str (::payload spec)) ")")
-         (str "(my.run/complete "
+         (str "(seon.run/complete "
               (pr-str (str "complete|" agent-id "|")) ")")]]
     (mapv (fn [source]
             {:seon.ns/name namespace-name
@@ -601,7 +601,7 @@
                   (fn [request]
                     (swap! model-calls conj request)
                     {:seon.ai/text
-                     "(my.run/complete \"unexpected model call\")"})]
+                     "(seon.run/complete \"unexpected model call\")"})]
       (with-cluster
         (fn [instance]
           (let [timings

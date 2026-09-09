@@ -420,7 +420,7 @@
             source
             (str "(do (seon.db/q '[:find (count ?function) . "
                  ":where [?function :seon.fn/sym _]]) "
-                 "(my.run/complete \"done\"))")]
+                 "(seon.run/complete \"done\"))")]
         (db/transact!
          connection
          [{:seon.ns/name namespace-name

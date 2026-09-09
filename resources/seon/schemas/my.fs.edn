@@ -24,7 +24,7 @@
             [:map [:my.fs/text :string]]
             [:map [:my.fs/bytes :my.fs/bytes]]
             [:map [:seon.blob/digest :seon.blob/digest]]]}
-          my.fs/content?]]
+          seon.fs/content?]]
         :created? :boolean
         :digest :seon.blob/digest
         :directory? :boolean
@@ -103,7 +103,7 @@
            [:or
             [:map [:my.fs/expected-absence? :my.fs/expected-absence?]]
             [:map [:my.fs/expected-digest :my.fs/expected-digest]]]}
-          my.fs/write-precondition?]]
+          seon.fs/write-precondition?]]
         :write-request
         [:map
          [:my.fs/path :my.fs/path]

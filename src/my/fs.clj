@@ -1,35 +1,12 @@
 (ns my.fs
   "Read, write, inspect, and find files with bounded results."
   (:refer-clojure :exclude [read])
-  (:require [clojure.test.check.generators :as gen]
+  (:require [seon.fs :as fs]
+            [clojure.test.check.generators :as gen]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
-(defn content?
-  "Whether a value names exactly one file-content source.
 
-  Takes a value and returns a boolean. This predicate validates text, bytes,
-  or blob-digest content for `write`."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [value]
-  (and (map? value)
-       (= 1
-          (count
-           (filter #(contains? value %)
-                   [:my.fs/text :my.fs/bytes :seon.blob/digest])))))
-
-(defn write-precondition?
-  "Whether a value names exactly one write precondition.
-
-  Takes a value and returns a boolean. This predicate validates an expected
-  absence or expected digest for `write`."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [value]
-  (and (map? value)
-       (= 1
-          (count
-           (filter #(contains? value %)
-                   [:my.fs/expected-absence? :my.fs/expected-digest])))))
 
 (def ^:private digest-generator
   (gen/fmap #(apply str %)
@@ -50,11 +27,11 @@
               digest-generator)]))
 
 (defonce ^:private _content-predicate
-  (schema/register-core-predicate! 'my.fs/content? content?))
+  (schema/register-core-predicate! 'seon.fs/content? fs/content?))
 
 (defonce ^:private _write-precondition-predicate
   (schema/register-core-predicate!
-   'my.fs/write-precondition? write-precondition?))
+   'seon.fs/write-precondition? fs/write-precondition?))
 
 ;; The predicates must exist before seon.effect loads the complete schema
 ;; population, whose :my.fs/content declaration resolves these Vars.

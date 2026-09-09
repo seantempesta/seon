@@ -1,6 +1,6 @@
 (ns my.agent-test
   (:require [clojure.test :refer [deftest is]]
-            [my.agent :as agent]
+            [seon.agent :as agent]
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.test-support :as support]))
@@ -23,8 +23,8 @@
        (is (= {:seon.config.eval/time-limit-ms 1234
                :seon.config.agent/turn-completion-backstop-ms 5678}
               settings))
-       (is (some #(= 'my.agent/render-settings-ai (:seon.render/ai %)) matches))
-       (is (not-any? #(= 'my.agent/render-settings-ai (:seon.render/ai %))
+       (is (some #(= 'seon.agent/render-settings-ai (:seon.render/ai %)) matches))
+       (is (not-any? #(= 'seon.agent/render-settings-ai (:seon.render/ai %))
                      (schema/matching-shapes-in (schema/projection-from-database database)
                                                {:my.plan.item/title "Unrelated"})))
        (db/transact! connection

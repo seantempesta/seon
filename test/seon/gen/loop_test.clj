@@ -281,7 +281,7 @@
        "(beta-helper-missing)\n"))
 
 (def ^:private planner-attempt
-  (str program "(my.run/wait \"asked the namespace owners\")"))
+  (str program "(seon.run/wait \"asked the namespace owners\")"))
 
 (defn- assigned-receipt-id
   "The receipt identity named by an assignment in a rendered prompt."
@@ -327,18 +327,18 @@
      ;; settlement derivation trusts.
      "alpha"
      (str "(defn alpha-helper-missing [] 3)\n"
-          "(my.run/complete \"defined the missing helper\")")
+          "(seon.run/complete \"defined the missing helper\")")
 
      ;; beta DECLINES, naming the problem it was assigned — the D10
      ;; shape, read out of its own context the way an agent would.
      "beta"
      (if-let [receipt-id (assigned-receipt-id prompt "beta")]
-       (str "(my.message/decline \"planner\" " (pr-str receipt-id)
+       (str "(seon.cluster.message/decline \"planner\" " (pr-str receipt-id)
             " \"That namespace has no contract to satisfy.\")\n"
-            "(my.run/complete \"declined\")")
-       "(my.run/complete \"I was told nothing I can act on\")")
+            "(seon.run/complete \"declined\")")
+       "(seon.run/complete \"I was told nothing I can act on\")")
 
-     "(my.run/complete \"nothing to do\")")})
+     "(seon.run/complete \"nothing to do\")")})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Queries — every milestone is a fact
@@ -642,7 +642,7 @@
                                      ;; evaluates fine, and its VALUE references
                                      ;; the var form 0 never bound
                                      "primes\n")
-                                "(my.run/wait \"nothing\")")})]
+                                "(seon.run/wait \"nothing\")")})]
                (drive! cluster 6 3))
              db @connection
              state (states db run-id)]
@@ -678,8 +678,8 @@
                              {:seon.ai/text
                               (if (= "planner" (prompt-agent-id prompt))
                                 (str program
-                                     "(my.run/complete \"the program is built\")")
-                                "(my.run/wait \"saying nothing\")")})]
+                                     "(seon.run/complete \"the program is built\")")
+                                "(seon.run/wait \"saying nothing\")")})]
                (drive! cluster 12 7))
              db @connection]
          (is (= "the program is built"

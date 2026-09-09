@@ -128,7 +128,7 @@
            (subs content-line 0 (- (count content-line) 2))
            "data: {\"choices\":[{\"delta\":{\"content\":123}}]}"
            "data: {\"error\":{\"message\":\"provider failed\"}}"]
-          prefix (content-chunk "(my.run/complete \"safe")
+          prefix (content-chunk "(seon.run/complete \"safe")
           suffix (content-chunk "\")")]
       (doseq [malformed malformed-lines]
         (let [result (ai/stream-fold [prefix malformed suffix] nil)]
@@ -142,7 +142,7 @@
                                   (str "data: {\"choices\":[{\"delta\":"
                                        "{\"reasoning_content\":123}}]}")
                                   (reasoning-chunk "second")
-                                  (content-chunk "(my.run/complete :safe)")]
+                                  (content-chunk "(seon.run/complete :safe)")]
                                  nil)]
       (is (= :seon.ai/unparseable-body (:seon.error/kind result)))
       (is (not (contains? result :seon.ai/reasoning-partial))))))
@@ -161,7 +161,7 @@
     (let [completion
           (ai/completion-text
            {"choices"
-            [{"message" {"content" "(my.run/complete :safe)"
+            [{"message" {"content" "(seon.run/complete :safe)"
                           "reasoning_content" 123}}]})]
       (is (= :seon.ai/unparseable-body (:seon.error/kind completion)))
       (is (not (contains? completion :seon.ai/text)))))
@@ -169,7 +169,7 @@
     (let [completion
           (ai/completion-text
            {"error" {"message" "provider failed"}
-            "choices" [{"message" {"content" "(my.run/complete :safe)"}}]})]
+            "choices" [{"message" {"content" "(seon.run/complete :safe)"}}]})]
       (is (= :seon.ai/unparseable-body (:seon.error/kind completion)))
       (is (not (contains? completion :seon.ai/text))))))
 
@@ -240,7 +240,7 @@
          extra))
 
 (deftest a-malformed-stream-settles-as-an-evidenced-flat-error
-  (let [prefix (content-chunk "(my.run/complete \"safe")
+  (let [prefix (content-chunk "(seon.run/complete \"safe")
         malformed "data: {not json"
         suffix (content-chunk "\")")]
     (with-provider {:body (str/join "\n" [prefix malformed suffix])}

@@ -9,8 +9,9 @@
   `:seon.error/value`, so the declared output schemas are ones the
   functions actually keep."
   (:require [clojure.test :refer [deftest is testing]]
-            [my.message :as message]
-            [my.run :as run]
+            [seon.cluster.message :as message]
+            [my.message]
+            [seon.run :as run]
             [seon.db :as db]
             [seon.schema]
             [seon.test-support :as support]))
@@ -155,14 +156,14 @@
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)]
        (doseq [bad ["nil" "\"\"" "123" ":bob" "{:a 1}" "[\"bob\"]"]
-               source [(str "(my.message/send " bad " \"content\")")
-                       (str "(my.message/send \"bob\" " bad ")")
-                       (str "(my.message/send \"bob\" \"content\" " bad ")")
-                       (str "(my.message/decline " bad
+               source [(str "(seon.cluster.message/send " bad " \"content\")")
+                       (str "(seon.cluster.message/send \"bob\" " bad ")")
+                       (str "(seon.cluster.message/send \"bob\" \"content\" " bad ")")
+                       (str "(seon.cluster.message/decline " bad
                             " \"failure-17\" \"Cannot repair.\")")
-                       (str "(my.message/decline \"planner\" " bad
+                       (str "(seon.cluster.message/decline \"planner\" " bad
                             " \"Cannot repair.\")")
-                       (str "(my.message/decline \"planner\" \"failure-17\" "
+                       (str "(seon.cluster.message/decline \"planner\" \"failure-17\" "
                             bad ")")]]
          (let [value (support/agent-value ctx source)]
            (is (map? value) source)

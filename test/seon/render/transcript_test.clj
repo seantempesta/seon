@@ -377,7 +377,7 @@
      :seon.cluster.eval/at (at 3500)
      :seon.cluster.eval/result-edn
      "{:my.run/disposition :wait :my.run/note \"waiting for the peer review\"}"
-     :seon.cluster.eval/source "(my.run/wait \"waiting for the peer review\")"}
+     :seon.cluster.eval/source "(seon.run/wait \"waiting for the peer review\")"}
     {:seon.cluster.message/id "decline-3"
      :seon.cluster.message/from [:seon.cluster.agent/id agent-id]
      :seon.cluster.message/to [:seon.cluster.agent/id peer-id]

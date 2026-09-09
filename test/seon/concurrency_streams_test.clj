@@ -6,7 +6,7 @@
   their issue notes; these regressions retain the passing safety invariants so
   the collision shapes remain executable while those repairs land."
   (:require [clojure.test :refer [deftest is testing]]
-            [my.message :as my.message]
+            [seon.cluster.message :as my.message]
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
             [seon.turn :as turn]
@@ -105,7 +105,7 @@
        (create-agent! connection cluster-name recipient 'streams.test.recipient)
        (let [value
              (mapv (fn [index]
-                     (my.message/send recipient (format "message-%02d" index)))
+                     (seon.cluster.message/send recipient (format "message-%02d" index)))
                    (range 12))
              delivery
              (message/delivery

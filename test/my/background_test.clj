@@ -1,6 +1,6 @@
 (ns my.background-test
   (:require [clojure.test :refer [deftest is]]
-            [my.background :as background]
+            [seon.background :as background]
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.test-support :as test-support]))

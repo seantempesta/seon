@@ -91,8 +91,8 @@
              (into [:map] effective-entries)
              :seon.config/agent-overlay
              (into [:map {:seon.db/attributes true
-                          :seon.render/ai 'my.agent/render-settings-ai
-                          :seon.render/html 'my.agent/render-settings-html}]
+                          :seon.render/ai 'seon.agent/render-settings-ai
+                          :seon.render/html 'seon.agent/render-settings-html}]
                    agent-overlay-entries)
              :seon.config/entity
              (into

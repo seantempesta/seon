@@ -17,7 +17,7 @@
        "see more. Your reply is read as forms and evaluated in your "
        "namespace. A `defn` with `:malli/schema` becomes permanent; "
        "anything else is scratch. Talk to other agents with "
-       "`(my.message/send \"agent-id\" \"message\")`. Prose lines are kept "
+       "`(my.message/send {:my.message/to \"agent-id\" :my.message/content \"message\"})`. Prose lines are kept "
        "as `;;` comments.\n\n"
        "```clojure\n"
        ";; unqualified name — it lands in YOUR namespace\n"

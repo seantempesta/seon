@@ -2,7 +2,7 @@
   "About-carrying sends resolve facts and upsert one assignment."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
-            [my.message :as my.message]
+            [seon.cluster.message :as my.message]
             [seon.cluster.message :as message]
             [seon.problems :as problems]
             [seon.test-support :as test-support])
@@ -37,7 +37,7 @@
 (defn- request
   [run-id content]
   {:my.message/value
-   (my.message/send "bob" content "failure-17")
+   (seon.cluster.message/send "bob" content "failure-17")
    :seon.cluster.agent/id "alice"
    :seon.turn/id run-id
    :seon.cluster.eval/ordinal 0
@@ -70,7 +70,7 @@
             @connection
             (assoc (request "run-1" "repair this")
                    :my.message/value
-                   (my.message/send "bob" "repair this" "missing-fact")))]
+                   (seon.cluster.message/send "bob" "repair this" "missing-fact")))]
        (is (empty? (:seon.cluster.message/rows delivery)))
        (is (= [:seon.cluster.message/unknown-about]
               (mapv :seon.error/kind (:seon.error/values delivery))))))))
@@ -83,7 +83,7 @@
             @connection
             (assoc (request "assignment-run" "repair this")
                    :my.message/value
-                   (my.message/send "bob" "repair this" "receipt-17")))
+                   (seon.cluster.message/send "bob" "repair this" "receipt-17")))
            _ (db/transact! connection
                          (:seon.cluster.message/rows assignment))
            red-before
@@ -95,7 +95,7 @@
            (message/delivery
             @connection
             {:my.message/value
-             (my.message/decline "alice" "receipt-17" reason)
+             (seon.cluster.message/decline "alice" "receipt-17" reason)
              :seon.cluster.agent/id "bob"
              :seon.turn/id "declination-run"
              :seon.cluster.eval/ordinal 0

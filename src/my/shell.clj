@@ -1,32 +1,11 @@
 (ns my.shell
   "Bounded foreground argv-vector process requests."
-  (:require [clojure.test.check.generators :as gen]
+  (:require [seon.shell :as shell]
+            [clojure.test.check.generators :as gen]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
-(defn stdin?
-  "True when stdin names exactly one byte source."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [value]
-  (and (map? value)
-       (= 1
-          (count
-           (filter #(contains? value %)
-                   [:my.shell/stdin-text
-                    :my.shell/stdin-bytes
-                    :seon.blob/digest])))))
 
-(defn output?
-  "True when output names exactly one complete representation."
-  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
-  [value]
-  (and (map? value)
-       (= 1
-          (count
-           (filter #(contains? value %)
-                   [:my.shell.output/text
-                    :my.shell.output/octet-values
-                    :my.shell.output/blob])))))
 
 (def stdin-generator
   (gen/one-of
@@ -38,8 +17,8 @@
                         (gen/vector
                          (gen/elements (seq "0123456789abcdef")) 64)))]))
 
-(schema/register-core-predicate! 'my.shell/stdin? stdin?)
-(schema/register-core-predicate! 'my.shell/output? output?)
+(schema/register-core-predicate! 'seon.shell/stdin? shell/stdin?)
+(schema/register-core-predicate! 'seon.shell/output? shell/output?)
 
 ;; Register predicates before seon.effect loads the complete population.
 (require '[seon.effect :as effect])

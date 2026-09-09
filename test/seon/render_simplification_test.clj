@@ -104,8 +104,8 @@
            entity {:seon.cluster.agent/id "unit-owner"
                    :my.plan/steps [{:db/id 42 :my.plan.item/id "s1"}]}
            argument (ns-resolve 'seon.render 'render-invocation-argument)]
-       (doseq [[output producer] [[:seon.render/html 'my.plan/render-plan-html]
-                                  [:seon.render/ai 'my.plan/render-plan-ai]]]
+       (doseq [[output producer] [[:seon.render/html 'seon.plan/render-plan-html]
+                                  [:seon.render/ai 'seon.plan/render-plan-ai]]]
          (let [request (assoc (render-request database ctx nil entity)
                               :seon.render/output output
                               :seon.render.walk/attribute :my.plan/steps)
@@ -158,7 +158,7 @@
         :my.plan.item/title "Render the pulled item"
         :my.plan.item/agent
         [:seon.cluster.agent/id "pulled-render-owner"]
-        :my.plan.item/about ['my.plan/render-item-html]}])
+        :my.plan.item/about ['seon.plan/render-item-html]}])
      (let [database @connection
            pulled (db/pull database '[*]
                            [:my.plan.item/id "pulled-render-item"])
@@ -171,18 +171,18 @@
            namespace-stage
            (nth (:seon.render.selection/stages decision) 2)
            candidate
-           (some #(when (= 'my.plan/render-item-html
+           (some #(when (= 'seon.plan/render-item-html
                            (:seon.render.selection.candidate/producer %))
                     %)
                  (:seon.render.selection.stage/candidates namespace-stage))
            rendered (render-html request)]
        (is (integer? (:my.plan.item/agent prepared)))
-       (is (= ['my.plan/render-item-html]
+       (is (= ['seon.plan/render-item-html]
               (:my.plan.item/about prepared))
            "a scalar EDN vector is not mistaken for cardinality-many")
        (is (= prepared (value/transacted (dissoc pulled :db/id) database))
            "normalization does not depend on a root :db/id projection")
-       (is (= 'my.plan/render-item-html
+       (is (= 'seon.plan/render-item-html
               (:seon.render.selection/selected decision)))
        (is (= :selected
               (:seon.render.selection.stage/status namespace-stage)))
