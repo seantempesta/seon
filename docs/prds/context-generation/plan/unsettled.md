@@ -381,3 +381,21 @@ half-edit. Measured targets in the issue.
   "Not yet available" line), page-feed (identity-grouping hunk, changed-
   content and cold-context latencies, prompt test expectations).
 
+## 2026-09-08 18:55 — page-feed and turn-cut second landings
+
+- page-feed `f518fd478`, `f77bab880`, `22f6163e5`: changed-content page
+  690 ms (was 2.1–2.4 s); cold context 284 ms (was 5.9 s); first SSE under
+  a write per second 1.70 s; 900/900 HTTP 200 through an adoption loop —
+  the listener survives adoption. Open: 2.99 s first SSE under combined
+  turn+write traffic (thread samples in its note); adoption does not
+  invalidate the render cache (components' finding); web filtering hunk.
+- turn-cut `a2783e7f7`, `adfdcc839`, `23eca99f7`: ordered evaluation
+  query (`seon.eval/of-agent`), evaluations render through the REPL pair
+  with evidence out of line; page 276 KB / 52 entries / 1.3 s. Open:
+  stored-def deletion, `seon.turn` rename, custody removal, delete rows.
+- components `03d3bfb1b`, `471c49bf1`: message pair; messages, turns,
+  faults declared reverse concerns. Ended.
+- Page read by the orchestrator after each landing: id, plan, namespace,
+  settings, messages, history; 22 printer fallbacks left (10 stored defs,
+  12 non-concern reverse refs), both assigned.
+
