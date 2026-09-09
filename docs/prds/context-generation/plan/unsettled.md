@@ -474,3 +474,18 @@ half-edit. Measured targets in the issue.
 - Adoption of `default` is refused while turn-cut's rename is in flight
   (schema edits); RESET NEEDED expected with its commit.
 
+## 2026-09-09 00:50 — turn-cut stopped on a documented partial; tree cleaned
+
+- turn-cut went idle 54 min with a 21–27-file `seon.turn` rename draft
+  uncommitted; resumed under a 30-minute slice rule; it landed no
+  production slice (custody gate: 11 unresolved test references; its
+  combined candidate `78c8fc1d6` on branch `turn-cut-gated-2026-09-09`
+  passed gates but failed its own review of recovery-test conversions;
+  virtual turns still take five transactions, not three). Handoff:
+  `901436ea4` in its landing note.
+- The draft is preserved as stash `turn-cut-draft-2026-09-09` (explicit
+  27-path list) so `default` adopts HEAD again; no lane is running.
+- Next: a fresh lane (`turn-rename`) from the handoff — custody slice
+  first, then the rename, then the three-transaction proof — with the
+  30-minute slice rule in its brief from the start.
+
