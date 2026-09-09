@@ -17,7 +17,7 @@ Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
 
-## Blocker (65)
+## Blocker (68)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -71,10 +71,12 @@ See `README.md` for the convention.
 | [Quote prose in printed data, never splice it](prose-renders-splice-unquoted-into-printed-data.md) | blocker | results-as-data rip-out |
 | [Prevent ranged collection from deleting resurrected branch data](ranged-store-collection-can-delete-live-segments-via-branch-resurrection.md) | blocker | exclusive sweep implementation wave |
 | [Registered render producers fall through to generic map rendering](registered-render-producers-fall-through-to-generic-map-rendering.md) | blocker | render-data plan S2 (the render unification rebuilds this seam) |
+| [A renamed core predicate leaves a row the projection treats as live, and a fresh cluster refuses to boot](renamed-predicate-leaves-a-tombstone-that-refuses-boot.md) | blocker | context-blocks lane (running, 2026-09-09) |
 | [Execute generated form projections before they enter history](render-history-serializes-unexecuted-form-projections.md) | blocker | generated-episode receipt integration |
 | [Fix render revision state overwriting its input atom](render-runtime-revision-overwrites-its-atom.md) | blocker | design-lab integration lane |
 | [Make the schema environment an explicit argument, not an ambient binding](schema-environment-is-ambient-not-explicit.md) | blocker | test runner explicit-unhanded proof conversion |
 | [Derive or explain every special SCI base binding](sci-base-context-silently-hand-lists-special-callables.md) | blocker | SCI base-context derivation wave |
+| [A seeded opening stores no read evidence, so the first wake re-emits the whole opening](seeded-opening-stores-no-read-evidence-so-the-first-wake-re-emits-everything.md) | blocker | context-blocks lane (running, 2026-09-09) |
 | [`seon.db` reads rebuild the schema projection on every call when none is handed](seon-db-reads-rebuild-the-projection-per-call-when-none-is-handed.md) | blocker | issues sweep wave (2026-09-09) |
 | [A stale operator JVM refuses every `bin/seon init --changed` publication](stale-operator-jvm-refuses-every-changed-publication.md) | blocker | wave/publication-velocity |
 | [Attribute and bound the store's one-day 69 GB growth](store-grew-to-69-gigabytes-in-one-day-of-lanes.md) | blocker | exclusive sweep implementation wave |
@@ -88,7 +90,7 @@ See `README.md` for the convention.
 | [Carry agent routing into the virtual-turn control](virtual-turn-control-loses-agent-routing.md) | blocker | turn follow-up wave |
 | [Render walk-unit hiccup as markup, never escaped EDN text](walk-units-render-their-hiccup-as-escaped-edn-text.md) | blocker | ui verification wave |
 
-## Friction (162)
+## Friction (163)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -233,6 +235,7 @@ See `README.md` for the convention.
 | [Give `seon.cluster.loop/settle!` a complete public contract](settle-is-public-without-a-complete-contract.md) | friction | unreadable-reply lane coordination |
 | [Identify shared store growth during renderer changes](shared-store-grows-during-render-source-work.md) | friction | page follow-up wave (after turn-cut lands) |
 | [Cut the 11.8 s source load back under the ten-second law](source-load-is-118s-against-the-ten-second-law.md) | friction | load-time incident |
+| [Source publication hides a failed dependency-cache subprocess](source-publication-cache-contention-hides-dependency-analysis-failure.md) | friction | adoption follow-up wave |
 | [Investigate the scratch config publication fingerprint collision](source-publication-fingerprint-collision-after-config-property-reordering.md) | friction | adoption follow-up wave |
 | [A stale dev-dependency cache serves wrong classes silently](stale-dev-dependency-cache-serves-wrong-classes-silently.md) | friction | boot-velocity wave |
 | [Name the stale clj-kondo cache entry that blocks correct code](stale-language-specific-kondo-cache-blocks-correct-code.md) | friction | dev-tooling face hygiene |
