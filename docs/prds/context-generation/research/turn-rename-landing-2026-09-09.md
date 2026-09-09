@@ -966,3 +966,67 @@ Both used `SEON_TEST_WORKERS=1`; no full suite was run. Logs:
 The first adoption loaded the new reader but reported source changed during
 adoption. A subsequent explicit development adoption is running; source
 identity convergence and served HTML will be recorded separately.
+
+Slice 5.1 landed as **c9530a1e7**. Default adoption and publication then
+converged at `6aa122d6-a2c2-5619-8da1-173fd4d1200b`; HTTP debug returned
+**200 / 42,898 bytes / 0.082442 seconds**. This is served HTML evidence,
+not a browser-paint claim. The failed first gate's holderless root
+`tmp/test-runs/run.eFOcoY` was removed after its replacement gate passed.
+All slice 5.1 runner and adoption shells exited.
+
+## Slice 5.2 — cold turn writes (started 2026-09-09, 09:13 UTC)
+
+The cold metadata-only transaction was positively attributed to
+`seon.schedule/schedule-step`'s resume transition, through
+`recover-interrupted!` → `transact-result!` → `seon.db/transact!`, with
+`{:tx-data [[:db.fn/call #'seon.schedule/interrupt-call agent-id now]]}`.
+The function returned no rows for a new agent, leaving only `:db/txInstant`.
+The temporary caller probe ran the canonical virtual-turn regression under
+`preserving-instrumentation-state` and recorded the caller stack whenever
+the actual report had exactly that one datom. Its output is
+`tmp/cold-turn-caller-probe.log`. Both fixture reforks reproduced it.
+
+Recovery now belongs to cluster boot, before any agent graph is armed.
+`seon.schedule/recover-tx` supplies unfinished maintenance rows to the
+existing `seon.cluster/recover-runs!` transaction. Empty boot recovery
+writes nothing. Schedule pause/resume no longer performs recovery, so a
+resume cannot interrupt work merely because its proc was paused.
+The maintenance recovery regression calls the real cluster boot owner and
+verifies interruption without handler reexecution.
+
+Cold one-form virtual turn, on both canonical reforks:
+
+| state | transactions | datoms by write | total datoms |
+|---|---:|---|---:|
+| before | 4 | 1 (schedule), 16 (open), 5 (evaluations), 2 (close) | 24 |
+| after | 3 | 16 (open), 5 (evaluations), 2 (close) | 23 |
+
+The cold count is now a regression assertion. The warm three-form proof
+still measures **3 transactions / 45 datoms** (30 / 13 / 2), with stable
+evaluation identities across the reforks. Fast gate: **31 tests / 425
+assertions**, zero failures/errors. Isolated gate: **57 tests / 540
+assertions**, zero failures/errors.
+
+The ordered declaration-call constraint is awaiting an explicit design
+decision, requested under AGENTS.md §2.5. Existing ordered calls already
+share one actual transaction, but still dispatch one function per
+declaration. Datahike passes the updated mid-transaction database to each
+call (`reference-code/datahike/src/datahike/db/transaction.cljc:1152`).
+Flattening against the entering database fails the retained test-first
+subject-resolution regression. `d/with` is not a drop-in writer simulation:
+the writer uses transient indexes, and `PersistentSortedSet.asTransient`
+rejects an already editable set
+(`reference-code/persistent-sorted-set/src-java/org/replikativ/persistent_sorted_set/PersistentSortedSet.java:951`).
+Options sent: retain ordered calls with the three-transaction guarantee;
+build a separately reviewed batch declaration planner; or extend the
+dependency's transaction API. No replacement planner or dependency API was
+introduced while that decision is pending.
+
+Platform gate: **83 tests / 490 assertions**, zero failures/errors.
+Both isolated gates used one worker. Owned paths for the cold-write commit:
+`src/seon/cluster.clj`, `src/seon/schedule.clj`,
+`test/seon/schedule_test.clj`, `test/seon/turn_test.clj`, and this note.
+No schema change and no RESET needed. Logs: `tmp/cold-turn-gate.log`,
+`tmp/cold-turn-platform.log`; their successful roots were removed by the
+runner and both shells exited. The ordered declaration-call decision remains
+pending; this commit claims the cold-write fix, not that broader reduction.

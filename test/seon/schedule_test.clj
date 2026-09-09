@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [malli.core :as m]
             [seon.cluster.agent :as agent]
+            [seon.cluster :as cluster]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -243,8 +244,7 @@
                     "seon.schedule-test/successful-handler")
         (db/transact! connection
                       {:tx-data [[:db.fn/call #'schedule/fire-call request]]})
-        (schedule/recover-interrupted! connection "root"
-                                       (instant "2025-04-05T12:35:00Z"))
+        (#'cluster/recover-runs! connection)
         (is (= 0 (schedule/fire-due! connection "root" observed-at
                                      (execution-context))))
         (is (empty? @handler-calls))

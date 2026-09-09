@@ -462,20 +462,23 @@
                       {:seon.error/kind ::invalid-terminal-arm
                        :seon.maintenance.settlement/arm arm :seon.schedule/invalid-terminal-arm true})))))
 
-(defn- interrupt-call
-  "Mark every unterminated receipt for one agent interrupted."
-  [database agent-id interrupted-at]
+(defn recover-tx
+  "Interrupt unfinished maintenance executions during cluster boot.
+
+  Boot owns this database before any agent graph is armed. Recovery belongs
+  to that lifecycle, never to a schedule proc's pause/resume transitions."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :inst] [:vector :map]]}
+  [database interrupted-at]
   (->> (db/q '[:find [?receipt ...]
-               :in $ ?agent-id
+               :in $
                :where
-               [?agent :seon.cluster.agent/id ?agent-id]
-               [?task :seon.schedule.task/owner ?agent]
-               [?receipt :seon.maintenance.receipt/task ?task]
+               [?receipt :seon.maintenance.receipt/id _]
                (not [?receipt :seon.maintenance.receipt/completed-at _])
                (not [?receipt :seon.maintenance.receipt/result _])
                (not [?receipt :seon.maintenance.receipt/error _])
                (not [?receipt :seon.maintenance.receipt/interrupted-at _])]
-             database agent-id)
+             database)
        sort
        (mapv (fn [receipt-eid]
                {:db/id receipt-eid
@@ -668,17 +671,6 @@
    0
    (task-rows @connection agent-id)))))
 
-(defn recover-interrupted!
-  "Mark claim-only receipts interrupted before deriving scheduled work."
-  {:malli/schema
-   [:=> [:cat :seon.db/connection :seon.cluster.agent/id :inst] :map]}
-  [connection agent-id interrupted-at]
-  (transact-result!
-   connection
-   [[:db.fn/call #'interrupt-call agent-id interrupted-at]]
-   ::recovery-refused
-   {:seon.cluster.agent/id agent-id}))
-
 (defn- earliest-next-at
   [database agent-id reference-at]
   (->> (task-rows database agent-id)
@@ -762,9 +754,6 @@
      (case transition
        ::flow/resume
        (do
-         (recover-interrupted! connection
-                               (:seon.cluster.agent/id state)
-                               (Date.))
          (d/listen connection listener-key
                    (fn [report]
                      (when (relevant-report? report)

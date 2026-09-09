@@ -2088,7 +2088,7 @@
         ;; transaction time, so this caller only names the open runs —
         ;; a stale-basis recovery stamping a settled receipt is
         ;; unrepresentable
-        operations (into []
+        operations (into (schedule/recover-tx db now)
                          (mapcat
                           (fn [run-id]
                             (run/recover-tx

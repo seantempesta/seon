@@ -146,6 +146,8 @@
                         :seon.cluster.agent/id id}))
          (reset! transactions [])
          (submit "a")
+         (is (= [16 5 2] (mapv :seon.test/datoms @transactions))
+             "the cold turn is open, evaluations, close, with no empty schedule recovery")
          (println {:seon.test/virtual-turn-transactions (count @transactions)
                    :seon.test/virtual-turn-datoms @transactions})
          (submit "b")
