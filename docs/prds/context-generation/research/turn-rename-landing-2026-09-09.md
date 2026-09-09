@@ -216,7 +216,7 @@ Verification of the exact source/test paths below:
 - Explicit `bin/test --platform --paths <listed paths>` — **83 tests,
   490 assertions, zero failures/errors**. Log `tmp/custody-platform.log`;
   successful root `run.TcicHq` removed by the runner.
-- Additional fast work/problematics verification used the same canonical
+- Additional fast work and problems verification used the same canonical
   fixture and armed contracts: `seon.cluster.work-test` and
   `seon.problems-test` passed; the whole five-namespace iteration was 75
   tests / 479 assertions with two subsequently corrected failures in the
@@ -301,3 +301,82 @@ test/seon/render_source_test.clj
 test/seon/schedule_test.clj
 test/seon/turn_test.clj
 ```
+
+
+## Completion evidence, 2026-09-09 07:36 UTC
+
+Implementation landed as **`b4d665f8956edfd12fc14d5c67553f3f76d75b9a`**.
+**RESET NEEDED: `b4d665f89`.** The default debug URL remains at the captured
+service-input boundary documented above; no default lifecycle action was
+performed. The remaining turn-row process identity found in the final fixture
+review is removed in the evidence follow-up commit, not renamed to a second
+identity. Its required gate and final platform result are appended below.
+
+Fresh construction was verified in owned worktree/operator root
+`tmp/custody-wt`, detached from entering HEAD with the exact implementation
+diff overlaid and `reference-code` linked. Source digest matched the adopted
+implementation: `05e6bfa7b2298523484168e627babb74c8de774224c564545afe6ad1faaaeb4e`.
+The isolated cluster `custody` booted as PID 34133, PREPL 53560, HTTP 7872.
+The Juniper config was supplied at boot with
+`SEON_DESIGN_LAB_NO_CREDENTIAL` unset. The committed fresh probe creates
+Juniper's settings component in the creation transaction, before installing
+sample messages; that component explicitly selects the disabled credential
+variable. The fixture now uses the current process provenance key and keeps
+that credential setting when it adds the plan and messages.
+
+Fresh live evidence:
+
+- `turn_custody_fresh_probe_2026_09_09.clj` returned seeded=true,
+  settings-variable=`SEON_DESIGN_LAB_NO_CREDENTIAL`, provider-usage-rows=0,
+  plan-present=true.
+- After serving the debug page, provider usage rows remained **0**. The
+  query of installed Datahike identities for the two retired run attributes
+  returned **[]**. This is a fresh-schema observation, not an old default
+  database silently retaining the removed attributes.
+- `http://127.0.0.1:7872/ns/my.agents.juniper/debug` returned **HTTP 200,
+  55,189 bytes, 1.213877 s**. Its HTML contains `my.agents.juniper`,
+  `Improve Juniper context inspection`, and the sample message beginning
+  `Please make your current plan`. It does not contain `missing required key`.
+  This verifies backend content; browser paint remains unavailable.
+- `bin/seon --root tmp/custody-wt down` ended PID 34133 and reported the
+  flock free. Status then reported zero clusters and no orphan JVMs. The
+  worktree was removed. Default still reports PID **87173**, alive at 7994.
+
+The scratch root was never an alternate development target and received no
+paid submission. All five disposable edit scripts were deleted. The gate
+runners removed successful roots themselves; no foreign root or worktree was
+removed. Inherited untracked `build/`, `workers/`, and
+`config/virtual-turns.edn` remain untouched. The namespace rename, write-count
+collapse, and stable-id rollout were not attempted in this resume.
+
+
+### Final gates and stop, 2026-09-09 07:42 UTC
+
+**Slice 1 is complete.** The follow-up preserves the prompt fixture's
+metadata-only transaction (it was not a custody operation) and removes the
+remaining process identity from the direct agent-test turn row. Both changes
+are path-gated together on HEAD plus only those two test files:
+
+- `SEON_TEST_WORKERS=3 bin/test --paths test/seon/cluster/agent_test.clj
+  test/seon/cluster/prompt_test.clj -- seon.cluster.run-test seon.turn-test
+  seon.cluster.loop-test`: **48 tests / 356 assertions, 0 failures/errors**.
+  Log `tmp/custody-corrected-gate.log`, root `run.yOdaXq` removed.
+- `SEON_TEST_WORKERS=1 bin/test --platform --paths
+  test/seon/cluster/agent_test.clj test/seon/cluster/prompt_test.clj`:
+  **83 tests / 490 assertions, 0 failures/errors**.
+  Log `tmp/custody-corrected-platform.log`, root `run.nZwj0H` removed.
+
+The intervening three-worker platform run reproduced the existing
+[cohost/sweep race](../../../seon/issues/cohost-start-races-the-reachability-sweep.md):
+83 tests / 474 assertions, one error, followed by a passing isolated
+confirmation. The final platform result above is green; no foreign edit was
+attributed. Its failed root was removed after a process-table check found no
+live holder.
+
+Final adopted source equals published source:
+`6aa10d39-844d-5bb6-aab2-23edcb76326e`. The main implementation's RESET NEEDED
+boundary still applies: adoption does not reconstruct default's old HTTP
+service input. Fresh construction returned HTTP 200 as recorded above.
+Every owned shell has ended, and the isolated scratch root/worktree is gone.
+The tracked tree is committed; only the inherited untracked paths remain.
+The slice finished inside its 30-minute bound, without beginning slice 2.

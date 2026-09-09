@@ -31,3 +31,15 @@ fresh-construction check and exact implementation commit.
 Visual verification also remains unavailable: CUA reports no browser
 surfaces; native Chrome and Brave access return `cgWindowNotFound` (-10005).
 HTTP observations do not constitute a browser-paint proof.
+
+
+## Fresh construction verified
+
+Implementation commit **`b4d665f89`**. The isolated `custody` cluster used the
+same source digest, a fresh database without either retired run attribute,
+and Juniper's disabled-credential settings component. Its debug URL returned
+HTTP 200, 55,189 bytes, with the plan and sample messages present. Provider
+usage rows remained zero. The scratch JVM was downed and its worktree removed.
+This confirms the failing default request is the captured pre-change input;
+it does not justify weakening the current contract. Default's reset remains
+pending with the owner.

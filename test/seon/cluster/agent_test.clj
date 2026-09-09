@@ -599,7 +599,6 @@
          [:seon.cluster.agent/id "missing-context"]
          :seon.cluster.run/trigger
          [:seon.cluster.message/id "missing-context-message"]
-         :seon.db.process/id process
          :seon.cluster.run/opened-at now}
         {:seon.cluster.agent/id "missing-context"
          :seon.cluster.agent/run

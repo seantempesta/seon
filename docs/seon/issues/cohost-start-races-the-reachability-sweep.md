@@ -19,3 +19,21 @@ The page-feed lane owns cluster.clj only for the adoption web-server hunk and
 has not modified this boundary. Verify start/sweep admission using the canonical
 cohost fixture and preserve the bounded typed refusal. Evidence and rerun results:
 [page-feed landing note](../../prds/context-generation/research/page-feed-landing-2026-09-08.md).
+
+
+## 2026-09-09 custody slice recurrence
+
+At `b4d665f89` plus the single agent-fixture correction, the explicit platform
+run with three workers returned **83 tests / 474 assertions, zero failures,
+one error** in the same cohost test. The refusal text was identical. Its
+isolated confirmation passed, and the runner classified it `parallel-only`;
+it found no preceding worker-global state change. Log:
+`tmp/custody-final-platform.log`, retained root `run.Z9PWqq` removed after
+confirming no live holder. The earlier platform run over the custody source
+passed 83 / 490. The final rerun and verification boundary are recorded in
+[the custody landing note](../../prds/context-generation/research/turn-rename-landing-2026-09-09.md).
+The admission/sweep implementation was not changed by this slice.
+
+The final single-worker platform rerun passed **83 tests / 490 assertions,
+zero failures/errors** (`tmp/custody-corrected-platform.log`). This verifies
+the final custody snapshot; it does not resolve the parallel boot/sweep race.

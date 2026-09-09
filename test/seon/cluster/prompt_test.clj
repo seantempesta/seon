@@ -173,7 +173,7 @@
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection
                                   (request connection ctx)))]
-
+       (db/transact! connection [])
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt @connection
                                    (request connection ctx)))]
