@@ -60,7 +60,7 @@
                [:seon.schema.admission/source
                 :seon.schema.admission/source]
                [:seon.schema/form :seon.schema/form]
-               [:seon.schema/generatable? :seon.schema/generatable?]
+               [:seon.schema/generatable? {:optional true} :seon.schema/generatable?]
                [:seon.schema/ns {:optional true} :seon.schema/ns]
                [:seon.schema/shape {:optional true} :seon.schema/shape]
                [:seon.schema/references

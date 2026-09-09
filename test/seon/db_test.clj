@@ -26,7 +26,10 @@
                       [:or :string :qualified-symbol]])
    (schema/register! ::html-declaration
                      [:or [:vector :any] :qualified-symbol])
-   (schema/register! ::row-id [:string {:seon.db/identity true}])))
+   (schema/register! ::row-id [:string {:seon.db/identity true}])
+   (schema/register! ::component-root-id [:string {:seon.db/identity true}])
+   (schema/register! ::component-child [:and {:seon.db/component true} :seon.db/ref])
+   (schema/register! ::component-value :string)))
 
 (def ^:private fixture-projection
   (schema/build-projection
@@ -142,17 +145,8 @@
   [:seon.schema/key :seon.db-test/missing])
 
 (def ^:private component-evidence-schema
-  [{:db/ident ::component-root-id
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident ::component-child
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/one
-    :db/isComponent true}
-   {:db/ident ::component-value
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one}])
+  (schema.datahike/malli->datahike-schema-in
+   fixture-projection [::component-root-id ::component-child ::component-value]))
 
 (def ^:private diagnostic-fields
   #{:seon.error/diagnostic-layer
@@ -204,8 +198,15 @@
        (is (schema/valid-candidate-value? :seon.error/value result)
            "classified transaction refusals satisfy the same error contract as their callers")))))
 
-(deftest edn-backed-reads-return-distinguishable-logical-values
+(defn- with-codec-database
+  [options body]
   (test-support/with-database
+   options
+   (fn [connection]
+     (schema/call-with-projection fixture-projection #(body connection)))))
+
+(deftest edn-backed-reads-return-distinguishable-logical-values
+  (with-codec-database
    {:seon.test-support/extra-schema
     (schema.datahike/malli->datahike-schema-in
      fixture-projection
@@ -268,7 +269,7 @@
   (doseq [[stored rule]
           [["[" ::schema.datahike/malformed-edn]
            ["true" ::schema.datahike/schema-invalid]]]
-    (test-support/with-database
+    (with-codec-database
      {:seon.test-support/extra-schema
       [(schema.datahike/malli->datahike-attr-in
         fixture-projection ::ai-declaration)]}
@@ -289,28 +290,14 @@
   (test-support/with-database
    (fn [connection]
      (db/transact! connection [{:seon.agent/id "wildcard-agent"}])
-     ;; THE WORKER'S ENTERING WRAPPERS, RESTORED BELOW. A pooled worker runs
-     ;; many tests per JVM and `instrument/remove!` is total by design, so a
-     ;; bare `remove!` in this `finally` left the worker with 926 wrappers
-     ;; gone and every LATER task asserting THIS test's timing rather than
-     ;; its own subject. The runner's own drift report named this test
-     ;; (AGENTS §5.7: own nothing global), and `seon.db-test` was already a
-     ;; known VICTIM of the same class — being its own cause as well is
-     ;; exactly what the class note predicted.
-     (let [entering-roots (into {} (map (juxt identity deref))
-                               (instrument/instrumented))]
-       ;; ABSENT MEANS NO KEY: the admission caps are optional here, and a nil
-       ;; in an optional key fails its contract.
-       (instrument/apply! {:seon.config/on-core-error :panic})
-       (try
+     (test-support/preserving-instrumentation-state
+      (fn []
+       (instrument/apply! {:seon.config/on-core-error :panic
+                          :seon.schema/projection (schema/handed-projection)})
          (is (= "wildcard-agent"
                 (:seon.agent/id
                  (db/pull @connection '[*]
-                          [:seon.agent/id "wildcard-agent"]))))
-         (finally
-           (instrument/remove!)
-           (doseq [[instrumented-var root] entering-roots]
-             (alter-var-root instrumented-var (constantly root)))))))))
+                          [:seon.agent/id "wildcard-agent"])))))))))
 
 (deftest explicit-and-current-database-forms-are-equivalent
   (test-support/with-database
@@ -361,7 +348,7 @@
                     :eids [schema-ref missing-schema-ref schema-ref]})))))))))
 
 (deftest return-map-queries-preserve-ordering-and-limit
-  (test-support/with-database
+  (with-codec-database
    {:seon.test-support/extra-schema
     (schema.datahike/malli->datahike-schema-in
      fixture-projection [::row-id])}
@@ -389,8 +376,8 @@
              [database]]
             ['[:find ?result .
                :where
-               [?receipt :seon.cluster.eval/ordinal 1]
-               [?receipt :seon.cluster.eval/result-edn ?result]]
+               [?evaluation :seon.cluster.eval/ordinal 1]
+               [?evaluation :seon.eval/value ?result]]
              [database]]
             ['[:find ?entity .
                :in $ ?id
@@ -502,7 +489,7 @@
 (deftest retained-read-evidence-invalidates-only-on-a-depended-attribute
   (test-support/with-database
    (fn [connection]
-     (db/transact! connection [{:seon.cluster/name "evidence-a"}])
+     (db/transact! connection [[:db/add "evidence-a" :seon.cluster/name "evidence-a"]])
      (let [captured (atom [])]
        (binding [db/*read-evidence-sink* captured]
          (db/q '[:find [?name ...]
@@ -516,7 +503,7 @@
                        [{:seon.agent/id "unrelated-agent"}])
          (is (db/read-evidence-current? @connection evidence)
              "an unrelated attribute revision retains the renderer read")
-         (db/transact! connection [{:seon.cluster/name "evidence-b"}])
+         (db/transact! connection [[:db/add "evidence-b" :seon.cluster/name "evidence-b"]])
          (is (not (db/read-evidence-current? @connection evidence))
              "a depended attribute revision makes the retained read stale"))))))
 
@@ -582,6 +569,9 @@
              (db/transact!
               connection
               [{:seon.cluster.eval/id "digest-persistence"
+                :seon.cluster.eval/run "datomic.tx"
+                :seon.cluster.eval/ordinal 0
+                :seon.cluster.eval/at #inst "2026-09-09T00:00:00Z"
                 :seon.cluster.eval/read-evidence
                 [(assoc (first evidence) :db/id "digest-persistence/0")]}])
              (is (= (:seon.db/read-result-digest (first evidence))
@@ -633,7 +623,7 @@
         "declining a lazy value never touches its source")))
 
 (deftest component-expanded-pull-evidence-detects-a-child-only-change
-  (test-support/with-database
+  (with-codec-database
    {:seon.test-support/extra-schema component-evidence-schema}
    (fn [connection]
      (db/transact! connection
@@ -878,15 +868,15 @@
      (db/transact!
       connection
       [{:seon.ns/name 'my.agents.db-conflict}
-       {:seon.cluster.eval/id "db-conflict-owner"
-        :seon.cluster.eval/refreshes
-        [:seon.ns/name 'my.agents.db-conflict]}])
+       [:db/add "db-conflict-owner" :seon.cluster.eval/id "db-conflict-owner"]
+       [:db/add "db-conflict-owner" :seon.cluster.eval/refreshes
+        [:seon.ns/name 'my.agents.db-conflict]]])
      (let [rejected
            (binding [db/*conn* connection]
              (db/transact!
-              [{:seon.cluster.eval/id "db-conflict-contender"
-                :seon.cluster.eval/refreshes
-                [:seon.ns/name 'my.agents.db-conflict]}]))
+              [[:db/add "db-conflict-contender" :seon.cluster.eval/id "db-conflict-contender"]
+               [:db/add "db-conflict-contender" :seon.cluster.eval/refreshes
+                [:seon.ns/name 'my.agents.db-conflict]]]))
            conflict (:seon.error/data rejected)]
        (is (= :seon.db/rejected (:seon.error/kind rejected)))
        (is (true? (:seon.db/transaction-refused rejected)))
@@ -1192,7 +1182,7 @@
   (test-support/with-database
    (fn [connection]
      (db/transact! connection
-                   [{:seon.turn/id "diagnostic-pull-run"}])
+                   [[:db/add "diagnostic-pull-run" :seon.turn/id "diagnostic-pull-run"]])
      (let [database @connection
            basis-before (db/basis-t database)
            uninstalled [:seon.turn/generated-at
@@ -1208,8 +1198,7 @@
          (is (= :seon.db/invalid-read (:seon.error/kind result)))
          (is (= attribute
                 (get-in result
-                        [:seon.error/data :seon.db/dependency-data
-                         :attribute]))))
+                        [:seon.error/data :seon.db/dependency-data :attribute]))))
        (is (= basis-before (db/basis-t @connection))
            "diagnostic reads cannot advance the database basis")
        (is (= {:seon.turn/id "diagnostic-pull-run"}
@@ -1312,14 +1301,14 @@
       (fn [foreign-connection]
         (binding [db/*conn* writing-connection]
           (let [explicit (db/transact! writing-connection
-                                       [{:seon.cluster.message/id "own"}])
-                elided (db/transact! [{:seon.cluster.message/id "elided"}])
+                                       [{:seon.agent/id "own"}])
+                elided (db/transact! [{:seon.agent/id "elided"}])
                 refused (db/transact! foreign-connection
-                                      [{:seon.cluster.message/id "foreign"}])
+                                      [{:seon.agent/id "foreign"}])
                 message-ids
                 (fn [connection]
                   (set (db/q '[:find [?id ...]
-                               :where [_ :seon.cluster.message/id ?id]]
+                               :where [_ :seon.agent/id ?id]]
                              @connection)))
                 branch
                 (fn [connection]

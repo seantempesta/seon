@@ -7,6 +7,7 @@
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.walk :as walk]
+            [malli.core :as m]
             [datahike.api :as d]
             [datahike.connector :as connector]
             [datahike.constants :as const]
@@ -2260,6 +2261,170 @@
       {:tx-data transaction
        :tx-meta {::receipt *receipt*}})))
 
+(defn- write-entity-schemas
+  [projection]
+  (schema/projection-cache-value
+   projection ::write-entity-schemas
+   (fn []
+     (let [forms (:seon.schema.projection/forms projection)]
+       (reduce-kv
+        (fn [by-identity schema-key authored]
+          (let [form (schema.datahike/resolve-malli-form-in projection authored)]
+            (if (and (schema.form/map-shape? form)
+                     (:seon.db/attributes (schema.form/schema-properties form)))
+              (reduce
+               (fn [result [attribute]]
+                 (if (schema/identity-attr? forms attribute)
+                   (update result attribute (fnil conj []) schema-key)
+                   result))
+               by-identity (schema.form/map-entries form))
+              by-identity)))
+        {} forms)))))
+
+(defn- write-validator
+  [projection form]
+  (schema/projection-cache-value
+   projection [::write-validator form]
+   #(m/validator form {:registry (:seon.schema.projection/registry projection)})))
+
+(defn- invalid-write
+  [attribute form value path entity-form cause candidates]
+  (diagnostic
+   (cond->
+    {:seon.error/kind ::invalid-write
+     :seon.error/message
+     (str "Attribute " (pr-str attribute) " expected " (pr-str form)
+          ", got " (pr-str value) ".")
+     ::transaction-refused true
+     ::attribute attribute
+     :seon.schema/form form
+     ::offending value
+     ::path path
+     :seon.error/diagnostic-layer :database-write
+     :seon.error/diagnostic-operation 'seon.db/transact!
+     :seon.error/diagnostic-member attribute
+     :seon.error/diagnostic-expected form
+     :seon.error/diagnostic-offending value
+     :seon.error/diagnostic-cause cause
+     :seon.error/diagnostic-evidence {::path path}}
+     entity-form (assoc ::entity-form entity-form)
+     candidates (assoc ::registered-candidates candidates))))
+
+(declare write-map-error write-attribute-error)
+
+(defn- write-ref-error
+  [database projection value path entity-form]
+  (cond
+    (map? value) (write-map-error database projection value path)
+    (and (sequential? value) (= 2 (count value)))
+    (write-attribute-error database projection (first value) (second value)
+                           (conj path 1) entity-form false)
+    :else nil))
+
+(defn- write-value
+  "Normalize Datahike's reference and many-value syntax for Malli only."
+  [database projection attribute value single?]
+  (let [form (schema.datahike/resolve-datahike-form-in projection attribute)
+        many? (and (not single?) (db.utils/multival? database attribute))
+        normalize (if (db.utils/ref? database attribute)
+                    #(if (or (map? %) (sequential? %)) 0 %)
+                    identity)]
+    (if (and many? (coll? value) (not (map? value)))
+      (case (schema.datahike/form-head form)
+        :set (into #{} (map normalize) value)
+        :vector (mapv normalize value)
+        (mapv normalize value))
+      (normalize value))))
+
+(defn- write-attribute-error
+  [database projection attribute value path entity-form single?]
+  (let [installed (get (dbi/-schema database) attribute)
+        authored (get (:seon.schema.projection/forms projection) attribute)]
+    (cond
+      (and (nil? installed) (not (contains? datahike.schema/schema-keys attribute)))
+      (invalid-write attribute :seon.error/unknown value path entity-form
+                     ::attribute-not-installed
+                     (registered-attribute-candidates
+                      (installed-attribute-declarations database) attribute))
+
+      :else
+      (let [many? (and (not single?) (db.utils/multival? database attribute))
+            children (if (and many? (coll? value) (not (map? value)))
+                       (map-indexed vector value) [[nil value]])
+            nested-error
+            (when (db.utils/ref? database attribute)
+              (some (fn [[index child]]
+                      (write-ref-error database projection child
+                                       (if (some? index) (conj path index) path)
+                                       entity-form))
+                    children))
+            form (if (and single? (db.utils/multival? database attribute))
+                   (first (schema.datahike/form-children
+                           (schema.datahike/resolve-datahike-form-in
+                            projection attribute)))
+                   attribute)]
+        (or nested-error
+            ;; Dependency-owned schema attributes have no authored Malli form;
+            ;; Datahike continues to validate and classify those declarations.
+            (when (and authored
+                       (not ((write-validator projection form)
+                             (write-value database projection attribute value single?))))
+              (invalid-write attribute authored value path entity-form
+                             ::invalid-value nil)))))))
+
+(defn- write-map-error
+  [database projection row path]
+  (let [schemas (write-entity-schemas projection)
+        schema-keys
+        (distinct
+         (mapcat (fn [attribute]
+                   (when (= :db.unique/identity
+                            (get-in (dbi/-schema database) [attribute :db/unique]))
+                     (get schemas attribute)))
+                 (keys row)))
+        forms (:seon.schema.projection/forms projection)
+        entity-form (some->> schema-keys first (get forms))]
+    (or
+     (some (fn [[attribute value]]
+             (if (= :db/id attribute)
+               (write-ref-error database projection value (conj path attribute) entity-form)
+               (write-attribute-error database projection attribute value
+                                      (conj path attribute) entity-form false)))
+           row)
+     (when (seq schema-keys)
+       (let [normalized
+             (reduce-kv (fn [result attribute value]
+                          (assoc result attribute
+                                 (write-value database projection attribute value false)))
+                        {} row)]
+         (some
+          (fn [schema-key]
+            (when-not ((write-validator projection schema-key) normalized)
+              (let [explain (schema/projection-cache-value
+                             projection [::write-explainer schema-key]
+                             #(schema/projection-explainer projection schema-key))
+                    failure (first (:errors (explain normalized)))
+                    in (:in failure)
+                    attribute (or (first in) (first (keys row)))
+                    value (get-in row in :seon.error/unknown)]
+                (invalid-write attribute
+                               (or (get forms attribute) (get forms schema-key))
+                               value (into path in) (get forms schema-key)
+                               (or (:type failure) ::invalid-entity) nil))))
+          schema-keys))))))
+
+(defn- write-error
+  [database projection transaction]
+  (some
+   (fn [[index entry]]
+     (cond
+       (map? entry) (write-map-error database projection entry [index])
+       (and (sequential? entry) (= :db/add (first entry)))
+       (or (write-ref-error database projection (second entry) [index 1] nil)
+           (write-attribute-error database projection (nth entry 2 nil)
+                                  (nth entry 3 nil) [index 3] nil true))))
+   (map-indexed vector (if (map? transaction) (:tx-data transaction) transaction))))
+
 (defn- transact-call
   [connection transaction]
   (if (error-value? connection)
@@ -2274,10 +2439,11 @@
                   (schema/projection-from-database database))
                 (schema/declaration-projection
                  ((requiring-resolve 'seon.schema.edn/packaged-forms))))]
-        (d/transact connection
+        (or (write-error database projection transaction)
+            (d/transact connection
                     (schema.datahike/encode-transaction-in
                      projection
-                     (jdk-integers->long (stamp-receipt transaction)))))
+                     (jdk-integers->long (stamp-receipt transaction))))))
       (catch Throwable throwable
         (let [data (error.refusal/refusal throwable)]
           (cond
@@ -2374,7 +2540,16 @@
   {:malli/schema
    [:=> [:cat :seon.db/transaction-refused-error] [:string {:min 1}]]}
   [unit]
-  (:seon.error/message (rendered-value unit)))
+  (let [value (rendered-value unit)]
+    (if (= ::invalid-write (:seon.error/kind value))
+      (str "Expected: " (pr-str (:seon.schema/form value))
+           "\nGot: " (pr-str (::offending value))
+           "\nAttribute: " (::attribute value) " at " (pr-str (::path value))
+           (when-let [form (::entity-form value)]
+             (str "\nEntity: " (pr-str form)))
+           (when-let [candidates (::registered-candidates value)]
+             (str "\nRegistered candidates: " (pr-str candidates))))
+      (:seon.error/message value))))
 
 (defn render-rejection-html
   "Render a rejected database transaction as readable Hiccup."
@@ -2395,7 +2570,13 @@
          [:dd (pr-str (::conflict-owner conflict))]]])]))
 
 (defn transact!
-  "Commit a transaction through an explicit or ambient connection.
+  "Validate authored transaction data and commit through the calling connection.
+
+  Attribute values and identified entity maps use the supplied cluster schema
+  projection. Invalid writes return their authored form, offending value, path,
+  and applicable entity form; unknown attributes include installed candidates.
+  Datahike owns native schema declarations, reference resolution, uniqueness,
+  and transaction-function execution, retaining its refusal classifications.
 
   When `*conn*` is bound, an explicit connection must have the same Datahike
   connection ID. An absent binding means the caller is outside an agent

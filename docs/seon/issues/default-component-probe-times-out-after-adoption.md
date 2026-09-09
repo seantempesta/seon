@@ -7,6 +7,12 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+Transact-feedback, 2026-09-09: the initial MCP `runtime_status` selected
+default PID 37586, PREPL 61094, and reported health/flow `unknown` with
+`Read timed out`. Descriptor-only `bin/seon status` reported that process
+alive. No cause is inferred and no default lifecycle operation was performed;
+the assigned scratch root supplies this lane's live verification.
+
 Observed by record-render on 2026-09-08. MCP JVM mode on default accepted
 `(+ 1 1)`, but a later component probe timed out after 15000 ms. It called
 `seon.operator/connection`, transacted agent `record-render-components`,
@@ -35,7 +41,6 @@ A subsequent MCP JVM `(+ 1 1)` returned 2 in 3 ms. The process is reachable;
 that arithmetic result does not establish Flow health. No default lifecycle
 operation was performed.
 
-
 Components checkpoint `e96001a7c`: development adoption reached JVM
 instrumentation and returned `:seon.instrument/registration-failed`, with
 Malli reporting `:malli.core/invalid-schema` for `:seon.render/cache`.
@@ -44,7 +49,6 @@ bound. Page-feed then landed `985a830b5`, including the cache schema
 alias. No default restart or refork was attempted; final source adoption
 is the next authorized convergence boundary. Scoped component gates and
 scratch adoption remain independent of this failure.
-
 
 Final components verification after `8b48a7c47`: default adoption completed
 at `6aa09fd1-1bbd-52ab-a9ae-a4a290e2cad6`. Juniper reseeding returned in

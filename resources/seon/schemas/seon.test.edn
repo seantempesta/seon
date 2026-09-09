@@ -9,7 +9,7 @@
             :run-basis-t :seon.db/basis-t,
             :run-at :inst,
             :failure-identity
-            [:string {:min 64, :max 64, :seon.search/index :exact}],
+            [:string {:min 64, :max 64}],
             :failing-assertions
             [:vector {:seon.db/cardinality :many}
              :seon.test/failure-identity],

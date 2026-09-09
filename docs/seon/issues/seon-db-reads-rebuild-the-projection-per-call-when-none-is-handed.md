@@ -7,6 +7,16 @@ tags: [issue, database, performance, class/p1, context]
 
 # `seon.db` reads rebuild the schema projection on every call when none is handed
 
+## Transaction-feedback verification, 2026-09-09
+
+The original db.clj at 05510a6d4 reproduced this failure in the canonical
+fast harness. After correcting the database tests' other fixture defects,
+the transact-feedback fast run had 46 tests / 328 assertions, one failure,
+zero errors: ten-unhanded-queries-stay-within-twice-raw-query-cost. The
+transaction preflight's six regression groups passed. This read-path defect
+is outside the assigned transact path; it was not hidden by relaxing the
+timing assertion. See the transaction-feedback landing note for exact gates.
+
 ## Problem
 
 `seon.db/q`'s `read-declarations` (`src/seon/db.clj:501`) is
@@ -125,7 +135,6 @@ the turn no longer depends on which executor ran the proc; regression
 `a-turn-hands-its-clusters-projection-to-every-database-call`
 (`test/seon/cluster/turn_test.clj`) runs the pass on a bare thread and asserts
 zero derivations.
-
 
 Components verification, 2026-09-08: `seon.ai/agent-overlay` explicitly rebuilt
 `projection-from-database` even with a handed projection. A thread dump of the
