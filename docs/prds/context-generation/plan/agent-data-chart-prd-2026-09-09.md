@@ -35,8 +35,14 @@ in the read-evidence / wake / evaluation-point map
 4. **Components are addressable.** A component the agent writes to
    carries an identity derived from its owner (`:my.plan/agent` as a unique
    identity ref), because a nested map under a cardinality-one component
-   REPLACES the component (probed: new plan entity, old orphaned with its
-   six steps). Upsert by identity is the only safe raw write.
+   REPLACES the component SILENTLY — no retraction datom appears in the
+   report and `retract-components` never runs (transaction.cljc:738-795;
+   probe: new plan entity, old orphaned with its six steps). Upsert by
+   identity is the only safe raw write, proven live with a temporary
+   identity attribute (`research/raw-data-forms-probe-2026-09-09.md`).
+   `transact!` refuses a nested identity-less map under a cardinality-one
+   component ("this would replace the component; address it by identity")
+   — §9.7.
 5. **Every read block is emitted once at turn 0, even when empty.**
    `[]` teaches the form and establishes read evidence, so a later change
    re-emits exactly that block (§14). No block appears for the first time
@@ -105,8 +111,9 @@ Writes, as data:
                      :my.plan/steps [{:my.plan.item/id "orders/verify" :my.plan.item/title "Verify the new total" :my.plan.item/done-when "…" :my.plan.item/position 6}]}])
 ;; Make a step current.
 (seon.db/transact! [[:db/add [:my.plan/agent [:seon.agent/id "juniper"]] :my.plan/current-step [:my.plan.item/id "juniper/aggregate"]]])
-;; Remove a step (the item entity goes with it: it is a component).
-(seon.db/transact! [[:db/retract [:my.plan/agent [:seon.agent/id "juniper"]] :my.plan/steps [:my.plan.item/id "orders/verify"]]])
+;; Remove a step: retractEntity cascades to the item and its incoming plan ref;
+;; a bare :db/retract of the ref would sever the edge and leave the item behind (transaction.cljc:1059).
+(seon.db/transact! [[:db.fn/retractEntity [:my.plan.item/id "orders/verify"]]])
 ```
 
 Haiku wrote the completion and add forms correctly from the help alone
@@ -251,6 +258,12 @@ Rulings:
    the data-count query over them.
 6. **Help says it once**: "A mistake returns :error data with the schema
    you violated."
+7. **Structural refusals with a sentence.** A nested identity-less map
+   under a cardinality-one component (silent replacement); a `:db/retract`
+   of a component ref (orphans the child — say `retractEntity`); an entity
+   map missing a key its entity schema requires (a raw message without
+   `:id`: valid datoms, invalid message — probe §6). Each refusal names
+   the form to use instead.
 
 ## 10. Notes — `:my.note/*`
 
