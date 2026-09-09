@@ -317,49 +317,31 @@ Detail on demand with the same `pull`/`q` against any agent's record.
 | C3, raw data forms | Haiku | vector, data-first | 8/8; correct pull/q/transact/get-in; wrote `(now)` (my bad example) and completed a step early (line trimmed) |
 | plan operations, live help + raw plan block | Haiku | live (16:30) | complete/current/retitle via `my.plan` guesses; chained `sort-by`+`map` unprompted; could NOT add (no shape shown), could NOT remove (no verb, `retractEntity` untaught), did not know the id rule — the plan block must teach its writes by example and the id rule must be visible |
 
-## 16. Roadmap — from here to there (owner: "this is the goal")
+## 16. Roadmap — from here to there (status 2026-09-09 17:45)
 
-Each step is a lane slice: one commit, gated, RESET NEEDED where marked
-(schema change; the orchestrator batches reforks). Order matters: reads
-before writes, schema before renders, platform seams before blocks.
+Each step is a lane slice: one commit, gated, RESET NEEDED where marked.
+Status: ✅ landed · ▶ running · ⏭ next · ◻ queued.
 
-| # | change | kind | reset | owner / lane |
-|---|---|---|---|---|
-| 1 | `transact!` validates against the projection; refusal carries the schema form, offending value, path, candidates (§9.1–2) | platform seam | no | transact-feedback (running) |
-| 2 | Read evidence exact for `not`/`or` pattern clauses and `pull` in `:find` (§0.6) | platform seam | no | next lane |
-| 3 | `(seon.id/id {:parts :length})` as the one id entry; message ids random 8; plan item ids from title slug | function | no | next lane |
-| 4 | Time is the transaction: NEW `:my.plan.item/completed-tx`, `:seon.message/read-tx` (refs); DELETE `:my.plan.item/completed-at`, `:seon.cluster.message/at`, `/ordinal`; instants derive from `:db/txInstant` | schema | yes | data lane |
-| 5 | Addressable components: NEW unique identity refs `:my.plan/agent`, `:seon.config/agent`; rename `:my.plan.item/expected-result` → `:done-when` | schema | yes (batch with 4) | data lane |
-| 6 | Messages family move `:seon.cluster.message/*` → `:seon.message/*`; `:seon.message/read-tx`; `my.message/reason` folded; `my.message/send` mints the id and writes both facts | schema | yes (batch) | data lane |
-| 7 | NEW runtime component `:seon.agent/runtime` (turn, trigger, listens; `:seon.runtime/agent` identity); DELETE `:seon.turn/plan-digest`, `supersedes`, `undisposed-at`, `background-results`, `error`; `:seon.eval/value` → `/shown`; `:seon.eval/missing`, `/size` gone; `:seon.error/run` → `/turn`; `:seon.ai.attempt/sent-body` gone, `reasoning` off by default | schema | yes (batch) | data lane |
-| 8 | Agent-declared listens union into the wake matcher (`wake.clj:428-438`), derived outside the per-datom loop | platform seam | no | runtime lane |
-| 9 | Value renderer: sort a component set by `:position` when every member has one; never a table | render | no | render lane |
-| 10 | Generated blocks per §1–§8 and §11: raw `pull`/`q` forms in the thinking voice, every read block once at turn 0 even when empty (faults, inbox) | generate | no | render lane |
-| 11 | `dir`/`doc` structure and the docstring convention (§9.4); contract violations carry the doc map (§9.3); declared schemas render (§9.5) | function | no | render lane |
-| 12 | `my.plan`/`my.note` become documented data (`doc` shows the transactions); `my.*` keeps `send`, `done`, `help`, `dir`, `doc` | delete | no | render lane |
-| 13 | Root's derived agents block and the cluster block (§12) | render | no | root lane |
-| 14 | The fixture rewritten to the new shapes; reseed; read the prompt as the model would; rerun the harness; record bytes and score | proof | reseed | each lane at its landing |
+| # | change | reset | status |
+|---|---|---|---|
+| 1 | `transact!` validates against the projection; refusal carries form, offending value, path, candidates; returned flat errors render through their AI pair | no | ✅ `26ec13420` `24953d294` `6f7c6faa3` |
+| 1a | The live loop: duplicate graphs on concurrent arming; empty virtual reply as a fault | no | ✅ `e12ba7535` (wake→settled 1–2 s, proven on default) |
+| 1b | Transaction report as resolved changes; positioned components ordered; nested pull shapes; `dir` shows declared schemas; forms printed as agent source; faults to root / routed stewards; root's agents block; raw component reads at turn 0 even when empty; data-first help lines | no | ✅ cookbook lane, 11 commits `d6377ac39`…`778be4b94` |
+| 1c | `(help)` as `#:seon.help{:lines}` with its own render pair (bare lines, no quoted strings); settings AI = effective values grouped; turns concern HTML-only and "Context now" showing the turn; plan ids derived and taught by an add/remove example (§14a) | no | ▶ cookbook (after its harness slice) |
+| 2 | Read evidence exact for `not`/`or` pattern clauses and `pull` in `:find` | no | ◻ evidence lane |
+| 3 | `(seon.id/id data [n])` as the one id entry; message ids random 8; plan item ids from title | no | ▶ data lane |
+| 4 | Time is the transaction: NEW `completed-tx`, `read-tx` refs; DELETE `completed-at`, message `at`, `ordinal` | yes | ▶ data lane |
+| 5 | Addressable components: `:my.plan/agent`, `:seon.config/agent` identities; `expected-result` → `done-when` | yes (batch) | ▶ data lane |
+| 6 | Messages `:seon.message/*`; the inbox as an edge `:seon.message/inbox` retracted when handled; `send` mints id and writes both facts | yes (batch) | ▶ data lane |
+| 7 | Runtime component `:seon.agent/runtime` with the turns inside it; retire `plan-digest`, `supersedes`, `undisposed-at`, `background-results`, `error`; `:seon.eval/value` → `/shown`; `sent-body` gone; reasoning off | yes (batch) | ▶ data lane |
+| 8 | Agent-declared listens union into the wake matcher | no | ◻ evidence lane |
+| 9–12 | Block functions from the cookbook on the new shapes; `dir`/`doc` structure; `my.plan`/`my.note` as documented data | no | ◻ render lane (after 3–7) |
+| 13 | Root's cluster block (JVM, store, commit, fault signatures) | no | ◻ root lane |
+| 14 | Fixture on the new shapes; reseed; read the prompt; harness score | reseed | every landing; paid trial rerun after 1c |
 
-Steps 4–7 are one reset. Nothing is hand-tuned to the scenario; every
-render is a function of the record; every block is a form the agent
-could type.
-
-## 14a. Page and help rulings from the owner's review (2026-09-09 16:30)
-
-- `(help)` returns `#:seon.help{:lines […]}` with its own render pair; the
-  AI pair prints the lines bare; no quoted strings. The identity block
-  performs help. Wording leads with: the prompt shows your namespace and
-  is drawn for you; send only `;;` comments and forms; results are data
-  you chain with `->>`, `sort-by`, `filter`, `map`, `get-in`.
-- Settings AI block shows the EFFECTIVE values grouped by namespace
-  (provider first), not overrides only.
-- The turns concern block: HTML shows turn headers; AI shows nothing —
-  the prompt section is the AI side. "Run …" vocabulary retired from the
-  header. "Context now" must show the turn's evaluations (page defect).
-- Plan item ids derive from the title (`(seon.id/id title 8)` or the
-  slug) and the plan block shows one add (with the id) and one
-  `retractEntity` remove in its comment/`doc`; the tools line stops
-  advertising verbs.
+Review points for the owner: after 1c (help and page on the current
+shapes), after 3–7 (raw writes in the history on a fresh fixture), after
+9–12 (harness score beside the previous one).
 
 ## 15. Open for the owner
 
