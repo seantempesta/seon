@@ -1,10 +1,12 @@
 (ns seon.loop-proof-test
   (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as async.flow]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [sci.core :as sci]
+            [seon.ai :as ai]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
@@ -26,6 +28,101 @@
 
 (defn- stored-text [database]
   (str/join "\n\n" (map repl/render-ai (evaluation/of-agent database "juniper"))))
+
+(deftest concurrent-arms-share-one-graph
+  (support/with-database
+   (fn [connection]
+     (let [_ (config/apply! {:seon.db/connection connection
+                            :seon.boot/cluster-name "loop-arm-proof"})
+           ctx (support/fork-cluster-ctx connection)
+           handle (support/cluster-handle
+                   {:seon.env/environment (support/environment "loop-arm-proof" connection)
+                    :seon.db/connection connection
+                    :seon.cluster/name "loop-arm-proof"
+                    :seon.sci.eval/ctx ctx
+                    :seon.flow/executor
+                    (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
+                    :seon.db.process/id cluster/boot-process-identity})
+           routing (agent/routing)
+           faults (async/chan (async/sliding-buffer 16))
+           _ (swap! routing assoc :seon.agent/fault-channel faults)
+           ready (java.util.concurrent.CountDownLatch. 2)
+           start (java.util.concurrent.CountDownLatch. 1)
+           request {:seon.turn.loop/cluster handle
+                    :seon.agent/routing routing :seon.agent/id "concurrent"}
+           _ (db/transact! connection
+                           [{:seon.agent/id "concurrent"
+                             :seon.agent/namespace {:seon.ns/name 'my.agents.concurrent}}])
+           arms (mapv (fn [_]
+                        (future
+                          (.countDown ready)
+                          (support/await-event! start ::start-arms)
+                          (agent/arm! request)))
+                      (range 2))
+           entries (atom [])]
+       (try
+         (support/await-event! ready ::arms-ready)
+         (.countDown start)
+         (doseq [arm arms]
+           (swap! entries conj (support/await-event! arm ::armed)))
+         (let [same? (identical? (first @entries) (second @entries))
+               routed? (every? #(identical? % (agent/armed routing "concurrent")) @entries)]
+           (is same? "the live armer and source installer must acquire the same graph")
+           (is routed? "every caller receives the published routing entry"))
+         (finally
+           (.countDown start)
+           (doseq [entry (distinct @entries)]
+             (async.flow/stop (:seon.flow/graph entry))
+             (support/await-event! (:seon.agent/turn-stopped entry) ::graph-stopped)
+             (doseq [key [:seon.cluster.wake/channel :seon.schedule/channel
+                          :seon.turn.loop/completion :seon.agent/turn-stopped]]
+               (async/close! (get entry key))))
+           (doseq [arm arms] (future-cancel arm))
+           (async/close! faults)
+           (doseq [key [:seon.cluster.wake/channel :seon.render/context-channel
+                        :seon.turn.loop/completion]]
+             (async/close! (get handle key)))))))))
+
+(deftest terminal-provider-refusal-is-durable
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           handle (support/cluster-handle
+                   {:seon.db/connection connection
+                    :seon.cluster/name "loop-refusal-proof"
+                    :seon.sci.eval/ctx ctx
+                    :seon.db.process/id cluster/boot-process-identity})
+           target (-> (:seon.ai/primary (ai/targets (support/effective-config)))
+                      (dissoc :seon.config.ai/no-auth)
+                      (assoc :seon.ai/api-key-variable "SEON_LOOP_PROOF_UNSET_CREDENTIAL"
+                             :seon.ai/prompt "Probe terminal refusal."))]
+       (try
+         (assert (nil? (System/getenv "SEON_LOOP_PROOF_UNSET_CREDENTIAL")))
+         (is (nil? (:seon.error/kind
+                    (db/transact! connection [{:seon.agent/id "root"}]))))
+         (is (nil? (:seon.error/kind
+                    (db/transact! connection
+                                  (turn/open-tx {:seon.turn/id "refusal-proof"
+                                                 :seon.turn/agent [:seon.agent/id "root"]
+                                                 :seon.turn/opened-at (java.util.Date.)})))))
+         (let [failure (ai/complete target)
+               _ (is (= :seon.ai/no-credential (:seon.error/kind failure)))
+               result (turn/settle! {:seon.turn.loop/cluster handle
+                                     :seon.turn.loop/now (java.util.Date.)
+                                     :seon.agent/id "root"
+                                     :seon.turn/id "refusal-proof"
+                                     :seon.error/value failure})]
+           (is (some? (:db-after (:seon.turn.loop/outcome result))) (pr-str result))
+           (is (some? (:seon.turn/closed-at
+                       (db/pull @connection [:seon.turn/closed-at]
+                                [:seon.turn/id "refusal-proof"]))))
+           (is (= #{[:seon.ai/no-credential]}
+                  (db/q '[:find ?kind :where [?e :seon.error/id]
+                           [?e :seon.error/kind ?kind]] @connection))))
+         (finally
+           (doseq [key [:seon.cluster.wake/channel :seon.render/context-channel
+                        :seon.turn.loop/completion]]
+             (async/close! (get handle key)))))))))
 
 (deftest virtual-loop-end-to-end
   (support/with-database
@@ -286,7 +383,17 @@
                              :seon.test/answer-t
                              (turn/latest-answering-turn-t @connection "juniper")}))))
              (testing "the ordinary wake path refreshes reads before its reply"
-               (let [written (db/transact!
+               (let [_ (is (nil? (:seon.error/kind
+                                 (config/apply! {:seon.db/connection connection
+                                                 :seon.boot/cluster-name "loop-proof"
+                                                 :seon.config/manifest
+                                                 {:seon.config.ai/no-provider :seon.config/absent}}))))
+                     _ (is (nil? (:seon.config.ai/no-provider
+                                  (config/effective @connection "loop-proof"))))
+                     _ (is (true? (:seon.config.ai/no-provider
+                                   (ai/agent-overlay @connection "juniper"))))
+                     faults-before (set (db/q '[:find [?e ...] :where [?e :seon.error/id]] @connection))
+                     written (db/transact!
                               connection
                               [{:seon.cluster.message/id "proof-wake-2"
                                 :seon.cluster.message/to [:seon.agent/id "juniper"]
@@ -316,6 +423,10 @@
                    (is (= ["(my.message/inbox)"] (mapv :seon.cluster.eval/source fresh))
                        "no-provider turns do not invent placeholder forms")
                    (is (empty? (turn/unanswered-wakes @connection "juniper" {})))
+                   (is (= faults-before
+                          (set (db/q '[:find [?e ...] :where [?e :seon.error/id]] @connection)))
+                       "a no-provider reply closes without recording a refusal")
+                   (is (= 19 (turn/turns-left @connection "juniper")))
                    (println {:seon.test/stage :ordinary-wake
                              :seon.test/sources (mapv :seon.cluster.eval/source fresh)}))))
              (testing "root's generated query executes without caller aliases"

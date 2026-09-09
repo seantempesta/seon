@@ -7,6 +7,17 @@ tags: [issue, mcp, sci, wave/dev-mcp]
 
 # Repair development MCP error locations and status scope
 
+## Live-loop observation — 2026-09-09
+
+Supported JVM evaluations during the loop diagnosis returned `Read timed
+out` at the 10-second bound after completing their file writes. Returning
+the same compact evidence through `pr-str` succeeded. This isolates an
+unavailable returned-value observation from execution failure; no raw
+prepl replacement was used. The live-loop evidence was saved under
+`docs/prds/context-generation/research/loop_live_*_2026_09_09.edn` before
+the lane's scratch root was removed. The rendering owner was outside
+this assignment and was not edited.
+
 ## 2026-09-08 turn-cut observation
 
 At 2026-09-09 05:54 UTC, `runtime_status {}` selected the main-root

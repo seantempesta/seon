@@ -628,10 +628,10 @@
   of the turn transform — so the wedge cannot return through the
   arming gap. Returns the armed entry.
 
-  ARMING IS SERIALIZED BY CONSTRUCTION: the armer proc is the ONE arm
-  site (boot primes the armer; the listener offers to the armer), so
-  two concurrent arms of one agent are unrepresentable without a
-  second caller someone would have to write. Refuses an agent id with
+  Routing owns graph lifecycle serialization, including direct source
+  installers racing the armer proc. The existing entry check and graph
+  publication occur under the same monitor as disarm, so concurrent callers
+  acquire one graph and teardown cannot remove its replacement. Refuses an agent id with
   no committed entity — the armer derives its set from facts, so a
   missing entity is a caller bug, never a nil routing key."
   {:malli/schema [:=> [:cat :seon.agent/arm-request]
@@ -639,7 +639,8 @@
   [{handle :seon.turn.loop/cluster
     agent-id :seon.agent/id
     routing :seon.agent/routing}]
-  (or (armed routing agent-id)
+  (locking routing
+   (or (armed routing agent-id)
       (let [connection (:seon.db/connection handle)
             eid (db/q '[:find ?agent .
                        :in $ ?id
@@ -706,7 +707,7 @@
                      (assoc-in [:seon.agent/channels eid] wake-channel))))
         ;; the arm prime — every mailbox arm primes exactly once
         (async/offer! wake-channel :seon.agent/wake)
-        entry)))
+        entry))))
 
 (defn- await-turn-completion!
   [routing entry]
@@ -792,7 +793,8 @@
   {:malli/schema [:=> [:cat :seon.agent/disarm-request] :nil]}
   [{agent-id :seon.agent/id
     routing :seon.agent/routing}]
-  (when-let [entry (armed routing agent-id)]
+  (locking routing
+   (when-let [entry (armed routing agent-id)]
     (flow/stop (:seon.flow/graph entry))
     (await-turn-completion! routing entry)
     (swap! routing
@@ -803,7 +805,7 @@
                          (:seon.agent/eid entry)))))
     (async/close! (:seon.cluster.wake/channel entry))
     (async/close! (:seon.turn.loop/completion entry))
-    (async/close! (:seon.agent/turn-stopped entry)))
+    (async/close! (:seon.agent/turn-stopped entry))))
   nil)
 
 ;;; ---------------------------------------------------------------------------

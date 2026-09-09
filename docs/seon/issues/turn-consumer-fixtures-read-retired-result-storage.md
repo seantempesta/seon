@@ -7,6 +7,20 @@ tags: [issue, test, runtime, class/p3, wave/contract-gate]
 
 # Turn consumers retain obsolete fixture and observation contracts
 
+## Live-loop baseline — 2026-09-09 23:01 UTC
+
+HEAD-only `bin/test-fast --paths` at `51a98c973` reproduced 20 agent
+tests / 98 assertions / 11 failures / 5 errors. The loop repair overlay
+plus its three passing regressions reported 23 tests / 222 assertions /
+11 failures / 6 errors; the additional error was another bounded
+`park-wake-test` wait. Both runs fail the routing properties, terminal
+wait, pause, park, disarm-backstop, restamp, and episode-cap observations.
+Routing failure data includes an unresolved fixture process ref
+`[:seon.db.process/id "8111-1700000000000"]`. These results do not establish
+a green agent consumer suite. The separate real-graph regression and live
+fresh/adopted measurements are in the
+[loop landing note](../../prds/context-generation/research/loop-live-landing-2026-09-09.md).
+
 ## Evidence, 2026-09-09
 
 At `34e47f595`, `test/seon/cluster/work_test.clj:122` and `:177` write

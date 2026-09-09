@@ -4022,7 +4022,10 @@
                           [:seon.sci.admit/caps
                            :seon.config.eval.result/max-source])
                   prepared
-                  (planned-sources reply-text namespace-name max-source)
+                  (if (and (:seon.config.ai/no-provider settings)
+                           (empty? reply-text))
+                    []
+                    (planned-sources reply-text namespace-name max-source))
                   sources (if (vector? prepared) prepared [])
                   staged-reply (stage-reply! connection reply-text)
                   plan-request
@@ -4046,7 +4049,8 @@
                    #(db/transact! connection {:tx-data intent-tx}))]
               (cond
                 (:seon.error/kind outcome) (fail! outcome)
-                (empty? sources) (fail! prepared)
+                (:seon.error/kind prepared) (fail! prepared)
+                (empty? sources) (report :released 0)
                 :else
                 (resume-turn
                  {:seon.turn.loop/cluster cluster
