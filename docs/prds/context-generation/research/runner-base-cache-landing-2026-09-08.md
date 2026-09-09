@@ -406,3 +406,99 @@ Evidence: `tmp/runner-resume-gate.log`; successful root `run.9mcaxA` removed.
 The same selected-path platform gate completed green; exact tally and phase
 lines are in `tmp/runner-resume-platform.log`. The published base was reused
 rather than rebuilt. This gate includes the prepared-worker-count regression.
+
+Platform tally for `b1cb47f14`: **83 tests / 490 assertions / zero
+failures/errors**. Phase seconds: snapshot 2, dependency/classpath 1,
+worker copies 4, base reuse 0, coordinator/tests 45. Base reuse work was
+459 ms (including retention). The test-fast lane's wrapper landed separately
+as `7bc62158b`: direct `bin/test-fast --paths bin/test-fast -- seon.repl-test`
+passed **13 tests / 42 assertions**, contracts armed, and its isolated
+`bin/test --paths bin/test-fast -- seon.test-runner-test` gate passed
+**43 tests / 268 assertions**, both with zero failures/errors. Evidence:
+`tmp/runner-resume-fast.log`, `tmp/runner-resume-wrapper-gate.log`.
+
+The inherited `src/seon/fn.clj` change was reviewed: `index!`'s recursive
+arity requires a callable observer, and refusal findings should be the
+actual blocking findings. Its source-only gate on `7bc62158b` failed:
+**30 tests / 154 assertions / 2 failures / 4 errors**, confirmed in isolation.
+The exact invalid fixture inputs, stale expectation, program-facts mismatch,
+and unreadably large failure output are recorded in
+[the indexing fixture issue](../../../seon/issues/fn-test-selected-source-gate-retains-invalid-fixtures.md).
+Under the requested “commit, or explain” alternative this source diff is
+left uncommitted; the sibling's broader `test/seon/fn_test.clj` edits are
+preserved. Evidence: `tmp/runner-resume-fn-gate.log`.
+
+## Completed serial before/after measurement (2026-09-09 UTC)
+
+Both runs select `seon.repl-test` on frozen application source `79326a2d2`.
+The before checkout carries the old `f3bd1d58c` harness, phase timers, and
+the already-described instrumentation preservation helper; the after
+checkout carries `79326a2d2`'s cache implementation. Harness/fixture changes
+are the treatment, not a claim of identical harness bytes. Each command
+sets `SEON_TEST_WORKERS=1`; there was no concurrent gate. Two lanes were
+active; default remained alive. A disposable old bisect-worktree cleanup
+overlapped part of the before publication, so its disk load is a limitation
+of this comparison. No cleanup overlapped the warm after run.
+
+| Phase | Before | Warm after |
+|---|---:|---:|
+| Snapshot | 1 s | 2 s |
+| Dependency cache/classpath | 23 s, rebuilt | 1 s, current |
+| Worker checkout views | 0 s at timer resolution | 1 s |
+| Published base | 37 s, published | 0 s, reused in 2 ms |
+| Fixed preparation phase sum | 61 s | 4 s |
+| Coordinator and tests | 28 s | 13 s |
+| Total wall including cleanup | **89.66 s** | **17.54 s** |
+| Tally | 15 tests / 50 assertions / 0 failures / 0 errors | same |
+
+The warm run reused digest
+`b18fbef09b9fbdc653a457d07e94d87e37e7ab76552dcdaff7e56e974dd02b11`.
+Evidence: `tmp/runner-resume-before.log`, `tmp/runner-resume-after.log`.
+Each launcher removed its successful run root. Exact command in each of
+the before/after worktrees:
+
+```bash
+SEON_TEST_WORKERS=1 /usr/bin/time -p bin/test --paths \
+  bin/test dev_cache.clj src/seon/test/runner.clj \
+  test/seon/test_runner_test.clj test/seon/test_support.clj -- seon.repl-test
+```
+
+The warm target is met for the complete invocation, including tests and
+cleanup, not merely the fixed phase sum. Earlier measurements under load
+remain above as evidence of contention rather than being replaced by this
+quieter result. The latest one-command-per-worker COW optimization is
+validated separately below; the matched historical comparison predates it.
+
+Final launcher measurement at `7bc62158b`, command
+`SEON_TEST_WORKERS=1 /usr/bin/time -p bin/test --paths bin/test -- seon.repl-test`:
+**13 tests / 42 assertions / zero failures/errors**, **20.93 s total wall**.
+Snapshot 1 s, dependency/classpath 2 s, worker views 2 s, base reuse 0 s,
+coordinator/tests 14 s. Dependency lock wait 0 ms / hold 208 ms; base reuse
+3 ms for digest
+`05bf2f5c62f1a976637f22291549b66e868f0b741676fcab53e9f40f128b92b9`.
+This newer source has 13 rather than the historical comparison's 15 tests;
+it is a separate final-version check, not a mixed-source timing comparison.
+Evidence: `tmp/runner-resume-final-warm.log`. No concurrent gate or scratch
+cleanup ran during this measurement; default stayed alive. Both fixed
+preparation (5 s) and complete wall time meet the 60-second warm target.
+
+The final checked-in `worker-count` form was read and hot-reloaded directly
+in default; prepared counts 1 and 3 returned 1 and 3 in 7 ms. This verifies
+the changed Var, not a completed development adoption. Default was never
+stopped, reforked, or restarted by this lane. All named authorities listed
+in Grounding were read end to end during the assignment.
+
+Cleanup: all six registered runner benchmark/bisect/dependency scratch
+worktrees were removed after their processes exited; temporary commit views
+and the resumed failed indexing root were also removed with non-following
+cleanup. Evidence logs remain under `tmp/`; measured numbers and commands
+are durable in this note. Process inspection found no remaining test runner
+JVM from this lane. Every awaited shell returned before reporting.
+
+Resume files landed: `bin/test`, `src/seon/test/runner.clj`,
+`test/seon/test_runner_test.clj`, `bin/test-fast`, this note, and the two
+resolved cache/snapshot issues. The indexing boundary is recorded in the
+new fixture issue. Earlier cache implementation files and commits remain
+listed in the implementation checkpoints. Unfinished: the inherited
+`src/seon/fn.clj` diff is intentionally uncommitted after its red independent
+gate; broader sibling `test/seon/fn_test.clj` changes remain untouched.
