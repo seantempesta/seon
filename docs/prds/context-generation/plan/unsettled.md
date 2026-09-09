@@ -512,3 +512,16 @@ half-edit. Measured targets in the issue.
   faults-render (walk total, terminal refusals, no-provider setting, fault
   render pair).
 
+## 2026-09-09 02:45 — faults-render landed in 25 minutes
+
+- `a90ed5cce` ordered episodes accept shown-text settlements (the walk no
+  longer throws on §15 evaluations); `3f26b8af3` static provider refusals
+  are terminal (one fault, no retry); `a4a0d457c` a per-agent no-provider
+  SETTING selects virtual turns — the Juniper fixture uses it, a scratch
+  seed now costs zero attempts and zero tokens; `5c9c0cc4e` the faults
+  concern renders through the error entity pair (nine fault cards on
+  default, zero printer markers). `68062f63d` evidence.
+- Open: the loop still records duplicate faults and opens another turn on
+  a refusal — loop.clj is turn-rename's; handed to it at its next resume.
+- Running: turn-rename (three writes per turn; stable ids).
+
