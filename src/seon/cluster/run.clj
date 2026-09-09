@@ -5,8 +5,8 @@
   the writer's database; no agent run pointer is stored. Each transition
   returns transaction data for the same serial Datahike writer.
 
-  Process custody and generated-turn recovery remain legacy mechanisms
-  pending the turn PRD cut; their presence is not the target crash model."
+  Boot closes every prior open turn and interrupts unfinished evaluations.
+  Process provenance belongs to execution requests and transactions."
   (:require [clojure.edn :as edn]
             [clojure.main :as main]
             [clojure.string :as str]
@@ -53,7 +53,7 @@
   "Project a completed evaluation into its existing settlement facts."
   {:malli/schema [:=> [:cat :seon.cluster.run/evaluation-facts-request]
                   :seon.cluster.eval/settle-request]}
-  [{:keys [:seon.cluster.run/id :seon.cluster.run/process
+  [{:keys [:seon.cluster.run/id
            :seon.cluster.eval/ordinal :seon.sci.eval/evaluation
            :seon.problems/form-problem :my.run/value]
     settlement-evaluation :seon.cluster.loop/settlement-evaluation}]
@@ -63,7 +63,6 @@
                  (:seon.error/kind form-problem))]
     (cond-> {:seon.cluster.run/id id
              :seon.cluster.eval/ordinal ordinal}
-      process (assoc :seon.cluster.run/process process)
       (:seon.eval/value settlement-evaluation)
       (assoc :seon.eval/value
              (:seon.eval/value settlement-evaluation))
@@ -186,16 +185,6 @@
   [run]
   (not (contains? run ::closed-at)))
 
-(defn held?
-  "True when a process holds the run. CUSTODY IS PRESENCE: `::process`
-  present = held, absent = unheld — there is no lease clock and no
-  epoch (custody revision 2026-07-28)."
-  {:malli/schema [:=> [:cat [:map
-                             [::process {:optional true} ::process]]]
-                  :boolean]}
-  [run]
-  (some? (::process run)))
-
 (defn terminal?
   "True when the receipt carries a terminal fact.
   THE ONE PRESENCE QUESTION over receipts (owner ruling 2026-07-28): a
@@ -285,9 +274,7 @@
 ;;; - otherwise returns plain tx-data (the serial writer makes the read
 ;;;   atomic with the write; no nested CAS is needed or wanted).
 ;;;
-;;; Implemented 2026-07-27 (ba5cb0c1e): `held-run` is the ONE custody
-;;; fence shared by release/close/plan. The `*-tx` wrappers
-;;; are the contract's own one-liners.
+;;; `require-open-run` checks existence and closure inside the serial writer.
 ;;; ---------------------------------------------------------------------------
 
 (defn- refuse!
@@ -306,28 +293,14 @@
   [db id]
   (db/pull db '[*] [::id id]))
 
-(defn- held-run
-  "The run's current facts when `request` names its exact custody.
-  The shared fence of release/close/plan: the run must exist, be open,
-  and be held by exactly `::process`. `::not-the-holder` is the ONE
-  loud custody refusal — a displaced or absent holder never resurrects
-  custody by asserting it."
-  [db transition request]
-  (let [{::keys [id process]} request
-        run (current-run db id)]
+(defn- require-open-run
+  "Read and require an existing open turn inside the serial writer."
+  [database operation request]
+  (let [turn (current-run database (::id request))]
     (cond
-      (nil? run) (refuse! transition ::no-such-run request)
-      (not (open? run)) (refuse! transition ::run-closed request)
-      (not= process (::process run))
-      (refuse! transition ::not-the-holder request)
-      :else run)))
-
-(defn- retract-custody
-  "The retraction op dropping `run`'s custody.
-  Retracts the value the mid-transaction read actually found, so the
-  op is exact rather than attribute-wide."
-  [run]
-  [[:db/retract (:db/id run) ::process (::process run)]])
+      (nil? turn) (refuse! operation ::no-such-run request)
+      (not (open? turn)) (refuse! operation ::run-closed request)
+      :else turn)))
 
 (defn- running-receipts
   "Every receipt of run entity `run-eid` carrying no terminal fact,
@@ -343,30 +316,16 @@
        (remove terminal?)))
 
 (defn- interrupt-stamps
-  "Everything a dead process's custody leaves behind, marked at `now`.
-
-  ONE `interrupted-at` per running receipt, AND ONE ON THE RUN. The run
-  stamp is not a summary of the receipt stamps and cannot be derived
-  from them: a process that died before its first form settled a
-  receipt row leaves NO receipt to stamp, and that run was
-  indistinguishable by query from a run that closed normally
-  (whole-system-arc observer, 2026-08-08 — `945f3226` closed by
-  recovery with one form, zero receipts, no error, and no marker
-  anywhere durable). The crash model's honesty clause is that recovery
-  marks what it interrupted, so recovery records the fact it alone
-  knows. Presence is the state; there is no status label and nothing
-  reads a boot counter to answer \"which runs did recovery cut?\"."
+  "Interrupt unfinished evaluations at the writer's current database value."
   [db run-eid now]
-  (conj (mapv (fn [receipt]
-                [:db/add (:db/id receipt)
-                 :seon.cluster.eval/interrupted-at now])
-              (running-receipts db run-eid))
-        [:db/add run-eid ::interrupted-at now]))
+  (mapv (fn [evaluation]
+          [:db/add (:db/id evaluation) :seon.cluster.eval/interrupted-at now])
+        (running-receipts db run-eid)))
 
 ;; The *-tx wrappers reference their *-call VARS (#'f): datahike applies
 ;; the var, so redefining a transition against the running system updates
 ;; behavior immediately — the flow-dynamics live-update pattern.
-(declare claim-call release-call close-call plan-call refresh-call
+(declare close-call plan-call refresh-call
          open-call receipt-start-call receipt-settle-call
          recover-call)
 
@@ -440,82 +399,11 @@
                (seq background-results)
                (assoc ::background-results background-results))])))
 
-(defn claim-tx
-  "Transaction data claiming `::id` for `::process`."
-  {:malli/schema [:=> [:cat [:map
-                             [::id ::id]
-                             [::process ::process]
-                             [::live-processes [:set ::process]]
-                             [::now :inst]]]
-                  [:vector :some]]}
-  [request]
-  [[:db.fn/call #'claim-call request]])
-
-(defn claim-call
-  "Claim the run, inside the transaction; eligibility IS the read.
-  CUSTODY IS PRESENCE, and CAS-on-absence is the mid-transaction read:
-  - the run must exist and be open (a closed run is never claimable);
-  - unheld (no `::process`) → claim: assert the process;
-  - held by a process in `::live-processes` → refuse `::run-held` (a
-    live claim is not stealable; there is no second live claimant to
-    steal for — the refusal is the model stating that);
-  - held by a DEAD process (outside `::live-processes`) → TAKEOVER =
-    RECOVERY, one shape: stamp the run and that custody's running
-    receipts `interrupted-at` at `::now`, then retract/assert
-    `::process` — one transaction, so the intermediate state never
-    exists (custody revision, Revision 3). The run stamp is the same
-    one `recover-call` writes, from the same `interrupt-stamps`: both
-    paths recover a dead process's custody, so both leave the same
-    durable evidence that they did.
-  There are no observed-* fields; the mid-transaction db is the only
-  truth consulted."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:map
-                        [::id ::id]
-                        [::process ::process]
-                        [::live-processes [:set ::process]]
-                        [::now :inst]]]
-                  [:vector :some]]}
-  [db request]
-  (let [{::keys [id process live-processes now]} request
-        run (current-run db id)
-        holder (::process run)]
-    (cond
-      (nil? run) (refuse! `claim-call ::no-such-run request)
-      (not (open? run)) (refuse! `claim-call ::run-closed request)
-      (nil? holder) [[:db/add (:db/id run) ::process process]]
-      (contains? live-processes holder)
-      (refuse! `claim-call ::run-held request)
-      :else (into (interrupt-stamps db (:db/id run) now)
-                  [[:db/retract (:db/id run) ::process holder]
-                   [:db/add (:db/id run) ::process process]]))))
-
-(defn release-tx
-  "Transaction data cleanly releasing `::process`'s custody."
-  {:malli/schema [:=> [:cat [:map
-                             [::id ::id]
-                             [::process ::process]]]
-                  [:vector :some]]}
-  [request]
-  [[:db.fn/call #'release-call request]])
-
-(defn release-call
-  "Release custody, inside the transaction.
-  Retracts the process. Refuses unless the run is open and held by
-  exactly `::process`."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:map
-                        [::id ::id]
-                        [::process ::process]]]
-                  [:vector :some]]}
-  [db request]
-  (retract-custody (held-run db `release-call request)))
-
 (defn close-tx
-  "Transaction data closing the run held by `::process`."
+  "Transaction data closing an open turn."
   {:malli/schema [:=> [:cat [:map
                              [::id ::id]
-                             [::process ::process]
+
                              [::closed-at ::closed-at]
                              [::undisposed-at {:optional true}
                               ::undisposed-at]]]
@@ -524,20 +412,19 @@
   [[:db.fn/call #'close-call request]])
 
 (defn close-call
-  "Close the held turn inside the writer by asserting closed-at.
+  "Close the open turn inside the writer by asserting closed-at.
   The owning agent becomes available through the open-turn query."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map
                         [::id ::id]
-                        [::process ::process]
+
                         [::closed-at ::closed-at]
                         [::undisposed-at {:optional true}
                          ::undisposed-at]]]
                   [:vector :some]]}
   [db request]
-  (let [run (held-run db `close-call request)]
-    (cond-> (conj (retract-custody run)
-                  [:db/add (:db/id run) ::closed-at (::closed-at request)])
+  (let [run (require-open-run db `close-call request)]
+    (cond-> [[:db/add (:db/id run) ::closed-at (::closed-at request)]]
       (::undisposed-at request)
       (conj [:db/add (:db/id run) ::undisposed-at
              (::undisposed-at request)]))))
@@ -548,10 +435,10 @@
     (assoc request :seon.cluster.eval/author author)]])
 
 (defn plan-tx
-  "Transaction data freezing one agent-authored form plan on the held run."
+  "Transaction data freezing one agent-authored form plan on the open turn."
   {:malli/schema [:=> [:cat [:map
                              [::id ::id]
-                             [::process ::process]
+
                              [::plan-digest ::plan-digest]
                              [::reply {:optional true} ::reply]
                              [::reply-blob {:optional true} ::reply-blob]
@@ -565,7 +452,7 @@
   (plan-tx-for-author :agent request))
 
 (defn- system-plan-tx
-  "Transaction data freezing one system-authored plan on the held run."
+  "Transaction data freezing one system-authored plan on the open turn."
   [request]
   (plan-tx-for-author :system request))
 
@@ -614,7 +501,6 @@
   "The transaction instant already allocated before a transaction call runs."
   [db]
   (:db/txInstant (db/pull db [:db/txInstant] (inc (db/basis-t db)))))
-
 
 (defn- source-rows
   "The shared namespace rows and the ordered evaluation entities of one plan.
@@ -666,14 +552,14 @@
 (defn plan-call
   "Freeze the plan, inside the transaction.
   Assert the digest and the
-  owned ordered form entities. Refuses unless the run is open, held by
-  exactly `::process`, and has NO existing `::plan-digest` —
+  owned ordered evaluations. Refuses unless the turn is open
+  and has no existing `::plan-digest` —
   concurrent replies are mutually exclusive because the second one
   reads the first one's digest and refuses."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map
                         [::id ::id]
-                        [::process ::process]
+
                         [::plan-digest ::plan-digest]
                         [::reply {:optional true} ::reply]
                         [::reply-blob {:optional true} ::reply-blob]
@@ -692,7 +578,7 @@
         ;; transaction is committing at, which only the transaction knows.
         at (or (:seon.cluster.eval/at request)
                (current-transaction-instant db))
-        run (held-run db `plan-call request)
+        run (require-open-run db `plan-call request)
         run-eid (:db/id run)
         agent-namespace
         (db/q '[:find ?namespace-name .
@@ -749,10 +635,10 @@
 (declare receipt-start-tx)
 
 (defn system-run-tx
-  "Open, claim, plan, and start every evaluation of one system-authored run.
+  "Open, plan, and start every evaluation of one system-authored run.
 
   The caller owns the ordered sources and their digest. The ordinary run
-  transaction functions retain every custody, plan, and evaluation
+  transaction functions retain every opening, plan, and evaluation
   fence. The entire execution intent is durable in this one transaction."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.run/system-run-request]
@@ -760,7 +646,6 @@
   [database request]
   (let [{agent-id :seon.cluster.agent/id
          run-id ::id
-         process ::process
          opened-at ::opened-at
          starting-ns ::starting-ns
          plan-digest ::plan-digest
@@ -773,21 +658,16 @@
                      ::agent [:seon.cluster.agent/id agent-id]
                      ::opened-at opened-at}
               trigger (assoc ::trigger trigger)))
-           (claim-tx {::id run-id
-                      ::process process
-                      ::live-processes #{process}
-                      ::now opened-at})
            (system-plan-tx
             (merge (select-keys request [::reply ::reply-blob ::reply-size])
                    {::id run-id
-                    ::process process
                     ::starting-ns starting-ns
                     ::plan-digest plan-digest
                     :seon.cluster.eval/at opened-at
                     ::sources sources}))))))
 
 (defn append-generated-call
-  "Append exactly one system-authored form to a held generated run.
+  "Append exactly one system-authored form to an open generated turn.
 
   The requested ordinal must equal the number of forms already present. For
   every noninitial append, the preceding ordinal must already have a terminal
@@ -804,7 +684,7 @@
          source :seon.cluster.eval/source
          comment :seon.cluster.eval/comment
          namespace-name :seon.ns/name} request
-        held (held-run db `append-generated-call request)
+        held (require-open-run db `append-generated-call request)
         run-eid (:db/id held)
         expected
         (long (or (db/q '[:find (count ?form) .
@@ -853,14 +733,13 @@
   [[:db.fn/call #'append-generated-call request]])
 
 (defn generated-run-tx
-  "Open and claim one zero-form generated system run."
+  "Open one zero-form generated system turn."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.run/generated-run-request]
                   :seon.store/transaction-data]}
   [database request]
   (let [{agent-id :seon.cluster.agent/id
          run-id ::id
-         process ::process
          opened-at ::opened-at
          starting-ns ::starting-ns
          trigger ::trigger} request
@@ -876,11 +755,7 @@
                      ::starting-ns [:seon.ns/name namespace-name]
                      :seon.cluster.work/situation :generate
                      ::opened-at opened-at}
-              trigger (assoc ::trigger trigger)))
-           (claim-tx {::id run-id
-                      ::process process
-                      ::live-processes #{process}
-                      ::now opened-at})])))
+              trigger (assoc ::trigger trigger)))])))
 
 (defn refresh-tx
   "Transaction data refreshing one prior system-authored form."
@@ -1565,7 +1440,7 @@
     {::recorded-run
      (-> (select-keys run [::id ::agent ::starting-ns ::opened-at ::closed-at
                            ::reply ::reply-blob ::reply-size
-                           ::plan-digest ::process])
+                           ::plan-digest])
          (update ::agent :db/id)
          (update ::starting-ns #(resolve-namespace-name database (:db/id %))))
      ::evaluations
@@ -1812,17 +1687,14 @@
                   [:vector :some]]}
   [db request]
   (let [{::keys [id now]} request
-        run (current-run db id)
-        holder (::process run)]
+        run (current-run db id)]
     (if (or (nil? run)
             (not (open? run)))
       []
       (let [interrupted
             (into (interrupt-stamps db (:db/id run) now)
                   (effect/interruption-stamps db (:db/id run) now))]
-        (conj (into interrupted
-                    (when (some? holder)
-                      (retract-custody run)))
+        (conj interrupted
               [:db/add (:db/id run) ::closed-at now])))))
 
 ;;; ---------------------------------------------------------------------------
@@ -1889,8 +1761,7 @@
 (defn render-ai
   "`:seon.render/ai` — one run, as the agent's own history of it.
 
-  STATE IS PRESENCE, read exactly as the model stores it: a run with a
-  process is held, one with a `closed-at` is over, one with an error
+  STATE IS PRESENCE, read exactly as the model stores it: a turn with a `closed-at` is over, one with an error
   never got a plan, and a cut fold is derived from its forms and
   receipts through the one `interrupted-warning`. There is no status
   attribute to restate and this invents none.
@@ -1944,24 +1815,21 @@
                    (::missing-results never-started)
                    " form(s) never ran, and nothing was retried.")
 
-              ;; THE FACT RECOVERY WROTE outranks every guess below it.
-              ;; Without it a run whose dead process left no receipt
-              ;; row read "It completed." — the render restating a
-              ;; database that could not tell the two apart. The two
-              ;; clauses above still say MORE (which form was cut), so
-              ;; they come first; this is what remains when the process
-              ;; died before any form-level evidence existed.
-              (and (::interrupted-at unit) (some? (::closed-at unit)))
-              (str "It was interrupted at "
-                   (pr-str (::interrupted-at unit))
-                   " — the process holding it died, recovery closed it, "
-                   "and nothing was retried.")
-
               (::error unit)
               (str "It did not run: " (::error unit)
                    " Nothing was retried, and nothing it asked for ran.")
 
-              (and (nil? (::plan-digest unit)) (some? (::closed-at unit)))
+              (and db (some? (::closed-at unit))
+                   (not (db/q '[:find ?run . :in $ ?id
+                                 :where [?run :seon.cluster.run/id ?id]
+                                 (or [?run :seon.cluster.run/reply]
+                                     [?run :seon.cluster.run/reply-blob])]
+                               db id))
+                   (not (db/q '[:find ?attempt . :in $ ?id
+                                 :where [?run :seon.cluster.run/id ?id]
+                                 [?attempt :seon.ai.attempt/run ?run]
+                                 [?attempt :seon.ai.attempt/error]]
+                               db id)))
               (str "It was interrupted before the reply arrived, and "
                    "nothing was retried.")
 
@@ -1972,8 +1840,7 @@
                    "Its trigger remains unanswered; nothing was retried.")
 
               (some? (::closed-at unit)) "It completed."
-              (some? (::process unit)) (str "It is running now, held by "
-                                            (::process unit) ".")
+              (open? unit) "It is open in this JVM."
               :else "It is open.")]
         ;; `pr-str` and never the platform's `toString`: an inst printed
         ;; through the default formatter carries the RENDERING machine's

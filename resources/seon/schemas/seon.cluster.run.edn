@@ -14,7 +14,7 @@
                    :generated-form-request
                    [:map
                     [:seon.cluster.run/id :seon.cluster.run/id]
-                    [:seon.cluster.run/process :seon.cluster.run/process]
+
                     [:seon.cluster.eval/at :seon.cluster.eval/at]
                     [:seon.cluster.eval/ordinal
                      :seon.cluster.eval/ordinal]
@@ -24,27 +24,20 @@
                      {:optional true}
                      :seon.cluster.eval/comment]
                     [:seon.ns/name :seon.ns/name]],
-                   ;; PRESENCE IS THE STATE: a run carries this exactly
-                   ;; when a dead process's custody of it was recovered.
-                   ;; The evaluation-level twin says which ordinal was cut;
-                   ;; a run whose dead process left no evaluation row has no
-                   ;; ordinal-level evidence at all, and this is the only
-                   ;; fact separating it from a normal close.
-                   :interrupted-at :inst,
-                   :live-processes [:set :seon.cluster.run/process],
+
                    :missing-results [:int {:min 0}],
                    :opened-at :inst,
                    :plan-digest [:string {:min 1}],
                    :reply [:string {:seon.db/no-history? true}],
                    :reply-blob :seon.blob/digest,
                    :reply-size [:int {:min 0}],
-                   :process [:string {:min 1}],
+
                    :starting-ns :seon.db/ref,
                    :supersedes [:set :seon.db/ref],
                    :evaluation-facts-request
                    [:map
                     [:seon.cluster.run/id :seon.cluster.run/id]
-                    [:seon.cluster.run/process {:optional true} :seon.cluster.run/process]
+
                     [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
                     [:seon.sci.eval/evaluation :seon.cluster.loop/evaluation]
                     [:seon.cluster.loop/settlement-evaluation :seon.cluster.loop/evaluation]
@@ -88,7 +81,7 @@
                    [:map
                     [:seon.cluster.agent/id :seon.cluster.agent/id]
                     [:seon.cluster.run/id :seon.cluster.run/id]
-                    [:seon.cluster.run/process :seon.cluster.run/process]
+
                     [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]
                     [:seon.cluster.run/starting-ns :seon.cluster.run/starting-ns]
                     [:seon.cluster.run/plan-digest :seon.cluster.run/plan-digest]
@@ -101,7 +94,7 @@
                    [:map
                     [:seon.cluster.agent/id :seon.cluster.agent/id]
                     [:seon.cluster.run/id :seon.cluster.run/id]
-                    [:seon.cluster.run/process :seon.cluster.run/process]
+
                     [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]
                     [:seon.cluster.run/starting-ns :seon.cluster.run/starting-ns]
                     [:seon.cluster.run/trigger {:optional true}
@@ -130,15 +123,11 @@
                     [:seon.cluster.run/closed-at
                      {:optional true}
                      :seon.cluster.run/closed-at]
-                    [:seon.cluster.run/interrupted-at
-                     {:optional true}
-                     :seon.cluster.run/interrupted-at]
+
                     [:seon.cluster.run/undisposed-at
                      {:optional true}
                      :seon.cluster.run/undisposed-at]
-                    [:seon.cluster.run/process
-                     {:optional true}
-                     :seon.cluster.run/process]
+
                     [:seon.cluster.run/plan-digest
                      {:optional true}
                      :seon.cluster.run/plan-digest]

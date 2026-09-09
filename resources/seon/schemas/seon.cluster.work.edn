@@ -1,8 +1,7 @@
 #:seon.cluster.work{:agent-request
                     [:map
                      [:seon.cluster.agent/id :seon.cluster.agent/id]
-                     [:seon.cluster.run/process
-                      :seon.cluster.run/process]],
+                     ],
                     :answered?
                     [:= :any],
                     :wake-request

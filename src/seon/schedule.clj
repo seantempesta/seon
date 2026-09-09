@@ -538,7 +538,7 @@
   (cond-> {:seon.error/source source
            :seon.error/id (error-identity claimed-receipt-id)
            :seon.error/at completed-at
-           :seon.error/process (:seon.cluster.run/process cluster)
+           :seon.error/process (:seon.db.process/id cluster)
            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
            :seon.config.error/recurrence-limit
            (:seon.config.error/recurrence-limit cluster)

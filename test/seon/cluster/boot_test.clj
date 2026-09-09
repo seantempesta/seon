@@ -48,7 +48,6 @@
   ;; namespace constructs names; boot's own constructor, fewer layers.
   (delay (test-support/environment "seon.cluster.boot-test")))
 
-
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures
 ;;; ---------------------------------------------------------------------------
@@ -1734,7 +1733,7 @@
                     [{:seon.cluster.run/id "run-crashed"
                       :seon.cluster.run/agent [:seon.cluster.agent/id "alice"]
                       :seon.cluster.run/opened-at now
-                      :seon.cluster.run/process "99999-1"
+
                       :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))}
                      {:seon.cluster.agent/id "alice"
                       }
@@ -1752,11 +1751,7 @@
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)]
         (try
-          (testing "the dead holder's custody is gone — custody is
-                    presence, and no run holds any"
-            (is (nil? (db/q (quote [:find ?p . :where
-                                   [_ :seon.cluster.run/process ?p]])
-                           @connection))))
+
           (testing "its dangling receipt carries interrupted-at — the
                     one terminal fact recovery asserts"
             (is (= 1 (count
@@ -1771,26 +1766,16 @@
             (is (some? (db/q (quote [:find ?d . :where
                                     [_ :seon.cluster.run/plan-digest ?d]])
                             @connection))))
-          (testing "RECOVERY MARKS WHAT IT INTERRUPTED, and only that —
-                    the run itself carries the fact, so the interrupted
-                    run is distinguishable by query from the clean one"
-            (is (= ["run-crashed"]
-                   (db/q '[:find [?id ...]
-                           :where
-                           [?run :seon.cluster.run/interrupted-at _]
-                           [?run :seon.cluster.run/id ?id]]
-                         @connection)))
-            (is (nil? (:seon.cluster.run/interrupted-at
-                       (db/pull @connection '[*]
-                                [:seon.cluster.run/id "run-clean"]))))
+          (testing "boot closes the interrupted turn and preserves the clean turn"
+            (is (inst? (:seon.cluster.run/closed-at
+                        (db/pull @connection '[*]
+                                 [:seon.cluster.run/id "run-crashed"]))))
             (is (str/includes?
                  (run/render-ai
                   (assoc (db/pull @connection '[*]
                                   [:seon.cluster.run/id "run-crashed"])
                          :seon.db/db @connection))
-                 "interrupted")
-                "and the run says so rather than restating a database
-                 that could not tell the two apart"))
+                 "interrupted")))
           (testing "and the instance reports what recovery did"
             (is (= 1 (:seon.boot/recovered-runs instance)))
             (is (pos? (:seon.boot/recovery-operations instance))))

@@ -34,7 +34,7 @@
                (work/next-agent-work
                 @connection
                 {:seon.cluster.agent/id "background-agent"
-                 :seon.cluster.run/process "process"})))
+                 :seon.db.process/id "process"})))
         (db/transact!
          connection
          (run/open-tx
@@ -53,4 +53,3 @@
                        (map :seon.effect/id)
                        (:seon.cluster.run/background-results opened))))
           (is (nil? (:seon.cluster.run/trigger opened))))))))
-

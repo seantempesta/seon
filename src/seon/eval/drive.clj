@@ -231,10 +231,10 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.cluster.agent/id
-          :seon.cluster.run/process :seon.cluster.message/id [:int {:min 1}]]
+          :seon.db.process/id :seon.cluster.message/id [:int {:min 1}]]
      [:maybe :seon.eval.drive/terminal-state]]
     [:=> [:cat :seon.db/database-value :seon.cluster.agent/id
-          :seon.cluster.run/process
+          :seon.db.process/id
           [:map [:seon.eval.drive/run-ids :seon.eval.drive/run-ids]
            [:seon.eval.drive/run-cap :seon.eval.drive/run-cap]]]
      [:maybe :seon.eval.drive/terminal-state]]]}
@@ -271,7 +271,7 @@
                    (nil? (work/next-agent-work
                           db
                           {:seon.cluster.agent/id agent-id
-                           :seon.cluster.run/process process})))]
+                           :seon.db.process/id process})))]
     (cond
       (seq completions)
       {:seon.eval.drive/outcome :completed

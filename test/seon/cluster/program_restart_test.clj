@@ -181,7 +181,7 @@
            connection
            (get-in first-instance
                    [:seon.cluster.loop/cluster
-                    :seon.cluster.run/process])
+                    :seon.db.process/id])
            {:seon.cluster.agent/id "restart-a"
             :seon.cluster/name cluster-name
             :seon.ns/name 'my.agents.restart-a})
@@ -352,7 +352,7 @@
            connection
            (get-in second-instance
                    [:seon.cluster.loop/cluster
-                    :seon.cluster.run/process])
+                    :seon.db.process/id])
            {:seon.cluster.agent/id "restart-b"
             :seon.cluster/name cluster-name
             :seon.ns/name 'my.agents.restart-b})

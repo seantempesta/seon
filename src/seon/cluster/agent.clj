@@ -59,9 +59,8 @@
 
   Crash walk: everything on any channel is losable by the transport
   law. Buffered wakes → boot re-stamps every graph and primes each
-  mailbox once. An in-flight turn's process state → recovery stamps
-  dead custody's running receipts `interrupted-at` and retracts
-  custody; NOTHING re-executes a form or refires a paid call. No row
+  mailbox once. Boot closes prior open turns and interrupts unfinished
+  evaluations; nothing resumes the interrupted execution. No row
   depends on a channel for recovery."
   (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as async.protocols]
@@ -394,21 +393,20 @@
    [(update state ::deliveries inc)
     {::episode [::wake]}]))
 
-(defn- held-run-id
-  "The id of the agent's open turn held by `process`, or nil.
+(defn- open-run-id
+  "The id of the agent's open turn, or nil.
   The turn proc's ping-state derivation — the current run rides in
   `::flow/state`, which is what retired the serial-dependent global
   query F2 §3.3 deleted."
-  [db agent-id process]
+  [db agent-id]
   (db/q '[:find ?id .
-         :in $ ?agent-id ?process
+         :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
          [?run :seon.cluster.run/agent ?agent]
          (not [?run :seon.cluster.run/closed-at])
-         [?run :seon.cluster.run/process ?process]
          [?run :seon.cluster.run/id ?id]]
-       db agent-id process))
+       db agent-id))
 
 (defn- turn-completion-backstop-failure
   [agent-id run-id timeout-ms operation expected events]
@@ -426,7 +424,7 @@
            (str "Agent " (pr-str agent-id)
                 (if run-id
                   (str " run " (pr-str run-id))
-                  " with no observable held run")
+                  " with no observable open turn")
                 " did not publish turn completion within " timeout-ms " ms.")
            :seon.cluster.agent/id agent-id
            :seon.cluster.agent/turn-completion-backstop agent-id
@@ -445,7 +443,7 @@
   [state]
   (let [{connection :seon.db/connection
          cluster-name :seon.cluster/name
-         process :seon.cluster.run/process
+         process :seon.db.process/id
          completion :seon.cluster.loop/completion
          executor :seon.flow/executor
          fault-channel :seon.cluster.agent/fault-channel
@@ -455,7 +453,7 @@
         (:seon.cluster.loop/cluster state)
         agent-id (:seon.cluster.agent/id state)
         database @connection
-        run-id (held-run-id database agent-id process)
+        run-id (open-run-id database agent-id)
         timeout-ms
         (or (:seon.config.agent/turn-completion-backstop-ms
              (ai/agent-overlay database agent-id))
@@ -593,16 +591,10 @@
           (let [result
                 (let [agent-id (:seon.cluster.agent/id state)
                       connection (:seon.db/connection cluster)
-                      process (:seon.cluster.run/process cluster)
+                      process (:seon.db.process/id cluster)
                       now (Date.)
-               ;; SETTLE BEFORE DERIVING, scoped to this agent: an orphaned
-               ;; run keeps its agent busy, and per-agent graphs settle their
-               ;; own orphan (conservation §5)
-               _ (when-let [orphan (work/interruption @connection agent-id)]
-                   (cluster.loop/settle-interruption!
-                    cluster (:seon.cluster.run/id orphan) now))
                       request {:seon.cluster.agent/id agent-id
-                               :seon.cluster.run/process process}
+                               :seon.db.process/id process}
                ;; ONE database value for the derivation
                       next (work/next-agent-work @connection request)
                       ;; THE BOUND LEARNS ITS SUBJECT HERE, once, from
@@ -813,8 +805,8 @@
                      (merge (dissoc staged-reply :seon.blob/staged-writes)
                             {:seon.cluster.agent/id agent-id
                              :seon.cluster.run/id run-id
-                             :seon.cluster.run/process
-                             (:seon.cluster.run/process handle)
+                             :seon.db.process/id
+                             (:seon.db.process/id handle)
                              :seon.cluster.run/opened-at now
                              :seon.cluster.run/starting-ns
                              [:seon.ns/name namespace-name]
@@ -989,14 +981,14 @@
   (let [completion (:seon.cluster.loop/completion entry)
         turn-stopped (:seon.cluster.agent/turn-stopped entry)
         {connection :seon.db/connection
-         process :seon.cluster.run/process}
+         process :seon.db.process/id}
         (:seon.cluster.loop/cluster entry)]
     (if-some [terminal (or (async/poll! completion)
                            (async/poll! turn-stopped))]
       terminal
       (let [agent-id (:seon.cluster.agent/id entry)
             database @connection
-            run-id (held-run-id database agent-id process)
+            run-id (open-run-id database agent-id)
             timeout-ms
             (:seon.config.agent/turn-completion-backstop-ms
              (:seon.cluster.loop/cluster entry))
@@ -1049,7 +1041,7 @@
   `:seon.config.agent/turn-completion-backstop-ms`, then drop the routing entry
   before closing its channels. Thus disarm waits through a seconds-long active
   model call, while an accepted-but-never-started proc cannot strand teardown.
-  If the loud backstop fires, its diagnostic names the agent and held run and
+  If the loud backstop fires, its diagnostic names the agent and open turn and
   the entry remains so disarm can be retried after the turn settles. Stop drops
   conn contents —
   safe by the transport law; triggers are rows and survive.
@@ -1177,7 +1169,7 @@
              (let [supervision-tx
                    (bootstrap/supervision-tx
                     database
-                    (:seon.cluster.run/process handle)
+                    (:seon.db.process/id handle)
                     (Date.)
                     first-agent)]
                (when (seq supervision-tx)

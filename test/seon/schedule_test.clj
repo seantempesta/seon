@@ -73,7 +73,7 @@
    :seon.cluster.loop/cluster
    (test-support/cluster-handle
     {:seon.cluster/name "default"
-     :seon.cluster.run/process "schedule-test-process"
+     :seon.db.process/id "schedule-test-process"
      :seon.sci.admit/caps result-caps
      :seon.config.error/recurrence-limit 3
      :seon.config.error/escalate-to "root"})})
@@ -305,7 +305,7 @@
                    (test-support/cluster-handle
                     {:seon.db/connection connection
                      :seon.cluster/name "seon.schedule-test"
-                     :seon.cluster.run/process "schedule-test-process"
+                     :seon.db.process/id "schedule-test-process"
                      :seon.sci.eval/ctx
                      (test-support/fork-cluster-ctx connection)
                      :seon.schedule/channel ::channel})

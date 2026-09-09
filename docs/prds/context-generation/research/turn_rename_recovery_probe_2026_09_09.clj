@@ -16,7 +16,6 @@
                {:seon.cluster.run/id id
                 :seon.cluster.run/agent [:seon.cluster.agent/id id]
                 :seon.cluster.run/opened-at now
-                :seon.cluster.run/process "saved-holder"
                 :seon.cluster.work/situation :generate}
                {:seon.cluster.eval/id (str id "-unfinished")
                 :seon.cluster.eval/run [:seon.cluster.run/id id]
@@ -26,7 +25,6 @@
       operations (seon.cluster.run/recover-call
                   database
                   {:seon.cluster.run/id id
-                   :seon.cluster.run/live-processes #{"saved-holder"}
                    :seon.cluster.run/now now})
       after (:db-after (datahike.api/with database operations))
       turn (seon.db/pull after '[*] [:seon.cluster.run/id id])
@@ -39,4 +37,5 @@
              after {:seon.cluster.run/id id :seon.cluster.run/now now}))
    :seon.test/default-unchanged (= (seon.db/basis-t before)
                                   (seon.db/basis-t @connection))
+   :seon.test/only-close-and-evaluation (= 2 (count operations))
    :seon.test/operations (count operations)})

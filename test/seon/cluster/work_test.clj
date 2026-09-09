@@ -78,8 +78,8 @@
    :seon.ai.attempt/settings-edn "{}"})
 
 (defn- open-run!
-  "Open a run, optionally claimed by `holder`, optionally planned."
-  [connection {:keys [holder planned? triggered?]}]
+  "Open a turn, optionally planned."
+  [connection {:keys [planned? triggered?]}]
   (db/transact!
    connection
    (cond-> {:tx-data
@@ -90,7 +90,6 @@
                        triggered?
                        (assoc :seon.cluster.run/trigger
                               [:seon.cluster.message/id message-id])
-                       holder (assoc :seon.cluster.run/process holder)
                        true (assoc :seon.cluster.work/situation :call)
                        planned? (assoc :seon.cluster.run/plan-digest digest))
                      {:seon.cluster.agent/id agent-id
@@ -148,7 +147,7 @@
             :seon.cluster.run/trigger
             [:seon.cluster.message/id trigger-id]
             :seon.cluster.run/opened-at at
-            :seon.cluster.run/process process
+
             :seon.cluster.run/plan-digest digest}
            {:seon.cluster.agent/id agent-id
             }
@@ -186,7 +185,7 @@
   central pass; the totality property is unchanged in strength — it
   always was a per-agent question, and now it says so."
   {:seon.cluster.agent/id agent-id
-   :seon.cluster.run/process process})
+   :seon.db.process/id process})
 
 ;;; ---------------------------------------------------------------------------
 ;;; The enumeration
@@ -207,7 +206,7 @@
    {::label "claimed here, unplanned — the ONE paid call, not yet made"
     ::build (fn [connection]
               (add-trigger! connection)
-              (open-run! connection {:holder process :triggered? true}))
+              (open-run! connection {:triggered? true}))
     ::expect {:seon.cluster.work/situation :call
               :seon.cluster.run/id run-id
               :seon.cluster.agent/id agent-id}}
@@ -215,7 +214,7 @@
    {::label "row 5 — planned, no receipts: fold from ordinal 0"
     ::build (fn [connection]
               (add-trigger! connection)
-              (open-run! connection {:holder process :planned? true
+              (open-run! connection {:planned? true
                                      :triggered? true}))
     ::expect {:seon.cluster.work/situation :resume
               :seon.cluster.run/id run-id
@@ -225,7 +224,7 @@
    {::label "row 8 — one terminal receipt: fold from ordinal 1"
     ::build (fn [connection]
               (add-trigger! connection)
-              (open-run! connection {:holder process :planned? true
+              (open-run! connection {:planned? true
                                      :triggered? true})
               (terminal-receipt! connection 0))
     ::expect {:seon.cluster.work/situation :resume
@@ -237,7 +236,7 @@
              done, and that is its OWN instruction (seal revision)"
     ::build (fn [connection]
               (add-trigger! connection)
-              (open-run! connection {:holder process :planned? true
+              (open-run! connection {:planned? true
                                      :triggered? true})
               (terminal-receipt! connection 0)
               (terminal-receipt! connection 1))
@@ -245,24 +244,14 @@
               :seon.cluster.run/id run-id
               :seon.cluster.agent/id agent-id}}
 
-   {::label "rows 2-4 — dead custody released, unplanned: NOT work.
-             The paid call is lost and nothing re-calls it."
-    ::build (fn [connection]
-              (add-trigger! connection)
-              (open-run! connection {:triggered? true}))
-    ::expect nil}
 
-   {::label "another process holds it: not ours to touch"
-    ::build (fn [connection]
-              (add-trigger! connection)
-              (open-run! connection {:holder other-process :planned? true
-                                     :triggered? true}))
-    ::expect nil}
+
+
 
    {::label "row 10 — closed run, answered trigger: idle"
     ::build (fn [connection]
               (add-trigger! connection)
-              (open-run! connection {:holder process :planned? true
+              (open-run! connection {:planned? true
                                      :triggered? true})
               (terminal-receipt! connection 0)
               (terminal-receipt! connection 1)
@@ -272,7 +261,7 @@
    {::label "closed run, and a NEW unanswered trigger: a fresh turn"
     ::build (fn [connection]
               (add-trigger! connection)
-              (open-run! connection {:holder process :planned? true
+              (open-run! connection {:planned? true
                                      :triggered? true})
               (close-run! connection)
               (db/transact! connection
@@ -289,7 +278,7 @@
              started is what makes the busy fence mean anything"
     ::build (fn [connection]
               (add-trigger! connection)
-              (open-run! connection {:holder process :planned? true
+              (open-run! connection {:planned? true
                                      :triggered? true})
               (db/transact! connection
                           [{:seon.cluster.message/id "message-2"
@@ -308,11 +297,10 @@
   ;; pure over committed facts and reads no clock, so the request now says
   ;; exactly that, and an unread required key cannot be reintroduced without
   ;; failing here.
-  (let [complete {:seon.cluster.agent/id agent-id
-                  :seon.cluster.run/process process}]
+  (let [complete {:seon.cluster.agent/id agent-id}]
     (is (true? (seon.schema/valid-candidate-value?
                 :seon.cluster.work/agent-request complete))
-        "the two facts the derivation reads are the whole request")
+        "the agent identity the derivation reads are the whole request")
     (is (true? (seon.schema/valid-candidate-value?
                 :seon.cluster.work/agent-request
                 (assoc complete :seon.cluster.work/now (Date.))))
@@ -351,7 +339,7 @@
 (deftest a-generated-run-resumes-then-requests-one-more-form
   (with-database
     (fn [connection]
-      (open-run! connection {:holder process})
+      (open-run! connection {})
       (db/transact!
        connection
        [[:db/retract [:seon.cluster.run/id run-id]
@@ -381,7 +369,7 @@
   (with-database
     (fn [connection]
       (add-trigger! connection)
-      (open-run! connection {:holder process :planned? true
+      (open-run! connection {:planned? true
                              :triggered? true})
       (db/transact!
        connection
@@ -465,8 +453,7 @@
         (tc/quick-check
          200
          (prop/for-all
-          [holder (gen/elements [nil process other-process])
-           planned? gen/boolean
+          [planned? gen/boolean
            closed? gen/boolean
            triggered? gen/boolean
            trigger-first? gen/boolean
@@ -476,8 +463,7 @@
             (fn [connection]
               (configure-cap! connection 3)
               (when trigger-first? (add-trigger! connection))
-              (open-run! connection {:holder holder
-                                     :planned? planned?
+              (open-run! connection {:planned? planned?
                                      :triggered? (and triggered?
                                                       trigger-first?)})
               (when (and triggered? (not trigger-first?))
@@ -519,29 +505,6 @@
     (is (true? (:result check))
         (str "situation totality failed: " (pr-str check)))))
 
-(deftest an-unplanned-orphan-run-is-settled-not-resumed
-  (with-database
-    (fn [connection]
-      (add-trigger! connection)
-      (open-run! connection {:triggered? true})
-      (let [db (db/db connection)]
-        (is (nil? (work/next-agent-work db request))
-            "it is not work — nothing re-calls a lost paid call")
-        (is (= run-id (:seon.cluster.run/id (work/interruption db agent-id)))
-            "it IS an interruption the turn proc must settle")))))
-
-(deftest a-planned-orphan-run-is-interruption-not-work
-  (with-database
-    (fn [connection]
-      (add-trigger! connection)
-      (open-run! connection {:planned? true :triggered? true})
-      (let [db (db/db connection)]
-        (is (nil? (work/next-agent-work db request))
-            "an unheld plan never cold resumes")
-        (is (= run-id (:seon.cluster.run/id
-                       (work/interruption db agent-id)))
-            "it is wreckage to bury, not work to continue")))))
-
 (deftest answeredness-is-the-turns-own-transaction
   ;; THE CLASS: answeredness used to be a stored reference from the run
   ;; to the one message it answered. It is now the turn's own `:t`, and
@@ -560,7 +523,7 @@
       (let [wake-t (:seon.wake/t
                     (first (work/unanswered-wakes
                             (db/db connection) agent-id {})))]
-        (open-run! connection {:holder process})
+        (open-run! connection {})
         (testing "opening a turn answers it — the turn's own transaction
                   is the basis, and no reference was written"
           (let [database (db/db connection)]
@@ -641,7 +604,7 @@
                (:seon.cluster.work/situation
                 (work/next-agent-work (db/db connection) request)))))
       (testing "a turn whose attempt succeeded answers"
-        (open-run! connection {:holder process})
+        (open-run! connection {})
         (let [database (db/db connection)]
           (is (empty? (work/unanswered-triggers database agent-id)))
           (is (pos? (work/latest-answering-turn-t database agent-id))))))))
@@ -672,16 +635,16 @@
       (is (= :open (:seon.cluster.work/situation
                     (work/next-agent-work (db/db connection)
                                           {:seon.cluster.agent/id agent-id
-                                           :seon.cluster.run/process process})))
+                                           :seon.db.process/id process})))
           "one turn opens")
-      (open-run! connection {:holder process})
+      (open-run! connection {})
       (close-run! connection)
       (let [database (db/db connection)]
         (is (empty? (work/unanswered-wakes database agent-id {}))
             "and that ONE turn answered both")
         (is (nil? (work/next-agent-work database
                                         {:seon.cluster.agent/id agent-id
-                                         :seon.cluster.run/process process}))
+                                         :seon.db.process/id process}))
             "no second paid call")))))
 
 (deftest a-wake-arriving-mid-turn-opens-the-next-turn
@@ -692,7 +655,7 @@
     (fn [connection]
       (configure-cap! connection 100)
       (add-trigger! connection)
-      (open-run! connection {:holder process})
+      (open-run! connection {})
       (db/transact!
        connection
        [{:seon.cluster.message/id "mid-turn"
@@ -709,7 +672,7 @@
               :seon.cluster.message/id "mid-turn"}
              (work/next-agent-work (db/db connection)
                                    {:seon.cluster.agent/id agent-id
-                                    :seon.cluster.run/process process}))
+                                    :seon.db.process/id process}))
           "and it opens the next turn"))))
 
 (deftest the-turn-bound-is-turns-since-the-latest-outside-wake
@@ -740,7 +703,7 @@
             "the inside wake did not refill the bound")
         (is (nil? (work/next-agent-work database
                                         {:seon.cluster.agent/id agent-id
-                                         :seon.cluster.run/process process}))
+                                         :seon.db.process/id process}))
             "AT the cap an inside wake opens nothing — this is what stops
              a fault about an agent's own code looping forever")
         (is (= ["self-1"]
@@ -766,7 +729,7 @@
         (is (= :open (:seon.cluster.work/situation
                       (work/next-agent-work
                        database {:seon.cluster.agent/id agent-id
-                                 :seon.cluster.run/process process})))
+                                 :seon.db.process/id process})))
             "and the agent hears it")))))
 
 (deftest triggers-come-back-oldest-first

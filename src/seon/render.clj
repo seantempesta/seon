@@ -138,7 +138,6 @@
                               :seon.render.value/root
                               :seon.render.data/cursor
                               :seon.render.walk/attribute
-                              :seon.cluster.run/live-processes
                               :seon.ai/partial
                               ;; the producers already rendering this
                               ;; chain — carried so a producer that

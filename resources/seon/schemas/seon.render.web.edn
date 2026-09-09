@@ -11,8 +11,8 @@
                    [:seon.sci.admit/caps :seon.sci.admit/caps]
                    [:seon.config.eval/time-limit-ms
                     :seon.sci.eval/time-limit-ms]
-                   [:seon.cluster.run/process
-                    :seon.cluster.run/process]
+                   [:seon.db.process/id
+                    :seon.db.process/id]
                    [:seon.render.web/pages-mult
                     :seon.render.web/pages-mult]
                    [:seon.render.web/registration
@@ -76,8 +76,7 @@
                     :seon.sci.eval/time-limit-ms]
                    [:seon.config/on-core-error
                     :seon.config/on-core-error]
-                   [:seon.cluster.run/live-processes
-                    :seon.cluster.run/live-processes]
+
                    [:seon.ai/partial
                     {:optional true}
                     :seon.ai/partial]],
@@ -108,8 +107,8 @@
                     :seon.sci.eval/time-limit-ms]
                    [:seon.config/on-core-error
                     :seon.config/on-core-error]
-                   [:seon.cluster.run/process
-                    :seon.cluster.run/process]
+                   [:seon.db.process/id
+                    :seon.db.process/id]
                    [:seon.render.web/pages-mult
                     :seon.render.web/pages-mult]
                    [:seon.render.web/registration
@@ -137,8 +136,8 @@
                    [:seon.render.web/completion :seon.flow/channel]
                    [:seon.render.web/root-agent-id
                     :seon.render.web/root-agent-id]
-                   [:seon.cluster.run/process
-                    :seon.cluster.run/process]
+                   [:seon.db.process/id
+                    :seon.db.process/id]
                    [:seon.render.web/pages-mult
                     :seon.render.web/pages-mult]],
                   :wanted-port :seon.render.web/port,

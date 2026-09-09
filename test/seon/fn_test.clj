@@ -436,18 +436,12 @@
            :seon.cluster.run/agent
            [:seon.cluster.agent/id "call-edges-agent"]
            :seon.cluster.run/opened-at (java.util.Date.)}))
-        (db/transact!
-         connection
-         (run/claim-tx
-          {:seon.cluster.run/id run-id
-           :seon.cluster.run/process process
-           :seon.cluster.run/live-processes #{process}
-           :seon.cluster.run/now (java.util.Date.)}))
+
         (db/transact!
          connection
          (run/plan-tx
           {:seon.cluster.run/id run-id
-           :seon.cluster.run/process process
+           :seon.db.process/id process
            :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
            :seon.cluster.run/plan-digest "call-edges-digest"
            :seon.cluster.run/sources
@@ -522,19 +516,12 @@
              :seon.cluster.run/agent
              [:seon.cluster.agent/id "settlement-parity-agent"]
              :seon.cluster.run/opened-at (java.util.Date.)}))
-          (db/transact!
-           connection
-           (run/claim-tx
-            {:seon.cluster.run/id "settlement-parity-run"
-             :seon.cluster.run/process "settlement-parity-process"
-             :seon.cluster.run/live-processes
-             #{"settlement-parity-process"}
-             :seon.cluster.run/now (java.util.Date.)}))
+
           (db/transact!
            connection
            (run/plan-tx
             {:seon.cluster.run/id "settlement-parity-run"
-             :seon.cluster.run/process "settlement-parity-process"
+             :seon.db.process/id "settlement-parity-process"
              :seon.cluster.run/starting-ns
              [:seon.ns/name namespace-name]
              :seon.cluster.run/plan-digest "settlement-parity-digest"

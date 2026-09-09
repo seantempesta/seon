@@ -419,17 +419,10 @@
   ranking; it has no private fragment path. GET, first SSE paint, and the
   render proc share this derivation. The proc retains fragments for deltas.
 
-  THE LIVE SET RIDES IN, it is not defaulted here. `:seon.cluster.run/
-  live-processes` is the one input no database value can answer, and
-  the problems block refuses to guess it rather than inventing wedges
-  (`#{}`) or hiding them (\"assume alive\"). The web layer can answer
-  it because the web layer IS the running process: the service carries
-  this process's run-holder identity, and on one branch that is the
-  whole live set."
+  Process provenance rides the service request."
   [{:keys [:seon.db/db :seon.cluster.agent/id
            :seon.render.web/root-agent-id
            :seon.db/connection] caps :seon.sci.admit/caps
-    live-processes :seon.cluster.run/live-processes
     stream-partial :seon.ai/partial
     retained :seon.render.web/retained-fragments
     retained-calls :seon.render/retained-calls
@@ -465,8 +458,7 @@
             (:seon.config.eval/time-limit-ms request)
             :seon.config/on-core-error
             (:seon.config/on-core-error request)
-            :seon.db/connection connection
-            :seon.cluster.run/live-processes live-processes}))
+            :seon.db/connection connection}))
         fleet-output
         (some-> fleet-call
                 (assoc :seon.render/output :seon.render/html
@@ -2118,8 +2110,6 @@
                      (:seon.config/on-core-error handle)
                      :seon.render/profile profile
                      :seon.db/connection connection
-                     :seon.cluster.run/live-processes
-                     #{(:seon.cluster.run/process handle)}
                      :seon.render.web/retained-fragments
                      (get-in retained-values [::fragments registration-key] {})
                      :seon.render/retained-calls retained
@@ -2991,7 +2981,7 @@
   [{connection :seon.store/connection-object
     :keys [:seon.cluster.agent/id]
     caps :seon.sci.admit/caps
-    process :seon.cluster.run/process}
+    process :seon.db.process/id}
    inbound]
   (let [request
         {:seon.cluster.agent/id (:seon.cluster.agent/id inbound)
@@ -3079,7 +3069,7 @@
 
 (defn- ensure-namespace-owner!
   [{connection :seon.store/connection-object
-    process :seon.cluster.run/process}
+    process :seon.db.process/id}
    namespace-name]
   ;; Any agent assigned to the namespace evaluates there; stewardship only
   ;; routes that namespace's faults and requests.
@@ -3490,7 +3480,7 @@
   {:malli/schema [:=> [:cat :seon.render.web/service] :seon.render.web/server]}
   [service]
   (let [connection (:seon.store/connection-object service)
-        process (:seon.cluster.run/process service)
+        process (:seon.db.process/id service)
         ;; Transaction provenance resolves to a durable process entity.
         ;; This is convergent: a running service creates its row once,
         ;; and every later start observes it.

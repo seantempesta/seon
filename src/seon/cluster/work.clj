@@ -2,8 +2,8 @@
   "Derive one agent's next operation from one database value.
 
   The open turn follows its agent ref and absence of closed-at. No pointer
-  or counter is stored on the agent. Legacy process custody and generated
-  turns remain until the turn PRD implementation replaces those paths."
+  or counter is stored on the agent. Boot closes prior open turns before
+  this derivation runs."
   (:require [clojure.edn :as edn]
             [seon.db :as db]
             [seon.ai :as ai]
@@ -491,7 +491,7 @@
   "The ONE thing to do next for `agent-id` on `db`, or nil when idle.
   Pure — the per-agent derivation every turn proc runs (F1 §5.2). The
   situations are ordered by what is already committed, not by
-  preference: a held run outranks a trigger, because finishing what is
+  preference: an open turn outranks a trigger, because finishing what is
   started is what makes the busy fence mean anything.
   `:resume` carries the ordinal the fold restarts at — the first form
   ordinal with no terminal receipt — so a turn never recomputes it;
@@ -504,13 +504,13 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.work/agent-request]
                   [:maybe :seon.cluster.work/next]]}
-  [db {:keys [:seon.cluster.agent/id :seon.cluster.run/process]}]
+  [db {:keys [:seon.cluster.agent/id]}]
   (let [agent-id id
         run (agent-run db agent-id)]
     (cond
-      ;; a run this process holds outranks any trigger: finishing what
+      ;; an open turn outranks any trigger: finishing what
       ;; is started is what makes the busy fence mean anything
-      (and run (= process (:seon.cluster.run/process run)))
+      (some? run)
       (cond
         (:seon.cluster.run/plan-digest run)
         (fold-or-close db run agent-id)
@@ -524,12 +524,6 @@
          :seon.cluster.agent/id agent-id}
 
         :else nil)
-
-      ;; An unheld run is interruption wreckage, never work. Boot
-      ;; recovery normally closes it before any graph is armed; keeping
-      ;; this derivation total prevents a fabricated or in-process
-      ;; orphan from becoming a cold resume.
-      (some? run) nil
 
       :else
       ;; ONE TURN FOR EVERY UNANSWERED WAKE. The turn's own transaction
@@ -557,27 +551,6 @@
                   :boolean]}
   [db request]
   (some? (next-agent-work db request)))
-
-(defn interruption
-  "The open, unclaimed run of `agent-id` on `db`, or nil.
-  Planned or unplanned, an unheld run is not work and never cold
-  resumes. Boot recovery normally closes prior-process runs before any
-  graph is armed; this derivation keeps the same rule total for
-  in-process wreckage. Returned separately from `next-agent-work`
-  because it is not work — the difference between `continue this` and
-  `bury this` must be visible in the value, not in a flag.
-
-  AGENT-SCOPED AND ALWAYS WAS: each turn proc settles its OWN orphan
-  before deriving, and the armer's arm-prime pass covers an agent with
-  no graph yet. The global plural died with the central pass (F2)."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.agent/id]
-                  [:maybe [:map [:seon.cluster.run/id :seon.cluster.run/id]]]]}
-  [db agent-id]
-  (let [run (agent-run db agent-id)]
-    (when (and run
-               (nil? (:seon.cluster.run/process run)))
-      {:seon.cluster.run/id (:seon.cluster.run/id run)})))
 
 (defn latest-answering-turn-t
   "The `:t` of the newest turn of `agent-id` that ANSWERED, or 0.

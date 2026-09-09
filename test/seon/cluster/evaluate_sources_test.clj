@@ -59,7 +59,7 @@
            cluster (merge defaults
                           {:seon.db/connection connection
                            :seon.cluster/name "preview-batch"
-                           :seon.cluster.run/process "preview-test"
+                           :seon.db.process/id "preview-test"
                            :seon.sci.eval/ctx base
                            :seon.cluster.wake/channel channel
                            :seon.render/context-channel channel
@@ -176,7 +176,7 @@
                               [:seon.cluster.run/id "saved-preview"]))))
              (is (= raw-source (:seon.cluster.run/reply saved)))
              (is (= closed-at (:seon.cluster.run/closed-at saved)))
-             (is (nil? (:seon.cluster.run/process saved)))
+
              (is (nil?
                    (run/open-for-agent @connection
                                        [:seon.cluster.agent/id "preview-batch-agent"])))

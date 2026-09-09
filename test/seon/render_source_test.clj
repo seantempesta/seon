@@ -42,7 +42,7 @@
   (support/cluster-handle
    {:seon.db/connection connection
     :seon.cluster/name cluster-name
-    :seon.cluster.run/process "preview-test"
+    :seon.db.process/id "preview-test"
     :seon.sci.eval/ctx ctx
     :seon.cluster.wake/channel channel
     :seon.render/context-channel channel

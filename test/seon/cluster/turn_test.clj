@@ -49,7 +49,6 @@
   ;; namespace constructs names; boot's own constructor, fewer layers.
   (delay (test-support/environment "seon.cluster.turn-test")))
 
-
 ;;; NO explicit attribute list. The live boot path installs whatever
 ;;; `canonical-database-attributes` derives, and a fixture that installs
 ;;; its own list is exactly how the missing entity maps stayed invisible
@@ -230,7 +229,7 @@
                :seon.db/connection connection
                :seon.cluster/name "turn-test"
                :seon.flow/work-launcher launcher
-               :seon.cluster.run/process process
+               :seon.db.process/id process
                :seon.sci.eval/ctx
                (test-support/fork-cluster-ctx connection)
                :seon.cluster.wake/channel
@@ -273,7 +272,7 @@
   ([connection] (request connection "agent-a"))
   ([_connection agent-id]
    {:seon.cluster.agent/id agent-id
-    :seon.cluster.run/process process
+    :seon.db.process/id process
     :seon.cluster.work/now (Date.)}))
 
 (defn- agent-ids
@@ -283,15 +282,6 @@
   turn rather than asking a global one that no longer exists."
   [db]
   (sort (db/q '[:find [?id ...] :where [?e :seon.cluster.agent/id ?id]] db)))
-
-(defn- settle-orphans!
-  "Settle each agent's OWN orphan, the way its turn proc would."
-  [cluster connection now]
-  (doseq [agent-id (agent-ids @connection)]
-    (when-let [orphan (work/interruption @connection agent-id)]
-      (cluster.loop/settle-interruption! cluster
-                                         (:seon.cluster.run/id orphan)
-                                         now))))
 
 (defn- any-agent-work
   "The first agent with work, derived through the AGENT-SCOPED
@@ -309,7 +299,7 @@
   (let [connection (:seon.db/connection cluster)]
     (loop [passes 0]
       (let [now (Date.)]
-        (settle-orphans! cluster connection now)
+
         (when-let [work (any-agent-work connection)]
           (when (< passes limit)
             (cluster.loop/turn {:seon.cluster.loop/cluster cluster
@@ -1751,74 +1741,6 @@
             "an effective as-alias target need not be loaded")
         (is (= 6 (:seon.sci.eval/installed acquired))))))))
 
-(deftest a-settled-orphan-stops-wedging-the-agent
-  ;; The crash drill's headline: a process died holding a claimed,
-  ;; unplanned run. Boot recovery released the dead CUSTODY, but until
-  ;; the turn proc settles the run the AGENT is still busy —
-  ;; next-agent-work finds
-  ;; nothing to do for it and every later trigger goes unanswered
-  ;; forever. This is that whole sequence, end to end.
-  (with-cluster fake-evaluate
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            now (Date.)]
-        ;; the wreckage a crash leaves, AFTER boot recovery has released
-        ;; the dead holder: open, unclaimed, unplanned
-        (db/transact! connection
-                    [{:seon.cluster.run/id "run-crashed"
-                      :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-                      :seon.cluster.run/opened-at (Date. 1000)}
-                     {:seon.cluster.agent/id "agent-a"
-                      }])
-        ;; A LATER trigger — the one the wedge would strand. Answeredness
-        ;; is the turn's own transaction, so a wake OLDER than the wreck
-        ;; was answered by the turn that died holding it (no resume, and
-        ;; the model is never re-called); this one arrived after it and
-        ;; must still be heard.
-        (db/transact! connection
-                    [{:seon.cluster.message/id "m-after-crash"
-                      :seon.cluster.message/to [:seon.cluster.agent/id "agent-a"]
-                      :seon.cluster.message/content "arrived while wedged"
-                      :seon.cluster.message/at now}])
-        (testing "the agent is WEDGED: it is busy, and nothing is work"
-          (is (nil? (work/next-agent-work @connection (request connection))))
-          (is (= "run-crashed"
-                 (:seon.cluster.run/id
-                  (work/interruption @connection "agent-a")))))
-
-        ;; the loop's own pass settles it before deriving anything
-        (with-redefs [ai/complete
-                      (fn [_] {:seon.ai/text "(my.run/complete \"answered\")"})]
-          (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
-                                  (pr-str (my.run/complete "answered"))
-                                  :seon.sci.admit/value (my.run/complete "answered")}]
-            (drive-passes! cluster 8)))
-
-        (testing "the orphan is settled — closed, and no longer an
-                  interruption"
-          (is (nil? (work/interruption @connection "agent-a")))
-          (is (some? (db/q '[:find ?c . :in $ ?id :where
-                            [?r :seon.cluster.run/id ?id]
-                            [?r :seon.cluster.run/closed-at ?c]]
-                          @connection "run-crashed"))))
-        (testing "and the trigger that was waiting behind it is ANSWERED
-                  by a new run that ran to completion"
-          (is (empty? (work/unanswered-triggers @connection "agent-a")))
-          (is (empty? (work/unanswered-wakes @connection "agent-a" {}))
-              "including the one that arrived while the agent was wedged")
-          (let [new-runs (db/q '[:find [?id ...] :where
-                                [?r :seon.cluster.run/id ?id]
-                                [?r :seon.cluster.run/plan-digest _]]
-                              @connection)]
-            (is (= 1 (count new-runs)))
-            (is (not= "run-crashed" (first new-runs))
-                "the crashed run was buried, never re-planned")))
-        (testing "nothing re-executed: receipts belong only to the new run"
-          (is (= 1 (count (db/q '[:find ?run-id (count ?e) :where
-                                 [?e :seon.cluster.eval/run ?r]
-                                 [?r :seon.cluster.run/id ?run-id]]
-                               @connection)))))))))
-
 (deftest a-lost-model-call-leaves-a-durable-readable-reason
   ;; the drive sat claimed-with-no-plan for 120 s and the operator had to
   ;; reproduce the call by hand to learn it was a missing credential.
@@ -1835,8 +1757,7 @@
         (testing "the run closed rather than sitting claimed"
           (is (some? (db/q '[:find ?c . :where
                             [_ :seon.cluster.run/closed-at ?c]] @connection)))
-          (is (nil? (db/q '[:find ?p . :where
-                           [_ :seon.cluster.run/process ?p]] @connection))))
+          )
         (testing "and WHY is readable from the database"
           (is (re-find #"DEEPSEEK_API_KEY"
                        (db/q '[:find ?e . :where
@@ -1919,7 +1840,7 @@
            :seon.cluster.run/trigger
            [:seon.cluster.message/id "route-goal"]
            :seon.cluster.run/opened-at now
-           :seon.cluster.run/process process
+
            :seon.cluster.run/plan-digest "route-digest"}])
         (db/transact!
          connection
@@ -2897,7 +2818,6 @@
               (mapv :seon.ai.attempt/ordinal rows))
            (every? #(not (contains? % :seon.ai/disposition)) rows)
            (contains? run-row :seon.cluster.run/closed-at)
-           (not (contains? run-row :seon.cluster.run/process))
            (= 1 (work/episode-runs @connection "agent-a"))
            (= succeeded?
               (contains? run-row :seon.cluster.run/plan-digest))))))))
@@ -3093,11 +3013,7 @@
         (testing "the held run derives :call for its holder ONLY"
           (is (= :call (:seon.cluster.work/situation
                         (work/next-agent-work @connection (request connection)))))
-          (is (nil? (work/next-agent-work @connection
-                                    {:seon.cluster.run/process
-                                     "some-other-process"
-                                     :seon.cluster.work/now (Date.)}))
-              "custody mismatch: another process derives NO work for it"))
+          )
         ;; the rest of the interleaving, arbitrarily later — there is
         ;; no clock on custody, so the pass simply proceeds
         (with-redefs [ai/complete
@@ -3139,7 +3055,7 @@
   (db/transact!
    connection
    (run/recover-tx {:seon.cluster.run/id run-id
-                    :seon.cluster.run/live-processes #{}
+
                     :seon.cluster.run/now (Date. 1700000001000)})))
 
 (deftest turn-intent-is-the-complete-crash-falsifier
@@ -3456,7 +3372,7 @@
           @connection
           {:seon.cluster.agent/id "agent-a"
            :seon.cluster.run/id run-id
-           :seon.cluster.run/process process
+           :seon.db.process/id process
            :seon.cluster.run/opened-at now
            :seon.cluster.run/starting-ns
            [:seon.ns/name 'my.agents.agent-a]}))
@@ -3464,7 +3380,7 @@
          connection
          (run/append-generated-tx
           {:seon.cluster.run/id run-id
-           :seon.cluster.run/process process
+           :seon.db.process/id process
            :seon.cluster.eval/at now
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/source "(help)"
@@ -3476,7 +3392,7 @@
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/result-edn "{:introduced 'my.run}"}))
         (let [request {:seon.cluster.agent/id "agent-a"
-                       :seon.cluster.run/process process}
+                       :seon.db.process/id process}
               generated (work/next-agent-work @connection request)
               report
               (with-redefs [bootstrap/next-entry (constantly nil)]
@@ -3519,7 +3435,7 @@
           @connection
           {:seon.cluster.agent/id "agent-a"
            :seon.cluster.run/id run-id
-           :seon.cluster.run/process process
+           :seon.db.process/id process
            :seon.cluster.run/opened-at now
            :seon.cluster.run/starting-ns
            [:seon.ns/name 'my.agents.agent-a]}))
@@ -3527,7 +3443,7 @@
          connection
          (run/append-generated-tx
           {:seon.cluster.run/id run-id
-           :seon.cluster.run/process process
+           :seon.db.process/id process
            :seon.cluster.eval/at now
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/source "(help)"
@@ -3539,7 +3455,7 @@
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/result-edn "{:introduced 'my.run}"}))
         (let [request {:seon.cluster.agent/id "agent-a"
-                       :seon.cluster.run/process process}
+                       :seon.db.process/id process}
               generated (work/next-agent-work @connection request)
               failure
               {:seon.error/kind :seon.bootstrap/root-acquisition-empty
@@ -3593,7 +3509,7 @@
                  :seon.cluster.run/agent
                  [:seon.cluster.agent/id "agent-a"]
                  :seon.cluster.run/opened-at now
-                 :seon.cluster.run/process process}
+                 }
                 {:seon.cluster.agent/id "agent-a"
                  }])
               (when evaluation?
@@ -3693,7 +3609,7 @@
                     [{:seon.cluster.run/id "run-untriggered"
                       :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
                       :seon.cluster.run/opened-at now
-                      :seon.cluster.run/process process}
+                      }
                      {:seon.cluster.agent/id "agent-a"
                       }])
         (with-redefs [ai/complete

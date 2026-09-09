@@ -3,8 +3,8 @@
                      [:seon.db/connection
                       :seon.db/connection]
                      [:seon.cluster/name :seon.cluster/name]
-                     [:seon.cluster.run/process
-                      :seon.cluster.run/process]
+                     [:seon.db.process/id
+                      :seon.db.process/id]
                      [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                      [:seon.flow/executor
                       {:optional true}
@@ -133,8 +133,8 @@
                     :terminal-request
                     [:map
                      [:seon.cluster.run/id :seon.cluster.run/id]
-                     [:seon.cluster.run/process
-                      :seon.cluster.run/process]
+                     [:seon.db.process/id {:optional true}
+                      :seon.db.process/id]
                      [:seon.cluster.eval/ordinal
                       :seon.cluster.eval/ordinal]
                      [:seon.eval/value

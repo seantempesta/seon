@@ -89,7 +89,7 @@
            red-before
            (:seon.problems/errored-receipts
             (problems/problems
-             @connection {:seon.cluster.run/live-processes #{}}))
+             @connection {}))
            reason "The dependency contract is missing."
            declination
            (message/delivery
@@ -125,7 +125,7 @@
          (is (= red-before
                 (:seon.problems/errored-receipts
                  (problems/problems
-                  @connection {:seon.cluster.run/live-processes #{}})))
+                  @connection {})))
              "the form stays red because the errored receipt is untouched")
          (is (= ["receipt-17"]
                 (mapv :seon.cluster.eval/id red-before)))

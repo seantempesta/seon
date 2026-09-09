@@ -176,3 +176,128 @@ their own roots. `run.MGNliH` was removed only after process-table
 inspection found no holder; `run.QPYZxQ` had already been removed by its
 wrapper. No lane worktree was created. The one disposable edit script was
 deleted; the rejected source remains in Git, not only in scratch files.
+
+
+## Slice 1 resume, 2026-09-09 07:15–07:31 UTC
+
+Entering HEAD `46e275d3b`; the two prior checkpoints were accepted. This
+resume implements custody removal only. The 30-minute deadline is 07:45 UTC.
+The named authorities were read end to end in the preceding checkpoint;
+their requirements and the two stash reviews remain the grounding here.
+The custody hunks of `39d1bf1` supplied the writer and request changes;
+`a9cd1f5` supplied only reviewed deletions of loop interruption cleanup and
+tests of that deleted mechanism. Neither stash was applied wholesale.
+
+Claim/release, `held?`, process-holder queries, the live-process roster,
+and the legacy run interruption stamp are removed. Close, plan and generated
+append check existence and absence of `closed-at` inside the Datahike writer.
+Boot closes all open turns and interrupts only unfinished evaluations and
+effects. Execution handles and request contracts use `:seon.db.process/id`;
+turn entities do not carry process identity. The problem renderer no longer
+invents a dead-holder family. A reply's absence is queried from database
+facts, because a render unit may omit the reply attribute.
+
+The fixed-seed state model retains open/close/plan/start/settle/recover.
+Removing custody made previously rare plan sequences reachable: the model
+now accounts for the existing writer's append of plan evaluations after the
+current ordinal count and its refusal of an occupied ordinal. Recovery tests
+preserve complete terminal entities, expected evaluation counts, exact close
+time, idempotence, late-settlement refusal, and zero invented evaluations.
+The real ordinary-proc regression still proves an agent takes new virtual
+turns after boot closes its old turn. No literal-nil assertion replaced a
+removed mechanism.
+
+Verification of the exact source/test paths below:
+
+- Required gate: `SEON_TEST_WORKERS=3 bin/test --paths <listed paths> --
+  seon.cluster.run-test seon.turn-test seon.cluster.loop-test` — **48 tests,
+  356 assertions, zero failures/errors**. Log `tmp/custody-gate.log`;
+  successful root `run.AYM1jE` removed by the runner.
+- Explicit `bin/test --platform --paths <listed paths>` — **83 tests,
+  490 assertions, zero failures/errors**. Log `tmp/custody-platform.log`;
+  successful root `run.TcicHq` removed by the runner.
+- Additional fast work/problematics verification used the same canonical
+  fixture and armed contracts: `seon.cluster.work-test` and
+  `seon.problems-test` passed; the whole five-namespace iteration was 75
+  tests / 479 assertions with two subsequently corrected failures in the
+  required namespaces. It is not represented as a separate green gate.
+- Literal/aliased retired process attributes, run interruption attributes,
+  and deleted API readers have **zero occurrences in src/test/resources**.
+  Source/test/schema patch: **197,939 bytes**, 49 paths at this checkpoint.
+- Virtual-turn observation: **4 transaction reports / 24 datoms**, distributed
+  1, 16, 5, 2. The first is metadata-only. This remains evidence for the next
+  slice, not a claim of three writes or work on that slice.
+
+**RESET NEEDED with the custody removal implementation commit** (commit hash
+recorded in the completion entry below). Both run schema attributes and
+execution request shapes changed. Default was never stopped, restarted, or
+reforked. Development adoption converged to
+`6aa10a14-9ed8-5ea9-bfb3-376b62023e7f`, digest
+`05e6bfa7b2298523484168e627babb74c8de774224c564545afe6ad1faaaeb4e`.
+The updated committed immutable recovery probe returned closed, interrupted,
+idempotent, default-unchanged and only-close-and-evaluation all true, with
+**2 operations**. This exercised the adopted live Var, without writing to
+or restarting default.
+
+After convergence, the required default debug URL returned **HTTP 500,
+110 bytes, 0.001136 s**. Its old captured service request lacks the new
+process key. Exact reset boundary and browser-tool failures are recorded in
+[the service-input issue](../../../seon/issues/development-adoption-retains-old-web-service-inputs.md).
+No foreign lane or foreign edit is involved. Browser paint is unverified.
+
+Fresh construction and cleanup are recorded in the completion entry below.
+Slices 2–4 (rename, three writes, stable ids) are outside this resume.
+
+Exact gated paths:
+
+```text
+resources/seon/schemas/seon.cluster.loop.edn
+resources/seon/schemas/seon.cluster.prompt.edn
+resources/seon/schemas/seon.cluster.run.edn
+resources/seon/schemas/seon.cluster.work.edn
+resources/seon/schemas/seon.context.capture.edn
+resources/seon/schemas/seon.context.edn
+resources/seon/schemas/seon.problems.edn
+resources/seon/schemas/seon.render.web.edn
+resources/seon/schemas/seon.schedule.edn
+src/seon/bootstrap.clj
+src/seon/cluster.clj
+src/seon/cluster/agent.clj
+src/seon/cluster/loop.clj
+src/seon/cluster/run.clj
+src/seon/cluster/work.clj
+src/seon/context.clj
+src/seon/eval/drive.clj
+src/seon/problems.clj
+src/seon/render.clj
+src/seon/render/web.clj
+src/seon/schedule.clj
+test/seon/ai_stream_fold_test.clj
+test/seon/background_test.clj
+test/seon/bootstrap_test.clj
+test/seon/cluster/agent_namespace_test.clj
+test/seon/cluster/agent_test.clj
+test/seon/cluster/armed_test.clj
+test/seon/cluster/boot_test.clj
+test/seon/cluster/evaluate_sources_test.clj
+test/seon/cluster/loop_test.clj
+test/seon/cluster/message_assignment_test.clj
+test/seon/cluster/program_restart_test.clj
+test/seon/cluster/prompt_test.clj
+test/seon/cluster/run_test.clj
+test/seon/cluster/turn_test.clj
+test/seon/cluster/work_test.clj
+test/seon/concurrency_independence_test.clj
+test/seon/concurrency_test.clj
+test/seon/effect_test.clj
+test/seon/flow_configuration_test.clj
+test/seon/fn_test.clj
+test/seon/gen/loop_test.clj
+test/seon/problems_test.clj
+test/seon/render/transcript_test.clj
+test/seon/render/web_performance_test.clj
+test/seon/render/web_test.clj
+test/seon/render_source_test.clj
+test/seon/schedule_test.clj
+test/seon/turn_test.clj
+```

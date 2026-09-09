@@ -209,7 +209,7 @@
   (let [connection (:seon.boot/cluster-connection instance)
         database @connection
         process (get-in instance [:seon.cluster.loop/cluster
-                                  :seon.cluster.run/process])
+                                  :seon.db.process/id])
         now (Date.)
         run-tx
         (mapcat
@@ -218,7 +218,7 @@
             database
             {:seon.cluster.agent/id (::agent-id spec)
              :seon.cluster.run/id (::run-id spec)
-             :seon.cluster.run/process process
+             :seon.db.process/id process
              :seon.cluster.run/opened-at now
              :seon.cluster.run/starting-ns
              [:seon.ns/name (::namespace spec)]
@@ -240,14 +240,14 @@
   [instance specs]
   (let [connection (:seon.boot/cluster-connection instance)
         handle (:seon.cluster.loop/cluster instance)
-        process (:seon.cluster.run/process handle)
+        process (:seon.db.process/id handle)
         work-items
         (mapv
          (fn [spec]
            (let [work-item (work/next-agent-work
                             @connection
                             {:seon.cluster.agent/id (::agent-id spec)
-                             :seon.cluster.run/process process})]
+                             :seon.db.process/id process})]
              (is (= :resume (:seon.cluster.work/situation work-item))
                  "a caller-planned run begins at the resume boundary")
              work-item))
@@ -348,33 +348,14 @@
     (is (empty? failures)
         (str "all receipts must settle successfully: " (pr-str failures)))))
 
-(defn- assert-custody!
-  [database process specs]
-  (let [run-ids (mapv ::run-id specs)
-        custody
-        (db/q '[:find ?run-id ?holder
-                :in $ [?run-id ...]
-                :where
-                [?run :seon.cluster.run/id ?run-id]
-                [?run :seon.cluster.run/process ?holder _ true]]
-              (db/history database) run-ids)
-        holders-by-run
-        (reduce (fn [result [run-id holder]]
-                  (update result run-id (fnil conj #{}) holder))
-                {}
-                custody)]
-    (doseq [spec specs]
-      (let [run-record
-            (db/pull database
-                     [:seon.cluster.run/id
-                      :seon.cluster.run/process
-                      :seon.cluster.run/closed-at]
-                     [:seon.cluster.run/id (::run-id spec)])]
-        (is (= #{process} (get holders-by-run (::run-id spec)))
-            "one process held the run throughout its complete history")
-        (is (some? (:seon.cluster.run/closed-at run-record)))
-        (is (nil? (:seon.cluster.run/process run-record))
-            "closed custody is retracted rather than left dangling")))))
+(defn- assert-closed!
+  [database specs]
+  (doseq [spec specs]
+    (let [turn (db/pull database
+                        [:seon.cluster.run/id :seon.cluster.run/closed-at]
+                        [:seon.cluster.run/id (::run-id spec)])]
+      (is (= (::run-id spec) (:seon.cluster.run/id turn)))
+      (is (inst? (:seon.cluster.run/closed-at turn))))))
 
 (defn- assert-concurrent-progress!
   [database specs]
@@ -563,7 +544,7 @@
         specs (scenario-specs scenario agent-count (Date.))
         run-ids (mapv ::run-id specs)
         process (get-in instance [:seon.cluster.loop/cluster
-                                  :seon.cluster.run/process])
+                                  :seon.db.process/id])
         started (System/nanoTime)]
     (create-scenario-agents! instance specs)
     (pause-scenario-mailboxes! instance specs)
@@ -574,7 +555,7 @@
           database @connection]
       (testing (str scenario " with N=" agent-count)
         (assert-receipts! database specs)
-        (assert-custody! database process specs)
+        (assert-closed! database specs)
         (assert-concurrent-progress! database specs)
         (assert-owned-rows! database specs)
         (assert-rows! database specs)

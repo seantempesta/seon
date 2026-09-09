@@ -10,7 +10,7 @@
 
 (defn- found [connection]
   (problems/problems @connection
-                     {:seon.cluster.run/live-processes #{}}))
+                     {}))
 
 (deftest creation-assigns-a-namespace-and-stewards-it
   (test-support/with-database

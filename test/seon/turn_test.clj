@@ -76,7 +76,7 @@
                     (cluster/projection-executor
                      (:seon.sci.eval/projection-state ctx))
                     :seon.sci.eval/ctx ctx
-                    :seon.cluster.run/process cluster/boot-process-identity
+                    :seon.db.process/id cluster/boot-process-identity
                     :seon.cluster.loop/stream-channel
                     (async/chan (async/sliding-buffer 1))})
            submit (fn [id & [source]]
@@ -120,7 +120,7 @@
                        [{:seon.cluster.run/id previous-id
                          :seon.cluster.run/agent [:seon.cluster.agent/id "a"]
                          :seon.cluster.run/opened-at (java.util.Date. 0)
-                         :seon.cluster.run/process cluster/boot-process-identity}])]
+}])]
            (is (nil? (:seon.error/kind seeded)) (pr-str seeded))
            (is (nil? (:seon.cluster.run/closed-at
                       (db/pull @connection '[*]

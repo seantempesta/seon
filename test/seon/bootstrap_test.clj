@@ -49,7 +49,7 @@
             result (cluster/ensure-entity! connection process request)
             run-id (bootstrap/run-id agent-id)
             run (db/pull @connection
-                         '[:seon.cluster.run/id :seon.cluster.run/process
+                         '[:seon.cluster.run/id
                            :seon.cluster.work/situation
                            :seon.cluster.run/plan-digest
                            {:seon.cluster.eval/_run
@@ -61,7 +61,7 @@
                              :seon.cluster.message/content]}]
                          [:seon.cluster.run/id run-id])]
         (is (= run-id (:seon.cluster.run/id result)))
-        (is (= process (:seon.cluster.run/process run)))
+
         (is (nil? (:seon.cluster.run/plan-digest run))
             "a generated run has no frozen authored plan")
         (is (= :generate (:seon.cluster.work/situation run)))
@@ -80,7 +80,7 @@
                 :seon.cluster.agent/id agent-id}
                (work/next-agent-work
                 @connection {:seon.cluster.agent/id agent-id
-                             :seon.cluster.run/process process})))))))
+                             :seon.db.process/id process})))))))
 
 (deftest drive-free-generation-is-pure-deterministic-and-pull-gated
   (support/with-database
@@ -118,7 +118,7 @@
            connection
            (run/append-generated-tx
             {:seon.cluster.run/id (bootstrap/run-id agent-id)
-             :seon.cluster.run/process cluster/boot-process-identity
+             :seon.db.process/id cluster/boot-process-identity
              :seon.cluster.eval/at (java.util.Date.)
              :seon.cluster.eval/ordinal 0
              :seon.cluster.eval/source opening-source

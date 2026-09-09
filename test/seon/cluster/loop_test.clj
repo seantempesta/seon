@@ -49,7 +49,6 @@
   ;; namespace constructs names; boot's own constructor, fewer layers.
   (delay (test-support/environment "seon.cluster.loop-test")))
 
-
 ;;; ---------------------------------------------------------------------------
 ;;; The pure parts
 ;;; ---------------------------------------------------------------------------
@@ -306,7 +305,7 @@
             trigger-id "one-question"
             first-run "first-answer"
             request {:seon.cluster.agent/id agent-id
-                     :seon.cluster.run/process process}]
+                     :seon.db.process/id process}]
         (db/transact!
          connection
          [{:seon.cluster.agent/id agent-id}
@@ -328,11 +327,7 @@
              {:seon.cluster.run/id first-run
               :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
               :seon.cluster.run/opened-at now}]]
-           (run/claim-tx
-            {:seon.cluster.run/id first-run
-             :seon.cluster.run/process process
-             :seon.cluster.run/live-processes #{process}
-             :seon.cluster.run/now now}))})
+           [])})
         (db/transact!
          connection
          [{:seon.cluster.run/id first-run
@@ -345,7 +340,7 @@
          connection
          (run/close-tx
           {:seon.cluster.run/id first-run
-           :seon.cluster.run/process process
+           :seon.db.process/id process
            :seon.cluster.run/closed-at now}))
         (let [database (db/db connection)]
           (is (empty? (work/unanswered-wakes database agent-id {}))
@@ -430,17 +425,12 @@
          (run/open-tx {::run/id run-id
                        ::run/agent [:seon.cluster.agent/id agent-id]
                        ::run/opened-at now}))
-        (db/transact!
-         connection
-         (run/claim-tx {::run/id run-id
-                        ::run/process process
-                        ::run/live-processes #{process}
-                        ::run/now now}))
+
         (db/transact!
          connection
          (run/plan-tx
           {::run/id run-id
-           ::run/process process
+           :seon.db.process/id process
            ::run/starting-ns [:seon.ns/name starting-ns]
            ::run/plan-digest "namespace-resume-plan"
            ::run/sources
@@ -496,7 +486,7 @@
                 cluster (merge defaults
                                {:seon.db/connection connection
                                 :seon.cluster/name cluster-name
-                                :seon.cluster.run/process process
+                                :seon.db.process/id process
                                 :seon.sci.eval/ctx ctx
                                 :seon.cluster.wake/channel channel
                                 :seon.render/context-channel channel
@@ -577,7 +567,7 @@
      :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
      :seon.cluster.run/trigger [:seon.cluster.message/id message-id]
      :seon.cluster.run/opened-at now
-     :seon.cluster.run/process process}
+     }
     {:seon.cluster.agent/id agent-id
      }]))
 
@@ -615,7 +605,7 @@
            cluster (test-support/cluster-handle
                    {:seon.db/connection connection
                     :seon.cluster/name cluster-name
-                    :seon.cluster.run/process process
+                    :seon.db.process/id process
                     :seon.sci.eval/ctx
                     (test-support/fork-cluster-ctx connection)
                     :seon.config.eval/time-limit-ms 2000
@@ -647,12 +637,7 @@
                       :seon.cluster.run/trigger
                       [:seon.cluster.message/id message-id]
                       :seon.cluster.run/opened-at now}))
-       (db/transact!
-        connection
-        (run/claim-tx {:seon.cluster.run/id run-id
-                       :seon.cluster.run/process process
-                       :seon.cluster.run/live-processes #{process}
-                       :seon.cluster.run/now now}))
+
        (with-redefs [prompt/prompt (fn [_database _request] refusal)
                      ai/complete (fn [_request]
                                    (swap! provider-calls inc)
@@ -741,17 +726,12 @@
          (run/open-tx {::run/id run-id
                        ::run/agent [:seon.cluster.agent/id agent-id]
                        ::run/opened-at now}))
-        (db/transact!
-         connection
-         (run/claim-tx {::run/id run-id
-                        ::run/process process
-                        ::run/live-processes #{process}
-                        ::run/now now}))
+
         (db/transact!
          connection
          (run/plan-tx
           {::run/id run-id
-           ::run/process process
+           :seon.db.process/id process
            ::run/plan-digest "assigned-run-plan"
            ::run/sources
            [{:seon.cluster.eval/source "(ns-name *ns*)"}]}))
@@ -839,7 +819,7 @@
            cluster (test-support/cluster-handle
                    {:seon.db/connection connection
                     :seon.cluster/name cluster-name
-                    :seon.cluster.run/process process
+                    :seon.db.process/id process
                     :seon.sci.eval/ctx
                     (test-support/fork-cluster-ctx connection)
                     :seon.config.eval/time-limit-ms 2000
@@ -943,7 +923,7 @@
              connection
              (run/close-tx
               {:seon.cluster.run/id "settings-run-1"
-               :seon.cluster.run/process process
+               :seon.db.process/id process
                :seon.cluster.run/closed-at now}))
             (config/apply!
              {:seon.db/connection connection
@@ -999,7 +979,7 @@
           :seon.cluster/name "refused-phase"
           :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
           :seon.config.error/escalate-to escalate-to
-          :seon.cluster.run/process process
+          :seon.db.process/id process
           :seon.config.error/recurrence-limit 3
           :seon.sci.admit/caps (config/result-caps (config/defaults))})
          @connection now agent-id nil process nil nil
@@ -1116,15 +1096,12 @@
                   ::run/agent [:seon.cluster.agent/id agent-id]
                   ::run/trigger [:seon.cluster.message/id message-id]
                   ::run/opened-at now})
-                (run/claim-tx
-                 {::run/id run-id
-                  ::run/process process
-                  ::run/live-processes #{process}
-                  ::run/now now})
+                []
                 (run/plan-tx
                  {::run/id run-id
-                  ::run/process process
+                  :seon.db.process/id process
                   ::run/plan-digest "recorded-three-form-reply"
+                  ::run/reply "(defn answer-count [] 2)\n(answer-count)\n(+ (answer-count) 1)"
                   ::run/sources
                   [{:seon.cluster.eval/source
                     "(defn answer-count [] 2)"}
@@ -1155,12 +1132,12 @@
                 (test-support/cluster-handle
                  {:seon.db/connection connection
                   :seon.cluster/name "undisposed"
-                  :seon.cluster.run/process process
+                  :seon.db.process/id process
                   :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)})
                 :seon.cluster.loop/now now
                 :seon.cluster.agent/id agent-id
                 :seon.cluster.run/id run-id
-                :seon.cluster.run/process process
+                :seon.db.process/id process
                 :seon.cluster.eval/ordinal 2
                 :seon.sci.eval/evaluation
                 {:seon.eval/value "3"
@@ -1260,7 +1237,7 @@
                                :seon.cluster.run/trigger
                                [:seon.cluster.message/id "m-live"]
                                :seon.cluster.run/opened-at now
-                               :seon.cluster.run/process "process/one"
+
                                :seon.cluster.run/plan-digest
                                (apply str (repeat 64 "a"))}
                               {:seon.cluster.agent/id "alice"
@@ -1338,7 +1315,7 @@
   `next-agent-work` with the same rows and the same expected
   situations."
   {:seon.cluster.agent/id "agent-a"
-   :seon.cluster.run/process process
+   :seon.db.process/id process
    :seon.cluster.work/now now})
 
 (defn- with-database [body]
@@ -1355,7 +1332,7 @@
                     :seon.cluster.message/at now}])
       (body connection))))
 
-(defn- commit-run! [connection {:keys [held? planned? receipts closed?]}]
+(defn- commit-run! [connection {:keys [planned? receipts closed?]}]
   (db/transact!
    connection
    {:tx-data
@@ -1364,7 +1341,6 @@
                       :seon.cluster.run/trigger
                       [:seon.cluster.message/id "m-1"]
                       :seon.cluster.run/opened-at now}
-               held? (assoc :seon.cluster.run/process process)
                planned? (assoc :seon.cluster.run/plan-digest
                                (apply str (repeat 64 "a")))
                closed? (assoc :seon.cluster.run/closed-at now))]
@@ -1418,7 +1394,7 @@
                     {:seon.db/connection connection
                      :seon.cluster/name "install-refusal"
                      :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
-                     :seon.cluster.run/process process
+                     :seon.db.process/id process
                      :seon.config.error/recurrence-limit 3})
             gate-refusal
             ((private-loop-fn 'phase)
@@ -1482,14 +1458,14 @@
   (doseq [[row state expected]
           [["1 — trigger only" nil :open]
            ["2-4 — claimed, no plan, custody died" {} nil]
-           ["5 — planned, no receipts" {:held? true :planned? true} :resume]
+           ["5 — planned, no receipts" {:planned? true} :resume]
            ["8 — one terminal receipt"
-            {:held? true :planned? true :receipts [[0 :done]]} :resume]
+            {:planned? true :receipts [[0 :done]]} :resume]
            ["9 — every receipt terminal, run open"
-            {:held? true :planned? true
+            {:planned? true
              :receipts [[0 :done] [1 :done]]} :close]
            ["10 — closed"
-            {:held? true :planned? true :closed? true
+            {:planned? true :closed? true
              :receipts [[0 :done] [1 :done]]} nil]]]
     (with-database
       (fn [connection]
@@ -1497,7 +1473,6 @@
         (let [derived (work/next-agent-work (db/db connection) request)]
           (testing (str "work derivation row " row)
             (is (= expected (:seon.cluster.work/situation derived)))))))))
-
 
 ;;; ---------------------------------------------------------------------------
 ;;; A staged blob settles, and a failed commit still closes the run
@@ -1569,7 +1544,7 @@
        {:seon.db/connection connection
         :seon.cluster/name cluster-name
         :seon.sci.eval/ctx ctx
-        :seon.cluster.run/process process})
+        :seon.db.process/id process})
       :seon.cluster.loop/now now
       :seon.cluster.agent/id "agent-a"
       :seon.cluster.run/id "run-1"
@@ -1582,7 +1557,7 @@
     (fn [connection]
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name "loop-blob"})
-      (commit-run! connection {:held? true})
+      (commit-run! connection {})
       (commit-agent-receipt! connection)
       (let [handed (volatile! ::never-called)
             publish (var-get #'blob/with-publication!)
@@ -1609,7 +1584,7 @@
     (fn [connection]
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name "loop-blob-refused"})
-      (commit-run! connection {:held? true})
+      (commit-run! connection {})
       (commit-agent-receipt! connection)
       (let [attempts (volatile! 0)
             publish (var-get #'blob/with-publication!)
@@ -1666,7 +1641,7 @@
     (fn [connection]
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name "loop-batch-refused"})
-      (commit-run! connection {:held? true})
+      (commit-run! connection {})
       (commit-agent-receipts! connection)
       (let [ctx (test-support/fork-cluster-ctx connection
                                                "loop-batch-refused")
@@ -1674,7 +1649,7 @@
                      {:seon.db/connection connection
                       :seon.cluster/name "loop-batch-refused"
                       :seon.sci.eval/ctx ctx
-                      :seon.cluster.run/process process})
+                      :seon.db.process/id process})
             decisions (config/defaults)
             evaluate
             (fn [ordinal]
@@ -1725,7 +1700,7 @@
             "every begun ordinal settled, so no form can execute twice")
         (is (inst? (closed-at connection))
             "and the turn closed in the refusal path itself")
-        (is (nil? (work/interruption database "agent-a"))
+        (is (nil? (run/open-for-agent database [:seon.cluster.agent/id "agent-a"]))
             "the agent holds no wreckage")
         (db/transact! connection
                       [{:seon.cluster.message/id "m-after-refusal"
@@ -1738,5 +1713,5 @@
                 (work/next-agent-work
                  @connection
                  {:seon.cluster.agent/id "agent-a"
-                  :seon.cluster.run/process process})))
+                  :seon.db.process/id process})))
             "AND THE AGENT TAKES ITS NEXT TURN")))))

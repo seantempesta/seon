@@ -54,7 +54,6 @@
   ;; A shorter fixture-only limit changes the tested disposition.
   (delay (:seon.config.eval/time-limit-ms (config/defaults))))
 
-
 (set! *warn-on-reflection* true)
 
 (def ^:dynamic *work-launcher* nil)
@@ -159,7 +158,7 @@
                    :seon.config.eval/time-limit-ms
                    @shipped-eval-time-limit-ms
                    :seon.config/on-core-error :panic
-                  :seon.cluster.run/process process}})}}
+                  :seon.db.process/id process}})}}
               :conns []
               :io-exec
               (cluster/projection-executor
@@ -203,7 +202,7 @@
    :seon.sci.eval/ctx ctx
    :seon.render/context-channel *context-channel*
    :seon.cluster.loop/stream-channel *stream-channel*
-   :seon.cluster.run/process process
+   :seon.db.process/id process
    ;; replaced per agent by arm! — present so the handle validates
    :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
    :seon.cluster.loop/completion (async/promise-chan)
@@ -600,7 +599,7 @@
          [:seon.cluster.agent/id "missing-context"]
          :seon.cluster.run/trigger
          [:seon.cluster.message/id "missing-context-message"]
-         :seon.cluster.run/process process
+         :seon.db.process/id process
          :seon.cluster.run/opened-at now}
         {:seon.cluster.agent/id "missing-context"
          :seon.cluster.agent/run
@@ -680,7 +679,7 @@
               (is (nil? (work/next-agent-work
                          @connection
                          {:seon.cluster.agent/id "prompt-refusal-cap"
-                          :seon.cluster.run/process process
+                          :seon.db.process/id process
                           :seon.cluster.work/now (Date.)}))
                   "the refused answering run derives no retry")))
           (finally
@@ -819,7 +818,7 @@
             wake-channel (async/chan (async/sliding-buffer 1))
             completion (async/chan 1)
             request {:seon.cluster.agent/id agent-id
-                     :seon.cluster.run/process process}
+                     :seon.db.process/id process}
             stale-work {:seon.cluster.work/situation :open
                         :seon.cluster.agent/id agent-id
                         :seon.cluster.message/id trigger-id}
@@ -1052,9 +1051,9 @@
                             :in $ ?agent-id
                             :where
                             [?agent :seon.cluster.agent/id ?agent-id]
-                            [?agent :seon.cluster.agent/run ?run]
+                            [?run :seon.cluster.run/agent ?agent]
                             [?run :seon.cluster.run/id ?run-id]
-                            [?run :seon.cluster.run/process _]]
+                            (not [?run :seon.cluster.run/closed-at])]
                           @connection agent-id)
                     started-at (System/nanoTime)
                     stopped
@@ -1179,7 +1178,7 @@
            {:seon.config.agent/turn-completion-backstop-ms timeout-ms})])
         (async/>!! completion ::ready)
         (let [escaped
-              (with-redefs [work/interruption (fn [& _] nil)
+              (with-redefs [
                             work/next-agent-work
                             (fn [& _]
                               {:seon.cluster.work/situation :resume
@@ -1240,18 +1239,12 @@
            :seon.cluster.run/trigger
            [:seon.cluster.message/id message-id]
            :seon.cluster.run/opened-at now}))
-        (db/transact!
-         connection
-         (run/claim-tx
-          {:seon.cluster.run/id run-id
-           :seon.cluster.run/process process
-           :seon.cluster.run/live-processes #{process}
-           :seon.cluster.run/now now}))
+
         (db/transact!
          connection
          (run/plan-tx
           {:seon.cluster.run/id run-id
-           :seon.cluster.run/process process
+           :seon.db.process/id process
            :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
            :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))
            :seon.cluster.run/sources
@@ -1456,14 +1449,10 @@
                                             :seon.cluster.run/trigger
                                             [:seon.cluster.message/id message-id]
                                             :seon.cluster.run/opened-at at})
-                              (run/claim-tx {:seon.cluster.run/id run-id
-                                             :seon.cluster.run/process process
-                                             :seon.cluster.run/live-processes
-                                             #{process}
-                                             :seon.cluster.run/now at}))})
+                              [])})
   (db/transact! connection
               (run/close-tx {:seon.cluster.run/id run-id
-                             :seon.cluster.run/process process
+                             :seon.db.process/id process
                              :seon.cluster.run/closed-at at})))
 
 (deftest episode-cap-refusal-test
@@ -1473,7 +1462,7 @@
   (with-connection
     (fn [connection _ctx]
       (let [request {:seon.cluster.agent/id "alice"
-                     :seon.cluster.run/process process
+                     :seon.db.process/id process
                      :seon.cluster.work/now (Date.)}]
         (db/transact! connection
                     [{:seon.cluster.agent/id "alice"}
@@ -1518,7 +1507,7 @@
         present under `get`, from facts alone"
           (let [found (problems/problems
                        @connection
-                       {:seon.cluster.run/live-processes #{process}})
+                       {})
                 deferred (get found :seon.problems/deferred-agents)]
             (is (= [{:seon.cluster.agent/id "alice"
                      :seon.cluster.work/episode-runs 3
@@ -1547,7 +1536,7 @@
           (is (empty? (work/deferred-triggers @connection "alice")))
           (is (empty? (get (problems/problems
                             @connection
-                            {:seon.cluster.run/live-processes #{process}})
+                            {})
                            :seon.problems/deferred-agents [])))
           (is (= 2 (work/episode-runs @connection "alice"))))))))
 
@@ -1683,15 +1672,10 @@
                                       :seon.cluster.run/trigger
                                       [:seon.cluster.message/id "m-dead"]
                                       :seon.cluster.run/opened-at now})
-                                    (run/claim-tx
-                                     {:seon.cluster.run/id "run-dead"
-                                      :seon.cluster.run/process dead
-                                      :seon.cluster.run/live-processes
-                                      #{dead}
-                                      :seon.cluster.run/now now}))})
+                                    [])})
         (db/transact! connection
                     (run/plan-tx {:seon.cluster.run/id "run-dead"
-                                  :seon.cluster.run/process dead
+                                  :seon.db.process/id dead
                                   :seon.cluster.run/plan-digest
                                   (apply str (repeat 64 "d"))
                                   :seon.cluster.run/sources
@@ -1733,7 +1717,7 @@
                     (db/transact! connection
                                   (run/recover-tx
                                    {:seon.cluster.run/id "run-dead"
-                                    :seon.cluster.run/live-processes #{process}
+
                                     :seon.cluster.run/now (Date.)}))
                     (doseq [agent-id ["midfold" "waiting"]]
                       (arm-one! connection ctx routing agent-id))
@@ -1760,11 +1744,7 @@
                                   [?receipt
                                    :seon.cluster.eval/interrupted-at ?at]]
                                 db)))
-                (is (nil? (db/q '[:find ?process .
-                                 :where
-                                 [?run :seon.cluster.run/id "run-dead"]
-                                 [?run :seon.cluster.run/process ?process]]
-                               db)))
+
                 (is (some? (db/q '[:find ?at .
                                   :where
                                   [?run :seon.cluster.run/id "run-dead"]
@@ -1773,7 +1753,7 @@
                 (is (nil? (db/q '[:find ?run .
                                  :where
                                  [?agent :seon.cluster.agent/id "midfold"]
-                                 [?agent :seon.cluster.agent/run ?run]]
+                                 [?run :seon.cluster.run/agent ?agent]]
                                db))))
               (testing "the interrupted plan never continues"
                 (is (every? (fn [[_ _ n]] (= 1 n))
@@ -1841,63 +1821,7 @@
 ;;; 8. custody-mismatch-regression (audit P2) — seed 2026072818
 ;;; ---------------------------------------------------------------------------
 
-(deftest custody-mismatch-regression
-  ;; seed 2026072818 — a run held by ANOTHER live process rewakes its
-  ;; agent here: this process derives no work for it and dispatches
-  ;; nothing. With leases deleted, P2's scenario is a custody mismatch.
-  (with-connection
-    (fn [connection ctx]
-      (let [other "77777-1"
-            routing (armory)
-            ledger (atom [])]
-        (db/transact! connection
-                    [{:seon.cluster.agent/id "held"}
-                     (config-row "p2-2026072818"
-                                 {:seon.config.run/max-episode-runs 100})])
-        (outside-trigger! connection "held" "m-held" "busy elsewhere")
-        (db/transact! connection
-                    {:tx-data (into (run/open-tx
-                                     {:seon.cluster.run/id "run-held"
-                                      :seon.cluster.run/agent
-                                      [:seon.cluster.agent/id "held"]
-                                      :seon.cluster.run/trigger
-                                      [:seon.cluster.message/id "m-held"]
-                                      :seon.cluster.run/opened-at now})
-                                    (run/claim-tx
-                                     {:seon.cluster.run/id "run-held"
-                                      :seon.cluster.run/process other
-                                      :seon.cluster.run/live-processes
-                                      #{other}
-                                      :seon.cluster.run/now now}))})
-        (is (nil? (work/next-agent-work
-                   @connection
-                   {:seon.cluster.agent/id "held"
-                    :seon.cluster.run/process process
-                    :seon.cluster.work/now (Date.)}))
-            "another process's held run derives NO work here")
-        (try
-          (with-redefs [ai/complete
-                        (recording-completer
-                         ledger (fn [_] "(my.run/complete \"done\")"))]
-            (arm-one! connection ctx routing "held")
-            (let [entry (agent/armed routing "held")]
-              ;; the arm prime plus an explicit rewake both pass over
-              ;; the held run without touching it
-              (async/offer! (:seon.cluster.wake/channel entry) ::wake)
-              (is (await-until #(>= (::flow/count (turn-ping entry)) 1)))
-              (is (zero? (count @ledger))
-                  "zero duplicate provider dispatches across the
-                   interleaving")
-              (is (empty? (db/q '[:find ?receipt
-                                  :where [?receipt :seon.cluster.eval/id _]]
-                                @connection)))
-              (is (= other (db/q '[:find ?p . :where
-                                  [?run :seon.cluster.run/id "run-held"]
-                                  [?run :seon.cluster.run/process ?p]]
-                                @connection))
-                  "custody untouched")))
-          (finally
-            (disarm-all! routing)))))))
+
 
 ;;; ---------------------------------------------------------------------------
 ;;; 9. wake-routing-conservation-property — seed 2026072819
@@ -2139,22 +2063,7 @@
               (testing "settle and close share ONE transaction"
                 (is (some? settle-tx))
                 (is (= settle-tx close-tx)))
-              (testing "no basis carries an unheld open planned run —
-              the P1 feeder state is unrepresentable"
-                (let [txs (sort (db/q '[:find [?tx ...] :where
-                                       [_ _ _ ?tx]]
-                                     db))]
-                  (is (not-any?
-                       (fn [tx]
-                         (let [basis (db/as-of db tx)
-                               run (db/pull basis '[*]
-                                           [:seon.cluster.run/id run-id])]
-                           (and (some? (:db/id run))
-                                (nil? (:seon.cluster.run/closed-at run))
-                                (nil? (:seon.cluster.run/process run))
-                                (some? (:seon.cluster.run/plan-digest
-                                        run)))))
-                       txs))))
+
               (testing "the note survives in the receipt"
                 (is (str/includes?
                      (db/q '[:find ?edn . :where

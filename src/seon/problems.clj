@@ -124,25 +124,6 @@
                       :seon.error/signature))
        vec))
 
-(defn- wedged-runs
-  "Runs held by a process that is not alive. Open runs only: a closed
-  run held by a dead process is finished work, not stuck work."
-  [db live-processes]
-  (->> (db/q '[:find ?id ?agent-id ?process
-              :where
-              [?run :seon.cluster.run/id ?id]
-              [?run :seon.cluster.run/process ?process]
-              (not [?run :seon.cluster.run/closed-at _])
-              [?run :seon.cluster.run/agent ?agent]
-              [?agent :seon.cluster.agent/id ?agent-id]]
-            db)
-       (remove (fn [[_ _ process]] (contains? live-processes process)))
-       (sort)
-       (mapv (fn [[id agent-id process]]
-               {:seon.cluster.run/id id
-                :seon.cluster.agent/id agent-id
-                :seon.cluster.run/process process}))))
-
 (defn- failed-runs
   [db]
   (->> (db/q '[:find ?id ?agent-id ?error
@@ -372,7 +353,7 @@
 
 (defn problems
   "Everything wrong now, as a map keyed by family. `{}` when nothing is.
-  Reads one immutable `db`, `:seon.cluster.run/live-processes`, and one
+  Reads one immutable `db` and one
   loaded-namespace snapshot. The same database value drives every
   query; neither process liveness nor JVM namespace state is stored.
 
@@ -385,9 +366,8 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.problems/request]
                   :seon.problems/problems]}
-  [db {:keys [:seon.cluster.run/live-processes]}]
+  [db _request]
   (let [signatures (error-signatures db)
-        wedged (wedged-runs db live-processes)
         failed (failed-runs db)
         errored (errored-receipts db)
         deferred (deferred-agents db)
@@ -396,7 +376,6 @@
         missing-model-rows (missing-models db)
         found (cond-> {}
                 (seq signatures) (assoc :seon.problems/error-signatures signatures)
-                (seq wedged) (assoc :seon.problems/wedged-runs wedged)
                 (seq failed) (assoc :seon.problems/failed-runs failed)
                 (seq errored) (assoc :seon.problems/errored-receipts errored)
                 (seq deferred) (assoc :seon.problems/deferred-agents deferred)
@@ -495,12 +474,7 @@
            "seen" (:seon.problems/occurrences entry)
            "signature" (:seon.error/signature entry)
            "latest" (:seon.error/message (:seon.error/fact entry)))))
-   (family-section
-    "wedged runs"
-    (for [entry (:seon.problems/wedged-runs found)]
-      (row "run" (:seon.cluster.run/id entry)
-           "agent" (:seon.cluster.agent/id entry)
-           "held by" (str (:seon.cluster.run/process entry) " (not alive)"))))
+
    (family-section
     "failed runs"
     (for [entry (:seon.problems/failed-runs found)]
@@ -533,38 +507,15 @@
     (map missing-model-html (:seon.problems/missing-models found)))])
 
 (defn block
-  "The problems BLOCK's html render: derive, then project.
-
-  The unit a block projection receives carries the exact immutable
-  database value, so every database-backed family is derived at that
-  value. Stale Vars additionally observe one snapshot of the loaded JVM
-  namespaces; reconnect re-derives both current inputs.
-
-  `:seon.cluster.run/live-processes` must ride on the unit. It is the
-  one input a database cannot answer, `problems` already takes it by
-  that name, and defaulting it here would be the worst kind of quiet
-  lie: an absent set makes every held run wedged, so a default of `#{}`
-  would invent problems and a default of \"assume alive\" would hide
-  them. Absent gets a legible card instead.
-
-  The HEALTHY case is rendered here rather than in `html-report`,
-  because only a block knows its surface has to occupy space whether or
-  not there is anything to say."
+  "Derive the problems block from its supplied database value."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (if-not (contains? unit :seon.cluster.run/live-processes)
-    [:div {:class "seon-error-card"}
-     [:span {:class "seon-error-card-message"}
-      (str "This block needs :seon.cluster.run/live-processes on the unit; "
-           "which processes are alive is the one thing the database "
-           "cannot answer.")]]
-    (let [found (problems (:seon.db/db unit)
-                          (select-keys unit [:seon.cluster.run/live-processes]))]
-      (if (empty? found)
-        [:div {:class "seon-problems seon-problems-healthy"}
-         [:span {:class "seon-problems-healthy-mark"} "◆"]
-         [:span "nothing is wrong"]]
-        (html-report found)))))
+  (let [found (problems (:seon.db/db unit) {})]
+    (if (empty? found)
+      [:div {:class "seon-problems seon-problems-healthy"}
+       [:span {:class "seon-problems-healthy-mark"} "◆"]
+       [:span "nothing is wrong"]]
+      (html-report found))))
 
 (defn ai-prose
   "`:seon.render/ai` — concise steering, derived from the families.
@@ -610,11 +561,7 @@
            (error/notice {:seon.error/fact (:seon.error/fact entry)
                           :seon.error/occurrences
                           (:seon.problems/occurrences entry)})))
-        (for [entry (:seon.problems/wedged-runs found)]
-          (str "seon.problems wedged-run run=" (:seon.cluster.run/id entry)
-               " agent=" (:seon.cluster.agent/id entry)
-               " held-by=" (:seon.cluster.run/process entry)
-               " (that process is not alive)"))
+
         (for [entry (:seon.problems/failed-runs found)]
           (str "seon.problems failed-run run=" (:seon.cluster.run/id entry)
                " agent=" (:seon.cluster.agent/id entry)

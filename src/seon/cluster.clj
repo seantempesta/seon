@@ -2060,19 +2060,14 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn process-identity
-  "This process's identity as a run holder: `<pid>-<start-millis>`.
-  (pid, start-instant) is the process identity the whole system already
-  uses; a bare pid is recyclable and a recycled pid claiming to hold a
-  run is the one confusion recovery must not have. The run loop's
-  handle should carry THIS value as `:seon.cluster.run/process`, so the
-  holder a run names and the holder recovery judges are the same string."
+  "Process provenance from its pid and start instant, carried on execution requests."
   ;; IT NEEDS (pid, start-instant) AND NOTHING ELSE, so that is what it
   ;; declares: `:seon.cluster.process/identity`, which every advertisement
   ;; satisfies (maps are open). Demanding the whole advertisement to compute
   ;; an identity was a lie about the dependency, and under armed contracts it
   ;; refused three fixtures that hand exactly the pair the identity IS.
   {:malli/schema [:=> [:cat :seon.cluster.process/identity]
-                  :seon.cluster.run/process]}
+                  :seon.db.process/id]}
   [advertisement]
   (str (:seon.boot/pid advertisement) "-"
        (inst-ms (:seon.boot/start-instant advertisement))))
@@ -2208,7 +2203,7 @@
   "Create an absent agent inside the transaction; otherwise change nothing."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
-         :seon.cluster.run/process
+         :seon.db.process/id
          :inst
          :seon.cluster.agent/creation-request]
     :seon.store/transaction-data]}
@@ -2227,7 +2222,7 @@
            {:seon.cluster.agent/id agent-id
             :seon.cluster/name (:seon.cluster/name request)
             :seon.ns/name namespace-name
-            :seon.cluster.run/process process
+            :seon.db.process/id process
             :seon.cluster.run/opened-at now}))))
 
 (defn ensure-entity!
@@ -2343,7 +2338,7 @@
                                      :seon.render.web/latest-packages
                                      :seon.render.web/render-channel
                                      :seon.render.web/fault-channel
-                                     :seon.cluster.run/process
+                                     :seon.db.process/id
                                      :seon.sci.eval/ctx
                                      :seon.config.eval/time-limit-ms
                                      :seon.config/on-core-error])))]
@@ -2358,22 +2353,21 @@
     served))
 
 (defn- tagged-run
-  "The tagged agent's open turn held by this process, or nil.
+  "The tagged agent's open turn, or nil.
   Attribution is STRUCTURAL: an agent graph's fault arrives tagged with
   its agent (structural provenance from the error-channel join), so
-  attribution is that agent's one held run — exact under concurrency,
+  attribution is that agent's one open turn — exact under concurrency,
   where the serial-era global query stopped being. That global query
   (`attributed-run`) is deleted at F2 §3.3."
-  [db agent-id process]
+  [db agent-id]
   (db/q '[:find ?id .
-         :in $ ?agent-id ?process
+         :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
          [?run :seon.cluster.run/agent ?agent]
          (not [?run :seon.cluster.run/closed-at])
-         [?run :seon.cluster.run/process ?process]
          [?run :seon.cluster.run/id ?id]]
-       db agent-id process))
+       db agent-id))
 
 (defn- previously-reported-fault-signature?
   [database signature]
@@ -2409,7 +2403,7 @@
           dials (config/effective db cluster-name)
           source-fault fault
           agent-id (:seon.cluster.agent/id source-fault)
-          run-id (when agent-id (tagged-run db agent-id process))
+          run-id (when agent-id (tagged-run db agent-id))
           dropped-count (::flow/dropped-fault-count source-fault)
           threshold (:seon.config.eval.result/blob-threshold dials)
           request
@@ -2533,7 +2527,7 @@
              (:seon.sci.eval/projection-state ctx)
              :seon.db/connection connection
               :seon.cluster/name cluster-name
-              :seon.cluster.run/process process
+              :seon.db.process/id process
               :seon.flow/work-launcher work-launcher
               :seon.sci.eval/ctx ctx
               :seon.cluster.wake/channel wake-channel
@@ -2681,14 +2675,8 @@
               (:seon.config.eval/time-limit-ms handle)
               :seon.config/on-core-error
               (:seon.config/on-core-error handle)
-              ;; THE ONE THING THE DATABASE CANNOT ANSWER, carried to
-              ;; the page boundary rather than defaulted at it. On this
-              ;; branch the live set is a singleton by construction —
-              ;; one connection per branch, one process per store, the
-              ;; same invariant `recover-runs!` reasons from — so the
-              ;; holder a run names and the holder a rendered page
-              ;; judges are the same string.
-              :seon.cluster.run/process (:seon.cluster.run/process handle)}
+              ;; Execution provenance for web effects.
+              :seon.db.process/id (:seon.db.process/id handle)}
         {graph :seon.flow/graph
          joins :seon.flow/joins}
         (flow/start-graph!
@@ -3213,8 +3201,7 @@
                  0)
         found (if db
                 (problems/problems
-                 db {:seon.cluster.run/live-processes
-                     #{(process-identity advertisement)}})
+                 db {})
                 {})]
     (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name advertisement)
              :seon.boot/pid (:seon.boot/pid advertisement)

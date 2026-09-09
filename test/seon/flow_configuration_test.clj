@@ -104,7 +104,7 @@
                      {:seon.env/environment environment
                       :seon.db/connection connection
                       :seon.cluster/name "seon.flow-configuration-test"
-                      :seon.cluster.run/process "census-0"
+                      :seon.db.process/id "census-0"
                       :seon.sci.eval/ctx
                       (test-support/fork-cluster-ctx connection)
                       :seon.config.eval/time-limit-ms 1000

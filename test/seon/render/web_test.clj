@@ -64,7 +64,6 @@
   ;; namespace constructs names; boot's own constructor, fewer layers.
   (delay (support/environment "seon.render.web-test")))
 
-
 (def ^:private caps
   (config/result-caps (config/defaults)))
 
@@ -150,7 +149,7 @@
                      :seon.sci.admit/caps caps
                      :seon.sci.eval/ctx ctx
                      :seon.config/on-core-error :record
-                     :seon.cluster.run/process process
+                     :seon.db.process/id process
                      :seon.cluster.loop/stream-channel stream-channel
 })
             graph (flow.core/create-flow
@@ -197,7 +196,7 @@ handle))}}
                            (:seon.config.eval/time-limit-ms
                             (config/defaults))
                            :seon.config/on-core-error :record
-                           :seon.cluster.run/process process
+                           :seon.db.process/id process
                            :seon.render.web/pages-mult pages-mult
                            :seon.render.web/registration registration
                            :seon.render.web/latest-packages latest-packages
@@ -1399,7 +1398,7 @@ handle))}}
                  {:seon.store/connection-object connection
                   :seon.cluster.agent/id agent-id
                   :seon.sci.admit/caps caps
-                  :seon.cluster.run/process process
+                  :seon.db.process/id process
                   :seon.render.web/pages-mult (async/mult pages-channel)
                   :seon.render.web/registration (atom {})
                   :seon.render.web/latest-packages (atom {})
@@ -1977,7 +1976,7 @@ handle))}}
           :seon.config.eval/time-limit-ms
           (:seon.config.eval/time-limit-ms (config/defaults))
           :seon.config/on-core-error :record
-          :seon.cluster.run/process process
+          :seon.db.process/id process
           :seon.render.web/pages-mult
           (async/mult (async/chan (async/sliding-buffer 1)))
           :seon.render.web/registration (atom {})
@@ -2142,7 +2141,7 @@ handle))}}
     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
     :seon.config.eval/time-limit-ms 1000
     :seon.config/on-core-error :panic
-    :seon.cluster.run/process "web-fault-test"})
+    :seon.db.process/id "web-fault-test"})
    :seon.cluster.agent/routing
    (atom {:seon.cluster.agent/fault-channel fault-channel})
    :seon.render.web/registration (atom {"agent-a" 1})
@@ -2214,7 +2213,6 @@ handle))}}
              (str (vals (get @(:seon.render.web/latest-packages after) "agent-a")))
              "could not be derived")
             "and the page still says so where its content would have been")))))
-
 
 (deftest debug-algorithm-carries-the-render-evaluation-inputs
   (with-server

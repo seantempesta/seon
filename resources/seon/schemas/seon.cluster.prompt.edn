@@ -23,9 +23,7 @@
                        [:seon.render/distance
                         {:optional true}
                         :seon.render/distance]
-                       [:seon.cluster.run/live-processes
-                        {:optional true}
-                        :seon.cluster.run/live-processes]],
+                       ],
                       :text [:string {:min 1}],
                       :rule :keyword,
                       :no-trigger [:= true]

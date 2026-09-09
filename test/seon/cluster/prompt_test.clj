@@ -31,7 +31,7 @@
   (let [handle (support/cluster-handle
                 {:seon.db/connection connection
                  :seon.cluster/name "prompt-walk"
-                 :seon.cluster.run/process cluster/boot-process-identity
+                 :seon.db.process/id cluster/boot-process-identity
                  :seon.sci.eval/ctx ctx})]
     (try
       (let [preview (loop/preview-sources
@@ -93,7 +93,6 @@
                     [:seon.cluster.message/id "walk-message"]
                     :seon.cluster.run/opened-at (Date. 1700000001000)}])
         (body connection ctx)))))
-
 
 (defn- request
   [connection ctx]
@@ -174,7 +173,7 @@
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection
                                   (request connection ctx)))]
-       (db/transact! connection [])
+
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt @connection
                                    (request connection ctx)))]

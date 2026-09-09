@@ -30,7 +30,7 @@
                 :execution-handle
                 [:map
                  [:seon.cluster/name :seon.cluster/name]
-                 [:seon.cluster.run/process :seon.cluster.run/process]
+                 [:seon.db.process/id :seon.db.process/id]
                  [:seon.sci.admit/caps :seon.sci.admit/caps]
                  [:seon.config.error/recurrence-limit
                   :seon.config.error/recurrence-limit]

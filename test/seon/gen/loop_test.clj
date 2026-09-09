@@ -47,7 +47,6 @@
   ;; namespace constructs names; boot's own constructor, fewer layers.
   (delay (test-support/environment "seon.gen.loop-test")))
 
-
 (def ^:private process
   (cluster/process-identity {:seon.boot/pid 4242
                              :seon.boot/start-instant (Date. 1700000000000)}))
@@ -152,7 +151,7 @@
          {:seon.db/connection connection
           :seon.cluster/name "generate-code-v0"
           :seon.flow/work-launcher launcher
-          :seon.cluster.run/process process
+          :seon.db.process/id process
           :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
           :seon.cluster.wake/channel
           (async/chan (async/sliding-buffer 1))
@@ -237,14 +236,11 @@
           ;; same millisecond order themselves at random
           (let [at (Date. (+ (inst-ms now) (* 1000 (long passes))))
                 work (some (fn [agent-id]
-                             (when-let [orphan (work/interruption @connection
-                                                                  agent-id)]
-                               (cluster.loop/settle-interruption!
-                                cluster (:seon.cluster.run/id orphan) at))
+
                              (work/next-agent-work
                               @connection
                               {:seon.cluster.agent/id agent-id
-                               :seon.cluster.run/process process
+                               :seon.db.process/id process
                                :seon.cluster.work/now at}))
                            (agent-ids @connection))]
             (when work

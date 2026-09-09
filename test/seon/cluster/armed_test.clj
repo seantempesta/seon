@@ -374,7 +374,7 @@
                   "the fault arrived TAGGED with its agent — structural
                    provenance from the error-channel join, never a
                    global attribution query")
-              (is (= (:seon.cluster.run/process handle)
+              (is (= (:seon.db.process/id handle)
                      (:seon.error/process fact)))
               (is (re-matches #"^[0-9a-f]{64}$" (:seon.error/signature fact))))
             (testing "whose data-edn READS BACK — which is what proves the
@@ -477,7 +477,7 @@
                 "the fault was injected at the first resume transition")
             (is (= ::first-cluster-proc-fault (:seon.error/kind fact)))
             (is (= :seon.cluster.agent/armer (:seon.error/proc fact)))
-            (is (= (:seon.cluster.run/process
+            (is (= (:seon.db.process/id
                     (:seon.cluster.loop/cluster instance))
                    (:seon.error/process fact))
                 "the first fault is durable with cluster provenance"))

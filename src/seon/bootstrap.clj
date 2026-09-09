@@ -696,7 +696,7 @@
   returned forms use the ordinary system-run transaction path and therefore
   acquire ordinary execution receipts."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.run/process
+                       :seon.db.process/id
                        :seon.cluster.run/opened-at
                        :seon.cluster.agent/id]
                   :seon.store/transaction-data]}
@@ -747,7 +747,7 @@
        database
        {:seon.cluster.agent/id "root"
         :seon.cluster.run/id run-id
-        :seon.cluster.run/process process
+        :seon.db.process/id process
         :seon.cluster.run/opened-at opened-at
         :seon.cluster.run/starting-ns [:seon.ns/name 'my.agents.root]
         :seon.cluster.run/plan-digest (digest-value sources)
@@ -763,13 +763,13 @@
       [:seon.cluster.agent/id :seon.cluster.agent/id]
       [:seon.cluster/name :seon.cluster/name]
       [:seon.ns/name :seon.ns/name]
-      [:seon.cluster.run/process :seon.cluster.run/process]
+      [:seon.db.process/id :seon.db.process/id]
       [:seon.cluster.run/opened-at :seon.cluster.run/opened-at]]]
     :seon.store/transaction-data]}
   [db
    {agent-id :seon.cluster.agent/id
     namespace-name :seon.ns/name
-    process :seon.cluster.run/process
+    process :seon.db.process/id
     opened-at :seon.cluster.run/opened-at}]
   (let [id (run-id agent-id)
         message-id (task-message-id agent-id)
@@ -800,7 +800,7 @@
            db
            {:seon.cluster.agent/id agent-id
             :seon.cluster.run/id id
-            :seon.cluster.run/process process
+            :seon.db.process/id process
             :seon.cluster.run/opened-at opened-at
             :seon.cluster.run/trigger
             [:seon.cluster.message/id message-id]

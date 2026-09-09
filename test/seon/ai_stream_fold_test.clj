@@ -348,7 +348,7 @@
                          {:seon.cluster.run/id "status-run"}])
             ((ns-resolve 'seon.cluster.loop 'record-attempt!)
              {:seon.db/connection connection
-              :seon.cluster.run/process "process/status-test"
+              :seon.db.process/id "process/status-test"
               :seon.config.error/recurrence-limit 3
               :seon.sci.admit/caps caps}
              {:seon.ai/target target
@@ -378,7 +378,7 @@
       (let [inline-reasoning "private reasoning"
             large (apply str (repeat 65537 "x"))
             cluster {:seon.db/connection connection
-                     :seon.cluster.run/process "process/reasoning-test"
+                     :seon.db.process/id "process/reasoning-test"
                      :seon.config.error/recurrence-limit 3
                      :seon.sci.admit/caps caps}
             base-request {:seon.ai/target

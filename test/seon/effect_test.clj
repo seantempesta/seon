@@ -21,7 +21,6 @@
   ;; namespace constructs names; boot's own constructor, fewer layers.
   (delay (test-support/environment "seon.effect-test")))
 
-
 (def ^:private handler-calls (atom []))
 
 (defn- test-handler
@@ -725,13 +724,7 @@
           {::run/id "effect-run"
            ::run/agent [:seon.cluster.agent/id "effect-agent"]
            ::run/opened-at opened-at}))
-        (db/transact!
-         connection
-         (run/claim-tx
-          {::run/id "effect-run"
-           ::run/process "dead-process"
-           ::run/live-processes #{"dead-process"}
-           ::run/now opened-at}))
+
         (install-capability! connection)
         (db/transact!
          connection
@@ -746,7 +739,7 @@
          connection
          (run/recover-tx
           {::run/id "effect-run"
-           ::run/live-processes #{"live-process"}
+
            ::run/now now}))
         (let [receipt (db/pull @connection '[*]
                                [:seon.effect/id

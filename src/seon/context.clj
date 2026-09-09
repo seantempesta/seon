@@ -497,8 +497,7 @@
   (let [{run-id :seon.cluster.run/id
          rendered :seon.cluster.prompt/rendered-context
          database :seon.db/db
-         failure :seon.error/value
-         live :seon.cluster.run/live-processes} request
+         failure :seon.error/value} request
         rendered-arm (find request :seon.cluster.prompt/rendered-context)
         refusal-arm (find request :seon.error/value)
         _ (when (= (some? rendered-arm) (some? refusal-arm))
@@ -530,8 +529,7 @@
                     (:seon.context/contributions rendered)))
        failure
        (assoc :seon.error/kind (:seon.error/kind failure)
-              :seon.error/message (:seon.error/message failure))
-       live (assoc :seon.cluster.run/live-processes live))]))
+              :seon.error/message (:seon.error/message failure)))]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one digest seam

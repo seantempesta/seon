@@ -22,7 +22,7 @@
                     :seon.sci.eval/ctx nil
                     :seon.config.eval/time-limit-ms 1000
                     :seon.config/on-core-error :panic
-                    :seon.cluster.run/process "web-performance-test"}
+                    :seon.db.process/id "web-performance-test"}
             state {:seon.cluster.loop/cluster handle
                    :seon.render.web/registration
                    (atom {"agent-a" 1 "agent-b" 1})

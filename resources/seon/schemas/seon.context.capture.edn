@@ -30,9 +30,7 @@
                         [:seon.error/message
                          {:optional true}
                          :seon.error/message]
-                        [:seon.cluster.run/live-processes
-                         {:optional true}
-                         :seon.cluster.run/live-processes]],
+                        ],
                        :contributions
                        [:set #:seon.db{:component true} :seon.db/ref],
                        :id [:string {:min 1, :seon.db/identity true}],

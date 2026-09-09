@@ -19,7 +19,7 @@
  (let [instance (get @seon.operator.runtime/running-instances cluster-name)
       cluster (:seon.cluster.loop/cluster instance)
       connection (:seon.db/connection cluster)
-      process (:seon.cluster.run/process cluster)]
+      process (:seon.db.process/id cluster)]
   (seon.schema/call-with-projection-state
    (:seon.sci.eval/projection-state cluster)
    (fn []
@@ -60,6 +60,7 @@
                    :seon.agent/settings
                    {:db/id settings-ref
                     :seon.config.eval/time-limit-ms 2500
+                    :seon.config.ai/api-key-variable "SEON_DESIGN_LAB_NO_CREDENTIAL"
                     :seon.config.run/max-episode-runs 4}
                    :seon.agent/plan
                    {:db/id plan-ref

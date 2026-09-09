@@ -1,34 +1,7 @@
 (ns seon.cluster.run-test
-  "Sealed acceptance for the run model (revised 2026-07-28, twice).
-
-  Orchestrator-authored. The implementation lane makes these green by
-  implementing the seon.cluster.run `*-call` transitions ONLY — schemas
-  and tests are byte-sealed; friction is reported, never resolved by
-  weakening. Everything runs against in-memory Datahike in-process.
-
-  CONTRACT REVISION 2026-07-28 morning (owner ruling: STATE IS
-  PRESENCE): `:seon.cluster.eval/status` is DELETED. A receipt is
-  running exactly when it carries none of
-  `result-edn`/`error`/`interrupted-at`.
-
-  CUSTODY REVISION 2026-07-28 (custody-revision-contracts-2026-07-28):
-  CUSTODY IS PRESENCE. `:seon.cluster.run/process` present = held,
-  absent = unheld; claiming is CAS-on-absence inside the transaction;
-  claiming from a DEAD holder is TAKEOVER = RECOVERY, one shape (stamp
-  that custody's running receipts `interrupted-at`, then retract/assert
-  the process — one transaction). There is no claim epoch and no lease:
-  every behavioral assertion the epoch/lease arms carried is KEPT below,
-  re-expressed against the surviving fences — `::not-the-holder` (the
-  one loud custody refusal), settle-once by presence, `(run, ordinal)`
-  receipt identity, and recovery idempotence.
-
-  The acceptance surface is the state-machine property: generated
-  command sequences run against the real database while a pure MODEL
-  decides, for every command, whether the transition must commit or
-  refuse. A transition that commits when the model says refuse (a
-  stolen held run, a reopened closed run, a second plan) or refuses
-  when the model says commit is a counterexample. Invariants over
-  durable facts are asserted after every command."
+  "Writer transitions verified against a pure state model and canonical Datahike.
+  Open means no closed-at. Boot closes open turns and interrupts unfinished
+  evaluations; settled outcomes remain unchanged."
   (:require [clojure.main :as main]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -206,10 +179,7 @@
   (testing "open is the absence of closed-at"
     (is (true? (run/open? {})))
     (is (false? (run/open? {::run/closed-at t2}))))
-  (testing "held is the PRESENCE of a process — custody is presence,
-            and there is no lease clock to consult"
-    (is (true? (run/held? {::run/process "p1"})))
-    (is (false? (run/held? {})))))
+  )
 
 (deftest interrupted-warning-is-one-derived-value
   (testing "clean evaluations derive no warning at all"
@@ -243,17 +213,12 @@
        (run/open-tx {::run/id "merged"
                      ::run/agent [:seon.cluster.agent/id "merged-agent"]
                      ::run/opened-at t0}))
-      (db/transact!
-       connection
-       (run/claim-tx {::run/id "merged"
-                      ::run/process "p1"
-                      ::run/live-processes #{"p1"}
-                      ::run/now t0}))
+
       (is (= ::committed
              (transact-or-refusal
               connection
               (run/plan-tx {::run/id "merged"
-                            ::run/process "p1"
+                            :seon.db.process/id "p1"
                             ::run/starting-ns [:seon.ns/name 'user]
                             ::run/plan-digest "merged-digest"
                             :seon.cluster.eval/at t1
@@ -307,31 +272,13 @@
                               ::run/agent [:seon.cluster.agent/id "teacher"]
                               ::run/opened-at t0}))))
         (is (= "lesson" (open-run-id connection "teacher"))))
-      (testing "claim an unheld open run — CAS-on-absence"
-        (is (= ::committed
-               (transact-or-refusal
-                connection
-                (run/claim-tx {::run/id "lesson"
-                               ::run/process "p1"
-                               ::run/live-processes #{"p1"}
-                               ::run/now t1}))))
-        (is (= "p1" (::run/process (run-entity connection "lesson")))))
-      (testing "a held run refuses a second live claim"
-        (is (= ::run/run-held
-               (::run/rule (transact-or-refusal
-                            connection
-                            (run/claim-tx {::run/id "lesson"
-                                           ::run/process "p2"
-                                           ::run/live-processes #{"p1" "p2"}
-                                           ::run/now t1})))))
-        (is (= "p1" (::run/process (run-entity connection "lesson")))
-            "the refusal leaves custody unchanged"))
+
       (testing "plan freezes once, with its ordered owned forms"
         (is (= ::committed
                (transact-or-refusal
                 connection
                 (run/plan-tx {::run/id "lesson"
-                              ::run/process "p1"
+                              :seon.db.process/id "p1"
                               ::run/starting-ns [:seon.ns/name 'user]
                               ::run/plan-digest "digest-a"
                               ::run/sources
@@ -363,13 +310,12 @@
                (transact-or-refusal
                 connection
                 (run/close-tx {::run/id "lesson"
-                               ::run/process "p1"
+                               :seon.db.process/id "p1"
                                ::run/closed-at t2}))))
         (let [entity (run-entity connection "lesson")]
           (is (false? (run/open? {::run/closed-at
                                   (::run/closed-at entity)})))
-          (is (nil? (::run/process entity))
-              "a closed run holds no custody"))
+          )
         (is (nil? (open-run-id connection "teacher")))))))
 
 (deftest generated-system-runs-grow-only-after-their-settled-prefix
@@ -388,7 +334,7 @@
                @connection
                {:seon.cluster.agent/id "generated-agent"
                 ::run/id "generated-run"
-                ::run/process "generated-process"
+                :seon.db.process/id "generated-process"
                 ::run/opened-at t0
                 ::run/starting-ns [:seon.ns/name 'my.agents.generated]}))))
       (is (= {:seon.cluster.work/situation :generate
@@ -408,7 +354,7 @@
               connection
               (run/append-generated-tx
                {::run/id "generated-run"
-                ::run/process "generated-process"
+                :seon.db.process/id "generated-process"
                 :seon.cluster.eval/at t0
                 :seon.cluster.eval/ordinal 0
                 :seon.cluster.eval/source "(help)"
@@ -430,7 +376,7 @@
                connection
                (run/append-generated-tx
                 {::run/id "generated-run"
-                 ::run/process "generated-process"
+                 :seon.db.process/id "generated-process"
                  :seon.cluster.eval/at t0
                  :seon.cluster.eval/ordinal 1
                  :seon.cluster.eval/source "(dir 'my.run)"
@@ -446,7 +392,7 @@
               connection
               (run/append-generated-tx
                {::run/id "generated-run"
-                ::run/process "generated-process"
+                :seon.db.process/id "generated-process"
                 :seon.cluster.eval/at t1
                 :seon.cluster.eval/ordinal 1
                 :seon.cluster.eval/source "(dir 'my.run)"
@@ -481,7 +427,7 @@
           @connection
           {:seon.cluster.agent/id "replay-agent"
            ::run/id "replay-run"
-           ::run/process "replay-process"
+           :seon.db.process/id "replay-process"
            ::run/opened-at t0
            ::run/starting-ns [:seon.ns/name 'replay.start]
            ::run/plan-digest "replay-digest"
@@ -565,7 +511,7 @@
                before
                {:seon.cluster.agent/id "moving-agent"
                 ::run/id "moving-run"
-                ::run/process "moving-process"
+                :seon.db.process/id "moving-process"
                 ::run/opened-at t0
                 ::run/starting-ns [:seon.ns/name 'my.agents.before]
                 ::run/plan-digest "moving-digest"
@@ -599,7 +545,7 @@
         @connection
         {:seon.cluster.agent/id "macro-caller"
          ::run/id "macro-call-run"
-         ::run/process "macro-call-process"
+         :seon.db.process/id "macro-call-process"
          ::run/opened-at t0
          ::run/starting-ns [:seon.ns/name 'my.macro-caller]
          ::run/plan-digest "macro-call-digest"
@@ -704,8 +650,7 @@
               (db/transact!
                connection
                (run/close-tx {::run/id run-id
-                              ::run/process process
-                              ::run/closed-at t1})))]
+                                            ::run/closed-at t1})))]
         (db/transact!
          connection
          [{:seon.ns/name namespace-name}
@@ -722,7 +667,7 @@
           @connection
           {:seon.cluster.agent/id "system-refresh"
            ::run/id "system-source"
-           ::run/process process
+           :seon.db.process/id process
            ::run/opened-at t0
            ::run/starting-ns [:seon.ns/name namespace-name]
            ::run/plan-digest "system-source-digest"
@@ -777,17 +722,11 @@
                        ::run/agent
                        [:seon.cluster.agent/id "agent-refresh"]
                        ::run/opened-at t0}))
-        (db/transact!
-         connection
-         (run/claim-tx {::run/id "agent-source"
-                        ::run/process process
-                        ::run/live-processes #{process}
-                        ::run/now t0}))
+
         (db/transact!
          connection
          (run/plan-tx {::run/id "agent-source"
-                       ::run/process process
-                       ::run/starting-ns
+                              ::run/starting-ns
                        [:seon.ns/name agent-namespace-name]
                        ::run/plan-digest "agent-source-digest"
                        ::run/sources
@@ -800,48 +739,6 @@
                  connection
                  (run/refresh-tx
                   (run/receipt-identity "agent-source" 0))))))))))
-
-(deftest a-non-holder-refuses-every-held-run-transition
-  ;; the surviving custody assertion, re-expressed from the lease-era
-  ;; expiry test: a process that does not hold the run cannot act on
-  ;; it, and the refusal leaves every fact unchanged. `::not-the-holder`
-  ;; is the ONE loud custody refusal (custody revision, kept fences).
-  (doseq [[operation tx]
-          [[:release
-            #(run/release-tx {::run/id "held"
-                              ::run/process "p2"})]
-           [:close
-            #(run/close-tx {::run/id "held"
-                            ::run/process "p2"
-                            ::run/closed-at t1})]
-           [:plan
-            #(run/plan-tx {::run/id "held"
-                           ::run/process "p2"
-                           ::run/starting-ns [:seon.ns/name 'user]
-                           ::run/plan-digest "held-digest"
-                           ::run/sources
-                           [{:seon.cluster.eval/source "(+ 1 1)"}]})]]]
-    (with-model-database
-      (fn [connection]
-        (db/transact! connection [{:seon.cluster.agent/id "held-agent"}])
-        (db/transact! connection
-                    (run/open-tx {::run/id "held"
-                                  ::run/agent
-                                  [:seon.cluster.agent/id "held-agent"]
-                                  ::run/opened-at (at -120000)}))
-        (db/transact! connection
-                    (run/claim-tx {::run/id "held"
-                                   ::run/process "p1"
-                                   ::run/live-processes #{"p1"}
-                                   ::run/now (at -60000)}))
-        (testing (str (name operation) " requires holding the run")
-          (is (= ::run/not-the-holder
-                 (::run/rule (transact-or-refusal connection (tx)))))
-          (let [entity (run-entity connection "held")]
-            (is (= "p1" (::run/process entity))
-                "the refusal leaves custody unchanged")
-            (is (nil? (::run/closed-at entity)))
-            (is (nil? (::run/plan-digest entity)))))))))
 
 (deftest receipt-transitions-preserve-one-terminal-outcome
   (let [start-tx (ns-resolve 'seon.cluster.run 'receipt-start-tx)
@@ -857,11 +754,7 @@
                                     ::run/agent
                                     [:seon.cluster.agent/id "receipt-agent"]
                                     ::run/opened-at (at -120000)}))
-          (db/transact! connection
-                      (run/claim-tx {::run/id "receipts"
-                                     ::run/process "p1"
-                                     ::run/live-processes #{"p1"}
-                                     ::run/now (at -60000)}))
+
           (let [start {::run/id "receipts"
                        :seon.cluster.eval/ordinal 0
                        :seon.cluster.eval/at t0}
@@ -921,13 +814,9 @@
             (is (= ::committed
                    (transact-or-refusal
                     connection
-                    (run/claim-tx {::run/id "receipts"
-                                   ::run/process "p2"
-                                   ;; p1 is DEAD at this instant
-                                   ::run/live-processes #{"p2"}
-                                   ::run/now t1})))
+                    (run/recover-tx {::run/id "receipts" ::run/now t1})))
                 "a run held by a dead process is taken over")
-            (is (= "p2" (::run/process (run-entity connection "receipts"))))
+
             (is (= t1 (:seon.cluster.eval/interrupted-at
                        (db/pull @connection '[*]
                                [:seon.cluster.eval/id
@@ -942,7 +831,7 @@
                                    :seon.cluster.eval/ordinal 1
                                    :seon.eval/value "1"})))
                 "the dead pass's late settle refuses — by presence")
-            (is (= ::run/receipt-exists
+            (is (= ::run/run-closed
                    (::run/rule (transact-or-refusal
                                 connection
                                 (start-tx start))))
@@ -1028,31 +917,23 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private agent-ids ["a1" "a2"])
-(def ^:private process-ids ["p1" "p2" "p3"])
+
 (def ^:private run-ids ["r1" "r2" "r3"])
 
 (def ^:private command-gen
   "One generated command. Times are monotonic per sequence position:
-  the runner assigns now = (at (* index 60000)). A claim carries the
-  set of processes ALIVE at that instant (the claimant is always in
-  it); whether the current holder is in it decides refuse vs takeover."
+  the runner assigns now = (at (* index 60000))."
   (gen/one-of
    [(gen/tuple (gen/return :open)
                (gen/elements run-ids)
                (gen/elements agent-ids))
-    (gen/tuple (gen/return :claim)
-               (gen/elements run-ids)
-               (gen/elements process-ids)
-               (gen/set (gen/elements process-ids)))
-    (gen/tuple (gen/return :release)
-               (gen/elements run-ids)
-               (gen/elements process-ids))
+
     (gen/tuple (gen/return :close)
                (gen/elements run-ids)
-               (gen/elements process-ids))
+)
     (gen/tuple (gen/return :plan)
                (gen/elements run-ids)
-               (gen/elements process-ids)
+
                (gen/elements ["digest-a" "digest-b"]))
     (gen/tuple (gen/return :receipt-start)
                (gen/elements run-ids)
@@ -1063,26 +944,14 @@
                (gen/elements run-ids)
                (gen/choose 0 3)
                (gen/elements [:done :error :interrupted]))
-    (gen/tuple (gen/return :recover)
-               (gen/set (gen/elements process-ids)))]))
+    (gen/return [:recover])]))
 
 (def ^:private commands-gen
-  (gen/one-of
-   [(gen/vector command-gen 1 15)
-    ;; the claim/takeover regression under presence: a live holder
-    ;; refuses the steal; a dead holder is taken over with its running
-    ;; receipt stamped in the same transaction
-    (gen/return [[:open "r1" "a1"]
-                 [:claim "r1" "p1" #{"p1"}]
-                 [:receipt-start "r1" 0]
-                 [:claim "r1" "p2" #{"p1" "p2"}]
-                 [:claim "r1" "p2" #{"p2"}]
-                 [:receipt-settle "r1" 0 :done]])]))
-
-(defn- claim-live-set
-  "The live set a claim executes with: the claimant is always alive."
-  [process live]
-  (conj (set live) process))
+  (gen/one-of [(gen/vector command-gen 1 15)
+               (gen/return [[:open "r1" "a1"]
+                            [:receipt-start "r1" 0]
+                            [:recover]
+                            [:receipt-settle "r1" 0 :done]])]))
 
 (defn- model-eligible?
   "The pure oracle: must this command COMMIT against `model`?"
@@ -1092,25 +961,19 @@
       :open (let [[run-id agent-id] args]
               (and (nil? (run-of run-id))
                    (nil? (get-in model [:pointers agent-id]))))
-      :claim (let [[run-id process live] args
-                   {:keys [closed] :as entry} (run-of run-id)
-                   holder (:process entry)]
-               (and (some? entry)
-                    (not closed)
-                    (or (nil? holder)
-                        (not (contains? (claim-live-set process live)
-                                        holder)))))
-      (:release :close)
-      (let [[run-id process] args
+
+      :close
+      (let [[run-id] args
             {:keys [closed] :as entry} (run-of run-id)]
         (and (some? entry)
-             (not closed)
-             (= process (:process entry))))
-      :plan (let [[run-id process _digest] args
-                  {:keys [closed digest] :as entry} (run-of run-id)]
+             (not closed)))
+      :plan (let [[run-id _digest] args
+                  {:keys [closed digest] :as entry} (run-of run-id)
+                  ordinal (count (filter #(= run-id (:run %))
+                                         (vals (:receipts model))))]
               (and (some? entry)
                    (not closed)
-                   (= process (:process entry))
+                   (nil? (get-in model [:receipts [run-id ordinal]]))
                    (nil? digest)))
       :receipt-start
       (let [[run-id ordinal] args
@@ -1149,18 +1012,7 @@
             (-> model
                 (assoc-in [:runs run-id] {:agent agent-id})
                 (assoc-in [:pointers agent-id] run-id)))
-    :claim (let [[run-id process _live] args
-                 holder (get-in model [:runs run-id :process])]
-             (cond-> model
-               ;; TAKEOVER = RECOVERY, one shape: a dead holder's
-               ;; running receipts AND its run are stamped in the same
-               ;; transition — a run with no receipt row still carries
-               ;; the evidence that a dead process's custody was cut
-               (some? holder) (stamp-running-receipts run-id)
-               (some? holder) (assoc-in [:runs run-id :interrupted] true)
-               true (assoc-in [:runs run-id :process] process)))
-    :release (let [[run-id] args]
-               (update-in model [:runs run-id] dissoc :process))
+
     :close (let [[run-id] args
                  agent-id (get-in model [:runs run-id :agent])]
              (-> model
@@ -1168,8 +1020,14 @@
                             #(-> % (assoc :closed true)
                                  (dissoc :process)))
                  (update :pointers dissoc agent-id)))
-    :plan (let [[run-id _ digest] args]
-            (assoc-in model [:runs run-id :digest] digest))
+    :plan (let [[run-id digest] args
+                ordinal (count (filter #(= run-id (:run %))
+                                       (vals (:receipts model))))]
+            (-> model
+                (assoc-in [:runs run-id :digest] digest)
+                (assoc-in [:receipts [run-id ordinal]]
+                          {:id (pr-str [run-id ordinal])
+                           :run run-id :ordinal ordinal})))
     :receipt-start (let [[run-id ordinal] args]
                      ;; no :settled key: a started receipt is running
                      ;; by the absence of any terminal fact
@@ -1192,7 +1050,6 @@
                                        #(-> %
                                             (assoc :closed true)
                                             ;; recovery marks what it cut
-                                            (assoc :interrupted true)
                                             (dissoc :process)))
                             (update :pointers dissoc agent-id)))))
                 model
@@ -1209,33 +1066,18 @@
              (run/open-tx {::run/id run-id
                            ::run/agent [:seon.cluster.agent/id agent-id]
                            ::run/opened-at now})))
-    :claim (let [[run-id process live] args]
-             (transact-or-refusal
-              connection
-              (run/claim-tx {::run/id run-id
-                             ::run/process process
-                             ::run/live-processes
-                             (claim-live-set process live)
-                             ::run/now now})))
-    :release (let [[run-id process] args]
-               (transact-or-refusal
-                connection
-                (run/release-tx
-                 {::run/id run-id
-                  ::run/process process})))
-    :close (let [[run-id process] args]
+
+    :close (let [[run-id] args]
              (transact-or-refusal
               connection
               (run/close-tx
                {::run/id run-id
-                ::run/process process
                 ::run/closed-at now})))
-    :plan (let [[run-id process digest] args]
+    :plan (let [[run-id digest] args]
             (transact-or-refusal
              connection
              (run/plan-tx
               {::run/id run-id
-               ::run/process process
                ::run/starting-ns [:seon.ns/name 'user]
                ::run/plan-digest digest
                ::run/sources
@@ -1270,7 +1112,7 @@
                          ;; run contributes nothing
                          (run/recover-tx
                           {::run/id run-id
-                           ::run/live-processes live
+
                            ::run/now now})))
                       run-ids)))))
 
@@ -1310,19 +1152,8 @@
             :let [entity (run-entity connection run-id)]]
         (and
          ;; the database agrees with the model on custody and closure
-         (= (:process entry) (::run/process entity))
          (= (boolean (:closed entry))
             (some? (::run/closed-at entity)))
-         ;; RECOVERY MARKS WHAT IT INTERRUPTED, and only that: a run a
-         ;; dead process's custody was recovered from carries
-         ;; `::interrupted-at`, a normally closed run never does. This
-         ;; is the only distinction for a run whose dead process left
-         ;; no receipt row to stamp
-         (= (boolean (:interrupted entry))
-            (some? (::run/interrupted-at entity)))
-         ;; a closed run holds no custody
-         (or (not (:closed entry))
-             (nil? (::run/process entity)))
          ;; the agent pointer exists exactly while its run is open
          (let [agent-id (:agent entry)
                pointer (open-run-id connection agent-id)]
@@ -1411,15 +1242,14 @@
         (tc/quick-check
          30
          (prop/for-all [states (gen/vector receipt-state-gen 1 5)
-                        dead? gen/boolean
                         generated? gen/boolean
                         round gen/nat]
            (with-model-database
              (fn [connection]
                (let [run-id (str "keep-" round "-" (count states)
-                                 "-" dead?)
+)
                      agent-id (str "keeper-" run-id)
-                     holder (if dead? "dead-process" "live-process")]
+]
                  (db/transact! connection
                              [{:seon.cluster.agent/id agent-id}])
                  (db/transact! connection
@@ -1427,11 +1257,7 @@
                               {::run/id run-id
                                ::run/agent [:seon.cluster.agent/id agent-id]
                                ::run/opened-at t0}))
-                 (db/transact! connection
-                             (run/claim-tx {::run/id run-id
-                                            ::run/process holder
-                                            ::run/live-processes #{holder}
-                                            ::run/now t1}))
+
                  (db/transact!
                   connection
                   (vec (map-indexed
@@ -1457,7 +1283,7 @@
                        recovery
                        (run/recover-tx
                         {::run/id run-id
-                         ::run/live-processes #{"live-process"}
+
                          ::run/now t2})
                        _ (db/transact! connection recovery)
                        ;; recovery is IDEMPOTENT: running it again from
@@ -1470,7 +1296,6 @@
                     (= terminals-before (pull-terminals connection run-id))
                     (every? run/terminal?
                             (pull-receipts connection run-id))
-                    (nil? (::run/process entity))
                     (= t2 (::run/closed-at entity))
                     (empty? (run/recover-call @connection
                                              {::run/id run-id ::run/now t2}))
@@ -1491,11 +1316,7 @@
                   (run/open-tx {::run/id "order-b"
                                 ::run/agent [:seon.cluster.agent/id "orderer"]
                                 ::run/opened-at t0}))
-      (db/transact! connection
-                  (run/claim-tx {::run/id "order-b"
-                                 ::run/process "dead-process"
-                                 ::run/live-processes #{"dead-process"}
-                                 ::run/now t0}))
+
       (db/transact! connection
                   (run/receipt-start-tx {::run/id "order-b"
                                          :seon.cluster.eval/ordinal 0
@@ -1508,7 +1329,7 @@
                                           :seon.eval/value "2"}))
       (db/transact! connection
                   (run/recover-tx {::run/id "order-b"
-                                   ::run/live-processes #{"live-process"}
+
                                    ::run/now t2}))
       (let [receipt (db/pull @connection '[*]
                             [:seon.cluster.eval/id (pr-str ["order-b" 0])])]
@@ -1516,75 +1337,32 @@
         (is (nil? (:seon.cluster.eval/interrupted-at receipt))
             "the settled receipt is byte-untouched — no contradiction
              fact can exist"))
-      (is (nil? (::run/process (run-entity connection "order-b")))
-          "and the dead custody is released")
+
       (is (some? (::run/closed-at (run-entity connection "order-b")))
           "the interrupted run is ended")
       (is (nil? (open-run-id connection "orderer"))
           "and the agent pointer is retracted"))))
 
-(deftest recovery-marks-a-run-that-settled-no-receipt
-  ;; THE CLASS: a run whose dead process settled no receipt row was
-  ;; indistinguishable by query from a run that closed normally, so
-  ;; "which runs did the last recovery interrupt?" was unanswerable
-  ;; from the database (whole-system-arc observer, 2026-08-08 —
-  ;; `945f3226`: one form, zero receipts, no error, no marker). The run
-  ;; stamp cannot be derived from receipts, because there are none.
+(deftest recovery-closes-a-turn-with-no-evaluations
   (with-model-database
     (fn [connection]
-      (db/transact! connection [{:seon.cluster.agent/id "cut"}
-                                {:seon.cluster.agent/id "clean"}])
-      ;; a run a dead process was holding, with no receipt at all
+      (db/transact! connection [{:seon.cluster.agent/id "cut"}])
       (db/transact! connection
                     (run/open-tx {::run/id "cut-run"
                                   ::run/agent [:seon.cluster.agent/id "cut"]
                                   ::run/opened-at t0}))
-      (db/transact! connection
-                    (run/claim-tx {::run/id "cut-run"
-                                   ::run/process "dead-process"
-                                   ::run/live-processes #{"dead-process"}
-                                   ::run/now t0}))
-      ;; and a run that closes NORMALLY, the same shape otherwise
-      (db/transact! connection
-                    (run/open-tx {::run/id "clean-run"
-                                  ::run/agent [:seon.cluster.agent/id "clean"]
-                                  ::run/opened-at t0}))
-      (db/transact! connection
-                    (run/claim-tx {::run/id "clean-run"
-                                   ::run/process "live-process"
-                                   ::run/live-processes #{"live-process"}
-                                   ::run/now t0}))
-      (db/transact! connection
-                    (run/close-tx {::run/id "clean-run"
-                                   ::run/process "live-process"
-                                   ::run/closed-at t1}))
-      (db/transact! connection
-                    (run/recover-tx {::run/id "cut-run"
-                                     ::run/live-processes #{"live-process"}
-                                     ::run/now t2}))
-      (let [cut (run-entity connection "cut-run")
-            clean (run-entity connection "clean-run")]
-        (is (= t2 (::run/interrupted-at cut))
-            "recovery records the interruption it performed")
-        (is (some? (::run/closed-at cut)))
-        (is (nil? (::run/interrupted-at clean))
-            "a normal close stays unmarked — presence is the whole state")
-        (is (empty? (db/q '[:find [?r ...]
-                            :where [?r :seon.cluster.eval/id _]]
-                          @connection))
-            "and no receipt was invented for a form that never started"))
-      (is (= ["cut-run"]
-             (db/q '[:find [?id ...]
-                     :where
-                     [?run :seon.cluster.run/interrupted-at _]
-                     [?run :seon.cluster.run/id ?id]]
-                   @connection))
-          "\"which runs did recovery interrupt?\" is one query")
-      (is (str/includes?
-           (run/render-ai (assoc (run-entity connection "cut-run")
-                                 :seon.db/db @connection))
-           "It was interrupted at")
-          "and the run says so rather than reporting \"It completed.\""))))
+      (is (= ::committed
+             (transact-or-refusal connection
+                                  (run/recover-tx {::run/id "cut-run"
+                                                   ::run/now t2}))))
+      (let [cut (run-entity connection "cut-run")]
+        (is (= "cut-run" (::run/id cut)))
+        (is (= t2 (::run/closed-at cut)))
+        (is (nil? (::run/reply cut)))
+        (is (empty? (db/q '[:find [?e ...]
+                            :where [?e :seon.cluster.eval/id]] @connection)))
+        (is (str/includes? (run/render-ai (assoc cut :seon.db/db @connection))
+                           "interrupted before the reply arrived"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema admissibility — the model refuses what it must

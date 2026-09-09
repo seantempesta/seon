@@ -1275,7 +1275,7 @@
            cluster (merge defaults
                           {:seon.db/connection connection
                            :seon.cluster/name "one-grammar"
-                           :seon.cluster.run/process "one-grammar-test"
+                           :seon.db.process/id "one-grammar-test"
                            :seon.sci.eval/ctx base
                            :seon.cluster.wake/channel channel
                            :seon.render/context-channel channel

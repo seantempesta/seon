@@ -181,7 +181,7 @@
                     :seon.sci.eval/ctx ctx
                     :seon.sci.eval/projection-state
                     (:seon.sci.eval/projection-state ctx)
-                    :seon.cluster.run/process cluster/boot-process-identity
+                    :seon.db.process/id cluster/boot-process-identity
                     :seon.cluster.loop/stream-channel
                     (async/chan (async/sliding-buffer 1))})]
        (swap! routing assoc :seon.cluster.agent/fault-channel faults)

@@ -1,5 +1,5 @@
 (ns seon.cluster.loop
-  "THE TURN: open → call → resume → close, and the custody law.
+  "THE TURN: open → call → resume → close.
 
   THERE IS NO LOOP HERE ANY MORE (F2 §3.1). The central serial pass —
   settle-all → global `next-work` → turn → global `more-work?` rewake —
@@ -334,7 +334,7 @@
 ;;; The proc
 ;;; ---------------------------------------------------------------------------
 
-(declare turn settle-interruption! resume-turn)
+(declare turn resume-turn)
 
 (defn- submission-time-limit-evaluation
   "The evaluation value for a submission the backstop cut.
@@ -395,7 +395,7 @@
    (merge {:seon.error/source failure
            :seon.error/id (str (random-uuid))
            :seon.error/at now
-           :seon.error/process (:seon.cluster.run/process cluster)
+           :seon.error/process (:seon.db.process/id cluster)
            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
            :seon.error/basis-t (db/basis-t db)
            :seon.config.error/recurrence-limit
@@ -486,7 +486,7 @@
     now ::now
     agent-id :seon.cluster.agent/id
     run-id :seon.cluster.run/id
-    process :seon.cluster.run/process
+    process :seon.db.process/id
     ordinal :seon.cluster.eval/ordinal
     evaluation :seon.sci.eval/evaluation
     problem :seon.problems/form-problem
@@ -560,7 +560,7 @@
         receipt
         (run/evaluation-facts
          (cond-> {:seon.cluster.run/id run-id
-                  :seon.cluster.run/process process
+                  :seon.db.process/id process
                   :seon.cluster.eval/ordinal ordinal
                   :seon.sci.eval/evaluation evaluation
                   ::settlement-evaluation settlement-evaluation}
@@ -573,7 +573,7 @@
                               (:my.run/disposition settled)))
            (run/close-tx
             (cond-> {:seon.cluster.run/id run-id
-                     :seon.cluster.run/process process
+                     :seon.db.process/id process
                      :seon.cluster.run/closed-at now}
               undisposed?
               (assoc :seon.cluster.run/undisposed-at now))))
@@ -595,10 +595,10 @@
   "Settle every evaluated form and all turn side effects in one transaction."
   [cluster requests]
   (let [connection (:seon.db/connection cluster)
-        process (:seon.cluster.run/process cluster)
+        process (:seon.db.process/id cluster)
         prepared (mapv #(evaluation-terminal-data
                          (assoc % ::batch? true
-                                  :seon.cluster.run/process process))
+                                  :seon.db.process/id process))
                        requests)
         namespace-rows
         (into []
@@ -688,7 +688,7 @@
             (when run-id
               (run/close-tx
                {:seon.cluster.run/id run-id
-                :seon.cluster.run/process process
+                :seon.db.process/id process
                 :seon.cluster.run/closed-at now}))
             recording])}))
 
@@ -700,7 +700,7 @@
          agent-id :seon.cluster.agent/id
          run-id :seon.cluster.run/id}
         (first requests)
-        process (:seon.cluster.run/process cluster)
+        process (:seon.db.process/id cluster)
         recording (error-tx cluster @connection refusal now
                             {:seon.cluster.agent/id agent-id
                              :seon.cluster.run/id run-id})
@@ -724,7 +724,7 @@
          (into (run/receipt-settle-batch-tx receipts)
                cat
                [(run/close-tx {:seon.cluster.run/id run-id
-                               :seon.cluster.run/process process
+                               :seon.db.process/id process
                                :seon.cluster.run/closed-at now})
                 recording])}
         outcome (db/transact! connection transaction)]
@@ -762,11 +762,11 @@
     failure :seon.error/value
     :as request}]
   (let [connection (:seon.db/connection cluster)
-        process (:seon.cluster.run/process cluster)
+        process (:seon.db.process/id cluster)
         prepared
         (if evaluation
           (phase #(evaluation-terminal-data
-                   (assoc request :seon.cluster.run/process process)))
+                   (assoc request :seon.db.process/id process)))
           failure)
         prepared
         (if (:seon.error/kind prepared)
@@ -816,7 +816,7 @@
 (defn- attempts
   "How many model attempts this run has already recorded.
   DERIVED at the start of a `:call` pass so the next ordinal continues
-  the chain. A run whose plan transaction refused stays claimed and
+  the chain. A run whose plan transaction refused stays open and
   reaches `:call` again; without this its second call would reuse
   ordinal 0 and upsert away the first attempt's evidence.
 
@@ -1093,65 +1093,13 @@
            (assoc :seon.flow/work-launcher
                   (:seon.flow/work-launcher cluster)))))
 
-(defn settle-interruption!
-  "Reclaim a generated prefix or bury one ordinary orphaned run.
-  Planned or unplanned, an unheld run is not work: there is no cold
-  resume of an authored plan. A system-generated prefix is append-only data,
-  however, so its open run is reclaimed and continues at the next ordinal.
-  Every other interruption is claim-then-close through the ordinary
-  transitions: a survivor cannot close a run it does not hold
-  (`close-call` refuses `::not-the-holder`), so it takes custody by the
-  takeover path first and closes as the holder.
-
-  Boot recovery released the dead custody; this releases the AGENT.
-  The two are deliberately separate: recovery states who no longer
-  holds what, and settlement decides what to do about it — and only
-  the loop is entitled to decide that.
-
-  Settle-only for N3 outside generated derivation. The explanation an agent reads is derived from
-  the settled run's own shape (no plan, closed) by
-  `seon.cluster.prompt`; when a richer reason is wanted, this
-  transaction is where it would ride."
-  {:malli/schema [:=> [:cat :seon.cluster.loop/cluster
-                       :seon.cluster.run/id :inst]
-                  :boolean]}
-  [cluster run-id now]
-  (let [connection (:seon.db/connection cluster)
-        process (:seon.cluster.run/process cluster)
-        claimed (db/transact!
-                 connection
-                 (run/claim-tx {:seon.cluster.run/id run-id
-                                :seon.cluster.run/process process
-                                ;; the only live process on this branch
-                                ;; is this one — flock + single writer
-                                :seon.cluster.run/live-processes #{process}
-                                :seon.cluster.run/now now}))]
-    (if (:seon.error/kind claimed)
-      false
-      (let [generated?
-            (= :generate
-               (:seon.cluster.work/situation
-                (db/pull @connection [:seon.cluster.work/situation]
-                         [:seon.cluster.run/id run-id])))]
-        (if generated?
-          true
-          (let [closed
-                (db/transact!
-                 connection
-                 (run/close-tx
-                  {:seon.cluster.run/id run-id
-                   :seon.cluster.run/process process
-                   ;; the pass's ONE clock, not a second reading of it
-                   :seon.cluster.run/closed-at now}))]
-            (not (:seon.error/kind closed))))))))
-
 (defn- open-turn
-  "Open and claim one run before any paid provider call."
+  "Open one turn before any paid provider call."
   [{cluster ::cluster work ::work now ::now report ::report}]
   (let [connection (:seon.db/connection cluster)
-        process (:seon.cluster.run/process cluster)
+        process (:seon.db.process/id cluster)
         agent-id (:seon.cluster.agent/id work)]
-    ;; OPEN + CLAIM FIRST, model second. The busy fence has to exist
+    ;; Open first, model second. The busy fence has to exist
     ;; before the expensive part.
     ;;
     ;; ANSWEREDNESS IS THIS TRANSACTION'S OWN `:t`. Nothing claims a
@@ -1181,12 +1129,7 @@
           outcome (db/transact!
                    connection
                    {:tx-data
-                    (into [[:db.fn/call #'run/open-call open-request]]
-                          (run/claim-tx {:seon.cluster.run/id id
-                                         :seon.cluster.run/process process
-                                         :seon.cluster.run/live-processes
-                                         #{process}
-                                         :seon.cluster.run/now now}))})]
+                    [[:db.fn/call #'run/open-call open-request]]})]
       (cond
         (:seon.error/kind outcome)
         (do
@@ -1205,7 +1148,7 @@
   "Call the provider and freeze the returned plan."
   [{cluster ::cluster work ::work now ::now report ::report}]
   (let [connection (:seon.db/connection cluster)
-        process (:seon.cluster.run/process cluster)
+        process (:seon.db.process/id cluster)
         agent-id (:seon.cluster.agent/id work)
         run-id (:seon.cluster.run/id work)]
     ;; THE PAID CALL, and the ONE place a second one is ever made.
@@ -1289,7 +1232,7 @@
                   plan-request
                   (merge (dissoc staged-reply :seon.blob/staged-writes)
                          {:seon.cluster.run/id run-id
-                          :seon.cluster.run/process process
+                          :seon.db.process/id process
                           :seon.cluster.run/plan-digest
                           (run/plan-digest sources)
                           ;; ONE ENTITY PER (run, ordinal): freezing the plan
@@ -1762,63 +1705,23 @@
                   (report :closed (count gated))
                   (report :released (count gated)))))))))))
 (defn- close-turn
-  "Claim when needed and close one fully settled run."
   [{cluster ::cluster work ::work now ::now report ::report}]
-  (let [connection (:seon.db/connection cluster)
-        process (:seon.cluster.run/process cluster)
-        agent-id (:seon.cluster.agent/id work)
-        run-id (:seon.cluster.run/id work)]
-    ;; the fold is done and nothing said otherwise: close it, so the
-    ;; agent stops being busy.
-    ;;
-    ;; CLAIM FIRST WHEN WE DO NOT HOLD IT, and this is a fix, not a
-    ;; flourish: `next-agent-work` derives `:close` for any open planned run
-    ;; whose forms are all settled, INCLUDING one nobody holds — a run
-    ;; released by `my.run/wait`, or one whose holder died after the
-    ;; last receipt. `close-call` refuses a run it is not the holder
-    ;; of (`::not-the-holder`), so those closes failed, the derivation
-    ;; kept returning `:close`, and the self-rewake kept firing:
-    ;; a HOT LIVELOCK committing one error fact per pass. Measured on
-    ;; the wait path — twelve passes, nine error facts, `next-agent-work`
-    ;; still saying `:close`. Taking custody first is the same
-    ;; takeover `settle-interruption!` already uses, and it is what
-    ;; makes "only the holder may close a run" a rule the loop can
-    ;; keep rather than one it repeatedly breaks.
-    (let [held (db/pull @connection [:seon.cluster.run/process]
-                       [:seon.cluster.run/id run-id])
-          claimed (when-not (= process (:seon.cluster.run/process held))
-                    (db/transact!
-                     connection
-                     (run/claim-tx {:seon.cluster.run/id run-id
-                                    :seon.cluster.run/process process
-                                    :seon.cluster.run/live-processes
-                                    #{process}
-                                    :seon.cluster.run/now now})))
-          outcome (if (:seon.error/kind claimed)
-                    ;; somebody else holds it: not ours to close, and
-                    ;; not an error of ours either
-                    claimed
-                    (db/transact!
-                     connection
-                     (run/close-tx {:seon.cluster.run/id run-id
-                                    :seon.cluster.run/process process
-                                    :seon.cluster.run/closed-at now})))]
-      (if (:seon.error/kind outcome)
-        (do
-          ;; A refused claim means another process owns this run. Record the
-          ;; refusal without mutating that process's terminal state.
-          (settle! {::cluster cluster
-                    ::now now
-                    :seon.cluster.agent/id agent-id
-                    :seon.error/value outcome})
+  (let [outcome (db/transact!
+                 (:seon.db/connection cluster)
+                 (run/close-tx {:seon.cluster.run/id (:seon.cluster.run/id work)
+                                :seon.cluster.run/closed-at now}))]
+    (if (:seon.error/kind outcome)
+      (do (settle! {::cluster cluster ::now now
+                     :seon.cluster.agent/id (:seon.cluster.agent/id work)
+                     :seon.error/value outcome})
           (report :error 0))
-        (report :closed 0)))))
+      (report :closed 0))))
 
 (defn- generate-turn
   "Append and execute one dependency-ready generated bootstrap form."
   [{cluster ::cluster work ::work now ::now report ::report :as request}]
   (let [connection (:seon.db/connection cluster)
-        process (:seon.cluster.run/process cluster)
+        process (:seon.db.process/id cluster)
         agent-id (:seon.cluster.agent/id work)
         run-id (:seon.cluster.run/id work)
         ordinal
@@ -1874,7 +1777,7 @@
              connection
              (run/close-tx
               {:seon.cluster.run/id run-id
-               :seon.cluster.run/process process
+               :seon.db.process/id process
                :seon.cluster.run/closed-at now}))]
         (if (:seon.error/kind terminal)
           (do
@@ -1892,7 +1795,7 @@
              connection
              (run/append-generated-tx
               (cond-> {:seon.cluster.run/id run-id
-                       :seon.cluster.run/process process
+                       :seon.db.process/id process
                        :seon.cluster.eval/at now
                        :seon.cluster.eval/ordinal ordinal
                        ;; THE COMMENT AND THE FORM ARE TWO FIELDS. A generated
@@ -1922,7 +1825,7 @@
 
 (defn turn
   "Run one turn to its next durable boundary; returns the turn report.
-  The sequence is the contract: claim → derive prompt → model (`:io`)
+  The sequence is the contract: open → derive prompt → model (`:io`)
   → split reply → freeze plan → reduce over ordered forms (running
   receipt → guarded eval at the previous step's `:db-after` → terminal
   receipt + disposition in ONE transaction) → close or release.
