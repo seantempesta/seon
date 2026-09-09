@@ -335,6 +335,14 @@
              :seon.cluster.run/now now}))})
         (db/transact!
          connection
+         [{:seon.cluster.run/id first-run
+           :seon.cluster.run/reply "(+ 1 1)"}
+          {:seon.ai.attempt/id "one-answer-attempt"
+           :seon.ai.attempt/run [:seon.cluster.run/id first-run]
+           :seon.ai.attempt/ordinal 0
+           :seon.ai.attempt/at now}])
+        (db/transact!
+         connection
          (run/close-tx
           {:seon.cluster.run/id first-run
            :seon.cluster.run/process process
@@ -408,6 +416,8 @@
             run-id "namespace-resume-run"
             starting-ns 'my.agents.namespace-resume
             ending-ns 'my.generated.after-resume]
+        (config/apply! {:seon.db/connection connection
+                        :seon.boot/cluster-name cluster-name})
         (test-support/seed-cluster! connection cluster-name)
         (db/transact!
          connection
@@ -468,7 +478,7 @@
             (merge {:seon.cluster.run/id run-id
                     :seon.cluster.eval/ordinal 0}
                    (select-keys first-evaluation
-                                [:seon.cluster.eval/result-edn
+                                [:seon.eval/value
                                  :seon.cluster.eval/ns
                                  :seon.sci.eval/ending-ns]))))
           (is (= ending-ns
@@ -537,7 +547,7 @@
                  :seon.cluster/name cluster-name})))
         (db/transact! connection
                     [{:seon.cluster.agent/id "planner"
-                      :seon.config.ai/thinking :high}])
+                      :seon.agent/settings {:seon.config.ai/thinking :high}}])
         (let [db @connection
               cluster-settings (config/effective db cluster-name)
               planner-settings
@@ -799,7 +809,7 @@
               (merge {:seon.cluster.run/id run-id
                       :seon.cluster.eval/ordinal 0}
                      (select-keys evaluation
-                                  [:seon.cluster.eval/result-edn
+                                  [:seon.eval/value
                                    :seon.cluster.eval/ns
                                    :seon.sci.eval/ending-ns]))))
             (is (= assigned-namespace
@@ -876,7 +886,7 @@
        (db/transact!
         connection
         [{:seon.cluster.agent/id agent-id
-          :seon.config.ai/thinking :high}])
+          :seon.agent/settings {:seon.config.ai/thinking :high}}])
        (prepare-call! connection agent-id "settings-run-1" "settings-message-1")
        (with-render-context-proc
         cluster
@@ -903,8 +913,8 @@
               (call-work agent-id "settings-run-1")}
              now)
             (testing "the opening prompt and paid call each resolve once"
-              (is (= 2 (count @overlays))
-                  "failover does not resolve either phase again")
+              (is (= 3 (count @overlays))
+                  "profile, prompt and call each read the overlay; failover reuses it")
               (is (= 2 (count @resolutions))
                   "prompt budget uses opening facts; attempts share call settings")
               (is (= ["before-apply" "backup-before-apply"]
@@ -948,7 +958,7 @@
               (call-work agent-id "settings-run-2")}
              now)
             (testing "both phases see the next run opened after config apply"
-              (is (= 4 (count @overlays)))
+              (is (= 6 (count @overlays)))
               (is (= 4 (count @resolutions)))
               (is (= "after-apply" (:seon.ai/model (last @requests))))
               (is (= :high (:seon.ai/thinking (last @requests))))
@@ -984,10 +994,14 @@
   (let [refusal-terminal-data (private-loop-fn 'refusal-terminal-data)
         prepared
         (refusal-terminal-data
-         {:seon.config.error/escalate-to escalate-to
+         (test-support/cluster-handle
+          {:seon.db/connection connection
+          :seon.cluster/name "refused-phase"
+          :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
+          :seon.config.error/escalate-to escalate-to
           :seon.cluster.run/process process
           :seon.config.error/recurrence-limit 3
-          :seon.sci.admit/caps (config/result-caps (config/defaults))}
+          :seon.sci.admit/caps (config/result-caps (config/defaults))})
          @connection now agent-id nil process nil nil
          {:seon.error/kind :seon.cluster.loop.phase/prompt
           :seon.error/message "injected prompt failure"
@@ -1128,7 +1142,7 @@
                  (run/receipt-settle-tx
                   {::run/id run-id
                    :seon.cluster.eval/ordinal ordinal
-                   :seon.cluster.eval/result-edn value}))))
+                   :seon.eval/value value}))))
         (db/transact!
          connection
          (run/receipt-start-tx
@@ -1139,14 +1153,17 @@
               (terminal-data
                {:seon.cluster.loop/cluster
                 (test-support/cluster-handle
-                 {:seon.db/connection connection})
+                 {:seon.db/connection connection
+                  :seon.cluster/name "undisposed"
+                  :seon.cluster.run/process process
+                  :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)})
                 :seon.cluster.loop/now now
                 :seon.cluster.agent/id agent-id
                 :seon.cluster.run/id run-id
                 :seon.cluster.run/process process
                 :seon.cluster.eval/ordinal 2
                 :seon.sci.eval/evaluation
-                {:seon.cluster.eval/result-edn "3"
+                {:seon.eval/value "3"
                  :seon.sci.admit/value 3}
                 :seon.cluster.message/trigger message-id})]
           (db/transact! connection (:seon.db/tx-data prepared)))
@@ -1264,7 +1281,7 @@
                                 :seon.cluster.eval/at now}])))
         (is (map? (db/transact! connection
                               [{:seon.cluster.eval/id "e-0"
-                                :seon.cluster.eval/result-edn "2"}]))))
+                                :seon.eval/value "2"}]))))
       (testing "the model-attempt chain: a failed primary carrying its
       transport evidence, and the backup that points back at it"
         (is (map? (db/transact! connection
@@ -1298,7 +1315,7 @@
                                 :seon.cluster.eval/ordinal 1
                                 :seon.cluster.eval/at now
                                 :seon.cluster.eval/error "boom"
-                                :seon.cluster.eval/result-edn "{:seon.error/kind :x}"}]))))
+                                :seon.eval/value "{:seon.error/kind :x}"}]))))
       (testing "the refs really are refs — a follow, not a string"
         (is (= "alice"
                (db/q '[:find ?id .
@@ -1327,6 +1344,8 @@
 (defn- with-database [body]
   (test-support/with-database
    (fn [connection]
+      (config/apply! {:seon.db/connection connection
+                      :seon.boot/cluster-name "loop-test"})
       (db/transact! connection
                   [{:seon.ns/name 'user}
                    {:seon.cluster.agent/id "agent-a"}
@@ -1352,6 +1371,11 @@
       (not closed?)
       (conj {:seon.cluster.agent/id "agent-a"
              })
+      closed?
+      (conj {:seon.ai.attempt/id "closed-attempt"
+             :seon.ai.attempt/run [:seon.cluster.run/id "run-1"]
+             :seon.ai.attempt/ordinal 0
+             :seon.ai.attempt/at now})
 
       ;; ONE ENTITY PER (run, ordinal), under the ONE identity derivation the
       ;; writer uses: the freeze asserts the source and the start instant, and
@@ -1377,7 +1401,7 @@
                             :seon.cluster.eval/ordinal ordinal
                             :seon.cluster.eval/at now}
                      (= :done state)
-                     (assoc :seon.cluster.eval/result-edn "2")
+                     (assoc :seon.eval/value "2")
                      (= :interrupted state)
                      (assoc :seon.cluster.eval/interrupted-at now)))
                  receipts)))}))
@@ -1392,6 +1416,8 @@
       ;; no separate receipt to start.
       (let [cluster (test-support/cluster-handle
                     {:seon.db/connection connection
+                     :seon.cluster/name "install-refusal"
+                     :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
                      :seon.cluster.run/process process
                      :seon.config.error/recurrence-limit 3})
             gate-refusal
@@ -1432,7 +1458,7 @@
                     [?receipt :seon.cluster.eval/ordinal ?ordinal]]
                   @connection "run-1" 0)
             stored-value (edn/read-string
-                          (:seon.cluster.eval/result-edn receipt))]
+                          (:seon.eval/value receipt))]
         (is (= :seon.cluster.loop/phase-failed
                (:seon.error/kind gate-refusal)
                (get-in terminal [:seon.error/value :seon.error/kind])
@@ -1551,7 +1577,7 @@
       :seon.sci.eval/evaluation
       (staged-def-evaluation connection ctx 10000)})))
 
-(deftest a-staged-def-settles-under-the-declared-vector-and-closes-its-run
+(deftest a-private-def-settles-without-staging-a-blob-and-closes
   (with-database
     (fn [connection]
       (config/apply! {:seon.db/connection connection
@@ -1566,24 +1592,17 @@
                             (vreset! handed staged-writes)
                             (publish conn staged-writes commit-roots!))]
               (settle-staged-def! connection "loop-blob"))
-            stored
-            (db/q '[:find (pull ?def [*]) .
-                    :in $ ?key
-                    :where [?def :seon.def/key ?key]]
-                  @connection (pr-str ["agent-a" "user/probe-staged-def"]))]
+]
         (is (vector? @handed)
             "the staged writes cross the blob seam as the declared vector,
              not as the seq a `(seq …)` branch produced")
-        (is (= 1 (count @handed))
-            "and a 10,000-character def genuinely staged one blob, so this
-             exercises the publication path rather than the empty one")
+        (is (empty? @handed)
+            "private values never stage blobs")
         (is (nil? (:seon.error/kind
                    (:seon.cluster.loop/outcome terminal)))
             "the settlement committed")
         (is (inst? (closed-at connection))
-            "the run closed")
-        (is (string? (:seon.def/blob stored))
-            "and the agent's def is stored as a published blob")))))
+            "the run closed")))))
 
 (deftest a-refused-terminal-commit-still-closes-the-run
   (with-database

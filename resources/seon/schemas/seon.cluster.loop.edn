@@ -51,9 +51,9 @@
                         :seon.schema.admission/reason
                         "An evaluation carries any already-admitted Clojure value; receipt settlement separately projects its durable representation."
                         :gen/elements [nil true 0 "" :k [] {} #{}]}]]
-                     [:seon.cluster.eval/result-edn
+                     [:seon.eval/value
                       {:optional true}
-                      :seon.cluster.eval/result-edn]
+                      :seon.eval/value]
                      [:seon.eval/missing {:optional true} :seon.eval/missing]
                      [:seon.eval/size {:optional true} :seon.eval/size]
                      [:seon.cluster.eval/error
@@ -77,9 +77,9 @@
                      [:seon.program/row
                       {:optional true}
                       :seon.program/row]
-                     [:seon.sci.eval/defs
+                     [:seon.sci.eval/bindings
                       {:optional true}
-                      :seon.sci.eval/defs]
+                      :seon.sci.eval/bindings]
                      [:seon.print/options
                       {:optional true}
                       :seon.print/options]],
@@ -121,7 +121,7 @@
                      [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
                      [:seon.ns/name :seon.ns/name]
                      [:seon.cluster.reply/sources :seon.cluster.reply/sources]
-                     [:seon.sci.eval/defs-notices {:optional true} :seon.sci.eval/defs-notices]],
+],
                     :forms-run [:int {:min 0}],
                     :now :inst,
                     :phase [:enum :claim :fork :prompt :freeze :evaluate :delivery],
@@ -137,12 +137,10 @@
                       :seon.cluster.run/process]
                      [:seon.cluster.eval/ordinal
                       :seon.cluster.eval/ordinal]
-                     [:seon.cluster.eval/result-edn
+                     [:seon.eval/value
                       {:optional true}
-                      :seon.cluster.eval/result-edn]
-                     [:seon.cluster.eval/result-blob
-                      {:optional true}
-                      :seon.cluster.eval/result-blob]
+                      :seon.eval/value]
+
                      [:seon.eval/missing {:optional true} :seon.eval/missing]
                      [:seon.eval/size {:optional true} :seon.eval/size]
                      [:seon.cluster.eval/error
@@ -169,9 +167,7 @@
                      [:seon.program/row
                       {:optional true}
                       :seon.program/row]
-                     [:seon.def/rows
-                      {:optional true}
-                      :seon.def/rows]
+
                      [:my.run/value {:optional true} :my.run/value]],
                     :settle-evaluation-request
                     [:map

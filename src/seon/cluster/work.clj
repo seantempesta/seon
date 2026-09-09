@@ -60,7 +60,7 @@
                [?evaluation :seon.cluster.eval/ordinal ?ordinal]
                [?evaluation :seon.cluster.eval/source ?source]
                (not-join [?evaluation]
-                         (or [?evaluation :seon.cluster.eval/result-edn _]
+                         (or [?evaluation :seon.eval/value _]
                              [?evaluation :seon.eval/missing _]
                              [?evaluation :seon.cluster.eval/error _]
                              [?evaluation
@@ -111,7 +111,7 @@
 
 (defn- receipt-value
   [receipt]
-  (when-let [printed (:seon.cluster.eval/result-edn receipt)]
+  (when-let [printed (:seon.eval/value receipt)]
     (try
       (edn/read-string printed)
       (catch Throwable _
@@ -175,7 +175,7 @@
   [receipt]
   (boolean
    (and receipt
-        (or (:seon.cluster.eval/result-edn receipt)
+        (or (:seon.eval/value receipt)
             (:seon.cluster.eval/error receipt)
             (:seon.cluster.eval/interrupted-at receipt)))))
 

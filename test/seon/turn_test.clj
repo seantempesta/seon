@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
+            [sci.core :as sci]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.config :as config]
@@ -12,6 +13,7 @@
             [seon.flow :as flow]
             [seon.render.hiccup :as hiccup]
             [seon.render.web :as web]
+            [seon.repl :as repl]
             [seon.test-support :as support]
             [seon.turn :as turn]))
 
@@ -64,6 +66,7 @@
            routing (agent/routing)
            faults (async/chan (async/sliding-buffer 16))
            events (async/chan (async/sliding-buffer 1))
+           transactions (atom [])
            handle (support/cluster-handle
                    {:seon.env/environment environment
                     :seon.db/connection connection
@@ -103,13 +106,22 @@
                                        [:seon.cluster.run/id turn-id]))))
                       turn-id))]
        (swap! routing assoc :seon.cluster.agent/fault-channel faults)
-       (d/listen connection ::turns #(async/offer! events %))
+       (d/listen connection ::turns
+                 (fn [report]
+                   (swap! transactions conj
+                          {:seon.test/datoms (count (:tx-data report))
+                           :seon.test/attributes
+                           (into #{} (map :a) (:tx-data report))})
+                   (async/offer! events report)))
        (try
          (doseq [id ["a" "b"]]
            (agent/arm! {:seon.cluster.loop/cluster handle
                         :seon.cluster.agent/routing routing
                         :seon.cluster.agent/id id}))
+         (reset! transactions [])
          (submit "a")
+         (println {:seon.test/virtual-turn-transactions (count @transactions)
+                   :seon.test/virtual-turn-datoms @transactions})
          (submit "b")
          (let [database @connection
                basis (db/basis-t database)
@@ -142,11 +154,10 @@
                b (evaluations @connection "b")]
            (is (= 1 (count a)))
            (is (= 1 (count b)))
-           (is (= 2 (:seon.print/value
-                     (edn/read-string
-                      (:seon.cluster.eval/result-edn
-                       (db/pull @connection [:seon.cluster.eval/result-edn]
-                                (first a)))))))
+           (is (= 2 (edn/read-string
+                      (:seon.eval/value
+                       (db/pull @connection [:seon.eval/value]
+                                (first a))))))
            (is (nil? (:seon.error/kind
                       (turn/compact! {:seon.db/connection connection
                                       :seon.cluster.agent/id "a"}))))
@@ -154,6 +165,50 @@
            (is (= b (evaluations @connection "b")))
            (submit "a")
            (is (= 1 (count (evaluations @connection "a")))))
+         (submit "a" "(def private-state (atom 2))")
+         (let [agent-context #(get-in (agent/armed routing %)
+                                     [:seon.cluster.loop/cluster
+                                      :seon.sci.eval/agent-ctx])
+               a-context (agent-context "a")
+               private-object @(sci/resolve a-context 'my.agents.a/private-state)]
+           (submit "b" "(+ 2 2)")
+           (is (nil? (sci/resolve (agent-context "b") 'my.agents.a/private-state)))
+           (is (nil? (sci/resolve ctx 'my.agents.a/private-state)))
+           (submit "a" "(swap! private-state inc)")
+           (is (identical? a-context (agent-context "a")))
+           (is (identical? private-object
+                           @(sci/resolve a-context 'my.agents.a/private-state)))
+           (is (= 3 @private-object))
+           (submit "a" "(identity private-state)")
+           (let [saved (last (evaluation/of-agent @connection "a"))
+                 result-name (:seon.repl/handle (repl/entity-emission saved))]
+             (is (qualified-symbol? result-name))
+             (is (identical? private-object @(sci/resolve a-context result-name)))
+             (is (nil? (sci/resolve (agent-context "b") result-name)))
+             (is (nil? (sci/resolve ctx result-name))))
+           (db/transact! connection
+                         [{:seon.cluster.agent/id "c"
+                           :seon.cluster.agent/namespace
+                           {:seon.ns/name 'my.agents.c}}])
+           (agent/arm! {:seon.cluster.loop/cluster handle
+                        :seon.cluster.agent/routing routing
+                        :seon.cluster.agent/id "c"})
+           (submit "c" "(+ 3 3)")
+           (is (nil? (sci/resolve (agent-context "c") 'my.agents.a/private-state)))
+           (is (nil? (sci/resolve (support/fork-cluster-ctx connection)
+                                 'my.agents.a/private-state))
+               "fresh acquisition cannot restore a private object from the database")
+           (submit "a" "(defn shared {:malli/schema [:=> [:cat] :int]} [] 42)")
+           (let [b-context (agent-context "b")]
+             (submit "b" "(my.agents.a/shared)")
+             (is (identical? b-context (agent-context "b")))
+             (is (= 42 (edn/read-string
+                         (:seon.eval/value
+                          (last (evaluation/of-agent @connection "b")))))))
+           (is (empty? (filter #(= "seon.def" (namespace %))
+                               (db/q '[:find [?key ...]
+                                       :where [_ :seon.schema/key ?key]]
+                                     @connection)))))
          (let [request {:seon.cluster.loop/cluster handle
                         :seon.cluster.agent/id "a"
                         :seon.turn/write? true}
@@ -184,7 +239,7 @@
             (submit "a" "(my.message/inbox {})")
            ;; Message facts are changed with both procs stopped. Only the
            ;; explicit system walk runs: this proof cannot call a provider.
-           (doseq [id ["a" "b"]]
+           (doseq [id ["a" "b" "c"]]
              (agent/disarm! {:seon.cluster.agent/routing routing
                              :seon.cluster.agent/id id}))
            (db/transact! connection
@@ -218,7 +273,7 @@
                                       [?e :seon.cluster.eval/run ?turn]]
                                     @connection (:seon.cluster.run/id stored))))))))
          (finally
-           (doseq [id ["a" "b"]]
+           (doseq [id ["a" "b" "c"]]
              (agent/disarm! {:seon.cluster.agent/routing routing
                              :seon.cluster.agent/id id}))
            (d/unlisten connection ::turns)

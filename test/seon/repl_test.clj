@@ -6,15 +6,6 @@
             [seon.repl :as repl]
             [seon.sci.admit :as admit]))
 
-(def ^:private symbol-vector
-  (str "#:seon.print{:face :seon.print/vector, :items ["
-       "#:seon.print{:face :seon.print/symbol, :value my.run/complete} "
-       "#:seon.print{:face :seon.print/symbol, :value my.run/wait}]}"))
-
-(defn- number-node
-  [value]
-  (str "#:seon.print{:face :seon.print/number, :value " value "}"))
-
 (deftest one-evaluation-emits-comment-prompt-and-response
   (testing "the comment sits above the prompt so the prompt holds one form"
     (let [emitted (repl/text
@@ -23,7 +14,7 @@
                   :seon.cluster.eval/source "(+ 1 1)"
                   :seon.ns/name 'my.agents.juniper
                   :seon.repl/handle (admit/result-handle 41)
-                  :seon.cluster.eval/result-edn (number-node 2)
+                  :seon.eval/value "2"
                   :seon.eval/duration-ms 3})]
       (is (= (str "; the agent's comment, verbatim, above the prompt\n"
                   "my.agents.juniper=> (+ 1 1)\n"
@@ -37,7 +28,7 @@
            (repl/text {:seon.cluster.eval/source "(+ 1 1)"
                        :seon.ns/name 'my.agents.juniper
                        :seon.repl/handle (admit/result-handle 41)
-                       :seon.cluster.eval/result-edn (number-node 2)
+                       :seon.eval/value "2"
                        :seon.eval/duration-ms 3})))))
 
 (deftest response-key-order-is-the-emitter-not-the-map
@@ -46,7 +37,7 @@
                     :seon.sci.eval/ending-ns 'my.agents.probe
                     :seon.cluster.eval/output "hi\n"
                     :seon.repl/handle (admit/result-handle 2)
-                    :seon.cluster.eval/result-edn (number-node 41)
+                    :seon.eval/value "41"
                     :seon.cluster.eval/source "(do (println \"hi\") 41)"
                     :seon.ns/name 'my.agents.juniper}
           response (repl/response emission)
@@ -62,10 +53,10 @@
                                  :seon.ns/name 'my.agents.juniper
                                  :seon.cluster.eval/ordinal 2
                                  :seon.cluster.eval/output "hi\n"
-                                 :seon.cluster.eval/result-edn
+                                 :seon.eval/value
                                  ;; the declared `::nil` face carries its
                                  ;; value key, exactly as admission emits it
-                                 "#:seon.print{:face :seon.print/nil, :value nil}"
+                                 "nil"
                                  :seon.eval/duration-ms 1})]
     (is (str/includes? response ":out \"hi\\n\"")
         "output is its own pr-str'd key, never folded into the value")
@@ -79,8 +70,8 @@
                    {:seon.cluster.eval/source source
                     :seon.ns/name 'my.agents.juniper
                     :seon.cluster.eval/ordinal 0
-                    :seon.cluster.eval/result-edn
-                    "#:seon.print{:face :seon.print/nil, :value nil}"})
+                    :seon.eval/value
+                    "nil"})
         def-response (repl/response (emission "(def secret 99)"))
         defn-response (repl/response (emission "(defn hello [] 42)"))]
     (is (str/includes? def-response ":note \"secret lives only in your SCI context")
@@ -117,7 +108,7 @@
                          :seon.ns/name 'my.agents.juniper
                          :seon.cluster.eval/ordinal 1
                          :seon.sci.eval/ending-ns 'my.agents.probe
-                         :seon.cluster.eval/result-edn (number-node 1)})
+                         :seon.eval/value "1"})
          ":ns my.agents.probe")))
   (testing "a form that stayed put does not repeat its own prompt"
     (is (not (str/includes?
@@ -125,53 +116,20 @@
                               :seon.ns/name 'my.agents.juniper
                               :seon.cluster.eval/ordinal 1
                               :seon.sci.eval/ending-ns 'my.agents.juniper
-                              :seon.cluster.eval/result-edn (number-node 2)})
+                              :seon.eval/value "2"})
               ":ns ")))))
 
-(deftest a-value-is-rendered-from-the-stored-node-under-the-print-options
-  (testing "the stored admitted node is the one value source"
-    (is (str/includes?
-         (repl/response {:seon.cluster.eval/source "(dir my.run)"
-                         :seon.ns/name 'my.agents.juniper
-                         :seon.cluster.eval/ordinal 4
-                         :seon.cluster.eval/result-edn symbol-vector})
-         ":value [my.run/complete my.run/wait]")))
-  (testing "a print option the form set bounds the same stored node"
-    (is (str/includes?
-         (repl/response {:seon.cluster.eval/source "(dir my.run)"
-                         :seon.ns/name 'my.agents.juniper
-                         :seon.cluster.eval/ordinal 4
-                         :seon.print/options {:seon.print/length 1}
-                         :seon.cluster.eval/result-edn symbol-vector})
-         ":value [my.run/complete ...]"))))
-
-(deftest the-stored-print-keys-are-the-ones-the-emitter-reads
-  ;; THE STORED KEYS REACH THE EMITTER (audit C3). `:seon.print/length` and
-  ;; `/level` are what settlement writes when a form `set!`s *print-length*
-  ;; or *print-level*; the emitter used to read `:seon.print/options`, a key
-  ;; no stored evaluation carries, so every per-form print setting was
-  ;; recorded and then silently discarded.
-  (testing "a stored :seon.print/length bounds the stored node"
-    (is (str/includes?
-         (repl/response {:seon.cluster.eval/source "(dir my.run)"
-                         :seon.ns/name 'my.agents.juniper
-                         :seon.print/length 1
-                         :seon.cluster.eval/result-edn symbol-vector})
-         ":value [my.run/complete ...]")))
-  (testing "a stored :seon.print/level bounds the same node's depth"
-    (is (str/includes?
-         (repl/response
-          {:seon.cluster.eval/source "(dir my.run)"
-           :seon.ns/name 'my.agents.juniper
-           :seon.print/level 0
-           :seon.cluster.eval/result-edn symbol-vector})
-         ":value #")))
-  (testing "no stored key leaves the shipped defaults in effect"
-    (is (str/includes?
-         (repl/response {:seon.cluster.eval/source "(dir my.run)"
-                         :seon.ns/name 'my.agents.juniper
-                         :seon.cluster.eval/result-edn symbol-vector})
-         ":value [my.run/complete my.run/wait]"))))
+(deftest history-preserves-shown-text-without-applying-a-later-profile
+  (let [shown "[my.run/complete my.run/wait]"
+        emission {:seon.cluster.eval/source "(dir my.run)"
+                  :seon.ns/name 'my.agents.juniper
+                  :seon.eval/value shown}
+        response (repl/response emission)]
+    (is (str/includes? response (str ":value " shown)))
+    (doseq [settings [{:seon.print/length 1}
+                      {:seon.print/level 0}
+                      {:seon.print/options {:seon.print/length 0}}]]
+      (is (= response (repl/response (merge emission settings)))))))
 
 (deftest an-error-names-its-throwable-and-never-invents-a-location
   ;; A REFUSAL NAMES WHAT IT KNOWS AND NOTHING MORE (law 2.4, audit F2).
@@ -211,7 +169,7 @@
          (repl/render-ai
           {:seon.cluster.eval/source "(+ 1 1)"
            :seon.cluster.eval/ns {:seon.ns/name 'my.agents.juniper}
-           :seon.cluster.eval/result-edn (number-node 2)})
+           :seon.eval/value "2"})
          "my.agents.juniper=> (+ 1 1)"))))
 
 (deftest nothing-emitted-is-comment-shaped
@@ -220,7 +178,7 @@
                             :seon.ns/name 'my.agents.juniper
                             :seon.cluster.eval/ordinal 4
                             :seon.cluster.eval/output "complete\n"
-                            :seon.cluster.eval/result-edn symbol-vector
+                            :seon.eval/value "[my.run/complete my.run/wait]"
                             :seon.eval/duration-ms 2})]
       (is (not (str/includes? emitted ";; result/"))
           "the result handle is a map key, never a comment")
@@ -260,72 +218,25 @@
            (repl/render-ai {:db/id 8143
                             :seon.cluster.eval/source "(+ 1 1)"
                             :seon.cluster.eval/ordinal 0
-                            :seon.cluster.eval/result-edn (number-node 2)})
+                            :seon.eval/value "2"})
            (str ":result " handle)))))
   (testing "two evaluations at the same ordinal never share a handle"
     (let [emitted (fn [entity-id]
                     (repl/render-ai {:db/id entity-id
                                      :seon.cluster.eval/source "(+ 1 1)"
                                      :seon.cluster.eval/ordinal 0
-                                     :seon.cluster.eval/result-edn
-                                     (number-node 2)}))]
+                                     :seon.eval/value
+                                     "2"}))]
       (is (not= (emitted 11) (emitted 12)))))
-  (testing "ruling 59c: no handle rather than a handle naming nothing"
-    (is (not (str/includes?
-              (repl/render-ai
-               {:db/id 8144
-                :seon.cluster.eval/source "(atom 1)"
-                :seon.ns/name 'my.agents.juniper
-                :seon.cluster.eval/result-edn
-                "#:seon.print{:face :seon.print/object, :name \"clojure.lang.Atom\"}"})
-              ":result"))
-        "a node that kept only a class name never held the value")
+  (testing "shown text identifies an opaque live object without restoring it"
+    (is (str/includes?
+         (repl/render-ai {:db/id 8144
+                          :seon.cluster.eval/source "(atom 1)"
+                          :seon.ns/name 'my.agents.juniper
+                          :seon.eval/value "#object[clojure.lang.Atom]"})
+         ":result result/e8144"))
     (is (not (str/includes?
               (repl/render-ai {:seon.cluster.eval/source "(+ 1 1)"
-                               :seon.cluster.eval/ordinal 0
-                               :seon.cluster.eval/result-edn (number-node 2)})
+                               :seon.eval/value "2"})
               ":result"))
-        "an evaluation that never persisted has no identity to name")
-    ;; A MISSING VALUE ABLATES ITS HANDLE. It stored no node at all, so the
-    ;; fork binds nothing and emitting `:result` would name a symbol that
-    ;; resolves to nothing.
-    (is (not (str/includes?
-              (repl/render-ai
-               {:db/id 8145
-                :seon.cluster.eval/source "(range)"
-                :seon.ns/name 'my.agents.juniper
-                :seon.eval/missing :over-bound
-                :seon.eval/size 8388608})
-              ":result"))
-        "a value over the storage bound is not a value to name")))
-
-(deftest a-missing-value-states-the-reason-and-the-bytes-it-reached
-  ;; ONE GENERATOR for the sentence, and it is DATA, never comment-shaped
-  ;; (ruling 45): the agent reads what happened rather than an empty
-  ;; `:value` that would say the form produced nothing.
-  (testing "over the storage bound"
-    (let [emitted (repl/render-ai
-                   {:db/id 9001
-                    :seon.cluster.eval/source "(range)"
-                    :seon.ns/name 'my.agents.juniper
-                    :seon.eval/missing :over-bound
-                    :seon.eval/size 8388608})]
-      (is (str/includes?
-           emitted "#:seon.repl{:value #:seon.eval{:missing :over-bound"))
-      (is (str/includes? emitted ":size 8388608"))
-      (is (not (str/includes? emitted ";")) "nothing emitted is a comment")))
-  (testing "not serializable — no size, because none was measured"
-    (let [emitted (repl/render-ai
-                   {:db/id 9002
-                    :seon.cluster.eval/source "(async/chan)"
-                    :seon.ns/name 'my.agents.juniper
-                    :seon.eval/missing :unserializable})]
-      (is (str/includes? emitted ":value #:seon.eval{:missing :unserializable}"))
-      (is (not (str/includes? emitted ":size")))))
-  (testing "missing wins over any stored node the reader might still find"
-    (is (str/includes?
-         (repl/render-ai {:db/id 9003
-                          :seon.cluster.eval/source "(range)"
-                          :seon.eval/missing :lost
-                          :seon.cluster.eval/result-edn (number-node 2)})
-         ":value #:seon.eval{:missing :lost}"))))
+        "a preview with no evaluation identity has no handle")))

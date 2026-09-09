@@ -330,53 +330,6 @@
       (dissoc evaluation :seon.program/row)
       evaluation)))
 
-(defn- def-rows
-  "Restore-ladder rows admitted by the terminal receipt transaction."
-  [_db agent-id evaluation ordinal]
-  (let [successful-evaluation?
-        (= :ok (get-in evaluation
-                       [:seon.sci.admit/record :seon.eval/outcome]))
-        row-base
-        (fn [candidate]
-          (-> candidate
-              (dissoc :seon.sci.eval/value)
-              (assoc :seon.def/key
-                     (pr-str [agent-id (:seon.def/id candidate)])
-                     :seon.def/agent
-                     [:seon.cluster.agent/id agent-id]
-                     :seon.def/ordinal ordinal
-                     :seon.schema.admission/source :agent)))
-        rows
-        (mapv
-         (fn [candidate]
-           (let [stored? (or (:seon.def/value-edn candidate)
-                             (:seon.def/blob candidate))
-                 atom? (:seon.def/atom? candidate)
-                 root-data (:seon.sci.eval/value candidate)
-                 root-reason (:sci.root/unrestorable-reason root-data)]
-             (cond
-               root-reason
-               (assoc (row-base candidate)
-                      :seon.def/unrestorable-reason root-reason)
-
-               stored?
-               (dissoc (row-base candidate) :seon.def/unrestorable-reason)
-
-               :else
-               (-> (row-base candidate)
-                   (dissoc :seon.def/value-edn :seon.def/blob :seon.def/size)
-                   (assoc :seon.def/unrestorable-reason
-                          (cond
-                            (and atom? (not stored?))
-                            "The atom's settled value is not store-faithful."
-
-                            (not successful-evaluation?)
-                            "Defining evaluation did not complete successfully."
-                            :else
-                            "The settled root is not store-faithful."))))))
-         (:seon.sci.eval/defs evaluation))]
-    rows))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The proc
 ;;; ---------------------------------------------------------------------------
@@ -602,16 +555,14 @@
                   ::now now}
            problem (assoc :seon.problems/form-problem problem)
            trigger (assoc :seon.cluster.message/trigger trigger)))
-        [settlement-evaluation defs-evaluation settlement-stages]
+        [settlement-evaluation _ settlement-stages]
         (run/settlement-projection cluster evaluation)
-        rows (def-rows database agent-id defs-evaluation ordinal)
         receipt
         (run/evaluation-facts
          (cond-> {:seon.cluster.run/id run-id
                   :seon.cluster.run/process process
                   :seon.cluster.eval/ordinal ordinal
                   :seon.sci.eval/evaluation evaluation
-                  :seon.def/rows rows
                   ::settlement-evaluation settlement-evaluation}
            problem (assoc :seon.problems/form-problem problem)
            settled (assoc :my.run/value settled)))
@@ -712,7 +663,7 @@
 ;;; interim `(not= escalate-to agent-id)` guard this function grew on 2026-08-08
 ;;; went with the copy it was guarding.
 (defn- refusal-terminal-data
-  [cluster database now agent-id run-id process ordinal receipt source]
+  [cluster database now agent-id run-id process ordinal _receipt source]
   (let [recording
         (error-tx cluster database source now
                   (cond-> {:seon.cluster.agent/id agent-id}
@@ -722,14 +673,11 @@
         (when ordinal
           (run/receipt-settle-tx
            database
-           (cond->
             {:seon.cluster.run/id run-id
              :seon.cluster.eval/ordinal ordinal
-             :seon.cluster.eval/result-edn (pr-str value)
+             :seon.eval/value (pr-str value)
              :seon.cluster.eval/error (:seon.error/message value)
-             :seon.error/kind (:seon.error/kind value)}
-             (seq (:seon.def/rows receipt))
-             (assoc :seon.def/rows (:seon.def/rows receipt)))))]
+             :seon.error/kind (:seon.error/kind value)}))]
     {:seon.error/value value
      :seon.db/tx-data
      (into [] cat
@@ -767,7 +715,7 @@
                ;; discarded those values and made a refused definition
                ;; unrestorable on the next turn.
                (dissoc :seon.program/row ::run/form-facts)
-               (assoc :seon.cluster.eval/result-edn serialized
+               (assoc :seon.eval/value serialized
                       :seon.cluster.eval/error (:seon.error/message value)
                       :seon.error/kind (:seon.error/kind value))))
          prepared)
@@ -1554,8 +1502,7 @@
     run-id :seon.cluster.run/id
     first-ordinal :seon.cluster.eval/ordinal
     sources :seon.cluster.reply/sources
-    starting-namespace :seon.ns/name
-    defs-notices :seon.sci.eval/defs-notices}]
+    starting-namespace :seon.ns/name}]
   (let [connection (:seon.db/connection cluster)
         cluster (merge cluster (ai/agent-overlay (or snapshot @connection) agent-id))]
     (loop [remaining (seq sources)
@@ -1568,8 +1515,12 @@
               database (or snapshot @connection)
               captured (atom [])
               at (java.util.Date.)
+              entity-id (when run-id
+                          (evaluation-entity-id
+                           database (run/receipt-identity run-id ordinal)))
+              handle (when entity-id (admit/result-handle entity-id))
               request
-              (cond-> (evaluation-request
+              (cond-> (assoc (evaluation-request
                        {::admitted-form form
                         ::evaluation-namespace namespace-name
                         ::cluster cluster
@@ -1577,9 +1528,12 @@
                         :seon.cluster.agent/id agent-id
                         :seon.cluster.eval/ordinal ordinal
                         :seon.cluster.run/id run-id})
-                snapshot (assoc :seon.db/db snapshot)
-                (and (empty? results) (seq defs-notices))
-                (assoc :seon.sci.eval/output-prefix (str/join "\n" defs-notices)))
+                             :seon.db/db database
+                             :seon.render/profile
+                             (render/request-profile
+                              {:seon.db/db database
+                               :seon.cluster.agent/id agent-id}))
+                handle (assoc :seon.repl/handle handle))
               evaluation
               (binding [db/*read-evidence-sink* captured]
                 (render/call-with-walk-context
@@ -1594,7 +1548,7 @@
               evaluation
               (if (:seon.error/kind evaluation)
                 {:seon.sci.admit/value evaluation
-                 :seon.cluster.eval/result-edn (pr-str evaluation)
+                 :seon.eval/value (pr-str evaluation)
                  :seon.cluster.eval/error (:seon.error/message evaluation)
                  :seon.error/kind (:seon.error/kind evaluation)}
                 evaluation)
@@ -1603,29 +1557,6 @@
                      :seon.cluster.eval/at at
                      :seon.cluster.eval/read-evidence (db/read-evidence @captured)
                      :seon.cluster.eval/read-basis-transaction (db/basis-t database))
-              ;; THE HANDLE IS THE EVALUATION'S OWN IDENTITY. The freeze
-              ;; already transacted this ordinal's evaluation entity, so its
-              ;; entity id is resolvable against the connection's CURRENT
-              ;; value — and an evaluation that never persisted (the page's
-              ;; in-memory preview) has no identity, so it gets no handle and
-              ;; binds nothing rather than a name a later turn cannot reach
-              ;; (ruling 59c).
-              entity-id (when run-id
-                          (evaluation-entity-id
-                           @connection
-                           (run/receipt-identity run-id ordinal)))
-              ;; AND ONLY WHEN THE NODE ACTUALLY HELD THE VALUE. `(def x 1)`
-              ;; and `(in-ns …)` admit to a Var and an object face — names,
-              ;; not values — so `bind-stored-results!` refuses them on the
-              ;; NEXT turn. Naming one here anyway put `:result result/eN`
-              ;; in the agent's context for a symbol that would resolve to
-              ;; nothing when the agent read it, and made the page's own
-              ;; render differ from the stored one it is supposed to equal.
-              ;; One predicate decides for the binder and both emitters.
-              handle (when (and entity-id
-                                (admit/restorable-node
-                                 (:seon.cluster.eval/result-edn evaluation)))
-                       (admit/result-handle entity-id))
               evaluation (cond-> evaluation
                            handle (assoc :seon.repl/handle handle))]
           (when handle
@@ -1677,8 +1608,7 @@
              :seon.cluster.agent/id agent-id
              :seon.cluster.eval/ordinal 0
              :seon.ns/name namespace-name
-             :seon.cluster.reply/sources sources
-             :seon.sci.eval/defs-notices (vec (:seon.sci.eval/defs-notices forked))})
+             :seon.cluster.reply/sources sources})
            :seon.cluster.agent/id agent-id
            :seon.cluster.run/starting-ns [:seon.ns/name namespace-name]
            :seon.cluster.run/opened-at opened-at
@@ -1694,11 +1624,14 @@
         base-ctx (:seon.sci.eval/ctx cluster)
         forked
         (phase #(sci.eval/fork-for-turn
-                 {:seon.sci.eval/ctx base-ctx
+                 (cond-> {:seon.sci.eval/ctx base-ctx
                   :seon.db/db @connection
                   :seon.db/connection connection
                   :seon.cluster.agent/id agent-id
-                  :seon.cluster.run/id run-id}))
+                  :seon.cluster.run/id run-id}
+                   (:seon.sci.eval/agent-ctx cluster)
+                   (assoc :seon.sci.eval/agent-ctx
+                          (:seon.sci.eval/agent-ctx cluster)))))
         trigger (phase #(message/trigger @connection run-id))]
     (if-let [failure (some #(when (:seon.error/kind %) %)
                            [forked trigger])]
@@ -1709,8 +1642,7 @@
                   :seon.cluster.run/id run-id
                   :seon.error/value failure})
         (report :error 0))
-      (let [{ctx :seon.sci.eval/ctx
-             defs-notices :seon.sci.eval/defs-notices} forked
+      (let [{ctx :seon.sci.eval/ctx} forked
             database @connection
             first-ordinal (:seon.cluster.eval/ordinal work)
             evaluations (fold-evaluations database run-id)
@@ -1725,7 +1657,6 @@
                 :seon.ns/name (or (fold-namespace database run-id evaluations
                                                  first-ordinal)
                                   (sci.eval/agent-namespace database agent-id))
-                :seon.sci.eval/defs-notices defs-notices
                 :seon.cluster.reply/sources
                 (into []
                       (comp (filter (fn [evaluation]

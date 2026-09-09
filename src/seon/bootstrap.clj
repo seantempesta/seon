@@ -14,6 +14,8 @@
 (defmacro help
   "Read the calling agent's live situation.
 
+  Defs live in your SCI context for this JVM's life and are never persisted.
+
   The returned situation is the generated opening's control surface. Its
   schema members are the seeds: adding a derived member to that shape is how
   the opening grows. The value is pulled live from current facts; no member is
@@ -557,7 +559,7 @@
                  [?form :seon.cluster.eval/source ?source]
                  [?receipt :seon.cluster.eval/run ?run]
                  [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                 [?receipt :seon.cluster.eval/result-edn ?result]]
+                 [?receipt :seon.eval/value ?result]]
                :args [(:seon.db/db request) run-id]
                :order-by '[?ordinal :asc]})
         pull (pull-result request)]
@@ -715,7 +717,7 @@
              "[?receipt :seon.cluster.eval/run ?run] "
              "[?receipt :seon.cluster.eval/ordinal ?ordinal] "
              "[?receipt :seon.cluster.eval/at ?at] "
-             "[?receipt :seon.cluster.eval/result-edn ?result]] "
+             "[?receipt :seon.eval/value ?result]] "
              ":args [(db/db) " (pr-str agent-id) "] "
              ":order-by '[?at :desc] :limit 2})")
         read-source

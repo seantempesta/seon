@@ -50,8 +50,8 @@
           :seon.cluster.eval/source "(+ 40 2)"
           :seon.cluster.eval/ordinal 0
           :seon.cluster.eval/ns {:seon.ns/name 'my.probe}
-          :seon.cluster.eval/result-edn
-          "#:seon.print{:face :seon.print/number, :value 42}"})
+          :seon.eval/value
+          "42"})
         lines (str/split-lines rendered)]
     (is (= "my.probe=> (+ 40 2)\n#:seon.repl{:value 42, :result result/e7042}"
            rendered)
@@ -128,7 +128,7 @@
                (run/receipt-settle-tx
                 {::run/id run-id
                  :seon.cluster.eval/ordinal 0
-                 :seon.cluster.eval/result-edn "nil"
+                 :seon.eval/value "nil"
                  :seon.program/row row})))]
         (db/transact! connection [{:seon.ns/name namespace-name}])
         (settle-row!
@@ -215,14 +215,14 @@
   (testing "clean evaluations derive no warning at all"
     (is (nil? (run/interrupted-warning
                [{:seon.cluster.eval/ordinal 0
-                 :seon.cluster.eval/result-edn "1"}
+                 :seon.eval/value "1"}
                 {:seon.cluster.eval/ordinal 1}
                 {:seon.cluster.eval/ordinal 2}]))))
   (testing "an interrupted evaluation derives exactly one warning naming
             the first interrupted ordinal and the missing tail"
     (let [warning (run/interrupted-warning
                    [{:seon.cluster.eval/ordinal 0
-                     :seon.cluster.eval/result-edn "1"}
+                     :seon.eval/value "1"}
                     {:seon.cluster.eval/ordinal 1
                      :seon.cluster.eval/interrupted-at t1}
                     {:seon.cluster.eval/ordinal 2}])]
@@ -440,7 +440,7 @@
        (run/receipt-settle-tx
         {::run/id "generated-run"
          :seon.cluster.eval/ordinal 0
-         :seon.cluster.eval/result-edn "{:introduced 'my.run}"}))
+         :seon.eval/value "{:introduced 'my.run}"}))
       (is (= ::committed
              (transact-or-refusal
               connection
@@ -622,7 +622,7 @@
               @connection
               {::run/id "macro-call-run"
                :seon.cluster.eval/ordinal 0
-               :seon.cluster.eval/result-edn "nil"}))]
+               :seon.eval/value "nil"}))]
         (is (not (:seon.error/kind result))
             "the settlement transaction commits"))
       (let [form (db/pull @connection
@@ -659,7 +659,7 @@
               @connection
               {::run/id "macro-call-run"
                :seon.cluster.eval/ordinal 2
-               :seon.cluster.eval/result-edn "nil"
+               :seon.eval/value "nil"
                :seon.program/row
                {:seon.ns/name 'my.macro-caller
                 :seon.ns/source "(require 'unindexed.required)"
@@ -697,7 +697,7 @@
                (run/receipt-settle-tx
                 {::run/id run-id
                  :seon.cluster.eval/ordinal 0
-                 :seon.cluster.eval/result-edn "42"
+                 :seon.eval/value "42"
                  :seon.cluster.eval/read-evidence evidence})))
             close!
             (fn [run-id]
@@ -867,11 +867,9 @@
                        :seon.cluster.eval/at t0}
                 settle {::run/id "receipts"
                         :seon.cluster.eval/ordinal 0
-                        :seon.cluster.eval/result-edn "42"
+                        :seon.eval/value "42"
                         :seon.cluster.eval/triage-edn
-                        "{:clojure.error/cause \"triage evidence\"}"
-                        :seon.cluster.eval/result-blob
-                        (apply str (repeat 64 "a"))}]
+                        "{:clojure.error/cause \"triage evidence\"}"}]
             (is (= ::committed
                    (transact-or-refusal connection (start-tx start))))
             (is (not= ::committed
@@ -881,7 +879,7 @@
                       (transact-or-refusal
                        connection
                        (settle-tx (dissoc settle
-                                          :seon.cluster.eval/result-edn))))
+                                          :seon.eval/value))))
                 "a settle carrying no terminal fact is refused")
             ;; MISSING IS A TERMINAL FACT LIKE THE REST. An evaluation whose
             ;; value went over the storage bound RAN; reading its absent
@@ -892,7 +890,7 @@
                    (transact-or-refusal connection (settle-tx settle))))
             (doseq [terminal [settle
                               (assoc settle
-                                     :seon.cluster.eval/result-edn
+                                     :seon.eval/value
                                      "{:seon.error/kind :x}"
                                      :seon.cluster.eval/error "changed")]]
               (is (not= ::committed
@@ -903,14 +901,12 @@
                                   '[*]
                                   [:seon.cluster.eval/id
                                    (pr-str ["receipts" 0])])]
-              (is (= "42" (:seon.cluster.eval/result-edn receipt))
+              (is (= "42" (:seon.eval/value receipt))
                   "the first terminal outcome is preserved")
               (is (nil? (:seon.eval/missing receipt))
                   "a stored value carries no missing marker")
               (is (= "{:clojure.error/cause \"triage evidence\"}"
                      (:seon.cluster.eval/triage-edn receipt)))
-              (is (= (apply str (repeat 64 "a"))
-                     (:seon.cluster.eval/result-blob receipt)))
               (is (nil? (:seon.cluster.eval/error receipt))
                   "and the refused re-settle changed nothing")))
           ;; the takeover interleaving, re-expressed from the epoch era:
@@ -944,7 +940,7 @@
                        connection
                        (settle-tx {::run/id "receipts"
                                    :seon.cluster.eval/ordinal 1
-                                   :seon.cluster.eval/result-edn "1"})))
+                                   :seon.eval/value "1"})))
                 "the dead pass's late settle refuses — by presence")
             (is (= ::run/receipt-exists
                    (::run/rule (transact-or-refusal
@@ -954,7 +950,7 @@
                  unrepresentable: an ordinal that ever had a receipt
                  refuses forever, across any custody change")))))))
 
-(deftest receipt-settlement-owns-agent-scoped-def-facts
+(deftest settlement-refuses-a-divergent-program-change-since-opening
   (with-model-database
     (fn [connection]
       (let [namespace-name 'my.defs.shared
@@ -965,19 +961,6 @@
             qualified-id "my.defs.shared/scratch"
             agent-ref (fn [agent-id]
                         [:seon.cluster.agent/id agent-id])
-            def-key (fn [agent-id id]
-                       (pr-str [agent-id id]))
-            def-row
-            (fn [agent-id value]
-              (merge
-               {:seon.def/key (def-key agent-id qualified-id)
-                :seon.def/id qualified-id
-                :seon.def/agent (agent-ref agent-id)
-                :seon.schema.admission/source :agent
-                :seon.def/ns [:seon.ns/name namespace-name]
-                :seon.def/name 'scratch
-                :seon.def/ordinal 0}
-               value))
             function-row
             (fn [result]
               ;; `:seon.fn/fn` declares its admission source, so a row that
@@ -991,15 +974,6 @@
                :seon.fn/arglists "([])"
                :seon.fn/private? false
                :seon.fn/spec "[:=> [:cat] :int]"})
-            rows-for
-            (fn [agent-id]
-              (->> (db/q '[:find [?definition ...]
-                           :in $ ?agent-id
-                           :where
-                           [?agent :seon.cluster.agent/id ?agent-id]
-                           [?definition :seon.def/agent ?agent]]
-                         (db/db connection) agent-id)
-                   (mapv #(db/pull (db/db connection) '[*] %))))
             start!
             (fn [run-id ordinal]
               (db/transact!
@@ -1015,7 +989,7 @@
                (run/receipt-settle-tx
                 (merge {::run/id run-id
                         :seon.cluster.eval/ordinal ordinal
-                        :seon.cluster.eval/result-edn "nil"}
+                        :seon.eval/value "nil"}
                        request))))]
         (db/transact!
          connection
@@ -1030,60 +1004,9 @@
                          ::run/agent (agent-ref agent-id)
                          ::run/opened-at t0})))
 
-        (testing "the same qualified id is isolated by agent"
-          (start! run-a 0)
-          (start! run-b 0)
-          (is (= ::committed
-                 (settle! run-a 0
-                          {:seon.def/rows
-                           [(def-row agent-a
-                                      {:seon.def/value-edn "1"})]})))
-          (is (= ::committed
-                 (settle! run-b 0
-                          {:seon.def/rows
-                           [(def-row agent-b
-                                      {:seon.def/value-edn "2"})]})))
-          (is (= ["1"] (mapv :seon.def/value-edn (rows-for agent-a))))
-          (is (= ["2"] (mapv :seon.def/value-edn (rows-for agent-b)))))
-
-        (testing "replacement is exact, including omitted old attributes"
-          (start! run-a 1)
-          (is (= ::committed
-                 (settle! run-a 1
-                          {:seon.def/rows
-                           [(def-row
-                             agent-a
-                             {:seon.def/unrestorable-reason
-                              "host value has no faithful representation"})]})))
-          (let [row (first (rows-for agent-a))]
-            (is (nil? (:seon.def/value-edn row)))
-            (is (= "host value has no faithful representation"
-                   (:seon.def/unrestorable-reason row)))))
-
-        (testing "a receipt cannot write another agent's defs"
-          (start! run-a 2)
-          (let [before (rows-for agent-b)
-                refusal
-                (settle! run-a 2
-                         {:seon.def/rows
-                          [(def-row agent-b
-                                     {:seon.def/value-edn "stolen"})]})]
-            (is (= ::run/def-agent-mismatch (::run/rule refusal)))
-            (is (= before (rows-for agent-b)))
-            (is (not (run/terminal?
-                      (db/pull
-                       (db/db connection) '[*]
-                       [:seon.cluster.eval/id (pr-str [run-a 2])]))))))
-
-        (testing "a contracted function retracts only its agent's matching def"
-          (start! run-a 3)
-          (is (= ::committed
-                 (settle!
-                  run-a 3
-                  {:seon.program/row
-                   (function-row 1)})))
-          (is (empty? (rows-for agent-a)))
-          (is (= ["2"] (mapv :seon.def/value-edn (rows-for agent-b)))))
+        (start! run-a 0)
+        (is (= ::committed
+               (settle! run-a 0 {:seon.program/row (function-row 1)})))
 
         (testing "a divergent definition from an older opening basis refuses"
           (start! run-b 1)
@@ -1098,29 +1021,7 @@
           (is (= ::committed
                  (settle! run-b 1
                           {:seon.program/row (function-row 1)}))
-              "an identical declaration is an assertion-free success"))
-
-        (testing "clearing is explicit, agent-local, and idempotent"
-          (start! run-a 4)
-          (is (= ::committed
-                 (settle! run-a 4
-                          {:seon.def/rows
-                           [(def-row agent-a
-                                      {:seon.def/value-edn "kept"})]})))
-          (is (= ::committed
-                 (transact-or-refusal
-                  connection
-                  (run/clear-defs-tx
-                   {:seon.def/agent (agent-ref agent-b)}))))
-          (is (empty? (rows-for agent-b)))
-          (is (= ["kept"]
-                 (mapv :seon.def/value-edn (rows-for agent-a))))
-          (is (= ::committed
-                 (transact-or-refusal
-                  connection
-                  (run/clear-defs-tx
-                   {:seon.def/agent (agent-ref agent-b)}))))
-          (is (empty? (rows-for agent-b))))))))
+              "an identical declaration is an assertion-free success"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The state machine — generated command sequences against a pure model
@@ -1359,7 +1260,7 @@
                                 :seon.cluster.eval/ordinal ordinal}
                                ;; the settle IS the terminal fact
                                (case kind
-                                 :done {:seon.cluster.eval/result-edn "42"}
+                                 :done {:seon.eval/value "42"}
                                  :error {:seon.cluster.eval/error "boom"}
                                  :interrupted
                                  {:seon.cluster.eval/interrupted-at now})))))
@@ -1396,7 +1297,7 @@
                        (cond-> {:id (:seon.cluster.eval/id receipt)
                                 :run run-id
                                 :ordinal (:seon.cluster.eval/ordinal receipt)}
-                         (:seon.cluster.eval/result-edn receipt)
+                         (:seon.eval/value receipt)
                          (assoc :settled :done)
                          (:seon.cluster.eval/error receipt)
                          (assoc :settled :error)
@@ -1507,7 +1408,7 @@
         pull-terminals
         (fn [connection run-id]
           (->> (pull-receipts connection run-id)
-               (filterv #(or (:seon.cluster.eval/result-edn %)
+               (filterv #(or (:seon.eval/value %)
                              (:seon.cluster.eval/error %)))
                (sort-by :seon.cluster.eval/ordinal)
                vec))
@@ -1546,7 +1447,7 @@
                                    :seon.cluster.eval/ordinal ordinal
                                    :seon.cluster.eval/at t1}
                             (= :done state)
-                            (assoc :seon.cluster.eval/result-edn
+                            (assoc :seon.eval/value
                                    (str ordinal))
                             (= :error state)
                             (assoc :seon.cluster.eval/error
@@ -1610,14 +1511,14 @@
       (db/transact! connection
                   (run/receipt-settle-tx {::run/id "order-b"
                                           :seon.cluster.eval/ordinal 0
-                                          :seon.cluster.eval/result-edn "2"}))
+                                          :seon.eval/value "2"}))
       (db/transact! connection
                   (run/recover-tx {::run/id "order-b"
                                    ::run/live-processes #{"live-process"}
                                    ::run/now t2}))
       (let [receipt (db/pull @connection '[*]
                             [:seon.cluster.eval/id (pr-str ["order-b" 0])])]
-        (is (= "2" (:seon.cluster.eval/result-edn receipt)))
+        (is (= "2" (:seon.eval/value receipt)))
         (is (nil? (:seon.cluster.eval/interrupted-at receipt))
             "the settled receipt is byte-untouched — no contradiction
              fact can exist"))

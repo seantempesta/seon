@@ -81,6 +81,7 @@
             [seon.render.route :as route]
             [seon.flow :as seon.flow]
             [seon.schedule :as schedule]
+            [seon.sci.eval :as sci.eval]
             [seon.schema.edn :as schema.edn])
   (:import [java.util Date]
            [java.util.concurrent Executor]))
@@ -936,6 +937,12 @@
                     (ai/agent-overlay @connection agent-id)))
             _ (async/>!! completion ::ready)
             agent-handle (assoc handle
+                                :seon.sci.eval/agent-ctx
+                                (:seon.sci.eval/ctx
+                                 (sci.eval/fork-for-turn
+                                  {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                                   :seon.db/db @connection
+                                   :seon.cluster.agent/id agent-id}))
                                 :seon.cluster.wake/armer-channel
                                 (:seon.cluster.wake/channel handle)
                                 :seon.cluster.wake/channel wake-channel

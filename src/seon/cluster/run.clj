@@ -49,39 +49,13 @@
       staged (assoc ::reply-blob (:seon.blob/digest staged))
       (nil? staged) (assoc ::reply text))))
 
-(defn- store-def-values!
-  [connection evaluation]
-  (let [threshold (result-blob-threshold @connection)]
-    (reduce
-     (fn [projection candidate]
-       (if-let [serialized
-                (blob/store-faithful-edn
-                 (:seon.sci.eval/value candidate))]
-         (let [size (long (count serialized))
-               staged (when (and threshold (> size threshold))
-                        (blob/stage! connection serialized))]
-           (cond->
-            (update projection :seon.sci.eval/defs
-                    conj
-                    (cond-> (assoc candidate :seon.def/size size)
-                      staged
-                      (assoc :seon.def/blob (:seon.blob/digest staged))
-
-                      (or (nil? threshold) (<= size threshold))
-                      (assoc :seon.def/value-edn serialized)))
-             staged (update :seon.blob/staged-writes conj staged)))
-         (update projection :seon.sci.eval/defs conj candidate)))
-     {:seon.sci.eval/defs []
-      :seon.blob/staged-writes []}
-     (:seon.sci.eval/defs evaluation))))
-
 (defn evaluation-facts
   "Project a completed evaluation into its existing settlement facts."
   {:malli/schema [:=> [:cat :seon.cluster.run/evaluation-facts-request]
                   :seon.cluster.eval/settle-request]}
   [{:keys [:seon.cluster.run/id :seon.cluster.run/process
            :seon.cluster.eval/ordinal :seon.sci.eval/evaluation
-           :seon.problems/form-problem :seon.def/rows :my.run/value]
+           :seon.problems/form-problem :my.run/value]
     settlement-evaluation :seon.cluster.loop/settlement-evaluation}]
   (let [error (or (:seon.cluster.eval/error evaluation)
                   (:seon.cluster.eval/error form-problem))
@@ -90,12 +64,9 @@
     (cond-> {:seon.cluster.run/id id
              :seon.cluster.eval/ordinal ordinal}
       process (assoc :seon.cluster.run/process process)
-      (:seon.cluster.eval/result-edn settlement-evaluation)
-      (assoc :seon.cluster.eval/result-edn
-             (:seon.cluster.eval/result-edn settlement-evaluation))
-      (:seon.cluster.eval/result-blob settlement-evaluation)
-      (assoc :seon.cluster.eval/result-blob
-             (:seon.cluster.eval/result-blob settlement-evaluation))
+      (:seon.eval/value settlement-evaluation)
+      (assoc :seon.eval/value
+             (:seon.eval/value settlement-evaluation))
       (:seon.eval/missing settlement-evaluation)
       (assoc :seon.eval/missing (:seon.eval/missing settlement-evaluation))
       (int? (:seon.eval/size settlement-evaluation))
@@ -174,7 +145,6 @@
              (:seon.program/row evaluation))
       (::form-facts evaluation)
       (assoc ::form-facts (::form-facts evaluation))
-      (seq rows) (assoc :seon.def/rows rows)
       value (assoc :my.run/value value))))
 
 (defn settlement-projection
@@ -199,13 +169,10 @@
                        :seon.test.accretion/report-size
                        (long (count report-edn)))
                 (update :seon.blob/staged-writes (fnil conj []) staged)))
-          receipt)
-        defs (store-def-values! (:seon.db/connection cluster) evaluation)]
+          receipt)]
     [(dissoc receipt :seon.blob/staged-writes)
-     (merge evaluation
-            (dissoc defs :seon.blob/staged-writes))
-     (into (vec (:seon.blob/staged-writes receipt))
-           (:seon.blob/staged-writes defs))]))
+     evaluation
+     (vec (:seon.blob/staged-writes receipt))]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivations
@@ -244,7 +211,7 @@
   executed, which is the one thing the crash model forbids."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [receipt]
-  (boolean (or (:seon.cluster.eval/result-edn receipt)
+  (boolean (or (:seon.eval/value receipt)
                (:seon.eval/missing receipt)
                (:seon.cluster.eval/error receipt)
                (:seon.cluster.eval/interrupted-at receipt))))
@@ -401,7 +368,7 @@
 ;; behavior immediately — the flow-dynamics live-update pattern.
 (declare claim-call release-call close-call plan-call refresh-call
          open-call receipt-start-call receipt-settle-call
-         recover-call clear-defs-call)
+         recover-call)
 
 (defn- unanswered-background-results
   [db agent-eid]
@@ -853,7 +820,7 @@
                     :where
                     [?receipt :seon.cluster.eval/run ?run]
                     [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                    (or [?receipt :seon.cluster.eval/result-edn _]
+                    (or [?receipt :seon.eval/value _]
                         [?receipt :seon.eval/missing _]
                         [?receipt :seon.cluster.eval/error _]
                         [?receipt :seon.cluster.eval/interrupted-at _])]
@@ -1298,7 +1265,7 @@
            :where
            [?declaration ?identity-attribute ?identity-value]
            [?declaration _ _ ?tx true]
-           [?receipt :seon.cluster.eval/result-edn _ ?tx]
+           [?receipt :seon.eval/value _ ?tx]
            [?receipt :seon.cluster.eval/run ?run]
            [?run :seon.cluster.run/id ?run-id]]
          (db/history db) identity-attribute identity-value run-id)))
@@ -1508,88 +1475,8 @@
                (pending-subject-resolution-tx
                 db identity identity-value existing)))))))
 
-(defn- def-owned-attributes
-  "Attributes declared on one agent def, derived from its entity schema."
-  []
-  (into #{}
-        (keep (fn [entry]
-                (when (and (vector? entry)
-                           (qualified-keyword? (first entry)))
-                  (first entry))))
-        (schema.form/map-entries (schema/schema-definition :seon.def/def))))
-
-(defn- def-row
-  "Validate one agent-owned def and derive its exact identity."
-  [db request run-agent row]
-  (when-not (schema/valid-candidate-value? :seon.def/def row)
-    (refuse! `receipt-settle-call ::def-row-not-admitted request))
-  (let [agent (db/pull db [:db/id :seon.cluster.agent/id]
-                       (:seon.def/agent row))
-        namespace-row (db/pull db [:db/id :seon.ns/name]
-                               (:seon.def/ns row))
-        agent-id (:seon.cluster.agent/id agent)
-        expected-id (when-let [namespace-name (:seon.ns/name namespace-row)]
-                      (str (symbol (str namespace-name)
-                                   (str (:seon.def/name row)))))
-        expected-key (pr-str [agent-id (:seon.def/id row)])]
-    (when-not (= (:db/id run-agent) (:db/id agent))
-      (refuse! `receipt-settle-call ::def-agent-mismatch request))
-    (when-not (:db/id namespace-row)
-      (refuse! `receipt-settle-call ::def-namespace-missing request))
-    (when-not (= expected-id (:seon.def/id row))
-      (refuse! `receipt-settle-call ::def-id-mismatch request))
-    (when-not (= expected-key (:seon.def/key row))
-      (refuse! `receipt-settle-call ::def-key-mismatch request))
-    (when-not (= :agent (:seon.schema.admission/source row))
-      (refuse! `receipt-settle-call ::def-source-not-agent request))
-    row))
-
-(defn- exact-def-row-tx
-  "Exactly replace the attributes owned by one admitted agent def."
-  [db row]
-  (let [existing (db/pull db '[*] [:seon.def/key (:seon.def/key row)])
-        entity-id (:db/id existing)
-        retracts
-        (when entity-id
-          (into []
-                (comp
-                 (remove #{:seon.def/key})
-                 (filter #(contains? existing %))
-                 (map (fn [attribute]
-                        [:db/retract entity-id attribute])))
-                (sort (def-owned-attributes))))]
-    (conj (vec retracts)
-          (cond-> row entity-id (assoc :db/id entity-id)))))
-
-(defn- def-rows-tx
-  "Validate and exact-upsert this receipt's agent-scoped defs."
-  [db request run-agent rows contracted-id]
-  (let [rows (mapv #(def-row db request run-agent %) rows)
-        keys (mapv :seon.def/key rows)]
-    (when-not (= (count keys) (count (set keys)))
-      (refuse! `receipt-settle-call ::def-key-duplicate request))
-    (into []
-          (comp
-           (remove #(= contracted-id (:seon.def/id %)))
-           (mapcat #(exact-def-row-tx db %)))
-          rows)))
-
-(defn- contracted-def-retractions
-  "Retract this agent's def superseded by a contracted function."
-  [db agent-eid contracted-id]
-  (when contracted-id
-    (into []
-          (map (fn [def-eid] [:db.fn/retractEntity def-eid]))
-          (db/q '[:find [?definition ...]
-                  :in $ ?agent ?id
-                  :where
-                  [?definition :seon.def/agent ?agent]
-                  [?definition :seon.def/id ?id]]
-                db agent-eid contracted-id))))
-
 (def ^:private receipt-terminal-attributes
-  [:seon.cluster.eval/result-edn
-   :seon.cluster.eval/result-blob
+  [:seon.eval/value
    :seon.eval/missing
    :seon.eval/size
    :seon.cluster.eval/error
@@ -1833,10 +1720,8 @@
          [:map
           [::id ::id]
           [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-          [:seon.cluster.eval/result-edn {:optional true}
-           :seon.cluster.eval/result-edn]
-          [:seon.cluster.eval/result-blob {:optional true}
-           :seon.cluster.eval/result-blob]
+          [:seon.eval/value {:optional true}
+           :seon.eval/value]
           [:seon.eval/missing {:optional true} :seon.eval/missing]
           [:seon.eval/size {:optional true} :seon.eval/size]
           [:seon.cluster.eval/error {:optional true}
@@ -1874,8 +1759,7 @@
           [:seon.test.accretion/report-size {:optional true}
            :seon.test.accretion/report-size]
           [:seon.program/row {:optional true}
-           :seon.program/row]
-          [:seon.def/rows {:optional true} :seon.def/rows]]]
+           :seon.program/row]]]
     [:vector :some]]}
   [db request]
   (let [{::keys [id]
@@ -1897,43 +1781,14 @@
 
       (not (terminal? request))
       (refuse! `receipt-settle-call ::no-terminal-fact request))
-    (let [program-row (:seon.program/row request)
-          contracted-id (:seon.fn/sym program-row)
-          agent-eid (:db/id (::agent run))]
+    (let [program-row (:seon.program/row request)]
       (into [] cat
             [(if program-row (row-tx db request program-row) [])
              (relation-assertions (:db/id (::form-facts request))
                                   (::form-facts request))
-             (def-rows-tx db request (::agent run)
-                           (or (:seon.def/rows request) [])
-                           contracted-id)
-             (contracted-def-retractions db agent-eid contracted-id)
              (receipt-read-evidence-tx receipt request)
              (receipt-gate-test-assertions receipt request)
              (receipt-terminal-assertions receipt request)]))))
-
-(defn clear-defs-tx
-  "Build transaction data explicitly clearing one agent's defs."
-  {:malli/schema
-   [:=> [:cat :seon.def/clear-request] [:vector :some]]}
-  [request]
-  [[:db.fn/call #'clear-defs-call request]])
-
-(defn clear-defs-call
-  "Retract every def owned by one declared agent."
-  {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.def/clear-request]
-    [:vector :some]]}
-  [db request]
-  (let [agent (db/pull db [:db/id] (:seon.def/agent request))]
-    (when-not (:db/id agent)
-      (refuse! `clear-defs-call ::def-agent-missing request))
-    (into []
-          (map (fn [def-eid] [:db.fn/retractEntity def-eid]))
-          (db/q '[:find [?definition ...]
-                  :in $ ?agent
-                  :where [?definition :seon.def/agent ?agent]]
-                db (:db/id agent)))))
 
 (defn recover-tx
   "Transaction data recovering one run from dead-process facts."
@@ -2041,7 +1896,7 @@
 
 (defn- receipt-value
   [receipt]
-  (some-> (:seon.cluster.eval/result-edn receipt)
+  (some-> (:seon.eval/value receipt)
           (#(try (edn/read-string %)
                  (catch Throwable _
                    nil)))))

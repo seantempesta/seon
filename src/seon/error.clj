@@ -476,7 +476,7 @@
                            :seon.error/message
                            (bounded-text message-value field-caps)
                            :seon.error/data-edn
-                           (:seon.cluster.eval/result-edn evidence))
+                           (:seon.sci.admit/edn evidence))
               (::marker evidence)
               (merge (::marker evidence))
               expected
@@ -504,7 +504,7 @@
         error-kind (kind source failure)
         source (meaningful-source source)
         admitted (bounded-admission source caps)
-        full-edn (:seon.cluster.eval/result-edn admitted)
+        full-edn (:seon.sci.admit/edn admitted)
         ;; ONE KEY, AND IT IS SUPPLIED. The fault family's own declared bound
         ;; decides how much evidence the FACT keeps; the blob threshold
         ;; decides where the complete evidence lives.

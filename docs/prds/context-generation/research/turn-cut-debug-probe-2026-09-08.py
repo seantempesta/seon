@@ -1,6 +1,7 @@
 """Read-only measurement of the default debug page's evaluation presentation."""
 
 import json
+from time import perf_counter
 from html.parser import HTMLParser
 from urllib.request import urlopen
 
@@ -32,6 +33,7 @@ class EvaluationPresentation(HTMLParser):
             self.text.append(data)
 
 
+started = perf_counter()
 with urlopen("http://127.0.0.1:7994/ns/my.agents.juniper/debug", timeout=15) as response:
     payload = response.read()
     status = response.status
@@ -40,6 +42,7 @@ presentation.feed(payload.decode("utf-8"))
 text = "".join(presentation.text)
 result = {
     "http_status": status,
+    "elapsed_seconds": round(perf_counter() - started, 6),
     "page_bytes": len(payload),
     "evaluation_entries": presentation.entries,
     "evaluation_printer_summaries": presentation.printer_summaries,

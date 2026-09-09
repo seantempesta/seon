@@ -71,12 +71,10 @@
                      [:seon.sci.eval/ending-ns
                       {:optional true}
                       :seon.sci.eval/ending-ns]
-                     [:seon.cluster.eval/result-edn
+                     [:seon.eval/value
                       {:optional true}
-                      :seon.cluster.eval/result-edn]
-                     [:seon.cluster.eval/result-blob
-                      {:optional true}
-                      :seon.cluster.eval/result-blob]
+                      :seon.eval/value]
+
                      [:seon.eval/missing
                       {:optional true}
                       :seon.eval/missing]
@@ -127,8 +125,6 @@
                       :seon.test.accretion/report-blob]
                      [:seon.test.accretion/report-size {:optional true}
                       :seon.test.accretion/report-size]],
-                    :result-blob :seon.blob/digest,
-                    :result-edn [:string #:seon.db{:no-history? true}],
                     :refreshes
                     [:and {:seon.db/unique true} :seon.db/ref],
                     :run :seon.db/ref,
@@ -137,12 +133,10 @@
                      [:seon.cluster.run/id :seon.cluster.run/id]
                      [:seon.cluster.eval/ordinal
                       :seon.cluster.eval/ordinal]
-                     [:seon.cluster.eval/result-edn
+                     [:seon.eval/value
                       {:optional true}
-                      :seon.cluster.eval/result-edn]
-                     [:seon.cluster.eval/result-blob
-                      {:optional true}
-                      :seon.cluster.eval/result-blob]
+                      :seon.eval/value]
+
                      [:seon.eval/missing
                       {:optional true}
                       :seon.eval/missing]
@@ -208,6 +202,4 @@
                      [:seon.program/row
                       {:optional true}
                       :seon.program/row]
-                     [:seon.def/rows
-                      {:optional true}
-                      :seon.def/rows]]}
+                     ]}

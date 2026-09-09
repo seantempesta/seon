@@ -49,7 +49,7 @@
                     [:seon.sci.eval/evaluation :seon.cluster.loop/evaluation]
                     [:seon.cluster.loop/settlement-evaluation :seon.cluster.loop/evaluation]
                     [:seon.problems/form-problem {:optional true} :seon.problems/form-problem]
-                    [:seon.def/rows {:optional true} :seon.def/rows]
+
                     [:my.run/value {:optional true} :my.run/value]],
                    :record-evaluated-request
                    [:map

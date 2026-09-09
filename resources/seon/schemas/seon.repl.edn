@@ -4,7 +4,7 @@
             :value
             [:string
              {:description
-              "The text one evaluation printed for its result: the stored admitted print node emitted through seon.print, never a second stored copy. An evaluation that stored no value prints seon.repl/missing-text here instead — the reason and the bytes it reached — and carries no :seon.repl/result beside it."}],
+              "The exact shown text from evaluation-time rendering. Historical responses preserve these bytes without decoding an object or applying another profile."}],
             :error
             [:string
              {:description
@@ -17,7 +17,7 @@
             :handle
             [:qualified-symbol
              {:description
-              "The symbol one evaluation's value is bound under in the agent's fork, derived from the evaluation entity's own id as result/e<entity-id>. Handles therefore never collide across an agent's runs, and an evaluation that never persisted — or whose stored node kept only a name — simply has none."}],
+              "The symbol bound directly to the evaluation's actual result in its agent's live SCI context. Stored shown text names the historical handle; restarting loses the object, and a preview without an evaluation identity has no handle."}],
             :out
             [:string
              {:description
@@ -55,15 +55,14 @@
             :emission
             [:map
              {:description
-              "One evaluation as seon.repl/text renders it: the agent's comment and the fixed source it wrote, the namespace the prompt line names, and whatever terminal facts the evaluation has settled. The stored evaluation entity satisfies this directly; a caller that already bounded the value supplies its printed text as :seon.repl/value instead of the stored :seon.cluster.eval/result-edn. The source is OPTIONAL so that a unit which is not an evaluation at all refuses through seon.repl/render-ai's own guard instead of raising a contract violation that takes the whole page derivation with it (law 2.4)."}
+              "One evaluation as seon.repl/text renders it: the agent's comment and the fixed source it wrote, the namespace the prompt line names, and whatever terminal facts the evaluation has settled. The stored evaluation entity satisfies this directly; a caller that already bounded the value supplies its printed text as :seon.repl/value instead of the stored :seon.eval/value. The source is OPTIONAL so that a unit which is not an evaluation at all refuses through seon.repl/render-ai's own guard instead of raising a contract violation that takes the whole page derivation with it (law 2.4)."}
              [:seon.cluster.eval/source {:optional true}
               :seon.cluster.eval/source]
              [:seon.cluster.eval/id {:optional true} :seon.cluster.eval/id]
              [:seon.ns/name {:optional true} :seon.ns/name]
              [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]
              [:seon.cluster.eval/ordinal {:optional true} :seon.cluster.eval/ordinal]
-             [:seon.cluster.eval/result-edn {:optional true} :seon.cluster.eval/result-edn]
-             [:seon.cluster.eval/result-blob {:optional true} :seon.cluster.eval/result-blob]
+             [:seon.eval/value {:optional true} :seon.eval/value]
              [:seon.eval/missing {:optional true} :seon.eval/missing]
              [:seon.eval/size {:optional true} :seon.eval/size]
              [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]

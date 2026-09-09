@@ -42,7 +42,7 @@
    :seon.cluster.eval/at
    :seon.cluster.eval/source
    :seon.cluster.eval/read-basis-transaction
-   :seon.cluster.eval/result-edn
+   :seon.eval/value
    :seon.eval/missing
    :seon.eval/size
    :seon.cluster.eval/error
@@ -344,7 +344,7 @@
                           :seon.ns/name])
          'user)
      ::read-basis (:seon.cluster.eval/read-basis-transaction receipt)
-     ::result (:seon.cluster.eval/result-edn receipt)
+     ::result (:seon.eval/value receipt)
      ::missing (:seon.eval/missing receipt)
      ::size (:seon.eval/size receipt)
      ::error (:seon.cluster.eval/error receipt)
@@ -441,19 +441,6 @@
          (sort-by entry-order)
          vec))))
 
-(defn- read-result
-  [serialized]
-  (when (string? serialized)
-    (with-open [reader (PushbackReader. (StringReader. serialized))]
-      (try
-        (let [value (edn/read {:eof ::eof} reader)
-              trailing (edn/read {:eof ::eof} reader)]
-          (if (and (not= ::eof value) (= ::eof trailing))
-            {::read-value value}
-            {::unreadable? true}))
-        (catch Throwable _
-          {::unreadable? true})))))
-
 (defn- floor-text
   [unit value]
   ;; Transcript values are immutable history entries. Give the shared value
@@ -517,39 +504,6 @@
          sentence
          (when (seq extra) (str "\n" (floor-text unit extra))))))
 
-(defn- bounded-result
-  "The printed value for one entry, under the print options its FORM set.
-
-  `:seon.print/length` and `/level` are facts of the evaluation — settlement
-  records what the form's `set!` left in effect — so they belong to the
-  entry, not to the render call. Reading only the unit's options printed
-  every stored value under the shipped defaults and silently discarded the
-  agent's own choice (audit C3, the transcript's half)."
-  [unit entry serialized]
-  (when (some? serialized)
-    (let [{::keys [read-value unreadable?]} (read-result serialized)
-          options (cond-> (merge (print/default-options)
-                                 (:seon.print/options unit))
-                    (int? (::print-length entry))
-                    (assoc :seon.print/length (::print-length entry))
-                    (int? (::print-level entry))
-                    (assoc :seon.print/level (::print-level entry)))]
-      (cond
-        unreadable?
-        (floor-text unit {:seon.cluster.eval/result-edn serialized
-                          :seon.render.transcript/unreadable? true})
-
-        ;; ONE GRAMMAR FOR A STRING RESULT. Splicing the string's own bytes
-        ;; in raw put newlines inside a response that is one line by
-        ;; construction; `emit-text` prints it quoted, exactly as `pr` would,
-        ;; which is also what `seon.repl` does with the same stored node.
-        (and (map? read-value) (:seon.print/face read-value))
-        (print/emit-text read-value options)
-
-        (string? read-value) read-value
-
-        :else (floor-text unit read-value)))))
-
 (defn- entry-handle
   "The handle naming one entry's value, or nil.
 
@@ -562,8 +516,7 @@
   [entry]
   (let [entity (::entity entry)]
     (or (:seon.repl/handle entity)
-        (when (and (int? (:db/id entity))
-                   (admit/restorable-node (::result entry)))
+        (when (and (int? (:db/id entity)) (string? (::result entry)))
           (admit/result-handle (:db/id entity))))))
 
 (defn- emission
@@ -589,17 +542,17 @@
       (int? (::size entry)) (assoc :seon.eval/size (::size entry))
       (and (::result entry) (nil? (::missing entry)))
       (assoc :seon.repl/value
-             (bounded-result unit entry (::result entry)))
+             (::result entry))
       (int? (::print-length entry)) (assoc :seon.print/length
                                            (::print-length entry))
       (int? (::print-level entry)) (assoc :seon.print/level
                                           (::print-level entry))
       (::error entry) (assoc :seon.cluster.eval/error
-                             (bounded-scalar unit (::error entry)))
+                             (::error entry))
       (::triage-edn entry) (assoc :seon.cluster.eval/triage-edn
                                   (::triage-edn entry))
       (::output entry) (assoc :seon.cluster.eval/output
-                              (bounded-scalar unit (::output entry)))
+                              (::output entry))
       (::ending-ns entry) (assoc :seon.sci.eval/ending-ns (::ending-ns entry))
       (::duration-ms entry) (assoc :seon.eval/duration-ms
                                    (::duration-ms entry)))))

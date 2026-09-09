@@ -106,20 +106,11 @@
        (is (str/includes? ai "(get-in (seon.db/pull (quote [*]) (quote [:my.message/inbox \"root\"])) [])"))
        (is (str/includes? html "requery (get-in (seon.db/pull"))))))
 
-(deftest stored-print-data-feeds-both-sinks-without-readmission
-  (let [stored (:seon.cluster.eval/result-edn
-                (admit/admit
-                 {:seon.sci.admit/value '(1 2 3)
-                  :seon.sci.admit/interrupt-fn (fn [])
-                  :seon.sci.admit/caps caps
-                  :seon.config/on-core-error :record}))
-        projection
-        (with-redefs [admit/admit (fn [_]
-                                   (throw (ex-info "readmitted" {})))]
-          (value/prepare
-           {:seon.render.call/id [:seon.render.value-test/stored]
-            :seon.cluster.eval/result-edn stored
-            :seon.sci.admit/caps caps}))]
+(deftest a-live-list-feeds-both-render-sinks
+  (let [projection
+        (value/prepare
+         (assoc (unit '(1 2 3))
+                :seon.render.call/id [:seon.render.value-test/list]))]
     (is (= "(1 2 3)" (:seon.render.value/text projection)))
     (is (= "(1 2 3)"
            (lexical-hiccup-text
@@ -166,8 +157,8 @@
         "the retired key is absent from the durable artifact")
     (is (= (:seon.sci.admit/value admitted)
            (value/artifact-value restored)))
-    (is (= (:seon.cluster.eval/result-edn admitted)
-           (value/artifact-result-edn restored)))))
+    (is (= (:seon.sci.admit/edn admitted)
+           (admit/print-node-edn (:seon.sci.admit/print-node restored))))))
 
 (deftest profile-fit-supersedes-legacy-print-cuts-with-values
   (is (= "(1 2 3)" (value/render-ai (unit '(1 2 3)))))

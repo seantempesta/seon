@@ -147,7 +147,7 @@
     (let [admitted (admit/admit (request {:alpha [1 2 3]}))
           print-node (:seon.sci.admit/print-node admitted)]
       (is (= print-node
-             (edn/read-string (:seon.cluster.eval/result-edn admitted))))
+             (edn/read-string (:seon.sci.admit/edn admitted))))
       (is (= (:seon.sci.admit/value admitted)
              (admit/semantic-value print-node)))
       (is (= print-node
@@ -171,10 +171,10 @@
     (is (= 1 (count object-nodes)))
     (is (= {::identity 41}
            (admit/semantic-value (::print/value (first object-nodes)))))
-    (is (< (* 10 (count (:seon.cluster.eval/result-edn admitted)))
+    (is (< (* 10 (count (:seon.sci.admit/edn admitted)))
            (count payload))
         "a satisfying defrecord can never contribute its structural bulk")
-    (is (not (str/includes? (:seon.cluster.eval/result-edn admitted)
+    (is (not (str/includes? (:seon.sci.admit/edn admitted)
                             payload)))))
 
 ;;; ---------------------------------------------------------------------------
@@ -246,7 +246,7 @@
   (let [{:keys [interrupt-fn]} (armed)
         input (request value interrupt-fn)
         admitted (admit/admit input)
-        printed (:seon.cluster.eval/result-edn admitted)]
+        printed (:seon.sci.admit/edn admitted)]
     (if (:seon.eval/missing admitted)
       ;; A MISSING ADMISSION IS A COMPLETE ANSWER, and its whole contract is
       ;; that it stored nothing: no node, no value, no bytes to read back.
@@ -309,12 +309,12 @@
         ;; unreachable — which it is, because the walk never enters a
         ;; reference type wherever it sits.
         (let [admitted (admit/admit (request [value]))]
-          (is (string? (:seon.cluster.eval/result-edn admitted)))
+          (is (string? (:seon.sci.admit/edn admitted)))
           (is (some? (edn/read-string
-                      (:seon.cluster.eval/result-edn admitted))))
+                      (:seon.sci.admit/edn admitted))))
           (is (m/validate
                (compiled-node-schema)
-               (edn/read-string (:seon.cluster.eval/result-edn admitted)))))))))
+               (edn/read-string (:seon.sci.admit/edn admitted)))))))))
 
 (deftest inst-projection-keeps-common-and-exotic-inst-values-readable
   (let [date (java.util.Date. 41)
@@ -368,8 +368,8 @@
                   (equiv [_ _] false))]
     (testing ":record degrades — the marker, and the run continues"
       (let [admitted (admit/admit (request {:hostile hostile}))]
-        (is (string? (:seon.cluster.eval/result-edn admitted)))
-        (is (str/includes? (:seon.cluster.eval/result-edn admitted)
+        (is (string? (:seon.sci.admit/edn admitted)))
+        (is (str/includes? (:seon.sci.admit/edn admitted)
                            ":seon.print/failed")
             "the member that could not be projected says so where it stood")))
     (testing ":panic throws hard and loud — a hole in OUR codec"
@@ -387,7 +387,7 @@
         (let [admitted (admit/admit
                         (assoc (request {:fine (get @escape-kinds :sci-fn)})
                                :seon.config/on-core-error mode))]
-          (is (string? (:seon.cluster.eval/result-edn admitted))
+          (is (string? (:seon.sci.admit/edn admitted))
               (str mode ": a marker is the codec working, not failing")))))))
 
 (deftest render-admission-can-preserve-a-complete-value-under-the-same-guard
@@ -395,7 +395,7 @@
         value ["complete" [1 2 3]]
         admitted (admit/admit-value
                   (assoc (request value interrupt-fn
-                                  {:seon.config.eval.result/max-bytes 1})
+                                  (assoc caps :seon.config.eval.result/max-bytes 1))
                          :seon.sci.admit/unbounded? true))]
     (is (= value (:seon.sci.admit/value admitted))
         "an unbounded caller is bounding its own source and keeps the value")
@@ -419,7 +419,7 @@
         "measured at the fragment that crossed the bound, not a running total")
     (is (pos? (calls))
         "the evaluation's own SCI interrupt was consulted at every node")
-    (is (not (contains? admitted :seon.cluster.eval/result-edn))
+    (is (not (contains? admitted :seon.sci.admit/edn))
         "NOTHING is stored for a missing value")
     (is (not (contains? admitted :seon.sci.admit/print-node)))
     (is (= (:seon.sci.admit/record (request nil))
@@ -440,7 +440,7 @@
               "the admitted value IS the value, with nothing elided")
           (is (= (:seon.sci.admit/print-node admitted)
                  (edn/read-string
-                  (:seon.cluster.eval/result-edn admitted)))
+                  (:seon.sci.admit/edn admitted)))
               "and the bytes the walk emitted read back as that node"))))))
 
 (defn- node-depth
@@ -498,16 +498,19 @@
         (is (= :unserializable (:seon.eval/missing admitted)))
         (is (not (contains? admitted :seon.eval/size))
             "an unserializable value has no measured size to report")
-        (is (not (contains? admitted :seon.cluster.eval/result-edn)))))))
+        (is (not (contains? admitted :seon.sci.admit/edn)))))))
 
 (deftest an-absent-storage-bound-refuses-and-names-the-key-it-wanted
   ;; docs/seon/issues/absent-admission-cap-crashes-the-print-walk.md: the cap
   ;; read straight into a `long` gave RT.longCast on nil, a Throwable
   ;; escaping an evaluation boundary where law 2.4 requires a flat value.
-  (let [refusal (admit/admit (request [1 2 3] (:interrupt-fn (armed)) {}))]
-    (is (= :seon.sci.admit/missing-bound (:seon.error/kind refusal)))
-    (is (= :seon.config.eval.result/max-bytes
-           (:seon.error/diagnostic-member refusal))
-        "the refusal names the member, not RT.longCast")
-    (is (str/includes? (:seon.error/message refusal)
-                       ":seon.config.eval.result/max-bytes"))))
+  (test-support/with-database
+   (fn [connection]
+     (let [refusal
+           (test-support/agent-value
+            (test-support/fork-cluster-ctx connection)
+            "(seon.sci.admit/admit {:seon.sci.admit/value [1 2 3], :seon.sci.admit/caps {}, :seon.sci.admit/interrupt-fn (fn []), :seon.config/on-core-error :record})")]
+       (is (some? (:seon.error/kind refusal)))
+       (is (str/includes? (pr-str refusal)
+                          ":seon.config.eval.result/max-bytes"))
+       (is (not (str/includes? (pr-str refusal) "RT.longCast")))))))

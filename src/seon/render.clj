@@ -107,21 +107,15 @@
                     [attribute (val entry)]))
                 (db/identity-attributes database)))]
     (cond-> (request-profile request)
-    (:seon.cluster.eval/result-blob request)
-    (assoc :seon.print/requery-id
-           [:seon.blob/digest (:seon.cluster.eval/result-blob request)])
-
-    (and (nil? (:seon.cluster.eval/result-blob request)) identity-requery)
+    identity-requery
     (assoc :seon.print/requery-id identity-requery)
 
-    (and (nil? (:seon.cluster.eval/result-blob request))
-         (nil? identity-requery)
+    (and (nil? identity-requery)
          (:seon.render.call/id request))
     (assoc :seon.print/requery-id
            [:seon.render.call/id (:seon.render.call/id request)])
 
-    (and (nil? (:seon.cluster.eval/result-blob request))
-         (nil? identity-requery)
+    (and (nil? identity-requery)
          (nil? (:seon.render.call/id request)))
     (assoc :seon.print/requery-refusal
            "The rendered value has no stable requery identity."))))
@@ -138,7 +132,6 @@
                               :seon.sci.eval/time-limit-ms
                               :seon.config/on-core-error
                               :seon.db/connection
-                              :seon.cluster.eval/result-blob
                               :seon.render.data/total
                               :seon.render/distance
                               :seon.render/profile
@@ -1162,10 +1155,9 @@
    :seon.error/diagnostic-operation 'seon.render/render-form
    :seon.error/diagnostic-member :seon.render.value/root
    :seon.error/diagnostic-expected
-   [:or :seon.render.walk/lookup :seon.cluster.eval/result-blob]
+   :seon.render.walk/lookup
    :seon.error/diagnostic-offending
-   (select-keys unit [:seon.render.value/root
-                      :seon.cluster.eval/result-blob])
+   (select-keys unit [:seon.render.value/root])
    :seon.error/diagnostic-cause ::missing-source-provenance
    :seon.error/diagnostic-evidence nil})
 

@@ -1,10 +1,11 @@
-#:seon.sci.admit{:admitted
+#:seon.sci.admit{:edn :string
+                 :admitted
                  [:or
                   [:map
                    [:seon.sci.admit/print-node :seon.print/node]
-                   [:seon.sci.admit/value :any]
-                   [:seon.cluster.eval/result-edn
-                    :seon.cluster.eval/result-edn]
+                   [:seon.sci.admit/value :seon.sci.admit/value]
+                   [:seon.sci.admit/edn
+                    :seon.sci.admit/edn]
                    [:seon.sci.admit/record
                     {:optional true}
                     :seon.sci.admit/record]]
@@ -43,7 +44,7 @@
                   [:seon.eval/outcome :seon.eval/outcome]],
                  :request
                  [:map
-                  [:seon.sci.admit/value :any]
+                  [:seon.sci.admit/value :seon.sci.admit/value]
                   [:seon.sci.admit/interrupt-fn
                    :seon.sci.admit/interrupt-fn]
                   [:seon.sci.admit/caps :seon.sci.admit/caps]
@@ -58,12 +59,14 @@
                   [:seon.sci.admit/record
                    {:optional true}
                    :seon.sci.admit/record]],
-                 :value :any,
+                 :value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                               :seon.schema.admission/reason "MCP and error evidence may contain any Clojure value before their bounded external projection."
+                               :gen/elements [nil true 0 "" :k [] {} #{}]}],
                  :admitted-value
                  [:or
                   [:map
                    [:seon.sci.admit/print-node :seon.print/node]
-                   [:seon.sci.admit/value :any]
+                   [:seon.sci.admit/value :seon.sci.admit/value]
                    [:seon.sci.admit/record
                     {:optional true}
                     :seon.sci.admit/record]]

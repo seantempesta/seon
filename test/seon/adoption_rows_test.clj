@@ -22,16 +22,7 @@
             good-source
             (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                  "good [x] (inc x))")
-            authored-ctx (eval/build-base-ctx)
-            _ (sci/add-namespace! authored-ctx namespace-name {})
-            _ (sci/binding [sci/ns (sci/create-ns namespace-name)]
-                (sci/eval-string* authored-ctx good-source))
-            good-root-edn
-            (binding [*print-meta* true]
-              (pr-str
-               (first
-                (sci/var-root-data authored-ctx
-                                   ['acquire.rows/good]))))]
+]
         (db/transact!
          connection
          [{:seon.cluster.agent/id agent-id
@@ -43,7 +34,7 @@
            :seon.fn/ns [:seon.ns/name namespace-name]
            :seon.fn/source
            (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                "bad [x] x)")
+                "bad [x] (unavailable-function x))")
            :seon.fn/arglists "([x])"
            :seon.fn/private? false
            :seon.fn/spec "[:=> [:cat :int] :int]"}
@@ -53,16 +44,7 @@
            :seon.fn/source good-source
            :seon.fn/arglists "([x])"
            :seon.fn/private? false
-           :seon.fn/spec "[:=> [:cat :int] :int]"}
-          {:seon.def/key
-           (pr-str [agent-id "acquire.rows/good#root"])
-           :seon.def/id "acquire.rows/good#root"
-           :seon.def/agent [:seon.cluster.agent/id agent-id]
-           :seon.def/ns [:seon.ns/name namespace-name]
-           :seon.def/name 'good#root
-           :seon.def/value-edn good-root-edn
-           :seon.def/ordinal 0
-           :seon.schema.admission/source :agent}])
+           :seon.fn/spec "[:=> [:cat :int] :int]"}])
         (let [ctx
               (assoc (eval/build-base-ctx)
                      :seon.sci.eval/custody
@@ -94,5 +76,5 @@
           (is (str/includes? (:seon.error/message refusal)
                              "[:seon.fn/sym \"acquire.rows/bad\"]"))
           (is (str/includes? (:seon.error/message refusal)
-                             "no durable root descriptor")
+                             "unavailable-function")
               "the fact retains the row's typed cause as queryable evidence"))))))

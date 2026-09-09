@@ -392,10 +392,8 @@
    (let [display (display-value unit)
           profile (render-profile unit)
           raw (:seon.render/value unit)
-          initial-tree (if-let [serialized (:seon.cluster.eval/result-edn unit)]
-                         (edn/read-string serialized)
-                         (value-node raw unit profile output 0 []
-                                     (volatile! (:seon.render.profile/token-budget profile))))
+          initial-tree (value-node raw unit profile output 0 []
+                                   (volatile! (:seon.render.profile/token-budget profile)))
           tree (cond-> initial-tree
                  (= output :seon.render/ai) (print/fit profile))
           options (cond-> (assoc (print-options unit)
@@ -491,13 +489,6 @@
   {:malli/schema [:=> [:cat :seon.render.value/artifact] :any]}
   [stored]
   (admit/semantic-value (:seon.sci.admit/print-node stored)))
-
-(defn artifact-result-edn
-  "Derive receipt EDN from an artifact's sole print node."
-  {:malli/schema [:=> [:cat :seon.render.value/artifact]
-                  :seon.cluster.eval/result-edn]}
-  [stored]
-  (admit/print-node-edn (:seon.sci.admit/print-node stored)))
 
 (defn- render-prepared
   [unit output]

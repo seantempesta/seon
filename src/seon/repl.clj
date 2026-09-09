@@ -73,99 +73,11 @@
                " was not installed: every function needs a :malli/schema"
                " contract to become part of the program."))))))
 
-(defn- read-node
-  "Read one stored EDN print node back, or say it is unreadable."
-  [serialized]
-  (with-open [reader (PushbackReader. (StringReader. serialized))]
-    (try
-      (let [value (edn/read {:eof ::eof} reader)
-            trailing (edn/read {:eof ::eof} reader)]
-        (if (and (not= ::eof value) (= ::eof trailing))
-          {::node value}
-          {::unreadable? true}))
-      (catch Throwable _
-        {::unreadable? true}))))
-
-(defn- print-options
-  "The print options one stored evaluation's own facts ask for.
-
-  A form's `set!` of `*print-length*` / `*print-level*` is stored as
-  `:seon.print/length` / `:seon.print/level` on the evaluation, so the
-  response prints the value the way the form asked for it rather than the way
-  the shipped defaults would. Before this, `entity-emission` read
-  `:seon.print/options` — a key no stored evaluation carries — so every
-  per-form print setting was recorded and then thrown away.
-
-  A clipped value's requery text is NOT decided here. An admission-minted
-  elision node carries only its face, and `seon.print`'s `emit ::elided`
-  reads the node alone, so no caller can name the source of a cut it did not
-  make: see
-  docs/seon/issues/admission-elision-cannot-name-its-requery-identity.md."
-  [{length :seon.print/length
-    level :seon.print/level
-    options :seon.print/options}]
-  (cond-> (merge (print/default-options) options)
-    (int? length) (assoc :seon.print/length length)
-    (int? level) (assoc :seon.print/level level)))
-
-(defn missing-text
-  "The whole answer for an evaluation that stored no value.
-
-  Data, not prose, and not comment-shaped (ruling 45): the reason and — when
-  the storage bound is the reason — the bytes it reached. This is the ONE
-  place that text is written, so the page, the history unit and the prompt
-  say the same thing about the same absence. The response carries no
-  `:seon.repl/result` beside it: a missing value ablates its handle, and a
-  later form naming that handle gets an ordinary unresolved symbol."
+(defn value-text
+  "Return the saved shown text unchanged."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
   [emission]
-  (when-some [marker (admit/missing-marker emission)]
-    (admit/canonical-edn marker)))
-
-(defn value-text
-  "Render one stored admitted print node as the text the REPL printed.
-
-  The node is the ONE durable representation of a result: this reads it and
-  never stores it a second time. A value that was never stored says so
-  through `missing-text` instead — there is nothing between whole and
-  missing, so nothing here needs a `capped?` flag to tell the truth. An
-  unreadable node degrades to an honest diagnostic value rather than to
-  silence."
-  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
-  [{serialized :seon.cluster.eval/result-edn
-    supplied :seon.repl/value
-    :as emission}]
-  ;; A CALLER THAT ALREADY BOUNDED THE VALUE HANDS ITS TEXT, NOT A NODE.
-  ;; The transcript owns the bound — the render unit's floor, elision root
-  ;; and print options — so what it produces is the printed value itself,
-  ;; and calling that a print node was a contract this could not honour.
-  (let [node (when (and (nil? supplied) (string? serialized))
-               (let [{::keys [node unreadable?]} (read-node serialized)]
-                 (if unreadable?
-                   {:seon.cluster.eval/result-edn serialized
-                    :seon.render.transcript/unreadable? true}
-                   node)))]
-    (cond
-      ;; MISSING WINS OVER EVERY OTHER SOURCE. An evaluation that stored no
-      ;; value has no node and no supplied text to fall back to, and an
-      ;; empty `:value` would read as the value being nothing.
-      (some? (missing-text emission)) (missing-text emission)
-
-      (some? supplied) supplied
-
-      (nil? node) nil
-
-      ;; A string prints quoted, newlines escaped, exactly as `pr` would:
-      ;; the response is one readable line of data, never a raw splice.
-      (and (map? node) (:seon.print/face node))
-      (print/emit-text node (print-options emission))
-
-      (string? node) node
-
-      :else (let [rendered (value/render-ai {:seon.render/value node
-                                             :seon.render.call/id
-                                             [::value node]})]
-              (if (string? rendered) rendered (pr-str node))))))
+  (or (:seon.eval/value emission) (:seon.repl/value emission)))
 
 (defn error-text
   "Clojure's own concise REPL error for one failed evaluation.
@@ -283,7 +195,7 @@
                              :seon.cluster.eval/source
                              :seon.cluster.eval/comment
                              :seon.cluster.eval/ordinal
-                             :seon.cluster.eval/result-edn
+                             :seon.eval/value
                              :seon.eval/missing
                              :seon.eval/size
                              :seon.cluster.eval/error
@@ -311,8 +223,7 @@
     ;; have no handle, and the response then carries no `:result` key.
     ;; A MISSING VALUE NAMES NOTHING EITHER — it stored no node at all, so
     ;; the same predicate that binds the fork's handles refuses here.
-    (and (int? (:db/id unit))
-         (admit/restorable-node (:seon.cluster.eval/result-edn unit)))
+    (and (int? (:db/id unit)) (string? (:seon.eval/value unit)))
     (assoc :seon.repl/handle (admit/result-handle (:db/id unit))))))
 
 (defn render-ai

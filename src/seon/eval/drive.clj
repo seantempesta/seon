@@ -155,7 +155,7 @@
                 [?receipt :seon.cluster.eval/run ?run]
                 [?receipt :seon.cluster.eval/ordinal ?ordinal]
                 [?receipt :seon.cluster.eval/at ?at]
-                [(get-else $ ?receipt :seon.cluster.eval/result-edn "") ?result]
+                [(get-else $ ?receipt :seon.eval/value "") ?result]
                 [(get-else $ ?receipt :seon.cluster.eval/error "") ?error]
                 [(get-else $ ?receipt :seon.error/kind :seon.eval.drive/absent)
                  ?error-kind]]
@@ -165,7 +165,7 @@
                  {:seon.cluster.run/id run-id
                   :seon.cluster.eval/ordinal ordinal
                   :seon.cluster.eval/source source
-                  :seon.cluster.eval/result-edn result
+                  :seon.eval/value result
                   :seon.eval.drive/value (read-result result)
                   :seon.cluster.eval/error error
                   :seon.error/kind error-kind

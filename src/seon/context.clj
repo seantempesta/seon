@@ -126,7 +126,7 @@
                            [:db/id :seon.cluster.run/closed-at
                             {:seon.cluster.run/agent [:db/id]}
                             {:seon.cluster.eval/_run
-                             [:db/id :seon.cluster.eval/result-edn
+                             [:db/id :seon.eval/value
                               :seon.cluster.eval/error
                               :seon.cluster.eval/interrupted-at]}]
                            [:seon.cluster.run/id run-id]))

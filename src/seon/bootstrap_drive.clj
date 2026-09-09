@@ -129,7 +129,7 @@
                 [?run :seon.cluster.run/id ?run-id]
                 [?receipt :seon.cluster.eval/run ?run]
                 [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                [?receipt :seon.cluster.eval/result-edn _ ?tx]]
+                [?receipt :seon.eval/value _ ?tx]]
               db run-ids namespace-name)
          (sort-by (juxt #(nth % 2) #(nth % 3) first))
          (mapv (fn [[sym spec run-id ordinal]]

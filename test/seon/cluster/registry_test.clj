@@ -42,10 +42,10 @@
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one
     :db/unique :db.unique/identity}
-   {:db/ident :seon.cluster.eval/result-blob
+   {:db/ident :seon.registry.test/payload-blob
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}
-   {:db/ident :seon.def/blob
+   {:db/ident :seon.registry.test/archive-blob
     :db/valueType :db.type/string
     :db/cardinality :db.cardinality/one}
    {:db/ident :seon.schema/key
@@ -95,9 +95,9 @@
        (try
          (db/transact! (:seon.store/connection-object opened) probe-schema)
          (db/transact! (:seon.store/connection-object opened)
-                     [{:seon.schema/key :seon.cluster.eval/result-blob
+                     [{:seon.schema/key :seon.registry.test/payload-blob
                        :seon.schema/form ":seon.blob/digest"}
-                      {:seon.schema/key :seon.def/blob
+                      {:seon.schema/key :seon.registry.test/archive-blob
                        :seon.schema/form ":seon.blob/digest"}])
          (write-marker! (:seon.store/connection-object opened) "ancestral")
          (registry/branch! {:seon.store/store opened
@@ -126,14 +126,14 @@
         (try
           (let [report
                 (db/transact! connection
-                            [{:seon.registry.test/marker "session def"
-                              :seon.def/blob digest}])
+                            [{:seon.registry.test/marker "historical payload"
+                              :seon.registry.test/archive-blob digest}])
                 entity-id
                 (:db/id
                  (db/pull (:db-after report) [:db/id]
-                         [:seon.registry.test/marker "session def"]))]
+                         [:seon.registry.test/marker "historical payload"]))]
             (db/transact! connection
-                        [[:db/retract entity-id :seon.def/blob digest]]))
+                        [[:db/retract entity-id :seon.registry.test/archive-blob digest]]))
           (finally
             (d/release connection)))
         (registry/collect! opened)
@@ -157,7 +157,7 @@
         (try
           (db/transact! connection
                       [{:seon.registry.test/marker "current blob"
-                        :seon.cluster.eval/result-blob digest}])
+                        :seon.registry.test/payload-blob digest}])
           (finally
             (d/release connection)))
         (registry/collect! opened)

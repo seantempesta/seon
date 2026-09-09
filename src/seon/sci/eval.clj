@@ -112,7 +112,6 @@
             [sci.impl.vars :as sci.vars]
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
-            [seon.blob :as blob]
             [seon.bootstrap]
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
@@ -121,11 +120,11 @@
             [seon.env :as env]
             [seon.error :as error]
             [seon.instrument :as instrument]
-            [seon.print :as print]
             [seon.program :as program]
+            [seon.render :as render]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.sci.admit :as admit]
             [seon.sci.kernel :as kernel]
             [seon.sci.reader :as reader]
             [seon.test.accretion :as accretion]
@@ -385,16 +384,6 @@
            (= (meta left) (meta right))
            (= left right))))
 
-(defn- durable-function-root
-  [ctx qualified]
-  (let [root-data (first (sci/var-root-data ctx [qualified]))]
-    (if (blob/store-faithful-edn root-data)
-      root-data
-      (assoc (select-keys root-data
-                          [:sci.root/version :sci.root/ns :sci.root/name])
-             :sci.root/unrestorable-reason
-             "The SCI function root contains a value without a faithful stored representation."))))
-
 (defn- definition-row
   "Derive one form's program row from the generation-stamped SCI Var."
   [ctx projection before source]
@@ -449,36 +438,18 @@
            row))))
    (sort-by (comp str key) (turn-interns ctx))))
 
-(defn- defs
+(defn- bindings
   [ctx _namespace-name before _source _form _observed-built-in-calls]
-  (let [after (turn-intern-values ctx)]
-    (into []
-          (comp
-           (remove (fn [[qualified value]]
-                     (or (identical? absent-intern value)
-                         (and (not (instance? clojure.lang.Atom value))
+  (into {}
+        (keep (fn [[qualified {sci-var :seon.sci.eval/var
+                              value :seon.sci.eval/value}]]
+                (when-not (or (identical? absent-intern value)
                               (same-intern-value?
-                               (get before qualified absent-intern) value)))))
-           (map (fn [[qualified value]]
-                  (let [atom? (instance? clojure.lang.Atom value)
-                        function? (fn? value)
-                        intern-name (symbol (name qualified))]
-                    (cond->
-                     {:seon.def/id (str qualified (when function? "#root"))
-                      :seon.def/ns
-                      [:seon.ns/name (symbol (namespace qualified))]
-                      :seon.def/name
-                      (if function?
-                        (symbol (str intern-name "#root"))
-                        intern-name)
-                      :seon.sci.eval/value
-                      (cond
-                        atom? @value
-                        function?
-                        (durable-function-root ctx qualified)
-                        :else value)}
-                      atom? (assoc :seon.def/atom? true))))))
-          after)))
+                               (get before qualified absent-intern) value))
+                  [qualified {:seon.sci.eval/value value
+                              :seon.sci.eval/metadata
+                              (dissoc (meta sci-var) :sci/generation)}])))
+        (turn-interns ctx)))
 
 (defn- deleted-schema-key
   [row]
@@ -545,6 +516,8 @@
   [ctx handle value]
   (let [namespace-name 'result
         intern-name (symbol (name handle))]
+    (when-let [objects (::result-objects ctx)]
+      (swap! objects assoc (subs (name handle) 1) value))
     (when-not (sci/find-ns ctx namespace-name)
       (sci/add-namespace! ctx namespace-name {}))
     (sci/intern ctx namespace-name intern-name value)
@@ -697,63 +670,6 @@
         function-symbol spec-edn projection on-core-error caps @sci-var))))
   nil)
 
-(defn- def-value
-  [connection {value-edn :seon.def/value-edn
-               digest :seon.def/blob}]
-  (let [serialized
-        (cond
-          (some? value-edn) value-edn
-          (and connection digest) (blob/get connection digest)
-          :else
-          (throw
-           (ex-info "Agent def has no available stored value."
-                    {:seon.error/kind ::def-blob-unavailable
-                     :seon.blob/digest digest :seon.sci.eval/def-blob-unavailable digest})))]
-    (edn/read-string serialized)))
-
-(defn- def-root-row
-  [db function-symbol]
-  (let [namespace-name (symbol (namespace function-symbol))
-        intern-name (symbol (str (name function-symbol) "#root"))
-        entry (db/q '[:find ?entry .
-                      :in $ ?namespace ?name
-                      :where
-                      [?ns :seon.ns/name ?namespace]
-                      [?entry :seon.def/ns ?ns]
-                      [?entry :seon.def/name ?name]]
-                    db namespace-name intern-name)]
-    (when entry
-      (db/pull db '[* {:seon.def/ns [:seon.ns/name]}] entry))))
-
-(defn- install-root-row!
-  [ctx connection function-symbol row]
-  (let [root-data (def-value connection row)
-        descriptor-symbol
-        (symbol (str (:sci.root/ns root-data))
-                (str (:sci.root/name root-data)))]
-    (cond
-      (not= function-symbol descriptor-symbol)
-      (throw
-       (ex-info "Stored function root descriptor names a different Var."
-                {:seon.error/kind ::function-root-identity-mismatch
-                 :seon.fn/sym (str function-symbol)
-                 :sci.root/sym (str descriptor-symbol)
-                 :seon.def/id (:seon.def/id row) :seon.sci.eval/function-root-identity-mismatch true}))
-
-      (:sci.root/function root-data)
-      (do
-        (sci/install-var-roots! ctx [root-data])
-        true)
-
-      :else
-      (let [reason
-            (or (:sci.root/unrestorable-reason root-data)
-                "The stored value is not a function-root descriptor.")]
-        (sci/intern ctx (:sci.root/ns root-data) (:sci.root/name root-data)
-                    {:seon.def/id (:seon.def/id row)
-                     :seon.def/unrestorable-reason reason})
-        false))))
-
 (defn- install-function-from-database!
   "Install one selected function from the acquired database snapshot."
   [ctx db function-symbol]
@@ -771,22 +687,14 @@
        ctx namespace-name (assoc (row-bindings namespace-row) :refers {}))
       (sci/install-namespace-bindings! ctx namespace-name
                                        (row-bindings namespace-row))
-      (let [function-installed?
-            (if-let [row (def-root-row db function-symbol)]
-              (install-root-row! ctx (:seon.db/connection (::custody ctx))
-                                 function-symbol row)
-              (throw
-               (ex-info "Selected function has no durable root descriptor."
-                        {:seon.error/kind ::unrestorable-function-root
-                         :seon.fn/sym (str function-symbol)
-                         :seon.def/unrestorable-reason
-                         "No fact-backed SCI function root was found." :seon.sci.eval/unrestorable-function-root true})))]
-        (when function-installed?
-          (install-function-contract!
-           ctx (db/pull db '[*] [:seon.fn/sym (str function-symbol)])
-           (context-projection ctx) db)))
+      (let [event (one-event source namespace-name ctx (count source))]
+        (sci/binding [sci/ns (sci/create-ns namespace-name)]
+          (sci/eval-form ctx (:seon.sci.reader/form event)))
+        (install-function-contract!
+         ctx (db/pull db '[*] [:seon.fn/sym (str function-symbol)])
+         (context-projection ctx) db)))
     (kernel/mark-installed! ctx function-symbol)
-      function-symbol)))
+    function-symbol))
 
 (def ^:private namespace-reference-attributes
   {:seon.fn/sym :seon.fn/ns
@@ -939,14 +847,20 @@
          :seon.sci.eval/installed 1})
       {:seon.schema/projection projection
        :seon.sci.eval/installed 0})]
-      ;; Namespace mutations execute in an isolated fork. The exact SCI state
-      ;; becomes visible only here, after the terminal transaction has proved
-      ;; that every durable declaration/context change committed. Replaying
-      ;; source would re-run dynamic target expressions against later state
-      ;; and cannot preserve import masks, which are resolver state rather
-      ;; than program identities.
+      ;; Transfer only the namespace operation's changed entries. Copying its
+      ;; whole namespace table would also publish unrelated private bindings.
+      ;; The operation's resolved targets remain exact without replaying source.
       (when-let [namespace-state (::namespace-state row)]
-        (sci/install-namespace-state! ctx namespace-state))
+        (swap! (:env ctx)
+               (fn [environment]
+                 (reduce (fn [environment [namespace-name binding-name value]]
+                           (if (identical? absent-intern value)
+                             (update-in environment [:namespaces namespace-name]
+                                        dissoc binding-name)
+                             (assoc-in environment
+                                       [:namespaces namespace-name binding-name]
+                                       value)))
+                         environment namespace-state))))
       (advance-context-projection!
        ctx db (:seon.schema/projection installed))
       installed)))
@@ -980,24 +894,19 @@
               (mapcat (comp (juxt :seon.fn/sym :seon.test/sym)
                             :seon.program/row)
                       installations))
-        roots
-        (into []
-              (comp
-               (mapcat (comp :seon.sci.eval/defs
-                             :seon.sci.eval/evaluation))
-               (keep :seon.sci.eval/value)
-               (filter :sci.root/function)
-               (filter
-                (fn [root]
-                  (contains?
-                   row-symbols
-                   (symbol (str (:sci.root/ns root))
-                           (str (:sci.root/name root)))))))
-              installations)]
-    ;; `install-var-roots!` resolves the batch as one environment update, so a
-    ;; test closure can name a function produced earlier in the same reply.
-    (when (seq roots)
-      (sci/install-var-roots! ctx roots))
+        roots (into {}
+                    (mapcat (comp :seon.sci.eval/bindings
+                                  :seon.sci.eval/evaluation))
+                    installations)]
+    (doseq [qualified row-symbols
+            :let [{value :seon.sci.eval/value metadata :seon.sci.eval/metadata}
+                  (get roots qualified)]
+            :when (get roots qualified)]
+      (let [namespace-name (symbol (namespace qualified))]
+        (when-not (sci/find-ns ctx namespace-name)
+          (sci/add-namespace! ctx namespace-name {}))
+        (sci/intern ctx namespace-name
+                    (with-meta (symbol (name qualified)) metadata) value)))
     (:installed
      (reduce
       (fn [{projection :projection installed :installed}
@@ -1635,75 +1544,6 @@
         namespace-order)
        commit-fault!)))))))
 
-(defn- def-restore-notice
-  [intern-name reason]
-  (str "could not restore `" intern-name "`: " reason))
-
-(defn- restorable-def-row?
-  [{:seon.def/keys [blob unrestorable-reason value-edn]}]
-  (and (nil? unrestorable-reason)
-       (or (some? value-edn) (some? blob))))
-
-(defn- unrestorable-def-value
-  [row reason]
-  {:seon.def/id (:seon.def/id row)
-   :seon.def/unrestorable-reason reason})
-
-(defn- def-entry
-  [connection row]
-  (if (or (:seon.def/value-edn row) (:seon.def/blob row))
-    (try
-      [row (def-value connection row) nil]
-      (catch Throwable failure
-        [row nil failure]))
-    [row nil nil]))
-
-(defn- def-target
-  [{namespace-ref :seon.def/ns
-    intern-name :seon.def/name}
-   value]
-  (if (and (map? value) (contains? value :sci.root/version))
-    [(:sci.root/ns value) (:sci.root/name value)]
-    [(:seon.ns/name namespace-ref) intern-name]))
-
-(defn- bind-stored-results!
-  "Bind every stored evaluation of ONE AGENT under its own handle.
-
-  An evaluation is shareable data, not a turn-local accident: a later turn's
-  fork rebuilds the handles from the stored admitted node, so an agent that
-  wrote `(range 100)` in one run can still ask `(count result/e41)` in the
-  next (ruling 59c). The scope is the agent, not the run in effect, because
-  the agent's context renders every run's evaluations: a handle bound only
-  for the current run would resolve to nothing — or, under the ordinal
-  spelling this replaced, to a different run's value.
-
-  A node that kept only a name — a Var, an object, a failure — binds NOTHING,
-  because the value it describes was never in it, and an unresolved symbol is
-  the honest answer. A MISSING VALUE BINDS NOTHING EITHER, by construction:
-  an evaluation over the storage bound stores no `result-edn` at all, so this
-  query never reaches it. There is no window to ask about any more — a value
-  is stored faithfully or it is missing.
-
-  Returns the handles it bound."
-  [ctx db agent-id]
-  (when agent-id
-    (let [rows (db/q '[:find ?evaluation (pull ?evaluation
-                                               [:seon.cluster.eval/result-edn])
-                       :in $ ?agent-id
-                       :where
-                       [?agent :seon.cluster.agent/id ?agent-id]
-                       [?run :seon.cluster.run/agent ?agent]
-                       [?evaluation :seon.cluster.eval/run ?run]
-                       [?evaluation :seon.cluster.eval/result-edn _]]
-                     db agent-id)]
-      (into []
-            (keep (fn [[entity-id stored]]
-                    (when-let [node (admit/restorable-node
-                                     (:seon.cluster.eval/result-edn stored))]
-                      (bind-result! ctx (admit/result-handle (long entity-id))
-                                    (admit/semantic-value node)))))
-            (sort-by first (or rows []))))))
-
 (defn- latest-print-fact
   "The value of one print attribute on this agent's latest evaluation to set it."
   [db agent-id attribute]
@@ -1734,103 +1574,71 @@
         (int? length) (assoc :seon.print/length length)
         (int? level) (assoc :seon.print/level level)))))
 
-(defn fork-for-turn
-  "Fork the live base, rehydrate the selected agent's defs, and bind its
-  stored evaluation handles.
+(defn- base-bindings
+  "Snapshot roots, not mutable Var identities, for the next base diff."
+  [ctx]
+  (into {}
+        (mapcat
+         (fn [[namespace-name bindings]]
+           (map (fn [[binding-name binding]]
+                  [[namespace-name binding-name]
+                   (if (sci.utils/var? binding)
+                     [(if (sci.vars/hasRoot binding) @binding absent-intern)
+                      (dissoc (meta binding) :sci/generation)]
+                     [binding])])
+                bindings)))
+        (sci/namespace-state ctx)))
 
-  The handles are the AGENT's, not the run's: an agent's context renders
-  every run's evaluations, so a fork that bound only the run in effect would
-  leave the names it just showed the agent unresolved."
+(defn- receive-base!
+  [ctx base-ctx]
+  (let [previous @(::base-bindings ctx)
+        current (base-bindings base-ctx)]
+    (doseq [[[namespace-name binding-name :as path] entry] current
+            :let [prior (get previous path)]
+            :when (or (not (identical? (first entry) (first prior)))
+                      (not= (second entry) (second prior)))]
+      (when-not (sci/find-ns ctx namespace-name)
+        (sci/add-namespace! ctx namespace-name {}))
+      (if (= 2 (count entry))
+        (let [[value metadata] entry
+              binding-name (with-meta binding-name metadata)]
+          (if (identical? absent-intern value)
+            (sci/intern ctx namespace-name binding-name)
+            (sci/intern ctx namespace-name binding-name value)))
+        (swap! (:env ctx) assoc-in
+               [:namespaces namespace-name binding-name] (first entry))))
+    (reset! (::base-bindings ctx) current)
+    (reset! (::kernel/program-snapshot ctx)
+            @(::kernel/program-snapshot base-ctx))
+    ctx))
+
+(defn fork-for-turn
+  "Receive base changes in the agent context, or fork once when it starts."
   {:malli/schema [:=> [:cat :seon.sci.eval/defs-fork-request]
                   :seon.sci.eval/defs-fork-result]}
   [{base-ctx :seon.sci.eval/ctx
+    agent-ctx :seon.sci.eval/agent-ctx
     db :seon.db/db
-    connection :seon.db/connection
     agent-id :seon.cluster.agent/id}]
-  (let [ctx (cond-> (sci/fork base-ctx)
-              (env/environment? (env/of base-ctx))
-              (env/carry-state
-               (env/environment-state (env/of base-ctx)))
-              true
-              (assoc ::turn-fork? true)
-              ;; THE SESSION OWNS THE PRINT BINDINGS, NOT THE FORM. Every
-              ;; form of this turn reads and updates the one carrier, so a
-              ;; `set!` of `*print-length*` holds for the forms that follow
-              ;; it exactly as it does at a `clojure.main` REPL.
-              true
-              (assoc ::print-session
-                     (atom (or (session-print-options db agent-id) {}))))
-        entry-ids
-        (db/q '[:find [?entry ...]
-                :in $ ?agent
-                :where
-                [?agent-eid :seon.cluster.agent/id ?agent]
-                [?entry :seon.def/agent ?agent-eid]]
-              db agent-id)
-        rows
-        (->> (db/pull-many db
-                           '[* {:seon.def/ns [:seon.ns/name]}]
-                           entry-ids)
-             (sort-by (juxt :seon.def/ordinal :seon.def/key))
-             vec)
-        entries (mapv #(def-entry connection %) rows)
-        notices (transient [])
+  (let [ctx (if agent-ctx
+              (receive-base! agent-ctx base-ctx)
+              (cond-> (assoc (sci/fork base-ctx)
+                             ::turn-fork? true
+                             ::base-bindings (atom (base-bindings base-ctx))
+                             ::result-objects (atom {})
+                             ::kernel/installed-functions
+                             (atom @(::kernel/installed-functions base-ctx))
+                             ::kernel/program-snapshot
+                             (atom @(::kernel/program-snapshot base-ctx))
+                             ::print-session
+                             (atom (or (session-print-options db agent-id) {})))
+                (env/environment? (env/of base-ctx))
+                (env/carry-state
+                 (env/environment-state (env/of base-ctx)))))
         assigned-namespace (agent-namespace db agent-id)]
-    (when (and assigned-namespace
-               (not (sci/find-ns ctx assigned-namespace)))
+    (when (and assigned-namespace (not (sci/find-ns ctx assigned-namespace)))
       (sci/add-namespace! ctx assigned-namespace {}))
-    (bind-stored-results! ctx db agent-id)
-    (doseq [[row value] entries]
-      (let [[namespace-name intern-name] (def-target row value)]
-        (when-not (sci/find-ns ctx namespace-name)
-          (sci/add-namespace! ctx namespace-name {}))
-        (when (or (:seon.def/unrestorable-reason row)
-                  (restorable-def-row? row))
-          (sci/intern ctx namespace-name intern-name))))
-    (doseq [[{intern-name :seon.def/name
-              atom? :seon.def/atom?
-              reason :seon.def/unrestorable-reason
-              :as row}
-             value failure] entries]
-      (let [[namespace-name target-name] (def-target row value)]
-        (cond
-          failure
-          (let [reason (.getMessage ^Throwable failure)]
-            (sci/intern ctx namespace-name target-name
-                        (unrestorable-def-value row reason))
-            (conj! notices (def-restore-notice target-name reason)))
-
-          reason
-          (do
-            (sci/intern ctx namespace-name target-name
-                        (unrestorable-def-value row reason))
-            (conj! notices (def-restore-notice target-name reason)))
-
-          (not (restorable-def-row? row))
-          (conj! notices
-                 (def-restore-notice
-                  intern-name "agent def has no defining form or stored value"))
-
-          atom?
-          (do
-            (sci/intern ctx namespace-name target-name (atom value))
-            (conj! notices
-                   (str "restored `" target-name
-                        "` from its last settled value")))
-
-          (or (:seon.def/value-edn row) (:seon.def/blob row))
-          (try
-            (if (:sci.root/function value)
-              (sci/install-var-roots! ctx [value])
-              (sci/intern ctx namespace-name target-name value))
-            (catch Throwable failure
-              (let [reason (.getMessage failure)]
-                (sci/intern ctx namespace-name target-name
-                            (unrestorable-def-value row reason))
-                (conj! notices
-                       (def-restore-notice target-name reason))))))))
-    {:seon.sci.eval/ctx ctx
-     :seon.sci.eval/defs-notices (persistent! notices)}))
+    {:seon.sci.eval/ctx ctx}))
 
 (declare cluster-ctx*)
 
@@ -2034,10 +1842,37 @@
         row (cond-> (or selected-row context-row)
               live-declaration? (assoc ::evaluated? true)
               (and namespace-changed? (or selected-row context-row))
-              (assoc ::namespace-state after-namespace-state))]
+              (assoc ::namespace-state
+                     (into []
+                           (mapcat
+                            (fn [namespace-name]
+                              (let [before (get before-namespace-state namespace-name)
+                                    after (get after-namespace-state namespace-name)]
+                                (keep (fn [binding-name]
+                                        (let [old (get before binding-name absent-intern)
+                                              new (get after binding-name absent-intern)]
+                                          (when-not (identical? old new)
+                                            [namespace-name binding-name new])))
+                                      (into (set (keys before)) (keys after))))))
+                           (into (set (keys before-namespace-state))
+                                 (keys after-namespace-state)))))]
     {:seon.program/row row
      :seon.sci.eval/context-row context-row
      :seon.sci.eval/namespace-changed? namespace-changed?}))
+
+(defn- shown-result
+  [value request record]
+  (let [profile (render/request-profile request)
+        shown (render.value/render-ai
+               (assoc request
+                      :seon.render/value value
+                      :seon.render/profile profile
+                      :seon.render.call/id
+                      [:seon.cluster.eval/source
+                       (:seon.cluster.eval/source request)]))]
+    (cond-> {:seon.sci.admit/value value
+             :seon.eval/value (if (string? shown) shown (pr-str shown))}
+      record (assoc :seon.sci.admit/record record))))
 
 (defn- success-evaluation
   [{admitted :seon.sci.eval/admitted
@@ -2047,7 +1882,7 @@
     namespace-name :seon.sci.eval/namespace-name
     ending-namespace :seon.sci.eval/ending-namespace
     print-options :seon.print/options
-    definitions :seon.sci.eval/defs
+    definitions :seon.sci.eval/bindings
     row :seon.program/row}]
   (cond-> (cond-> {:seon.print/options print-options
                    :seon.cluster.eval/ns [:seon.ns/name namespace-name]
@@ -2058,13 +1893,10 @@
             ;; is what lets a reader ask `contains?` instead of guessing.
             (contains? admitted :seon.sci.admit/value)
             (assoc :seon.sci.admit/value (:seon.sci.admit/value admitted))
-            (:seon.cluster.eval/result-edn admitted)
-            (assoc :seon.cluster.eval/result-edn
-                   (:seon.cluster.eval/result-edn admitted))
-            (:seon.eval/missing admitted)
-            (assoc :seon.eval/missing (:seon.eval/missing admitted))
-            (int? (:seon.eval/size admitted))
-            (assoc :seon.eval/size (:seon.eval/size admitted)))
+            (:seon.eval/value admitted)
+            (assoc :seon.eval/value
+                   (:seon.eval/value admitted))
+)
     ;; HOW LONG THE FORM TOOK IS A KEY OF THE EVALUATION, not something two
     ;; readers dig out of the diagnostic record by different routes. The
     ;; storage projection and the page's in-memory render both read this one
@@ -2074,7 +1906,7 @@
     (assoc :seon.eval/duration-ms
            (get-in admitted [:seon.sci.admit/record :seon.eval/duration-ms]))
     row (assoc :seon.program/row row)
-    (seq definitions) (assoc :seon.sci.eval/defs definitions)
+    (seq definitions) (assoc :seon.sci.eval/bindings definitions)
     (or (seq output-prefix) (seq (str printed)))
     (assoc :seon.cluster.eval/output
            (evaluation-output output-prefix printed))))
@@ -2086,7 +1918,7 @@
     printed :seon.sci.eval/printed
     namespace-name :seon.sci.eval/namespace-name
     print-options :seon.print/options
-    definitions :seon.sci.eval/defs
+    definitions :seon.sci.eval/bindings
     record :seon.sci.admit/record
     value :seon.sci.admit/value
     triage-edn :seon.cluster.eval/triage-edn
@@ -2099,19 +1931,16 @@
                    :seon.sci.admit/record record}
             (contains? admitted :seon.sci.admit/value)
             (assoc :seon.sci.admit/value (:seon.sci.admit/value admitted))
-            (:seon.cluster.eval/result-edn admitted)
-            (assoc :seon.cluster.eval/result-edn
-                   (:seon.cluster.eval/result-edn admitted))
-            (:seon.eval/missing admitted)
-            (assoc :seon.eval/missing (:seon.eval/missing admitted))
-            (int? (:seon.eval/size admitted))
-            (assoc :seon.eval/size (:seon.eval/size admitted)))
+            (:seon.eval/value admitted)
+            (assoc :seon.eval/value
+                   (:seon.eval/value admitted))
+)
     ;; The same one spelling on the failing path.
     (int? (:seon.eval/duration-ms record))
     (assoc :seon.eval/duration-ms (:seon.eval/duration-ms record))
     (string? triage-edn)
     (assoc :seon.cluster.eval/triage-edn triage-edn)
-    (seq definitions) (assoc :seon.sci.eval/defs definitions)
+    (seq definitions) (assoc :seon.sci.eval/bindings definitions)
     (contains? request :seon.cluster.eval/interrupted-at)
     (assoc :seon.cluster.eval/interrupted-at interrupted-at)
     (or (seq output-prefix) (seq (str printed)))
@@ -2173,7 +2002,7 @@
                  (assoc :seon.eval/duration-ms duration-ms)
                  interrupted? (assoc :seon.eval/outcome :time))]
     (cond-> {:seon.sci.admit/value value
-             :seon.cluster.eval/result-edn (pr-str value)
+             :seon.eval/value (pr-str value)
              :seon.cluster.eval/error (:seon.error/message value)
              :seon.cluster.eval/ns namespace-ref
              :seon.sci.eval/ending-ns (symbol (str (second namespace-ref)))
@@ -2460,21 +2289,9 @@
               ;; `receipt-settle-call`; a refused shared commit retains it in
               ;; this agent's defs.
               definitions
-              (defs execution-ctx namespace-name before-intern-values
+              (bindings execution-ctx namespace-name before-intern-values
                          source form (built-in-calls))
-              admitted (admit/admit
-                        {:seon.sci.admit/value value
-                          :seon.sci.admit/interrupt-fn interrupt-fn
-                          :seon.sci.admit/caps caps
-                          :seon.schema/projection projection
-                          ;; R41 travels WITH the request: admission does
-                          ;; not read a dial of its own, and this
-                          ;; evaluator does not default one
-                          :seon.config/on-core-error on-core-error
-                          ;; ADMISSION MAKES NO CUTS ANY MORE, so it needs no
-                          ;; requery identity: elision happens once, where AI
-                          ;; context is generated, from the stored value.
-                          :seon.sci.admit/record evaluation-record})]
+              admitted (shown-result value request evaluation-record)]
           (success-evaluation
            {:seon.sci.eval/admitted admitted
             :seon.sci.admit/caps caps
@@ -2488,7 +2305,7 @@
             :seon.sci.eval/namespace-name namespace-name
             :seon.sci.eval/ending-namespace @ending-namespace
             :seon.print/options @print-options
-            :seon.sci.eval/defs definitions
+            :seon.sci.eval/bindings definitions
             :seon.program/row row}))
         (catch Throwable throwable
           (let [record (record (if (kernel/interrupted? throwable)
@@ -2502,7 +2319,7 @@
                   ;; it installed before the later throw/cut therefore belongs
                   ;; to the agent's defs, including a contracted def whose declaration
                   ;; never reached the terminal transaction.
-                  (defs
+                  (bindings
                    failed-ctx namespace-name before source failed-form
                    (built-in-calls)))
                 arity-message (interpreted-arity-message throwable)
@@ -2513,23 +2330,14 @@
                            throwable record)
                         arity-message
                         (assoc :seon.error/message arity-message))
-                admitted
-                (admit/admit
-                 {:seon.sci.admit/value value
-                  :seon.sci.admit/interrupt-fn (constantly nil)
-                  :seon.sci.admit/caps caps
-                  :seon.schema/projection
-                  (evaluation-projection
-                   {:seon.sci.eval/ctx evaluation-ctx})
-                  :seon.config/on-core-error :record
-                  :seon.sci.admit/record record})]
+                admitted (shown-result value request record)]
           (failed-evaluation
            (cond-> {:seon.sci.eval/admitted admitted
                     :seon.sci.admit/caps caps
                     :seon.sci.eval/printed printed
                     :seon.sci.eval/namespace-name namespace-name
                     :seon.print/options @print-options
-                    :seon.sci.eval/defs definitions
+                    :seon.sci.eval/bindings definitions
                     :seon.sci.admit/record record
                     :seon.sci.admit/value value
                     :seon.cluster.eval/triage-edn
@@ -2548,8 +2356,8 @@
   "Fork one candidate through the generation-aware turn path.
 
   This deliberately delegates to `fork-for-turn`; candidate code never calls
-  plain `sci/fork`, and therefore inherits the same copy-on-write Var roots and
-  agent-def restoration as an ordinary turn."
+  plain `sci/fork`; the candidate receives a separate context and cannot
+  modify the live agent's private bindings."
   {:malli/schema [:=> [:cat :seon.test.accretion/candidate-context-request]
                   :seon.sci.eval/ctx]}
   [request]

@@ -278,42 +278,6 @@
           {:seon.boot/cluster-name cluster-name}}))
       bootstrap-effective)))
 
-(defn- evaluation-node
-  ; A door evaluation is recognized by its result-edn parsing to a print
-  ; node. The ORIGINAL string is parsed (the admitted projection may have
-  ; truncated it into a marker); anything else falls to the generic window.
-  [value]
-  (when (and (map? value)
-             (string? (:seon.cluster.eval/result-edn value)))
-    (let [node (try (edn/read-string (:seon.cluster.eval/result-edn value))
-                    (catch Exception _ nil))]
-      (when (and (map? node) (:seon.print/face node))
-        node))))
-
-(defn- text-face
-  ; Both evaluation modes render their compact inline value through the one
-  ; printer used by the transcript. The complete admitted artifact is retained
-  ; separately by `mcp-project`.
-  [node effective details]
-  (assoc details
-         :seon.dev.mcp/text
-         (print/emit-text
-          node
-          {:seon.print/length (:seon.print/length effective)
-           :seon.print/level (:seon.print/level effective)})))
-
-(defn- evaluation-face
-  [value node effective]
-  (text-face
-   node effective
-   (cond-> {:seon.cluster.eval/ns (:seon.cluster.eval/ns value)
-             :seon.sci.eval/ending-ns (:seon.sci.eval/ending-ns value)
-             :seon.sci.admit/record (:seon.sci.admit/record value)}
-      (contains? value :seon.cluster.eval/error)
-      (assoc :seon.cluster.eval/error (:seon.cluster.eval/error value))
-      (contains? value :seon.cluster.eval/output)
-      (assoc :seon.cluster.eval/output (:seon.cluster.eval/output value)))))
-
 (defn- prepl-exception-envelope?
   [value]
   (and (map? value)
@@ -363,12 +327,25 @@
         effective (mcp-effective cluster-name bootstrap-effective)
         caps (when-not (:seon.error/kind effective)
                (config/result-caps effective))]
-    (if-let [refusal (or (when (:seon.error/kind effective) effective)
-                         (when (:seon.error/kind caps) caps))]
-      {:seon.dev.mcp/value refusal
+    (cond
+      (:seon.error/kind effective)
+      {:seon.dev.mcp/value effective :seon.dev.mcp/windowed? false}
+
+      (:seon.error/kind caps)
+      {:seon.dev.mcp/value caps :seon.dev.mcp/windowed? false}
+
+      (and (:seon.sci.admit/record value) (string? (:seon.eval/value value)))
+      {:seon.dev.mcp/value
+       (assoc (select-keys value [:seon.cluster.eval/ns
+                                 :seon.sci.eval/ending-ns
+                                 :seon.sci.admit/record
+                                 :seon.cluster.eval/error
+                                 :seon.cluster.eval/output])
+              :seon.dev.mcp/text (:seon.eval/value value))
        :seon.dev.mcp/windowed? false}
-      (let [evaluation-print-node (evaluation-node value)
-            exception-envelope? (prepl-exception-envelope? value)
+
+      :else
+      (let [exception-envelope? (prepl-exception-envelope? value)
             exception-summary-value (when exception-envelope?
                                       (exception-summary value))
             instance-projection
@@ -376,13 +353,6 @@
                     env/of
                     :seon.schema/projection)
             admitted
-            (if evaluation-print-node
-              {:seon.sci.admit/print-node evaluation-print-node}
-              ;; ABSENT MEANS NO KEY: `:seon.schema/projection` is optional on
-              ;; the admission request, and an optional key present as nil
-              ;; fails its contract, so an instance holding no ctx — a
-              ;; storeless MCP evaluation — supplies no projection rather
-              ;; than a nil one.
               (admit/admit-value
                (cond-> {:seon.sci.admit/value (or exception-summary-value
                                                   value)
@@ -391,7 +361,7 @@
                         :seon.config/on-core-error
                         (:seon.config/on-core-error effective)}
                  instance-projection
-                 (assoc :seon.schema/projection instance-projection))))
+                 (assoc :seon.schema/projection instance-projection)))
             artifact (render.value/artifact admitted)
             content (render.value/artifact-edn artifact)
             content-digest (blob/digest content)
@@ -437,9 +407,7 @@
                         :seon.dev.mcp.artifact/transaction-result result})))
                    content-digest))))]
         (cond-> {:seon.dev.mcp/value
-                 (if evaluation-print-node
-                   (evaluation-face value projected-node effective)
-                   (admit/semantic-value projected-node))
+                 (admit/semantic-value projected-node)
                  :seon.dev.mcp/windowed? artifact-backed?}
           artifact-backed?
           (assoc :seon.blob/digest content-digest

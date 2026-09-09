@@ -31,7 +31,7 @@
   ask whether the thing it holds is the whole value.
 
   `admit-value` returns that answer without the serialized EDN key; `admit`
-  adds `:seon.cluster.eval/result-edn` for storage callers. Admission
+  adds `:seon.sci.admit/edn` for storage callers. Admission
   preserves supplied evaluation diagnostics. SCI interrupts propagate. Other
   projection failures panic or degrade to markers according to
   `:seon.config/on-core-error`. Admission opens no resources and writes no
@@ -630,7 +630,7 @@
   the storage bound stops an unbounded source — so this is for callers that
   hold a finished node and want its bytes."
   {:malli/schema [:=> [:cat :seon.print/node]
-                  :seon.cluster.eval/result-edn]}
+                  :seon.sci.admit/edn]}
   [print-node]
   (canonical-edn print-node))
 
@@ -712,7 +712,7 @@
               {:seon.eval/missing :unserializable}
               {::print-node print-node
                ::value (semantic-value print-node)
-               :seon.cluster.eval/result-edn (str builder)}))
+               :seon.sci.admit/edn (str builder)}))
           (catch clojure.lang.ExceptionInfo failure
             (if (over-bound? failure)
               {:seon.eval/missing :over-bound
@@ -733,7 +733,7 @@
   {:malli/schema
    [:=> [:cat :seon.sci.admit/request] :seon.sci.admit/admitted-value]}
   [request]
-  (dissoc (admit* request) :seon.cluster.eval/result-edn))
+  (dissoc (admit* request) :seon.sci.admit/edn))
 
 (defn admit
   "Realize and bound one value leaving a sci evaluation. ONE pass.
@@ -746,7 +746,7 @@
 
       {::value        <the projection>
        ::print-node   <its print node>
-       :seon.cluster.eval/result-edn <the bytes it emitted>
+       :seon.sci.admit/edn <the bytes it emitted>
        ::record       <the diagnostics, unchanged>}
 
   or, for a value that reached `:seon.config.eval.result/max-bytes` or that

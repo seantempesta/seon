@@ -7,6 +7,89 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
+## Private objects and shown-text conversion, continuation
+
+The agent proc now owns one SCI context. Before its next turn it receives
+changed base bindings, comparing snapshotted roots rather than mutable Var
+identities. Private defs and atoms stay in that context; accepted program
+functions transfer their actual roots to the base. Namespace operations
+transfer only changed entries, never the agent's complete namespace table.
+Cold acquisition executes installed program source; it restores no private
+state. The evaluation keeps the actual result object and its handle, and stores
+the value renderer's shown text. Historical REPL rendering does not decode or
+apply a later print profile to that text.
+
+Dependency ledger: SCI's `namespace-state`, `intern`, `add-namespace!`, and
+`fork` in `reference-code/sci/src/sci/core.cljc` supply namespace inspection,
+updates and initial isolation. The existing acquisition and install seams in
+`src/seon/sci/eval.clj` own base updates; `src/seon/cluster/agent.clj` owns
+the proc's context lifetime. `seon.render.value/render-ai` supplies the one
+evaluation-time presentation bound; `seon.repl/value-text` reads saved bytes.
+The canonical Datahike/SCI fixture and ordinary source-submission proc are
+the isolation proof, with no provider call or loop replacement.
+
+Production literal occurrences, entering HEAD versus this working cut:
+
+| Attribute or function | Before | After |
+| --- | ---: | ---: |
+| `:seon.def/` | 116 | 0 |
+| `:seon.cluster.eval/result-edn` | 69 | 0 |
+| `:seon.cluster.eval/result-blob` | 22 | 0 |
+| `bind-stored-results!` | 3 | 0 |
+| `store-def-values!` | 2 | 0 |
+| `clear-defs-call` | 4 | 0 |
+
+The obsolete stored-def restoration suite and its child process helper are
+deleted. The ordinary-proc regression now checks interleaved A/B turns, A's
+same atom and context across turns, absence from B and the base, a third agent
+created mid-run, fresh acquisition losing private state, and B calling A's
+contracted installed function without replacing B's context. The old REPL
+re-clipping tests are replaced by a saved-text byte-preservation regression.
+
+Fast checkpoints: storage/render/virtual-turn subjects **46 tests, 336
+assertions, zero failures/errors**; loop **26 tests, 117 assertions, zero
+failures/errors**. The latter repairs inherited fixture defects: incomplete
+cluster handles, settings written outside their component, and turns claimed
+to answer wakes without a successful attempt. An isolated entering-HEAD loop
+probe had **26 tests, 114 assertions, 15 failures and four errors**. Final
+commit gate passed **147 tests, 790 assertions, zero failures/errors** across
+turn, run, loop, adoption, value rendering, REPL, bounded admission, cluster,
+errors and registry. Four renamed/replacement test declarations ran alongside
+143 inherited declarations. The final ordinary-proc checkpoint passed **2
+tests, 101 assertions**, including object identity through the result handle
+and absence of that handle from B and the base. Six obsolete def restoration
+tests were removed, including the old child-process restoration test. The
+successful gate removed its isolated root.
+
+The first virtual-turn observation recorded five transactions with datom counts
+**[1, 1, 17, 5, 3]**, including two one-datom writes around proc startup. The
+test now records attribute sets as well as counts so the next loop cut can
+identify their authority. This is not a claim of the required three-write
+open/store/close model.
+
+Default was neither stopped nor restarted. Read-only MCP observed five old
+def entities and zero new shown-text facts at source commit
+`6aa0e2a4-2815-52a4-a198-67194e28c091`; this is explicitly NOT live proof of
+the conversion. HTTP subsequently returned **218,212 bytes in 2.044847 s**,
+54 entries, zero inline evidence, zero printer summaries and zero depth labels.
+Native Chrome and Brave observations both refused with `cgWindowNotFound`,
+so no new browser-paint claim is made. The repeatable HTTP probe now records
+elapsed time. The earlier manual publication command also incorrectly repeated
+`--changed`; subsequent hook publications carry the corrected files. Its
+reported unresolved `sci.eval/unrun` test call was corrected and removed.
+
+The separate MCP artifact/error codec still uses bounded print-node admission;
+it no longer supplies agent evaluation results. Removing that separate durable
+artifact format is not claimed by this cut. Stable evaluation ids, the family
+rename, process custody removal, the remaining opening/prompt deletions and
+the final transaction-count target are still unfinished.
+
+Later MCP inspection found the stored-def schema definition absent and the
+shown-text schema present, with five old def entities still in default. Adoption
+was not yet converged: adopted `6aa0e566-5adc-516a-80aa-bd7b8f2957e4`, published
+`6aa0e7b8-5bc2-5377-9732-483dbe4ac5fd`. A reset is needed to discard those
+retired datoms; only the owner operates default's lifecycle.
+
 ## Evaluation presentation continuation
 
 Committed as **adfdcc839**. Post-commit `bin/test --platform` passed **83
