@@ -502,3 +502,41 @@ committed under this research directory and test/seon/render/.
 After scratch cleanup, a final default debug curl returned HTTP200 in
 1498.884 ms, 292220 bytes; PID 22932 was still alive. The path-limited
 evidence diff passed its whitespace check.
+
+### 18:55 follow-up — adoption cache generation
+
+Read the updated components landing note end to end, including its later
+message/reverse-concern hunk and confirmed stale page after adoption. The first
+identity grouping was already shipped in `f518fd478`; the later reverse-concern
+filter is a separate pending slice. Prompt expectations were fixed in
+`22f6163e5`, whose combined gate passed 27 tests/166 assertions.
+
+The existing caches compared the SCI program-snapshot object. Adoption can
+replace loaded functions without replacing that object. The generation now
+also contains the cluster row's `:seon.source/commit-id`, which adoption writes
+only after reload, SCI acquisition, and instrumentation succeed
+(`src/seon/cluster.clj`, the final adoption transaction).
+`seon.render/source-generation` queries those facts from the handed database;
+page/context generation, selection inspection, and invocation evidence include
+it. A changed page generation discards that page's retained calls/fragments
+before deriving. No cache service, lock, or global registry was added.
+
+The armed canonical regression pauses the render proc, retains the same SCI
+snapshot object, warms a real HTTP debug page, and changes only the adopted
+commit fact. The unchanged GET performs no new SCI invocations; the new commit
+forces the real renderer to run. The fast test passed 2 tests / 18 assertions.
+
+Live scratch proof: PID 61496, root `tmp/page-feed-root`, Juniper seeded from the
+canonical fixture. The initial GET returned 200 in 1966.404 ms, 68157 bytes and
+contained `Attributes and connections`, with no new heading. The cached page
+was left in place. `debug-found-values-html` was edited to emit
+`Entity attributes and connections`, then adopted through the ordinary operator.
+Adoption converged at `6aa0df3e-6000-597b-8b12-a1114b3ad234`, digest
+`def4e16d633262feece7b6dfbb5b77330a9833148e65c7f1c33834b1de7e6a3f`.
+The next GET returned 200 in 1740.387667 ms, 80803 bytes and contained the new
+heading. PID 61496 was unchanged; no cache reset or restart occurred.
+`test/seon/render/page_feed_adoption_probe.py` verifies expected response bytes
+and retains status, time, size, and SHA-256 evidence.
+
+Adoption-cache path-limited gate: 23 tests, 96 assertions, zero failures/errors
+across web context, debug, and root-pull namespaces.

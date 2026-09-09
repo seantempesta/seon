@@ -6,6 +6,7 @@
             [seon.db :as db]
             [seon.render :as render]
             [seon.render.web-test :as web-test]
+            [seon.sci.kernel :as kernel]
             [seon.test-support :as support])
   (:import [java.net URI]
            [java.util.concurrent Callable Executors TimeUnit]))
@@ -62,3 +63,29 @@
            (is (identical? (render/shared-cache ctx) (render/shared-cache ctx)))
            (is (seq (:seon.render.web/ai-calls @(render/shared-cache ctx))))
            (is (seq (:seon.render.web/calls @(render/shared-cache ctx))))))))))
+
+(deftest adoption-invalidates-pages-with-an-unchanged-sci-snapshot
+  (#'web-test/with-server
+   (fn [connection server context]
+     (flow/pause (:graph context))
+     (let [ctx (:ctx context)
+           snapshot @(:seon.sci.kernel/program-snapshot ctx)
+           invoke kernel/invoke
+           calls (atom 0)]
+       (with-redefs [kernel/invoke
+                     (fn [request] (swap! calls inc) (invoke request))]
+         (let [before (#'web-test/fetch server "/agent/root/debug")
+               initial @calls
+               _ (#'web-test/fetch server "/agent/root/debug")]
+           (is (= 200 (.statusCode before)))
+           (is (pos? initial) "the real SCI renderer ran")
+           (is (= initial @calls) "the unchanged page reuses its calls")
+           (db/transact! connection
+                         [{:seon.cluster/name "web-test"
+                           :seon.source/commit-id
+                           #uuid "f54229d7-54eb-472d-9ae8-917a0f97af71"}])
+           (let [after (#'web-test/fetch server "/agent/root/debug")]
+             (is (identical? snapshot @(:seon.sci.kernel/program-snapshot ctx)))
+             (is (= 200 (.statusCode after)))
+             (is (< initial @calls)
+                 "adoption invalidates even without a proc wake or SCI snapshot replacement"))))))))

@@ -619,11 +619,21 @@
                 (:seon.render.selection.stage/candidates stage)))
         (:seon.render.selection/stages decision)))
 
+(defn source-generation
+  "The adopted program commit carried by this database; empty before adoption."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:vector :seon.source/commit-id]]}
+  [database]
+  (db/q '[:find [?commit ...]
+          :where [?cluster :seon.cluster/name _]
+                 [?cluster :seon.source/commit-id ?commit]] database))
+
 (defn- call-cache-evidence
   [request selected]
   (let [ctx (:seon.sci.eval/ctx request)
         projection (sci.kernel/context-projection ctx)]
-    {::program-snapshot
+    {::source-generation (source-generation (:seon.db/db request))
+     ::program-snapshot
      (some-> (:seon.sci.kernel/program-snapshot ctx) deref)
      ::projection projection
      ::selection-input
@@ -643,6 +653,7 @@
   [request selected evidence]
   [selected
    (:seon.render/output request)
+   (::source-generation evidence)
    (System/identityHashCode (::program-snapshot evidence))
    (get (::projection evidence) :seon.schema.projection/fingerprint)
    (hash (::selection-input evidence))])
@@ -669,7 +680,8 @@
   "True when two invocation entries describe the same code and input."
   {:malli/schema [:=> [:cat :map :map] :boolean]}
   [previous current]
-  (and (some? (::program-snapshot current))
+  (and (= (::source-generation previous) (::source-generation current))
+       (some? (::program-snapshot current))
        (some? (::projection current))
        (identical? (::program-snapshot previous)
                    (::program-snapshot current))

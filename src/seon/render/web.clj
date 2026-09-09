@@ -1371,7 +1371,7 @@
                 agent? (filter #(or (reverse-attribute? %)
                                     (get components %))))]
   [:section {:id "debug-units" :class "seon-debug-found-values"}
-   [:h1 {:class "seon-debug-caption"} "Attributes and connections"]
+   [:h1 {:class "seon-debug-caption"} "Entity attributes and connections"]
    (if (:seon.error/kind acquisition)
      (debug-value-html acquisition)
      (into (cond-> [:div]
@@ -1505,6 +1505,7 @@
         {:seon.render.call/producer 'seon.render/selection-inspection
          :seon.render.call/argument
          [(:seon.render/value request) output
+          (render/source-generation (:seon.db/db request))
           (some-> (:seon.sci.kernel/program-snapshot ctx) deref)
           (get (sci.kernel/context-projection ctx)
                :seon.schema.projection/fingerprint)]}
@@ -2150,8 +2151,14 @@
   [handle database streams profile registration-key derive-all? invalidate-calls?]
   (let [cache (render/shared-cache (:seon.sci.eval/ctx handle))
         retained @cache
-        program (some-> handle :seon.sci.eval/ctx :seon.sci.kernel/program-snapshot deref)
-        changed-code? (not (identical? program (get-in retained [::programs registration-key])))
+        program [(some-> handle :seon.sci.eval/ctx :seon.sci.kernel/program-snapshot deref)
+                 (render/source-generation database)]
+        changed-code? (not= program (get-in retained [::programs registration-key]))
+        retained (if changed-code?
+                   (-> retained
+                       (update ::calls dissoc registration-key)
+                       (update ::fragments dissoc registration-key))
+                   retained)
         result (derive-page handle database streams profile registration-key retained
                             (or derive-all? changed-code?)
                             (or invalidate-calls? changed-code?))
@@ -2560,9 +2567,10 @@
        (if (:seon.render/context-action request)
          (change-context request)
          (let [agent-id (:seon.cluster.agent/id request)
-               program (some-> ctx :seon.sci.kernel/program-snapshot deref)
+               program [(some-> ctx :seon.sci.kernel/program-snapshot deref)
+                        (render/source-generation (:seon.db/db request))]
                before @cache
-               before (if (identical? program (get-in before [::context-programs agent-id]))
+               before (if (= program (get-in before [::context-programs agent-id]))
                         before
                         (-> before (update ::ai-calls dissoc agent-id)
                             (update ::ai-entries dissoc agent-id)))
