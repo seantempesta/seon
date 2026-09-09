@@ -19,7 +19,7 @@
   consume one declaration rather than parallel member lists."
   {'seon.schema ['register! 'unregister!]
    'clojure.test :publics
-   'my.run ['wait 'complete]
+   'my.turn ['wait 'complete]
    'my.background ['background 'poll 'await]
    'my.message ['send 'decline]
    'seon.bootstrap ['help 'dir 'doc]})

@@ -7,8 +7,8 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as cluster.agent]
-            [seon.cluster.run :as run]
-            [seon.cluster.work :as work]
+            [seon.turn :as run]
+            [seon.turn :as work]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render.walk :as walk]
@@ -49,38 +49,38 @@
             result (cluster/ensure-entity! connection process request)
             run-id (bootstrap/run-id agent-id)
             run (db/pull @connection
-                         '[:seon.cluster.run/id :seon.cluster.run/process
-                           :seon.cluster.work/situation
-                           :seon.cluster.run/plan-digest
-                           {:seon.cluster.eval/_run
-                            [:seon.cluster.eval/ordinal
-                             :seon.cluster.eval/author
-                             :seon.cluster.eval/source]}
-                           {:seon.cluster.run/trigger
+                         '[:seon.turn/id :seon.db.process/id
+                           :seon.turn/situation
+                           :seon.turn/plan-digest
+                           {:seon.eval/_run
+                            [:seon.eval/ordinal
+                             :seon.eval/author
+                             :seon.eval/source]}
+                           {:seon.turn/trigger
                             [:seon.cluster.message/id
                              :seon.cluster.message/content]}]
-                         [:seon.cluster.run/id run-id])]
-        (is (= run-id (:seon.cluster.run/id result)))
-        (is (= process (:seon.cluster.run/process run)))
-        (is (nil? (:seon.cluster.run/plan-digest run))
+                         [:seon.turn/id run-id])]
+        (is (= run-id (:seon.turn/id result)))
+        (is (= process (:seon.db.process/id run)))
+        (is (nil? (:seon.turn/plan-digest run))
             "a generated run has no frozen authored plan")
-        (is (= :generate (:seon.cluster.work/situation run)))
+        (is (= :generate (:seon.turn/situation run)))
         ;; ONE ENTITY PER (run, ordinal): the evaluations point AT the run,
         ;; and the run keeps no component mirror of that back-edge.
-        (is (empty? (:seon.cluster.eval/_run run))
+        (is (empty? (:seon.eval/_run run))
             "creation admits no evaluation outside the generator")
         (is (= (bootstrap/task-message-id agent-id)
-               (get-in run [:seon.cluster.run/trigger
+               (get-in run [:seon.turn/trigger
                             :seon.cluster.message/id])))
         (is (= (bootstrap/task-message)
-               (get-in run [:seon.cluster.run/trigger
+               (get-in run [:seon.turn/trigger
                             :seon.cluster.message/content])))
-        (is (= {:seon.cluster.work/situation :generate
-                :seon.cluster.run/id run-id
+        (is (= {:seon.turn/situation :generate
+                :seon.turn/id run-id
                 :seon.cluster.agent/id agent-id}
-               (work/next-agent-work
+               (work/step
                 @connection {:seon.cluster.agent/id agent-id
-                             :seon.cluster.run/process process})))))))
+                             :seon.db.process/id process})))))))
 
 (deftest drive-free-generation-is-pure-deterministic-and-pull-gated
   (support/with-database
@@ -117,18 +117,18 @@
           (db/transact!
            connection
            (run/append-generated-tx
-            {:seon.cluster.run/id (bootstrap/run-id agent-id)
-             :seon.cluster.run/process cluster/boot-process-identity
-             :seon.cluster.eval/at (java.util.Date.)
-             :seon.cluster.eval/ordinal 0
-             :seon.cluster.eval/source opening-source
+            {:seon.turn/id (bootstrap/run-id agent-id)
+             :seon.db.process/id cluster/boot-process-identity
+             :seon.eval/at (java.util.Date.)
+             :seon.eval/ordinal 0
+             :seon.eval/source opening-source
              :seon.ns/name namespace-name}))
           (db/transact!
            connection
            (run/receipt-settle-tx
-            {:seon.cluster.run/id (bootstrap/run-id agent-id)
-             :seon.cluster.eval/ordinal 0
-             :seon.cluster.eval/result-edn (pr-str node)}))
+            {:seon.turn/id (bootstrap/run-id agent-id)
+             :seon.eval/ordinal 0
+             :seon.eval/result-edn (pr-str node)}))
           (let [post-receipt-pull
                 (bootstrap/pull-result (generator-request connection))
                 listing-candidates
@@ -142,10 +142,10 @@
                    (db/q '[:find ?source .
                            :in $ ?run-id
                            :where
-                           [?run :seon.cluster.run/id ?run-id]
-                           [?form :seon.cluster.eval/run ?run]
-                           [?form :seon.cluster.eval/ordinal 0]
-                           [?form :seon.cluster.eval/source ?source]]
+                           [?run :seon.turn/id ?run-id]
+                           [?form :seon.eval/turn ?run]
+                           [?form :seon.eval/ordinal 0]
+                           [?form :seon.eval/source ?source]]
                          @connection (bootstrap/run-id agent-id)))
                 "the first derived entry remains byte-identical in history")
             (is (every? #(= (first (:seon.repl/key %))
@@ -384,13 +384,13 @@
               (db/q '[:find [?source ...]
                       :in $ ?run-id
                       :where
-                      [?run :seon.cluster.run/id ?run-id]
-                      [?form :seon.cluster.eval/run ?run]
-                      [?form :seon.cluster.eval/source ?source]]
+                      [?run :seon.turn/id ?run-id]
+                      [?form :seon.eval/turn ?run]
+                      [?form :seon.eval/source ?source]]
                     @connection (bootstrap/supervision-run-id))]
           (is (= 2 (count sources)))
           (is (some #(str/includes? % "my.message/send") sources))
-          (is (some #(str/includes? % "seon.cluster.eval/result-edn") sources))
+          (is (some #(str/includes? % "seon.eval/result-edn") sources))
           (is (every? #(or (str/includes? % "run/complete")
                            (not (str/includes? % "my.message/send")))
                       sources))

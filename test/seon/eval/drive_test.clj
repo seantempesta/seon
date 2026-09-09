@@ -16,19 +16,19 @@
          {:seon.cluster.agent/id "projection-proof"
           :seon.cluster.agent/namespace
           [:seon.ns/name 'my.agents.projection-proof]}
-         {:seon.cluster.run/id "projection-proof-run"
-          :seon.cluster.run/agent
+         {:seon.turn/id "projection-proof-run"
+          :seon.turn/agent
           [:seon.cluster.agent/id "projection-proof"]
-          :seon.cluster.run/opened-at (java.util.Date.)}
+          :seon.turn/opened-at (java.util.Date.)}
          ;; `result-size` is intentionally absent. Evaluation rendering derives
          ;; from the declared content and must not require that numeric fact.
-         {:seon.cluster.eval/id "projection-proof-receipt"
-          :seon.cluster.eval/run
-          [:seon.cluster.run/id "projection-proof-run"]
-          :seon.cluster.eval/ordinal 0
-          :seon.cluster.eval/source "42"
-          :seon.cluster.eval/at (java.util.Date.)
-          :seon.cluster.eval/result-edn "42"}]})
+         {:seon.eval/id "projection-proof-receipt"
+          :seon.eval/turn
+          [:seon.turn/id "projection-proof-run"]
+          :seon.eval/ordinal 0
+          :seon.eval/source "42"
+          :seon.eval/at (java.util.Date.)
+          :seon.eval/result-edn "42"}]})
       (let [database @connection
             full-transcript (ns-resolve 'seon.eval.drive 'full-transcript)
             instance {:seon.boot/cluster-connection connection

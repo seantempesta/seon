@@ -14,15 +14,15 @@
  [:map
   {:description
    "One run of an agent's history: the run's own facts plus the entries evaluated inside it."}
-  [:seon.cluster.run/id :seon.cluster.run/id]
+  [:seon.turn/id :seon.turn/id]
   [:seon.render.transcript/entries :seon.render.transcript/entries]
-  [:seon.cluster.run/opened-at
+  [:seon.turn/opened-at
    {:optional true}
-   :seon.cluster.run/opened-at]
-  [:seon.cluster.run/closed-at
+   :seon.turn/opened-at]
+  [:seon.turn/closed-at
    {:optional true}
-   :seon.cluster.run/closed-at]
-  [:seon.cluster.run/error {:optional true} :seon.cluster.run/error]],
+   :seon.turn/closed-at]
+  [:seon.turn/error {:optional true} :seon.turn/error]],
  :runs
  [:vector
   {:description "The bounded newest-first runs of one agent's history."}

@@ -99,8 +99,8 @@
                 (config/result-caps (test-support/effective-config))
                 :seon.sci.eval/time-limit-ms 5000
                 :seon.config/on-core-error :panic
-                :seon.cluster.eval/source source
-                :seon.cluster.eval/ns [:seon.ns/name namespace-name]}))]
+                :seon.eval/source source
+                :seon.eval/ns [:seon.ns/name namespace-name]}))]
         (is (= [1] (mapv :seon.fn.arity/argument-count arities))
             "the argumentless SCI call uses the one declared request-map arity")
         (is (every? :seon.fn.arity/output arities))
@@ -112,7 +112,7 @@
           (is (= namespace-name (get-in value [:seon.cluster.agent/namespace :seon.ns/name])))
           (is (= agent-id (get-in value [:seon.cluster.agent/namespace :seon.ns/steward
                                         :seon.cluster.agent/id])))
-          (is (empty? (:seon.cluster.eval/output result))))
+          (is (empty? (:seon.eval/out result))))
         (is (= {:seon.config.eval/time-limit-ms 1234}
                (:seon.sci.admit/value
                 (evaluate "(my.agent/settings! {:seon.config.eval/time-limit-ms 1234})"))))

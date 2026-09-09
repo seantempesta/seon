@@ -7,6 +7,28 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
+## Scratch provider prevention, continuation
+
+There is no implemented virtual model name: changing the model string alone
+does not prevent HTTP. The existing derivation refuses model turns when
+`:seon.config.run/max-episode-runs` is absent from both the config singleton
+and the agent settings component (`seon.cluster.work/max-episode-runs` and
+`episode-capped?`). `config/virtual-turns.edn` selects the compiler's explicit
+absence decision. Pass it at first boot, before any agent is armed:
+
+```sh
+unset SEON_OPERATOR_EPHEMERAL_OWNER_PID
+bin/seon --root tmp/turn-cut-root start turn-cut --config config/virtual-turns.edn
+```
+
+For subsequent fixture data, seed without messages and without a per-agent
+turn-bound override. Do not call the current Juniper research installer in
+this mode: it writes both messages and a per-agent bound of four, which
+overrides the absent cluster bound. Do not rely on retracting messages or
+changing settings after seeding; the agent may already have woken. The
+canonical virtual-turn proof uses source submissions and no provider.
+This recipe is source-grounded; no new scratch boot is claimed yet.
+
 ## Final checkpoint for this continuation
 
 Commits: `ff9507c1b` (private objects/shown text), `a16e8d269`
@@ -633,3 +655,62 @@ event in 4,898 ms, but no completed tally is available and that event alone
 is not a pass claim. No lane-owned background shell or JVM remains. The
 obsolete scratch root and both interrupted isolated test roots were removed
 after the process-table and lane-status checks found no holders.
+
+
+## 2026-09-09 custody and turn-owner consolidation
+
+The isolated slice consolidates the former run, work, and loop owners into
+`seon.turn`, with `step`, `open`, `store`, `close`, and `advance!`; `my.turn`
+is the thin surface. Evaluation storage uses `:seon.eval/*` (`turn`, `out`).
+No compatibility namespace or alias function remains. Boot recovery closes
+all open turns and interrupts unfinished evaluations; the open-turn query
+inside the writer and the proc permit are the execution fences.
+
+Textual occurrences in src/ and resources/, measured against shared HEAD
+before this slice and the isolated candidate:
+
+| spelling | before | after |
+|---|---:|---:|
+| `:seon.cluster.run/process` | 93 | 0 |
+| `seon.cluster.run` | 774 | 0 |
+| `seon.cluster.work` | 95 | 0 |
+| `seon.cluster.loop` | 201 | 0 |
+| `seon.cluster.eval` | 801 | 0 |
+| `my.run` | 91 | 0 |
+| `claim-call` | 6 | 0 |
+| `release-call` | 4 | 0 |
+
+Fast verification: 84 tests / 567 assertions green; after the public API
+rename, the affected 46 tests / 251 assertions green. The path-isolated
+commit gate passed 84 tests / 567 assertions, zero failures/errors. Gate
+root `run.eDkW04` was removed by the successful runner. Workers were capped
+at three; provider credential variables were removed for this gate.
+
+The ordinary-proc virtual turn still measured five commits: two empty
+transaction-metadata commits (one datom each), intent (16 datoms), results
+(5 datoms), close (2 datoms). This is NOT the required three-transaction
+proof; grouping remains unfinished. The two generated-prefix proofs remain
+until their implementation is removed in the next slice.
+
+Default observation before this slice: HTTP 200, 49,717 bytes, 0.057302 s.
+MCP health timed out; CUA reported no browser available. These are HTTP
+observations, not browser-paint or in-place adoption proofs. Schema deletion
+requires the owner's refork; the lane did not operate default's lifecycle.
+
+A broader fast invocation was stopped after entering a real boot test
+without explicit no-provider admission. Its completed `solo` fixture was
+already cleaned; the retained store contained only `:db` and an incomplete
+source-build branch, whose schema refused the attempt audit. Therefore no
+zero-attempt claim is made for that invocation. The boot test fixture now
+passes an absent model-turn bound to the real `cluster/start!` before agents
+arm. Subsequent test processes also unset DEEPSEEK_API_KEY,
+MOONSHOT_API_KEY, META_MODEL_API_KEY, and OPENROUTER_API_KEY. No new scratch
+operator was started. The earlier paid scratch incident remains recorded
+above; this broader boot invocation cannot be audited retrospectively.
+
+This candidate is kept in an isolated, path-limited commit while shared
+caller files carry unrelated edits. Those edits are not included. Remaining
+work: integrate that candidate without overwriting the shared callers;
+remove the remaining §1a rows; derive evaluation ids through seon.id;
+automatic compaction and the three-transaction virtual-turn proof; final
+platform gate and live verification after the owner's schema refork.

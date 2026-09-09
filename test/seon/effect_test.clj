@@ -4,7 +4,7 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.core :as datahike]
             [sci.core :as sci]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -152,8 +152,8 @@
    {:seon.env/environment @test-environment
     :seon.db/connection connection
     :seon.cluster.agent/id "effect-agent"
-    :seon.cluster.run/id "effect-run"
-    :seon.cluster.eval/ordinal 3
+    :seon.turn/id "effect-run"
+    :seon.eval/ordinal 3
     :seon.boot/cluster-name "default"
     :seon.flow/work-launcher launcher
     :seon.sci.admit/caps (config/result-caps (config/defaults))
@@ -167,8 +167,8 @@
        connection
        [(cluster-config 60000)
         {:seon.cluster.agent/id "effect-agent"}
-        {:seon.cluster.run/id "effect-run"
-         :seon.cluster.run/agent
+        {:seon.turn/id "effect-run"
+         :seon.turn/agent
          [:seon.cluster.agent/id "effect-agent"]}])
       (install-capability! connection)
       (let [settled (CountDownLatch. 1)
@@ -242,7 +242,7 @@
   (test-support/with-database
     (fn [connection]
       (db/transact! connection [(cluster-config 600000)
-                                {:seon.cluster.run/id "effect-run"}])
+                                {:seon.turn/id "effect-run"}])
       (install-arm-probe! connection)
       (let [ctx @probe-ctx]
         (testing "entrances made inside the handler reach the requester's arm"
@@ -295,8 +295,8 @@
        connection
        [(cluster-config 60000)
         {:seon.cluster.agent/id "effect-agent"}
-        {:seon.cluster.run/id "effect-run"
-         :seon.cluster.run/agent [:seon.cluster.agent/id "effect-agent"]}])
+        {:seon.turn/id "effect-run"
+         :seon.turn/agent [:seon.cluster.agent/id "effect-agent"]}])
       (install-arm-probe! connection)
       (let [events (async/chan 4)
             listener-key (random-uuid)
@@ -384,8 +384,8 @@
          connection
          [(cluster-config config-limit-ms)
           {:seon.cluster.agent/id "effect-agent"}
-          {:seon.cluster.run/id "effect-run"
-           :seon.cluster.run/agent [:seon.cluster.agent/id "effect-agent"]}])
+          {:seon.turn/id "effect-run"
+           :seon.turn/agent [:seon.cluster.agent/id "effect-agent"]}])
         (install-arm-probe! connection)
         (let [events (async/chan 4)
               listener-key (random-uuid)
@@ -517,7 +517,7 @@
       (fn [connection]
         (db/transact! connection [{:seon.config/cluster "default"}
                                   {:seon.cluster.agent/id "effect-agent"}
-                                  {:seon.cluster.run/id "effect-run"}])
+                                  {:seon.turn/id "effect-run"}])
         (install-arm-probe! connection)
         (let [result
               (binding [effect/*request-context*
@@ -538,7 +538,7 @@
       (fn [connection]
         (db/transact! connection [(cluster-config 60000)
                                   {:seon.cluster.agent/id "effect-agent"}
-                                  {:seon.cluster.run/id "effect-run"}])
+                                  {:seon.turn/id "effect-run"}])
         (install-arm-probe! connection)
         (let [result
               (binding [effect/*request-context*
@@ -575,7 +575,7 @@
     (fn [connection]
       (reset! handler-calls [])
       (db/transact! connection [(cluster-config 600000)
-                                {:seon.cluster.run/id "effect-run"}])
+                                {:seon.turn/id "effect-run"}])
       (install-capability! connection)
       (let [first-result
             (binding [effect/*request-context* (request-context connection)]
@@ -655,7 +655,7 @@
   (test-support/with-database
     (fn [connection]
       (db/transact! connection [(cluster-config 600000)
-                                {:seon.cluster.run/id "effect-run"}])
+                                {:seon.turn/id "effect-run"}])
       (install-capability! connection)
       (with-redefs-fn
         {(ns-resolve 'seon.effect 'dispatch)
@@ -678,31 +678,31 @@
   (test-support/with-database
     (fn [connection]
       (db/transact! connection [(cluster-config 600000)
-                                {:seon.cluster.run/id "effect-run"}
-                                {:seon.cluster.eval/id
+                                {:seon.turn/id "effect-run"}
+                                {:seon.eval/id
                                  (pr-str ["effect-run" 3])
-                                 :seon.cluster.eval/run
-                                 [:seon.cluster.run/id "effect-run"]
-                                 :seon.cluster.eval/ordinal 3
-                                 :seon.cluster.eval/at (Date.)}])
+                                 :seon.eval/turn
+                                 [:seon.turn/id "effect-run"]
+                                 :seon.eval/ordinal 3
+                                 :seon.eval/at (Date.)}])
       (install-capability! connection)
       (let [ctx (test-support/fork-cluster-ctx connection)
             effective (config/defaults)
             evaluation
             (sci.eval/evaluate
-             {:seon.cluster.eval/source
+             {:seon.eval/source
               (str "(seon.effect/request! "
                    "#'seon.effect-test/capability-owner "
                    "{:seon.effect-test/value 9})")
-              :seon.cluster.eval/ns [:seon.ns/name 'user]
+              :seon.eval/ns [:seon.ns/name 'user]
               :seon.sci.admit/caps (config/result-caps effective)
               :seon.sci.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms effective)
               :seon.config/on-core-error :record
               :seon.sci.eval/ctx ctx
               :seon.cluster.agent/id "root"
-              :seon.cluster.run/id "effect-run"
-              :seon.cluster.eval/ordinal 3
+              :seon.turn/id "effect-run"
+              :seon.eval/ordinal 3
               :seon.boot/cluster-name "default"})
             receipt
             (db/pull @connection '[*]
@@ -721,22 +721,18 @@
         (db/transact! connection [{:seon.cluster.agent/id "effect-agent"}])
         (db/transact!
          connection
-         (run/open-tx
+         (run/open
           {::run/id "effect-run"
            ::run/agent [:seon.cluster.agent/id "effect-agent"]
            ::run/opened-at opened-at}))
         (db/transact!
          connection
-         (run/claim-tx
-          {::run/id "effect-run"
-           ::run/process "dead-process"
-           ::run/live-processes #{"dead-process"}
-           ::run/now opened-at}))
+         [])
         (install-capability! connection)
         (db/transact!
          connection
          [{:seon.effect/id (pr-str ["effect-run" 3 0])
-           :seon.effect/run [:seon.cluster.run/id "effect-run"]
+           :seon.effect/run [:seon.turn/id "effect-run"]
            :seon.effect/owner [:seon.fn/sym "seon.effect-test/capability-owner"]
            :seon.effect/form-ordinal 3
            :seon.effect/ordinal 0
@@ -755,4 +751,4 @@
           (is (nil? (:seon.effect/result-edn receipt)))
           (is (some? (::run/closed-at
                       (db/pull @connection '[*]
-                               [:seon.cluster.run/id "effect-run"])))))))))
+                               [:seon.turn/id "effect-run"])))))))))

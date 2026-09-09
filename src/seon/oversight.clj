@@ -26,7 +26,7 @@
             [clojure.datafy :as datafy]
             [clojure.string :as str]
             [seon.cluster.agent :as agent]
-            [seon.cluster.work :as work]
+            [seon.turn :as work]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render.block :as block]))
@@ -79,9 +79,9 @@
          :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.cluster.run/agent ?agent]
-         (not [?run :seon.cluster.run/closed-at])
-         [?run :seon.cluster.run/id ?run-id]]
+         [?run :seon.turn/agent ?agent]
+         (not [?run :seon.turn/closed-at])
+         [?run :seon.turn/id ?run-id]]
        db agent-id))
 
 (defn- occupancy
@@ -129,10 +129,10 @@
              ;; remains observable without inventing another counter.
              (get-in mailbox [::flow/outs ::agent/episode])))]
     (cond-> {:seon.cluster.agent/id agent-id
-             :seon.cluster.work/episode-runs
+             :seon.turn/episode-runs
              (work/episode-runs db agent-id)}
       run-id
-      (assoc :seon.cluster.run/id run-id)
+      (assoc :seon.turn/id run-id)
 
       mailbox-occupancy
       (assoc :seon.oversight/mailbox mailbox-occupancy)
@@ -222,7 +222,7 @@
   "An open turn proves work; no turn plus a pong proves parked; else unknown."
   [agent]
   (cond
-    (:seon.cluster.run/id agent) "mid-turn"
+    (:seon.turn/id agent) "mid-turn"
     (some? (:seon.oversight/turn-passes agent)) "parked"
     :else "unknown"))
 
@@ -239,8 +239,8 @@
         (fn [agent]
           (let [agent-id (:seon.cluster.agent/id agent)
                 story (agent-story-text agent)
-                run-id (:seon.cluster.run/id agent)
-                episode-runs (:seon.cluster.work/episode-runs agent)]
+                run-id (:seon.turn/id agent)
+                episode-runs (:seon.turn/episode-runs agent)]
             (if (= "parked" story)
               (str agent-id ": parked")
               (str agent-id ": " story
@@ -285,8 +285,8 @@
                  :data-state story}
             [:td (:seon.cluster.agent/id agent)]
             [:td story]
-            [:td (or (:seon.cluster.run/id agent) "—")]
-            [:td (:seon.cluster.work/episode-runs agent)]
+            [:td (or (:seon.turn/id agent) "—")]
+            [:td (:seon.turn/episode-runs agent)]
             [:td (occupancy-text (:seon.oversight/mailbox agent))]
             [:td (occupancy-text (:seon.oversight/turn-buffer agent))]]))]]
      [:dl

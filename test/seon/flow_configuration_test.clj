@@ -99,12 +99,12 @@
                   ;; production caller: the blueprint is pure data, but its
                   ;; declared request is the handle a running cluster owns.
                   (seon.cluster.agent/graph-definition
-                   {:seon.cluster.loop/cluster
+                   {:seon.turn/cluster
                     (test-support/cluster-handle
                      {:seon.env/environment environment
                       :seon.db/connection connection
                       :seon.cluster/name "seon.flow-configuration-test"
-                      :seon.cluster.run/process "census-0"
+                      :seon.db.process/id "census-0"
                       :seon.sci.eval/ctx
                       (test-support/fork-cluster-ctx connection)
                       :seon.config.eval/time-limit-ms 1000

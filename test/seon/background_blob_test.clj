@@ -86,8 +86,8 @@
                :seon.config/cluster "default"
                :seon.config.eval.result/blob-threshold 8)
         {:seon.cluster.agent/id "binary-agent"}
-        {:seon.cluster.run/id "binary-run"
-         :seon.cluster.run/agent
+        {:seon.turn/id "binary-run"
+         :seon.turn/agent
          [:seon.cluster.agent/id "binary-agent"]}])
       (install-capability! connection)
       (let [threshold
@@ -114,8 +114,8 @@
             {:seon.env/environment @test-environment
              :seon.db/connection connection
              :seon.cluster.agent/id "binary-agent"
-             :seon.cluster.run/id "binary-run"
-             :seon.cluster.eval/ordinal 0
+             :seon.turn/id "binary-run"
+             :seon.eval/ordinal 0
              :seon.boot/cluster-name "default"
              :seon.flow/work-launcher launcher
              :seon.sci.admit/caps (config/result-caps (config/defaults))

@@ -37,16 +37,16 @@
       (let [rows
             (db/q '[:find ?t ?turn-id ?ordinal ?evaluation-t
                     (pull ?evaluation
-                          [* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
-                           {:seon.cluster.eval/read-evidence [*]}])
+                          [* {:seon.eval/ns [:db/id :seon.ns/name]}
+                           {:seon.eval/read-evidence [*]}])
                     :in $ ?agent-id
                     :where
                     [?agent :seon.cluster.agent/id ?agent-id]
-                    [?turn :seon.cluster.run/agent ?agent]
-                    [?turn :seon.cluster.run/id ?turn-id ?t]
-                    [?evaluation :seon.cluster.eval/run ?turn]
-                    [?evaluation :seon.cluster.eval/id _ ?evaluation-t]
-                    [?evaluation :seon.cluster.eval/ordinal ?ordinal]]
+                    [?turn :seon.turn/agent ?agent]
+                    [?turn :seon.turn/id ?turn-id ?t]
+                    [?evaluation :seon.eval/turn ?turn]
+                    [?evaluation :seon.eval/id _ ?evaluation-t]
+                    [?evaluation :seon.eval/ordinal ?ordinal]]
                   database agent-id)]
         (if (:seon.error/kind rows)
           rows

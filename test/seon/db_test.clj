@@ -5,7 +5,7 @@
             [datahike.pull-api :as pull-api]
             [my.message :as message]
             [seon.config :as config]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.db :as db]
             [seon.instrument :as instrument]
             [seon.render :as render]
@@ -167,13 +167,13 @@
 (deftest transaction-wrappers-cannot-hide-a-classified-refusal
   (test-support/with-database
    (fn [connection]
-     (let [refusal {:seon.error/kind :seon.cluster.run/refused
-                    :seon.cluster.run/rule
-                    :seon.cluster.run/agent-already-running}
+     (let [refusal {:seon.error/kind :seon.turn/refused
+                    :seon.turn/rule
+                    :seon.turn/agent-already-running}
            wrapped (ex-info "classified transition refusal"
                             refusal
                             (ex-info "transaction wrapper"
-                                     {:seon.cluster.run/id nil}))]
+                                     {:seon.turn/id nil}))]
        (with-redefs [d/transact (fn [& _] (throw wrapped))]
          (is (= (assoc refusal :seon.error/message "classified transition refusal")
                 (db/transact! connection []))
@@ -182,22 +182,22 @@
                    [{:seon.cluster.agent/id "busy-agent"}])
      (is (map? (db/transact!
                 connection
-                (run/open-tx
-                 {:seon.cluster.run/id "already-open"
-                  :seon.cluster.run/agent
+                (run/open
+                 {:seon.turn/id "already-open"
+                  :seon.turn/agent
                   [:seon.cluster.agent/id "busy-agent"]
-                  :seon.cluster.run/opened-at (java.util.Date.)}))))
+                  :seon.turn/opened-at (java.util.Date.)}))))
      (let [result
            (db/transact!
             connection
-            (run/open-tx
-             {:seon.cluster.run/id "contending-run"
-              :seon.cluster.run/agent
+            (run/open
+             {:seon.turn/id "contending-run"
+              :seon.turn/agent
               [:seon.cluster.agent/id "busy-agent"]
-              :seon.cluster.run/opened-at (java.util.Date.)}))]
-       (is (= :seon.cluster.run/refused (:seon.error/kind result)))
-       (is (= :seon.cluster.run/agent-already-running
-              (:seon.cluster.run/rule result))
+              :seon.turn/opened-at (java.util.Date.)}))]
+       (is (= :seon.turn/refused (:seon.error/kind result)))
+       (is (= :seon.turn/agent-already-running
+              (:seon.turn/rule result))
            "real run contention preserves the rule needed by source preview")
        (is (= "run transition refused: agent-already-running"
               (:seon.error/message result)))
@@ -389,8 +389,8 @@
              [database]]
             ['[:find ?result .
                :where
-               [?receipt :seon.cluster.eval/ordinal 1]
-               [?receipt :seon.cluster.eval/result-edn ?result]]
+               [?receipt :seon.eval/ordinal 1]
+               [?receipt :seon.eval/result-edn ?result]]
              [database]]
             ['[:find ?entity .
                :in $ ?id
@@ -581,17 +581,17 @@
            (when (= :seon.cluster.message/id (first subject))
              (db/transact!
               connection
-              [{:seon.cluster.eval/id "digest-persistence"
-                :seon.cluster.eval/read-evidence
+              [{:seon.eval/id "digest-persistence"
+                :seon.eval/read-evidence
                 [(assoc (first evidence) :db/id "digest-persistence/0")]}])
              (is (= (:seon.db/read-result-digest (first evidence))
                     (get-in
                      (db/pull
                       @connection
-                      '[{:seon.cluster.eval/read-evidence
+                      '[{:seon.eval/read-evidence
                          [:seon.db/read-result-digest]}]
-                      [:seon.cluster.eval/id "digest-persistence"])
-                     [:seon.cluster.eval/read-evidence 0
+                      [:seon.eval/id "digest-persistence"])
+                     [:seon.eval/read-evidence 0
                       :seon.db/read-result-digest]))
                  "the fixed-size digest survives the durable component codec"))))))))
 
@@ -878,26 +878,26 @@
      (db/transact!
       connection
       [{:seon.ns/name 'my.agents.db-conflict}
-       {:seon.cluster.eval/id "db-conflict-owner"
-        :seon.cluster.eval/refreshes
+       {:seon.eval/id "db-conflict-owner"
+        :seon.eval/refreshes
         [:seon.ns/name 'my.agents.db-conflict]}])
      (let [rejected
            (binding [db/*conn* connection]
              (db/transact!
-              [{:seon.cluster.eval/id "db-conflict-contender"
-                :seon.cluster.eval/refreshes
+              [{:seon.eval/id "db-conflict-contender"
+                :seon.eval/refreshes
                 [:seon.ns/name 'my.agents.db-conflict]}]))
            conflict (:seon.error/data rejected)]
        (is (= :seon.db/rejected (:seon.error/kind rejected)))
        (is (true? (:seon.db/transaction-refused rejected)))
        (is (= {:error :transact/unique
-               :attribute :seon.cluster.eval/refreshes}
+               :attribute :seon.eval/refreshes}
               (select-keys conflict [:error :attribute])))
        (is (instance? datahike.datom.Datom (:datom conflict)))
        (is (= {:seon.db/conflict-attribute
-               :seon.cluster.eval/refreshes
+               :seon.eval/refreshes
                :seon.db/conflict-owner
-               [:seon.cluster.eval/id "db-conflict-owner"]}
+               [:seon.eval/id "db-conflict-owner"]}
               (select-keys conflict
                            [:seon.db/conflict-attribute
                             :seon.db/conflict-owner])))
@@ -1118,7 +1118,7 @@
      ;; says so, so under the contracts every cluster arms the contract
      ;; refuses first — same crossing, same function named, and the agent
      ;; still reads a flat value because its forms cross the SCI kernel
-     ;; (`my.run-test`, `my.message-test` prove that boundary).
+     ;; (`my.turn-test`, `my.message-test` prove that boundary).
      (let [refusal (test-support/refusal-data
                     #(db/pull-many @connection schema-pattern ["not-an-eid"]))]
        (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))
@@ -1192,16 +1192,16 @@
   (test-support/with-database
    (fn [connection]
      (db/transact! connection
-                   [{:seon.cluster.run/id "diagnostic-pull-run"}])
+                   [{:seon.turn/id "diagnostic-pull-run"}])
      (let [database @connection
            basis-before (db/basis-t database)
-           uninstalled [:seon.cluster.run/generated-at
-                        :seon.cluster.run/generation-complete-at]
+           uninstalled [:seon.turn/generated-at
+                        :seon.turn/generation-complete-at]
            results
            (mapv (fn [attribute]
                    (db/pull database
-                            [:seon.cluster.run/id attribute]
-                            [:seon.cluster.run/id "diagnostic-pull-run"]))
+                            [:seon.turn/id attribute]
+                            [:seon.turn/id "diagnostic-pull-run"]))
                  uninstalled)]
        (is (every? #(not (contains? (:schema database) %)) uninstalled))
        (doseq [[attribute result] (map vector uninstalled results)]
@@ -1212,10 +1212,10 @@
                          :attribute]))))
        (is (= basis-before (db/basis-t @connection))
            "diagnostic reads cannot advance the database basis")
-       (is (= {:seon.cluster.run/id "diagnostic-pull-run"}
+       (is (= {:seon.turn/id "diagnostic-pull-run"}
               (db/pull @connection
-                       [:seon.cluster.run/id]
-                       [:seon.cluster.run/id "diagnostic-pull-run"])))))))
+                       [:seon.turn/id]
+                       [:seon.turn/id "diagnostic-pull-run"])))))))
 
 (deftest temporal-database-identities-use-the-origin-schema
   (test-support/with-database

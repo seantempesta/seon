@@ -62,7 +62,7 @@
   committed; the next caller re-derives it from the same facts."
   (:require [clojure.string :as str]
             [seon.db :as db]
-            [seon.cluster.work :as work]
+            [seon.turn :as work]
             [seon.error :as error]
             [seon.schema.edn :as schema.edn]))
 
@@ -91,7 +91,7 @@
   [pulled]
   (cond-> (dissoc pulled :db/id)
     (contains? pulled :seon.error/run)
-    (update :seon.error/run restore-error-ref :seon.cluster.run/id)
+    (update :seon.error/run restore-error-ref :seon.turn/id)
 
     (contains? pulled :seon.error/agent)
     (update :seon.error/agent restore-error-ref :seon.cluster.agent/id)))
@@ -102,7 +102,7 @@
   (->> (db/q '[:find [(pull ?error
                              [*
                               {:seon.error/run
-                               [:db/id :seon.cluster.run/id]
+                               [:db/id :seon.turn/id]
                                :seon.error/agent
                                [:db/id :seon.cluster.agent/id]}]) ...]
               :where
@@ -124,39 +124,22 @@
                       :seon.error/signature))
        vec))
 
-(defn- wedged-runs
-  "Runs held by a process that is not alive. Open runs only: a closed
-  run held by a dead process is finished work, not stuck work."
-  [db live-processes]
-  (->> (db/q '[:find ?id ?agent-id ?process
-              :where
-              [?run :seon.cluster.run/id ?id]
-              [?run :seon.cluster.run/process ?process]
-              (not [?run :seon.cluster.run/closed-at _])
-              [?run :seon.cluster.run/agent ?agent]
-              [?agent :seon.cluster.agent/id ?agent-id]]
-            db)
-       (remove (fn [[_ _ process]] (contains? live-processes process)))
-       (sort)
-       (mapv (fn [[id agent-id process]]
-               {:seon.cluster.run/id id
-                :seon.cluster.agent/id agent-id
-                :seon.cluster.run/process process}))))
+
 
 (defn- failed-runs
   [db]
   (->> (db/q '[:find ?id ?agent-id ?error
               :where
-              [?run :seon.cluster.run/id ?id]
-              [?run :seon.cluster.run/error ?error]
-              [?run :seon.cluster.run/agent ?agent]
+              [?run :seon.turn/id ?id]
+              [?run :seon.turn/error ?error]
+              [?run :seon.turn/agent ?agent]
               [?agent :seon.cluster.agent/id ?agent-id]]
             db)
        (sort)
        (mapv (fn [[id agent-id message]]
-               {:seon.cluster.run/id id
+               {:seon.turn/id id
                 :seon.cluster.agent/id agent-id
-                :seon.cluster.run/error message}))))
+                :seon.turn/error message}))))
 
 (defn- errored-receipts
   [db]
@@ -165,24 +148,24 @@
               ;; PRESENCE IS THE STATE: an errored receipt is one that
               ;; carries an error — there is no status label to filter
               ;; on, and the clause below already binds it
-              [?receipt :seon.cluster.eval/id ?id]
-              [?receipt :seon.cluster.eval/ordinal ?ordinal]
+              [?receipt :seon.eval/id ?id]
+              [?receipt :seon.eval/ordinal ?ordinal]
               [?receipt :seon.error/kind ?kind]
-              [?receipt :seon.cluster.eval/error ?error]
-              [?receipt :seon.cluster.eval/run ?run]
-              [?run :seon.cluster.run/id ?run-id]
-              [?form :seon.cluster.eval/run ?run]
-              [?form :seon.cluster.eval/ordinal ?ordinal]
-              [?form :seon.cluster.eval/source ?source]]
+              [?receipt :seon.eval/error ?error]
+              [?receipt :seon.eval/turn ?run]
+              [?run :seon.turn/id ?run-id]
+              [?form :seon.eval/turn ?run]
+              [?form :seon.eval/ordinal ?ordinal]
+              [?form :seon.eval/source ?source]]
             db)
        (sort)
        (mapv (fn [[id run-id ordinal source kind error]]
-               {:seon.cluster.eval/id id
-                :seon.cluster.run/id run-id
-                :seon.cluster.eval/ordinal ordinal
-                :seon.cluster.eval/source source
+               {:seon.eval/id id
+                :seon.turn/id run-id
+                :seon.eval/ordinal ordinal
+                :seon.eval/source source
                 :seon.error/kind kind
-                :seon.cluster.eval/error error}))))
+                :seon.eval/error error}))))
 
 (defn form-problem
   "A routable red evaluation attributed to its namespace owner, or nil.
@@ -191,19 +174,19 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.problems/form-problem-request]
                   [:maybe :seon.problems/form-problem]]}
-  [db {:keys [:seon.cluster.run/id :seon.cluster.eval/ordinal
+  [db {:keys [:seon.turn/id :seon.eval/ordinal
               :seon.sci.eval/evaluation]}]
   (let [form
         (db/q '[:find (pull ?form [*]) .
                :in $ ?run-id ?ordinal
                :where
-               [?run :seon.cluster.run/id ?run-id]
-               [?form :seon.cluster.eval/run ?run]
-               [?form :seon.cluster.eval/ordinal ?ordinal]]
+               [?run :seon.turn/id ?run-id]
+               [?form :seon.eval/turn ?run]
+               [?form :seon.eval/ordinal ?ordinal]]
              db id ordinal)
         admitted (:seon.sci.admit/value evaluation)
-        ordinary-error (:seon.cluster.eval/error evaluation)
-        interrupted? (boolean (:seon.cluster.eval/interrupted-at evaluation))
+        ordinary-error (:seon.eval/error evaluation)
+        interrupted? (boolean (:seon.eval/interrupted-at evaluation))
         unbound? (work/unbound-value? admitted)
         red? (or ordinary-error interrupted? unbound?)
         scoped? (work/planner-scoped-attempt? db id)
@@ -215,8 +198,8 @@
             (db/q '[:find ?author-id .
                    :in $ ?form
                    :where
-                   [?form :seon.cluster.eval/run ?run]
-                   [?run :seon.cluster.run/agent ?author]
+                   [?form :seon.eval/turn ?run]
+                   [?run :seon.turn/agent ?author]
                    [?author :seon.cluster.agent/id ?author-id]]
                  db (:db/id form))
             kind (or (:seon.error/kind admitted)
@@ -227,15 +210,15 @@
                         "The admitted result contains an unbound var.")
                       "The evaluation was interrupted.")]
         {:seon.problems/id (work/problem-id id ordinal)
-         :seon.cluster.eval/id (work/problem-id id ordinal)
-         :seon.cluster.run/id id
-         :seon.cluster.eval/ordinal ordinal
-         :seon.cluster.eval/source
-         (:seon.cluster.eval/source form)
+         :seon.eval/id (work/problem-id id ordinal)
+         :seon.turn/id id
+         :seon.eval/ordinal ordinal
+         :seon.eval/source
+         (:seon.eval/source form)
          :seon.cluster.agent/id owner-id
          :seon.problems/author author-id
          :seon.error/kind kind
-         :seon.cluster.eval/error error}))))
+         :seon.eval/error error}))))
 
 (defn assignment-value
   "The E3 message value routing one problem to its derived owner.
@@ -252,9 +235,9 @@
      :my.message/about (:seon.problems/id problem)
      :my.message/content
      (str "Repair problem " (:seon.problems/id problem)
-          " from run " (:seon.cluster.run/id problem)
-          ", form " (:seon.cluster.eval/ordinal problem)
-          ": " (:seon.cluster.eval/error problem))}))
+          " from run " (:seon.turn/id problem)
+          ", form " (:seon.eval/ordinal problem)
+          ": " (:seon.eval/error problem))}))
 
 (defn- deferred-agents
   "Agents whose pending triggers the episode cap is deferring (F1 §7).
@@ -271,7 +254,7 @@
                (let [deferred (work/deferred-triggers db agent-id)]
                  (when (seq deferred)
                    {:seon.cluster.agent/id agent-id
-                    :seon.cluster.work/episode-runs
+                    :seon.turn/episode-runs
                     (work/episode-runs db agent-id)
                     :seon.problems/deferred-count (count deferred)}))))
        vec))
@@ -372,7 +355,7 @@
 
 (defn problems
   "Everything wrong now, as a map keyed by family. `{}` when nothing is.
-  Reads one immutable `db`, `:seon.cluster.run/live-processes`, and one
+  Reads one immutable `db` and one
   loaded-namespace snapshot. The same database value drives every
   query; neither process liveness nor JVM namespace state is stored.
 
@@ -385,9 +368,8 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.problems/request]
                   :seon.problems/problems]}
-  [db {:keys [:seon.cluster.run/live-processes]}]
+  [db _request]
   (let [signatures (error-signatures db)
-        wedged (wedged-runs db live-processes)
         failed (failed-runs db)
         errored (errored-receipts db)
         deferred (deferred-agents db)
@@ -396,7 +378,6 @@
         missing-model-rows (missing-models db)
         found (cond-> {}
                 (seq signatures) (assoc :seon.problems/error-signatures signatures)
-                (seq wedged) (assoc :seon.problems/wedged-runs wedged)
                 (seq failed) (assoc :seon.problems/failed-runs failed)
                 (seq errored) (assoc :seon.problems/errored-receipts errored)
                 (seq deferred) (assoc :seon.problems/deferred-agents deferred)
@@ -495,31 +476,26 @@
            "seen" (:seon.problems/occurrences entry)
            "signature" (:seon.error/signature entry)
            "latest" (:seon.error/message (:seon.error/fact entry)))))
-   (family-section
-    "wedged runs"
-    (for [entry (:seon.problems/wedged-runs found)]
-      (row "run" (:seon.cluster.run/id entry)
-           "agent" (:seon.cluster.agent/id entry)
-           "held by" (str (:seon.cluster.run/process entry) " (not alive)"))))
+
    (family-section
     "failed runs"
     (for [entry (:seon.problems/failed-runs found)]
-      (row "run" (:seon.cluster.run/id entry)
+      (row "run" (:seon.turn/id entry)
            "agent" (:seon.cluster.agent/id entry)
-           "error" (:seon.cluster.run/error entry))))
+           "error" (:seon.turn/error entry))))
    (family-section
     "errored forms"
     (for [entry (:seon.problems/errored-receipts found)]
-      (row "run" (:seon.cluster.run/id entry)
-           "form" (:seon.cluster.eval/ordinal entry)
+      (row "run" (:seon.turn/id entry)
+           "form" (:seon.eval/ordinal entry)
            "kind" (:seon.error/kind entry)
-           "source" (:seon.cluster.eval/source entry)
-           "error" (:seon.cluster.eval/error entry))))
+           "source" (:seon.eval/source entry)
+           "error" (:seon.eval/error entry))))
    (family-section
     "deferred agents"
     (for [entry (:seon.problems/deferred-agents found)]
       (row "agent" (:seon.cluster.agent/id entry)
-           "episode runs" (:seon.cluster.work/episode-runs entry)
+           "episode runs" (:seon.turn/episode-runs entry)
            "deferred" (:seon.problems/deferred-count entry))))
    (family-section
     "unstewarded namespaces"
@@ -533,38 +509,15 @@
     (map missing-model-html (:seon.problems/missing-models found)))])
 
 (defn block
-  "The problems BLOCK's html render: derive, then project.
-
-  The unit a block projection receives carries the exact immutable
-  database value, so every database-backed family is derived at that
-  value. Stale Vars additionally observe one snapshot of the loaded JVM
-  namespaces; reconnect re-derives both current inputs.
-
-  `:seon.cluster.run/live-processes` must ride on the unit. It is the
-  one input a database cannot answer, `problems` already takes it by
-  that name, and defaulting it here would be the worst kind of quiet
-  lie: an absent set makes every held run wedged, so a default of `#{}`
-  would invent problems and a default of \"assume alive\" would hide
-  them. Absent gets a legible card instead.
-
-  The HEALTHY case is rendered here rather than in `html-report`,
-  because only a block knows its surface has to occupy space whether or
-  not there is anything to say."
+  "Derive the problems block from its supplied database value."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (if-not (contains? unit :seon.cluster.run/live-processes)
-    [:div {:class "seon-error-card"}
-     [:span {:class "seon-error-card-message"}
-      (str "This block needs :seon.cluster.run/live-processes on the unit; "
-           "which processes are alive is the one thing the database "
-           "cannot answer.")]]
-    (let [found (problems (:seon.db/db unit)
-                          (select-keys unit [:seon.cluster.run/live-processes]))]
-      (if (empty? found)
-        [:div {:class "seon-problems seon-problems-healthy"}
-         [:span {:class "seon-problems-healthy-mark"} "◆"]
-         [:span "nothing is wrong"]]
-        (html-report found)))))
+  (let [found (problems (:seon.db/db unit) {})]
+    (if (empty? found)
+      [:div {:class "seon-problems seon-problems-healthy"}
+       [:span {:class "seon-problems-healthy-mark"} "◆"]
+       [:span "nothing is wrong"]]
+      (html-report found))))
 
 (defn ai-prose
   "`:seon.render/ai` — concise steering, derived from the families.
@@ -575,15 +528,15 @@
   [found]
   (->> (concat
         (for [entry (:seon.problems/errored-receipts found)]
-          (str "Form " (:seon.cluster.eval/ordinal entry)
+          (str "Form " (:seon.eval/ordinal entry)
                " failed during evaluation: "
-               (:seon.cluster.eval/error entry)
+               (:seon.eval/error entry)
                ". The run did not retry it. Inspect receipt "
-               (:seon.cluster.eval/id entry)
+               (:seon.eval/id entry)
                " and revise the remaining plan from current facts."))
         (for [entry (:seon.problems/deferred-agents found)]
           (str "Agent " (:seon.cluster.agent/id entry) " has run "
-               (:seon.cluster.work/episode-runs entry)
+               (:seon.turn/episode-runs entry)
                " self-triggered runs since the last outside trigger; "
                (:seon.problems/deferred-count entry)
                " triggers are deferred until one arrives."))
@@ -610,28 +563,24 @@
            (error/notice {:seon.error/fact (:seon.error/fact entry)
                           :seon.error/occurrences
                           (:seon.problems/occurrences entry)})))
-        (for [entry (:seon.problems/wedged-runs found)]
-          (str "seon.problems wedged-run run=" (:seon.cluster.run/id entry)
-               " agent=" (:seon.cluster.agent/id entry)
-               " held-by=" (:seon.cluster.run/process entry)
-               " (that process is not alive)"))
+
         (for [entry (:seon.problems/failed-runs found)]
-          (str "seon.problems failed-run run=" (:seon.cluster.run/id entry)
+          (str "seon.problems failed-run run=" (:seon.turn/id entry)
                " agent=" (:seon.cluster.agent/id entry)
-               " error=" (pr-str (:seon.cluster.run/error entry))))
+               " error=" (pr-str (:seon.turn/error entry))))
         (for [entry (:seon.problems/errored-receipts found)]
           (str "seon.problems errored-receipt receipt="
-               (:seon.cluster.eval/id entry)
-               " run=" (:seon.cluster.run/id entry)
-               " ordinal=" (:seon.cluster.eval/ordinal entry)
-               " source=" (pr-str (:seon.cluster.eval/source entry))
+               (:seon.eval/id entry)
+               " run=" (:seon.turn/id entry)
+               " ordinal=" (:seon.eval/ordinal entry)
+               " source=" (pr-str (:seon.eval/source entry))
                " kind=" (:seon.error/kind entry)
-               (when-let [message (:seon.cluster.eval/error entry)]
+               (when-let [message (:seon.eval/error entry)]
                  (str " error=" (pr-str message)))))
         (for [entry (:seon.problems/deferred-agents found)]
           (str "seon.problems deferred-agent agent="
                (:seon.cluster.agent/id entry)
-               " episode-runs=" (:seon.cluster.work/episode-runs entry)
+               " episode-runs=" (:seon.turn/episode-runs entry)
                " deferred=" (:seon.problems/deferred-count entry)
                " (agent-sent triggers wait for an outside trigger)"))
         (for [entry (:seon.problems/unowned-namespaces found)]

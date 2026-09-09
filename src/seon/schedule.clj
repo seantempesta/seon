@@ -538,7 +538,7 @@
   (cond-> {:seon.error/source source
            :seon.error/id (error-identity claimed-receipt-id)
            :seon.error/at completed-at
-           :seon.error/process (:seon.cluster.run/process cluster)
+           :seon.error/process (:seon.db.process/id cluster)
            :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
            :seon.config.error/recurrence-limit
            (:seon.config.error/recurrence-limit cluster)
@@ -612,17 +612,17 @@
                    @connection)
              "default")
          instance (get @operator.runtime/running-instances cluster-name)
-         cluster (:seon.cluster.loop/cluster instance)]
+         cluster (:seon.turn/cluster instance)]
      (when-not cluster
        (throw (ex-info "The cluster execution handle is unavailable."
                        {:seon.error/kind ::missing-execution-handle
                         :seon.cluster/name cluster-name :seon.schedule/missing-execution-handle true})))
      (fire-due! connection agent-id observed-at
                 (assoc (execution-context @connection cluster)
-                       :seon.cluster.loop/cluster cluster))))
+                       :seon.turn/cluster cluster))))
   ([connection agent-id observed-at context]
-   (let [cluster (:seon.cluster.loop/cluster context)
-         common-request (dissoc context :seon.cluster.loop/cluster)]
+   (let [cluster (:seon.turn/cluster context)
+         common-request (dissoc context :seon.turn/cluster)]
     (reduce
    (fn [fire-count task]
      (let [database @connection
@@ -756,7 +756,7 @@
           ::fires 0
           ::listener-key (random-uuid)))
   ([state transition]
-   (let [connection (get-in state [:seon.cluster.loop/cluster
+   (let [connection (get-in state [:seon.turn/cluster
                                    :seon.db/connection])
          listener-key (::listener-key state)]
      (case transition
@@ -785,15 +785,15 @@
 
        state)))
   ([state _input _message]
-   (let [connection (get-in state [:seon.cluster.loop/cluster
+   (let [connection (get-in state [:seon.turn/cluster
                                    :seon.db/connection])
          agent-id (:seon.cluster.agent/id state)
          observed-at (Date.)
-         cluster (get-in state [:seon.cluster.loop/cluster])
+         cluster (get-in state [:seon.turn/cluster])
          fires (fire-due!
                 connection agent-id observed-at
                 (assoc (execution-context @connection cluster)
-                       :seon.cluster.loop/cluster cluster))
+                       :seon.turn/cluster cluster))
          next-at (earliest-next-at @connection agent-id observed-at)]
      [(-> state
           (update ::passes inc)

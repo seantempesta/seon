@@ -32,7 +32,7 @@
             [org.httpkit.server :as http]
             [seon.ai :as ai]
             [seon.blob :as blob]
-            [seon.cluster.loop]
+            [seon.turn]
             [seon.config :as config]
             [seon.test-support :as support])
   (:import [java.util Date]))
@@ -128,7 +128,7 @@
            (subs content-line 0 (- (count content-line) 2))
            "data: {\"choices\":[{\"delta\":{\"content\":123}}]}"
            "data: {\"error\":{\"message\":\"provider failed\"}}"]
-          prefix (content-chunk "(my.run/complete \"safe")
+          prefix (content-chunk "(my.turn/complete \"safe")
           suffix (content-chunk "\")")]
       (doseq [malformed malformed-lines]
         (let [result (ai/stream-fold [prefix malformed suffix] nil)]
@@ -142,7 +142,7 @@
                                   (str "data: {\"choices\":[{\"delta\":"
                                        "{\"reasoning_content\":123}}]}")
                                   (reasoning-chunk "second")
-                                  (content-chunk "(my.run/complete :safe)")]
+                                  (content-chunk "(my.turn/complete :safe)")]
                                  nil)]
       (is (= :seon.ai/unparseable-body (:seon.error/kind result)))
       (is (not (contains? result :seon.ai/reasoning-partial))))))
@@ -161,7 +161,7 @@
     (let [completion
           (ai/completion-text
            {"choices"
-            [{"message" {"content" "(my.run/complete :safe)"
+            [{"message" {"content" "(my.turn/complete :safe)"
                           "reasoning_content" 123}}]})]
       (is (= :seon.ai/unparseable-body (:seon.error/kind completion)))
       (is (not (contains? completion :seon.ai/text)))))
@@ -169,7 +169,7 @@
     (let [completion
           (ai/completion-text
            {"error" {"message" "provider failed"}
-            "choices" [{"message" {"content" "(my.run/complete :safe)"}}]})]
+            "choices" [{"message" {"content" "(my.turn/complete :safe)"}}]})]
       (is (= :seon.ai/unparseable-body (:seon.error/kind completion)))
       (is (not (contains? completion :seon.ai/text))))))
 
@@ -240,7 +240,7 @@
          extra))
 
 (deftest a-malformed-stream-settles-as-an-evidenced-flat-error
-  (let [prefix (content-chunk "(my.run/complete \"safe")
+  (let [prefix (content-chunk "(my.turn/complete \"safe")
         malformed "data: {not json"
         suffix (content-chunk "\")")]
     (with-provider {:body (str/join "\n" [prefix malformed suffix])}
@@ -345,16 +345,16 @@
           (fn [connection]
             (db/transact! connection
                         [{:seon.cluster.agent/id "status-agent"}
-                         {:seon.cluster.run/id "status-run"}])
-            ((ns-resolve 'seon.cluster.loop 'record-attempt!)
+                         {:seon.turn/id "status-run"}])
+            ((ns-resolve 'seon.turn 'record-attempt!)
              {:seon.db/connection connection
-              :seon.cluster.run/process "process/status-test"
+              :seon.db.process/id "process/status-test"
               :seon.config.error/recurrence-limit 3
               :seon.sci.admit/caps caps}
              {:seon.ai/target target
               :seon.error/value failure
               :seon.ai.attempt/sent-body sent-body
-              :seon.cluster.run/id "status-run"
+              :seon.turn/id "status-run"
               :seon.cluster.agent/id "status-agent"
               :seon.ai.attempt/ordinal 0}
              (Date. 1785319000000))
@@ -374,11 +374,11 @@
       (db/transact! connection
                   [{:seon.config.eval.result/blob-threshold 65536}
                    {:seon.cluster.agent/id "reasoning-agent"}
-                   {:seon.cluster.run/id "reasoning-run"}])
+                   {:seon.turn/id "reasoning-run"}])
       (let [inline-reasoning "private reasoning"
             large (apply str (repeat 65537 "x"))
             cluster {:seon.db/connection connection
-                     :seon.cluster.run/process "process/reasoning-test"
+                     :seon.db.process/id "process/reasoning-test"
                      :seon.config.error/recurrence-limit 3
                      :seon.sci.admit/caps caps}
             base-request {:seon.ai/target
@@ -386,10 +386,10 @@
                            :seon.ai/model "fixture"}
                           :seon.ai/settings
                           (ai/settings (support/effective-config) {})
-                          :seon.cluster.run/id "reasoning-run"
+                          :seon.turn/id "reasoning-run"
                           :seon.cluster.agent/id "reasoning-agent"}]
         (doseq [[ordinal reasoning] [[0 inline-reasoning] [1 large]]]
-          ((ns-resolve 'seon.cluster.loop 'record-attempt!)
+          ((ns-resolve 'seon.turn 'record-attempt!)
            cluster
            (assoc base-request
                   :seon.ai.attempt/ordinal ordinal

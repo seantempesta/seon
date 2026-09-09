@@ -10,7 +10,7 @@
             [seon.cluster :as cluster]
             [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
-            [seon.cluster.work :as work]
+            [seon.turn :as work]
             [seon.config :as config]
             [seon.print :as print]
             [seon.render.transcript :as transcript])
@@ -34,28 +34,28 @@
                (db/q '[:find ?closed .
                       :in $ ?run-id
                       :where
-                      [?run :seon.cluster.run/id ?run-id]
-                      [?run :seon.cluster.run/closed-at ?closed]]
+                      [?run :seon.turn/id ?run-id]
+                      [?run :seon.turn/closed-at ?closed]]
                     db run-id)]
       (let [receipt-count
             (or (db/q '[:find (count ?receipt) .
                        :in $ ?run-id
                        :where
-                       [?run :seon.cluster.run/id ?run-id]
-                       [?receipt :seon.cluster.eval/run ?run]]
+                       [?run :seon.turn/id ?run-id]
+                       [?receipt :seon.eval/turn ?run]]
                      db run-id)
                 0)
             form-count
             (or (db/q '[:find (count ?form) .
                        :in $ ?run-id
                        :where
-                       [?run :seon.cluster.run/id ?run-id]
-                       [?form :seon.cluster.eval/run ?run]]
+                       [?run :seon.turn/id ?run-id]
+                       [?form :seon.eval/turn ?run]]
                      db run-id)
                 0)]
         (when (= form-count receipt-count)
-          {:seon.cluster.run/id run-id
-           :seon.cluster.run/closed-at closed-at
+          {:seon.turn/id run-id
+           :seon.turn/closed-at closed-at
            :seon.eval.drive/receipt-count receipt-count})))))
 
 (defn- await-fact!
@@ -118,8 +118,8 @@
               :in $ ?message-id
               :where
               [?message :seon.cluster.message/id ?message-id]
-              [?run :seon.cluster.run/trigger ?message]
-              [?run :seon.cluster.run/id ?run-id ?opened-tx]]
+              [?run :seon.turn/trigger ?message]
+              [?run :seon.turn/id ?run-id ?opened-tx]]
             db message-id)
        (sort-by second)
        (mapv first)))
@@ -141,41 +141,41 @@
 (defn run-receipts
   "Ordered fact-space receipt values for `run-ids`."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:vector :seon.cluster.run/id]]
+                       [:vector :seon.turn/id]]
                   [:vector :seon.eval.drive/evaluation]]}
   [db run-ids]
   (if (seq run-ids)
     (->> (db/q '[:find ?run-id ?ordinal ?source ?result ?error ?error-kind ?at
                 :in $ [?run-id ...]
                 :where
-                [?run :seon.cluster.run/id ?run-id]
-                [?form :seon.cluster.eval/run ?run]
-                [?form :seon.cluster.eval/ordinal ?ordinal]
-                [?form :seon.cluster.eval/source ?source]
-                [?receipt :seon.cluster.eval/run ?run]
-                [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                [?receipt :seon.cluster.eval/at ?at]
+                [?run :seon.turn/id ?run-id]
+                [?form :seon.eval/turn ?run]
+                [?form :seon.eval/ordinal ?ordinal]
+                [?form :seon.eval/source ?source]
+                [?receipt :seon.eval/turn ?run]
+                [?receipt :seon.eval/ordinal ?ordinal]
+                [?receipt :seon.eval/at ?at]
                 [(get-else $ ?receipt :seon.eval/value "") ?result]
-                [(get-else $ ?receipt :seon.cluster.eval/error "") ?error]
+                [(get-else $ ?receipt :seon.eval/error "") ?error]
                 [(get-else $ ?receipt :seon.error/kind :seon.eval.drive/absent)
                  ?error-kind]]
               db run-ids)
          (sort-by (juxt #(inst-ms (nth % 6)) second))
          (mapv (fn [[run-id ordinal source result error error-kind at]]
-                 {:seon.cluster.run/id run-id
-                  :seon.cluster.eval/ordinal ordinal
-                  :seon.cluster.eval/source source
+                 {:seon.turn/id run-id
+                  :seon.eval/ordinal ordinal
+                  :seon.eval/source source
                   :seon.eval/value result
                   :seon.eval.drive/value (read-result result)
-                  :seon.cluster.eval/error error
+                  :seon.eval/error error
                   :seon.error/kind error-kind
-                  :seon.cluster.eval/at at})))
+                  :seon.eval/at at})))
     []))
 
 (defn- completion-values [receipts]
   (into []
         (comp (map :seon.eval.drive/value)
-              (filter #(= :completed (:my.run/disposition %))))
+              (filter #(= :completed (:my.turn/disposition %))))
         receipts))
 
 (defn completed-result
@@ -183,14 +183,14 @@
   {:malli/schema [:=> [:cat [:vector :seon.eval.drive/evaluation]]
                   [:maybe :seon.schema/value]]}
   [receipts]
-  (:my.run/result (last (completion-values receipts))))
+  (:my.turn/result (last (completion-values receipts))))
 
 (defn- model-attempts [db run-ids]
   (if (seq run-ids)
     (->> (db/q '[:find [?attempt ...]
                 :in $ [?run-id ...]
                 :where
-                [?run :seon.cluster.run/id ?run-id]
+                [?run :seon.turn/id ?run-id]
                 [?attempt :seon.ai.attempt/run ?run]]
               db run-ids)
          (map #(db/pull
@@ -218,12 +218,12 @@
 
 (defn- run-records [db run-ids]
   (mapv #(db/pull db
-                 [:seon.cluster.run/id
-                  :seon.cluster.run/opened-at
-                  :seon.cluster.run/closed-at
-                  :seon.cluster.run/plan-digest
-                  :seon.cluster.run/error]
-                 [:seon.cluster.run/id %])
+                 [:seon.turn/id
+                  :seon.turn/opened-at
+                  :seon.turn/closed-at
+                  :seon.turn/plan-digest
+                  :seon.turn/error]
+                 [:seon.turn/id %])
         run-ids))
 
 (defn terminal-state
@@ -231,10 +231,10 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.cluster.agent/id
-          :seon.cluster.run/process :seon.cluster.message/id [:int {:min 1}]]
+          :seon.db.process/id :seon.cluster.message/id [:int {:min 1}]]
      [:maybe :seon.eval.drive/terminal-state]]
     [:=> [:cat :seon.db/database-value :seon.cluster.agent/id
-          :seon.cluster.run/process
+          :seon.db.process/id
           [:map [:seon.eval.drive/run-ids :seon.eval.drive/run-ids]
            [:seon.eval.drive/run-cap :seon.eval.drive/run-cap]]]
      [:maybe :seon.eval.drive/terminal-state]]]}
@@ -254,8 +254,8 @@
               (db/q '[:find ?run .
                       :in $ [?run-id ...]
                       :where
-                      [?run :seon.cluster.run/id ?run-id]
-                      [?run :seon.cluster.run/undisposed-at _]]
+                      [?run :seon.turn/id ?run-id]
+                      [?run :seon.turn/undisposed-at _]]
                     db run-ids)))
         closed-count
         (if (seq run-ids)
@@ -263,15 +263,15 @@
            (db/q '[:find [?run ...]
                   :in $ [?run-id ...]
                   :where
-                  [?run :seon.cluster.run/id ?run-id]
-                  [?run :seon.cluster.run/closed-at _]]
+                  [?run :seon.turn/id ?run-id]
+                  [?run :seon.turn/closed-at _]]
                 db run-ids))
           0)
         idle? (and (seq run-ids)
-                   (nil? (work/next-agent-work
+                   (nil? (work/step
                           db
                           {:seon.cluster.agent/id agent-id
-                           :seon.cluster.run/process process})))]
+                           :seon.db.process/id process})))]
     (cond
       (seq completions)
       {:seon.eval.drive/outcome :completed

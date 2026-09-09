@@ -54,8 +54,8 @@
             [seon.blob :as blob]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.message :as message]
-            [seon.cluster.loop :as loop]
-            [seon.cluster.run :as run]
+            [seon.turn :as loop]
+            [seon.turn :as run]
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
@@ -419,7 +419,7 @@
   ranking; it has no private fragment path. GET, first SSE paint, and the
   render proc share this derivation. The proc retains fragments for deltas.
 
-  THE LIVE SET RIDES IN, it is not defaulted here. `:seon.cluster.run/
+  THE LIVE SET RIDES IN, it is not defaulted here. `:seon.turn/
   live-processes` is the one input no database value can answer, and
   the problems block refuses to guess it rather than inventing wedges
   (`#{}`) or hiding them (\"assume alive\"). The web layer can answer
@@ -429,7 +429,6 @@
   [{:keys [:seon.db/db :seon.cluster.agent/id
            :seon.render.web/root-agent-id
            :seon.db/connection] caps :seon.sci.admit/caps
-    live-processes :seon.cluster.run/live-processes
     stream-partial :seon.ai/partial
     retained :seon.render.web/retained-fragments
     retained-calls :seon.render/retained-calls
@@ -465,8 +464,7 @@
             (:seon.config.eval/time-limit-ms request)
             :seon.config/on-core-error
             (:seon.config/on-core-error request)
-            :seon.db/connection connection
-            :seon.cluster.run/live-processes live-processes}))
+            :seon.db/connection connection}))
         fleet-output
         (some-> fleet-call
                 (assoc :seon.render/output :seon.render/html
@@ -741,7 +739,7 @@
                     [:p [:strong (pr-str (:seon.turn/status form))]
                      (when-let [lookup (:seon.render.walk/lookup form)]
                        [:code (str " · " (pr-str lookup))])]
-                    (when-let [basis (:seon.cluster.eval/read-basis-transaction form)]
+                    (when-let [basis (:seon.eval/read-basis-transaction form)]
                       [:p "Read basis transaction " (str basis)])
                     (when (seq (:seon.turn/changes form))
                       [:details
@@ -751,7 +749,7 @@
                     ;; seon.repl/text; printing the string again escapes them.
                     [:pre {:class "seon-debug-source"}
                      (or (:seon.turn/text form)
-                         (:seon.cluster.eval/source form))]])
+                         (:seon.eval/source form))]])
                  forms)))))
 
 (defn- system-action-form
@@ -1458,7 +1456,7 @@
               (binding [db/*read-evidence-sink* observed]
                 (let [evaluated
                       (loop/preview-sources
-                       {:seon.cluster.loop/cluster (:seon.cluster.loop/cluster request)
+                       {:seon.turn/cluster (:seon.turn/cluster request)
                         :seon.db/db database
                         :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
                         :seon.cluster.agent/id agent-id
@@ -1475,11 +1473,11 @@
                 (transcript/render-ai
                  (-> request
                      (merge preview)
-                     (assoc :seon.cluster.run/id (:seon.render.call/source-run-id preview))))))
+                     (assoc :seon.turn/id (:seon.render.call/source-run-id preview))))))
             evidence
             (into (db/read-evidence @observed {:seon.db/retain-read-results? true})
-                  (mapcat #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
-                  (:seon.cluster.loop/evaluated-sources preview))
+                  (mapcat #(get-in % [:seon.sci.eval/evaluation :seon.eval/read-evidence]))
+                  (:seon.turn/evaluated-sources preview))
             ;; ONE STORE OF THE EVALUATION. The invocation entry is the cache
             ;; keyed by code and input (ruling 71), so the evaluated forms and
             ;; their rendered bytes live there and nowhere else; the call entry
@@ -1786,7 +1784,7 @@
             :seon.sci.eval/time-limit-ms
             (:seon.config.eval/time-limit-ms handle)
             :seon.config/on-core-error (:seon.config/on-core-error handle)
-            :seon.cluster.loop/cluster handle
+            :seon.turn/cluster handle
             :seon.cluster.agent/routing
             (:seon.cluster.agent/routing handle)
             :seon.render/retained-calls retained-calls
@@ -1819,7 +1817,7 @@
           (when-let [agent-id (:seon.cluster.agent/id debug-request)]
             (debug-prompt db connection agent-id caps
                           (assoc handle :seon.render/profile profile
-                                        :seon.cluster.loop/cluster handle))))
+                                        :seon.turn/cluster handle))))
         program-identity
         (debug-program-identity db (:seon.sci.eval/ctx handle))
         page
@@ -1957,7 +1955,7 @@
 
 (defn- retained-interest
   [state]
-  (let [cache @(render/shared-cache (get-in state [:seon.cluster.loop/cluster :seon.sci.eval/ctx]))
+  (let [cache @(render/shared-cache (get-in state [:seon.turn/cluster :seon.sci.eval/ctx]))
         calls (concat (vals (::calls cache))
                       (vals (::ai-calls cache)))
         interest (reduce (fn [interest retained]
@@ -2062,7 +2060,7 @@
   another path. A missing run is not live. This presence gate makes a
   delayed partial incapable of repainting over its settled facts."
   [db stream]
-  (when-let [run-id (:seon.cluster.run/id stream)]
+  (when-let [run-id (:seon.turn/id stream)]
     (let [row (db/pull db [:db/id ::run/plan-digest ::run/error ::run/closed-at]
                       [::run/id run-id])]
       (and (some? row)
@@ -2118,8 +2116,6 @@
                      (:seon.config/on-core-error handle)
                      :seon.render/profile profile
                      :seon.db/connection connection
-                     :seon.cluster.run/live-processes
-                     #{(:seon.cluster.run/process handle)}
                      :seon.render.web/retained-fragments
                      (get-in retained-values [::fragments registration-key] {})
                      :seon.render/retained-calls retained
@@ -2192,7 +2188,7 @@
   [service database registration-key]
   (let [projection (sci.kernel/context-projection (:seon.sci.eval/ctx service))
         connection (:seon.store/connection-object service)
-        handle (merge service (:seon.cluster.loop/cluster service)
+        handle (merge service (:seon.turn/cluster service)
                       {:seon.db/connection connection
                        :seon.render.web/root-agent-id
                        (:seon.render.web/root-agent-id service
@@ -2233,7 +2229,7 @@
   (let [watched (watched-registration-keys
                  (:seon.render.web/registration state))
         cache (render/shared-cache
-               (get-in state [:seon.cluster.loop/cluster :seon.sci.eval/ctx]))]
+               (get-in state [:seon.turn/cluster :seon.sci.eval/ctx]))]
     (swap! cache
            (fn [retained]
              (-> retained
@@ -2329,16 +2325,16 @@
   and a repair keyframe assembled from bytes already serialized by this proc."
   ([state]
    (render-pass state
-                @(-> state :seon.cluster.loop/cluster :seon.db/connection)
+                @(-> state :seon.turn/cluster :seon.db/connection)
                 true false))
   ([state database derive-all?]
    (render-pass state database derive-all? false))
   ([state database derive-all? invalidate-calls?]
   (schema/call-with-projection
    (sci.kernel/context-projection
-    (get-in state [:seon.cluster.loop/cluster :seon.sci.eval/ctx]))
+    (get-in state [:seon.turn/cluster :seon.sci.eval/ctx]))
    (fn []
-  (let [handle (:seon.cluster.loop/cluster state)
+  (let [handle (:seon.turn/cluster state)
         cache (render/shared-cache (:seon.sci.eval/ctx handle))
         state (merge state (select-keys @cache [::calls ::ai-calls ::invocations ::packages]))
         registration (:seon.render.web/registration state)
@@ -2468,7 +2464,7 @@
 (defn- change-context
   "Run the requested ordinary turn operation on the calling thread."
   [request]
-  (let [cluster (:seon.cluster.loop/cluster request request)
+  (let [cluster (:seon.turn/cluster request request)
         connection (:seon.db/connection cluster)
         action (:seon.render/context-action request)
         function (case action
@@ -2478,7 +2474,7 @@
         prepared (merge cluster request
                         {:seon.db/db @connection
                          :seon.db/connection connection
-                         :seon.cluster.loop/cluster cluster
+                         :seon.turn/cluster cluster
                          :seon.cluster.agent/routing
                          (:seon.cluster.agent/routing cluster)})
         result (turn-function-result
@@ -2637,8 +2633,8 @@
    (let [ports {::interest (:seon.render.web/render-channel args)
                 ::runtime-eval
                 (:seon.render.web/runtime-eval-channel args)
-                ::stream (:seon.cluster.loop/stream-channel
-                          (:seon.cluster.loop/cluster args))
+                ::stream (:seon.turn/stream-channel
+                          (:seon.turn/cluster args))
                 ::pages (:seon.render.web/pages-channel args)
                 ::latest-packages (:seon.render.web/latest-packages args)
                 ::render-interest (:seon.render.web/interest args)}]
@@ -2653,8 +2649,8 @@
           ::flow/in-ports
           {::interest (:seon.render.web/render-channel args)
            ::runtime-eval (:seon.render.web/runtime-eval-channel args)
-           ::stream (:seon.cluster.loop/stream-channel
-                     (:seon.cluster.loop/cluster args))}
+           ::stream (:seon.turn/stream-channel
+                     (:seon.turn/cluster args))}
           ::flow/out-ports
           {::pages (:seon.render.web/pages-channel args)}
           ::streams {}
@@ -2687,7 +2683,7 @@
                  ::runtime-eval (invalidate-runtime-derived-state state)
                  state)
          connection (:seon.db/connection
-                     (:seon.cluster.loop/cluster state))
+                     (:seon.turn/cluster state))
          floor (::coalesce-ms state 0)
          elapsed-ms (quot (- (System/nanoTime)
                              (long (::last-pass-nanos state)))
@@ -2991,7 +2987,7 @@
   [{connection :seon.store/connection-object
     :keys [:seon.cluster.agent/id]
     caps :seon.sci.admit/caps
-    process :seon.cluster.run/process}
+    process :seon.db.process/id}
    inbound]
   (let [request
         {:seon.cluster.agent/id (:seon.cluster.agent/id inbound)
@@ -3079,7 +3075,7 @@
 
 (defn- ensure-namespace-owner!
   [{connection :seon.store/connection-object
-    process :seon.cluster.run/process}
+    process :seon.db.process/id}
    namespace-name]
   ;; Any agent assigned to the namespace evaluates there; stewardship only
   ;; routes that namespace's faults and requests.
@@ -3261,7 +3257,7 @@
                  nil)
         result (if action
                  (render/acquire-context!
-                  (merge service (:seon.cluster.loop/cluster service)
+                  (merge service (:seon.turn/cluster service)
                   {:seon.db/connection (:seon.store/connection-object service)
                    :seon.render/context-action action
                    :seon.cluster.agent/id (get-in request [:path-params :id])
@@ -3490,7 +3486,7 @@
   {:malli/schema [:=> [:cat :seon.render.web/service] :seon.render.web/server]}
   [service]
   (let [connection (:seon.store/connection-object service)
-        process (:seon.cluster.run/process service)
+        process (:seon.db.process/id service)
         ;; Transaction provenance resolves to a durable process entity.
         ;; This is convergent: a running service creates its row once,
         ;; and every later start observes it.

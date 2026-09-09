@@ -1,36 +1,218 @@
-#:seon.eval{:value [:string {:description "Exact shown text produced once by the evaluation's value renderer under its render profile. It is an observation, not a serialization of the live object."}]
-            :entity
-            [:map {:seon.render/ai seon.repl/render-ai
-                   :seon.render/html seon.repl/render-html}
-             [:db/id {:optional true} :int]
-             [:t {:optional true} :seon.db/basis-t]
-             [:seon.cluster.eval/id :seon.cluster.eval/id]
-             [:seon.cluster.eval/run [:map [:db/id :int]]]
-             [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-             [:seon.cluster.eval/source {:optional true} :seon.cluster.eval/source]
-             [:seon.cluster.eval/at {:optional true} :inst]
-             [:seon.cluster.eval/ns {:optional true}
-              [:map [:seon.ns/name :seon.ns/name]]]
-             [:seon.cluster.eval/read-evidence {:optional true}
-              [:vector :seon.db/read-evidence]]
-             [:seon.cluster.eval/read-basis-transaction {:optional true}
-              :seon.db/basis-t]
-             [:seon.eval/value {:optional true} :string]
-             [:seon.cluster.eval/output {:optional true} :string]
-             [:seon.cluster.eval/error {:optional true} :string]
-             [:seon.cluster.eval/interrupted-at {:optional true} :inst]],
-            :allocated-bytes :int,
-            :duration-ms :int,
-            :fn-entries :int,
-            :host-interop-count [:int {:min 0}],
+#:seon.eval{:ordinal [:int {:min 0}],
             :missing
             [:enum
              {:description
               "Why this evaluation stores no value: it reached the storage bound while its serialization streamed (:over-bound), the walk could not project it into data at all (:unserializable), or its stored bytes are gone (:lost). A missing value ablates the result handle: the response carries no :seon.repl/result and the turn's fork binds nothing, so a later form naming it gets an ordinary unresolved-symbol error."}
-             :over-bound :unserializable :lost],
+             :over-bound
+             :unserializable
+             :lost],
+            :triage-edn [:string {:min 1}],
+            :host-interop-count [:int {:min 0}],
+            :entity
+            [:map
+             #:seon.render{:ai seon.repl/render-ai,
+                           :html seon.repl/render-html}
+             [:db/id {:optional true} :int]
+             [:t {:optional true} :seon.db/basis-t]
+             [:seon.eval/id :seon.eval/id]
+             [:seon.eval/turn [:map [:db/id :int]]]
+             [:seon.eval/ordinal :seon.eval/ordinal]
+             [:seon.eval/source {:optional true} :seon.eval/source]
+             [:seon.eval/at {:optional true} :inst]
+             [:seon.eval/ns
+              {:optional true}
+              [:map [:seon.ns/name :seon.ns/name]]]
+             [:seon.eval/read-evidence
+              {:optional true}
+              [:vector :seon.db/read-evidence]]
+             [:seon.eval/read-basis-transaction
+              {:optional true}
+              :seon.db/basis-t]
+             [:seon.eval/value {:optional true} :string]
+             [:seon.eval/out {:optional true} :string]
+             [:seon.eval/error {:optional true} :string]
+             [:seon.eval/interrupted-at {:optional true} :inst]],
             :size
             [:int
              {:min 0,
               :description
               "UTF-8 bytes reached when the value went over the storage bound. Present only with :seon.eval/missing :over-bound: an unserializable or lost value has no measured size, and a stored value's size is the length of what is stored."}],
-            :outcome [:enum :ok :time :error]}
+            :duration-ms :int,
+            :fn-entries :int,
+            :allocated-bytes :int,
+            :turn :seon.db/ref,
+            :outcome [:enum :ok :time :error],
+            :interrupted-at :inst,
+            :receipt
+            [:map
+             #:seon.db{:attributes true}
+             [:seon.eval/id :seon.eval/id]
+             [:seon.eval/turn :seon.eval/turn]
+             [:seon.eval/ordinal :seon.eval/ordinal]
+             [:seon.eval/at :seon.eval/at]
+             [:seon.eval/source {:optional true} :seon.eval/source]
+             [:seon.eval/ns {:optional true} :seon.eval/ns]
+             [:seon.eval/comment {:optional true} :seon.eval/comment]
+             [:seon.eval/author {:optional true} :seon.eval/author]
+             [:seon.eval/refreshes
+              {:optional true}
+              :seon.eval/refreshes]
+             [:seon.eval/duration-ms
+              {:optional true}
+              :seon.eval/duration-ms]
+             [:seon.print/length {:optional true} :seon.print/length]
+             [:seon.print/level {:optional true} :seon.print/level]
+             [:seon.sci.eval/ending-ns
+              {:optional true}
+              :seon.sci.eval/ending-ns]
+             [:seon.eval/value {:optional true} :seon.eval/value]
+             [:seon.eval/missing {:optional true} :seon.eval/missing]
+             [:seon.eval/size {:optional true} :seon.eval/size]
+             [:seon.eval/error {:optional true} :seon.eval/error]
+             [:seon.eval/triage-edn
+              {:optional true}
+              :seon.eval/triage-edn]
+             [:seon.eval/interrupted-at
+              {:optional true}
+              :seon.eval/interrupted-at]
+             [:seon.problems/id {:optional true} :seon.problems/id]
+             [:seon.error/kind {:optional true} :seon.error/kind]
+             [:seon.eval/out {:optional true} :seon.eval/out]
+             [:seon.eval/read-evidence
+              {:optional true}
+              :seon.eval/read-evidence]
+             [:seon.eval/read-basis-transaction
+              {:optional true}
+              :seon.eval/read-basis-transaction]
+             [:seon.test.accretion/gate-tests
+              {:optional true}
+              :seon.test.accretion/gate-tests]
+             [:seon.test.accretion/gate-test-count
+              {:optional true}
+              :seon.test.accretion/gate-test-count]
+             [:seon.test.accretion/gate-pass-count
+              {:optional true}
+              :seon.test.accretion/gate-pass-count]
+             [:seon.test.accretion/gate-fail-count
+              {:optional true}
+              :seon.test.accretion/gate-fail-count]
+             [:seon.test.accretion/seed
+              {:optional true}
+              :seon.test.accretion/seed]
+             [:seon.test.accretion/case-count
+              {:optional true}
+              :seon.test.accretion/case-count]
+             [:seon.test.accretion/executed-count
+              {:optional true}
+              :seon.test.accretion/executed-count]
+             [:seon.test.accretion/status
+              {:optional true}
+              :seon.test.accretion/status]
+             [:seon.test.accretion/report-blob
+              {:optional true}
+              :seon.test.accretion/report-blob]
+             [:seon.test.accretion/report-size
+              {:optional true}
+              :seon.test.accretion/report-size]],
+            :settle-request
+            [:map
+             [:seon.turn/id :seon.turn/id]
+             [:seon.eval/ordinal :seon.eval/ordinal]
+             [:seon.eval/value {:optional true} :seon.eval/value]
+             [:seon.eval/missing {:optional true} :seon.eval/missing]
+             [:seon.eval/size {:optional true} :seon.eval/size]
+             [:seon.eval/error {:optional true} :seon.eval/error]
+             [:seon.eval/triage-edn
+              {:optional true}
+              :seon.eval/triage-edn]
+             [:seon.eval/interrupted-at
+              {:optional true}
+              :seon.eval/interrupted-at]
+             [:seon.error/kind {:optional true} :seon.error/kind]
+             [:seon.eval/out {:optional true} :seon.eval/out]
+             [:seon.eval/read-evidence
+              {:optional true}
+              [:vector :seon.db/read-evidence]]
+             [:seon.eval/read-basis-transaction
+              {:optional true}
+              :seon.eval/read-basis-transaction]
+             [:seon.eval/ns {:optional true} :seon.eval/ns]
+             [:seon.sci.eval/ending-ns
+              {:optional true}
+              :seon.sci.eval/ending-ns]
+             [:seon.eval/duration-ms
+              {:optional true}
+              :seon.eval/duration-ms]
+             [:seon.print/length {:optional true} :seon.print/length]
+             [:seon.print/level {:optional true} :seon.print/level]
+             [:seon.test.accretion/gate-tests
+              {:optional true}
+              :seon.test.accretion/gate-tests]
+             [:seon.test.accretion/gate-test-count
+              {:optional true}
+              :seon.test.accretion/gate-test-count]
+             [:seon.test.accretion/gate-pass-count
+              {:optional true}
+              :seon.test.accretion/gate-pass-count]
+             [:seon.test.accretion/gate-fail-count
+              {:optional true}
+              :seon.test.accretion/gate-fail-count]
+             [:seon.test.accretion/seed
+              {:optional true}
+              :seon.test.accretion/seed]
+             [:seon.test.accretion/case-count
+              {:optional true}
+              :seon.test.accretion/case-count]
+             [:seon.test.accretion/executed-count
+              {:optional true}
+              :seon.test.accretion/executed-count]
+             [:seon.test.accretion/status
+              {:optional true}
+              :seon.test.accretion/status]
+             [:seon.test.accretion/report-blob
+              {:optional true}
+              :seon.test.accretion/report-blob]
+             [:seon.test.accretion/report-size
+              {:optional true}
+              :seon.test.accretion/report-size]
+             [:seon.program/row {:optional true} :seon.program/row]],
+            :out [:string {:min 1, :seon.db/no-history? true}],
+            :error :string,
+            :at :inst,
+            :refreshes [:and #:seon.db{:unique true} :seon.db/ref],
+            :comment
+            [:string
+             {:min 1,
+              :seon.db/no-history? true,
+              :description
+              "The agent's own prose above this form, verbatim and stored apart from the source it introduces, so a prompt line holds exactly one form and HTML can label the comment separately."}],
+            :read-evidence-entity
+            [:map
+             #:seon.db{:attributes true}
+             [:seon.db/source-argument-position
+              :seon.db/source-argument-position]
+             [:datahike.read/dependency-plan
+              :seon.db/read-dependency-plan]
+             [:datahike.read/revision :seon.db/dependency-revision]
+             [:seon.db/read-request
+              {:optional true}
+              :seon.db/read-request]
+             [:seon.db/read-result-digest
+              {:optional true}
+              :seon.db/read-result-digest]],
+            :read-basis-transaction :seon.db/basis-t,
+            :source [:string {:min 1, :seon.db/no-history? true}],
+            :author
+            [:enum
+             {:description
+              "Who wrote this form: :agent when the agent's reply carried it, :system when the platform generated it. Authorship is the fact a stored situation label used to stand in for."}
+             :agent
+             :system],
+            :value
+            [:string
+             {:description
+              "Exact shown text produced once by the evaluation's value renderer under its render profile. It is an observation, not a serialization of the live object."}],
+            :id [:string {:min 1, :seon.db/identity true}],
+            :ns :seon.db/ref,
+            :read-evidence
+            [:vector #:seon.db{:component true} :seon.db/ref]}

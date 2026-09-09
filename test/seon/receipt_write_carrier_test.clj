@@ -1,7 +1,7 @@
 (ns seon.receipt-write-carrier-test
   "Regression for receipt provenance on agent-authored database writes."
   (:require [clojure.test :refer [deftest is testing]]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -30,7 +30,7 @@
        (db/transact! connection [{:seon.cluster.agent/id agent-id}])
        (db/transact!
         connection
-        (run/open-tx
+        (run/open
          {::run/id run-id
           ::run/agent [:seon.cluster.agent/id agent-id]
           ::run/opened-at now}))
@@ -38,11 +38,11 @@
         connection
         (run/receipt-start-tx
          {::run/id run-id
-          :seon.cluster.eval/ordinal ordinal
-          :seon.cluster.eval/at now}))
+          :seon.eval/ordinal ordinal
+          :seon.eval/at now}))
        (let [evaluation
              (sci.eval/evaluate
-              {:seon.cluster.eval/source
+              {:seon.eval/source
                (str
                 "(seon.db/transact! "
                 (pr-str
@@ -61,10 +61,10 @@
                :seon.config/on-core-error :panic
                :seon.boot/cluster-name "receipt-write-carrier-test"
                :seon.cluster.agent/id agent-id
-               :seon.cluster.run/id run-id
-               :seon.cluster.eval/ordinal ordinal})]
+               :seon.turn/id run-id
+               :seon.eval/ordinal ordinal})]
          (testing "every write during evaluation names its receipt on the transaction"
-           (is (nil? (:seon.cluster.eval/error evaluation)))
+           (is (nil? (:seon.eval/error evaluation)))
            (is (= [receipt-id agent-id]
                   (db/q
                    '[:find [?receipt-id ?agent-id]
@@ -73,7 +73,7 @@
                      [?note :my.note/id ?note-id]
                      [?note :my.note/content _ ?tx]
                      [?tx :seon.db/receipt ?receipt]
-                     [?receipt :seon.cluster.eval/id ?receipt-id]
+                     [?receipt :seon.eval/id ?receipt-id]
                      [?tx :seon.db/user ?agent]
                      [?agent :seon.cluster.agent/id ?agent-id]]
                    @connection "receipt-carrier")))))

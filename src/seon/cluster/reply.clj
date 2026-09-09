@@ -31,12 +31,12 @@
   belongs to no form: a comment renders above the prompt, so attaching
   it to the form it followed inverted the agent's own authorship order
   in its rendered session. It stays in the durable reply text
-  (`:seon.cluster.run/reply`) and nowhere else.
+  (`:seon.turn/reply`) and nowhere else.
 
   EVERY PLAN SOURCE CARRIES A READER EVENT, and that is the invariant
   this namespace exists to keep. A comment-only plan source has no
   event, so nothing evaluates it and nothing settles a receipt for it:
-  the run recorded a `:seon.cluster.eval` row and closed with that
+  the run recorded a `:seon.eval` row and closed with that
   row unsettled, silently, detectable only by counting forms against
   receipts. The 2026-08-08 arc drive read 105 forms / 102 receipts, and
   all three gaps were comment-only sources produced by deepseek-v4-flash
@@ -65,7 +65,7 @@
   closes the run with a steering message the agent sees next wake.
 
   Crash walk: pure. A kill loses a vector of strings that had not been
-  committed; the plan is not durable until N2's `plan-tx` commits it,
+  committed; the plan is not durable until N2's `store` commits it,
   and re-deriving it from the same text is deterministic."
   (:require [clojure.string :as str]
             [seon.schema.edn :as schema.edn]
@@ -261,10 +261,10 @@
               prose (comment-source (subs source cursor start))]
           (recur end (next remaining)
                  (conj forms
-                       (cond-> {:seon.cluster.eval/source
+                       (cond-> {:seon.eval/source
                                 (subs source start end)}
                          (not (str/blank? prose))
-                         (assoc :seon.cluster.eval/comment prose)
+                         (assoc :seon.eval/comment prose)
                          ns (assoc :seon.ns/name ns)))))
         ;; THE PROSE AND THE FORM ARE TWO FACTS, NOT ONE STRING. They used to
         ;; be concatenated, which put the agent's comment on the prompt line
@@ -276,7 +276,7 @@
         ;; form's comment made the agent's own rendered session invert what it
         ;; wrote: text authored after a form appeared above it. The prose is
         ;; not lost — the whole reply is already a durable fact
-        ;; (`:seon.cluster.run/reply`, staged by `seon.cluster.run/stage-reply!`
+        ;; (`:seon.turn/reply`, staged by `seon.turn/stage-reply!`
         ;; before any form is frozen), so dropping it here removes a wrong
         ;; placement, not a record. Prose alone was once its own plan source,
         ;; which is the shape that recorded a form row no receipt could settle;
@@ -373,7 +373,7 @@
   - `::refused-tag` — `#=` or an unknown reader tag, named;
   - `::no-forms` — the reply carried no code: it was empty, or its
     whole text read as prose. Prose that PRECEDES a form becomes that
-    form's own `:seon.cluster.eval/comment` fact; prose after the last
+    form's own `:seon.eval/comment` fact; prose after the last
     form is kept only by the durable reply text, because a comment
     renders above the prompt and would otherwise read as if it had been
     written before the form it followed. Prose ALONE is a refusal, because a

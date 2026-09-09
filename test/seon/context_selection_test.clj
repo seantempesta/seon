@@ -7,7 +7,7 @@
 (defn- request
   [agent-id run-id contribution-id]
   {:seon.cluster.agent/id agent-id
-   :seon.cluster.run/id run-id
+   :seon.turn/id run-id
    :seon.context.contribution/id contribution-id})
 
 (defn- append-call
@@ -36,24 +36,24 @@
                    {:seon.cluster.agent/id "selection-b"}]
                   (concat
                    (map (fn [[agent-id run-id closed?]]
-                          (cond-> {:seon.cluster.run/id run-id
-                                   :seon.cluster.run/agent
+                          (cond-> {:seon.turn/id run-id
+                                   :seon.turn/agent
                                    [:seon.cluster.agent/id agent-id]}
-                            closed? (assoc :seon.cluster.run/closed-at
+                            closed? (assoc :seon.turn/closed-at
                                            #inst "2026-09-06T00:00:00Z")))
                         runs)
                    (for [[_ run-id _] runs
                          :when (not= "selection-empty" run-id)
                          ordinal [0 1]]
-                     (cond-> {:seon.cluster.eval/id (str run-id "-" ordinal)
-                              :seon.cluster.eval/run
-                              [:seon.cluster.run/id run-id]
-                              :seon.cluster.eval/ordinal ordinal}
+                     (cond-> {:seon.eval/id (str run-id "-" ordinal)
+                              :seon.eval/turn
+                              [:seon.turn/id run-id]
+                              :seon.eval/ordinal ordinal}
                        (not= "selection-pending" run-id)
-                       (assoc :seon.cluster.eval/result-edn (pr-str ordinal)))))))
+                       (assoc :seon.eval/result-edn (pr-str ordinal)))))))
            _ (is (nil? (:seon.error/kind seed)))
            before-count (db/q '[:find (count ?e) .
-                                :where [?e :seon.cluster.eval/id]] @connection)
+                                :where [?e :seon.eval/id]] @connection)
            committed (db/transact!
                       connection
                       [(append-call "selection-a" "selection-first" "chosen-1")
@@ -69,14 +69,14 @@
        (is (= [0] (mapv :seon.context.contribution/position
                         (context/selection @connection "selection-b"))))
        (is (= #{"selection-first-0" "selection-first-1"}
-              (set (map #(-> (db/pull @connection [:seon.cluster.eval/id] %)
-                             :seon.cluster.eval/id)
+              (set (map #(-> (db/pull @connection [:seon.eval/id] %)
+                             :seon.eval/id)
                         (:seon.context.contribution/evaluations
                          (first selected)))))
            "every original evaluation is referenced")
        (is (= before-count
               (db/q '[:find (count ?e) .
-                      :where [?e :seon.cluster.eval/id]] @connection)))
+                      :where [?e :seon.eval/id]] @connection)))
        (is (= #{:db/id :seon.context.contribution/id
                 :seon.context.contribution/agent
                 :seon.context.contribution/position
@@ -109,7 +109,7 @@
               (:seon.context/selection-refused
                (context/selection @connection "missing")))))
      (let [before-evaluations (db/q '[:find (count ?e) .
-                                      :where [?e :seon.cluster.eval/id]] @connection)
+                                      :where [?e :seon.eval/id]] @connection)
            remove-request {:seon.cluster.agent/id "selection-a"
                            :seon.context.contribution/id "chosen-1"}
            foreign (db/transact!
@@ -124,7 +124,7 @@
        (is (= ["chosen-2"] (mapv :seon.context.contribution/id
                                  (context/selection @connection "selection-a"))))
        (is (= before-evaluations
-              (db/q '[:find (count ?e) . :where [?e :seon.cluster.eval/id]] @connection)))))))
+              (db/q '[:find (count ?e) . :where [?e :seon.eval/id]] @connection)))))))
 
 (deftest compact-replaces-only-observed-evaluation-refs
   (test-support/with-database
@@ -133,31 +133,31 @@
            _ (db/transact!
               connection
               [{:seon.cluster.agent/id "compact-agent"}
-               {:seon.cluster.run/id "compact-before"
-                :seon.cluster.run/agent
+               {:seon.turn/id "compact-before"
+                :seon.turn/agent
                 [:seon.cluster.agent/id "compact-agent"]
-                :seon.cluster.run/closed-at closed-at}
-               {:seon.cluster.run/id "compact-after"
-                :seon.cluster.run/agent
+                :seon.turn/closed-at closed-at}
+               {:seon.turn/id "compact-after"
+                :seon.turn/agent
                 [:seon.cluster.agent/id "compact-agent"]
-                :seon.cluster.run/closed-at closed-at}
+                :seon.turn/closed-at closed-at}
                {:seon.ns/name 'compact.context}
-               {:seon.cluster.eval/id "compact-before-0"
-                :seon.cluster.eval/run
-                [:seon.cluster.run/id "compact-before"]
-                :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/author :system
-                :seon.cluster.eval/source "(identity 1)"
-                :seon.cluster.eval/ns [:seon.ns/name 'compact.context]
-                :seon.cluster.eval/result-edn "1"}
-               {:seon.cluster.eval/id "compact-after-0"
-                :seon.cluster.eval/run
-                [:seon.cluster.run/id "compact-after"]
-                :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/author :system
-                :seon.cluster.eval/source "(identity 1)"
-                :seon.cluster.eval/ns [:seon.ns/name 'compact.context]
-                :seon.cluster.eval/result-edn "2"}])
+               {:seon.eval/id "compact-before-0"
+                :seon.eval/turn
+                [:seon.turn/id "compact-before"]
+                :seon.eval/ordinal 0
+                :seon.eval/author :system
+                :seon.eval/source "(identity 1)"
+                :seon.eval/ns [:seon.ns/name 'compact.context]
+                :seon.eval/result-edn "1"}
+               {:seon.eval/id "compact-after-0"
+                :seon.eval/turn
+                [:seon.turn/id "compact-after"]
+                :seon.eval/ordinal 0
+                :seon.eval/author :system
+                :seon.eval/source "(identity 1)"
+                :seon.eval/ns [:seon.ns/name 'compact.context]
+                :seon.eval/result-edn "2"}])
            _ (db/transact!
               connection
               [(append-call "compact-agent" "compact-before" "compact-choice")])
@@ -170,35 +170,35 @@
            memory-basis (db/basis-t @connection)
            memory-request
            (assoc (request "compact-agent" "not-persisted" "compact-choice")
-                  :seon.cluster.loop/evaluated-sources
-                  [{:seon.cluster.eval/ordinal 0
-                    :seon.cluster.loop/admitted-form
-                    {:seon.cluster.eval/source "(identity 1)"
-                     :seon.cluster.eval/ns [:seon.ns/name 'compact.context]}
+                  :seon.turn/evaluated-sources
+                  [{:seon.eval/ordinal 0
+                    :seon.turn/admitted-form
+                    {:seon.eval/source "(identity 1)"
+                     :seon.eval/ns [:seon.ns/name 'compact.context]}
                     :seon.sci.eval/evaluation
-                    {:seon.sci.admit/value 2 :seon.cluster.eval/result-edn "2"}}])
+                    {:seon.sci.admit/value 2 :seon.eval/result-edn "2"}}])
            memory-comparison (context/comparison @connection memory-request)
            _ (is (= memory-basis (db/basis-t @connection)))
            _ (is (= :ready (:seon.context.comparison/status memory-comparison)))
            _ (is (= expected (set (:seon.context.comparison/baseline-evaluations
                                    memory-comparison))))
-           _ (is (= (:seon.cluster.loop/evaluated-sources memory-request)
-                    (:seon.cluster.loop/evaluated-sources memory-comparison)))
+           _ (is (= (:seon.turn/evaluated-sources memory-request)
+                    (:seon.turn/evaluated-sources memory-comparison)))
            _ (is (= :seon.context/unfinished-evaluation
                     (:seon.context/selection-refused
                      (context/comparison
                       @connection
                       (update-in memory-request
-                                 [:seon.cluster.loop/evaluated-sources 0
+                                 [:seon.turn/evaluated-sources 0
                                   :seon.sci.eval/evaluation]
-                                 dissoc :seon.cluster.eval/result-edn)))))
+                                 dissoc :seon.eval/result-edn)))))
            _ (is (= :different-source
                     (:seon.context.comparison/status
                      (context/comparison
                       @connection
                       (assoc-in memory-request
-                                [:seon.cluster.loop/evaluated-sources 0
-                                 :seon.cluster.loop/admitted-form :seon.cluster.eval/ns]
+                                [:seon.turn/evaluated-sources 0
+                                 :seon.turn/admitted-form :seon.eval/ns]
                                 [:seon.ns/name 'another.context])))))
            committed
            (db/transact!
@@ -213,8 +213,8 @@
        (is (= (:seon.context.contribution/position before)
               (:seon.context.contribution/position after)))
        (is (= "compact-after-0"
-              (:seon.cluster.eval/id
-               (db/pull @connection [:seon.cluster.eval/id]
+              (:seon.eval/id
+               (db/pull @connection [:seon.eval/id]
                         (first (:seon.context.contribution/evaluations after))))))
        (let [basis (db/basis-t @connection)
              stale (db/transact!

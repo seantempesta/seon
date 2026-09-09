@@ -229,7 +229,7 @@
            {:seon.render/ai :seon.render/ai
             :seon.render/html :seon.render/html
             :seon.render/form :seon.render/form}
-           row-tx (ns-resolve 'seon.cluster.run 'row-tx)
+           row-tx (ns-resolve 'seon.turn 'row-tx)
            transact-row!
            (fn [row]
              (db/transact!
@@ -292,7 +292,7 @@
   ;; `schema/declaration-population` falls through to
   ;; `seon.schema.edn/packaged-forms`, which re-reads and re-validates every
   ;; schema resource from the classpath (~14 ms). Per attribute that turned
-  ;; `seon.cluster.work-test/situation-totality-property` into a suite wedge
+  ;; `seon.turn-test/situation-totality-property` into a suite wedge
   ;; that never finished inside the 300 s liveness backstop
   ;; (docs/prds/sci-execution-runtime/research/parallel-turns-hang-cause-2026-08-07.md).
   ;; One resolution per transaction is the wanted behavior, and it must not
@@ -303,7 +303,7 @@
               :seon.cluster.message/id "m-1"
               :seon.cluster.message/content "do the thing"
               :seon.cluster.message/at (java.util.Date.)
-              :seon.cluster.run/id "run-1"
+              :seon.turn/id "run-1"
               ::title "Alpha"}
         nested {:seon.cluster.agent/id "agent-b"
                 :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.b}}]
@@ -408,8 +408,8 @@
                 :datahike.query.source/symbol '$)])
              receipt
              (fn [id read-request dependency-plan]
-               {:seon.cluster.eval/id id
-                :seon.cluster.eval/read-evidence
+               {:seon.eval/id id
+                :seon.eval/read-evidence
                 [{:seon.db/source-argument-position 0
                   :datahike.read/dependency-plan dependency-plan
                   :datahike.read/revision
@@ -426,26 +426,26 @@
          (let [selector '[*]
                forward-raw
                (d/pull @connection selector
-                       [:seon.cluster.eval/id "codec-forward"])
+                       [:seon.eval/id "codec-forward"])
                reversed-raw
                (d/pull @connection selector
-                       [:seon.cluster.eval/id "codec-reversed"])
+                       [:seon.eval/id "codec-reversed"])
                forward
                (binding [*print-namespace-maps* true]
                  (db/pull @connection selector
-                          [:seon.cluster.eval/id "codec-forward"]))
+                          [:seon.eval/id "codec-forward"]))
                reversed
                (binding [*print-namespace-maps* false]
                  (db/pull @connection selector
-                          [:seon.cluster.eval/id "codec-reversed"]))
+                          [:seon.eval/id "codec-reversed"]))
                forward-raw-evidence
-               (first (:seon.cluster.eval/read-evidence forward-raw))
+               (first (:seon.eval/read-evidence forward-raw))
                reversed-raw-evidence
-               (first (:seon.cluster.eval/read-evidence reversed-raw))
+               (first (:seon.eval/read-evidence reversed-raw))
                forward-evidence
-               (first (:seon.cluster.eval/read-evidence forward))
+               (first (:seon.eval/read-evidence forward))
                reversed-evidence
-               (first (:seon.cluster.eval/read-evidence reversed))]
+               (first (:seon.eval/read-evidence reversed))]
            (testing "the transaction codec emits one canonical representation"
              (is (= (:seon.db/read-request forward-raw-evidence)
                     (:seon.db/read-request reversed-raw-evidence)))

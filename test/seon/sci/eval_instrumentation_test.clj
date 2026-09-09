@@ -27,13 +27,13 @@
                              :seon.boot/root root})]
         (try
           (let [connection (:seon.boot/cluster-connection instance)
-                handle (:seon.cluster.loop/cluster instance)]
+                handle (:seon.turn/cluster instance)]
             (with-redefs
               [ai/complete
                (fn [request]
                  (async/offer! attempt-requests request)
                  {:seon.ai/text
-                  "(my.run/complete \"instrumented acquisition ran\")"})]
+                  "(my.turn/complete \"instrumented acquisition ran\")"})]
               (try
                 (let [applied
                       (instrument/apply!

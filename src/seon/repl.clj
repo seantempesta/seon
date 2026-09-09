@@ -89,7 +89,7 @@
   parens, because a diagnostic that fabricates where a failure happened is
   worse than one that omits it (law 2.4)."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
-  [{error :seon.cluster.eval/error triage :seon.cluster.eval/triage-edn}]
+  [{error :seon.eval/error triage :seon.eval/triage-edn}]
   (when (string? error)
     (or (when (string? triage)
           (try
@@ -101,13 +101,13 @@
 
 (defn- response-entries
   "The response's present keys, in declared order, each already text."
-  [{output :seon.cluster.eval/output
-    source :seon.cluster.eval/source
+  [{output :seon.eval/out
+    source :seon.eval/source
     handle :seon.repl/handle
     ending-ns :seon.sci.eval/ending-ns
     prompt-ns :seon.ns/name
     duration :seon.eval/duration-ms
-    interrupted-at :seon.cluster.eval/interrupted-at
+    interrupted-at :seon.eval/interrupted-at
     :as emission}]
   (let [value (value-text emission)
         error (error-text emission)
@@ -163,8 +163,8 @@
   some other way is by definition a second grammar, and a second grammar is
   what taught agents to echo results instead of writing forms."
   {:malli/schema [:=> [:cat :seon.repl/emission] :string]}
-  [{prose :seon.cluster.eval/comment
-    source :seon.cluster.eval/source
+  [{prose :seon.eval/comment
+    source :seon.eval/source
     prompt-ns :seon.ns/name
     :as emission}]
   (let [answer (response emission)]
@@ -183,7 +183,7 @@
 (defn entity-emission
   "One pulled evaluation entity as an emission this namespace can render.
 
-  The prompt namespace is the evaluation's own `:seon.cluster.eval/ns` when
+  The prompt namespace is the evaluation's own `:seon.eval/ns` when
   the pull reached its name; an unreached namespace prints as `user`, which
   is what a REPL with no namespace in effect is called."
   {:malli/schema [:=> [:cat :seon.repl/entity-request] :seon.repl/emission]}
@@ -191,17 +191,17 @@
   (let [unit (if (map? (:seon.render/value unit))
                (:seon.render/value unit)
                unit)]
-   (cond-> (select-keys unit [:seon.cluster.eval/id
-                             :seon.cluster.eval/source
-                             :seon.cluster.eval/comment
-                             :seon.cluster.eval/ordinal
+   (cond-> (select-keys unit [:seon.eval/id
+                             :seon.eval/source
+                             :seon.eval/comment
+                             :seon.eval/ordinal
                              :seon.eval/value
                              :seon.eval/missing
                              :seon.eval/size
-                             :seon.cluster.eval/error
-                             :seon.cluster.eval/interrupted-at
-                             :seon.cluster.eval/triage-edn
-                             :seon.cluster.eval/output
+                             :seon.eval/error
+                             :seon.eval/interrupted-at
+                             :seon.eval/triage-edn
+                             :seon.eval/out
                              :seon.sci.eval/ending-ns
                              :seon.eval/duration-ms
                              ;; THE STORED KEYS ARE THE ONES THE FORM SET.
@@ -214,8 +214,8 @@
     ;; ONE ENTITY PER (run, ordinal), ONE SPELLING. The frozen form family
     ;; is gone; the source, the ordinal and the namespace are this
     ;; evaluation's own attributes, so there is nothing to reconcile here.
-    (get-in unit [:seon.cluster.eval/ns :seon.ns/name])
-    (assoc :seon.ns/name (get-in unit [:seon.cluster.eval/ns :seon.ns/name]))
+    (get-in unit [:seon.eval/ns :seon.ns/name])
+    (assoc :seon.ns/name (get-in unit [:seon.eval/ns :seon.ns/name]))
 
     ;; THE HANDLE COMES FROM THE EVALUATION'S OWN IDENTITY, so two runs of one
     ;; agent never name two values alike. An evaluation with no entity id never
@@ -231,7 +231,7 @@
   {:malli/schema [:=> [:cat :seon.repl/entity-request] [:maybe :string]]}
   [unit]
   (let [emission (entity-emission unit)]
-    (when (seq (:seon.cluster.eval/source emission))
+    (when (seq (:seon.eval/source emission))
       (text emission))))
 
 (defn render-html
@@ -242,9 +242,9 @@
   {:malli/schema [:=> [:cat :seon.repl/entity-request] [:maybe :seon.render/hiccup]]}
   [unit]
   (let [emission (entity-emission unit)
-        prose (:seon.cluster.eval/comment emission)
+        prose (:seon.eval/comment emission)
         answer (response emission)]
-    (when (seq (:seon.cluster.eval/source emission))
+    (when (seq (:seon.eval/source emission))
       (into [:article {:class "seon-family-entry seon-eval-entry"}]
             (cond-> []
               (seq prose)
@@ -252,6 +252,6 @@
               :always
               (conj [:pre [:code {:class "seon-eval-prompt"}
                            (str (or (:seon.ns/name emission) 'user) "=> "
-                                (:seon.cluster.eval/source emission))]])
+                                (:seon.eval/source emission))]])
               answer
               (conj [:pre [:code {:class "seon-eval-response"} answer]]))))))

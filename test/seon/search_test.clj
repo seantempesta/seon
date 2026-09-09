@@ -207,7 +207,7 @@
             evaluation
             (eval/evaluate
              {:seon.sci.eval/ctx ctx
-              :seon.cluster.eval/source
+              :seon.eval/source
               (str "(seon.search/search "
                    (pr-str (list 'quote request)) ")")
               :seon.sci.admit/caps
@@ -215,7 +215,7 @@
               :seon.sci.eval/time-limit-ms 5000
               :seon.config/on-core-error :panic})
             result (:seon.sci.admit/value evaluation)]
-        (is (nil? (:seon.cluster.eval/error evaluation)))
+        (is (nil? (:seon.eval/error evaluation)))
         (is (seq (:seon.search/results result)))
         (is (every? #(= :seon.fn/sym (:seon.search/family %))
                     (:seon.search/results result)))))))

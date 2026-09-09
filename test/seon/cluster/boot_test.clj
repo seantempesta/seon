@@ -24,9 +24,9 @@
             [seon.cluster.source :as source]
             [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.cluster.store :as store]
-            [seon.cluster.work :as work]
+            [seon.turn :as work]
             [seon.config :as config]
             [seon.db :as db]
             [seon.fn :as seon.fn]
@@ -52,6 +52,13 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Fixtures
 ;;; ---------------------------------------------------------------------------
+
+(defn- start-cluster!
+  "Boot the real cluster with model turn admission disabled before agents arm."
+  [request]
+  (cluster/start!
+   (assoc-in request [:seon.config/manifest :seon.config.run/max-episode-runs]
+             :seon.config/absent)))
 
 (defn- bare-root []
   (let [root (str "tmp/boot-test/" (random-uuid))]
@@ -144,8 +151,8 @@
      (db/q '[:find ?closed-at .
             :in $ ?run-id
             :where
-            [?run :seon.cluster.run/id ?run-id]
-            [?run :seon.cluster.run/closed-at ?closed-at]]
+            [?run :seon.turn/id ?run-id]
+            [?run :seon.turn/closed-at ?closed-at]]
           db (bootstrap/run-id agent-id)))))
 
 (defn- write-source!
@@ -238,7 +245,7 @@
     (try
       (seed-incompatible-sovereign! root cluster-name)
       (let [failure (try
-                      (cluster/start! request)
+                      (start-cluster! request)
                       nil
                       (catch Exception error
                         error))
@@ -460,7 +467,7 @@
   repl-is-live-after-ordered-boot
   (let [root (published-root)]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name "solo"
+      (let [instance (start-cluster! {:seon.boot/cluster-name "solo"
                                       :seon.boot/root root})
             advertisement (:seon.boot/advertisement instance)
             answer (prepl-eval (:seon.boot/prepl-host advertisement)
@@ -490,9 +497,9 @@
   two-instances-are-isolated
   (let [root (published-root)]
     (try
-      (let [a (cluster/start! {:seon.boot/cluster-name "a"
+      (let [a (start-cluster! {:seon.boot/cluster-name "a"
                                :seon.boot/root root})
-            b (cluster/start! {:seon.boot/cluster-name "b"
+            b (start-cluster! {:seon.boot/cluster-name "b"
                                :seon.boot/root root})
             port-of #(get-in % [:seon.boot/advertisement
                                 :seon.boot/prepl-port])]
@@ -503,7 +510,7 @@
             (is (= "\"b\"" (prepl-eval "127.0.0.1" (port-of b) "\"b\""))))
           (testing "a second start! for a running cluster refuses"
             (is (thrown? Exception
-                         (cluster/start! {:seon.boot/cluster-name "a"
+                         (start-cluster! {:seon.boot/cluster-name "a"
                                           :seon.boot/root root}))))
           (testing "stopping a leaves b untouched"
             (cluster/stop! a)
@@ -524,7 +531,7 @@
   stale-advertisements-read-as-absent
   (let [root (published-root)]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name "stale"
+      (let [instance (start-cluster! {:seon.boot/cluster-name "stale"
                                       :seon.boot/root root})
             advertisement (:seon.boot/advertisement instance)
             file (io/file (:seon.boot/advertisement-file
@@ -560,10 +567,10 @@
   ;; value must leave a same-named replacement fully alive
   (let [root (published-root)]
     (try
-      (let [old-instance (cluster/start! {:seon.boot/cluster-name "swap"
+      (let [old-instance (start-cluster! {:seon.boot/cluster-name "swap"
                                           :seon.boot/root root})]
         (cluster/stop! old-instance)
-        (let [replacement (cluster/start! {:seon.boot/cluster-name "swap"
+        (let [replacement (start-cluster! {:seon.boot/cluster-name "swap"
                                            :seon.boot/root root})
               port (get-in replacement [:seon.boot/advertisement
                                         :seon.boot/prepl-port])]
@@ -587,13 +594,13 @@
         server-name (str "seon.cluster/" cluster-name)]
     (try
       (let [first-instance
-            (cluster/start! {:seon.boot/cluster-name cluster-name
+            (start-cluster! {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})]
         (cluster/stop! first-instance)
         (is (not (contains? (registered-prepl-servers) server-name))
             "stop! releases the clojure.core.server name synchronously")
         (let [replacement
-              (cluster/start! {:seon.boot/cluster-name cluster-name
+              (start-cluster! {:seon.boot/cluster-name cluster-name
                                :seon.boot/root root})]
           (try
             (is (contains? (registered-prepl-servers) server-name))
@@ -617,7 +624,7 @@
         root-store-key (derived-store-dir root)
         retry-release-calls (atom 0)]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
+      (let [instance (start-cluster! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root root})
             advertisement (:seon.boot/advertisement instance)
             registered-instances
@@ -649,7 +656,7 @@
           (testing "the failed generation excludes a replacement"
             (when (get @registered-instances cluster-name)
               (is (thrown? Exception
-                           (cluster/start!
+                           (start-cluster!
                             {:seon.boot/cluster-name cluster-name
                              :seon.boot/root root})))))
           (testing "a later stop retries the remaining release"
@@ -670,7 +677,7 @@
           (testing "the released name and flock admit a replacement"
             (when (nil? (cluster/read-advertisement root cluster-name))
               (let [replacement
-                    (cluster/start! {:seon.boot/cluster-name cluster-name
+                    (start-cluster! {:seon.boot/cluster-name cluster-name
                                      :seon.boot/root root})]
                 (cluster/stop! replacement))))
           (finally
@@ -701,7 +708,7 @@
         original-transact! db/transact!
         original-stop flow/stop]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name "stopping"
+      (let [instance (start-cluster! {:seon.boot/cluster-name "stopping"
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)]
         (try
@@ -713,7 +720,7 @@
                (let [outcome (original-transact! conn tx-data)]
                  (deliver transaction-outcome outcome)
                  outcome))
-             work/next-agent-work
+             work/step
              (fn [_db _request]
                (db/transact! connection
                                 [{:seon.cluster.agent/id "root"}])
@@ -759,7 +766,7 @@
 (defn- start-refusal
   [request]
   (try
-    (cluster/start! request)
+    (start-cluster! request)
     nil
     (catch Throwable failure
       failure)))
@@ -773,7 +780,7 @@
   operator-root-history-policy-is-creation-fixed
   (let [root (fresh-root-with-history-policy false)
         instance
-        (cluster/start!
+        (start-cluster!
          {:seon.boot/root root
           :seon.boot/cluster-name "history-off"
           :seon.config/manifest {:seon.config.db/keep-history? false}})]
@@ -821,7 +828,7 @@
         stale-digest (apply str (repeat 64 "f"))]
     (try
       (let [program-transactions-before
-            (let [instance (cluster/start! request)
+            (let [instance (start-cluster! request)
                   connection (:seon.boot/cluster-connection instance)
                   source-eid
                   (db/q '[:find ?source .
@@ -840,7 +847,7 @@
                          @connection)]
                 (cluster/stop! instance)
                 program-transactions))
-            restarted (cluster/start! request)]
+            restarted (start-cluster! request)]
         (try
           (testing "an older complete corpus is a sovereign cluster world"
             (is (some? (:seon.cluster.agent/routing restarted)))
@@ -870,7 +877,7 @@
         current-digest
         (:seon.source/digest (cluster/source-snapshot))]
     (try
-      (let [instance (cluster/start! request)
+      (let [instance (start-cluster! request)
             connection (:seon.boot/cluster-connection instance)]
         (await-bootstrap! connection "root")
         (testing "a fresh fork is born at the current source digest"
@@ -924,7 +931,7 @@
         current-digest
         (:seon.source/digest (cluster/source-snapshot))
         old-world
-        (cluster/start!
+        (start-cluster!
          {:seon.boot/cluster-name "old-world"
           :seon.boot/root root})]
     (try
@@ -959,7 +966,7 @@
                         :where [_ :seon.source/digest ?digest]]
                       @old-connection))))
         (testing "future clusters fork the published commit"
-          (let [future (cluster/start!
+          (let [future (start-cluster!
                         {:seon.boot/cluster-name "future-world"
                          :seon.boot/root root})]
             (try
@@ -981,18 +988,18 @@
           "an existing namespace without classpath source cannot be required")
       (is (#'cluster/reloadable-namespace? 'seon.cluster))
       (finally (remove-ns namespace-name))))
-  ;; The observed failure: alphabetical reload put seon.cluster.loop before
-  ;; seon.cluster.run, and the reloaded loop failed on run's new Var.
+  ;; The observed failure: alphabetical reload put seon.turn before
+  ;; seon.turn, and the reloaded loop failed on run's new Var.
   (testing "a changed callee reloads before every changed caller, ties by name"
-    (is (= '[my.plan seon.cluster.run seon.cluster.loop seon.cluster]
+    (is (= '[my.plan seon.turn seon.cluster]
            (cluster/reload-order
-            '#{seon.cluster.loop seon.cluster my.plan seon.cluster.run}
-            '{seon.cluster.loop #{seon.cluster.run}
-              seon.cluster #{seon.cluster.loop seon.cluster.run seon.db}}))))
+            '#{seon.turn seon.cluster my.plan}
+            '{seon.turn #{my.plan}
+              seon.cluster #{seon.turn seon.db}}))))
   (testing "requires outside the changed set do not block reload"
-    (is (= '[seon.cluster.loop]
-           (cluster/reload-order '#{seon.cluster.loop}
-                                 '{seon.cluster.loop #{seon.cluster.run}}))))
+    (is (= '[seon.turn]
+           (cluster/reload-order '#{seon.turn}
+                                 '{seon.turn #{seon.db}}))))
   (testing "no edges is plain name order and an empty set is empty"
     (is (= '[a.b a.c] (cluster/reload-order '#{a.c a.b} {})))
     (is (= [] (cluster/reload-order #{} {})))))
@@ -1014,10 +1021,10 @@
       (with-redefs [seon.fn/source-roots roots
                        cluster/source-roots (conj roots "config/default.edn")]
            (let [fork (cluster/refresh-source! root)
-                 default (cluster/start! {:seon.boot/root root
+                 default (start-cluster! {:seon.boot/root root
                                           :seon.boot/cluster-name "default"})]
              (try
-               (let [beta (cluster/start! {:seon.boot/root root
+               (let [beta (start-cluster! {:seon.boot/root root
                                            :seon.boot/cluster-name "beta"})]
                  (try
                    (let [connection (:seon.boot/cluster-connection default)
@@ -1142,7 +1149,7 @@
         start-work-launcher! seon.flow/start-work-launcher!
         arm-agents! (var-get (ns-resolve 'seon.cluster 'arm-agents!))]
     (try
-      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
+      (let [instance (start-cluster! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)]
         (db/transact!
@@ -1167,7 +1174,7 @@
                     (config/effective @connection name))])
            (arm-agents! instance connection name))}
         #(let [instance
-               (cluster/start!
+               (start-cluster!
                 {:seon.boot/cluster-name cluster-name
                  :seon.boot/root root
                  :seon.config/manifest
@@ -1302,7 +1309,7 @@
             instance
             (with-bindings
               {progress-var #(swap! phases conj %)}
-              (cluster/start! {:seon.boot/cluster-name "boot-order"
+              (start-cluster! {:seon.boot/cluster-name "boot-order"
                                :seon.boot/root root
                                :seon.config/manifest
                                {:seon.config.flow.compute/queue-depth 11}}))
@@ -1348,14 +1355,14 @@
               (is (= (db/q '[:find (count ?form) .
                              :in $ ?run-id
                              :where
-                             [?run :seon.cluster.run/id ?run-id]
-                             [?form :seon.cluster.eval/run ?run]]
+                             [?run :seon.turn/id ?run-id]
+                             [?form :seon.eval/turn ?run]]
                            database run-id)
                      (db/q '[:find (count ?receipt) .
                              :in $ ?run-id
                              :where
-                             [?run :seon.cluster.run/id ?run-id]
-                             [?receipt :seon.cluster.eval/run ?run]]
+                             [?run :seon.turn/id ?run-id]
+                             [?receipt :seon.eval/turn ?run]]
                            database run-id))
                   "every successful form settles with a real receipt")
               (is (< build-index verify-index complete-index))
@@ -1364,13 +1371,13 @@
                    (db/q '[:find ?error
                            :in $ ?run-id
                            :where
-                           [?run :seon.cluster.run/id ?run-id]
+                           [?run :seon.turn/id ?run-id]
                            [?error :seon.error/run ?run]]
                          database run-id))
                   "an agent evaluation error never enters the core-fault family")))
           (testing "a second cluster acquires its own projection from the
                     shared store"
-            (let [sibling (cluster/start!
+            (let [sibling (start-cluster!
                            {:seon.boot/cluster-name "twr2"
                             :seon.boot/root root
                             :seon.config/manifest
@@ -1409,7 +1416,7 @@
       (spit (derived-store-dir root) "not a store")
       (let [degraded
             (try
-              (cluster/start! {:seon.boot/cluster-name "wreck"
+              (start-cluster! {:seon.boot/cluster-name "wreck"
                                :seon.boot/root root})
               (is false "the failed boot must throw")
               nil
@@ -1461,7 +1468,7 @@
                    {:seon.operator/repository-root repository-root
                     :seon.operator/managed-root managed-root
                     :seon.boot/cluster-name cluster-name})
-            instance (cluster/start! {:seon.boot/cluster-name cluster-name
+            instance (start-cluster! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root cluster-root})]
         (is (contains? (:seon.operator.claim/clusters claim) cluster-name)
             (str "the refork target must be exactly claimed: "
@@ -1477,7 +1484,7 @@
                          (:seon.source/commit-id published)
                          :seon.store/store (:seon.store/store instance)})
                 replacement
-                (cluster/start! {:seon.boot/cluster-name cluster-name
+                (start-cluster! {:seon.boot/cluster-name cluster-name
                                  :seon.boot/root cluster-root})]
             (try
               (testing "the old branch was replaced from current-src"
@@ -1630,7 +1637,7 @@
                      :seon.test/output (str/join "\n" @child-output)}))))
       (.destroyForcibly process)
       (test-support/await-event! (.onExit process) ::child-exit-after-kill)
-      (let [instance (cluster/start! {:seon.boot/cluster-name cluster-name
+      (let [instance (start-cluster! {:seon.boot/cluster-name cluster-name
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)
             run-id (bootstrap/run-id "root")]
@@ -1641,27 +1648,27 @@
              (db/q '[:find ?receipt .
                      :in $ ?run-id
                      :where
-                     [?run :seon.cluster.run/id ?run-id]
-                     [?receipt :seon.cluster.eval/run ?run]
-                     [?receipt :seon.cluster.eval/ordinal 1]
-                     (or [?receipt :seon.cluster.eval/result-edn _]
-                         [?receipt :seon.cluster.eval/error _])]
+                     [?run :seon.turn/id ?run-id]
+                     [?receipt :seon.eval/turn ?run]
+                     [?receipt :seon.eval/ordinal 1]
+                     (or [?receipt :seon.eval/result-edn _]
+                         [?receipt :seon.eval/error _])]
                    database run-id)))
           (let [database @connection
                 run (db/pull database
-                             '[:seon.cluster.run/id
-                               :seon.cluster.run/closed-at
-                               {:seon.cluster.run/trigger
+                             '[:seon.turn/id
+                               :seon.turn/closed-at
+                               {:seon.turn/trigger
                                 [:seon.cluster.message/id]}]
-                             [:seon.cluster.run/id run-id])
+                             [:seon.turn/id run-id])
                 ordinals
                 (db/q {:query
                        '[:find [?ordinal ...]
                          :in $ ?run-id
                          :where
-                         [?run :seon.cluster.run/id ?run-id]
-                         [?form :seon.cluster.eval/run ?run]
-                         [?form :seon.cluster.eval/ordinal ?ordinal]]
+                         [?run :seon.turn/id ?run-id]
+                         [?form :seon.eval/turn ?run]
+                         [?form :seon.eval/ordinal ?ordinal]]
                        :args [database run-id]
                        :order-by '[?ordinal :asc]})
                 error-kinds
@@ -1669,10 +1676,10 @@
                       (db/q '[:find [?kind ...]
                               :where [_ :seon.error/kind ?kind]]
                             database))]
-            (is (= run-id (:seon.cluster.run/id run)))
-            (is (nil? (:seon.cluster.run/closed-at run)))
+            (is (= run-id (:seon.turn/id run)))
+            (is (nil? (:seon.turn/closed-at run)))
             (is (= (bootstrap/task-message-id "root")
-                   (get-in run [:seon.cluster.run/trigger
+                   (get-in run [:seon.turn/trigger
                                 :seon.cluster.message/id])))
             (is (= [0 1] (vec (take 2 (sort ordinals)))))
             (is (= [run-id]
@@ -1680,13 +1687,13 @@
                            :in $ ?trigger-id
                            :where
                            [?trigger :seon.cluster.message/id ?trigger-id]
-                           [?run :seon.cluster.run/trigger ?trigger]
-                           [?run :seon.cluster.run/id ?run-id]]
+                           [?run :seon.turn/trigger ?trigger]
+                           [?run :seon.turn/id ?run-id]]
                          database (bootstrap/task-message-id "root"))))
             (is (not (contains? error-kinds
                                 :seon.bootstrap/prefix-drift)))
             (is (not (contains? error-kinds
-                                :seon.cluster.loop/trigger-already-answered))))
+                                :seon.turn/trigger-already-answered))))
           (finally
             (schema/call-with-projection
              (schema/projection-from-database @connection)
@@ -1702,7 +1709,7 @@
   a-dead-holders-run-is-unclaimed-by-the-time-start-returns
   ;; The live crash drill found this gap: `recover-tx` existed with no
   ;; caller, so a process that died holding a claimed run left the agent
-  ;; wedged — `work/next-agent-work` sees a run held by someone else and
+  ;; wedged — `work/step` sees a run held by someone else and
   ;; returns nothing, forever. Recovery is BY FACT: the drill measured
   ;; the dead holder's 60-second lease still in the future when the fix
   ;; fires, so nothing here waits a lease out.
@@ -1711,7 +1718,7 @@
       ;; a first boot writes the wreckage a kill -9 mid-model-call leaves:
       ;; an open run claimed by a process that will not exist afterwards,
       ;; a live lease, and a dangling :running receipt
-      (let [instance (cluster/start! {:seon.boot/cluster-name "recov"
+      (let [instance (start-cluster! {:seon.boot/cluster-name "recov"
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)
             now (java.util.Date.)]
@@ -1726,50 +1733,50 @@
         ;; 2026-08-08: `945f3226` closed by recovery with no marker
         ;; anywhere durable, so the honesty claim died with its JVM)
         (db/transact! connection
-                    [{:seon.cluster.run/id "run-clean"
-                      :seon.cluster.run/agent [:seon.cluster.agent/id "bob"]
-                      :seon.cluster.run/opened-at now
-                      :seon.cluster.run/closed-at now}])
+                    [{:seon.turn/id "run-clean"
+                      :seon.turn/agent [:seon.cluster.agent/id "bob"]
+                      :seon.turn/opened-at now
+                      :seon.turn/closed-at now}])
         (db/transact! connection
-                    [{:seon.cluster.run/id "run-crashed"
-                      :seon.cluster.run/agent [:seon.cluster.agent/id "alice"]
-                      :seon.cluster.run/opened-at now
-                      :seon.cluster.run/process "99999-1"
-                      :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))}
+                    [{:seon.turn/id "run-crashed"
+                      :seon.turn/agent [:seon.cluster.agent/id "alice"]
+                      :seon.turn/opened-at now
+                      :seon.db.process/id "99999-1"
+                      :seon.turn/plan-digest (apply str (repeat 64 "a"))}
                      {:seon.cluster.agent/id "alice"
                       }
                      ;; dangling = started with no terminal fact —
                      ;; running IS that absence, there is no status
-                     {:seon.cluster.eval/id "e-0"
-                      :seon.cluster.eval/run [:seon.cluster.run/id "run-crashed"]
-                      :seon.cluster.eval/ordinal 0
-                      :seon.cluster.eval/source "(+ 1 1)"
-                      :seon.cluster.eval/at now}])
+                     {:seon.eval/id "e-0"
+                      :seon.eval/turn [:seon.turn/id "run-crashed"]
+                      :seon.eval/ordinal 0
+                      :seon.eval/source "(+ 1 1)"
+                      :seon.eval/at now}])
         (cluster/stop! instance))
 
       ;; the next boot must settle it, with no lease wait
-      (let [instance (cluster/start! {:seon.boot/cluster-name "recov"
+      (let [instance (start-cluster! {:seon.boot/cluster-name "recov"
                                       :seon.boot/root root})
             connection (:seon.boot/cluster-connection instance)]
         (try
           (testing "the dead holder's custody is gone — custody is
                     presence, and no run holds any"
             (is (nil? (db/q (quote [:find ?p . :where
-                                   [_ :seon.cluster.run/process ?p]])
+                                   [_ :seon.db.process/id ?p]])
                            @connection))))
           (testing "its dangling receipt carries interrupted-at — the
                     one terminal fact recovery asserts"
             (is (= 1 (count
                       (db/q (quote [:find [?at ...] :where
-                                   [_ :seon.cluster.eval/interrupted-at ?at]])
+                                   [_ :seon.eval/interrupted-at ?at]])
                            @connection)))))
           (testing "and the run is CLOSED with its plan intact —
                     recovery ends custody and no plan form can execute"
             (is (some? (db/q (quote [:find ?c . :where
-                                    [_ :seon.cluster.run/closed-at ?c]])
+                                    [_ :seon.turn/closed-at ?c]])
                             @connection)))
             (is (some? (db/q (quote [:find ?d . :where
-                                    [_ :seon.cluster.run/plan-digest ?d]])
+                                    [_ :seon.turn/plan-digest ?d]])
                             @connection))))
           (testing "RECOVERY MARKS WHAT IT INTERRUPTED, and only that —
                     the run itself carries the fact, so the interrupted
@@ -1777,16 +1784,16 @@
             (is (= ["run-crashed"]
                    (db/q '[:find [?id ...]
                            :where
-                           [?run :seon.cluster.run/interrupted-at _]
-                           [?run :seon.cluster.run/id ?id]]
+                           [?run :seon.turn/interrupted-at _]
+                           [?run :seon.turn/id ?id]]
                          @connection)))
-            (is (nil? (:seon.cluster.run/interrupted-at
+            (is (nil? (:seon.turn/interrupted-at
                        (db/pull @connection '[*]
-                                [:seon.cluster.run/id "run-clean"]))))
+                                [:seon.turn/id "run-clean"]))))
             (is (str/includes?
                  (run/render-ai
                   (assoc (db/pull @connection '[*]
-                                  [:seon.cluster.run/id "run-crashed"])
+                                  [:seon.turn/id "run-crashed"])
                          :seon.db/db @connection))
                  "interrupted")
                 "and the run says so rather than restating a database
@@ -1798,7 +1805,7 @@
             (cluster/stop! instance))))
 
       ;; a clean boot commits nothing
-      (let [instance (cluster/start! {:seon.boot/cluster-name "clean"
+      (let [instance (start-cluster! {:seon.boot/cluster-name "clean"
                                       :seon.boot/root root})]
         (try
           (is (= 0 (:seon.boot/recovery-operations instance))

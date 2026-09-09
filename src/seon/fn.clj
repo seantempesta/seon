@@ -590,17 +590,17 @@
   {:malli/schema
    [:=> [:cat :seon.db/database-value
          [:vector [:map
-                   [:seon.cluster.eval/source
-                    :seon.cluster.eval/source]
-                   [:seon.cluster.eval/ns
-                    :seon.cluster.eval/ns]
+                   [:seon.eval/source
+                    :seon.eval/source]
+                   [:seon.eval/ns
+                    :seon.eval/ns]
                    [:seon.program/row :seon.program/row]]]]
     [:or [:vector [:tuple :map :seon.program/row]] :seon.error/value]]}
   [database requests]
   (let [resolved
         (mapv
-         (fn [{source :seon.cluster.eval/source
-               namespace-ref :seon.cluster.eval/ns
+         (fn [{source :seon.eval/source
+               namespace-ref :seon.eval/ns
                :as request}]
            (let [namespace-row (db/pull database [:seon.ns/name] namespace-ref)]
              (if-let [namespace-name (:seon.ns/name namespace-row)]
@@ -642,8 +642,8 @@
    [:=>
     [:catn
      [:database :seon.db/database-value]
-     [:source :seon.cluster.eval/source]
-     [:namespace-ref :seon.cluster.eval/ns]
+     [:source :seon.eval/source]
+     [:namespace-ref :seon.eval/ns]
      [:program-row [:maybe :seon.program/row]]]
     [:or
      [:tuple
@@ -656,8 +656,8 @@
   [database source namespace-ref program-row]
   (let [result (analyze-forms
                 database
-                [{:seon.cluster.eval/source source
-                  :seon.cluster.eval/ns namespace-ref
+                [{:seon.eval/source source
+                  :seon.eval/ns namespace-ref
                   :seon.program/row program-row}])]
     (if (:seon.error/kind result) result (first result))))
 

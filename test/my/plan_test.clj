@@ -413,8 +413,8 @@
                    (config/result-caps (support/effective-config))
                    :seon.sci.eval/time-limit-ms 5000
                    :seon.config/on-core-error :panic
-                   :seon.cluster.eval/source source
-                   :seon.cluster.eval/ns
+                   :seon.eval/source source
+                   :seon.eval/ns
                    [:seon.ns/name 'fixture.plan]}))))
             alice (evaluate "alice" "(my.plan/plan {})")
             bob (evaluate "bob" "(my.plan/plan {})")

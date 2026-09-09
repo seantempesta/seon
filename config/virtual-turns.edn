@@ -1,0 +1,3 @@
+;; Apply before boot. With no per-agent override, unanswered messages cannot
+;; open model turns; source submissions still use the ordinary agent proc.
+{:seon.config.run/max-episode-runs :seon.config/absent}

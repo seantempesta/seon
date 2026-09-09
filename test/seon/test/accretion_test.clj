@@ -213,7 +213,7 @@
               :seon.db/db @connection
               :seon.db/connection connection
               :seon.cluster.agent/id "candidate-author"
-              :seon.cluster.eval/source
+              :seon.eval/source
               (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                    "target [x] (inc x))")
               :seon.test.accretion/gate-set
@@ -268,7 +268,7 @@
                 :seon.db/db @connection
                 :seon.db/connection connection
                 :seon.cluster.agent/id "auto-check-author"
-                :seon.cluster.eval/source source
+                :seon.eval/source source
                 :seon.test.accretion/gate-set []
                 :seon.sci.eval/time-limit-ms 2000
                 :seon.sci.admit/caps

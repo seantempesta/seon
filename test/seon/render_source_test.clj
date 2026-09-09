@@ -4,7 +4,7 @@
             [clojure.test :refer [deftest is testing]]
             [seon.blob :as blob]
             [seon.cluster.agent :as agent]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
@@ -36,17 +36,17 @@
   caller's. This used to be `(merge (config/defaults) …)` — a SECOND
   mechanism for the same shape (§2.5), and one that pours every effective
   config dial into the handle rather than the members
-  `:seon.cluster.loop/cluster` declares, so a renamed dial would leave the
+  `:seon.turn/cluster` declares, so a renamed dial would leave the
   fixture working while production broke."
   [connection ctx channel cluster-name]
   (support/cluster-handle
    {:seon.db/connection connection
     :seon.cluster/name cluster-name
-    :seon.cluster.run/process "preview-test"
+    :seon.db.process/id "preview-test"
     :seon.sci.eval/ctx ctx
     :seon.cluster.wake/channel channel
     :seon.render/context-channel channel
-    :seon.cluster.loop/completion channel
+    :seon.turn/completion channel
     :seon.sci.admit/caps caps
     :seon.config.eval/time-limit-ms 2000
     :seon.config/on-core-error :panic}))
@@ -62,10 +62,10 @@
                            :seon.cluster/name "memory-preview"})
                          [{:my.plan.item/id "preview-item" :my.plan.item/title "Before"}]))
      (db/transact! connection
-                   (run/open-tx
-                    {:seon.cluster.run/id "agent-is-busy"
-                     :seon.cluster.run/agent [:seon.cluster.agent/id "memory-preview-agent"]
-                     :seon.cluster.run/opened-at (java.util.Date.)}))
+                   (run/open
+                    {:seon.turn/id "agent-is-busy"
+                     :seon.turn/agent [:seon.cluster.agent/id "memory-preview-agent"]
+                     :seon.turn/opened-at (java.util.Date.)}))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            channel (async/chan 1)
@@ -87,7 +87,7 @@
                     :seon.sci.admit/caps caps :seon.sci.eval/time-limit-ms 2000
                     :seon.config/on-core-error :panic
                     :seon.cluster.agent/id "memory-preview-agent"
-                    :seon.cluster.loop/cluster cluster}
+                    :seon.turn/cluster cluster}
            preview
            (with-redefs [db/transact! (fn [& _] (throw (ex-info "preview wrote database facts" {})))
                          blob/stage! (fn [& _] (throw (ex-info "preview staged a blob" {})))
@@ -107,7 +107,7 @@
                first-output))
            entry (get @calls [:memory-preview])
            cached-id (:seon.render.call/source-run-id entry)
-           state {:seon.cluster.loop/cluster cluster
+           state {:seon.turn/cluster cluster
                   :seon.render.web/interest (atom {})
                   :seon.render.web/invocations @invocations
                   :seon.render.web/calls {[:memory-preview] @calls}
@@ -129,7 +129,7 @@
          (is (str/includes? preview "Before"))
          (is (= (db/basis-t database) (db/basis-t @connection))
              "previewing, including the busy agent, changes no facts")
-         (is (nil? (db/pull @connection [:seon.cluster.run/id] [:seon.cluster.run/id cached-id])))
+         (is (nil? (db/pull @connection [:seon.turn/id] [:seon.turn/id cached-id])))
          (db/transact! connection [{:my.plan.item/id "preview-item" :my.plan.item/title "After"}])
          (let [next-calls (atom {})
                next-output (source-call
@@ -167,7 +167,7 @@
            evaluate (fn [source]
                       (:seon.sci.admit/value
                        (eval/evaluate
-                        {:seon.cluster.eval/source source
+                        {:seon.eval/source source
                          :seon.sci.eval/ctx ctx
                          :seon.sci.admit/caps caps
                          :seon.sci.eval/time-limit-ms 2000
@@ -235,18 +235,18 @@
                                      "#:seon.print{:face :seon.print/nil, :value nil}"]]]
        (db/transact!
         connection
-        [{:seon.cluster.run/id run-id
-          :seon.cluster.run/agent [:seon.cluster.agent/id "source-contract-agent"]
-          :seon.cluster.run/opened-at #inst "2026-09-06T20:00:00Z"
-          :seon.cluster.run/closed-at #inst "2026-09-06T20:00:01Z"
-          :seon.cluster.run/starting-ns [:seon.ns/name 'my.agents.source-contract]}
-         {:seon.cluster.eval/id (str run-id "/0")
-          :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-          :seon.cluster.eval/ordinal 0
-          :seon.cluster.eval/at #inst "2026-09-06T20:00:00Z"
-          :seon.cluster.eval/source source
-          :seon.cluster.eval/ns [:seon.ns/name 'my.agents.source-contract]
-          :seon.cluster.eval/result-edn result}]))
+        [{:seon.turn/id run-id
+          :seon.turn/agent [:seon.cluster.agent/id "source-contract-agent"]
+          :seon.turn/opened-at #inst "2026-09-06T20:00:00Z"
+          :seon.turn/closed-at #inst "2026-09-06T20:00:01Z"
+          :seon.turn/starting-ns [:seon.ns/name 'my.agents.source-contract]}
+         {:seon.eval/id (str run-id "/0")
+          :seon.eval/turn [:seon.turn/id run-id]
+          :seon.eval/ordinal 0
+          :seon.eval/at #inst "2026-09-06T20:00:00Z"
+          :seon.eval/source source
+          :seon.eval/ns [:seon.ns/name 'my.agents.source-contract]
+          :seon.eval/result-edn result}]))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            source-call (ns-resolve 'seon.render.web 'render-source-call)
@@ -274,9 +274,9 @@
               :seon.sci.admit/caps caps :seon.sci.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic
               :seon.cluster.agent/id "source-contract-agent"
-              :seon.cluster.loop/cluster cluster
+              :seon.turn/cluster cluster
               :seon.cluster.agent/routing (atom {})})
-           stored-run (db/pull database '[*] [:seon.cluster.run/id "stored-transcript"])
+           stored-run (db/pull database '[*] [:seon.turn/id "stored-transcript"])
            output-refs
            (fn [function-symbol]
              (set (db/q '[:find [?key ...] :in $ ?symbol
@@ -322,12 +322,12 @@
            (is (str/includes? terminal "already ran"))
            (is (= 2 @evaluations)
                "stored transcript source is never submitted again")
-           (is (nil? (:seon.cluster.run/id retained))
+           (is (nil? (:seon.turn/id retained))
                "a run-valued input does not prove what evaluations a renderer displayed")
            (is (nil? (:seon.context.contribution/evaluations retained)))
            (is (nil? (:seon.render.call/source-run-id retained)))
            (is (= (db/q '[:find (count ?evaluation) .
-                          :where [?evaluation :seon.cluster.eval/id]] database)
+                          :where [?evaluation :seon.eval/id]] database)
                   (db/q '[:find (count ?evaluation) .
-                          :where [?evaluation :seon.cluster.eval/id]] @connection))))
+                          :where [?evaluation :seon.eval/id]] @connection))))
        (async/close! channel)))))

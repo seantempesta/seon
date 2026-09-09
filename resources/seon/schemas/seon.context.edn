@@ -1,19 +1,15 @@
 #:seon.context{:capture-request
                [:or
                 [:map
-                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.turn/id :seon.turn/id]
                  [:seon.cluster.prompt/rendered-context
                   :seon.cluster.prompt/rendered-context]
-                 [:seon.cluster.run/live-processes
-                  {:optional true}
-                  :seon.cluster.run/live-processes]]
+                 ]
                 [:map
-                 [:seon.cluster.run/id :seon.cluster.run/id]
+                 [:seon.turn/id :seon.turn/id]
                  [:seon.db/db :seon.db/database-value]
                  [:seon.error/value :seon.error/value]
-                 [:seon.cluster.run/live-processes
-                  {:optional true}
-                  :seon.cluster.run/live-processes]]],
+                 ]],
                :contribution
                [:map
                 [:seon.render.block/name :seon.render.block/name]
@@ -35,12 +31,12 @@
                :append-request
                [:map
                 [:seon.cluster.agent/id :seon.cluster.agent/id]
-                [:seon.cluster.run/id :seon.cluster.run/id]
+                [:seon.turn/id :seon.turn/id]
                 [:seon.context.contribution/id :seon.context.contribution/id]],
                :compact-request
                [:map
                 [:seon.cluster.agent/id :seon.cluster.agent/id]
-                [:seon.cluster.run/id :seon.cluster.run/id]
+                [:seon.turn/id :seon.turn/id]
                 [:seon.context.contribution/id :seon.context.contribution/id]
                 [:seon.context.contribution/evaluations
                  :seon.context.contribution/evaluations]],
@@ -51,9 +47,9 @@
                :comparison-request
                [:map
                 [:seon.cluster.agent/id :seon.cluster.agent/id]
-                [:seon.cluster.run/id :seon.cluster.run/id]
-                [:seon.cluster.loop/evaluated-sources {:optional true}
-                 :seon.cluster.loop/evaluated-sources]
+                [:seon.turn/id :seon.turn/id]
+                [:seon.turn/evaluated-sources {:optional true}
+                 :seon.turn/evaluated-sources]
                 [:seon.context.contribution/id :seon.context.contribution/id]],
                :comparison
                [:or
@@ -64,7 +60,7 @@
                 [:map
                  [:seon.context.comparison/status [:= :ready]]
                  [:seon.context.comparison/baseline-evaluations [:vector :seon.db/ref]]
-                 [:seon.cluster.loop/evaluated-sources :seon.cluster.loop/evaluated-sources]]
+                 [:seon.turn/evaluated-sources :seon.turn/evaluated-sources]]
                 [:map
                  [:seon.context.comparison/status [:= :ready]]
                  [:seon.context.comparison/baseline-evaluations

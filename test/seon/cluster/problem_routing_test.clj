@@ -4,7 +4,7 @@
             [seon.db :as db]
             [my.message :as my.message]
             [seon.cluster.message :as message]
-            [seon.cluster.work :as work]
+            [seon.turn :as work]
             [seon.print :as print]
             [seon.problems :as problems]
             [seon.schema :as schema]
@@ -41,32 +41,32 @@
         :seon.cluster.message/at now}])
      (db/transact!
       connection
-      [{:seon.cluster.run/id run-id
-        :seon.cluster.run/agent [:seon.cluster.agent/id "planner"]
-        :seon.cluster.run/trigger
+      [{:seon.turn/id run-id
+        :seon.turn/agent [:seon.cluster.agent/id "planner"]
+        :seon.turn/trigger
         [:seon.cluster.message/id "planner-goal"]
-        :seon.cluster.run/opened-at now
-        :seon.cluster.run/plan-digest "settlement-digest"}])
+        :seon.turn/opened-at now
+        :seon.turn/plan-digest "settlement-digest"}])
      (body connection))))
 
 (defn- form-row
   [ordinal]
-  {:seon.cluster.eval/id (str "form-" ordinal)
-   :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-   :seon.cluster.eval/ordinal ordinal
-   :seon.cluster.eval/source (str "(form-" ordinal ")")
-   :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]})
+  {:seon.eval/id (str "form-" ordinal)
+   :seon.eval/turn [:seon.turn/id run-id]
+   :seon.eval/ordinal ordinal
+   :seon.eval/source (str "(form-" ordinal ")")
+   :seon.eval/ns [:seon.ns/name 'my.gen.alpha]})
 
 (defn- receipt-row
   "The started/settled facts of the SAME evaluation entity `form-row` freezes.
 
   One entity per (run, ordinal): a started evaluation carries
-  `:seon.cluster.eval/at`, and its terminal facts accrete onto it."
+  `:seon.eval/at`, and its terminal facts accrete onto it."
   [ordinal terminal]
   (merge
    (form-row ordinal)
    {:seon.problems/id (str "problem-" ordinal)
-    :seon.cluster.eval/at now}
+    :seon.eval/at now}
    terminal))
 
 (defn- deliver!
@@ -76,8 +76,8 @@
          @connection
          {:my.message/value value
           :seon.cluster.agent/id sender
-          :seon.cluster.run/id run-id
-          :seon.cluster.eval/ordinal 0
+          :seon.turn/id run-id
+          :seon.eval/ordinal 0
           :seon.cluster.message/at now
           :seon.config.message/max-chain 16})]
     (is (empty? (:seon.error/values delivery)))
@@ -102,12 +102,12 @@
    {:seon.error/kind :seon.sci.eval/evaluation-failed
     :seon.error/message message
     :seon.error/data {}}
-   :seon.cluster.eval/result-edn
+   :seon.eval/result-edn
    (pr-str {:seon.error/kind :seon.sci.eval/evaluation-failed
             :seon.error/message message
             :seon.error/data {}})
-   :seon.cluster.eval/error message
-   :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]
+   :seon.eval/error message
+   :seon.eval/ns [:seon.ns/name 'my.gen.alpha]
    :seon.sci.eval/ending-ns 'my.gen.alpha
    :seon.print/options (print/default-options)
    :seon.sci.admit/record
@@ -123,19 +123,19 @@
      (db/transact!
       connection
       [(receipt-row 0 {})
-       (dissoc (receipt-row 1 {}) :seon.cluster.eval/ns)])
+       (dissoc (receipt-row 1 {}) :seon.eval/ns)])
      (let [failed (evaluation-error "boom")
            attributed
            (problems/form-problem
             @connection
-            {:seon.cluster.run/id run-id
-             :seon.cluster.eval/ordinal 0
+            {:seon.turn/id run-id
+             :seon.eval/ordinal 0
              :seon.sci.eval/evaluation failed})
            fallback
            (problems/form-problem
             @connection
-            {:seon.cluster.run/id run-id
-             :seon.cluster.eval/ordinal 1
+            {:seon.turn/id run-id
+             :seon.eval/ordinal 1
              :seon.sci.eval/evaluation failed})]
        (is (= "alpha" (:seon.cluster.agent/id attributed))
            "the reader-projected namespace owns the red form")
@@ -153,16 +153,16 @@
       [(dissoc
         (receipt-row
          0
-         {:seon.cluster.eval/result-edn
+         {:seon.eval/result-edn
           (pr-str {:seon.error/kind :probe/self-owned-red})
-          :seon.cluster.eval/error "self-owned red"
+          :seon.eval/error "self-owned red"
           :seon.error/kind :probe/self-owned-red})
-        :seon.cluster.eval/ns)])
+        :seon.eval/ns)])
      (let [problem
            (problems/form-problem
             @connection
-            {:seon.cluster.run/id run-id
-             :seon.cluster.eval/ordinal 0
+            {:seon.turn/id run-id
+             :seon.eval/ordinal 0
              :seon.sci.eval/evaluation
              (evaluation-error "self-owned red")})]
        (is (= "planner" (:seon.cluster.agent/id problem)))
@@ -178,12 +178,12 @@
                  @connection
                  (:seon.problems/id problem)))
            "the ordinary loop shape emits no author-to-author message")
-       (is (= {:seon.cluster.work/form-state :unrouted-red
-               :seon.cluster.work/settled? false}
+       (is (= {:seon.turn/form-state :unrouted-red
+               :seon.turn/settled? false}
               (select-keys
                (work/form-settlement @connection "form-0")
-               [:seon.cluster.work/form-state
-                :seon.cluster.work/settled?]))
+               [:seon.turn/form-state
+                :seon.turn/settled?]))
            "the red problem still keeps its plan unsettled")))))
 
 (deftest historical-reds-are-outside-the-live-attempt-chain
@@ -191,20 +191,20 @@
    (fn [connection]
      (db/transact!
       connection
-      [{:seon.cluster.run/id "historical-run"
-        :seon.cluster.run/agent [:seon.cluster.agent/id "planner"]
-        :seon.cluster.run/opened-at now
-        :seon.cluster.run/plan-digest "historical-digest"}
-       {:seon.cluster.eval/id "historical-form"
-        :seon.cluster.eval/run [:seon.cluster.run/id "historical-run"]
-        :seon.cluster.eval/ordinal 0
-        :seon.cluster.eval/source "(my.store/get :obsolete)"
-        :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]}])
+      [{:seon.turn/id "historical-run"
+        :seon.turn/agent [:seon.cluster.agent/id "planner"]
+        :seon.turn/opened-at now
+        :seon.turn/plan-digest "historical-digest"}
+       {:seon.eval/id "historical-form"
+        :seon.eval/turn [:seon.turn/id "historical-run"]
+        :seon.eval/ordinal 0
+        :seon.eval/source "(my.store/get :obsolete)"
+        :seon.eval/ns [:seon.ns/name 'my.gen.alpha]}])
      (is (nil?
           (problems/form-problem
            @connection
-           {:seon.cluster.run/id "historical-run"
-            :seon.cluster.eval/ordinal 0
+           {:seon.turn/id "historical-run"
+            :seon.eval/ordinal 0
             :seon.sci.eval/evaluation (evaluation-error "Unable to resolve")})))
      (is (empty?
           (db/q '[:find ?assignment
@@ -221,19 +221,19 @@
       (into
        [(form-row 0)]
        [(receipt-row 1 {})
-        (receipt-row 2 {:seon.cluster.eval/result-edn "2"})
-        (receipt-row 3 {:seon.cluster.eval/result-edn
+        (receipt-row 2 {:seon.eval/result-edn "2"})
+        (receipt-row 3 {:seon.eval/result-edn
                         (pr-str {:seon.error/kind :probe/red})
-                        :seon.cluster.eval/error "red 3"
+                        :seon.eval/error "red 3"
                         :seon.error/kind :probe/red})
-        (receipt-row 4 {:seon.cluster.eval/result-edn
+        (receipt-row 4 {:seon.eval/result-edn
                         (pr-str {:seon.error/kind :probe/red})
-                        :seon.cluster.eval/error "red 4"
+                        :seon.eval/error "red 4"
                         :seon.error/kind :probe/red})
-        (receipt-row 5 {:seon.cluster.eval/result-edn "5"})
-        (receipt-row 6 {:seon.cluster.eval/result-edn
+        (receipt-row 5 {:seon.eval/result-edn "5"})
+        (receipt-row 6 {:seon.eval/result-edn
                         (pr-str {:seon.error/kind :probe/red})
-                        :seon.cluster.eval/error "red 6"
+                        :seon.eval/error "red 6"
                         :seon.error/kind :probe/red})]))
      (assign! connection 3)
      (assign! connection 5)
@@ -244,7 +244,7 @@
                (my.message/decline
                 "planner" "problem-6" "The required contract is absent."))
      (let [settlement (work/plan-settlement @connection run-id)
-           forms (:seon.cluster.work/forms settlement)]
+           forms (:seon.turn/evaluation-settlements settlement)]
        (is (= [:unevaluated
                :running
                :succeeded
@@ -252,17 +252,17 @@
                :unrouted-red
                :owner-fixed
                :owner-declared-cant]
-              (mapv :seon.cluster.work/form-state forms)))
+              (mapv :seon.turn/form-state forms)))
        (is (= [false false true false false true true]
-              (mapv :seon.cluster.work/settled? forms)))
-       (is (false? (:seon.cluster.work/settled? settlement))
+              (mapv :seon.turn/settled? forms)))
+       (is (false? (:seon.turn/settled? settlement))
            "one unsettled form keeps the plan unsettled regardless of run state")
        (is (schema/valid-candidate-value?
-            :seon.cluster.work/plan-settlement settlement))
+            :seon.turn/plan-settlement settlement))
        (testing "closing the run cannot falsely settle its plan"
          (db/transact! connection
-                     [[:db/add [:seon.cluster.run/id run-id]
-                       :seon.cluster.run/closed-at now]])
+                     [[:db/add [:seon.turn/id run-id]
+                       :seon.turn/closed-at now]])
          (is (false?
-              (:seon.cluster.work/settled?
+              (:seon.turn/settled?
                (work/plan-settlement @connection run-id)))))))))

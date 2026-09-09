@@ -28,8 +28,8 @@
                :seon.db/connection connection
                :seon.db/db @connection
                :seon.cluster.agent/id "juniper"
-               :seon.cluster.eval/source "(my.message/inbox (seon.db/db) \"juniper\")"
-               :seon.cluster.eval/ns [:seon.ns/name 'user]
+               :seon.eval/source "(my.message/inbox (seon.db/db) \"juniper\")"
+               :seon.eval/ns [:seon.ns/name 'user]
                :seon.sci.admit/caps (config/result-caps (config/defaults))
                :seon.sci.eval/time-limit-ms 5000
                :seon.config/on-core-error :panic}))

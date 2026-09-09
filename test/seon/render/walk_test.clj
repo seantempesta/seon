@@ -37,16 +37,16 @@
    [{:seon.ns/name agent-namespace}
     {:seon.cluster.agent/id agent-id
      :seon.cluster.agent/namespace [:seon.ns/name agent-namespace]}
-    {:seon.cluster.run/id "render-walk-run"
-     :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-     :seon.cluster.run/opened-at (at 0)}
-    {:seon.cluster.eval/id "render-walk-eval"
-     :seon.cluster.eval/run [:seon.cluster.run/id "render-walk-run"]
-     :seon.cluster.eval/ordinal 0
-     :seon.cluster.eval/at (at 1)
-     :seon.cluster.eval/ns [:seon.ns/name agent-namespace]
-     :seon.cluster.eval/result-edn "42"
-     :seon.cluster.eval/source "(+ 20 22)"}]))
+    {:seon.turn/id "render-walk-run"
+     :seon.turn/agent [:seon.cluster.agent/id agent-id]
+     :seon.turn/opened-at (at 0)}
+    {:seon.eval/id "render-walk-eval"
+     :seon.eval/turn [:seon.turn/id "render-walk-run"]
+     :seon.eval/ordinal 0
+     :seon.eval/at (at 1)
+     :seon.eval/ns [:seon.ns/name agent-namespace]
+     :seon.eval/result-edn "42"
+     :seon.eval/source "(+ 20 22)"}]))
 
 (deftest every-identifiable-neighbour-uses-its-declared-lookup-ref
   (support/with-database
@@ -55,7 +55,7 @@
      (db/transact!
       connection
       [{:db/id "identityless-run"
-        :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]}])
+        :seon.turn/agent [:seon.cluster.agent/id agent-id]}])
      (let [database @connection
            identity-attributes (db/populated-identity-attributes database)
            units (walk/neighborhood
@@ -73,7 +73,7 @@
                          [attribute (get entity attribute)]))
                      identity-attributes)))]
        (testing "the reverse-ref run is addressed by its declared identity"
-         (is (some #(= [:seon.cluster.run/id "render-walk-run"]
+         (is (some #(= [:seon.turn/id "render-walk-run"]
                        (:seon.render.walk/lookup %))
                    units)))
        (testing "a raw eid survives only when the entity has no identity"
@@ -147,13 +147,13 @@
      (db/transact!
       connection
       (mapv (fn [ordinal]
-              {:seon.cluster.eval/id (str "render-walk-eval-" ordinal)
-               :seon.cluster.eval/run [:seon.cluster.run/id "render-walk-run"]
-               :seon.cluster.eval/ordinal ordinal
-               :seon.cluster.eval/at (at (+ 10 ordinal))
-               :seon.cluster.eval/ns [:seon.ns/name agent-namespace]
-               :seon.cluster.eval/result-edn "42"
-               :seon.cluster.eval/source "(+ 20 22)"})
+              {:seon.eval/id (str "render-walk-eval-" ordinal)
+               :seon.eval/turn [:seon.turn/id "render-walk-run"]
+               :seon.eval/ordinal ordinal
+               :seon.eval/at (at (+ 10 ordinal))
+               :seon.eval/ns [:seon.ns/name agent-namespace]
+               :seon.eval/result-edn "42"
+               :seon.eval/source "(+ 20 22)"})
             [1 2]))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)

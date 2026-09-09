@@ -614,11 +614,11 @@
                                  "<script>raw-agent-bytes</script>"))))
        (let [evaluation
              (eval/evaluate
-              {:seon.cluster.eval/source
+              {:seon.eval/source
                (str "(defn live-html "
                     "{:malli/schema [:=> [:cat :map] :seon.render/hiccup]} "
                     "[_value] [:article {:class \"live-html\"} \"live\"])")
-               :seon.cluster.eval/ns [:seon.ns/name fixture-a]
+               :seon.eval/ns [:seon.ns/name fixture-a]
                :seon.sci.eval/ctx ctx
                :seon.sci.admit/caps caps
                :seon.sci.eval/time-limit-ms 2000
@@ -806,18 +806,18 @@
         {:seon.cluster.agent/id "source-cache-agent"
          :seon.ns/name fixture-a
          :seon.cluster/name "source-cache"})
-       [{:seon.cluster.run/id "source-cache-run"
-         :seon.cluster.run/agent
+       [{:seon.turn/id "source-cache-run"
+         :seon.turn/agent
          [:seon.cluster.agent/id "source-cache-agent"]
-         :seon.cluster.run/opened-at #inst "2026-09-06T20:00:00Z"
-         :seon.cluster.run/starting-ns [:seon.ns/name fixture-a]}
-        {:seon.cluster.eval/id "source-cache-eval"
-         :seon.cluster.eval/run
-         [:seon.cluster.run/id "source-cache-run"]
-         :seon.cluster.eval/ordinal 0
-         :seon.cluster.eval/at #inst "2026-09-06T20:00:00Z"
-         :seon.cluster.eval/source "(+ 1 1)"
-         :seon.cluster.eval/ns [:seon.ns/name fixture-a]}]))
+         :seon.turn/opened-at #inst "2026-09-06T20:00:00Z"
+         :seon.turn/starting-ns [:seon.ns/name fixture-a]}
+        {:seon.eval/id "source-cache-eval"
+         :seon.eval/turn
+         [:seon.turn/id "source-cache-run"]
+         :seon.eval/ordinal 0
+         :seon.eval/at #inst "2026-09-06T20:00:00Z"
+         :seon.eval/source "(+ 1 1)"
+         :seon.eval/ns [:seon.ns/name fixture-a]}]))
      (let [ctx (support/fork-cluster-ctx connection)
            invoke kernel/invoke
            source-invocations (atom 0)
@@ -851,7 +851,7 @@
                     ;; refused when no evaluator was named; the evaluator is a
                     ;; Var now, and a fixture that hands less than production
                     ;; hands is the defect.
-                    :seon.cluster.loop/cluster
+                    :seon.turn/cluster
                     {:seon.db/connection connection
                      :seon.cluster/name "source-cache"
                      :seon.sci.admit/caps caps
@@ -866,7 +866,7 @@
           submit-var
           (fn [_]
             (swap! submissions inc)
-            {:seon.cluster.run/id "source-cache-run"})}
+            {:seon.turn/id "source-cache-run"})}
          (fn []
            (let [first-invocations (atom {})
                  first-calls (atom {})
@@ -892,11 +892,11 @@
                          [:seon.render.web/calls registration-key])
                  _ (db/transact!
                     connection
-                    [{:seon.cluster.eval/id "source-cache-eval"
-                      :seon.cluster.eval/result-edn
+                    [{:seon.eval/id "source-cache-eval"
+                      :seon.eval/result-edn
                       "#:seon.print{:face :seon.print/number, :value 2}"}
-                     {:seon.cluster.run/id "source-cache-run"
-                      :seon.cluster.run/closed-at
+                     {:seon.turn/id "source-cache-run"
+                      :seon.turn/closed-at
                       #inst "2026-09-06T20:00:01Z"}])
                  second-invocations (atom {})
                  second-calls (atom {})
@@ -911,14 +911,14 @@
                               (request [:debug] invocations captured
                                        second-calls retained
                                        {:seon.ns/name fixture-a
-                                        :seon.cluster.run/_agent
+                                        :seon.turn/_agent
                                         [{:db/id 9001}]}))]
                          (reset! second-invocations @captured)
                          {:seon.render.call/output output}))}
                     (fn []
                       ((ns-resolve 'seon.render.web 'page-refresh)
                        (assoc invalidated
-                              :seon.cluster.loop/cluster
+                              :seon.turn/cluster
                               {:seon.db/connection connection
                                :seon.cluster/name "source-cache"
                                :seon.sci.admit/caps caps
@@ -932,7 +932,7 @@
                   (request [:context] @second-invocations third-invocations
                            third-calls {}
                            {:seon.ns/name fixture-a
-                            :seon.cluster.run/_agent [{:db/id 9001}]}))
+                            :seon.turn/_agent [{:db/id 9001}]}))
                  retained (some-> @third-invocations vals first peek)
                  invalidated-terminal
                  (target-call
@@ -952,7 +952,7 @@
                            (get-in invalidated-terminal
                                    [:seon.render.web/calls registration-key])
                            {:seon.ns/name fixture-a
-                            :seon.cluster.run/_agent [{:db/id 9001}]}))]
+                            :seon.turn/_agent [{:db/id 9001}]}))]
              (is (nil? first-output)
                  "the pending run has no invented synchronous output")
              (is (nil? (get-in retained-after-runtime-eval

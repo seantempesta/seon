@@ -21,7 +21,7 @@
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.cluster.agent :as agent]
-            [seon.cluster.work :as work]
+            [seon.turn :as work]
             [seon.blob :as blob]
             [seon.db :as db]
             [seon.env :as env]
@@ -93,7 +93,7 @@
 (defn- run-in
   [ctx source time-limit-ms]
   (eval/evaluate
-   (cond-> {:seon.cluster.eval/source source
+   (cond-> {:seon.eval/source source
             :seon.sci.admit/caps caps
             :seon.sci.eval/time-limit-ms time-limit-ms
             ;; development disposition: a codec hole must be loud
@@ -126,18 +126,18 @@
 (defn- cut?
   "The time limit fired: the evaluation carries its cut instant."
   [evaluation]
-  (some? (:seon.cluster.eval/interrupted-at evaluation)))
+  (some? (:seon.eval/interrupted-at evaluation)))
 
 (defn- failed?
   "The form failed on its own: an error with no cut instant."
   [evaluation]
-  (and (some? (:seon.cluster.eval/error evaluation))
+  (and (some? (:seon.eval/error evaluation))
        (not (cut? evaluation))))
 
 (defn- ok?
   "The form produced a value: no error and no cut instant."
   [evaluation]
-  (and (nil? (:seon.cluster.eval/error evaluation))
+  (and (nil? (:seon.eval/error evaluation))
        (not (cut? evaluation))))
 
 ;;; ---------------------------------------------------------------------------
@@ -148,13 +148,13 @@
   ;; the dial is REQUIRED, so a caller cannot forget to decide
   (is (seon.schema/valid-candidate-value?
        :seon.sci.eval/request
-       {:seon.cluster.eval/source "(+ 1 1)"
+       {:seon.eval/source "(+ 1 1)"
         :seon.sci.admit/caps caps
         :seon.sci.eval/time-limit-ms 1000
         :seon.config/on-core-error :panic}))
   (is (not (seon.schema/valid-candidate-value?
             :seon.sci.eval/request
-            {:seon.cluster.eval/source "(+ 1 1)"
+            {:seon.eval/source "(+ 1 1)"
              :seon.sci.admit/caps caps
              :seon.sci.eval/time-limit-ms 1000}))
       "no dial, no evaluation"))
@@ -182,7 +182,7 @@
                   :seon.db/db @connection
                   :seon.db/connection connection
                   :seon.cluster.agent/id "root"
-                  :seon.cluster.eval/source
+                  :seon.eval/source
                   "; generated opening non-declaration\n:opening-probe"
                   :seon.sci.admit/caps caps
                   :seon.sci.eval/time-limit-ms 2000
@@ -251,7 +251,7 @@
            (:seon.print/options evaluation)))))
 
 (deftest the-evaluator-remains-live-after-its-namespace-reloads
-  (let [request {:seon.cluster.eval/source "(+ 1 2)"
+  (let [request {:seon.eval/source "(+ 1 2)"
                  :seon.sci.admit/caps caps
                  :seon.sci.eval/time-limit-ms 10000
                  :seon.config/on-core-error :panic}
@@ -262,7 +262,7 @@
     (let [after ((requiring-resolve 'seon.sci.eval/evaluate) request)]
       (is (= 3 (:seon.sci.admit/value after))
           "ordinary arm data has no reload-sensitive class identity")
-      (is (nil? (:seon.cluster.eval/error after))))))
+      (is (nil? (:seon.eval/error after))))))
 
 (deftest isolated-one-off-evaluations-do-not-share-definitions
   (run "(def leaked 1)")
@@ -332,8 +332,8 @@
                 evaluate
                 (fn [ctx]
                   (eval/evaluate
-                   {:seon.cluster.eval/source query
-                    :seon.cluster.eval/ns [:seon.ns/name 'user]
+                   {:seon.eval/source query
+                    :seon.eval/ns [:seon.ns/name 'user]
                     :seon.sci.eval/ctx ctx
                     :seon.sci.admit/caps caps
                     :seon.sci.eval/time-limit-ms 5000
@@ -640,8 +640,8 @@
             (:seon.program/row
              (eval/evaluate
               {:seon.sci.eval/ctx ctx
-               :seon.cluster.eval/ns [:seon.ns/name 'parity]
-               :seon.cluster.eval/source source
+               :seon.eval/ns [:seon.ns/name 'parity]
+               :seon.eval/source source
                :seon.sci.admit/caps caps
                :seon.sci.eval/time-limit-ms 2000
                :seon.config/on-core-error :panic}))
@@ -669,10 +669,10 @@
 (deftest contracted-defn-renders-the-var-it-declared
   (let [def-node
         (edn/read-string
-         (:seon.cluster.eval/result-edn (run "(def plain-declaration 1)")))
+         (:seon.eval/result-edn (run "(def plain-declaration 1)")))
         defn-node
         (edn/read-string
-         (:seon.cluster.eval/result-edn
+         (:seon.eval/result-edn
           (run
            (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                 "rendered-declaration [x] x)"))))]
@@ -847,7 +847,7 @@
         (#'eval/success-evaluation
          {:seon.sci.eval/admitted
           {:seon.sci.admit/value 7
-           :seon.cluster.eval/result-edn "7"
+           :seon.eval/result-edn "7"
            :seon.sci.admit/record record}
           :seon.sci.admit/caps
           (assoc caps :seon.config.eval.result/max-string 3)
@@ -859,14 +859,14 @@
           :seon.sci.eval/defs defs
           :seon.program/row row})]
     (is (= {:seon.sci.admit/value 7
-            :seon.cluster.eval/result-edn "7"
+            :seon.eval/result-edn "7"
             :seon.print/options {:seon.print/length 4}
-            :seon.cluster.eval/ns [:seon.ns/name 'user]
+            :seon.eval/ns [:seon.ns/name 'user]
             :seon.sci.eval/ending-ns 'next
             :seon.sci.admit/record record
             :seon.program/row row
             :seon.sci.eval/defs defs
-            :seon.cluster.eval/output "restored\nabcdef"}
+            :seon.eval/out "restored\nabcdef"}
            evaluation))))
 
 (deftest failed-evaluation-assembles-failure-presence-facts
@@ -876,7 +876,7 @@
         value {:seon.error/kind :seon.sci.eval/time-limit
                :seon.error/message "Ran out of time."}
         admitted {:seon.sci.admit/value value
-                  :seon.cluster.eval/result-edn (pr-str value)}
+                  :seon.eval/result-edn (pr-str value)}
         defs [{:seon.def/id "user/x"}]
         evaluation
         (#'eval/failed-evaluation
@@ -890,17 +890,17 @@
           :seon.sci.eval/defs defs
           :seon.sci.admit/record record
           :seon.sci.admit/value value
-          :seon.cluster.eval/interrupted-at interrupted-at})]
+          :seon.eval/interrupted-at interrupted-at})]
     (is (= {:seon.sci.admit/value value
-            :seon.cluster.eval/result-edn (pr-str value)
+            :seon.eval/result-edn (pr-str value)
             :seon.print/options {:seon.print/level 3}
-            :seon.cluster.eval/ns [:seon.ns/name 'user]
+            :seon.eval/ns [:seon.ns/name 'user]
             :seon.sci.eval/ending-ns 'user
-            :seon.cluster.eval/error "Ran out of time."
+            :seon.eval/error "Ran out of time."
             :seon.sci.admit/record record
             :seon.sci.eval/defs defs
-            :seon.cluster.eval/interrupted-at interrupted-at
-            :seon.cluster.eval/output "lost\nbefore failure"}
+            :seon.eval/interrupted-at interrupted-at
+            :seon.eval/out "lost\nbefore failure"}
            evaluation))))
 
 (deftest evaluation-projection-prefers-the-live-context
@@ -939,7 +939,7 @@
           :seon.sci.eval/live-declaration? false
           :seon.sci.eval/namespace-name 'user
           :seon.sci.eval/namespace-unmap? true
-          :seon.cluster.eval/source source})
+          :seon.eval/source source})
         row (:seon.program/row result)]
     (is (true? (:seon.sci.eval/namespace-changed? result)))
     (is (= #{[:seon.fn/sym "user/discarded"]
@@ -981,13 +981,13 @@
         "the evaluated registration remains isolated from global candidates")))
 
 (deftest the-dispositions-are-callable-and-come-back-as-values
-  (let [evaluation (run "(my.run/complete \"done\")")]
+  (let [evaluation (run "(my.turn/complete \"done\")")]
     (is (ok? evaluation))
-    (is (= {:my.run/disposition :completed :my.run/result "done"}
+    (is (= {:my.turn/disposition :completed :my.turn/result "done"}
            (:seon.sci.admit/value evaluation))
         "the loop reads its disposition out of exactly this"))
-  (let [evaluation (run "(my.run/wait \"later\")")]
-    (is (= :wait (:my.run/disposition (:seon.sci.admit/value evaluation))))))
+  (let [evaluation (run "(my.turn/wait \"later\")")]
+    (is (= :wait (:my.turn/disposition (:seon.sci.admit/value evaluation))))))
 
 (deftest an-unbound-var-remains-structured-after-production-admission
   ;; A BARE HOST REFERENCE AT THE ROOT IS MISSING, not described: sci's
@@ -999,25 +999,25 @@
         nested (run "(do (declare zy) {:unbound zy})")
         admitted (:seon.sci.admit/value nested)]
     (is (= :unserializable (:seon.eval/missing bare)))
-    (is (not (contains? bare :seon.cluster.eval/result-edn))
+    (is (not (contains? bare :seon.eval/result-edn))
         "and it stores no node to bind a handle to")
     (is (= {:unbound {:seon.sci.admit/opaque "sci.impl.vars.SciUnbound"}}
            admitted)
         "the real evaluation preserves a value-level marker; no error string
          is parsed")
     (is (work/unbound-value? admitted))
-    (is (nil? (:seon.cluster.eval/error bare))
+    (is (nil? (:seon.eval/error bare))
         "sci produced a value; E2-PRIME, not the evaluator, classifies it red")))
 
 (deftest a-failed-evaluation-records-reconstructable-throwable-data
   (let [evaluation (run "(/ 1 0)")
         triage-data
-        (edn/read-string (:seon.cluster.eval/triage-edn evaluation))]
+        (edn/read-string (:seon.eval/triage-edn evaluation))]
     (is (= "Divide by zero" (:clojure.error/cause triage-data)))
     (is (= :execution (:clojure.error/phase triage-data)))
     (is (= 'java.lang.ArithmeticException
            (:clojure.error/class triage-data)))
-    (is (= "Divide by zero" (:seon.cluster.eval/error evaluation)))))
+    (is (= "Divide by zero" (:seon.eval/error evaluation)))))
 
 (deftest an-instrumented-multi-arity-miss-reads-like-clojure
   (test-support/with-database
@@ -1036,7 +1036,7 @@
             (is (= (str "Wrong number of args (0) passed to: my.message/send"
                         "; declared arglists: ([to content] [to content about])")
                    (:seon.error/message failure)
-                   (:seon.cluster.eval/error evaluation)))
+                   (:seon.eval/error evaluation)))
             (is (= :seon.instrument/contract-violated
                    (:seon.error/kind failure)))
             (is (= 0 (get-in failure
@@ -1044,7 +1044,7 @@
             (is (= '[[to content] [to content about]]
                    (get-in failure
                            [:seon.error/data :seon.instrument/arglists])))
-            (is (not (str/includes? (:seon.cluster.eval/result-edn evaluation)
+            (is (not (str/includes? (:seon.eval/result-edn evaluation)
                                     ":malli.core/invalid-schema"))))
           (finally
             (instrument/remove!)))))))
@@ -1086,13 +1086,13 @@
             uncontracted-doc
             (run-in ctx "(doc fixture.doc/uncontracted)" 2000)
             giant-doc (run-in ctx "(doc fixture.doc/giant)" 2000)
-            read-output (:seon.cluster.eval/output read-doc)
-            multi-output (:seon.cluster.eval/output multi-doc)
+            read-output (:seon.eval/out read-doc)
+            multi-output (:seon.eval/out multi-doc)
             uncontracted-output
-            (:seon.cluster.eval/output uncontracted-doc)
-            giant-output (:seon.cluster.eval/output giant-doc)]
+            (:seon.eval/out uncontracted-doc)
+            giant-output (:seon.eval/out giant-doc)]
         (is (= "decline\ninbox\nread\nsend\n"
-               (:seon.cluster.eval/output directory)))
+               (:seon.eval/out directory)))
         (is (= ['my.message/decline 'my.message/inbox
                 'my.message/read 'my.message/send]
                (:seon.sci.admit/value directory))
@@ -1151,7 +1151,7 @@
             (is (some #(str/starts-with?
                         % "       :seon.error/value  [:map")
                       (str/split-lines
-                       (:seon.cluster.eval/output nonstandard-doc))))
+                       (:seon.eval/out nonstandard-doc))))
             (is (= 'my.fs/read
                    (get-in nonstandard-doc
                            [:seon.sci.admit/value :seon.fn/sym])))))
@@ -1185,8 +1185,8 @@
             (eval/evaluate
              {:seon.sci.eval/ctx turn-ctx
               :seon.cluster.agent/id agent-id
-              :seon.cluster.eval/ns [:seon.ns/name namespace-name]
-              :seon.cluster.eval/source "(dir fixture.empty-agent)"
+              :seon.eval/ns [:seon.ns/name namespace-name]
+              :seon.eval/source "(dir fixture.empty-agent)"
               :seon.sci.admit/caps caps
               :seon.sci.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic})]
@@ -1197,9 +1197,9 @@
         (is (contains? evaluation :seon.sci.admit/value))
         (is (nil? (:seon.sci.admit/value evaluation))
             "Clojure's empty dir completes with nil")
-        (is (not (contains? evaluation :seon.cluster.eval/output))
+        (is (not (contains? evaluation :seon.eval/out))
             "an empty directory prints no output")
-        (is (nil? (:seon.cluster.eval/error evaluation)))))))
+        (is (nil? (:seon.eval/error evaluation)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary — time is the only limit
@@ -1209,14 +1209,14 @@
   (let [evaluation (deadlined "(loop [] (recur))" 300)]
     (is (not= ::hung evaluation) "the limit is the limit")
     (is (cut? evaluation))
-    (is (inst? (:seon.cluster.eval/interrupted-at evaluation))
+    (is (inst? (:seon.eval/interrupted-at evaluation))
         "the cut instant is the one fact — presence is the state")
     (is (= :time (:seon.eval/outcome (:seon.sci.admit/record evaluation))))
     (testing "and the agent is told what happened, as a value"
       (is (= :seon.sci.eval/time-limit
              (:seon.error/kind (:seon.sci.admit/value evaluation))))
       (is (re-find #"(?i)time"
-                   (:seon.cluster.eval/error evaluation))))))
+                   (:seon.eval/error evaluation))))))
 
 (deftest an-agent-cannot-catch-the-interrupt
   ;; sci's try refuses to hand the interrupt to a user catch clause, and
@@ -1506,7 +1506,7 @@
             (eval/evaluate
              {:seon.sci.eval/ctx ctx
               :seon.cluster.agent/id agent-id
-              :seon.cluster.eval/source "(ns-name *ns*)"
+              :seon.eval/source "(ns-name *ns*)"
               :seon.sci.admit/caps caps
               :seon.sci.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic})
@@ -1522,7 +1522,7 @@
         (is (= assigned-namespace
                (:seon.sci.admit/value assigned-evaluation)))
         (is (= [:seon.ns/name assigned-namespace]
-               (:seon.cluster.eval/ns assigned-evaluation))
+               (:seon.eval/ns assigned-evaluation))
             "an evaluation without an explicit form namespace opens at the assignment")
         (is (failed? external)
             "loaded dependencies are not first-party merely because loaded")))))
@@ -1541,22 +1541,22 @@
             (eval/evaluate
              {:seon.sci.eval/ctx ctx
               :seon.cluster.agent/id "scoped-agent"
-              :seon.cluster.run/id "scoped-run"
-              :seon.cluster.eval/ordinal 7
-              :seon.cluster.eval/source "(my.run/complete \"done\")"
+              :seon.turn/id "scoped-run"
+              :seon.eval/ordinal 7
+              :seon.eval/source "(my.turn/complete \"done\")"
               :seon.sci.admit/caps caps
               :seon.sci.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic})]
-        (is (= {:my.run/disposition :completed
-                :my.run/result "done"}
+        (is (= {:my.turn/disposition :completed
+                :my.turn/result "done"}
                (:seon.sci.admit/value evaluation)))
         (is (some #(= {:seon.cluster.agent/id "scoped-agent"
-                       :seon.cluster.run/id "scoped-run"
-                       :seon.cluster.eval/ordinal 7}
+                       :seon.turn/id "scoped-run"
+                       :seon.eval/ordinal 7}
                       (select-keys %
                                    [:seon.cluster.agent/id
-                                    :seon.cluster.run/id
-                                    :seon.cluster.eval/ordinal]))
+                                    :seon.turn/id
+                                    :seon.eval/ordinal]))
                   @seen)
             "SCI's actual call-preparation hook sees this form's turn members")))))
 
@@ -1575,8 +1575,8 @@
                 evaluate
                 (fn [ctx source]
                   (eval/evaluate
-                   {:seon.cluster.eval/source source
-                    :seon.cluster.eval/ns [:seon.ns/name 'user]
+                   {:seon.eval/source source
+                    :seon.eval/ns [:seon.ns/name 'user]
                     :seon.sci.eval/ctx ctx
                     :seon.sci.admit/caps caps
                     :seon.sci.eval/time-limit-ms 5000
@@ -1620,7 +1620,7 @@
             (is (= ["ambient-b"] (:seon.sci.admit/value read-b))
                 "each sibling derives custody from its own ctx")
             (is (= ["ambient-a"] (:seon.sci.admit/value read-a-again)))
-            (is (nil? (:seon.cluster.eval/error write)))
+            (is (nil? (:seon.eval/error write)))
             (is (= "ambient-message"
                    (:seon.sci.admit/value read-written))
                 "a declared write is visible to the next evaluation")
@@ -1851,9 +1851,9 @@
                                      [(ok? evaluation)
                                       (failed? evaluation)
                                       (cut? evaluation)])))
-                 (string? (:seon.cluster.eval/result-edn evaluation))
+                 (string? (:seon.eval/result-edn evaluation))
                  (do (edn/read-string
-                      (:seon.cluster.eval/result-edn evaluation))
+                      (:seon.eval/result-edn evaluation))
                      true)
                  (seon.schema/valid-candidate-value?
                   :seon.sci.eval/evaluation evaluation)))
@@ -2031,7 +2031,7 @@
         (is (= :seon.sci.kernel/already-armed
                (:seon.error/kind (:seon.sci.admit/value evaluation)))
             "a refusal at an agent-facing operation is a value, never a throw")
-        (is (some? (:seon.cluster.eval/error evaluation))
+        (is (some? (:seon.eval/error evaluation))
             "presence is the state, so a preserved refusal still carries the
              message the loop reads — it must never store a nil there"))
       ;; `sci/fork` is `(update ctx :env …)`, so it PRESERVES the guard key
@@ -2167,38 +2167,38 @@
            :seon.cluster/name "result-rehydration"}])
         (db/transact!
          connection
-         [{:seon.cluster.run/id "rehydration-run"
-           :seon.cluster.run/agent [:seon.cluster.agent/id "rehydrator"]
-           :seon.cluster.run/opened-at (java.util.Date.)}
+         [{:seon.turn/id "rehydration-run"
+           :seon.turn/agent [:seon.cluster.agent/id "rehydrator"]
+           :seon.turn/opened-at (java.util.Date.)}
           ;; TWO RUNS OF ONE AGENT, both at ordinal 0. Under the ordinal
           ;; spelling this replaced they were one name for two values.
-          {:seon.cluster.run/id "rehydration-run-2"
-           :seon.cluster.run/agent [:seon.cluster.agent/id "rehydrator"]
-           :seon.cluster.run/opened-at (java.util.Date.)}
-          {:seon.cluster.eval/id "[\"rehydration-run\" 0]"
-           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run"]
-           :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/at (java.util.Date.)
-           :seon.cluster.eval/source "[1 2 3]"
-           :seon.cluster.eval/result-edn
+          {:seon.turn/id "rehydration-run-2"
+           :seon.turn/agent [:seon.cluster.agent/id "rehydrator"]
+           :seon.turn/opened-at (java.util.Date.)}
+          {:seon.eval/id "[\"rehydration-run\" 0]"
+           :seon.eval/turn [:seon.turn/id "rehydration-run"]
+           :seon.eval/ordinal 0
+           :seon.eval/at (java.util.Date.)
+           :seon.eval/source "[1 2 3]"
+           :seon.eval/result-edn
            (str "#:seon.print{:face :seon.print/vector, :items ["
                 "#:seon.print{:face :seon.print/number, :value 1} "
                 "#:seon.print{:face :seon.print/number, :value 2} "
                 "#:seon.print{:face :seon.print/number, :value 3}]}")}
           ;; A node that kept only a name never held the value.
-          {:seon.cluster.eval/id "[\"rehydration-run\" 1]"
-           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run"]
-           :seon.cluster.eval/ordinal 1
-           :seon.cluster.eval/at (java.util.Date.)
-           :seon.cluster.eval/source "(atom 1)"
-           :seon.cluster.eval/result-edn
+          {:seon.eval/id "[\"rehydration-run\" 1]"
+           :seon.eval/turn [:seon.turn/id "rehydration-run"]
+           :seon.eval/ordinal 1
+           :seon.eval/at (java.util.Date.)
+           :seon.eval/source "(atom 1)"
+           :seon.eval/result-edn
            "#:seon.print{:face :seon.print/object, :name \"clojure.lang.Atom\"}"}
-          {:seon.cluster.eval/id "[\"rehydration-run-2\" 0]"
-           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run-2"]
-           :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/at (java.util.Date.)
-           :seon.cluster.eval/source "[4 5]"
-           :seon.cluster.eval/result-edn
+          {:seon.eval/id "[\"rehydration-run-2\" 0]"
+           :seon.eval/turn [:seon.turn/id "rehydration-run-2"]
+           :seon.eval/ordinal 0
+           :seon.eval/at (java.util.Date.)
+           :seon.eval/source "[4 5]"
+           :seon.eval/result-edn
            (str "#:seon.print{:face :seon.print/vector, :items ["
                 "#:seon.print{:face :seon.print/number, :value 4} "
                 "#:seon.print{:face :seon.print/number, :value 5}]}")}
@@ -2206,24 +2206,24 @@
           ;; the storage bound stores no node at all — no window, no page —
           ;; so there is nothing for the fork to bind and a later form
           ;; naming it gets sci's ordinary unresolved symbol.
-          {:seon.cluster.eval/id "[\"rehydration-run-2\" 1]"
-           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run-2"]
-           :seon.cluster.eval/ordinal 1
-           :seon.cluster.eval/at (java.util.Date.)
-           :seon.cluster.eval/source "(range)"
+          {:seon.eval/id "[\"rehydration-run-2\" 1]"
+           :seon.eval/turn [:seon.turn/id "rehydration-run-2"]
+           :seon.eval/ordinal 1
+           :seon.eval/at (java.util.Date.)
+           :seon.eval/source "(range)"
            :seon.eval/missing :over-bound
            :seon.eval/size 8388608}
           ;; And the other reason: the walk could only describe the value.
-          {:seon.cluster.eval/id "[\"rehydration-run-2\" 2]"
-           :seon.cluster.eval/run [:seon.cluster.run/id "rehydration-run-2"]
-           :seon.cluster.eval/ordinal 2
-           :seon.cluster.eval/at (java.util.Date.)
-           :seon.cluster.eval/source "(async/chan)"
+          {:seon.eval/id "[\"rehydration-run-2\" 2]"
+           :seon.eval/turn [:seon.turn/id "rehydration-run-2"]
+           :seon.eval/ordinal 2
+           :seon.eval/at (java.util.Date.)
+           :seon.eval/source "(async/chan)"
            :seon.eval/missing :unserializable}])
         (let [database @connection
               eid (fn [evaluation-id]
                     (:db/id (db/pull database [:db/id]
-                                     [:seon.cluster.eval/id evaluation-id])))
+                                     [:seon.eval/id evaluation-id])))
               first-handle (admit/result-handle (eid "[\"rehydration-run\" 0]"))
               second-handle (admit/result-handle (eid "[\"rehydration-run-2\" 0]"))
               opaque-handle (admit/result-handle (eid "[\"rehydration-run\" 1]"))
@@ -2238,7 +2238,7 @@
                      :seon.db/db database
                      :seon.db/connection connection
                      :seon.cluster.agent/id "rehydrator"
-                     :seon.cluster.run/id "rehydration-run-2"}))]
+                     :seon.turn/id "rehydration-run-2"}))]
           (is (not= first-handle second-handle)
               "two runs at ordinal 0 mint two handles, never one")
           (is (every? #(= 'result (symbol (namespace %)))

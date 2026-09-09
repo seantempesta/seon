@@ -12,7 +12,7 @@
            run (fn [source]
                  (evaluation/evaluate
                   {:seon.sci.eval/ctx ctx
-                   :seon.cluster.eval/source source
+                   :seon.eval/source source
                    :seon.sci.admit/caps (config/result-caps (config/defaults))
                    :seon.sci.eval/time-limit-ms 2000
                    :seon.config/on-core-error :panic}))
@@ -31,7 +31,7 @@
        (is (seq (:seon.fn/arities row)))
        (is (seq (get-in row [:seon.fn/arities 0 :seon.fn.arity/input-refs])))
        (doseq [result [directory documentation missing missing-ns]]
-         (is (empty? (:seon.cluster.eval/output result))))
+         (is (empty? (:seon.eval/out result))))
        (is (= :seon.sci.eval/documentation-unavailable
               (get-in missing [:seon.sci.admit/value :seon.error/kind])))
        (is (= :seon.sci.eval/documentation-unavailable

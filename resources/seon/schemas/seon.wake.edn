@@ -22,7 +22,7 @@
             :unanswered
             [:map
              {:description
-              "One wake as `seon.cluster.work/unanswered-wakes` returns it: the entity carrying the datom, which attribute carried it, and its transaction. The message keys are present only when the wake is a message."}
+              "One wake as `seon.turn/unanswered-wakes` returns it: the entity carrying the datom, which attribute carried it, and its transaction. The message keys are present only when the wake is a message."}
              [:db/id :int]
              [:seon.wake/attribute :seon.wake/attribute]
              [:seon.wake/t :seon.wake/t]

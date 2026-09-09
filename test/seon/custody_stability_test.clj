@@ -127,8 +127,8 @@
 (defn- evaluate-in
   [ctx source]
   (eval/evaluate
-   {:seon.cluster.eval/source source
-    :seon.cluster.eval/ns [:seon.ns/name 'user]
+   {:seon.eval/source source
+    :seon.eval/ns [:seon.ns/name 'user]
     :seon.sci.eval/ctx ctx
     :seon.sci.admit/caps caps
     :seon.sci.eval/time-limit-ms 5000
@@ -232,7 +232,7 @@
                         "@@#'seon.cluster/root-store-holder"
                         "@@#'seon.cluster.store/held-flocks"
                         "@@#'seon.sci.eval/generator-ctx"]]
-          (is (some? (:seon.cluster.eval/error (evaluate-in ctx source)))
+          (is (some? (:seon.eval/error (evaluate-in ctx source)))
               source))))))
 
 (deftest foreign-context-integrity-is-invariant-under-agent-evaluation
@@ -285,8 +285,8 @@
                     '[:find [?id ...]
                       :where [_ :seon.cluster.message/id ?id]]
                     @connection)))]
-            (is (nil? (:seon.cluster.eval/error own)))
-            (is (nil? (:seon.cluster.eval/error ambient)))
+            (is (nil? (:seon.eval/error own)))
+            (is (nil? (:seon.eval/error ambient)))
             (is (= :seon.db/foreign-connection
                    (get-in foreign
                            [:seon.sci.admit/value :seon.error/kind])))

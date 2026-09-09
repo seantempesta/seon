@@ -9,17 +9,17 @@
    (fn [connection]
      (let [run-id "context-reference-run"
            evaluation-ids ["context-reference-e0" "context-reference-e1"]
-           evaluation-refs (set (map #(vector :seon.cluster.eval/id %)
+           evaluation-refs (set (map #(vector :seon.eval/id %)
                                      evaluation-ids))
            seed (db/transact!
                  connection
-                 (into [{:seon.cluster.run/id run-id}]
+                 (into [{:seon.turn/id run-id}]
                        (map-indexed
                         (fn [ordinal id]
-                          {:seon.cluster.eval/id id
-                           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-                           :seon.cluster.eval/ordinal ordinal
-                           :seon.cluster.eval/result-edn (pr-str ordinal)})
+                          {:seon.eval/id id
+                           :seon.eval/turn [:seon.turn/id run-id]
+                           :seon.eval/ordinal ordinal
+                           :seon.eval/result-edn (pr-str ordinal)})
                         evaluation-ids)))
            _ (is (nil? (:seon.error/kind seed)))
            rendered {:seon.db/db @connection
@@ -33,7 +33,7 @@
                        :seon.context.contribution/tokens 7
                        :seon.context.contribution/evaluations evaluation-refs}]}
            transaction (context/capture-tx
-                        {:seon.cluster.run/id run-id
+                        {:seon.turn/id run-id
                          :seon.cluster.prompt/rendered-context rendered})
            capture-id (:seon.context.capture/id (first transaction))
            committed (db/transact! connection transaction)
@@ -42,18 +42,18 @@
                      [{:seon.context.capture/contributions
                        [:seon.context.contribution/position
                         {:seon.context.contribution/evaluations
-                         [:seon.cluster.eval/id :seon.cluster.eval/ordinal]}]}]
+                         [:seon.eval/id :seon.eval/ordinal]}]}]
                      [:seon.context.capture/id capture-id])
            contribution (first (:seon.context.capture/contributions selected))]
        (is (nil? (:seon.error/kind committed)))
        (is (= 0 (:seon.context.contribution/position contribution)))
        (is (= (set evaluation-ids)
-              (set (map :seon.cluster.eval/id
+              (set (map :seon.eval/id
                         (:seon.context.contribution/evaluations contribution)))))
        (is (= 2 (db/q '[:find (count ?e) .
-                        :where [?e :seon.cluster.eval/id]] @connection))
+                        :where [?e :seon.eval/id]] @connection))
            "capturing context references both original evaluations without copying them")
-       (is (not-any? #(or (:seon.cluster.eval/source %)
-                         (:seon.cluster.eval/result-edn %))
+       (is (not-any? #(or (:seon.eval/source %)
+                         (:seon.eval/result-edn %))
                      (:seon.context.capture/contributions (first transaction)))
            "contributions carry references rather than source or result copies")))))

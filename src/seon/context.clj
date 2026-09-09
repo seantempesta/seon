@@ -9,7 +9,7 @@
   peers are, which message this run answers. What LEFT — `interruption-ai`
   and `continuity-ai` — restated neighbourhood facts, and now lives in
   the lenses of the families that own those facts
-  (`seon.cluster.run/render-ai`, `render-receipt-ai`), where a page, a
+  (`seon.turn/render-ai`, `render-receipt-ai`), where a page, a
   debug view and another agent's neighbourhood are told the same true
   thing by the same function instead of only the prompt.
   `seon.cluster.prompt` keeps only selection, validation, ordered
@@ -42,7 +42,7 @@
   — capture with no attempt row, evidence the call may never have
   fired; kill after — today's attempt-row story. Nothing re-executes."
   (:require [seon.ai.tokens :as tokens]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.db :as db]
             [seon.error :as error]
             [seon.schema :as schema]
@@ -117,28 +117,28 @@
 (defn- eligible-run
   [database request]
   (let [agent-id (:seon.cluster.agent/id request)
-        run-id (:seon.cluster.run/id request)
+        run-id (:seon.turn/id request)
         agent-data (transaction-read
                     (db/pull database [:db/id]
                              [:seon.cluster.agent/id agent-id]))
         run-data (transaction-read
                   (db/pull database
-                           [:db/id :seon.cluster.run/closed-at
-                            {:seon.cluster.run/agent [:db/id]}
-                            {:seon.cluster.eval/_run
+                           [:db/id :seon.turn/closed-at
+                            {:seon.turn/agent [:db/id]}
+                            {:seon.eval/_run
                              [:db/id :seon.eval/value
-                              :seon.cluster.eval/error
-                              :seon.cluster.eval/interrupted-at]}]
-                           [:seon.cluster.run/id run-id]))
-        evaluations (:seon.cluster.eval/_run run-data)
+                              :seon.eval/error
+                              :seon.eval/interrupted-at]}]
+                           [:seon.turn/id run-id]))
+        evaluations (:seon.eval/_run run-data)
         evaluation-refs (set (map :db/id evaluations))
         rule (cond
                (nil? agent-data) ::no-such-agent
                (nil? run-data) ::no-such-run
                (not= (:db/id agent-data)
-                     (get-in run-data [:seon.cluster.run/agent :db/id]))
+                     (get-in run-data [:seon.turn/agent :db/id]))
                ::foreign-run
-               (not (:seon.cluster.run/closed-at run-data)) ::run-open
+               (not (:seon.turn/closed-at run-data)) ::run-open
                (empty? evaluations) ::no-evaluations
                (not-every? run/terminal? evaluations) ::unfinished-evaluation)]
     {:agent-data agent-data
@@ -151,7 +151,7 @@
   (let [refusal (selection-refusal
                  rule request
                  {:seon.cluster.agent/id (:seon.cluster.agent/id request)
-                  :seon.cluster.run/id (:seon.cluster.run/id request)
+                  :seon.turn/id (:seon.turn/id request)
                   :seon.context.contribution/id
                   (:seon.context.contribution/id request)})]
     (throw (ex-info (:seon.error/message refusal) refusal))))
@@ -276,24 +276,24 @@
                  (db/q '[:find ?ordinal ?evaluation
                          :in $ ?run
                          :where
-                         [?evaluation :seon.cluster.eval/run ?run]
-                         [?evaluation :seon.cluster.eval/ordinal ?ordinal]]
+                         [?evaluation :seon.eval/turn ?run]
+                         [?evaluation :seon.eval/ordinal ?ordinal]]
                        database run-eid))))
 
 (defn- ordered-run-source
   [database run-eid]
   (mapv (fn [[ordinal source namespace-name]]
-          {:seon.cluster.eval/ordinal ordinal
-           :seon.cluster.eval/source source
+          {:seon.eval/ordinal ordinal
+           :seon.eval/source source
            :seon.ns/name namespace-name})
         (sort-by first
                  (db/q '[:find ?ordinal ?source ?namespace-name
                          :in $ ?run
                          :where
-                         [?form :seon.cluster.eval/run ?run]
-                         [?form :seon.cluster.eval/ordinal ?ordinal]
-                         [?form :seon.cluster.eval/source ?source]
-                         [?form :seon.cluster.eval/ns ?namespace]
+                         [?form :seon.eval/turn ?run]
+                         [?form :seon.eval/ordinal ?ordinal]
+                         [?form :seon.eval/source ?source]
+                         [?form :seon.eval/ns ?namespace]
                          [?namespace :seon.ns/name ?namespace-name]]
                        database run-eid))))
 
@@ -308,27 +308,27 @@
     [:or :seon.context/comparison :seon.error/value]]}
   [database request]
   (let [agent-id (:seon.cluster.agent/id request)
-        run-id (:seon.cluster.run/id request)
-        evaluated-sources (:seon.cluster.loop/evaluated-sources request)
+        run-id (:seon.turn/id request)
+        evaluated-sources (:seon.turn/evaluated-sources request)
         in-memory? (some? evaluated-sources)
         contribution-id (:seon.context.contribution/id request)
         contribution
         (db/pull database
                  [{:seon.context.contribution/agent [:db/id]}
                   {:seon.context.contribution/evaluations
-                   [:db/id {:seon.cluster.eval/run [:db/id]}]}]
+                   [:db/id {:seon.eval/turn [:db/id]}]}]
                  [:seon.context.contribution/id contribution-id])
         agent-data (db/pull database [:db/id]
                        [:seon.cluster.agent/id agent-id])
         refreshed
         (when-not in-memory? (db/pull database
-                 [:db/id :seon.cluster.run/closed-at
-                 {:seon.cluster.run/agent [:db/id]}]
-                 [:seon.cluster.run/id run-id]))
-        eligibility (when (:seon.cluster.run/closed-at refreshed)
+                 [:db/id :seon.turn/closed-at
+                 {:seon.turn/agent [:db/id]}]
+                 [:seon.turn/id run-id]))
+        eligibility (when (:seon.turn/closed-at refreshed)
                       (eligible-run database request))
         baseline-runs
-        (set (keep #(get-in % [:seon.cluster.eval/run :db/id])
+        (set (keep #(get-in % [:seon.eval/turn :db/id])
                    (:seon.context.contribution/evaluations contribution)))
         rule (cond
                (:seon.error/kind contribution) contribution
@@ -343,7 +343,7 @@
                (and (not in-memory?) (nil? refreshed)) ::no-such-run
                (and (not in-memory?)
                     (not= (:db/id agent-data)
-                          (get-in refreshed [:seon.cluster.run/agent :db/id])))
+                          (get-in refreshed [:seon.turn/agent :db/id])))
                ::foreign-run
                (not= 1 (count baseline-runs)) ::contribution-run-ambiguous
                (and in-memory?
@@ -355,18 +355,18 @@
       (map? rule) rule
       rule (selection-refusal rule request
                               {:seon.context.contribution/id contribution-id
-                               :seon.cluster.run/id run-id})
-      (and (not in-memory?) (not (:seon.cluster.run/closed-at refreshed)))
+                               :seon.turn/id run-id})
+      (and (not in-memory?) (not (:seon.turn/closed-at refreshed)))
       {:seon.context.comparison/status :pending}
       :else
       (let [baseline-run (first baseline-runs)
             current-source
             (if in-memory?
-              (mapv (fn [{ordinal :seon.cluster.eval/ordinal
-                          form :seon.cluster.loop/admitted-form}]
-                      {:seon.cluster.eval/ordinal ordinal
-                       :seon.cluster.eval/source (:seon.cluster.eval/source form)
-                       :seon.ns/name (second (:seon.cluster.eval/ns form))})
+              (mapv (fn [{ordinal :seon.eval/ordinal
+                          form :seon.turn/admitted-form}]
+                      {:seon.eval/ordinal ordinal
+                       :seon.eval/source (:seon.eval/source form)
+                       :seon.ns/name (second (:seon.eval/ns form))})
                     evaluated-sources)
               (ordered-run-source database (:db/id refreshed)))
             same-source? (= (ordered-run-source database baseline-run) current-source)]
@@ -375,7 +375,7 @@
           (cond-> {:seon.context.comparison/status :ready
            :seon.context.comparison/baseline-evaluations
            (ordered-run-evaluations database baseline-run)}
-            in-memory? (assoc :seon.cluster.loop/evaluated-sources evaluated-sources)
+            in-memory? (assoc :seon.turn/evaluated-sources evaluated-sources)
             (not in-memory?)
             (assoc :seon.context.comparison/refreshed-evaluations
                    (ordered-run-evaluations database (:db/id refreshed)))))))))
@@ -397,7 +397,7 @@
   it swallowed a message transacted with the turn that answered it."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
-         [:maybe :seon.cluster.run/id]
+         [:maybe :seon.turn/id]
          :seon.cluster.agent/id
          :int]
     :keyword]}
@@ -414,7 +414,7 @@
           run-t (db/q '[:find ?tx .
                         :in $ ?run-id
                         :where
-                        [?run :seon.cluster.run/id ?run-id ?tx]]
+                        [?run :seon.turn/id ?run-id ?tx]]
                       database run-id)]
       (cond
         (or (nil? message-t) (nil? run-t)) ::history
@@ -425,8 +425,8 @@
                           :in $ ?agent-id ?run-t
                           :where
                           [?agent :seon.cluster.agent/id ?agent-id]
-                          [?run :seon.cluster.run/agent ?agent]
-                          [?run :seon.cluster.run/id _ ?tx]
+                          [?run :seon.turn/agent ?agent]
+                          [?run :seon.turn/id _ ?tx]
                           [(< ?tx ?run-t)]]
                         database agent-id run-t)
                   0)]
@@ -494,11 +494,10 @@
   {:malli/schema [:=> [:cat :seon.context/capture-request]
                   :seon.store/transaction-data]}
   [request]
-  (let [{run-id :seon.cluster.run/id
+  (let [{run-id :seon.turn/id
          rendered :seon.cluster.prompt/rendered-context
          database :seon.db/db
-         failure :seon.error/value
-         live :seon.cluster.run/live-processes} request
+         failure :seon.error/value} request
         rendered-arm (find request :seon.cluster.prompt/rendered-context)
         refusal-arm (find request :seon.error/value)
         _ (when (= (some? rendered-arm) (some? refusal-arm))
@@ -516,7 +515,7 @@
         basis-t (long (db/basis-t db))
         capture-id (str run-id "-context-" basis-t)]
     [(cond-> {:seon.context.capture/id capture-id
-              :seon.context.capture/run [:seon.cluster.run/id run-id]
+              :seon.context.capture/run [:seon.turn/id run-id]
               :seon.context.capture/basis-t basis-t}
        rendered
        (assoc :seon.context.capture/prompt
@@ -530,8 +529,7 @@
                     (:seon.context/contributions rendered)))
        failure
        (assoc :seon.error/kind (:seon.error/kind failure)
-              :seon.error/message (:seon.error/message failure))
-       live (assoc :seon.cluster.run/live-processes live))]))
+              :seon.error/message (:seon.error/message failure)))]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one digest seam

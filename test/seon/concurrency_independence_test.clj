@@ -17,9 +17,9 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.cluster.loop :as loop]
-            [seon.cluster.run :as run]
-            [seon.cluster.work :as work]
+            [seon.turn :as loop]
+            [seon.turn :as run]
+            [seon.turn :as work]
             [seon.config :as config]
             [seon.db :as db]
             [seon.eval.drive :as drive]
@@ -76,8 +76,8 @@
      (db/q '[:find ?closed-at .
              :in $ ?run-id
              :where
-             [?run :seon.cluster.run/id ?run-id]
-             [?run :seon.cluster.run/closed-at ?closed-at]]
+             [?run :seon.turn/id ?run-id]
+             [?run :seon.turn/closed-at ?closed-at]]
            database (bootstrap/run-id "root")))))
 
 (defn- with-cluster
@@ -139,11 +139,11 @@
          (str "(" function-name " 1)")
          (str "(my.message/send " (pr-str next-agent-id) " "
               (pr-str (::payload spec)) ")")
-         (str "(my.run/complete "
+         (str "(my.turn/complete "
               (pr-str (str "complete|" agent-id "|")) ")")]]
     (mapv (fn [source]
             {:seon.ns/name namespace-name
-             :seon.cluster.eval/source source})
+             :seon.eval/source source})
           sources)))
 
 (defn- scenario-specs
@@ -187,7 +187,7 @@
 
 (defn- pause-scenario-mailboxes!
   [instance specs]
-  (let [handle (:seon.cluster.loop/cluster instance)
+  (let [handle (:seon.turn/cluster instance)
         routing (:seon.cluster.agent/routing instance)
         quiesced (async/promise-chan)]
     ;; The armer channel orders this request after the creation wake. Its
@@ -208,8 +208,8 @@
   [instance specs]
   (let [connection (:seon.boot/cluster-connection instance)
         database @connection
-        process (get-in instance [:seon.cluster.loop/cluster
-                                  :seon.cluster.run/process])
+        process (get-in instance [:seon.turn/cluster
+                                  :seon.db.process/id])
         now (Date.)
         run-tx
         (mapcat
@@ -217,14 +217,14 @@
            (run/system-run-tx
             database
             {:seon.cluster.agent/id (::agent-id spec)
-             :seon.cluster.run/id (::run-id spec)
-             :seon.cluster.run/process process
-             :seon.cluster.run/opened-at now
-             :seon.cluster.run/starting-ns
+             :seon.turn/id (::run-id spec)
+             :seon.db.process/id process
+             :seon.turn/opened-at now
+             :seon.turn/starting-ns
              [:seon.ns/name (::namespace spec)]
-             :seon.cluster.run/plan-digest
+             :seon.turn/plan-digest
              (digest-value (::sources spec))
-             :seon.cluster.run/sources (::sources spec)}))
+             :seon.turn/sources (::sources spec)}))
          specs)
         result
         (db/transact!
@@ -239,16 +239,16 @@
 (defn- fold-scenario-runs!
   [instance specs]
   (let [connection (:seon.boot/cluster-connection instance)
-        handle (:seon.cluster.loop/cluster instance)
-        process (:seon.cluster.run/process handle)
+        handle (:seon.turn/cluster instance)
+        process (:seon.db.process/id handle)
         work-items
         (mapv
          (fn [spec]
-           (let [work-item (work/next-agent-work
+           (let [work-item (work/step
                             @connection
                             {:seon.cluster.agent/id (::agent-id spec)
-                             :seon.cluster.run/process process})]
-             (is (= :resume (:seon.cluster.work/situation work-item))
+                             :seon.db.process/id process})]
+             (is (= :resume (:seon.turn/situation work-item))
                  "a caller-planned run begins at the resume boundary")
              work-item))
          specs)
@@ -260,21 +260,21 @@
         (async/>!!
          completed
          (try
-           {:seon.cluster.loop/report
-            (loop/turn {:seon.cluster.loop/cluster handle
-                        :seon.cluster.work/next work-item}
+           {:seon.turn/report
+            (loop/advance! {:seon.turn/cluster handle
+                        :seon.turn/next work-item}
                        (Date.))}
            (catch Throwable failure
-             {:seon.cluster.loop/failure failure})))))
+             {:seon.turn/failure failure})))))
     (.countDown start)
     (dotimes [_ (count work-items)]
       (let [outcome
             (await-channel! completed "concurrent planned fold")
-            report (:seon.cluster.loop/report outcome)]
-        (is (nil? (:seon.cluster.loop/failure outcome))
-            (some-> (:seon.cluster.loop/failure outcome) Throwable->map pr-str))
-        (is (= :closed (:seon.cluster.loop/outcome report)))
-        (is (= form-count (:seon.cluster.loop/forms-run report)))))))
+            report (:seon.turn/report outcome)]
+        (is (nil? (:seon.turn/failure outcome))
+            (some-> (:seon.turn/failure outcome) Throwable->map pr-str))
+        (is (= :closed (:seon.turn/outcome report)))
+        (is (= form-count (:seon.turn/forms-run report)))))))
 
 (defn- await-runs-closed
   [connection run-ids]
@@ -285,8 +285,8 @@
            (db/q '[:find [?run-id ...]
                    :in $ [?run-id ...]
                    :where
-                   [?run :seon.cluster.run/id ?run-id]
-                   [?run :seon.cluster.run/closed-at _]]
+                   [?run :seon.turn/id ?run-id]
+                   [?run :seon.turn/closed-at _]]
                  database run-ids)]
        (when (= (set run-ids) (set closed))
          closed)))))
@@ -296,18 +296,18 @@
   (db/q '[:find ?receipt-id ?run-id ?agent-id ?ordinal
           :in $ [?run-id ...]
           :where
-          [?run :seon.cluster.run/id ?run-id]
-          [?run :seon.cluster.run/agent ?agent]
+          [?run :seon.turn/id ?run-id]
+          [?run :seon.turn/agent ?agent]
           [?agent :seon.cluster.agent/id ?agent-id]
-          [?receipt :seon.cluster.eval/run ?run]
-          [?receipt :seon.cluster.eval/id ?receipt-id]
-          [?receipt :seon.cluster.eval/ordinal ?ordinal]]
+          [?receipt :seon.eval/turn ?run]
+          [?receipt :seon.eval/id ?receipt-id]
+          [?receipt :seon.eval/ordinal ?ordinal]]
         database run-ids))
 
 (def ^:private receipt-failure-attributes
-  [:seon.cluster.eval/error
+  [:seon.eval/error
    :seon.error/kind
-   :seon.cluster.eval/interrupted-at])
+   :seon.eval/interrupted-at])
 
 (defn- receipt-failures
   [database run-ids]
@@ -320,9 +320,9 @@
            (db/q '[:find ?run-id ?ordinal ?value
                    :in $ [?run-id ...] ?attribute
                    :where
-                   [?run :seon.cluster.run/id ?run-id]
-                   [?receipt :seon.cluster.eval/run ?run]
-                   [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                   [?run :seon.turn/id ?run-id]
+                   [?receipt :seon.eval/turn ?run]
+                   [?receipt :seon.eval/ordinal ?ordinal]
                    [?receipt ?attribute ?value]]
                  database run-ids attribute)))
     receipt-failure-attributes)))
@@ -355,8 +355,8 @@
         (db/q '[:find ?run-id ?holder
                 :in $ [?run-id ...]
                 :where
-                [?run :seon.cluster.run/id ?run-id]
-                [?run :seon.cluster.run/process ?holder _ true]]
+                [?run :seon.turn/id ?run-id]
+                [?run :seon.db.process/id ?holder _ true]]
               (db/history database) run-ids)
         holders-by-run
         (reduce (fn [result [run-id holder]]
@@ -366,27 +366,27 @@
     (doseq [spec specs]
       (let [run-record
             (db/pull database
-                     [:seon.cluster.run/id
-                      :seon.cluster.run/process
-                      :seon.cluster.run/closed-at]
-                     [:seon.cluster.run/id (::run-id spec)])]
+                     [:seon.turn/id
+                      :seon.db.process/id
+                      :seon.turn/closed-at]
+                     [:seon.turn/id (::run-id spec)])]
         (is (= #{process} (get holders-by-run (::run-id spec)))
             "one process held the run throughout its complete history")
-        (is (some? (:seon.cluster.run/closed-at run-record)))
-        (is (nil? (:seon.cluster.run/process run-record))
+        (is (some? (:seon.turn/closed-at run-record)))
+        (is (nil? (:seon.db.process/id run-record))
             "closed custody is retracted rather than left dangling")))))
 
 (defn- assert-concurrent-progress!
   [database specs]
   (let [run-ids (mapv ::run-id specs)
         rows
-        (db/q '[:find ?run-id ?receipt-tx ?close-tx
+        (db/q '[:find ?run-id ?receipt-tx ?close
                 :in $ [?run-id ...]
                 :where
-                [?run :seon.cluster.run/id ?run-id]
-                [?run :seon.cluster.run/closed-at _ ?close-tx]
-                [?receipt :seon.cluster.eval/run ?run]
-                [?receipt :seon.cluster.eval/result-edn _ ?receipt-tx]]
+                [?run :seon.turn/id ?run-id]
+                [?run :seon.turn/closed-at _ ?close]
+                [?receipt :seon.eval/turn ?run]
+                [?receipt :seon.eval/result-edn _ ?receipt-tx]]
               database run-ids)
         first-close (apply min (map #(nth % 2) rows))
         begun-before-first-close
@@ -424,7 +424,7 @@
   [database specs]
   (doseq [spec specs]
     (let [definition-source
-          (:seon.cluster.eval/source (nth (::sources spec) 2))
+          (:seon.eval/source (nth (::sources spec) 2))
           row
           (db/pull database
                    [:seon.fn/sym
@@ -517,7 +517,7 @@
       (is (= expected-message-ids
              (agent-message-ids database (::agent-id spec)))
           "the transcript message input is exactly the incoming/outgoing ring pair")
-      (doseq [source (map :seon.cluster.eval/source (::sources spec))]
+      (doseq [source (map :seon.eval/source (::sources spec))]
         (is (str/includes? rendered source)
             "the transcript includes every form belonging to its own run"))
       (is (str/includes? rendered (::payload spec)))
@@ -536,12 +536,12 @@
 (defn- assert-plan-results!
   [database specs]
   (let [receipts-by-run
-        (group-by :seon.cluster.run/id
+        (group-by :seon.turn/id
                   (drive/run-receipts database (mapv ::run-id specs)))]
     (doseq [spec specs]
       (let [by-ordinal
             (into {}
-                  (map (juxt :seon.cluster.eval/ordinal identity))
+                  (map (juxt :seon.eval/ordinal identity))
                   (get receipts-by-run (::run-id spec)))
             query-result
             (:seon.eval.drive/value (get by-ordinal 1))
@@ -553,8 +553,8 @@
             "each agent queried exactly the rows it had just committed")
         (is (= (+ 1001 (::index spec)) call-result)
             "the contracted function call used this agent's own definition")
-        (is (= {:my.run/disposition :completed
-                :my.run/result (str "complete|" (::agent-id spec) "|")}
+        (is (= {:my.turn/disposition :completed
+                :my.turn/result (str "complete|" (::agent-id spec) "|")}
                completion))))))
 
 (defn- run-scenario!
@@ -562,8 +562,8 @@
   (let [connection (:seon.boot/cluster-connection instance)
         specs (scenario-specs scenario agent-count (Date.))
         run-ids (mapv ::run-id specs)
-        process (get-in instance [:seon.cluster.loop/cluster
-                                  :seon.cluster.run/process])
+        process (get-in instance [:seon.turn/cluster
+                                  :seon.db.process/id])
         started (System/nanoTime)]
     (create-scenario-agents! instance specs)
     (pause-scenario-mailboxes! instance specs)
@@ -592,26 +592,26 @@
             interrupted-at (Date.)]
         (db/transact!
          connection
-         [{:seon.cluster.run/id run-id}
-          {:seon.cluster.eval/id (pr-str [run-id 0])
-           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-           :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/result-edn "42"}
-          {:seon.cluster.eval/id (pr-str [run-id 1])
-           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-           :seon.cluster.eval/ordinal 1
-           :seon.cluster.eval/error "failed"}
-          {:seon.cluster.eval/id (pr-str [run-id 2])
-           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-           :seon.cluster.eval/ordinal 2
+         [{:seon.turn/id run-id}
+          {:seon.eval/id (pr-str [run-id 0])
+           :seon.eval/turn [:seon.turn/id run-id]
+           :seon.eval/ordinal 0
+           :seon.eval/result-edn "42"}
+          {:seon.eval/id (pr-str [run-id 1])
+           :seon.eval/turn [:seon.turn/id run-id]
+           :seon.eval/ordinal 1
+           :seon.eval/error "failed"}
+          {:seon.eval/id (pr-str [run-id 2])
+           :seon.eval/turn [:seon.turn/id run-id]
+           :seon.eval/ordinal 2
            :seon.error/kind :user-input}
-          {:seon.cluster.eval/id (pr-str [run-id 3])
-           :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-           :seon.cluster.eval/ordinal 3
-           :seon.cluster.eval/interrupted-at interrupted-at}])
-        (is (= #{[run-id 1 :seon.cluster.eval/error "failed"]
+          {:seon.eval/id (pr-str [run-id 3])
+           :seon.eval/turn [:seon.turn/id run-id]
+           :seon.eval/ordinal 3
+           :seon.eval/interrupted-at interrupted-at}])
+        (is (= #{[run-id 1 :seon.eval/error "failed"]
                  [run-id 2 :seon.error/kind :user-input]
-                 [run-id 3 :seon.cluster.eval/interrupted-at interrupted-at]}
+                 [run-id 3 :seon.eval/interrupted-at interrupted-at]}
                (receipt-failures @connection [run-id])))))))
 
 (deftest n-agents-fold-independently-on-one-live-cluster
@@ -620,7 +620,7 @@
                   (fn [request]
                     (swap! model-calls conj request)
                     {:seon.ai/text
-                     "(my.run/complete \"unexpected model call\")"})]
+                     "(my.turn/complete \"unexpected model call\")"})]
       (with-cluster
         (fn [instance]
           (let [timings

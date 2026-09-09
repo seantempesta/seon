@@ -39,9 +39,9 @@
               [:seon.error/basis-t
                {:optional true}
                :seon.error/basis-t]
-              [:seon.cluster.run/id
+              [:seon.turn/id
                {:optional true}
-               :seon.cluster.run/id]
+               :seon.turn/id]
               [:seon.cluster.agent/id
                {:optional true}
                :seon.cluster.agent/id]
@@ -123,9 +123,9 @@
               [:seon.error/basis-t
                {:optional true}
                :seon.error/basis-t]
-              [:seon.cluster.run/id
+              [:seon.turn/id
                {:optional true}
-               :seon.cluster.run/id]
+               :seon.turn/id]
               [:seon.cluster.agent/id
                {:optional true}
                :seon.cluster.agent/id]
@@ -196,8 +196,8 @@
              :refusal-value
              [:map
               [:seon.error/message :seon.error/message]
-              [:seon.cluster.run/rule {:optional true} :seon.cluster.run/rule]
-              [:seon.cluster.run/transition {:optional true} :seon.cluster.run/transition]],
+              [:seon.turn/rule {:optional true} :seon.turn/rule]
+              [:seon.turn/transition {:optional true} :seon.turn/transition]],
              :unclassified [:= true],
              :unclassified-error
              [:map {:seon.error/class true

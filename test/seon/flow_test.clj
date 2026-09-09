@@ -13,7 +13,7 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [malli.instrument :as mi]
-            [seon.cluster.loop :as cluster.loop]
+            [seon.turn :as cluster.loop]
             [seon.config :as config]
             [seon.flow :as sut]
             [seon.schema :as schema]
@@ -734,7 +734,7 @@
             :seon.flow/work-launcher @test-work-launcher}
            sci.eval/evaluate
            "turn-boundary-0"
-           {:seon.cluster.eval/source
+           {:seon.eval/source
             "(reduce + (map inc (range 500)))"
             :seon.sci.admit/caps
             (config/result-caps (config/defaults))

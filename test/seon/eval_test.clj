@@ -16,18 +16,18 @@
               ["a-second" 1000 "a" [[0 "a2"]]]]]
        (db/transact!
         connection
-        (into [{:seon.cluster.run/id turn-id
-                :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-                :seon.cluster.run/opened-at (java.util.Date. timestamp)}]
+        (into [{:seon.turn/id turn-id
+                :seon.turn/agent [:seon.cluster.agent/id agent-id]
+                :seon.turn/opened-at (java.util.Date. timestamp)}]
               (map (fn [[ordinal source]]
-                     {:seon.cluster.eval/id source
-                      :seon.cluster.eval/run [:seon.cluster.run/id turn-id]
-                      :seon.cluster.eval/ordinal ordinal
-                      :seon.cluster.eval/source source}) sources))))
+                     {:seon.eval/id source
+                      :seon.eval/turn [:seon.turn/id turn-id]
+                      :seon.eval/ordinal ordinal
+                      :seon.eval/source source}) sources))))
      (let [basis (db/basis-t @connection)
            history (evaluation/of-agent @connection "a")]
-       (is (= ["a0" "a1" "a2"] (mapv :seon.cluster.eval/source history)))
-       (is (= ["b0"] (mapv :seon.cluster.eval/source
+       (is (= ["a0" "a1" "a2"] (mapv :seon.eval/source history)))
+       (is (= ["b0"] (mapv :seon.eval/source
                            (evaluation/of-agent @connection "b"))))
        (is (= basis (db/basis-t @connection)))
-       (is (every? #(nil? (:seon.cluster.eval/result-edn %)) history))))))
+       (is (every? #(nil? (:seon.eval/result-edn %)) history))))))

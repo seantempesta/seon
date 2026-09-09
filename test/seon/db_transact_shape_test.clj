@@ -35,7 +35,7 @@
            :seon.schema/projection (:seon.schema/projection base-ctx)}))
         ctx (env/carry-state base-ctx (env/environment-state environment))]
     (sci.eval/evaluate
-     {:seon.cluster.eval/source
+     {:seon.eval/source
       "(seon.db-transact-shape-test/transaction-result-shape)"
       :seon.sci.eval/ctx ctx
       :seon.sci.admit/caps caps
@@ -55,5 +55,5 @@
                  ::db-after? true}
                 system-result)))
        (testing "the same function agrees inside a guarded agent evaluation"
-         (is (nil? (:seon.cluster.eval/error evaluation)))
+         (is (nil? (:seon.eval/error evaluation)))
          (is (= system-result agent-result)))))))

@@ -26,7 +26,7 @@
             [seon.cluster.process :as cluster.process]
             [seon.cluster.wake :as wake]
             [seon.error :as error]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.test.check.generators :as gen]
@@ -336,11 +336,11 @@
 
       (and (:seon.sci.admit/record value) (string? (:seon.eval/value value)))
       {:seon.dev.mcp/value
-       (assoc (select-keys value [:seon.cluster.eval/ns
+       (assoc (select-keys value [:seon.eval/ns
                                  :seon.sci.eval/ending-ns
                                  :seon.sci.admit/record
-                                 :seon.cluster.eval/error
-                                 :seon.cluster.eval/output])
+                                 :seon.eval/error
+                                 :seon.eval/out])
               :seon.dev.mcp/text (:seon.eval/value value))
        :seon.dev.mcp/windowed? false}
 
@@ -2060,51 +2060,29 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn process-identity
-  "This process's identity as a run holder: `<pid>-<start-millis>`.
-  (pid, start-instant) is the process identity the whole system already
-  uses; a bare pid is recyclable and a recycled pid claiming to hold a
-  run is the one confusion recovery must not have. The run loop's
-  handle should carry THIS value as `:seon.cluster.run/process`, so the
-  holder a run names and the holder recovery judges are the same string."
+  "The process provenance identity: `<pid>-<start-millis>`."
   ;; IT NEEDS (pid, start-instant) AND NOTHING ELSE, so that is what it
   ;; declares: `:seon.cluster.process/identity`, which every advertisement
   ;; satisfies (maps are open). Demanding the whole advertisement to compute
   ;; an identity was a lie about the dependency, and under armed contracts it
   ;; refused three fixtures that hand exactly the pair the identity IS.
   {:malli/schema [:=> [:cat :seon.cluster.process/identity]
-                  :seon.cluster.run/process]}
+                  :seon.db.process/id]}
   [advertisement]
   (str (:seon.boot/pid advertisement) "-"
        (inst-ms (:seon.boot/start-instant advertisement))))
 
 (defn- recover-runs!
-  "Settle every run held by a dead process, before anything resumes.
-  BY FACT, NEVER BY CLOCK: a run whose holder is not in the live set is
-  closed immediately, its custody and agent pointer are retracted, and
-  BOTH the run and its dangling receipts — those carrying no terminal
-  fact — get `interrupted-at` asserted (presence is the state; there is
-  no status).
-
-  The counts below are DIAGNOSTICS, never the answer. Recovery's own
-  evidence is durable: `:seon.cluster.run/interrupted-at` on every run
-  this pass cut, so a later process can still ask what the last one
-  interrupted. Reporting only the counts is what made the 2026-08-08
-  restart's honesty claim unfalsifiable — the interrupted run was
-  indistinguishable by query from a normal close.
-  No clock is consulted at all: this process just started, so on this
-  branch every other holder is provably gone (one connection per
-  branch, one process per store).
-
-  Nothing here re-opens, re-plans, or re-executes. `recover-tx` is pure
-  over the values it is handed and returns [] for a run needing
-  nothing, so a clean boot commits nothing at all."
-  [connection process]
+  "At boot, close every open turn and interrupt its unfinished evaluations.
+  The process root holds the store lock, so none belongs to a live predecessor.
+  The writer reads terminal facts inside the transaction, preserving outcomes."
+  [connection]
   (let [db @connection
         now (java.util.Date.)
         open-runs (db/q '[:find [?run-id ...]
                          :where
-                         [?run :seon.cluster.run/id ?run-id]
-                         (not [?run :seon.cluster.run/closed-at _])]
+                         [?run :seon.turn/id ?run-id]
+                         (not [?run :seon.turn/closed-at _])]
                        db)
         ;; the decision moved INSIDE the transaction (custody revision,
         ;; Revision 4): `recover-call` reads each run's receipts at
@@ -2115,14 +2093,13 @@
                          (mapcat
                           (fn [run-id]
                             (run/recover-tx
-                             {:seon.cluster.run/id run-id
-                              :seon.cluster.run/live-processes #{process}
-                              :seon.cluster.run/now now})))
+                             {:seon.turn/id run-id
+                              :seon.turn/now now})))
                          open-runs)]
     (when (seq operations)
       (require-committed!
        (db/transact! connection operations)
-       {:seon.boot/population :seon.cluster.run/recovery}))
+       {:seon.boot/population :seon.turn/recovery}))
     {:seon.boot/recovered-runs (count open-runs)
      :seon.boot/recovery-operations (count operations)}))
 
@@ -2227,7 +2204,7 @@
   "Create an absent agent inside the transaction; otherwise change nothing."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
-         :seon.cluster.run/process
+         :seon.db.process/id
          :inst
          :seon.cluster.agent/creation-request]
     :seon.store/transaction-data]}
@@ -2246,8 +2223,8 @@
            {:seon.cluster.agent/id agent-id
             :seon.cluster/name (:seon.cluster/name request)
             :seon.ns/name namespace-name
-            :seon.cluster.run/process process
-            :seon.cluster.run/opened-at now}))))
+            :seon.db.process/id process
+            :seon.turn/opened-at now}))))
 
 (defn ensure-entity!
   "Create one absent agent atomically and return its durable useful identity.
@@ -2282,8 +2259,8 @@
             (db/q '[:find ?agent-id .
                     :in $ ?run-id
                     :where
-                    [?run :seon.cluster.run/id ?run-id]
-                    [?run :seon.cluster.run/agent ?agent]
+                    [?run :seon.turn/id ?run-id]
+                    [?run :seon.turn/agent ?agent]
                     [?agent :seon.cluster.agent/id ?agent-id]]
                   database bootstrap-run-id)
             namespace-name
@@ -2294,7 +2271,7 @@
           {:seon.cluster.agent/id agent-id
            :seon.ns/name namespace-name
            :seon.cluster/name cluster-name
-           :seon.cluster.run/id bootstrap-run-id}
+           :seon.turn/id bootstrap-run-id}
           {:seon.error/kind :seon.cluster.agent/creation-incomplete
            :seon.cluster.agent/creation-incomplete agent-id
            :seon.error/message
@@ -2356,13 +2333,13 @@
                         :seon.cluster.agent/id root-agent-id
                         :seon.sci.admit/caps (config/result-caps dials)}
                        (select-keys view
-                                    [:seon.cluster.loop/cluster
+                                    [:seon.turn/cluster
                                      :seon.render.web/pages-mult
                                      :seon.render.web/registration
                                      :seon.render.web/latest-packages
                                      :seon.render.web/render-channel
                                      :seon.render.web/fault-channel
-                                     :seon.cluster.run/process
+                                     :seon.db.process/id
                                      :seon.sci.eval/ctx
                                      :seon.config.eval/time-limit-ms
                                      :seon.config/on-core-error])))]
@@ -2385,14 +2362,13 @@
   (`attributed-run`) is deleted at F2 §3.3."
   [db agent-id process]
   (db/q '[:find ?id .
-         :in $ ?agent-id ?process
+         :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.cluster.run/agent ?agent]
-         (not [?run :seon.cluster.run/closed-at])
-         [?run :seon.cluster.run/process ?process]
-         [?run :seon.cluster.run/id ?id]]
-       db agent-id process))
+         [?run :seon.turn/agent ?agent]
+         (not [?run :seon.turn/closed-at])
+         [?run :seon.turn/id ?id]]
+       db agent-id))
 
 (defn- previously-reported-fault-signature?
   [database signature]
@@ -2453,7 +2429,7 @@
             (:seon.config.error/escalate-to dials)
             (assoc :seon.config.error/escalate-to
                    (:seon.config.error/escalate-to dials))
-            run-id (assoc :seon.cluster.run/id run-id)
+            run-id (assoc :seon.turn/id run-id)
             agent-id (assoc :seon.cluster.agent/id agent-id))
           ;; The fault family's own bound decides how much evidence the
           ;; durable fact keeps; the blob threshold decides where the
@@ -2552,15 +2528,15 @@
              (:seon.sci.eval/projection-state ctx)
              :seon.db/connection connection
               :seon.cluster/name cluster-name
-              :seon.cluster.run/process process
+              :seon.db.process/id process
               :seon.flow/work-launcher work-launcher
               :seon.sci.eval/ctx ctx
               :seon.cluster.wake/channel wake-channel
               ;; the cluster's ONE stream conn (F2 §2.1): sliding-1, so
               ;; the newest complete snapshot wins and the provider fold
               ;; is never parked by presentation
-              :seon.cluster.loop/stream-channel stream-channel
-              :seon.cluster.loop/completion completion
+              :seon.turn/stream-channel stream-channel
+              :seon.turn/completion completion
               :seon.sci.admit/caps (config/result-caps dials)
               :seon.config.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms dials)
@@ -2614,14 +2590,14 @@
     {:procs {:seon.cluster.agent/armer
              {:proc (flow/var-process
                      #'cluster.agent/armer-step :io
-                     (env/carry {:seon.cluster.loop/cluster handle
+                     (env/carry {:seon.turn/cluster handle
                                  :seon.cluster.agent/routing routing}
                                 environment))}
              :seon.render.web/render
              {:proc (flow/var-process
                      #'web/render-step :io
                      (env/carry (assoc view
-                                       :seon.cluster.loop/cluster handle
+                                       :seon.turn/cluster handle
                                        :seon.cluster.agent/routing routing)
                                 environment))}
              :seon.search/index
@@ -2707,7 +2683,7 @@
               ;; same invariant `recover-runs!` reasons from — so the
               ;; holder a run names and the holder a rendered page
               ;; judges are the same string.
-              :seon.cluster.run/process (:seon.cluster.run/process handle)}
+              :seon.db.process/id (:seon.db.process/id handle)}
         {graph :seon.flow/graph
          joins :seon.flow/joins}
         (flow/start-graph!
@@ -2782,11 +2758,11 @@
     ;; armed, while the running proc owns every later wake.
     (cluster.agent/armer-step
      (cluster.agent/armer-step
-      {:seon.cluster.loop/cluster handle
+      {:seon.turn/cluster handle
        :seon.cluster.agent/routing routing})
      ::cluster.agent/arm
      ::cluster.agent/boot)
-    {:seon.cluster.loop/cluster handle
+    {:seon.turn/cluster handle
      :seon.flow/graph graph
      :seon.flow/error-fanout fanout
      :seon.cluster.agent/routing routing
@@ -2827,11 +2803,11 @@
   ;; holding sockets belonging to somebody outside this process
   (when-let [served (:seon.render.web/served instance)]
     (web/stop! served))
-  (when-let [handle (:seon.cluster.loop/cluster instance)]
+  (when-let [handle (:seon.turn/cluster instance)]
     (wake/unlisten! {:seon.cluster.wake/connection
                      (:seon.db/connection handle)
                      :seon.cluster.wake/key :seon.cluster.agent/route}))
-  (when-let [handle (:seon.cluster.loop/cluster instance)]
+  (when-let [handle (:seon.turn/cluster instance)]
     (let [armer-channel (:seon.cluster.wake/channel handle)
           quiesced (async/promise-chan)]
       (when-not (async.protocols/closed? armer-channel)
@@ -2865,8 +2841,8 @@
     ;; `flow/stop` only queues `::flow/stop`, so a render pass holding
     ;; the branch connection would otherwise still be deriving when the
     ;; connection is released
-    (async/<!! (:seon.cluster.loop/completion
-                (:seon.cluster.loop/cluster instance)))
+    (async/<!! (:seon.turn/completion
+                (:seon.turn/cluster instance)))
     (some-> (get-in instance [:seon.render.web/view
                               :seon.render.web/completion])
             async/<!!)
@@ -2878,8 +2854,8 @@
     (search/close! (:seon.search/index instance)))
   (when-let [fanout (:seon.flow/error-fanout instance)]
     (flow/stop-error-fanout! fanout))
-  (when-let [handle (:seon.cluster.loop/cluster instance)]
-    (some-> (:seon.cluster.loop/stream-channel handle) async/close!))
+  (when-let [handle (:seon.turn/cluster instance)]
+    (some-> (:seon.turn/stream-channel handle) async/close!))
   ;; the render pipeline's own ports, after the proc that reads them has
   ;; published its completion: a tab still looping on a tap sees its tap
   ;; close and falls out of the loop
@@ -2895,9 +2871,7 @@
   (schema/call-with-projection-state
    projection-state
    (fn []
-     (let [recovery (recover-runs!
-                     connection
-                     (process-identity (:seon.boot/advertisement instance)))
+     (let [recovery (recover-runs! connection)
            instance (publish! (merge instance recovery))
            instance (publish!
                      (assoc instance
@@ -2966,8 +2940,8 @@
            dials (config/effective @connection cluster-name)
            served (serve! connection cluster-name dials
                           (assoc (:seon.render.web/view instance)
-                                 :seon.cluster.loop/cluster
-                                 (:seon.cluster.loop/cluster instance)))
+                                 :seon.turn/cluster
+                                 (:seon.turn/cluster instance)))
            advertisement (assoc (:seon.boot/advertisement instance)
                                 :seon.render.web/url
                                 (:seon.render.web/url served)
@@ -3234,8 +3208,7 @@
                  0)
         found (if db
                 (problems/problems
-                 db {:seon.cluster.run/live-processes
-                     #{(process-identity advertisement)}})
+                 db {})
                 {})]
     (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name advertisement)
              :seon.boot/pid (:seon.boot/pid advertisement)

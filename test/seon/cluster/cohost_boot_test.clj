@@ -82,8 +82,8 @@
 (defn- evaluate-in
   [instance source]
   (sci.eval/evaluate
-   {:seon.cluster.eval/source source
-    :seon.cluster.eval/ns [:seon.ns/name 'user]
+   {:seon.eval/source source
+    :seon.eval/ns [:seon.ns/name 'user]
     :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
     :seon.sci.admit/caps caps
     :seon.sci.eval/time-limit-ms 5000
@@ -154,7 +154,7 @@
                   [["cohost-a" a "(+ 20260806 1)" "20260807"]
                    ["cohost-b" b "(+ 20260807 1)" "20260808"]]]
             (let [result (evaluate-in instance source)]
-              (is (nil? (:seon.cluster.eval/error result))
+              (is (nil? (:seon.eval/error result))
                   (str label " evaluated without an error value"))
               (is (= expected (str (:seon.sci.admit/value result)))
                   (str label " returned its own computed value"))))))

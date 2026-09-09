@@ -66,7 +66,7 @@
   unbound by default — `println` fails with `SciUnbound cannot be cast
   to java.io.Writer` — so both are bound to one `StringWriter` per
   evaluation and what the form printed rides back on the evaluation as
-  `:seon.cluster.eval/output`, bounded by the same `max-string` cap the
+  `:seon.eval/out`, bounded by the same `max-string` cap the
   projection uses. Printed output is evidence an agent produced about
   its own work; a sink would have made it disappear, and the drive
   showed exactly how expensive disappeared evidence is.
@@ -85,7 +85,7 @@
   THE CTX IS SUPPLIED, NOT BUILT HERE. `build-base-ctx` is the minimum
   N3 needs —
   `clojure.core` and `clojure.string` in their interrupt-aware form
-  plus bare `help`, the two `my.run` dispositions, and both `my.message`
+  plus bare `help`, the two `my.turn` dispositions, and both `my.message`
   values — and a caller may pass its own. `acquire!` then intersects core-provenanced
   program namespaces with the JVM's loaded namespace set and binds their
   actual compiled Vars. The set is computed, never listed. Agent-authored
@@ -107,7 +107,7 @@
             [clojure.test.check.generators :as gen]
             [my.background]
             [my.message]
-            [my.run]
+            [my.turn]
             [sci.core :as sci]
             [sci.impl.vars :as sci.vars]
             [sci.impl.utils :as sci.utils]
@@ -1551,8 +1551,8 @@
                                :in $ ?agent-id ?attribute
                                :where
                                [?agent :seon.cluster.agent/id ?agent-id]
-                               [?run :seon.cluster.run/agent ?agent]
-                               [?evaluation :seon.cluster.eval/run ?run]
+                               [?run :seon.turn/agent ?agent]
+                               [?evaluation :seon.eval/turn ?run]
                                [?evaluation ?attribute ?value]]
                              db agent-id attribute))]
     (second (last (sort-by first rows)))))
@@ -1812,7 +1812,7 @@
     live-declaration? :seon.sci.eval/live-declaration?
     namespace-name :seon.sci.eval/namespace-name
     namespace-unmap? :seon.sci.eval/namespace-unmap?
-    source :seon.cluster.eval/source}]
+    source :seon.eval/source}]
   (let [removed-identities
         (when namespace-unmap?
           (removed-program-identities
@@ -1868,8 +1868,8 @@
                       :seon.render/value value
                       :seon.render/profile profile
                       :seon.render.call/id
-                      [:seon.cluster.eval/source
-                       (:seon.cluster.eval/source request)]))]
+                      [:seon.eval/source
+                       (:seon.eval/source request)]))]
     (cond-> {:seon.sci.admit/value value
              :seon.eval/value (if (string? shown) shown (pr-str shown))}
       record (assoc :seon.sci.admit/record record))))
@@ -1885,7 +1885,7 @@
     definitions :seon.sci.eval/bindings
     row :seon.program/row}]
   (cond-> (cond-> {:seon.print/options print-options
-                   :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                   :seon.eval/ns [:seon.ns/name namespace-name]
                    :seon.sci.eval/ending-ns ending-namespace
                    :seon.sci.admit/record (:seon.sci.admit/record admitted)}
             ;; ONE OF TWO TERMINAL SHAPES, never both and never neither: the
@@ -1908,7 +1908,7 @@
     row (assoc :seon.program/row row)
     (seq definitions) (assoc :seon.sci.eval/bindings definitions)
     (or (seq output-prefix) (seq (str printed)))
-    (assoc :seon.cluster.eval/output
+    (assoc :seon.eval/out
            (evaluation-output output-prefix printed))))
 
 (defn- failed-evaluation
@@ -1921,13 +1921,13 @@
     definitions :seon.sci.eval/bindings
     record :seon.sci.admit/record
     value :seon.sci.admit/value
-    triage-edn :seon.cluster.eval/triage-edn
-    interrupted-at :seon.cluster.eval/interrupted-at
+    triage-edn :seon.eval/triage-edn
+    interrupted-at :seon.eval/interrupted-at
     :as request}]
   (cond-> (cond-> {:seon.print/options print-options
-                   :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                   :seon.eval/ns [:seon.ns/name namespace-name]
                    :seon.sci.eval/ending-ns namespace-name
-                   :seon.cluster.eval/error (:seon.error/message value)
+                   :seon.eval/error (:seon.error/message value)
                    :seon.sci.admit/record record}
             (contains? admitted :seon.sci.admit/value)
             (assoc :seon.sci.admit/value (:seon.sci.admit/value admitted))
@@ -1939,12 +1939,12 @@
     (int? (:seon.eval/duration-ms record))
     (assoc :seon.eval/duration-ms (:seon.eval/duration-ms record))
     (string? triage-edn)
-    (assoc :seon.cluster.eval/triage-edn triage-edn)
+    (assoc :seon.eval/triage-edn triage-edn)
     (seq definitions) (assoc :seon.sci.eval/bindings definitions)
-    (contains? request :seon.cluster.eval/interrupted-at)
-    (assoc :seon.cluster.eval/interrupted-at interrupted-at)
+    (contains? request :seon.eval/interrupted-at)
+    (assoc :seon.eval/interrupted-at interrupted-at)
     (or (seq output-prefix) (seq (str printed)))
-    (assoc :seon.cluster.eval/output
+    (assoc :seon.eval/out
            (evaluation-output output-prefix printed))))
 
 (defn- arity-exception
@@ -1981,34 +1981,34 @@
   arm this replaced hand-built four keys of that value inside the loop, so the
   submission backstop's own report — a run cut when its evaluation reached its
   time limit — arrived at `seon.problems/form-problem` missing
-  `:seon.cluster.eval/ns`, `:seon.sci.eval/ending-ns` and
+  `:seon.eval/ns`, `:seon.sci.eval/ending-ns` and
   `:seon.print/options`. The durable evidence of the interruption
   became a contract violation from the recorder: the diagnostic lied about
   what happened, which is the one thing a diagnostic may never do.
 
   An arm that does not name the value's keys cannot omit them. The namespace
-  is the form's own `:seon.cluster.eval/ns` reference, so nothing here has
+  is the form's own `:seon.eval/ns` reference, so nothing here has
   to guess where the form was going to run."
   {:malli/schema [:=> [:cat :seon.sci.eval/unrun-request]
                   :seon.sci.eval/evaluation]}
   [{value :seon.sci.admit/value
-    namespace-ref :seon.cluster.eval/ns
+    namespace-ref :seon.eval/ns
     duration-ms :seon.eval/duration-ms
-    interrupted-at :seon.cluster.eval/interrupted-at
+    interrupted-at :seon.eval/interrupted-at
     :as request}]
-  (let [interrupted? (contains? request :seon.cluster.eval/interrupted-at)
+  (let [interrupted? (contains? request :seon.eval/interrupted-at)
         record (cond-> (kernel/unarmed-record (System/nanoTime))
                  (int? duration-ms)
                  (assoc :seon.eval/duration-ms duration-ms)
                  interrupted? (assoc :seon.eval/outcome :time))]
     (cond-> {:seon.sci.admit/value value
              :seon.eval/value (pr-str value)
-             :seon.cluster.eval/error (:seon.error/message value)
-             :seon.cluster.eval/ns namespace-ref
+             :seon.eval/error (:seon.error/message value)
+             :seon.eval/ns namespace-ref
              :seon.sci.eval/ending-ns (symbol (str (second namespace-ref)))
              :seon.print/options {}
              :seon.sci.admit/record record}
-      interrupted? (assoc :seon.cluster.eval/interrupted-at interrupted-at))))
+      interrupted? (assoc :seon.eval/interrupted-at interrupted-at))))
 
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.
@@ -2033,21 +2033,21 @@
 
   Never throws. A failure of any kind returns an ordinary map whose
   `:seon.sci.admit/value` is a flat `:seon.error` value. PRESENCE IS
-  THE STATE (owner ruling 2026-07-28): `:seon.cluster.eval/error` is
+  THE STATE (owner ruling 2026-07-28): `:seon.eval/error` is
   present exactly when the form failed, and
-  `:seon.cluster.eval/interrupted-at` — the instant the interrupt was
+  `:seon.eval/interrupted-at` — the instant the interrupt was
   observed — is present exactly when the time limit fired. The record
   rides through with `fn-entries` and `allocated-bytes` intact."
   {:malli/schema [:=> [:cat :seon.sci.eval/request]
                   :seon.sci.eval/evaluation]}
-  [{:keys [:seon.cluster.eval/source :seon.sci.admit/caps]
+  [{:keys [:seon.eval/source :seon.sci.admit/caps]
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
-    run-id :seon.cluster.run/id
-    form-ordinal :seon.cluster.eval/ordinal
+    run-id :seon.turn/id
+    form-ordinal :seon.eval/ordinal
     cluster-name :seon.boot/cluster-name
     work-launcher :seon.flow/work-launcher
-    namespace-ref :seon.cluster.eval/ns
+    namespace-ref :seon.eval/ns
     output-prefix :seon.sci.eval/output-prefix
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error
@@ -2063,9 +2063,9 @@
                        agent-id
                        (assoc :seon.cluster.agent/id agent-id)
                        run-id
-                       (assoc :seon.cluster.run/id run-id)
+                       (assoc :seon.turn/id run-id)
                        (some? form-ordinal)
-                       (assoc :seon.cluster.eval/ordinal form-ordinal))
+                       (assoc :seon.eval/ordinal form-ordinal))
         turn-environment
         (some-> (env/of base-evaluation-ctx)
                 (env/scope turn-members))
@@ -2109,7 +2109,7 @@
         connection (get-in evaluation-ctx
                            [::custody :seon.db/connection])
         receipt (when (and run-id (some? form-ordinal))
-                  [:seon.cluster.eval/id
+                  [:seon.eval/id
                    (pr-str [run-id form-ordinal])])
         namespace-name (or (second namespace-ref)
                            (when (and connection agent-id)
@@ -2140,11 +2140,11 @@
                           (some-> (env/of evaluation-ctx)
                                   (env/scope
                                    {:seon.cluster.agent/id agent-id
-                                    :seon.cluster.run/id run-id
-                                    :seon.cluster.eval/ordinal form-ordinal}))
+                                    :seon.turn/id run-id
+                                    :seon.eval/ordinal form-ordinal}))
                           :seon.db/connection connection
-                          :seon.cluster.run/id run-id
-                          :seon.cluster.eval/ordinal form-ordinal
+                          :seon.turn/id run-id
+                          :seon.eval/ordinal form-ordinal
                           :seon.cluster.agent/id agent-id
                           :seon.flow/work-launcher work-launcher
                           :seon.boot/cluster-name cluster-name
@@ -2252,7 +2252,7 @@
               :seon.sci.eval/live-declaration? live-declaration?
               :seon.sci.eval/namespace-name namespace-name
               :seon.sci.eval/namespace-unmap? namespace-unmap?
-              :seon.cluster.eval/source source})
+              :seon.eval/source source})
             var-row (definition-row execution-ctx projection
                                     before-intern-values source)
             row (or var-row reader-row)
@@ -2340,14 +2340,14 @@
                     :seon.sci.eval/bindings definitions
                     :seon.sci.admit/record record
                     :seon.sci.admit/value value
-                    :seon.cluster.eval/triage-edn
+                    :seon.eval/triage-edn
                     (pr-str
                      (main/ex-triage (Throwable->map throwable)))}
              ;; the instant the interrupt was OBSERVED — the one
              ;; genuinely new fact a cut evaluation leaves. Its
              ;; presence IS the interrupted state; there is no label.
              (= :time (:seon.eval/outcome record))
-             (assoc :seon.cluster.eval/interrupted-at
+             (assoc :seon.eval/interrupted-at
                     (java.util.Date.))))))
         (finally
           (stop!))))))))
@@ -2390,7 +2390,7 @@
    :seon.test/fail-count 0
    :seon.test/error-count 1
    :seon.test/failure-message
-   (or (:seon.cluster.eval/error evaluation)
+   (or (:seon.eval/error evaluation)
        (str "Candidate test " test-symbol " could not be evaluated."))})
 
 (defn- run-candidate-test!
@@ -2402,10 +2402,10 @@
         (evaluate
          (assoc request
                 :seon.sci.eval/ctx ctx
-                :seon.cluster.eval/source (:seon.test/source row)
-                :seon.cluster.eval/ns
+                :seon.eval/source (:seon.test/source row)
+                :seon.eval/ns
                 [:seon.ns/name (get-in row [:seon.test/ns :seon.ns/name])]))]
-    (if (:seon.cluster.eval/error evaluation)
+    (if (:seon.eval/error evaluation)
       (candidate-test-result test-symbol evaluation)
       (let [test-var (sci/resolve ctx (symbol test-symbol))
             armed (kernel/arm ctx (:seon.sci.eval/time-limit-ms request))]
@@ -2427,7 +2427,7 @@
     database :seon.db/db
     connection :seon.db/connection
     agent-id :seon.cluster.agent/id
-    source :seon.cluster.eval/source
+    source :seon.eval/source
     test-symbols :seon.test.accretion/gate-set
     analyzed-row :seon.program/row
     :as request}]
@@ -2439,10 +2439,10 @@
         evaluation
         (evaluate (assoc request
                          :seon.sci.eval/ctx ctx
-                         :seon.cluster.eval/source source))
+                         :seon.eval/source source))
         row (or analyzed-row (:seon.program/row evaluation))
         evaluation (cond-> evaluation row (assoc :seon.program/row row))]
-    (if (or (:seon.cluster.eval/error evaluation)
+    (if (or (:seon.eval/error evaluation)
             (nil? (:seon.fn/sym row)))
       {:seon.test.accretion/candidate-ctx ctx
        :seon.test.accretion/evaluation evaluation

@@ -9,7 +9,7 @@
             [seon.schedule :as schedule]
             [seon.schema :as schema]
             [seon.cluster.wake :as wake]
-            [seon.cluster.work :as work]
+            [seon.turn :as work]
             [seon.test-support :as test-support])
   (:import [java.time Instant]
            [java.util Date]))
@@ -70,10 +70,10 @@
    :seon.config.maintenance/min-usable-ratio 0.01
    :seon.config.maintenance/log-max-bytes 1024
    :seon.config.maintenance/log-retained-files 2
-   :seon.cluster.loop/cluster
+   :seon.turn/cluster
    (test-support/cluster-handle
     {:seon.cluster/name "default"
-     :seon.cluster.run/process "schedule-test-process"
+     :seon.db.process/id "schedule-test-process"
      :seon.sci.admit/caps result-caps
      :seon.config.error/recurrence-limit 3
      :seon.config.error/escalate-to "root"})})
@@ -147,7 +147,7 @@
         (is (= 1 (count-with @connection
                              :seon.maintenance.receipt/completed-at)))
         (is (= 1 (count-with @connection :seon.maintenance.receipt/result)))
-        (is (= 0 (count-with @connection :seon.cluster.run/id)))
+        (is (= 0 (count-with @connection :seon.turn/id)))
         (is (= 0 (count-with @connection :seon.cluster.message/id)))
         (is (identical? connection (:seon.db/connection (first @handler-calls))))
         (is (= (dissoc (first @handler-calls)
@@ -158,7 +158,7 @@
                        :seon.fn/sym
                        :seon.schedule.fire/nominal-at
                        :seon.schedule.fire/observed-at)
-               (dissoc (execution-context) :seon.cluster.loop/cluster)))))))
+               (dissoc (execution-context) :seon.turn/cluster)))))))
 
 (deftest each-firing-is-one-wake-that-opens-no-turn
   ;; THE CLASS: a recurrence definition is not an event. Claiming the
@@ -232,7 +232,7 @@
             nominal-at (instant "2025-04-05T12:34:00Z")
             fire-id (pr-str [task-id nominal-at])
             request
-            (merge (dissoc (execution-context) :seon.cluster.loop/cluster)
+            (merge (dissoc (execution-context) :seon.turn/cluster)
                    {:seon.schedule.task/id task-id
                     :seon.schedule.fire/id fire-id
                     :seon.cluster.agent/id "root"
@@ -305,14 +305,14 @@
                    (test-support/cluster-handle
                     {:seon.db/connection connection
                      :seon.cluster/name "seon.schedule-test"
-                     :seon.cluster.run/process "schedule-test-process"
+                     :seon.db.process/id "schedule-test-process"
                      :seon.sci.eval/ctx
                      (test-support/fork-cluster-ctx connection)
                      :seon.schedule/channel ::channel})
                    environment)
            definition
            (agent/graph-definition
-            {:seon.cluster.loop/cluster handle
+            {:seon.turn/cluster handle
              :seon.cluster.agent/id "root"})]
        (is (= #{::agent/mailbox ::agent/turn ::agent/schedule}
               (set (keys (:procs definition)))))))))

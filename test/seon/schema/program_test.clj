@@ -78,14 +78,14 @@
 
 (deftest evaluation-drive-values-have-declared-leaf-shapes
   (let [run-id "proof:sample"
-        receipt {:seon.cluster.run/id run-id
-                 :seon.cluster.eval/ordinal 0
-                 :seon.cluster.eval/source "(+ 1 1)"
-                 :seon.cluster.eval/result-edn "2"
+        receipt {:seon.turn/id run-id
+                 :seon.eval/ordinal 0
+                 :seon.eval/source "(+ 1 1)"
+                 :seon.eval/result-edn "2"
                  :seon.eval.drive/value 2
-                 :seon.cluster.eval/error ""
+                 :seon.eval/error ""
                  :seon.error/kind :seon.eval.drive/absent
-                 :seon.cluster.eval/at (java.util.Date.)}
+                 :seon.eval/at (java.util.Date.)}
         terminal {:seon.eval.drive/outcome :completed
                   :seon.eval.drive/run-ids [run-id]}]
     (is (schema/valid-candidate-value?
@@ -94,7 +94,7 @@
          :seon.eval.drive/terminal-state terminal))
     (is (not (schema/valid-candidate-value?
               :seon.eval.drive/evaluation
-              (dissoc receipt :seon.cluster.eval/at))))
+              (dissoc receipt :seon.eval/at))))
     (is (not (schema/valid-candidate-value?
               :seon.eval.drive/terminal-state
               (assoc terminal :seon.eval.drive/outcome :unknown))))))

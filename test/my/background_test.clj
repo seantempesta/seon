@@ -54,10 +54,10 @@
       (db/transact!
        connection
        [{:seon.cluster.agent/id "background-agent"}
-        {:seon.cluster.run/id "background-run"}
+        {:seon.turn/id "background-run"}
         {:seon.fn/sym "my.example/call"}
         {:seon.effect/id "background-result"
-         :seon.effect/run [:seon.cluster.run/id "background-run"]
+         :seon.effect/run [:seon.turn/id "background-run"]
          :seon.effect/owner [:seon.fn/sym "my.example/call"]
          :seon.effect/form-ordinal 0
          :seon.effect/ordinal 0
@@ -69,8 +69,8 @@
         (is (= {:seon.effect/id "background-result"
                 :seon.effect/request-edn "{}"}
                (background/poll [:seon.effect/id "background-result"])))
-        (is (= {:my.run/disposition :wait
-                :my.run/note "Use the result."
+        (is (= {:my.turn/disposition :wait
+                :my.turn/note "Use the result."
                 :my.background/result
                 [:seon.effect/id "background-result"]}
                (background/await

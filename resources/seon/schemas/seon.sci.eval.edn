@@ -37,22 +37,22 @@
                   :seon.eval/value]
                  [:seon.eval/missing {:optional true} :seon.eval/missing]
                  [:seon.eval/size {:optional true} :seon.eval/size]
-                 [:seon.cluster.eval/error
+                 [:seon.eval/error
                   {:optional true}
-                  :seon.cluster.eval/error]
-                 [:seon.cluster.eval/triage-edn
+                  :seon.eval/error]
+                 [:seon.eval/triage-edn
                   {:optional true}
-                  :seon.cluster.eval/triage-edn]
-                 [:seon.cluster.eval/interrupted-at
+                  :seon.eval/triage-edn]
+                 [:seon.eval/interrupted-at
                   {:optional true}
-                  :seon.cluster.eval/interrupted-at]
-                 [:seon.cluster.eval/output
+                  :seon.eval/interrupted-at]
+                 [:seon.eval/out
                   {:optional true}
-                  :seon.cluster.eval/output]
-                 [:seon.cluster.eval/read-evidence
+                  :seon.eval/out]
+                 [:seon.eval/read-evidence
                   {:optional true}
                   [:vector :seon.db/read-evidence]]
-                 [:seon.cluster.eval/ns :seon.cluster.eval/ns]
+                 [:seon.eval/ns :seon.eval/ns]
                  [:seon.sci.eval/ending-ns :seon.sci.eval/ending-ns]
                  [:seon.program/row
                   {:optional true}
@@ -65,11 +65,11 @@
                 :unrun-request
                 [:map
                  [:seon.sci.admit/value :seon.error/value]
-                 [:seon.cluster.eval/ns :seon.db/ref]
+                 [:seon.eval/ns :seon.db/ref]
                  [:seon.eval/duration-ms {:optional true} :int]
-                 [:seon.cluster.eval/interrupted-at
+                 [:seon.eval/interrupted-at
                   {:optional true}
-                  :seon.cluster.eval/interrupted-at]],
+                  :seon.eval/interrupted-at]],
                 :install-request
                 [:map
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
@@ -102,11 +102,11 @@
                 :referenced-vars [:set :symbol],
                 :request
                 [:map
-                 [:seon.cluster.eval/source
-                  :seon.cluster.eval/source]
-                 [:seon.cluster.eval/ns
+                 [:seon.eval/source
+                  :seon.eval/source]
+                 [:seon.eval/ns
                   {:optional true}
-                  :seon.cluster.eval/ns]
+                  :seon.eval/ns]
                  [:seon.sci.admit/caps :seon.sci.admit/caps]
                  [:seon.sci.eval/time-limit-ms
                   :seon.sci.eval/time-limit-ms]
@@ -121,12 +121,12 @@
                  [:seon.cluster.agent/id
                   {:optional true}
                   :seon.cluster.agent/id]
-                 [:seon.cluster.run/id
+                 [:seon.turn/id
                   {:optional true}
-                  :seon.cluster.run/id]
-                 [:seon.cluster.eval/ordinal
+                  :seon.turn/id]
+                 [:seon.eval/ordinal
                   {:optional true}
-                  :seon.cluster.eval/ordinal]
+                  :seon.eval/ordinal]
                  [:seon.sci.eval/output-prefix
                   {:optional true}
                   :string]
@@ -149,9 +149,9 @@
                  ;; The run whose already settled evaluations this fork binds
                  ;; back as result/eN handles. Absent when no run is in
                  ;; effect, and then the fork simply binds none.
-                 [:seon.cluster.run/id
+                 [:seon.turn/id
                   {:optional true}
-                  :seon.cluster.run/id]
+                  :seon.turn/id]
                  [:seon.db/connection
                   {:optional true}
                   :seon.db/connection]],

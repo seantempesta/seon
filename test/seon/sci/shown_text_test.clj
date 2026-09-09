@@ -27,8 +27,8 @@
             :my.plan.item/title "Render this plan clearly"
             :my.plan.item/expected-result "The item is shown as data."}}}}])
      (let [ctx (support/fork-cluster-ctx connection)
-           request {:seon.cluster.eval/source "(my.plan/current)"
-                    :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
+           request {:seon.eval/source "(my.plan/current)"
+                    :seon.eval/ns [:seon.ns/name 'my.agents.juniper]
                     :seon.cluster.agent/id "juniper"
                     :seon.sci.eval/ctx ctx
                     :seon.db/db @connection
@@ -39,7 +39,7 @@
            result (render/call-with-walk-context
                    request #(evaluation/evaluate request))
            shown (repl/value-text result)]
-       (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+       (is (nil? (:seon.eval/error result)) (pr-str result))
        (is (= "juniper/render-plan"
               (get-in result [:seon.sci.admit/value :my.plan.item/id])))
        (is (string? shown))

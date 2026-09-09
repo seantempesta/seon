@@ -12,8 +12,8 @@
             [seon.cluster.prompt :as prompt]
             [seon.render :as render]
             [seon.sci.kernel :as kernel]
-            [seon.cluster.loop :as loop]
-            [seon.cluster.run :as run]
+            [seon.turn :as loop]
+            [seon.turn :as run]
             [seon.blob :as blob]
             [seon.test-support :as support])
   (:import [java.util Date]))
@@ -31,11 +31,11 @@
   (let [handle (support/cluster-handle
                 {:seon.db/connection connection
                  :seon.cluster/name "prompt-walk"
-                 :seon.cluster.run/process cluster/boot-process-identity
+                 :seon.db.process/id cluster/boot-process-identity
                  :seon.sci.eval/ctx ctx})]
     (try
       (let [preview (loop/preview-sources
-                     {:seon.cluster.loop/cluster handle
+                     {:seon.turn/cluster handle
                       :seon.db/db @connection
                       :seon.sci.eval/ctx ctx
                       :seon.cluster.agent/id "walker"
@@ -43,16 +43,16 @@
                       :seon.cluster.reply/text source
                       :seon.sci.admit/caps caps})
             prepared (run/record-evaluated-tx
-                       {:seon.cluster.loop/cluster handle
+                       {:seon.turn/cluster handle
                         :seon.db/db @connection
-                        :seon.cluster.run/id run-id
-                        :seon.cluster.run/agent [:seon.cluster.agent/id "walker"]
-                        :seon.cluster.run/starting-ns [:seon.ns/name 'my.agents.walker]
-                        :seon.cluster.run/reply source
-                        :seon.cluster.run/opened-at (:seon.cluster.run/opened-at preview)
-                        :seon.cluster.run/closed-at (:seon.cluster.run/closed-at preview)
-                        :seon.cluster.loop/evaluated-sources
-                        (:seon.cluster.loop/evaluated-sources preview)})]
+                        :seon.turn/id run-id
+                        :seon.turn/agent [:seon.cluster.agent/id "walker"]
+                        :seon.turn/starting-ns [:seon.ns/name 'my.agents.walker]
+                        :seon.turn/reply source
+                        :seon.turn/opened-at (:seon.turn/opened-at preview)
+                        :seon.turn/closed-at (:seon.turn/closed-at preview)
+                        :seon.turn/evaluated-sources
+                        (:seon.turn/evaluated-sources preview)})]
         (let [result (blob/with-publication!
                       connection (:seon.blob/staged-writes prepared)
                       #(db/transact! connection (:seon.db/tx-data prepared)))]
@@ -61,7 +61,7 @@
           result))
       (finally
         (doseq [key [:seon.cluster.wake/channel :seon.render/context-channel
-                    :seon.cluster.loop/completion]]
+                    :seon.turn/completion]]
           (when-let [channel (get handle key)] (async/close! channel)))))))
 
 (defn- planted
@@ -86,18 +86,18 @@
         (record-evaluation! connection ctx "opening-history"
                             "(seon.db/pull [:seon.cluster.message/content] [:seon.cluster.message/id \"walk-message\"])")
       (db/transact! connection
-                  [{:seon.cluster.run/id "walk-run"
-                    :seon.cluster.run/agent
+                  [{:seon.turn/id "walk-run"
+                    :seon.turn/agent
                     [:seon.cluster.agent/id "walker"]
-                    :seon.cluster.run/trigger
+                    :seon.turn/trigger
                     [:seon.cluster.message/id "walk-message"]
-                    :seon.cluster.run/opened-at (Date. 1700000001000)}])
+                    :seon.turn/opened-at (Date. 1700000001000)}])
         (body connection ctx)))))
 
 
 (defn- request
   [connection ctx]
-  {:seon.cluster.run/id "walk-run"
+  {:seon.turn/id "walk-run"
    :seon.cluster.agent/id "walker"
    :seon.db/connection connection
    :seon.sci.admit/caps caps
@@ -159,8 +159,8 @@
    (fn [connection ctx]
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection (request connection ctx)))]
-       (db/transact! connection [{:seon.cluster.run/id "walk-run"
-                                 :seon.cluster.run/closed-at (Date.)}])
+       (db/transact! connection [{:seon.turn/id "walk-run"
+                                 :seon.turn/closed-at (Date.)}])
        (record-evaluation! connection ctx "second-history" "(str \"SECOND-EVALUATION\")")
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt @connection (request connection ctx)))]
@@ -193,10 +193,10 @@
                     :seon.cluster/name "no-trigger"
                     :seon.ns/name 'my.agents.walker}))
       (db/transact! connection
-                  [{:seon.cluster.run/id "walk-run"
-                    :seon.cluster.run/agent
+                  [{:seon.turn/id "walk-run"
+                    :seon.turn/agent
                     [:seon.cluster.agent/id "walker"]
-                    :seon.cluster.run/opened-at (Date.)}])
+                    :seon.turn/opened-at (Date.)}])
       (testing "the custody invariant remains independent of presentation"
         (is (= :seon.cluster.prompt/no-trigger
                (:seon.cluster.prompt/rule
@@ -252,16 +252,16 @@
   on the run's capture, and the provider's own count on the attempt."
   [model ordinal characters provider-tokens]
   (let [run-id (str "usage-run-" ordinal)]
-    [{:seon.cluster.run/id run-id
-      :seon.cluster.run/agent [:seon.cluster.agent/id "walker"]
-      :seon.cluster.run/opened-at (Date. (+ 1700000100000 (* 1000 ordinal)))}
+    [{:seon.turn/id run-id
+      :seon.turn/agent [:seon.cluster.agent/id "walker"]
+      :seon.turn/opened-at (Date. (+ 1700000100000 (* 1000 ordinal)))}
      {:seon.context.capture/id (str run-id "-context-1")
-      :seon.context.capture/run [:seon.cluster.run/id run-id]
+      :seon.context.capture/run [:seon.turn/id run-id]
       :seon.context.capture/basis-t 1
       :seon.context.capture/prompt (apply str (repeat characters "x"))
       :seon.ai.tokens/characters characters}
      {:seon.ai.attempt/id (str run-id "-0")
-      :seon.ai.attempt/run [:seon.cluster.run/id run-id]
+      :seon.ai.attempt/run [:seon.turn/id run-id]
       :seon.ai.attempt/ordinal 0
       :seon.ai.attempt/at (Date. (+ 1700000100000 (* 1000 ordinal)))
       :seon.ai/endpoint "https://example.invalid/v1/chat/completions"

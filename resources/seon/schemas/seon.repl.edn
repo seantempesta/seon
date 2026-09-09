@@ -35,7 +35,7 @@
             [:string
              {:min 1,
               :description
-              "The instant boot cut one evaluation, as the readable #inst the one print grammar renders every other instant as. Present exactly when the evaluation carries :seon.cluster.eval/interrupted-at, so an evaluation that was interrupted never reads in the agent's own history like one that is still running."}],
+              "The instant boot cut one evaluation, as the readable #inst the one print grammar renders every other instant as. Present exactly when the evaluation carries :seon.eval/interrupted-at, so an evaluation that was interrupted never reads in the agent's own history like one that is still running."}],
             :ms
             [:string
              {:description
@@ -56,20 +56,20 @@
             [:map
              {:description
               "One evaluation as seon.repl/text renders it: the agent's comment and the fixed source it wrote, the namespace the prompt line names, and whatever terminal facts the evaluation has settled. The stored evaluation entity satisfies this directly; a caller that already bounded the value supplies its printed text as :seon.repl/value instead of the stored :seon.eval/value. The source is OPTIONAL so that a unit which is not an evaluation at all refuses through seon.repl/render-ai's own guard instead of raising a contract violation that takes the whole page derivation with it (law 2.4)."}
-             [:seon.cluster.eval/source {:optional true}
-              :seon.cluster.eval/source]
-             [:seon.cluster.eval/id {:optional true} :seon.cluster.eval/id]
+             [:seon.eval/source {:optional true}
+              :seon.eval/source]
+             [:seon.eval/id {:optional true} :seon.eval/id]
              [:seon.ns/name {:optional true} :seon.ns/name]
-             [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]
-             [:seon.cluster.eval/ordinal {:optional true} :seon.cluster.eval/ordinal]
+             [:seon.eval/comment {:optional true} :seon.eval/comment]
+             [:seon.eval/ordinal {:optional true} :seon.eval/ordinal]
              [:seon.eval/value {:optional true} :seon.eval/value]
              [:seon.eval/missing {:optional true} :seon.eval/missing]
              [:seon.eval/size {:optional true} :seon.eval/size]
-             [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]
-             [:seon.cluster.eval/interrupted-at {:optional true}
-              :seon.cluster.eval/interrupted-at]
-             [:seon.cluster.eval/triage-edn {:optional true} :seon.cluster.eval/triage-edn]
-             [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]
+             [:seon.eval/error {:optional true} :seon.eval/error]
+             [:seon.eval/interrupted-at {:optional true}
+              :seon.eval/interrupted-at]
+             [:seon.eval/triage-edn {:optional true} :seon.eval/triage-edn]
+             [:seon.eval/out {:optional true} :seon.eval/out]
              [:seon.sci.eval/ending-ns {:optional true} :seon.sci.eval/ending-ns]
              [:seon.eval/duration-ms {:optional true} :seon.eval/duration-ms]
              [:seon.repl/value {:optional true} :seon.repl/value]

@@ -41,7 +41,7 @@
   [text]
   (let [forms (reply/sources text)]
     (if (vector? forms)
-      (mapv :seon.cluster.eval/source forms)
+      (mapv :seon.eval/source forms)
       forms)))
 
 ;;; ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@
     (gen/fmap (fn [k] {k [1 2 3]}) gen/keyword)
     (gen/fmap (fn [s] (list 'str s)) gen/string-alphanumeric)
     (gen/fmap (fn [n] (list 'defn 'f '[x] (list '+ 'x n))) gen/small-integer)
-    (gen/return '(my.run/wait "still working"))
+    (gen/return '(my.turn/wait "still working"))
     (gen/return '(let [y (* 2 3)] {:y y}))]))
 
 (deftest a-printed-plan-round-trips-through-the-splitter
@@ -97,7 +97,7 @@
            (sources ";; a note\n(def a 1)\n(inc a)"))
         "a prompt line holds exactly the one form it prompts for")
     (is (= [";; a note" nil]
-           (mapv :seon.cluster.eval/comment
+           (mapv :seon.eval/comment
                  (reply/sources ";; a note\n(def a 1)\n(inc a)")))))
   (testing "and nesting, whitespace and strings containing parens"
     (is (= ["(println \"a ) b\")" "(inc 1)"]
@@ -107,7 +107,7 @@
   (testing "parenthesized code mentioned in prose is still prose"
     (is (= ["(+ 1 2)"] (sources "I will run (+ 1 2) now.\n(+ 1 2)")))
     (is (= ["; I will run (+ 1 2) now."]
-           (mapv :seon.cluster.eval/comment
+           (mapv :seon.eval/comment
                  (reply/sources "I will run (+ 1 2) now.\n(+ 1 2)"))))))
 
 (deftest crlf-events-stay-within-the-original-reply
@@ -120,7 +120,7 @@
         (is (<= start end (count text)))))
     (is (= ["(+ 1 2)"] (sources text)))
     (is (= ["; 😀 note"]
-           (mapv :seon.cluster.eval/comment (reply/sources text))))))
+           (mapv :seon.eval/comment (reply/sources text))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Forms and prose — comments record text, only forms run
@@ -130,10 +130,10 @@
   (testing "pure code keeps its exact ordered top-level sources"
     (let [text (str "(def widgets (map inc (range 3)))\n"
                     "widgets\n"
-                    "(my.run/complete \"counted 6\")")]
+                    "(my.turn/complete \"counted 6\")")]
       (is (= ["(def widgets (map inc (range 3)))"
               "widgets"
-              "(my.run/complete \"counted 6\")"]
+              "(my.turn/complete \"counted 6\")"]
              (sources text)))))
 
   (testing "pure prose is a refusal, never a form"
@@ -148,34 +148,34 @@
     (let [text (str "First I will add the values.\n"
                     "(+ 1 2)\n"
                     "Then I will finish.\n"
-                    "(my.run/complete \"3\")\n"
+                    "(my.turn/complete \"3\")\n"
                     "That is all.")]
-      (is (= ["(+ 1 2)" "(my.run/complete \"3\")"] (sources text)))
+      (is (= ["(+ 1 2)" "(my.turn/complete \"3\")"] (sources text)))
       (is (= ["; First I will add the values."
               "; Then I will finish."]
-             (mapv :seon.cluster.eval/comment (reply/sources text)))
+             (mapv :seon.eval/comment (reply/sources text)))
           "a form's comment is the prose ABOVE it, never prose written after")))
 
   (testing "the live word-salad reply freezes one form, not its 22 prose tokens"
     (let [text (str "I defined a function to sum integers from 1 to n, "
                     "called it with 10 to get 55, and reported the action.\n"
-                    "(my.run/complete \"reported\")")
+                    "(my.turn/complete \"reported\")")
           result (sources text)]
-      (is (= ["(my.run/complete \"reported\")"] result))
+      (is (= ["(my.turn/complete \"reported\")"] result))
       (is (= [(str "; I defined a function to sum integers from 1 to n, "
                    "called it with 10 to get 55, and reported the action.")]
-             (mapv :seon.cluster.eval/comment (reply/sources text))))
-      (is (= '(my.run/complete "reported") (read-back (first result))))
+             (mapv :seon.eval/comment (reply/sources text))))
+      (is (= '(my.turn/complete "reported") (read-back (first result))))
       (is (not-any? #{"I" "defined" "1" "10" "get" "55"} result)
           "none of the live prose tokens becomes its own plan source")))
 
   (testing "invalid prose tokens are comments while a same-line form survives"
-    (is (= ["(my.run/complete \"denied\")"]
-           (sources "denied /etc/hosts now.(my.run/complete \"denied\")")))
+    (is (= ["(my.turn/complete \"denied\")"]
+           (sources "denied /etc/hosts now.(my.turn/complete \"denied\")")))
     (is (= ["; denied /etc/hosts now."]
-           (mapv :seon.cluster.eval/comment
+           (mapv :seon.eval/comment
                  (reply/sources
-                  "denied /etc/hosts now.(my.run/complete \"denied\")"))))))
+                  "denied /etc/hosts now.(my.turn/complete \"denied\")"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Attribution — the reader's namespace-in-effect, projected verbatim
@@ -183,13 +183,13 @@
 
 (deftest attribution-follows-the-one-reader
   (testing "REPL semantics: each form carries the ns it was written under"
-    (is (= [{:seon.cluster.eval/source "(ns my.gen.alpha)"
+    (is (= [{:seon.eval/source "(ns my.gen.alpha)"
              :seon.ns/name 'user}
-            {:seon.cluster.eval/source "(defn f [x] (inc x))"
+            {:seon.eval/source "(defn f [x] (inc x))"
              :seon.ns/name 'my.gen.alpha}
-            {:seon.cluster.eval/source "(ns my.gen.beta)"
+            {:seon.eval/source "(ns my.gen.beta)"
              :seon.ns/name 'my.gen.alpha}
-            {:seon.cluster.eval/source "(defn g [x] (* 2 x))"
+            {:seon.eval/source "(defn g [x] (* 2 x))"
              :seon.ns/name 'my.gen.beta}]
            (reply/sources
             (str "(ns my.gen.alpha)\n(defn f [x] (inc x))\n"
@@ -204,16 +204,16 @@
            to the author rather than to a guessed owner")))
 
   (testing "prose carried into a form does not disturb attribution"
-    (is (= [{:seon.cluster.eval/source "(ns my.gen.alpha)"
+    (is (= [{:seon.eval/source "(ns my.gen.alpha)"
              :seon.ns/name 'user}
-            {:seon.cluster.eval/source "(defn f [] 1)"
-             :seon.cluster.eval/comment "; Now the function."
+            {:seon.eval/source "(defn f [] 1)"
+             :seon.eval/comment "; Now the function."
              :seon.ns/name 'my.gen.alpha}]
            (reply/sources
             "(ns my.gen.alpha)\nNow the function.\n(defn f [] 1)"))))
 
   (testing "prose after the last form belongs to no form, and keeps the ns"
-    (is (= {:seon.cluster.eval/source "(def a 1)"
+    (is (= {:seon.eval/source "(def a 1)"
             :seon.ns/name 'my.gen.alpha}
            (last (reply/sources "(ns my.gen.alpha)\n(def a 1)\nThat is all.")))
         "the prose is neither glued to the source nor made its comment")))
@@ -238,12 +238,12 @@
                  {:registry (:seon.schema.projection/registry projection)})
         text ";; a note\n(def a 1)\n(inc a)"]
     (is (= ["(def a 1)" "(inc a)"]
-           (mapv :seon.cluster.eval/source (checked text)))
+           (mapv :seon.eval/source (checked text)))
         "the one-argument arity passes its own input contract")
     (is (= (reply/sources text 'user) (checked text))
         "and names the namespace the reader would have defaulted to anyway")
     (is (= ["(def a 1)" "(inc a)"]
-           (mapv :seon.cluster.eval/source (checked text 'my.gen.alpha)))
+           (mapv :seon.eval/source (checked text 'my.gen.alpha)))
         "as do the two- and three-argument arities")
     (is (vector? (checked text 'my.gen.alpha (count text))))))
 
@@ -252,11 +252,11 @@
 ;;; the agent wrote ABOVE the form
 ;;; ---------------------------------------------------------------------------
 
-;;; `seon.repl/text` prints a form's `:seon.cluster.eval/comment` above that
+;;; `seon.repl/text` prints a form's `:seon.eval/comment` above that
 ;;; form's prompt line. Folding prose written AFTER the last form into that
 ;;; form's comment therefore inverted the agent's own authorship order in the
 ;;; session it reads back: text it wrote last appeared first. The whole reply
-;;; is already durable (`:seon.cluster.run/reply`), so the parser keeps the
+;;; is already durable (`:seon.turn/reply`), so the parser keeps the
 ;;; placement honest by attaching only what precedes a form.
 (deftest a-forms-comment-is-only-the-prose-written-above-it
   (doseq [[text expected]
@@ -266,7 +266,7 @@
             ["; Here is the plan." nil]]
            ["Here is the plan:\n```clojure\n(+ 1 2)\n```\nThat is all."
             ["; Here is the plan:"]]]]
-    (is (= expected (mapv :seon.cluster.eval/comment (reply/sources text)))
+    (is (= expected (mapv :seon.eval/comment (reply/sources text)))
         (str "a comment must be the prose above its form: " (pr-str text))))
   (testing "and the form sources are untouched by the dropped prose"
     (is (= ["(+ 1 2)"]
@@ -326,18 +326,18 @@
 
 (deftest a-fenced-reply-retains-surrounding-prose-as-comments
   (let [text (str "Sure — here is the plan.\n\n"
-                  "```clojure\n(def a 1)\n(my.run/complete \"done\")\n```\n\n"
+                  "```clojure\n(def a 1)\n(my.turn/complete \"done\")\n```\n\n"
                   "Let me know if that works.")]
-    (is (= ["(def a 1)" "(my.run/complete \"done\")"] (sources text)))
+    (is (= ["(def a 1)" "(my.turn/complete \"done\")"] (sources text)))
     (is (= ["; Sure — here is the plan." nil]
-           (mapv :seon.cluster.eval/comment (reply/sources text)))
+           (mapv :seon.eval/comment (reply/sources text)))
         "prose above a form is its comment; prose after the last form is not")))
 
 (deftest tilde-fences-have-the-same-presentation-semantics
   (let [text "Here:\n~~~clojure\n(+ 1 2)\n~~~\nDone."]
     (is (= ["(+ 1 2)"] (sources text)))
     (is (= ["; Here:"]
-           (mapv :seon.cluster.eval/comment (reply/sources text))))))
+           (mapv :seon.eval/comment (reply/sources text))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The class: a plan source the reader finds no event in
@@ -372,13 +372,13 @@
   (testing "so every recorded form can settle a receipt"
     (doseq [text [";; a note\n(def a 1)\n(inc a)"
                   "First I will add.\n(+ 1 2)\nThat is all."
-                  (str "<assistant1>\n(my.run/complete \"done\")\n"
+                  (str "<assistant1>\n(my.turn/complete \"done\")\n"
                        "That is everything I did.")
                   "Here:\n```clojure\n(+ 1 2)\n```\nDone."
                   "(ns my.gen.alpha)\n(def a 1)\nThat is all."]]
       (let [forms (reply/sources text)]
         (is (vector? forms) (str "expected forms for: " text))
-        (doseq [{source :seon.cluster.eval/source} forms]
+        (doseq [{source :seon.eval/source} forms]
           (is (seq (reader/read
                     {:seon.sci.reader/text source
                      :seon.config.eval.result/max-source (count source)

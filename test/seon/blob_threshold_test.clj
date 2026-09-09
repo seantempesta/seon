@@ -7,7 +7,7 @@
   missing, and settlement is not allowed to make a third answer out of it."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.blob :as blob]
-            [seon.cluster.run :as run]
+            [seon.turn :as run]
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.admit :as admit]
@@ -18,7 +18,7 @@
 
 (defn- admitted-result
   [value]
-  (:seon.cluster.eval/result-edn
+  (:seon.eval/result-edn
    (admit/admit
     {:seon.sci.admit/value value
      :seon.sci.admit/interrupt-fn (fn [])
@@ -49,9 +49,9 @@
         (testing "a result under the inline threshold"
           (let [result-edn (admitted-result (apply str (repeat 420 \r)))]
             (is (< (count result-edn) threshold))
-            (is (= {:seon.cluster.eval/result-edn result-edn}
+            (is (= {:seon.eval/result-edn result-edn}
                    (settlement connection
-                               {:seon.cluster.eval/result-edn result-edn})))))
+                               {:seon.eval/result-edn result-edn})))))
         (testing "a result far past it keeps EVERY byte and stages nothing"
           ;; The class this kills: the old seam replaced the stored node with
           ;; a PAGE of itself whose root face was an ordinary vector, so
@@ -59,9 +59,9 @@
           (let [result-edn (admitted-result (vec (repeat 40 (apply str (repeat 4000 \r)))))]
             (is (< threshold (count result-edn)))
             (let [settled (settlement connection
-                                      {:seon.cluster.eval/result-edn result-edn})]
-              (is (= {:seon.cluster.eval/result-edn result-edn} settled))
-              (is (not (contains? settled :seon.cluster.eval/result-blob)))
+                                      {:seon.eval/result-edn result-edn})]
+              (is (= {:seon.eval/result-edn result-edn} settled))
+              (is (not (contains? settled :seon.eval/result-blob)))
               (is (not (contains? settled :seon.eval/size))))))))))
 
 (deftest settlement-carries-a-missing-marker-and-stores-no-node

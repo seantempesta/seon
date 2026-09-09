@@ -47,13 +47,13 @@
                           {:seon.error/kind ::commit-timeout
                            ::receipts
                            (mapv #(db/pull @connection
-                                          [:seon.cluster.eval/ordinal
-                                           :seon.cluster.eval/result-edn
-                                           :seon.cluster.eval/error]
+                                          [:seon.eval/ordinal
+                                           :seon.eval/result-edn
+                                           :seon.eval/error]
                                           %)
                                  (db/q '[:find [?receipt ...]
                                         :where
-                                        [?receipt :seon.cluster.eval/ordinal _]]
+                                        [?receipt :seon.eval/ordinal _]]
                                       @connection))})))
         observed)
       (finally
@@ -76,10 +76,10 @@
          :in $ ?agent-id ?bootstrap-run-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.cluster.run/agent ?agent]
-         [?run :seon.cluster.run/id ?run-id]
+         [?run :seon.turn/agent ?agent]
+         [?run :seon.turn/id ?run-id]
          [(not= ?run-id ?bootstrap-run-id)]
-         [?receipt :seon.cluster.eval/run ?run]]
+         [?receipt :seon.eval/turn ?run]]
        db agent-id (bootstrap/run-id agent-id)))
 
 (defn- semantic-result
@@ -92,12 +92,12 @@
          :in $ ?agent-id ?bootstrap-run-id ?ordinal
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.cluster.run/agent ?agent]
-         [?run :seon.cluster.run/id ?run-id]
+         [?run :seon.turn/agent ?agent]
+         [?run :seon.turn/id ?run-id]
          [(not= ?run-id ?bootstrap-run-id)]
-         [?receipt :seon.cluster.eval/run ?run]
-         [?receipt :seon.cluster.eval/ordinal ?ordinal]
-         [?receipt :seon.cluster.eval/result-edn ?result]]
+         [?receipt :seon.eval/turn ?run]
+         [?receipt :seon.eval/ordinal ?ordinal]
+         [?receipt :seon.eval/result-edn ?result]]
        db agent-id (bootstrap/run-id agent-id) ordinal))
 
 (defn- active-agent-id
@@ -105,9 +105,9 @@
   [db]
   (db/q '[:find ?agent-id .
          :where
-         [?run :seon.cluster.run/agent ?agent]
+         [?run :seon.turn/agent ?agent]
          [?agent :seon.cluster.agent/id ?agent-id]
-         (not [?run :seon.cluster.run/closed-at _])]
+         (not [?run :seon.turn/closed-at _])]
        db))
 
 (defn- agent-open-run?
@@ -117,8 +117,8 @@
           :in $ ?agent-id
           :where
           [?agent :seon.cluster.agent/id ?agent-id]
-          [?run :seon.cluster.run/agent ?agent]
-          (not [?run :seon.cluster.run/closed-at _])]
+          [?run :seon.turn/agent ?agent]
+          (not [?run :seon.turn/closed-at _])]
         db agent-id)))
 
 (defn- agent-authored-closed-run-count
@@ -127,10 +127,10 @@
          :in $ ?agent-id ?bootstrap-run-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.cluster.run/agent ?agent]
-         [?run :seon.cluster.run/id ?run-id]
+         [?run :seon.turn/agent ?agent]
+         [?run :seon.turn/id ?run-id]
          [(not= ?run-id ?bootstrap-run-id)]
-         [?run :seon.cluster.run/closed-at _]]
+         [?run :seon.turn/closed-at _]]
        db agent-id (bootstrap/run-id agent-id)))
 
 (defn- await-bootstrap!
@@ -138,9 +138,9 @@
   (await-commit!
    connection
    (fn [db]
-     (:seon.cluster.run/closed-at
-      (db/pull db [:seon.cluster.run/closed-at]
-              [:seon.cluster.run/id (bootstrap/run-id agent-id)])))
+     (:seon.turn/closed-at
+      (db/pull db [:seon.turn/closed-at]
+              [:seon.turn/id (bootstrap/run-id agent-id)])))
    (constantly nil)))
 
 (defn- authored-program-settled?
@@ -159,10 +159,10 @@
               (db/q '[:find [?result ...]
                      :where
                      [?agent :seon.cluster.agent/id "restart-b"]
-                     [?run :seon.cluster.run/agent ?agent]
-                     [?receipt :seon.cluster.eval/run ?run]
-                     [?receipt :seon.cluster.eval/ordinal 0]
-                     [?receipt :seon.cluster.eval/result-edn ?result]]
+                     [?run :seon.turn/agent ?agent]
+                     [?receipt :seon.eval/turn ?run]
+                     [?receipt :seon.eval/ordinal 0]
+                     [?receipt :seon.eval/result-edn ?result]]
                    db)))))
 
 (deftest an-agent-definition-survives-restart-and-another-agent-calls-it
@@ -180,8 +180,8 @@
           (cluster/ensure-entity!
            connection
            (get-in first-instance
-                   [:seon.cluster.loop/cluster
-                    :seon.cluster.run/process])
+                   [:seon.turn/cluster
+                    :seon.db.process/id])
            {:seon.cluster.agent/id "restart-a"
             :seon.cluster/name cluster-name
             :seon.ns/name 'my.agents.restart-a})
@@ -221,8 +221,8 @@
                      "(clojure.core/ns-unmap "
                      "(find-ns 'my.agents.restart-a) "
                      "(symbol \"removed-before-restart\"))\n"
-                     "(my.run/complete \"program committed\")")
-                  "(my.run/complete \"unexpected agent\")")})]
+                     "(my.turn/complete \"program committed\")")
+                  "(my.turn/complete \"unexpected agent\")")})]
             (await-commit!
              connection
              authored-program-settled?
@@ -250,7 +250,7 @@
                  (semantic-result
                   (authored-result @connection "restart-a" 14)))
               "a computed require changes lint and eval state for the next form")
-          (is (= :seon.cluster.loop/lint-rejected
+          (is (= :seon.turn/lint-rejected
                  (:seon.error/kind
                   (semantic-result
                    (authored-result @connection "restart-a" 15))))
@@ -351,8 +351,8 @@
           (cluster/ensure-entity!
            connection
            (get-in second-instance
-                   [:seon.cluster.loop/cluster
-                    :seon.cluster.run/process])
+                   [:seon.turn/cluster
+                    :seon.db.process/id])
            {:seon.cluster.agent/id "restart-b"
             :seon.cluster/name cluster-name
             :seon.ns/name 'my.agents.restart-b})
@@ -364,8 +364,8 @@
                 (if (= "restart-b" (active-agent-id @connection))
                   (str
                    "(my.agents.restart-a/persisted \"ok\")\n"
-                   "(my.run/complete \"restarted definition called\")")
-                  "(my.run/complete \"unexpected agent\")")})]
+                   "(my.turn/complete \"restarted definition called\")")
+                  "(my.turn/complete \"unexpected agent\")")})]
             (await-commit!
              connection
              restarted-call-present?

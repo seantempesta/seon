@@ -27,8 +27,8 @@
     terminal.
   - `::turn` — one episode pass per signal, the central pass's proven
     shape narrowed to one agent: settle this agent's orphan, pin ONE
-    database value, derive `next-agent-work`, execute the situation
-    through the surviving `seon.cluster.loop/turn` owner (custody law,
+    database value, derive `step`, execute the situation
+    through the surviving `seon.turn/advance!` owner (custody law,
     pre-provider capture, terminal transactions all unchanged), then
     self-rewake into this agent's OWN mailbox when more remains.
   - `::schedule` — one disposable timer and fact listener scoped to this
@@ -69,9 +69,9 @@
             [clojure.string :as str]
             [seon.bootstrap :as bootstrap]
             [seon.ai :as ai]
-            [seon.cluster.loop :as cluster.loop]
-            [seon.cluster.run :as run]
-            [seon.cluster.work :as work]
+            [seon.turn :as cluster.loop]
+            [seon.turn :as run]
+            [seon.turn :as work]
             [seon.config :as config]
             [seon.db :as db]
             [seon.blob :as blob]
@@ -139,7 +139,7 @@
       :seon.ns/name namespace-name
       :seon.ns/requires
       [[:seon.ns/name 'my.message]
-       [:seon.ns/name 'my.run]
+       [:seon.ns/name 'my.turn]
        [:seon.ns/name 'seon.db]]}
      {:seon.cluster.agent/id agent-id
       :seon.cluster.agent/namespace namespace-tempid}
@@ -294,14 +294,14 @@
            " unread message"
            (when-not (= 1 (:seon.cluster.agent/unread-message-count situation))
              "s")
-           ". " (:seon.cluster.run/turns-remaining situation)
+           ". " (:seon.turn/turns-remaining situation)
            " turns remain in this episode."
-           (when-let [trigger (:seon.cluster.run/trigger situation)]
+           (when-let [trigger (:seon.turn/trigger situation)]
              (str " This run exists because of " (pr-str trigger) "."))
            "\nInjected callables: help — " (doc-line #'bootstrap/help)
            " dir — " (doc-line #'bootstrap/dir)
            " doc — " (doc-line #'bootstrap/doc)
-           "\nEvery run ends with my.run/complete or my.run/wait; "
+           "\nEvery run ends with my.turn/complete or my.turn/wait; "
            "an undisposed run is unfinished work."))))
 
 (defn render-creation-ai
@@ -311,7 +311,7 @@
   (when-let [agent-id (:seon.cluster.agent/id unit)]
     (str "Agent " agent-id " · namespace " (:seon.ns/name unit)
          " · cluster " (:seon.cluster/name unit)
-         " · bootstrap run " (:seon.cluster.run/id unit) ".")))
+         " · bootstrap run " (:seon.turn/id unit) ".")))
 
 (defn render-creation-html
   "`:seon.render/html` — the compact agent-creation result card."
@@ -325,7 +325,7 @@
       [:div [:dt "Namespace"] [:dd [:code (str (:seon.ns/name unit))]]]
       [:div [:dt "Cluster"] [:dd (:seon.cluster/name unit)]]
       [:div [:dt "Bootstrap run"]
-       [:dd [:code (:seon.cluster.run/id unit)]]]]]))
+       [:dd [:code (:seon.turn/id unit)]]]]]))
 
 (defn assigned-to
   "Agent ids assigned to work in `namespace-name`, sorted; empty when none.
@@ -394,21 +394,20 @@
    [(update state ::deliveries inc)
     {::episode [::wake]}]))
 
-(defn- held-run-id
-  "The id of the agent's open turn held by `process`, or nil.
+(defn- open-turn-id
+  "The id of the agent's open turn, or nil.
   The turn proc's ping-state derivation — the current run rides in
   `::flow/state`, which is what retired the serial-dependent global
   query F2 §3.3 deleted."
-  [db agent-id process]
+  [db agent-id]
   (db/q '[:find ?id .
-         :in $ ?agent-id ?process
+         :in $ ?agent-id
          :where
          [?agent :seon.cluster.agent/id ?agent-id]
-         [?run :seon.cluster.run/agent ?agent]
-         (not [?run :seon.cluster.run/closed-at])
-         [?run :seon.cluster.run/process ?process]
-         [?run :seon.cluster.run/id ?id]]
-       db agent-id process))
+         [?run :seon.turn/agent ?agent]
+         (not [?run :seon.turn/closed-at])
+         [?run :seon.turn/id ?id]]
+       db agent-id))
 
 (defn- turn-completion-backstop-failure
   [agent-id run-id timeout-ms operation expected events]
@@ -417,7 +416,7 @@
          {:seon.cluster.agent/id agent-id
           :seon.config.agent/turn-completion-backstop-ms timeout-ms
           :seon.cluster.agent/completion-events events}
-          run-id (assoc :seon.cluster.run/id run-id))
+          run-id (assoc :seon.turn/id run-id))
         diagnostic
         (error/diagnostic
          (cond->
@@ -433,29 +432,29 @@
            :seon.config.agent/turn-completion-backstop-ms timeout-ms
            :seon.error/diagnostic-layer ::agent-graph
            :seon.error/diagnostic-operation operation
-           :seon.error/diagnostic-member :seon.cluster.loop/completion
+           :seon.error/diagnostic-member :seon.turn/completion
            :seon.error/diagnostic-expected expected
            :seon.error/diagnostic-offending evidence
            :seon.error/diagnostic-cause ::turn-completion-backstop
            :seon.error/diagnostic-evidence evidence}
-           run-id (assoc :seon.cluster.run/id run-id)))]
+           run-id (assoc :seon.turn/id run-id)))]
     (ex-info (:seon.error/message diagnostic) diagnostic)))
 
 (defn- await-turn-permit!
   [state]
   (let [{connection :seon.db/connection
          cluster-name :seon.cluster/name
-         process :seon.cluster.run/process
-         completion :seon.cluster.loop/completion
+         process :seon.db.process/id
+         completion :seon.turn/completion
          executor :seon.flow/executor
          fault-channel :seon.cluster.agent/fault-channel
          carried-timeout-ms
          :seon.config.agent/turn-completion-backstop-ms
          backstop-state :seon.cluster.agent/turn-backstop-state}
-        (:seon.cluster.loop/cluster state)
+        (:seon.turn/cluster state)
         agent-id (:seon.cluster.agent/id state)
         database @connection
-        run-id (held-run-id database agent-id process)
+        run-id (open-turn-id database agent-id)
         timeout-ms
         (or (:seon.config.agent/turn-completion-backstop-ms
              (ai/agent-overlay database agent-id))
@@ -484,7 +483,7 @@
       (throw
        (turn-completion-backstop-failure
         agent-id run-id timeout-ms ::turn-start ::turn-permit
-        [:seon.cluster.loop/completion])))))
+        [:seon.turn/completion])))))
 
 (defn- offer-turn-backstop-fault!
   [{::keys [fault-channel agent-id timeout-ms] armed-run ::run-id}]
@@ -492,7 +491,7 @@
         failure
         (turn-completion-backstop-failure
          agent-id run-id timeout-ms ::turn-transform ::turn-terminal
-         [:seon.cluster.loop/completion])
+         [:seon.turn/completion])
         fault
         (cond->
          {::flow/pid ::turn
@@ -500,7 +499,7 @@
           ::flow/op ::turn-completion-backstop
           ::flow/ex failure
           :seon.cluster.agent/id agent-id}
-          run-id (assoc :seon.cluster.run/id run-id))]
+          run-id (assoc :seon.turn/id run-id))]
     (when-not (and fault-channel (async/offer! fault-channel fault))
       (binding [*out* *err*]
         (println "SEON CORE FAULT (agent turn backstop):"
@@ -546,8 +545,8 @@
 (defn turn-step
   "The turn transform, in Flow's four arities: ONE episode pass.
   Settle this agent's orphan (the wedge fence, per-agent), pin one
-  database value, derive `next-agent-work`, run the situation through
-  `seon.cluster.loop/turn` — the surviving owner of open/call/resume/
+  database value, derive `step`, run the situation through
+  `seon.turn/advance!` — the surviving owner of open/call/resume/
   close, the pass-local custody law, the pre-provider capture, and the
   resume branch's mandatory `seon.flow/submit!!` eval hop — then
   `offer!` one wake into this agent's OWN mailbox when
@@ -573,19 +572,19 @@
     :outs {}
     :workload :io
     :ping-map-fn (fn [state]
-                   (select-keys state [:seon.cluster.run/id]))})
+                   (select-keys state [:seon.turn/id]))})
   ([args]
    args)
   ([state transition]
    (when (= ::flow/stop transition)
      (async/offer!
       (:seon.cluster.agent/turn-stopped
-       (:seon.cluster.loop/cluster state))
+       (:seon.turn/cluster state))
       ::stopped))
    state)
   ([state _input _message]
-   (let [cluster (:seon.cluster.loop/cluster state)
-         completion (:seon.cluster.loop/completion cluster)]
+   (let [cluster (:seon.turn/cluster state)
+         completion (:seon.turn/completion cluster)]
      (if-some [turn-bound (await-turn-permit! state)]
        (let [backstop (arm-turn-completion-backstop! turn-bound)
              succeeded? (volatile! false)]
@@ -593,39 +592,33 @@
           (let [result
                 (let [agent-id (:seon.cluster.agent/id state)
                       connection (:seon.db/connection cluster)
-                      process (:seon.cluster.run/process cluster)
+                      process (:seon.db.process/id cluster)
                       now (Date.)
-               ;; SETTLE BEFORE DERIVING, scoped to this agent: an orphaned
-               ;; run keeps its agent busy, and per-agent graphs settle their
-               ;; own orphan (conservation §5)
-               _ (when-let [orphan (work/interruption @connection agent-id)]
-                   (cluster.loop/settle-interruption!
-                    cluster (:seon.cluster.run/id orphan) now))
                       request {:seon.cluster.agent/id agent-id
-                               :seon.cluster.run/process process}
+                               :seon.db.process/id process}
                ;; ONE database value for the derivation
-                      next (work/next-agent-work @connection request)
+                      next (work/step @connection request)
                       ;; THE BOUND LEARNS ITS SUBJECT HERE, once, from
                       ;; the derivation that decided it. `:open` mints
                       ;; its run inside the turn, so the report supplies
                       ;; it below; every other situation names it now.
-                      _ (when-let [derived (:seon.cluster.run/id next)]
+                      _ (when-let [derived (:seon.turn/id next)]
                           (reset! (::run-id turn-bound) derived))]
                   (if (nil? next)
-                    [(dissoc state :seon.cluster.run/id)
+                    [(dissoc state :seon.turn/id)
                      nil]
-                    (let [report (cluster.loop/turn
-                                  {:seon.cluster.loop/cluster cluster
-                                   :seon.cluster.work/next next}
+                    (let [report (cluster.loop/advance!
+                                  {:seon.turn/cluster cluster
+                                   :seon.turn/next next}
                                   now)
-                          _ (when-let [opened (:seon.cluster.run/id report)]
+                          _ (when-let [opened (:seon.turn/id report)]
                               (reset! (::run-id turn-bound) opened))]
                ;; Run closure is an armer wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.
                ;; The signal is disposable: the armer re-derives the complete
                ;; supervision transition from the current database value.
                       (when (and
-                             (= :closed (:seon.cluster.loop/outcome report))
+                             (= :closed (:seon.turn/outcome report))
                              (:seon.cluster.wake/armer-channel cluster))
                         (async/offer!
                          (:seon.cluster.wake/armer-channel cluster)
@@ -638,12 +631,12 @@
                          (:seon.cluster.wake/channel cluster) ::wake))
                       ;; THE PASS REPORTS THE RUN IT TURNED, not whatever
                       ;; the database says is held now: the turn may have
-                      ;; closed and released custody, and re-deriving here
+                      ;; closed the turn, and re-deriving here
                       ;; made the ping state disagree with the report in
                       ;; exactly that ordinary case.
-                      [(let [run-id (:seon.cluster.run/id report)]
-                         (cond-> (dissoc state :seon.cluster.run/id)
-                           run-id (assoc :seon.cluster.run/id run-id)))
+                      [(let [run-id (:seon.turn/id report)]
+                         (cond-> (dissoc state :seon.turn/id)
+                           run-id (assoc :seon.turn/id run-id)))
                 ;; flow's own report channel: observation, never a dependency
                        {::flow/report [report]}])))]
            (vreset! succeeded? true)
@@ -681,7 +674,7 @@
   so coalescing is free by the same argument that made the central
   pass's wake safe."
   {:malli/schema [:=> [:cat :seon.cluster.agent/blueprint-request] :map]}
-  [{handle :seon.cluster.loop/cluster agent-id :seon.cluster.agent/id}]
+  [{handle :seon.turn/cluster agent-id :seon.cluster.agent/id}]
   ;; Every proc in this agent's graph carries the cluster's environment
   ;; SCOPED to this agent, so work leaving a proc on any thread still names
   ;; which cluster and which agent it belongs to.
@@ -698,14 +691,14 @@
        ::turn
        {:proc (seon.flow/var-process
                #'turn-step :io
-               (env/carry {:seon.cluster.loop/cluster handle
+               (env/carry {:seon.turn/cluster handle
                            :seon.cluster.agent/id agent-id}
                           environment))
         :chan-opts {::episode {:buf-or-n (async/sliding-buffer 1)}}}
        ::schedule
        {:proc (seon.flow/var-process
                #'schedule/schedule-step :io
-               (env/carry {:seon.cluster.loop/cluster handle
+               (env/carry {:seon.turn/cluster handle
                            :seon.cluster.agent/id agent-id
                            :seon.schedule/channel
                            (:seon.schedule/channel handle)}
@@ -749,7 +742,7 @@
   {:malli/schema
    [:=> [:catn [:request :seon.cluster.agent/source-submission-request]]
     [:or :seon.cluster.agent/source-submission-result :seon.error/value]]}
-  [{handle :seon.cluster.loop/cluster :as request}]
+  [{handle :seon.turn/cluster :as request}]
   ;; The submission thread otherwise pays the cold projection rebuild
   ;; (measured 728 → 147 ms per source turn); the handle carries its world.
   (if-let [projection-state (:seon.sci.eval/projection-state handle)]
@@ -759,10 +752,10 @@
     (submit-source-in-projection request)))
 
 (defn- submit-source-in-projection
-  [{handle :seon.cluster.loop/cluster
+  [{handle :seon.turn/cluster
     routing :seon.cluster.agent/routing
     agent-id :seon.cluster.agent/id
-    starting-ns :seon.cluster.run/starting-ns
+    starting-ns :seon.turn/starting-ns
     text :seon.cluster.reply/text}]
   (let [connection (:seon.db/connection handle)
         database @connection
@@ -812,21 +805,21 @@
                      database
                      (merge (dissoc staged-reply :seon.blob/staged-writes)
                             {:seon.cluster.agent/id agent-id
-                             :seon.cluster.run/id run-id
-                             :seon.cluster.run/process
-                             (:seon.cluster.run/process handle)
-                             :seon.cluster.run/opened-at now
-                             :seon.cluster.run/starting-ns
+                             :seon.turn/id run-id
+                             :seon.db.process/id
+                             (:seon.db.process/id handle)
+                             :seon.turn/opened-at now
+                             :seon.turn/starting-ns
                              [:seon.ns/name namespace-name]
-                             :seon.cluster.run/plan-digest (run/plan-digest sources)
-                             :seon.cluster.run/sources sources}))}))]
+                             :seon.turn/plan-digest (run/plan-digest sources)
+                             :seon.turn/sources sources}))}))]
             (if (:seon.error/kind outcome)
               outcome
               (let [channel
                     (or (:seon.cluster.wake/channel (armed routing agent-id))
                         (:seon.cluster.wake/channel handle))]
                 (if (async/offer! channel ::wake)
-                  {:seon.cluster.run/id run-id}
+                  {:seon.turn/id run-id}
                   (error/diagnostic
                    {:seon.error/kind ::source-submission-undeliverable
                     :seon.error/message
@@ -840,7 +833,7 @@
                     :seon.error/diagnostic-cause
                     ::source-submission-undeliverable
                     :seon.error/diagnostic-evidence
-                    {:seon.cluster.run/id run-id}}))))))))))
+                    {:seon.turn/id run-id}}))))))))))
 
 (defn fenced?
   "True when this agent is QUARANTINED: armed, routed, mailbox closed.
@@ -848,7 +841,7 @@
   DERIVED from the two process-local artifacts that already exist —
   presence of the routing entry and the channel's own `closed?` — so
   there is no quarantine flag, no fenced-id set, and nothing to keep in
-  sync. The state is real and is the one `seon.cluster.loop`'s terminal
+  sync. The state is real and is the one `seon.turn`'s terminal
   settlement fence creates: the agent must take no further pass over
   its still-running receipt until boot recovery marks that receipt
   interrupted, so its mailbox is closed IN PLACE while its entry stays,
@@ -912,7 +905,7 @@
   missing entity is a caller bug, never a nil routing key."
   {:malli/schema [:=> [:cat :seon.cluster.agent/arm-request]
                   :seon.cluster.agent/armed]}
-  [{handle :seon.cluster.loop/cluster
+  [{handle :seon.turn/cluster
     agent-id :seon.cluster.agent/id
     routing :seon.cluster.agent/routing}]
   (or (armed routing agent-id)
@@ -947,7 +940,7 @@
                                 (:seon.cluster.wake/channel handle)
                                 :seon.cluster.wake/channel wake-channel
                                 :seon.schedule/channel schedule-channel
-                                :seon.cluster.loop/completion completion
+                                :seon.turn/completion completion
                                 ::fault-channel (::fault-channel @routing)
                                 ::turn-backstop-state turn-backstop-state
                                 :seon.config.agent/turn-completion-backstop-ms
@@ -957,7 +950,7 @@
             (seon.flow/start-graph!
              {:seon.flow/graph-definition
               (graph-definition
-               {:seon.cluster.loop/cluster agent-handle
+               {:seon.turn/cluster agent-handle
                 :seon.cluster.agent/id agent-id})
               :seon.flow/joins
               {::error-fanout
@@ -968,11 +961,11 @@
                    :seon.flow/tag {:seon.cluster.agent/id agent-id}}))}})
             entry {:seon.cluster.agent/id agent-id
                    :seon.cluster.agent/eid eid
-                   :seon.cluster.loop/cluster agent-handle
+                   :seon.turn/cluster agent-handle
                    :seon.flow/graph graph
                    :seon.cluster.wake/channel wake-channel
                    :seon.schedule/channel schedule-channel
-                   :seon.cluster.loop/completion completion
+                   :seon.turn/completion completion
                    ::turn-backstop-state turn-backstop-state
                    :seon.cluster.agent/turn-stopped turn-stopped}]
         (swap! routing
@@ -986,20 +979,20 @@
 
 (defn- await-turn-completion!
   [routing entry]
-  (let [completion (:seon.cluster.loop/completion entry)
+  (let [completion (:seon.turn/completion entry)
         turn-stopped (:seon.cluster.agent/turn-stopped entry)
         {connection :seon.db/connection
-         process :seon.cluster.run/process}
-        (:seon.cluster.loop/cluster entry)]
+         process :seon.db.process/id}
+        (:seon.turn/cluster entry)]
     (if-some [terminal (or (async/poll! completion)
                            (async/poll! turn-stopped))]
       terminal
       (let [agent-id (:seon.cluster.agent/id entry)
             database @connection
-            run-id (held-run-id database agent-id process)
+            run-id (open-turn-id database agent-id)
             timeout-ms
             (:seon.config.agent/turn-completion-backstop-ms
-             (:seon.cluster.loop/cluster entry))
+             (:seon.turn/cluster entry))
             active-backstop-state (::turn-backstop-state entry)
             active-backstop
             (when active-backstop-state @active-backstop-state)]
@@ -1023,7 +1016,7 @@
               (let [failure
                     (turn-completion-backstop-failure
                      agent-id run-id timeout-ms ::disarm ::turn-completed
-                     [:seon.cluster.loop/completion
+                     [:seon.turn/completion
                       :seon.cluster.agent/turn-stopped])
                     fault
                     (cond->
@@ -1032,7 +1025,7 @@
                       ::flow/op ::turn-completion-backstop
                       ::flow/ex failure
                       :seon.cluster.agent/id agent-id}
-                      run-id (assoc :seon.cluster.run/id run-id))]
+                      run-id (assoc :seon.turn/id run-id))]
                 (async/offer! (::fault-channel @routing) fault)
                 (binding [*out* *err*]
                   (println "SEON CORE FAULT (agent stop backstop):"
@@ -1076,7 +1069,7 @@
                  (update ::channels dissoc
                          (:seon.cluster.agent/eid entry)))))
     (async/close! (:seon.cluster.wake/channel entry))
-    (async/close! (:seon.cluster.loop/completion entry))
+    (async/close! (:seon.turn/completion entry))
     (async/close! (:seon.cluster.agent/turn-stopped entry)))
   nil)
 
@@ -1114,11 +1107,11 @@
   ([args]
    (assoc args
           ::flow/in-ports {::arm (:seon.cluster.wake/channel
-                                  (:seon.cluster.loop/cluster args))}))
+                                  (:seon.turn/cluster args))}))
   ([state transition]
    (when (= ::flow/stop transition)
-     (async/put! (:seon.cluster.loop/completion
-                  (:seon.cluster.loop/cluster state))
+     (async/put! (:seon.turn/completion
+                  (:seon.turn/cluster state))
                  ::stopped))
    state)
   ([state _input message]
@@ -1132,7 +1125,7 @@
        [state nil])
 
      :else
-     (let [handle (:seon.cluster.loop/cluster state)
+     (let [handle (:seon.turn/cluster state)
            routing (:seon.cluster.agent/routing state)
            connection (:seon.db/connection handle)
            db @connection
@@ -1144,7 +1137,7 @@
            first-agent (when (= 1 (count non-root-agents))
                          (first non-root-agents))]
        (doseq [agent-id (sort unarmed)]
-         (arm! {:seon.cluster.loop/cluster handle
+         (arm! {:seon.turn/cluster handle
                 :seon.cluster.agent/id agent-id
                 :seon.cluster.agent/routing routing}))
        ;; Supervision is a fact-derived transition, never a wait inside this
@@ -1158,8 +1151,8 @@
                 (db/q '[:find ?closed .
                         :in $ ?run-id
                         :where
-                        [?run :seon.cluster.run/id ?run-id]
-                        [?run :seon.cluster.run/closed-at ?closed]]
+                        [?run :seon.turn/id ?run-id]
+                        [?run :seon.turn/closed-at ?closed]]
                       database (bootstrap/run-id first-agent)))
                root-eid
                (db/q '[:find ?root .
@@ -1170,14 +1163,14 @@
                     (nil?
                      (db/q '[:find ?run .
                              :in $ ?root
-                             :where [?run :seon.cluster.run/agent ?root]
-                             (not [?run :seon.cluster.run/closed-at])]
+                             :where [?run :seon.turn/agent ?root]
+                             (not [?run :seon.turn/closed-at])]
                            database root-eid)))]
            (when (and worker-closed? root-idle?)
              (let [supervision-tx
                    (bootstrap/supervision-tx
                     database
-                    (:seon.cluster.run/process handle)
+                    (:seon.db.process/id handle)
                     (Date.)
                     first-agent)]
                (when (seq supervision-tx)

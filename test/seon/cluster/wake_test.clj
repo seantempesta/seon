@@ -25,7 +25,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
-            [seon.cluster.loop :as cluster.loop]
+            [seon.turn :as cluster.loop]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.error :as error]
@@ -58,10 +58,10 @@
 (defn- run-tx
   "A commit of attributes a TURN writes — the other side of C2."
   [id]
-  [{:seon.cluster.run/id id
-    :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-    :seon.cluster.run/opened-at (Date.)
-    :seon.cluster.run/plan-digest (apply str (repeat 64 "a"))}])
+  [{:seon.turn/id id
+    :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+    :seon.turn/opened-at (Date.)
+    :seon.turn/plan-digest (apply str (repeat 64 "a"))}])
 
 (defn- route-probe!
   "Register the production listener with this test's own channels.
@@ -464,7 +464,7 @@
   ;; transaction's go block BEFORE (deliver p tx-report)
   ;; (writer.cljc:384-386), so an escaping exception means the
   ;; committing caller waits forever. What CHANGED is the verdict on a
-  ;; closed mailbox. `seon.cluster.loop`'s terminal settlement fence
+  ;; closed mailbox. `seon.turn`'s terminal settlement fence
   ;; closes an agent's mailbox in place so it takes no further pass over
   ;; a still-running receipt; committing that very fault also commits
   ;; its explanation message, so routing used to turn the quarantine

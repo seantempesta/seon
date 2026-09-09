@@ -11,7 +11,7 @@
                        :seon.error/value],
                       :request
                       [:map
-                       [:seon.cluster.run/id :seon.cluster.run/id]
+                       [:seon.turn/id :seon.turn/id]
                        [:seon.cluster.agent/id :seon.cluster.agent/id]
                        [:seon.db/connection :seon.db/connection]
                        [:seon.sci.admit/caps :seon.sci.admit/caps]
@@ -23,9 +23,7 @@
                        [:seon.render/distance
                         {:optional true}
                         :seon.render/distance]
-                       [:seon.cluster.run/live-processes
-                        {:optional true}
-                        :seon.cluster.run/live-processes]],
+                       ],
                       :text [:string {:min 1}],
                       :rule :keyword,
                       :no-trigger [:= true]

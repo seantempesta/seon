@@ -48,7 +48,7 @@
     :seon.bootstrap-drive/objective
     (str
      "Your bootstrap run's ordered forms are rows already committed as facts. "
-     "Query their :seon.cluster.eval/ordinal and namespace; map the one "
+     "Query their :seon.eval/ordinal and namespace; map the one "
      "user-namespace form to label \"user\" and the agent-namespace forms to "
      "label \"agent\", with each ordinal as amount. The resulting rows are "
      (pr-str o1-rows) ". Define a permanent contracted function in your "
@@ -62,7 +62,7 @@
     :seon.bootstrap-drive/objective
     (str
      "Find, by querying the program graph rather than relying on its name, "
-     "the function in this cluster that accepts :my.run/result. Use that "
+     "the function in this cluster that accepts :my.turn/result. Use that "
      "function to end this run with the exact text discovered-by-contract.")}
 
    :o3
@@ -111,8 +111,8 @@
               :in $ ?message-id
               :where
               [?message :seon.cluster.message/id ?message-id]
-              [?run :seon.cluster.run/trigger ?message]
-              [?run :seon.cluster.run/id ?run-id ?opened-tx]]
+              [?run :seon.turn/trigger ?message]
+              [?run :seon.turn/id ?run-id ?opened-tx]]
             db message-id)
        (sort-by second)
        (mapv first)))
@@ -126,17 +126,17 @@
                 [?function :seon.fn/ns ?namespace]
                 [?function :seon.fn/sym ?sym ?tx]
                 [?function :seon.fn/spec ?spec]
-                [?run :seon.cluster.run/id ?run-id]
-                [?receipt :seon.cluster.eval/run ?run]
-                [?receipt :seon.cluster.eval/ordinal ?ordinal]
+                [?run :seon.turn/id ?run-id]
+                [?receipt :seon.eval/turn ?run]
+                [?receipt :seon.eval/ordinal ?ordinal]
                 [?receipt :seon.eval/value _ ?tx]]
               db run-ids namespace-name)
          (sort-by (juxt #(nth % 2) #(nth % 3) first))
          (mapv (fn [[sym spec run-id ordinal]]
                  {:seon.fn/sym sym
                   :seon.fn/spec spec
-                  :seon.cluster.run/id run-id
-                  :seon.cluster.eval/ordinal ordinal})))
+                  :seon.turn/id run-id
+                  :seon.eval/ordinal ordinal})))
     []))
 
 (defn- evaluate-function
@@ -146,16 +146,16 @@
         evaluation
         (sci.eval/evaluate
          {:seon.sci.eval/ctx (sci.eval/cluster-ctx db connection)
-          :seon.cluster.eval/source
+          :seon.eval/source
           (str "(" function-symbol " " (pr-str argument) ")")
-          :seon.cluster.eval/ns
+          :seon.eval/ns
           [:seon.ns/name (agent-namespace db agent-id)]
           :seon.cluster.agent/id agent-id
           :seon.sci.admit/caps caps
           :seon.sci.eval/time-limit-ms 30000
           :seon.config/on-core-error :panic})]
     {:seon.bootstrap-drive/value (:seon.sci.admit/value evaluation)
-     :seon.cluster.eval/error (:seon.cluster.eval/error evaluation)}))
+     :seon.eval/error (:seon.eval/error evaluation)}))
 
 (defn- grade-o1
   [connection cluster-name agent-id run-ids completed-result]
@@ -184,7 +184,7 @@
   {:p2a
    (boolean
     (some #(re-find #":seon\.fn(?:\.arity/input-refs|/spec)"
-                    (:seon.cluster.eval/source %))
+                    (:seon.eval/source %))
           receipts))
    :p2b (= "discovered-by-contract" completed-result)})
 
@@ -241,9 +241,9 @@
         (some (fn [function-symbol]
                 (some #(when (and
                               (str/includes?
-                               (:seon.cluster.eval/source %)
+                               (:seon.eval/source %)
                                function-symbol)
-                              (str/blank? (:seon.cluster.eval/error %)))
+                              (str/blank? (:seon.eval/error %)))
                          function-symbol)
                       receipts))
               peer-functions)]
@@ -268,7 +268,7 @@
                                :seon.error/data
                                :seon.sci.eval/data
                                :seon.schema/error])))
-               (keep #(defined-name (:seon.cluster.eval/source %))))
+               (keep #(defined-name (:seon.eval/source %))))
               receipts)
         repaired
         (into #{}

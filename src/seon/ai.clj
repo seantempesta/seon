@@ -19,7 +19,7 @@
   - `delays` derives the finite backoff schedule as a vector of waits.
 
   `complete` STILL MAKES EXACTLY ONE ATTEMPT. Failover and backoff are
-  the CALLER's reduce over these values (`seon.cluster.loop`'s `:call`
+  the CALLER's reduce over these values (`seon.turn`'s `:call`
   branch), which is why this namespace holds no attempt count and no
   state: every attempt is one `complete` call and one durable
   `:seon.ai/attempt` fact.

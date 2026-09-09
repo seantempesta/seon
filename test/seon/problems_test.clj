@@ -33,7 +33,6 @@
             [seon.test-support :as test-support]))
 
 (def ^:private live "9999-1785191833372")
-(def ^:private dead "1234-1700000000000")
 (def ^:private now #inst "2026-07-27T21:00:00.000-00:00")
 
 (def ^:private caps
@@ -52,12 +51,12 @@
   owns that threading; here the seam is explicit so the test proves the
   block, not the refusal card."
   [unit]
-  (problems/block (assoc unit :seon.cluster.run/live-processes #{live})))
+  (problems/block unit))
 
 (defn- found
   [connection]
   (problems/problems @connection
-                     {:seon.cluster.run/live-processes #{live}}))
+                     {}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The database fixtures — each commits ONLY its own family's facts
@@ -90,38 +89,30 @@
       :seon.config.error/recurrence-limit 3
       :seon.config.error/max-evidence-bytes 16384}))))
 
-(defn- commit-wedged-run!
-  [connection]
-  (db/transact! connection
-              [{:seon.cluster.run/id "run-wedged"
-                :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-                :seon.cluster.run/opened-at now
-                :seon.cluster.run/process dead}]))
-
 (defn- commit-failed-run!
   [connection]
   (db/transact! connection
-              [{:seon.cluster.run/id "run-failed"
-                :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-                :seon.cluster.run/opened-at now
-                :seon.cluster.run/closed-at now
-                :seon.cluster.run/error "the model did not answer"}]))
+              [{:seon.turn/id "run-failed"
+                :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+                :seon.turn/opened-at now
+                :seon.turn/closed-at now
+                :seon.turn/error "the model did not answer"}]))
 
 (defn- commit-errored-receipt!
   [connection]
   (db/transact! connection
-              [{:seon.cluster.run/id "run-with-receipt"
-                :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-               :seon.cluster.run/opened-at now
-                :seon.cluster.run/closed-at now}
-               {:seon.cluster.eval/id "receipt-1"
-                :seon.cluster.eval/run [:seon.cluster.run/id "run-with-receipt"]
-                :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/at now
+              [{:seon.turn/id "run-with-receipt"
+                :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+               :seon.turn/opened-at now
+                :seon.turn/closed-at now}
+               {:seon.eval/id "receipt-1"
+                :seon.eval/turn [:seon.turn/id "run-with-receipt"]
+                :seon.eval/ordinal 0
+                :seon.eval/at now
                 ;; the error's presence IS the errored state
                 :seon.error/kind :seon.sci.eval/evaluation-failed
-                :seon.cluster.eval/error "Unable to resolve symbol: widgets"
-                :seon.cluster.eval/source "(widgets)"}]))
+                :seon.eval/error "Unable to resolve symbol: widgets"
+                :seon.eval/source "(widgets)"}]))
 
 (defn- commit-missing-model!
   [connection]
@@ -131,7 +122,6 @@
 
 (def ^:private families
   {:seon.problems/error-signatures commit-error!
-   :seon.problems/wedged-runs commit-wedged-run!
    :seon.problems/failed-runs commit-failed-run!
    :seon.problems/errored-receipts commit-errored-receipt!
    :seon.problems/missing-models commit-missing-model!})
@@ -168,7 +158,7 @@
             :seon.error/capped? false}
            (select-keys optional-error-evidence optional-attributes))
     run? (assoc :seon.error/run
-                [:seon.cluster.run/id "generated-error-run"])
+                [:seon.turn/id "generated-error-run"])
     agent? (assoc :seon.error/agent
                   [:seon.cluster.agent/id "agent-a"])))
 
@@ -265,7 +255,7 @@
             loaded-namespace (the-ns namespace-name)
             derive #(problems/problems
                      database
-                     {:seon.cluster.run/live-processes #{live}})]
+                     {})]
         (is (nil? (ns-resolve loaded-namespace intern-name)))
         (is (nil? (:seon.problems/stale-vars (derive)))
             "the synchronized source image and program graph are clean")
@@ -335,9 +325,9 @@
        (fn [connection]
          (db/transact!
           connection
-          [{:seon.cluster.run/id "generated-error-run"
-            :seon.cluster.run/agent [:seon.cluster.agent/id "agent-a"]
-            :seon.cluster.run/opened-at now}])
+          [{:seon.turn/id "generated-error-run"
+            :seon.turn/agent [:seon.cluster.agent/id "agent-a"]
+            :seon.turn/opened-at now}])
          (let [facts (mapv (fn [ordinal attribution]
                              (generated-error-fact
                               ordinal optional-attributes attribution))
@@ -384,30 +374,13 @@
              :seon.problems/problems value)
             "partial signature rows cannot invalidate runtime health")))))
 
-(deftest a-run-held-by-a-dead-process-is-wedged
-  (with-db
-    (fn [connection]
-      (commit-wedged-run! connection)
-      (let [entry (first (:seon.problems/wedged-runs (found connection)))]
-        (is (= "run-wedged" (:seon.cluster.run/id entry)))
-        (is (= "agent-a" (:seon.cluster.agent/id entry)))
-        (is (= dead (:seon.cluster.run/process entry))
-            "the holder is named, because the next question is always
-             which process")
-        (testing "and the SAME run held by a LIVE process is not a problem —
-        wedged is derived from liveness, never from a clock"
-          (is (empty? (:seon.problems/wedged-runs
-                       (problems/problems
-                        @connection
-                        {:seon.cluster.run/live-processes #{live dead}})))))))))
-
 (deftest a-run-that-closed-with-an-error-says-why
   (with-db
     (fn [connection]
       (commit-failed-run! connection)
       (let [entry (first (:seon.problems/failed-runs (found connection)))]
-        (is (= "run-failed" (:seon.cluster.run/id entry)))
-        (is (= "the model did not answer" (:seon.cluster.run/error entry)))))))
+        (is (= "run-failed" (:seon.turn/id entry)))
+        (is (= "the model did not answer" (:seon.turn/error entry)))))))
 
 (deftest an-errored-receipt-is-a-problem-without-being-a-fault
   (with-db
@@ -415,11 +388,11 @@
       (commit-errored-receipt! connection)
       (let [value (found connection)
             entry (first (:seon.problems/errored-receipts value))]
-        (is (= "receipt-1" (:seon.cluster.eval/id entry)))
-        (is (= "run-with-receipt" (:seon.cluster.run/id entry)))
-        (is (= 0 (:seon.cluster.eval/ordinal entry)))
-        (is (str/includes? (:seon.cluster.eval/error entry) "widgets"))
-        (is (= "(widgets)" (:seon.cluster.eval/source entry)))
+        (is (= "receipt-1" (:seon.eval/id entry)))
+        (is (= "run-with-receipt" (:seon.turn/id entry)))
+        (is (= 0 (:seon.eval/ordinal entry)))
+        (is (str/includes? (:seon.eval/error entry) "widgets"))
+        (is (= "(widgets)" (:seon.eval/source entry)))
         (is (= :seon.sci.eval/evaluation-failed (:seon.error/kind entry)))
         (is (str/includes?
              (problems/ai-prose value)
@@ -510,24 +483,21 @@
   (with-db
     (fn [connection]
       (let [healthy @connection
-            _ (commit-wedged-run! connection)
+            _ (commit-failed-run! connection)
             broken @connection
             render-at (fn [db]
                         (hiccup/->string
                          (problems/block
                           {:seon.db/db db
-                           :seon.cluster.run/live-processes #{live}})))]
+                           })))]
         (is (str/includes? (render-at healthy) "nothing is wrong")
             "the healthy surface still occupies its space")
-        (is (str/includes? (render-at broken) "not alive"))
+        (is (str/includes? (render-at broken) "the model did not answer"))
         (is (not (str/includes? (render-at broken) "nothing is wrong")))))))
 
-(deftest the-block-refuses-legibly-when-liveness-is-not-supplied
-  ;; The one input a database cannot answer. Defaulting it would either
-  ;; invent problems (#{} makes every held run wedged) or hide them.
+(deftest the-block-needs-only-its-database
   (with-db
     (fn [connection]
-      (commit-wedged-run! connection)
-      (let [refused (problems/block {:seon.db/db @connection})]
-        (is (hiccup/hiccup? refused))
-        (is (str/includes? (hiccup/->string refused) "live-processes"))))))
+      (let [value (problems/block {:seon.db/db @connection})]
+        (is (hiccup/hiccup? value))
+        (is (str/includes? (hiccup/->string value) "nothing is wrong"))))))

@@ -150,8 +150,8 @@
                      :seon.sci.admit/caps caps
                      :seon.sci.eval/ctx ctx
                      :seon.config/on-core-error :record
-                     :seon.cluster.run/process process
-                     :seon.cluster.loop/stream-channel stream-channel
+                     :seon.db.process/id process
+                     :seon.turn/stream-channel stream-channel
 })
             graph (flow.core/create-flow
                    {:procs
@@ -160,7 +160,7 @@
                              #'web/render-step :io
                              (assoc view
                                     :seon.env/environment @test-environment
-                                    :seon.cluster.loop/cluster
+                                    :seon.turn/cluster
 handle))}}
                     :conns []})
             pages-mult (async/mult pages-channel)
@@ -188,7 +188,7 @@ handle))}}
                         :seon.cluster.wake/fault-channel fault-channel
                         :seon.cluster.wake/key ::route})
           (reset! server (web/start!
-                          {:seon.cluster.loop/cluster handle
+                          {:seon.turn/cluster handle
                            :seon.store/connection-object connection
                            :seon.cluster.agent/id agent-id
                            :seon.sci.admit/caps caps
@@ -197,7 +197,7 @@ handle))}}
                            (:seon.config.eval/time-limit-ms
                             (config/defaults))
                            :seon.config/on-core-error :record
-                           :seon.cluster.run/process process
+                           :seon.db.process/id process
                            :seon.render.web/pages-mult pages-mult
                            :seon.render.web/registration registration
                            :seon.render.web/latest-packages latest-packages
@@ -303,10 +303,10 @@ handle))}}
   "Open a minimal run row for one renderer presence-gate test."
   [connection run-id]
   (db/transact! connection
-              [{:seon.cluster.run/id run-id
-                :seon.cluster.run/agent
+              [{:seon.turn/id run-id
+                :seon.turn/agent
                 [:seon.cluster.agent/id agent-id]
-                :seon.cluster.run/opened-at (java.util.Date.)}]))
+                :seon.turn/opened-at (java.util.Date.)}]))
 
 (defn- client [] (.build (HttpClient/newBuilder)))
 
@@ -823,9 +823,9 @@ handle))}}
                                         :where [['?e '?a]]}
                                        :args [database attribute]})
                                 0))]
-                {:runs (total :seon.cluster.run/id)
-                 :evaluations (total :seon.cluster.eval/id)
-                 :forms (total :seon.cluster.eval/ordinal)
+                {:runs (total :seon.turn/id)
+                 :evaluations (total :seon.eval/id)
+                 :forms (total :seon.eval/ordinal)
                  :faults (total :seon.error/id)}))
             subject (URLEncoder/encode
                      (pr-str [:seon.cluster.agent/id agent-id]) "UTF-8")
@@ -839,10 +839,10 @@ handle))}}
                               (finally (.close stream)))))]
         (open-run! connection "inspection-counts")
         (db/transact! connection
-                      [{:seon.cluster.eval/id "inspection-counts-e0"
-                        :seon.cluster.eval/run
-                        [:seon.cluster.run/id "inspection-counts"]
-                        :seon.cluster.eval/ordinal 0}])
+                      [{:seon.eval/id "inspection-counts-e0"
+                        :seon.eval/turn
+                        [:seon.turn/id "inspection-counts"]
+                        :seon.eval/ordinal 0}])
         (inspect!)
         (is (= 200 (.statusCode (fetch server "/agent/root/debug?prompt=true"))))
         (let [before (durable-counts)
@@ -1399,7 +1399,7 @@ handle))}}
                  {:seon.store/connection-object connection
                   :seon.cluster.agent/id agent-id
                   :seon.sci.admit/caps caps
-                  :seon.cluster.run/process process
+                  :seon.db.process/id process
                   :seon.render.web/pages-mult (async/mult pages-channel)
                   :seon.render.web/registration (atom {})
                   :seon.render.web/latest-packages (atom {})
@@ -1541,10 +1541,10 @@ handle))}}
         (open-run! connection run-a)
         (db/transact! connection
                     [{:seon.cluster.agent/id "agent-b"}
-                     {:seon.cluster.run/id run-b
-                      :seon.cluster.run/agent
+                     {:seon.turn/id run-b
+                      :seon.turn/agent
                       [:seon.cluster.agent/id "agent-b"]
-                      :seon.cluster.run/opened-at (java.util.Date.)}])
+                      :seon.turn/opened-at (java.util.Date.)}])
         (let [tab (open-feed server (str "/feed/" agent-id))]
         (try
           (is (not (str/includes? (read-complete-paint! tab connection)
@@ -1556,7 +1556,7 @@ handle))}}
 
           (async/offer! (:stream-channel context)
                         {:seon.cluster.agent/id agent-id
-                         :seon.cluster.run/id run-a
+                         :seon.turn/id run-a
                          :seon.ai/partial {:seon.ai/text "A half reply"
                                            :seon.ai/tokens 3}})
           (let [partial (read-until! tab "A half reply")]
@@ -1567,7 +1567,7 @@ handle))}}
           ;; changes B's transient entry but cannot carry semantics for A.
           (async/offer! (:stream-channel context)
                         {:seon.cluster.agent/id "agent-b"
-                         :seon.cluster.run/id run-b
+                         :seon.turn/id run-b
                          :seon.ai/partial {:seon.ai/text "B newest"
                                            :seon.ai/tokens 2}})
           (await-ping! context
@@ -1577,8 +1577,8 @@ handle))}}
           ;; The frozen plan is the settled provider reply fact. Its
           ;; normal database wake is the stream terminal.
           (db/transact! connection
-                      [[:db/add [:seon.cluster.run/id run-a]
-                        :seon.cluster.run/plan-digest
+                      [[:db/add [:seon.turn/id run-a]
+                        :seon.turn/plan-digest
                         (apply str (repeat 64 "a"))]])
           (await-ping! context
                        #(zero? (:seon.render.web/streaming-agents %))
@@ -1593,7 +1593,7 @@ handle))}}
             (let [before (derivations context)]
               (async/offer! (:stream-channel context)
                             {:seon.cluster.agent/id agent-id
-                             :seon.cluster.run/id run-a
+                             :seon.turn/id run-a
                              :seon.ai/partial {:seon.ai/text "too late"
                                                :seon.ai/tokens 99}})
               (await-ping! context
@@ -1619,7 +1619,7 @@ handle))}}
                        [:first-tab-derived])
           (async/offer! (:stream-channel context)
                         {:seon.cluster.agent/id agent-id
-                         :seon.cluster.run/id run-id
+                         :seon.turn/id run-id
                          :seon.ai/partial {:seon.ai/text "not durable"
                                            :seon.ai/tokens 2}})
           (is (str/includes? (read-until! first-tab "not durable")
@@ -1977,7 +1977,7 @@ handle))}}
           :seon.config.eval/time-limit-ms
           (:seon.config.eval/time-limit-ms (config/defaults))
           :seon.config/on-core-error :record
-          :seon.cluster.run/process process
+          :seon.db.process/id process
           :seon.render.web/pages-mult
           (async/mult (async/chan (async/sliding-buffer 1)))
           :seon.render.web/registration (atom {})
@@ -2134,7 +2134,7 @@ handle))}}
                  {:seon.cluster.agent/id "agent-a"
                   :seon.cluster/name "web-fault-test"
                   :seon.ns/name 'my.agents.fault-test}))
-  {:seon.cluster.loop/cluster
+  {:seon.turn/cluster
    (support/cluster-handle
    {:seon.cluster/name "web-fault-test"
     :seon.db/connection connection
@@ -2142,7 +2142,7 @@ handle))}}
     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
     :seon.config.eval/time-limit-ms 1000
     :seon.config/on-core-error :panic
-    :seon.cluster.run/process "web-fault-test"})
+    :seon.db.process/id "web-fault-test"})
    :seon.cluster.agent/routing
    (atom {:seon.cluster.agent/fault-channel fault-channel})
    :seon.render.web/registration (atom {"agent-a" 1})

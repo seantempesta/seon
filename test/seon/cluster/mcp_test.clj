@@ -47,7 +47,7 @@
           :seon.sci.admit/caps (config/result-caps effective)
           :seon.config/on-core-error :record})]
     (assoc admitted
-           :seon.cluster.eval/ns [:seon.ns/name 'user]
+           :seon.eval/ns [:seon.ns/name 'user]
            :seon.sci.eval/ending-ns 'user)))
 
 (defn- observed-query-shape
@@ -97,7 +97,7 @@
                        \x))
         evaluation-shaped-value
         {:seon.sci.admit/value (vec (range 50000))
-         :seon.cluster.eval/result-edn oversized-string}
+         :seon.eval/result-edn oversized-string}
         result (projected cluster-name effective evaluation-shaped-value)]
     (is (< (utf8-size result) 8192)
         "nested collection and string bulk cannot escape the value window")
@@ -107,14 +107,14 @@
 (deftest door-evaluations-project-the-repl-text-face
   (let [cluster-name "mcp-text-face-test"
         effective (config/defaults)
-        result-edn (:seon.cluster.eval/result-edn
+        result-edn (:seon.eval/result-edn
                     (admit/admit
                      {:seon.sci.admit/value (vec (range 50000))
                       :seon.sci.admit/interrupt-fn (fn [])
                       :seon.sci.admit/caps (config/result-caps effective)
                       :seon.config/on-core-error :record}))
-        evaluation {:seon.cluster.eval/result-edn result-edn
-                    :seon.cluster.eval/ns [:seon.ns/name 'user]
+        evaluation {:seon.eval/result-edn result-edn
+                    :seon.eval/ns [:seon.ns/name 'user]
                     :seon.sci.eval/ending-ns 'user
                     :seon.sci.admit/record {:seon.eval/outcome :ok}}
         result (projected cluster-name effective evaluation)
@@ -123,7 +123,7 @@
         "a door evaluation projects the printed REPL face")
     (is (str/starts-with? (:seon.dev.mcp/text face) "[0 1 2")
         "the text face reads like a REPL value")
-    (is (not (contains? face :seon.cluster.eval/result-edn))
+    (is (not (contains? face :seon.eval/result-edn))
         "the node tree never rides the envelope; the text replaces it")
     (is (< (utf8-size result) 8192))))
 
@@ -135,7 +135,7 @@
         artifact
         (render.value/artifact
          {:seon.sci.admit/print-node
-          (edn/read-string (:seon.cluster.eval/result-edn evaluation))})
+          (edn/read-string (:seon.eval/result-edn evaluation))})
         artifact-content (render.value/artifact-edn artifact)
         result (projected cluster-name effective evaluation)
         text (get-in result [:seon.dev.mcp/value :seon.dev.mcp/text])]
@@ -309,7 +309,7 @@
                          {:seon.error/fact
                           {:seon.error/data-edn large-detail}}]
                         :seon.problems/errored-receipts
-                        [{:seon.cluster.eval/error large-detail}]}})]
+                        [{:seon.eval/error large-detail}]}})]
         (let [result (cluster/mcp-runtime-observation cluster-name)
               ready (:seon.dev.mcp/readiness result)]
           (is (= {:seon.problems/error-signatures 2

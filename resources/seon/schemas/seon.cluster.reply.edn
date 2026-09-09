@@ -2,11 +2,11 @@
                      [:map
                       {:description
                        "One form the reply reader found, with the agent's own prose above it kept as its own fact rather than concatenated onto the source it introduces."}
-                      [:seon.cluster.eval/source
-                       :seon.cluster.eval/source]
-                      [:seon.cluster.eval/comment
+                      [:seon.eval/source
+                       :seon.eval/source]
+                      [:seon.eval/comment
                        {:optional true}
-                       :seon.cluster.eval/comment]
+                       :seon.eval/comment]
                       [:seon.ns/name {:optional true} :seon.ns/name]],
                      :sources [:vector :seon.cluster.reply/form],
                      :text :string,

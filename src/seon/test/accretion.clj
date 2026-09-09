@@ -173,7 +173,7 @@
 
 (defn seed-for
   "A stable positive test.check seed derived from one receipt identity."
-  {:malli/schema [:=> [:cat :seon.cluster.eval/id]
+  {:malli/schema [:=> [:cat :seon.eval/id]
                   :seon.test.accretion/seed]}
   [receipt-id]
   (Long/parseLong

@@ -32,9 +32,9 @@
             [seon.ai :as ai]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.cluster.loop :as cluster.loop]
+            [seon.turn :as cluster.loop]
             [seon.cluster.message :as message]
-            [seon.cluster.work :as work]
+            [seon.turn :as work]
             [seon.config :as config]
             [seon.flow :as seon.flow]
             [seon.render :as render]
@@ -90,7 +90,7 @@
         cluster (assoc cluster
                        :seon.env/environment @test-environment
                        :seon.render/context-channel context-channel
-                       :seon.cluster.loop/stream-channel stream-channel)
+                       :seon.turn/stream-channel stream-channel)
         graph
         (flow.core/create-flow
          {:procs
@@ -108,7 +108,7 @@
               :seon.render.web/interest (atom :all)
               :seon.render.web/completion completion
               :seon.render.web/root-agent-id "planner"
-              :seon.cluster.loop/cluster cluster})}}
+              :seon.turn/cluster cluster})}}
           :conns []})
         {:keys [report-chan error-chan]} (flow.core/start graph)]
     (async/go-loop [] (when (async/<! report-chan) (recur)))
@@ -152,7 +152,7 @@
          {:seon.db/connection connection
           :seon.cluster/name "generate-code-v0"
           :seon.flow/work-launcher launcher
-          :seon.cluster.run/process process
+          :seon.db.process/id process
           :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
           :seon.cluster.wake/channel
           (async/chan (async/sliding-buffer 1))
@@ -179,9 +179,9 @@
   (let [run-id
         (->> (db/q '[:find ?id ?opened
                     :where
-                    [?run :seon.cluster.run/id ?id]
-                    [?run :seon.cluster.run/opened-at ?opened]
-                    [?run :seon.cluster.run/agent ?agent]
+                    [?run :seon.turn/id ?id]
+                    [?run :seon.turn/opened-at ?opened]
+                    [?run :seon.turn/agent ?agent]
                     [?agent :seon.cluster.agent/id "planner"]]
                   database)
              (sort-by (comp inst-ms second))
@@ -192,7 +192,7 @@
            (db/q '[:find ?member
                    :in $ ?run-id ?attribute
                    :where
-                   [?run :seon.cluster.run/id ?run-id]
+                   [?run :seon.turn/id ?run-id]
                    [?member ?attribute ?run]]
                  database run-id attribute)))
         terminal-receipt-count
@@ -200,18 +200,18 @@
          (db/q '[:find ?receipt
                  :in $ ?run-id
                  :where
-                 [?run :seon.cluster.run/id ?run-id]
-                 [?receipt :seon.cluster.eval/run ?run]
-                 (or [?receipt :seon.cluster.eval/result-edn _]
-                     [?receipt :seon.cluster.eval/result-blob _]
-                     [?receipt :seon.cluster.eval/error _]
-                     [?receipt :seon.cluster.eval/interrupted-at _])]
+                 [?run :seon.turn/id ?run-id]
+                 [?receipt :seon.eval/turn ?run]
+                 (or [?receipt :seon.eval/result-edn _]
+                     [?receipt :seon.eval/result-blob _]
+                     [?receipt :seon.eval/error _]
+                     [?receipt :seon.eval/interrupted-at _])]
                database run-id))]
     {:seon.gen.loop/run-id run-id
      :seon.gen.loop/form-count
-     (count-run-members :seon.cluster.eval/run)
+     (count-run-members :seon.eval/turn)
      :seon.gen.loop/receipt-count
-     (count-run-members :seon.cluster.eval/run)
+     (count-run-members :seon.eval/turn)
      :seon.gen.loop/terminal-receipt-count terminal-receipt-count}))
 
 (defn- complete-planner-census?
@@ -237,19 +237,18 @@
           ;; same millisecond order themselves at random
           (let [at (Date. (+ (inst-ms now) (* 1000 (long passes))))
                 work (some (fn [agent-id]
-                             (when-let [orphan (work/interruption @connection
-                                                                  agent-id)]
+                             (when-let [orphan nil]
                                (cluster.loop/settle-interruption!
-                                cluster (:seon.cluster.run/id orphan) at))
-                             (work/next-agent-work
+                                cluster (:seon.turn/id orphan) at))
+                             (work/step
                               @connection
                               {:seon.cluster.agent/id agent-id
-                               :seon.cluster.run/process process
-                               :seon.cluster.work/now at}))
+                               :seon.db.process/id process
+                               :seon.turn/now at}))
                            (agent-ids @connection))]
             (when work
-              (cluster.loop/turn {:seon.cluster.loop/cluster cluster
-                                  :seon.cluster.work/next work}
+              (cluster.loop/advance! {:seon.turn/cluster cluster
+                                  :seon.turn/next work}
                                  at)
               (recur (inc passes))))))
       (let [event
@@ -285,7 +284,7 @@
        "(beta-helper-missing)\n"))
 
 (def ^:private planner-attempt
-  (str program "(my.run/wait \"asked the namespace owners\")"))
+  (str program "(my.turn/wait \"asked the namespace owners\")"))
 
 (defn- assigned-receipt-id
   "The receipt identity named by an assignment in a rendered prompt."
@@ -331,7 +330,7 @@
      ;; settlement derivation trusts.
      "alpha"
      (str "(defn alpha-helper-missing [] 3)\n"
-          "(my.run/complete \"defined the missing helper\")")
+          "(my.turn/complete \"defined the missing helper\")")
 
      ;; beta DECLINES, naming the problem it was assigned — the D10
      ;; shape, read out of its own context the way an agent would.
@@ -339,10 +338,10 @@
      (if-let [receipt-id (assigned-receipt-id prompt "beta")]
        (str "(my.message/decline \"planner\" " (pr-str receipt-id)
             " \"That namespace has no contract to satisfy.\")\n"
-            "(my.run/complete \"declined\")")
-       "(my.run/complete \"I was told nothing I can act on\")")
+            "(my.turn/complete \"declined\")")
+       "(my.turn/complete \"I was told nothing I can act on\")")
 
-     "(my.run/complete \"nothing to do\")")})
+     "(my.turn/complete \"nothing to do\")")})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Queries — every milestone is a fact
@@ -355,10 +354,10 @@
         (db/q '[:find ?ordinal ?namespace-name
                :in $ ?run-id
                :where
-               [?run :seon.cluster.run/id ?run-id]
-               [?form :seon.cluster.eval/run ?run]
-               [?form :seon.cluster.eval/ordinal ?ordinal]
-               [?form :seon.cluster.eval/ns ?namespace]
+               [?run :seon.turn/id ?run-id]
+               [?form :seon.eval/turn ?run]
+               [?form :seon.eval/ordinal ?ordinal]
+               [?form :seon.eval/ns ?namespace]
                [?namespace :seon.ns/name ?namespace-name]]
              db run-id)))
 
@@ -368,9 +367,9 @@
   (set (db/q '[:find ?to-id ?receipt-id
               :in $ ?run-id
               :where
-              [?run :seon.cluster.run/id ?run-id]
-              [?receipt :seon.cluster.eval/run ?run]
-              [?receipt :seon.cluster.eval/id ?receipt-id]
+              [?run :seon.turn/id ?run-id]
+              [?receipt :seon.eval/turn ?run]
+              [?receipt :seon.eval/id ?receipt-id]
               [?m :seon.cluster.message/about ?receipt]
               [?m :seon.cluster.message/to ?to]
               [?to :seon.cluster.agent/id ?to-id]]
@@ -380,9 +379,9 @@
   "The derived state of every form of the planner's plan, by ordinal."
   [db run-id]
   (into {}
-        (map (juxt :seon.cluster.eval/ordinal
-                   :seon.cluster.work/form-state))
-        (:seon.cluster.work/forms (work/plan-settlement db run-id))))
+        (map (juxt :seon.eval/ordinal
+                   :seon.turn/form-state))
+        (:seon.turn/evaluation-settlements (work/plan-settlement db run-id))))
 
 (defn- ambiguous-identities
   "Identity strings this database gives to more than one entity.
@@ -430,12 +429,12 @@
         (db/q '[:find [?value ...]
                :in $ ?run-id
                :where
-               [?run :seon.cluster.run/id ?run-id]
+               [?run :seon.turn/id ?run-id]
                (or-join [?run ?value]
-                        (and [?form :seon.cluster.eval/run ?run]
-                             [?form :seon.cluster.eval/id ?value])
-                        (and [?receipt :seon.cluster.eval/run ?run]
-                             [?receipt :seon.cluster.eval/id ?value]))]
+                        (and [?form :seon.eval/turn ?run]
+                             [?form :seon.eval/id ?value])
+                        (and [?receipt :seon.eval/turn ?run]
+                             [?receipt :seon.eval/id ?value]))]
              db run-id)]
     (select-keys (ambiguous-identities db) (vec minted))))
 
@@ -485,8 +484,8 @@
            (is (= 7 (count (db/q '[:find ?f
                                   :in $ ?run-id
                                   :where
-                                  [?run :seon.cluster.run/id ?run-id]
-                                  [?f :seon.cluster.eval/run ?run]]
+                                  [?run :seon.turn/id ?run-id]
+                                  [?f :seon.eval/turn ?run]]
                                 db run-id)))
                "seven forms froze and every form has evaluation truth"))
 
@@ -495,10 +494,10 @@
                 (db/q '[:find ?edn .
                        :in $ ?run-id
                        :where
-                       [?run :seon.cluster.run/id ?run-id]
-                       [?r :seon.cluster.eval/run ?run]
-                       [?r :seon.cluster.eval/ordinal 1]
-                       [?r :seon.cluster.eval/result-edn ?edn]]
+                       [?run :seon.turn/id ?run-id]
+                       [?r :seon.eval/turn ?run]
+                       [?r :seon.eval/ordinal 1]
+                       [?r :seon.eval/result-edn ?edn]]
                      db run-id)
                 "my.gen.alpha/widget-total")
                "the definition is installed in the namespace the reader
@@ -508,8 +507,8 @@
            (is (= 7 (count (db/q '[:find ?r
                                   :in $ ?run-id
                                   :where
-                                  [?run :seon.cluster.run/id ?run-id]
-                                  [?r :seon.cluster.eval/run ?run]]
+                                  [?run :seon.turn/id ?run-id]
+                                  [?r :seon.eval/turn ?run]]
                                 db run-id)))
                "one receipt per ordinal, including the ones after the
                 first failure"))
@@ -529,7 +528,7 @@
            (let [assignment-tx (db/q '[:find ?tx .
                                       :in $ ?receipt-id
                                       :where
-                                      [?about :seon.cluster.eval/id ?receipt-id]
+                                      [?about :seon.eval/id ?receipt-id]
                                       [?m :seon.cluster.message/about ?about
                                        ?tx]]
                                     db (work/problem-id run-id 2))]
@@ -537,8 +536,8 @@
                     (db/q '[:find [?ordinal ...]
                            :in $ ?tx
                            :where
-                           [?r :seon.cluster.eval/error _ ?tx]
-                           [?r :seon.cluster.eval/ordinal ?ordinal]]
+                           [?r :seon.eval/error _ ?tx]
+                           [?r :seon.eval/ordinal ?ordinal]]
                          db assignment-tx))
                  "no window in which an assignment exists and the red
                   receipt explaining it does not")))
@@ -551,7 +550,7 @@
          ;; `:seon.cluster.message/ambiguous-about` — loudly, into an
          ;; error fact, which no assertion here was reading. The form
          ;; identity is now qualified by its own attribute
-         ;; (`seon.cluster.run/form-identity`), and this is the standing
+         ;; (`seon.turn/form-identity`), and this is the standing
          ;; proof that no OTHER family reintroduces the class: it runs
          ;; the resolver's own derivation over a real production drive
          ;; and scopes it BY QUERY to the strings this run minted, so a
@@ -573,21 +572,21 @@
            (is (some? (db/q '[:find ?error .
                              :in $ ?run-id
                              :where
-                             [?run :seon.cluster.run/id ?run-id]
-                             [?r :seon.cluster.eval/run ?run]
-                             [?r :seon.cluster.eval/ordinal 5]
-                             [?r :seon.cluster.eval/error ?error]]
+                             [?run :seon.turn/id ?run-id]
+                             [?r :seon.eval/turn ?run]
+                             [?r :seon.eval/ordinal 5]
+                             [?r :seon.eval/error ?error]]
                            db run-id))))
 
          (testing "the plan is NOT settled, and no agent's completion
                    can make it so"
-           (is (false? (:seon.cluster.work/settled?
+           (is (false? (:seon.turn/settled?
                         (work/plan-settlement db run-id))))
            (is (some? (db/q '[:find ?closed .
                              :in $ ?run-id
                              :where
-                             [?run :seon.cluster.run/id ?run-id]
-                             [?run :seon.cluster.run/closed-at ?closed]]
+                             [?run :seon.turn/id ?run-id]
+                             [?run :seon.turn/closed-at ?closed]]
                            db run-id))
                "the planner's run closed normally — settlement is a
                 derivation over forms, never a run state"))
@@ -609,7 +608,7 @@
                      (db/q '[:find ?id .
                             :in $ ?receipt-id
                             :where
-                            [?about :seon.cluster.eval/id ?receipt-id]
+                            [?about :seon.eval/id ?receipt-id]
                             [?m :seon.cluster.message/about ?about]
                             [?m :seon.cluster.message/to ?to]
                             [?to :seon.cluster.agent/id "alpha"]
@@ -646,7 +645,7 @@
                                      ;; evaluates fine, and its VALUE references
                                      ;; the var form 0 never bound
                                      "primes\n")
-                                "(my.run/wait \"nothing\")")})]
+                                "(my.turn/wait \"nothing\")")})]
                (drive! cluster 6 3))
              db @connection
              state (states db run-id)]
@@ -656,7 +655,7 @@
              "the unbound-var result is red at the one admission gate and
               routes like any other red form — no string matching, and no
               run completing on a value that references nothing")
-         (is (false? (:seon.cluster.work/settled?
+         (is (false? (:seon.turn/settled?
                       (work/plan-settlement db run-id)))))))))
 
 (deftest a-silent-owner-leaves-the-plan-unsettled-forever
@@ -682,8 +681,8 @@
                              {:seon.ai/text
                               (if (= "planner" (prompt-agent-id prompt))
                                 (str program
-                                     "(my.run/complete \"the program is built\")")
-                                "(my.run/wait \"saying nothing\")")})]
+                                     "(my.turn/complete \"the program is built\")")
+                                "(my.turn/wait \"saying nothing\")")})]
                (drive! cluster 12 7))
              db @connection]
          (is (= "the program is built"
@@ -694,7 +693,7 @@
                        [?m :seon.cluster.message/content ?content]]
                      db))
              "the planner said it was finished")
-         (is (false? (:seon.cluster.work/settled?
+         (is (false? (:seon.turn/settled?
                       (work/plan-settlement db run-id)))
              "and the facts contradict it — an unsettled routed problem
               keeps the plan open no matter what the reply says")

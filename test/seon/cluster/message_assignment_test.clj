@@ -19,19 +19,19 @@
                  [{:seon.cluster.agent/id "alice"}
                   {:seon.cluster.agent/id "bob"}
                   {:seon.error/id "failure-17"}
-                  {:seon.cluster.run/id "red-run"
-                   :seon.cluster.run/agent
+                  {:seon.turn/id "red-run"
+                   :seon.turn/agent
                    [:seon.cluster.agent/id "alice"]
-                   :seon.cluster.run/opened-at now}
-                  {:seon.cluster.eval/id "receipt-17"
-                   :seon.cluster.eval/run
-                   [:seon.cluster.run/id "red-run"]
-                   :seon.cluster.eval/ordinal 0
-                   :seon.cluster.eval/at now
+                   :seon.turn/opened-at now}
+                  {:seon.eval/id "receipt-17"
+                   :seon.eval/turn
+                   [:seon.turn/id "red-run"]
+                   :seon.eval/ordinal 0
+                   :seon.eval/at now
                    :seon.error/kind :seon.sci.eval/evaluation-failed
-                   :seon.cluster.eval/error
+                   :seon.eval/error
                    "Unable to resolve symbol: missing-dependency"
-                   :seon.cluster.eval/source "(missing-dependency)"}])
+                   :seon.eval/source "(missing-dependency)"}])
      (body connection))))
 
 (defn- request
@@ -39,8 +39,8 @@
   {:my.message/value
    (my.message/send "bob" content "failure-17")
    :seon.cluster.agent/id "alice"
-   :seon.cluster.run/id run-id
-   :seon.cluster.eval/ordinal 0
+   :seon.turn/id run-id
+   :seon.eval/ordinal 0
    :seon.cluster.message/at now
    :seon.config.message/max-chain 16})
 
@@ -89,7 +89,7 @@
            red-before
            (:seon.problems/errored-receipts
             (problems/problems
-             @connection {:seon.cluster.run/live-processes #{}}))
+             @connection {:seon.turn/live-processes #{}}))
            reason "The dependency contract is missing."
            declination
            (message/delivery
@@ -97,8 +97,8 @@
             {:my.message/value
              (my.message/decline "alice" "receipt-17" reason)
              :seon.cluster.agent/id "bob"
-             :seon.cluster.run/id "declination-run"
-             :seon.cluster.eval/ordinal 0
+             :seon.turn/id "declination-run"
+             :seon.eval/ordinal 0
              :seon.cluster.message/at now
              :seon.config.message/max-chain 16})
            rows (:seon.cluster.message/rows declination)]
@@ -109,7 +109,7 @@
          (is (= 1
                 (db/q '[:find (count ?declination) .
                        :where
-                       [?problem :seon.cluster.eval/id "receipt-17"]
+                       [?problem :seon.eval/id "receipt-17"]
                        [?planner :seon.cluster.agent/id "alice"]
                        [?owner :seon.cluster.agent/id "bob"]
                        [?assignment :seon.cluster.message/about ?problem]
@@ -125,10 +125,10 @@
          (is (= red-before
                 (:seon.problems/errored-receipts
                  (problems/problems
-                  @connection {:seon.cluster.run/live-processes #{}})))
+                  @connection {:seon.turn/live-processes #{}})))
              "the form stays red because the errored receipt is untouched")
          (is (= ["receipt-17"]
-                (mapv :seon.cluster.eval/id red-before)))
+                (mapv :seon.eval/id red-before)))
          (is (= reason
                 (db/q '[:find ?reason .
                        :where

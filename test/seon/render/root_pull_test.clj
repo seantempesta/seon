@@ -82,12 +82,12 @@
         :seon.cluster.message/content "The opening message."}])
      (db/transact!
       connection
-      [{:seon.cluster.run/id "temporal-root-run"
-        :seon.cluster.run/agent
+      [{:seon.turn/id "temporal-root-run"
+        :seon.turn/agent
         [:seon.cluster.agent/id "temporal-root-agent"]
-        :seon.cluster.run/trigger
+        :seon.turn/trigger
         [:seon.cluster.message/id "temporal-root-message"]
-        :seon.cluster.run/opened-at (java.util.Date. 1786400000001)}
+        :seon.turn/opened-at (java.util.Date. 1786400000001)}
        {:seon.cluster.agent/id "temporal-root-agent"
         }])
      (let [current @connection

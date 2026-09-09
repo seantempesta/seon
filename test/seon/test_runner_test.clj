@@ -968,8 +968,8 @@
             evaluate
             (fn [source]
               (eval/evaluate
-               {:seon.cluster.eval/source source
-                :seon.cluster.eval/ns [:seon.ns/name 'user]
+               {:seon.eval/source source
+                :seon.eval/ns [:seon.ns/name 'user]
                 :seon.sci.eval/ctx ctx
                 :seon.sci.admit/caps
                 (config/result-caps (config/defaults))

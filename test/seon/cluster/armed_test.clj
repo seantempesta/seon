@@ -32,7 +32,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.cluster.work :as work]
+            [seon.turn :as work]
             [seon.config :as config]
             [seon.db :as db]
             [seon.schema]
@@ -76,8 +76,8 @@
            (db/q '[:find ?closed-at .
                   :in $ ?run-id
                   :where
-                  [?run :seon.cluster.run/id ?run-id]
-                  [?run :seon.cluster.run/closed-at ?closed-at]]
+                  [?run :seon.turn/id ?run-id]
+                  [?run :seon.turn/closed-at ?closed-at]]
                 db (bootstrap/run-id "root"))))
         (body instance)
         (finally
@@ -158,8 +158,8 @@
           (is (some? (:seon.flow/fault-channel
                       (:seon.flow/error-fanout instance)))))
         (testing "the handle retains identity while AI settings stay live"
-          (let [handle (:seon.cluster.loop/cluster instance)]
-            (is (seon.schema/valid-candidate-value? :seon.cluster.loop/cluster
+          (let [handle (:seon.turn/cluster instance)]
+            (is (seon.schema/valid-candidate-value? :seon.turn/cluster
                                                     handle))
             (is (= "armed" (:seon.cluster/name handle)))
             (is (= "root" (:seon.config.error/escalate-to handle)))
@@ -199,17 +199,17 @@
              (db/q '[:find ?closed-at .
                     :in $ ?run-id
                     :where
-                    [?run :seon.cluster.run/id ?run-id]
-                    [?run :seon.cluster.run/closed-at ?closed-at]]
+                    [?run :seon.turn/id ?run-id]
+                    [?run :seon.turn/closed-at ?closed-at]]
                   db (bootstrap/run-id "root")))))
-        (let [left-handle (:seon.cluster.loop/cluster left)
-              right-handle (:seon.cluster.loop/cluster right)
+        (let [left-handle (:seon.turn/cluster left)
+              right-handle (:seon.turn/cluster right)
               left-ctx (:seon.sci.eval/ctx left-handle)
               right-ctx (:seon.sci.eval/ctx right-handle)
               request
               (fn [handle agent-id source]
                 (sci.eval/evaluate
-                 {:seon.cluster.eval/source source
+                 {:seon.eval/source source
                   :seon.sci.admit/caps (:seon.sci.admit/caps handle)
                   :seon.sci.eval/time-limit-ms
                   (:seon.config.eval/time-limit-ms handle)
@@ -230,7 +230,7 @@
                        "(my.agents.root/shared-live 41)")]
           (is (not (identical? (:env left-ctx) (:env right-ctx)))
               "cluster construction allocates distinct SCI env atoms")
-          (is (nil? (:seon.cluster.eval/error definition)))
+          (is (nil? (:seon.eval/error definition)))
           (is (= 42 (:seon.sci.admit/value shared-call))
               "the committed agent resolves its left-cluster definition")
           (is (= :seon.sci.eval/evaluation-failed
@@ -254,20 +254,20 @@
           (let [routing (:seon.cluster.agent/routing instance)
                 entry (seon.cluster.agent/armed routing "root")
                 derived (CountDownLatch. 1)
-                next-agent-work work/next-agent-work
+                step work/step
                 connection (:seon.boot/cluster-connection instance)
                 run-count (fn []
                             (db/q '[:find (count ?run) .
                                    :in $ ?agent-id
                                    :where
                                    [?agent :seon.cluster.agent/id ?agent-id]
-                                   [?run :seon.cluster.run/agent ?agent]]
+                                   [?run :seon.turn/agent ?agent]]
                                  @connection "root"))]
             (is (= 1 (run-count))
                 "the one local bootstrap plan is the only durable run")
-            (with-redefs [work/next-agent-work
+            (with-redefs [work/step
                           (fn [& arguments]
-                            (let [result (apply next-agent-work arguments)]
+                            (let [result (apply step arguments)]
                               (.countDown derived)
                               result))]
               (async/offer! (:seon.cluster.wake/channel entry) ::probe)
@@ -282,14 +282,14 @@
   (let [name "arming-window"
         root (str "tmp/armed-test/" name)
         primed (CountDownLatch. 1)
-        next-agent-work work/next-agent-work
+        step work/step
         arm! agent/arm!]
     (test-support/delete-recursively! root)
     (test-support/populate-published-root! root)
     (with-redefs
-      [work/next-agent-work
+      [work/step
        (fn [& arguments]
-         (let [result (apply next-agent-work arguments)]
+         (let [result (apply step arguments)]
            (.countDown primed)
            result))
        agent/arm!
@@ -301,7 +301,7 @@
            (test-support/await-event! primed "boot arm prime")
            (db/transact!
             (:seon.db/connection
-             (:seon.cluster.loop/cluster request))
+             (:seon.turn/cluster request))
             [{:seon.cluster.message/id "boot-window-message"
               :seon.cluster.message/to [:seon.cluster.agent/id "root"]
               :seon.cluster.message/content "answer during boot"
@@ -309,7 +309,7 @@
            entry))
        ai/complete
        (fn [_request]
-         {:seon.ai/text "(my.run/complete \"answered\")"})]
+         {:seon.ai/text "(my.turn/complete \"answered\")"})]
       (let [instance (cluster/start! {:seon.boot/cluster-name name
                                       :seon.boot/root root})]
         (try
@@ -319,16 +319,16 @@
                  (fn [database]
                    (db/q
                     '[:find (pull ?run
-                                  [:seon.cluster.run/id
-                                   {:seon.cluster.run/trigger
+                                  [:seon.turn/id
+                                   {:seon.turn/trigger
                                     [:seon.cluster.message/id]}]) .
                       :in $ ?message-id
                       :where
                       [?message :seon.cluster.message/id ?message-id]
-                      [?run :seon.cluster.run/trigger ?message]]
+                      [?run :seon.turn/trigger ?message]]
                     database "boot-window-message")))]
             (is (= "boot-window-message"
-                   (get-in run [:seon.cluster.run/trigger
+                   (get-in run [:seon.turn/trigger
                                 :seon.cluster.message/id]))
                 "the committed message opened a run without a later wake"))
           (finally
@@ -343,15 +343,15 @@
     "faulting"
     (fn [instance]
       (let [connection (:seon.boot/cluster-connection instance)
-            handle (:seon.cluster.loop/cluster instance)
+            handle (:seon.turn/cluster instance)
             routing (:seon.cluster.agent/routing instance)
             entry (seon.cluster.agent/armed routing "root")
             graph (:seon.flow/graph entry)]
         ;; INJECTED AT THE REAL SEAM: the turn proc's transform calls
-        ;; `next-agent-work`, so a throw there is a throw inside a
+        ;; `step`, so a throw there is a throw inside a
         ;; running flow proc — the exact path §1.2's report shapes come
         ;; from. Nothing here touches the error channel by hand.
-        (with-redefs [work/next-agent-work
+        (with-redefs [work/step
                       (fn [& _]
                         (throw (ex-info "injected core fault"
                                         {:seon.error/kind ::injected})))]
@@ -374,7 +374,7 @@
                   "the fault arrived TAGGED with its agent — structural
                    provenance from the error-channel join, never a
                    global attribution query")
-              (is (= (:seon.cluster.run/process handle)
+              (is (= (:seon.db.process/id handle)
                      (:seon.error/process fact)))
               (is (re-matches #"^[0-9a-f]{64}$" (:seon.error/signature fact))))
             (testing "whose data-edn READS BACK — which is what proves the
@@ -459,7 +459,7 @@
           (armer-step state input message)))
        ai/complete
        (fn [_request]
-         {:seon.ai/text "(my.run/complete \"fault observed\")"})]
+         {:seon.ai/text "(my.turn/complete \"fault observed\")"})]
       (let [instance (cluster/start! {:seon.boot/cluster-name name
                                       :seon.boot/root root})]
         (try
@@ -477,8 +477,8 @@
                 "the fault was injected at the first resume transition")
             (is (= ::first-cluster-proc-fault (:seon.error/kind fact)))
             (is (= :seon.cluster.agent/armer (:seon.error/proc fact)))
-            (is (= (:seon.cluster.run/process
-                    (:seon.cluster.loop/cluster instance))
+            (is (= (:seon.db.process/id
+                    (:seon.turn/cluster instance))
                    (:seon.error/process fact))
                 "the first fault is durable with cluster provenance"))
           (finally

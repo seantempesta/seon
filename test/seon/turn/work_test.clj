@@ -1,11 +1,11 @@
-(ns seon.cluster.work-test
+(ns seon.turn.work-test
   "Sealed acceptance draft for the resume derivation (N3, C8).
 
   DRAFT FOR ORCHESTRATOR SEAL (drafted 2026-07-27). The implementation
-  lane makes these green by implementing `seon.cluster.work` ONLY —
+  lane makes these green by implementing `seon.turn` ONLY —
   schemas and tests are byte-sealed.
 
-  The acceptance surface is EXHAUSTIVE, not sampled. `next-agent-work`'s
+  The acceptance surface is EXHAUSTIVE, not sampled. `step`'s
   domain is small and enumerable — the run's custody and plan state
   crossed with the trigger's answeredness — so every state is
   constructed as real committed facts in a real in-memory database and
@@ -24,7 +24,7 @@
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
             [my.agent :as my.agent]
-            [seon.cluster.work :as work]
+            [seon.turn :as work]
             [seon.schema]
             [seon.test-support :as support])
   (:import [java.util Date]))
@@ -41,7 +41,7 @@
 (def ^:private now (Date. 1700000000000))
 (def ^:private digest (apply str (repeat 64 "a")))
 (def ^:private lint-refusal
-  {:seon.error/kind :seon.cluster.loop/lint-rejected
+  {:seon.error/kind :seon.turn/lint-rejected
    :seon.error/message "Static analysis rejected this source form."
    :seon.error/data {:seon.fn.analyzer/findings
                      [{:seon.fn.analyzer/level :error}]}})
@@ -70,7 +70,7 @@
   writes this beside the run exactly as `record-attempt!` does."
   [run-id at]
   {:seon.ai.attempt/id (str run-id "-attempt-0")
-   :seon.ai.attempt/run [:seon.cluster.run/id run-id]
+   :seon.ai.attempt/run [:seon.turn/id run-id]
    :seon.ai.attempt/ordinal 0
    :seon.ai.attempt/at at
    :seon.ai/endpoint "https://fixture.invalid/v1/chat"
@@ -79,30 +79,29 @@
 
 (defn- open-run!
   "Open a run, optionally claimed by `holder`, optionally planned."
-  [connection {:keys [holder planned? triggered?]}]
+  [connection {:keys [planned? triggered?]}]
   (db/transact!
    connection
    (cond-> {:tx-data
-            (cond-> [(cond-> {:seon.cluster.run/id run-id
-                              :seon.cluster.run/agent
+            (cond-> [(cond-> {:seon.turn/id run-id
+                              :seon.turn/agent
                               [:seon.cluster.agent/id agent-id]
-                              :seon.cluster.run/opened-at now}
+                              :seon.turn/opened-at now}
                        triggered?
-                       (assoc :seon.cluster.run/trigger
+                       (assoc :seon.turn/trigger
                               [:seon.cluster.message/id message-id])
-                       holder (assoc :seon.cluster.run/process holder)
-                       true (assoc :seon.cluster.work/situation :call)
-                       planned? (assoc :seon.cluster.run/plan-digest digest))
+                       true (assoc :seon.turn/situation :call)
+                       planned? (assoc :seon.turn/plan-digest digest))
                      {:seon.cluster.agent/id agent-id
                       }
                      (model-attempt run-id now)]
               planned?
               (into (map (fn [ordinal]
-                           {:seon.cluster.eval/id (str run-id "-" ordinal)
-                            :seon.cluster.eval/run
-                            [:seon.cluster.run/id run-id]
-                            :seon.cluster.eval/ordinal ordinal
-                            :seon.cluster.eval/source (str "(+ " ordinal " 1)")})
+                           {:seon.eval/id (str run-id "-" ordinal)
+                            :seon.eval/turn
+                            [:seon.turn/id run-id]
+                            :seon.eval/ordinal ordinal
+                            :seon.eval/source (str "(+ " ordinal " 1)")})
                          (range 2))))})))
 
 (defn- terminal-receipt!
@@ -110,17 +109,17 @@
    (terminal-receipt! connection ordinal "1"))
   ([connection ordinal result-edn]
    (db/transact! connection
-               [{:seon.cluster.eval/id (str run-id "-" ordinal)
-                 :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-                 :seon.cluster.eval/ordinal ordinal
-                 :seon.cluster.eval/at now
+               [{:seon.eval/id (str run-id "-" ordinal)
+                 :seon.eval/turn [:seon.turn/id run-id]
+                 :seon.eval/ordinal ordinal
+                 :seon.eval/at now
                  ;; the result's presence IS the terminal state
-                 :seon.cluster.eval/result-edn result-edn}])))
+                 :seon.eval/value result-edn}])))
 
 (defn- close-run! [connection]
   (db/transact! connection
-              [[:db/add [:seon.cluster.run/id run-id]
-                :seon.cluster.run/closed-at now]
+              [[:db/add [:seon.turn/id run-id]
+                :seon.turn/closed-at now]
                ]))
 
 (defn- configure-cap!
@@ -143,22 +142,21 @@
   (db/transact!
    connection
    {:tx-data
-    (into [{:seon.cluster.run/id id
-            :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-            :seon.cluster.run/trigger
+    (into [{:seon.turn/id id
+            :seon.turn/agent [:seon.cluster.agent/id agent-id]
+            :seon.turn/trigger
             [:seon.cluster.message/id trigger-id]
-            :seon.cluster.run/opened-at at
-            :seon.cluster.run/process process
-            :seon.cluster.run/plan-digest digest}
+            :seon.turn/opened-at at
+            :seon.turn/plan-digest digest}
            {:seon.cluster.agent/id agent-id
             }
            (model-attempt id at)]
           (map-indexed
            (fn [ordinal _]
-             {:seon.cluster.eval/id (str id "-" ordinal)
-              :seon.cluster.eval/run [:seon.cluster.run/id id]
-              :seon.cluster.eval/ordinal ordinal
-              :seon.cluster.eval/source (str "(+ " ordinal " 1)")})
+             {:seon.eval/id (str id "-" ordinal)
+              :seon.eval/turn [:seon.turn/id id]
+              :seon.eval/ordinal ordinal
+              :seon.eval/source (str "(+ " ordinal " 1)")})
            result-values))})
   ;; ONE ENTITY PER (run, ordinal): the terminal fact accretes onto the
   ;; evaluation the freeze minted, under the same identity.
@@ -170,15 +168,15 @@
    (vec
     (map-indexed
      (fn [ordinal value]
-       {:seon.cluster.eval/id (str id "-" ordinal)
-        :seon.cluster.eval/run [:seon.cluster.run/id id]
-        :seon.cluster.eval/ordinal ordinal
-        :seon.cluster.eval/at at
-        :seon.cluster.eval/result-edn (pr-str value)})
+       {:seon.eval/id (str id "-" ordinal)
+        :seon.eval/turn [:seon.turn/id id]
+        :seon.eval/ordinal ordinal
+        :seon.eval/at at
+        :seon.eval/value (pr-str value)})
      result-values)))
   (db/transact! connection
-              [[:db/add [:seon.cluster.run/id id]
-                :seon.cluster.run/closed-at at]
+              [[:db/add [:seon.turn/id id]
+                :seon.turn/closed-at at]
                ]))
 
 (def ^:private request
@@ -186,7 +184,7 @@
   central pass; the totality property is unchanged in strength — it
   always was a per-agent question, and now it says so."
   {:seon.cluster.agent/id agent-id
-   :seon.cluster.run/process process})
+   :seon.db.process/id process})
 
 ;;; ---------------------------------------------------------------------------
 ;;; The enumeration
@@ -200,7 +198,7 @@
 
    {::label "row 1 — trigger committed, nothing else (also the boot pass)"
     ::build (fn [connection] (add-trigger! connection))
-    ::expect {:seon.cluster.work/situation :open
+    ::expect {:seon.turn/situation :open
               :seon.cluster.agent/id agent-id
               :seon.cluster.message/id message-id}}
 
@@ -208,8 +206,8 @@
     ::build (fn [connection]
               (add-trigger! connection)
               (open-run! connection {:holder process :triggered? true}))
-    ::expect {:seon.cluster.work/situation :call
-              :seon.cluster.run/id run-id
+    ::expect {:seon.turn/situation :call
+              :seon.turn/id run-id
               :seon.cluster.agent/id agent-id}}
 
    {::label "row 5 — planned, no receipts: fold from ordinal 0"
@@ -217,10 +215,10 @@
               (add-trigger! connection)
               (open-run! connection {:holder process :planned? true
                                      :triggered? true}))
-    ::expect {:seon.cluster.work/situation :resume
-              :seon.cluster.run/id run-id
+    ::expect {:seon.turn/situation :resume
+              :seon.turn/id run-id
               :seon.cluster.agent/id agent-id
-              :seon.cluster.eval/ordinal 0}}
+              :seon.eval/ordinal 0}}
 
    {::label "row 8 — one terminal receipt: fold from ordinal 1"
     ::build (fn [connection]
@@ -228,10 +226,10 @@
               (open-run! connection {:holder process :planned? true
                                      :triggered? true})
               (terminal-receipt! connection 0))
-    ::expect {:seon.cluster.work/situation :resume
-              :seon.cluster.run/id run-id
+    ::expect {:seon.turn/situation :resume
+              :seon.turn/id run-id
               :seon.cluster.agent/id agent-id
-              :seon.cluster.eval/ordinal 1}}
+              :seon.eval/ordinal 1}}
 
    {::label "row 9 — every receipt terminal, run still open: the fold is
              done, and that is its OWN instruction (seal revision)"
@@ -241,22 +239,23 @@
                                      :triggered? true})
               (terminal-receipt! connection 0)
               (terminal-receipt! connection 1))
-    ::expect {:seon.cluster.work/situation :close
-              :seon.cluster.run/id run-id
+    ::expect {:seon.turn/situation :close
+              :seon.turn/id run-id
               :seon.cluster.agent/id agent-id}}
 
    {::label "rows 2-4 — dead custody released, unplanned: NOT work.
              The paid call is lost and nothing re-calls it."
     ::build (fn [connection]
               (add-trigger! connection)
-              (open-run! connection {:triggered? true}))
+              (open-run! connection {:triggered? true})
+              (db/transact! connection (work/recover-tx {:seon.turn/id run-id :seon.turn/now now})))
     ::expect nil}
 
    {::label "another process holds it: not ours to touch"
     ::build (fn [connection]
               (add-trigger! connection)
-              (open-run! connection {:holder other-process :planned? true
-                                     :triggered? true}))
+              (open-run! connection {:planned? true :triggered? true})
+              (db/transact! connection (work/recover-tx {:seon.turn/id run-id :seon.turn/now now})))
     ::expect nil}
 
    {::label "row 10 — closed run, answered trigger: idle"
@@ -281,7 +280,7 @@
                             [:seon.cluster.agent/id agent-id]
                             :seon.cluster.message/content "again"
                             :seon.cluster.message/at now}]))
-    ::expect {:seon.cluster.work/situation :open
+    ::expect {:seon.turn/situation :open
               :seon.cluster.agent/id agent-id
               :seon.cluster.message/id "message-2"}}
 
@@ -297,10 +296,10 @@
                             [:seon.cluster.agent/id agent-id]
                             :seon.cluster.message/content "again"
                             :seon.cluster.message/at now}]))
-    ::expect {:seon.cluster.work/situation :resume
-              :seon.cluster.run/id run-id
+    ::expect {:seon.turn/situation :resume
+              :seon.turn/id run-id
               :seon.cluster.agent/id agent-id
-              :seon.cluster.eval/ordinal 0}}])
+              :seon.eval/ordinal 0}}])
 
 (deftest the-request-declares-exactly-the-dependencies-the-derivation-reads
   ;; The class: a required argument no code reads. It cannot be passed
@@ -308,18 +307,17 @@
   ;; pure over committed facts and reads no clock, so the request now says
   ;; exactly that, and an unread required key cannot be reintroduced without
   ;; failing here.
-  (let [complete {:seon.cluster.agent/id agent-id
-                  :seon.cluster.run/process process}]
+  (let [complete {:seon.cluster.agent/id agent-id}]
     (is (true? (seon.schema/valid-candidate-value?
-                :seon.cluster.work/agent-request complete))
-        "the two facts the derivation reads are the whole request")
+                :seon.turn/agent-request complete))
+        "the agent identity the derivation reads are the whole request")
     (is (true? (seon.schema/valid-candidate-value?
-                :seon.cluster.work/agent-request
-                (assoc complete :seon.cluster.work/now (Date.))))
+                :seon.turn/agent-request
+                (assoc complete :seon.turn/now (Date.))))
         "a caller still passing a clock is accreted, never refused")
     (doseq [required (keys complete)]
       (is (false? (seon.schema/valid-candidate-value?
-                   :seon.cluster.work/agent-request
+                   :seon.turn/agent-request
                    (dissoc complete required)))
           (str required " is genuinely required")))))
 
@@ -335,7 +333,7 @@
         (configure-cap! connection 100)
         (build connection)
         (let [db (db/db connection)
-              derived (work/next-agent-work db request)]
+              derived (work/step db request)]
           (testing label
             (if (nil? expect)
               (is (nil? derived) "must derive idle")
@@ -346,7 +344,7 @@
             (testing "and the situation validates against its own schema"
               (when derived
                 (is (seon.schema/valid-candidate-value?
-                     :seon.cluster.work/next derived))))))))))
+                     :seon.turn/next derived))))))))))
 
 (deftest a-generated-run-resumes-then-requests-one-more-form
   (with-database
@@ -354,28 +352,28 @@
       (open-run! connection {:holder process})
       (db/transact!
        connection
-       [[:db/retract [:seon.cluster.run/id run-id]
-         :seon.cluster.work/situation :call]
-        [:db/add [:seon.cluster.run/id run-id]
-         :seon.cluster.work/situation :generate]
-        {:seon.cluster.eval/id (str run-id "-0")
-         :seon.cluster.eval/run [:seon.cluster.run/id run-id]
-         :seon.cluster.eval/ordinal 0
-         :seon.cluster.eval/author :system
-         :seon.cluster.eval/source "(help)"}])
-      (is (= {:seon.cluster.work/situation :resume
-              :seon.cluster.run/id run-id
+       [[:db/retract [:seon.turn/id run-id]
+         :seon.turn/situation :call]
+        [:db/add [:seon.turn/id run-id]
+         :seon.turn/situation :generate]
+        {:seon.eval/id (str run-id "-0")
+         :seon.eval/turn [:seon.turn/id run-id]
+         :seon.eval/ordinal 0
+         :seon.eval/author :system
+         :seon.eval/source "(help)"}])
+      (is (= {:seon.turn/situation :resume
+              :seon.turn/id run-id
               :seon.cluster.agent/id agent-id
-              :seon.cluster.eval/ordinal 0}
-             (work/next-agent-work @connection request)))
-      (terminal-receipt! connection 0 "{:introduced 'my.run}")
-      (let [derived (work/next-agent-work @connection request)]
-        (is (= {:seon.cluster.work/situation :generate
-                :seon.cluster.run/id run-id
+              :seon.eval/ordinal 0}
+             (work/step @connection request)))
+      (terminal-receipt! connection 0 "{:introduced 'my.turn}")
+      (let [derived (work/step @connection request)]
+        (is (= {:seon.turn/situation :generate
+                :seon.turn/id run-id
                 :seon.cluster.agent/id agent-id}
                derived))
         (is (seon.schema/valid-candidate-value?
-             :seon.cluster.work/next derived))))))
+             :seon.turn/next derived))))))
 
 (deftest comment-only-input-is-recorded-but-never-becomes-eval-work
   (with-database
@@ -385,18 +383,18 @@
                              :triggered? true})
       (db/transact!
        connection
-       [[:db/add [:seon.cluster.eval/id (str run-id "-0")]
-         :seon.cluster.eval/source "; pure prose"]])
-      (is (= {:seon.cluster.work/situation :resume
-              :seon.cluster.run/id run-id
+       [[:db/add [:seon.eval/id (str run-id "-0")]
+         :seon.eval/source "; pure prose"]])
+      (is (= {:seon.turn/situation :resume
+              :seon.turn/id run-id
               :seon.cluster.agent/id agent-id
-              :seon.cluster.eval/ordinal 1}
-             (work/next-agent-work @connection request)))
+              :seon.eval/ordinal 1}
+             (work/step @connection request)))
       (terminal-receipt! connection 1)
-      (is (= {:seon.cluster.work/situation :close
-              :seon.cluster.run/id run-id
+      (is (= {:seon.turn/situation :close
+              :seon.turn/id run-id
               :seon.cluster.agent/id agent-id}
-             (work/next-agent-work @connection request)))
+             (work/step @connection request)))
       ;; ONE ENTITY PER (run, ordinal): the comment-only ordinal HAS an
       ;; evaluation entity — that is the durable input — and it never
       ;; acquires a terminal fact, which is what "never becomes work" means.
@@ -404,12 +402,12 @@
            (db/q '[:find [?evaluation ...]
                   :in $ ?run-id
                   :where
-                  [?run :seon.cluster.run/id ?run-id]
-                  [?evaluation :seon.cluster.eval/run ?run]
-                  [?evaluation :seon.cluster.eval/ordinal 0]
-                  (or [?evaluation :seon.cluster.eval/result-edn _]
-                      [?evaluation :seon.cluster.eval/error _]
-                      [?evaluation :seon.cluster.eval/interrupted-at _])]
+                  [?run :seon.turn/id ?run-id]
+                  [?evaluation :seon.eval/turn ?run]
+                  [?evaluation :seon.eval/ordinal 0]
+                  (or [?evaluation :seon.eval/value _]
+                      [?evaluation :seon.eval/error _]
+                      [?evaluation :seon.eval/interrupted-at _])]
                 @connection run-id))))))
 
 (deftest a-lint-refusal-is-terminal-until-a-new-trigger-arrives
@@ -423,7 +421,7 @@
           (add-outside-trigger! connection message-id now)
           (closed-run! connection "refused-run" message-id results now)
           (let [db @connection
-                derived (work/next-agent-work db request)]
+                derived (work/step db request)]
             (is (empty? (work/unanswered-triggers db agent-id))
                 "the refused run answered its external trigger")
             (is (nil? derived)
@@ -431,14 +429,14 @@
             (is (false? (work/more-agent-work? db request)))
             (add-outside-trigger! connection "concurrent-message"
                                   (Date. 1700000000001))
-            (let [next-trigger (work/next-agent-work @connection request)]
-              (is (= {:seon.cluster.work/situation :open
+            (let [next-trigger (work/step @connection request)]
+              (is (= {:seon.turn/situation :open
                       :seon.cluster.agent/id agent-id
                       :seon.cluster.message/id "concurrent-message"}
                      next-trigger)
                   "only a new outside trigger starts another turn")
               (is (seon.schema/valid-candidate-value?
-                   :seon.cluster.work/next next-trigger)))))))))
+                   :seon.turn/next next-trigger)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The two derivations that are NOT work
@@ -450,7 +448,7 @@
 
 (deftest situation-totality-property
   ;; ORACLE, re-sealed agent-scoped after the central pass died: over
-  ;; GENERATED run/receipt/trigger states, `next-agent-work` is TOTAL —
+  ;; GENERATED run/receipt/trigger states, `step` is TOTAL —
   ;; it returns only the four situations or nil, `more-agent-work?`
   ;; never disagrees with it, and `:resume` always carries the FIRST
   ;; unsettled ordinal.
@@ -490,8 +488,8 @@
                    "1")))
               (when closed? (close-run! connection))
               (let [db (db/db connection)
-                    derived (work/next-agent-work db request)
-                    situation (:seon.cluster.work/situation derived)
+                    derived (work/step db request)
+                    situation (:seon.turn/situation derived)
                     answered-closed? (and closed? triggered? trigger-first?)]
                 (and
                  ;; TOTAL: only the four situations, or idle
@@ -501,7 +499,7 @@
                  ;; a derived situation always validates its own schema
                  (or (nil? derived)
                      (seon.schema/valid-candidate-value?
-                      :seon.cluster.work/next derived))
+                      :seon.turn/next derived))
                  ;; Every answered closed turn is idle. Receipt content cannot
                  ;; manufacture a new trigger or corrective turn.
                  (or (not answered-closed?)
@@ -510,7 +508,7 @@
                  ;; receipt — never one already settled, which is what
                  ;; "nothing re-executes" means in the derivation
                  (or (not= :resume situation)
-                     (let [ordinal (:seon.cluster.eval/ordinal derived)]
+                     (let [ordinal (:seon.eval/ordinal derived)]
                        (and (not (contains? (set receipts) ordinal))
                             (= ordinal
                                (first (remove (set receipts)
@@ -519,28 +517,21 @@
     (is (true? (:result check))
         (str "situation totality failed: " (pr-str check)))))
 
-(deftest an-unplanned-orphan-run-is-settled-not-resumed
-  (with-database
-    (fn [connection]
-      (add-trigger! connection)
-      (open-run! connection {:triggered? true})
-      (let [db (db/db connection)]
-        (is (nil? (work/next-agent-work db request))
-            "it is not work — nothing re-calls a lost paid call")
-        (is (= run-id (:seon.cluster.run/id (work/interruption db agent-id)))
-            "it IS an interruption the turn proc must settle")))))
-
-(deftest a-planned-orphan-run-is-interruption-not-work
-  (with-database
-    (fn [connection]
-      (add-trigger! connection)
-      (open-run! connection {:planned? true :triggered? true})
-      (let [db (db/db connection)]
-        (is (nil? (work/next-agent-work db request))
-            "an unheld plan never cold resumes")
-        (is (= run-id (:seon.cluster.run/id
-                       (work/interruption db agent-id)))
-            "it is wreckage to bury, not work to continue")))))
+(deftest boot-closes-every-open-turn-before-work-is-derived
+  (doseq [planned? [false true]]
+    (with-database
+      (fn [connection]
+        (add-trigger! connection)
+        (open-run! connection {:planned? planned? :triggered? true})
+        (is (not (:seon.error/kind
+                  (db/transact! connection
+                    (work/recover-tx {:seon.turn/id run-id :seon.turn/now now})))))
+        (let [database (db/db connection)]
+          (is (= now (:seon.turn/closed-at
+                       (db/pull database '[*] [:seon.turn/id run-id]))))
+          (is (nil? (work/step database request)))
+          (when planned?
+            (is (= 2 (count (db/q '[:find ?e :where [?e :seon.eval/interrupted-at]] database))))))))))
 
 (deftest answeredness-is-the-turns-own-transaction
   ;; THE CLASS: answeredness used to be a stored reference from the run
@@ -567,9 +558,9 @@
             (is (empty? (work/unanswered-triggers database agent-id)))
             (is (< wake-t (work/latest-answering-turn-t database agent-id))
                 "the wake arrived before the turn that answered it")
-            (is (nil? (:seon.cluster.run/trigger
-                       (db/pull database [:seon.cluster.run/trigger]
-                                [:seon.cluster.run/id run-id])))
+            (is (nil? (:seon.turn/trigger
+                       (db/pull database [:seon.turn/trigger]
+                                [:seon.turn/id run-id])))
                 "and no run attribute records the answer"))))
       (testing "a wake asserted after the turn is unanswered again"
         (close-run! connection)
@@ -605,12 +596,12 @@
       (testing "a turn with no attempts — a source submission — answers nothing"
         (db/transact!
          connection
-         [{:seon.cluster.run/id "source-run"
-           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-           :seon.cluster.run/opened-at now
+         [{:seon.turn/id "source-run"
+           :seon.turn/agent [:seon.cluster.agent/id agent-id]
+           :seon.turn/opened-at now
            ;; a source submission stores the submitted text as the reply
-           :seon.cluster.run/reply "(+ 1 1)"
-           :seon.cluster.run/closed-at now}])
+           :seon.turn/reply "(+ 1 1)"
+           :seon.turn/closed-at now}])
         (is (= [message-id]
                (mapv :seon.cluster.message/id
                      (work/unanswered-triggers (db/db connection) agent-id)))
@@ -624,10 +615,10 @@
            :seon.error/kind :seon.ai/no-credential
            :seon.error/message "no credential"
            :seon.error/at now}
-          {:seon.cluster.run/id "failed-run"
-           :seon.cluster.run/agent [:seon.cluster.agent/id agent-id]
-           :seon.cluster.run/opened-at now
-           :seon.cluster.run/closed-at now}
+          {:seon.turn/id "failed-run"
+           :seon.turn/agent [:seon.cluster.agent/id agent-id]
+           :seon.turn/opened-at now
+           :seon.turn/closed-at now}
           (assoc (model-attempt "failed-run" now)
                  :seon.ai.attempt/error [:seon.error/id "provider-failure"])])
         (is (= [message-id]
@@ -638,8 +629,8 @@
                                                  agent-id))))
       (testing "and the wakes still open the next turn"
         (is (= :open
-               (:seon.cluster.work/situation
-                (work/next-agent-work (db/db connection) request)))))
+               (:seon.turn/situation
+                (work/step (db/db connection) request)))))
       (testing "a turn whose attempt succeeded answers"
         (open-run! connection {:holder process})
         (let [database (db/db connection)]
@@ -669,19 +660,19 @@
         (is (= 2 (count wakes)) "both are unanswered")
         (is (apply = (map :seon.wake/t wakes))
             "and they share one transaction, which is the whole point"))
-      (is (= :open (:seon.cluster.work/situation
-                    (work/next-agent-work (db/db connection)
+      (is (= :open (:seon.turn/situation
+                    (work/step (db/db connection)
                                           {:seon.cluster.agent/id agent-id
-                                           :seon.cluster.run/process process})))
+                                           :seon.db.process/id process})))
           "one turn opens")
       (open-run! connection {:holder process})
       (close-run! connection)
       (let [database (db/db connection)]
         (is (empty? (work/unanswered-wakes database agent-id {}))
             "and that ONE turn answered both")
-        (is (nil? (work/next-agent-work database
+        (is (nil? (work/step database
                                         {:seon.cluster.agent/id agent-id
-                                         :seon.cluster.run/process process}))
+                                         :seon.db.process/id process}))
             "no second paid call")))))
 
 (deftest a-wake-arriving-mid-turn-opens-the-next-turn
@@ -704,12 +695,12 @@
                    (work/unanswered-triggers (db/db connection) agent-id)))
           "it is newer than the open turn's own transaction")
       (close-run! connection)
-      (is (= {:seon.cluster.work/situation :open
+      (is (= {:seon.turn/situation :open
               :seon.cluster.agent/id agent-id
               :seon.cluster.message/id "mid-turn"}
-             (work/next-agent-work (db/db connection)
+             (work/step (db/db connection)
                                    {:seon.cluster.agent/id agent-id
-                                    :seon.cluster.run/process process}))
+                                    :seon.db.process/id process}))
           "and it opens the next turn"))))
 
 (deftest the-turn-bound-is-turns-since-the-latest-outside-wake
@@ -738,9 +729,9 @@
       (let [database (db/db connection)]
         (is (= 2 (work/episode-runs database agent-id))
             "the inside wake did not refill the bound")
-        (is (nil? (work/next-agent-work database
+        (is (nil? (work/step database
                                         {:seon.cluster.agent/id agent-id
-                                         :seon.cluster.run/process process}))
+                                         :seon.db.process/id process}))
             "AT the cap an inside wake opens nothing — this is what stops
              a fault about an agent's own code looping forever")
         (is (= ["self-1"]
@@ -749,11 +740,11 @@
             "it is deferred, and the deferral is a derivation with
              nothing stored"))
       (my.agent/settings! {:seon.config.run/max-episode-runs 3} connection agent-id)
-      (is (= :open (:seon.cluster.work/situation
-                    (work/next-agent-work @connection request)))
+      (is (= :open (:seon.turn/situation
+                    (work/step @connection request)))
           "the agent component override changes the live admission bound")
       (my.agent/settings! {:seon.config.run/max-episode-runs 2} connection agent-id)
-      (is (nil? (work/next-agent-work @connection request)))
+      (is (nil? (work/step @connection request)))
       (db/transact!
        connection
        [{:seon.cluster.message/id "human-2"
@@ -763,10 +754,10 @@
       (let [database (db/db connection)]
         (is (zero? (work/episode-runs database agent-id))
             "an outside wake ARRIVING is the reset; there is no reset code")
-        (is (= :open (:seon.cluster.work/situation
-                      (work/next-agent-work
+        (is (= :open (:seon.turn/situation
+                      (work/step
                        database {:seon.cluster.agent/id agent-id
-                                 :seon.cluster.run/process process})))
+                                 :seon.db.process/id process})))
             "and the agent hears it")))))
 
 (deftest triggers-come-back-oldest-first
@@ -783,3 +774,15 @@
              (mapv :seon.cluster.message/id
                    (work/unanswered-triggers (db/db connection) agent-id)))
           "commit order is not arrival order; the fact carries the time"))))
+
+(deftest an-absent-turn-bound-does-not-admit-a-message-wake
+  (with-database
+    (fn [connection]
+      (add-trigger! connection)
+      (is (= [message-id]
+             (mapv :seon.cluster.message/id
+                   (work/unanswered-triggers (db/db connection) agent-id))))
+      (is (nil? (work/step (db/db connection) request)))
+      (my.agent/settings! {:seon.config.run/max-episode-runs 1} connection agent-id)
+      (is (= :open (:seon.turn/situation
+                    (work/step (db/db connection) request)))))))

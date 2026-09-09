@@ -9,7 +9,7 @@
             [my.message :as my.message]
             [seon.cluster.agent :as agent]
             [seon.cluster.message :as message]
-            [seon.cluster.work :as work]
+            [seon.turn :as work]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render.transcript :as transcript]
@@ -112,8 +112,8 @@
               @connection
               {:my.message/value value
                :seon.cluster.agent/id sender
-               :seon.cluster.run/id "streams-test-message-run"
-               :seon.cluster.eval/ordinal 1
+               :seon.turn/id "streams-test-message-run"
+               :seon.eval/ordinal 1
                :seon.cluster.message/at at
                :seon.config.message/max-chain 64})
              rows (:seon.cluster.message/rows delivery)

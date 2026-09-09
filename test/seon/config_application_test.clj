@@ -259,7 +259,7 @@
                              :seon.boot/cluster-name name
                              :seon.config/manifest applied})
             connection (:seon.boot/cluster-connection instance)
-            handle (:seon.cluster.loop/cluster instance)
+            handle (:seon.turn/cluster instance)
             launcher (:seon.flow/work-launcher instance)]
         (try
           (testing "the database representation is fixed at store creation"
@@ -330,7 +330,7 @@
                     @connection)))
             (is (= 6
                    ((var-get
-                     (ns-resolve 'seon.cluster.work 'max-episode-runs))
+                     (ns-resolve 'seon.turn 'max-episode-runs))
                     @connection))))
           (finally
             (cluster/stop! instance))))

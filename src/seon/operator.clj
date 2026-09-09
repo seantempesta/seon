@@ -95,7 +95,7 @@
         (keep (fn [[cluster-name instance]]
                 (when-let [environment
                            (some-> instance
-                                   :seon.cluster.loop/cluster
+                                   :seon.turn/cluster
                                    env/of)]
                   [cluster-name environment])))
         @runtime/running-instances))

@@ -27,13 +27,13 @@
   (doseq [[observations expected]
           [[{} "unknown"]
            [{:seon.oversight/turn-passes 0} "parked"]
-           [{:seon.cluster.run/id "open-turn"} "mid-turn"]
-           [{:seon.cluster.run/id "open-turn"
+           [{:seon.turn/id "open-turn"} "mid-turn"]
+           [{:seon.turn/id "open-turn"
              :seon.oversight/turn-passes 0} "mid-turn"]]]
     (let [unit {:seon.render/value
                 {:seon.oversight/agents
                  [(merge {:seon.cluster.agent/id "observed"
-                          :seon.cluster.work/episode-runs 0}
+                          :seon.turn/episode-runs 0}
                          observations)]
                  :seon.oversight/plumbing
                  [(oversight/proc-ping :delayed nil)]}}
@@ -75,8 +75,8 @@
            (db/q '[:find ?closed-at .
                   :in $ ?run-id
                   :where
-                  [?run :seon.cluster.run/id ?run-id]
-                  [?run :seon.cluster.run/closed-at ?closed-at]]
+                  [?run :seon.turn/id ?run-id]
+                  [?run :seon.turn/closed-at ?closed-at]]
                 db (bootstrap/run-id "root"))))
         (body instance)
         (finally
@@ -104,7 +104,7 @@
     (fn [instance]
       (let [db @(:seon.boot/cluster-connection instance)
             caps (:seon.sci.admit/caps
-                  (:seon.cluster.loop/cluster instance))
+                  (:seon.turn/cluster instance))
             built (oversight/unit {:seon.db/db db
                                    :seon.sci.admit/caps caps})
             value (:seon.render/value built)
@@ -123,7 +123,7 @@
           (is (not-any? #(contains? % :seon.oversight/state)
                         (concat (:seon.oversight/agents value) plumbing))
               "the process-local story carries presence, not an enum")
-          (is (nat-int? (:seon.cluster.work/episode-runs root))
+          (is (nat-int? (:seon.turn/episode-runs root))
               "a new outside wake may already have reset the episode count")
           (doseq [occupancy (keep root [:seon.oversight/mailbox
                                        :seon.oversight/turn-buffer])]
@@ -138,7 +138,7 @@
                       plumbing)
               "a missing pong is unknown even after the opening completed"))
         (testing "both typed outputs share the fleet value"
-          (let [expected (cond (:seon.cluster.run/id root) "mid-turn"
+          (let [expected (cond (:seon.turn/id root) "mid-turn"
                                (some? (:seon.oversight/turn-passes root)) "parked"
                                :else "unknown")
                 html (hiccup/->string
@@ -154,11 +154,11 @@
                   {:seon.render/value
                    {:seon.oversight/agents
                     [{:seon.cluster.agent/id "agent-b"
-                      :seon.cluster.run/id "run-3"
-                      :seon.cluster.work/episode-runs 3}
+                      :seon.turn/id "run-3"
+                      :seon.turn/episode-runs 3}
                      {:seon.cluster.agent/id "agent-c"
                       :seon.oversight/turn-passes 0
-                      :seon.cluster.work/episode-runs 0}]}}))))
+                      :seon.turn/episode-runs 0}]}}))))
         (testing "the seeded block reaches the real root-page wire"
           (let [^HttpResponse response (fetch-root instance)
                 body (.body response)]
