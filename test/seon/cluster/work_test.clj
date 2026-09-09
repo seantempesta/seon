@@ -108,14 +108,14 @@
 (defn- terminal-receipt!
   ([connection ordinal]
    (terminal-receipt! connection ordinal "1"))
-  ([connection ordinal result-edn]
+  ([connection ordinal shown-text]
    (db/transact! connection
                [{:seon.cluster.eval/id (str run-id "-" ordinal)
                  :seon.cluster.eval/run [:seon.cluster.run/id run-id]
                  :seon.cluster.eval/ordinal ordinal
                  :seon.cluster.eval/at now
                  ;; the result's presence IS the terminal state
-                 :seon.cluster.eval/result-edn result-edn}])))
+                 :seon.eval/value shown-text}])))
 
 (defn- close-run! [connection]
   (db/transact! connection
@@ -174,7 +174,7 @@
         :seon.cluster.eval/run [:seon.cluster.run/id id]
         :seon.cluster.eval/ordinal ordinal
         :seon.cluster.eval/at at
-        :seon.cluster.eval/result-edn (pr-str value)})
+        :seon.eval/value (pr-str value)})
      result-values)))
   (db/transact! connection
               [[:db/add [:seon.cluster.run/id id]
@@ -407,7 +407,7 @@
                   [?run :seon.cluster.run/id ?run-id]
                   [?evaluation :seon.cluster.eval/run ?run]
                   [?evaluation :seon.cluster.eval/ordinal 0]
-                  (or [?evaluation :seon.cluster.eval/result-edn _]
+                  (or [?evaluation :seon.eval/value _]
                       [?evaluation :seon.cluster.eval/error _]
                       [?evaluation :seon.cluster.eval/interrupted-at _])]
                 @connection run-id))))))

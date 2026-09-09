@@ -70,3 +70,109 @@ this is not the three-write proof and is not a deterministic count claim.
 Remaining: finish custody/provenance and its consumers; rename to seon.turn;
 prove three writes per virtual turn; route stable identities through seon.id.
 Platform gate and final shell cleanup remain pending at this checkpoint.
+
+## Bounded partial: 2026-09-09 07:10 UTC
+
+Recovery landed as **`34e47f595`**. Its explicit platform gate passed
+**83 tests / 490 assertions, zero failures/errors**:
+`SEON_TEST_WORKERS=3 bin/test --platform --paths
+docs/prds/context-generation/research/turn-rename-landing-2026-09-09.md`.
+That snapshot uses committed production source and excludes the rejected
+draft below. Log: `tmp/turn-rename-recovery-platform.log`.
+
+One independently green fixture repair changes only
+`test/seon/cluster/work_test.clj`: two fixture writers and one terminal
+query now use the installed shown-text attribute `:seon.eval/value`.
+No test was deleted and no expected work state changed in this repair.
+Its final path gate passed **14 tests / 91 assertions, zero failures/errors**:
+`SEON_TEST_WORKERS=3 bin/test --paths test/seon/cluster/work_test.clj --
+seon.cluster.work-test`. Log: `tmp/turn-rename-work-gate.log`.
+
+**Slice 1 is incomplete.** Claims, releases, process custody, the legacy
+turn interruption stamp, and their consumers have not been removed.
+The rename, three-write grouping, and stable-id integration were not
+started. No RESET NEEDED line applies to either landed change.
+
+### Rejected draft and exact verification boundary
+
+Stash **`a9cd1f5ad0abbe82b053a665a2475b6f7965eb70`**, named
+`turn-rename-interruption-draft-2026-09-09`, preserves the eight-file
+attempt: **56,384 patch bytes**, 128 insertions / 314 deletions.
+Its base is `34e47f595`. It was removed from the working tree; use as
+quarry only. The earlier owner's stash remains separately preserved as
+`39d1bf18663b3c3fa46e8dde8baee5140a8140a6` (now the next stash entry).
+
+Exact rejected paths:
+
+```text
+src/seon/cluster/agent.clj
+src/seon/cluster/loop.clj
+src/seon/cluster/work.clj
+test/seon/cluster/agent_test.clj
+test/seon/cluster/loop_test.clj
+test/seon/cluster/turn_test.clj
+test/seon/cluster/work_test.clj
+test/seon/gen/loop_test.clj
+```
+
+The draft deletes `work/interruption` and loop-side
+`settle-interruption!`, removes the corresponding per-pass cleanup and
+three tests of that deleted mechanism, and changes the refusal-path test
+to query actual open turns. Its later consumer edits are **not verified**.
+In particular, do not treat arbitrary shown text as EDN: a shown Var is
+not EDN, and the separate stored error-data codec is still needed.
+
+The attempted gate used those eight paths and these complete namespaces:
+`seon.cluster.loop-test seon.cluster.work-test seon.cluster.agent-test
+seon.cluster.turn-test seon.gen.loop-test seon.turn-test`.
+It was stopped after the unbounded routing fixture and worker-global
+instrumentation drift were observed. The runner's reap backstop forced its
+coordinator to exit; the wrapper exited **143**, with no complete tally.
+Log: `tmp/turn-rename-interruption-gate.log`. No green result is claimed
+for this draft, and no failure is attributed to another lane.
+
+Observed boundaries, with the full class recorded in
+[the consumer-fixture issue](../../../seon/issues/turn-consumer-fixtures-read-retired-result-storage.md):
+
+- Work fixtures wrote/read the deleted result field: six assertion
+  failures. The isolated fixture repair above resolves this member.
+- HEAD-only `seon.cluster.agent-test` independently reproduced the
+  prompt-refusal and parallel-turn failures and the install-gate
+  observation failure. Its log is `tmp/turn-rename-agent-baseline.log`;
+  it was stopped without a complete tally.
+- `install-gate-failure-settles-commits-and-cancels-the-turn-backstop`
+  read an uninstalled attribute and treated the returned error as a
+  completion. A failed assertion printed a cyclic runtime value until
+  `Required array length 2147483640 + 18 is too large`.
+- `routing-conservation-waits-for-terminal-evidence` timed out while its
+  future still owned temporary Var roots. The gate reported missing
+  wrappers for `seon.ai/complete`, `seon.bootstrap/next-entry`, and
+  `seon.sci.eval/evaluate`. The underlying arming channel wait was unbounded.
+- The later turn-consumer fast attempt still failed stored-private-def
+  queries, shown-Var EDN decoding, obsolete delivered-result expectations,
+  prompt-render expectations, and reasoning-only failure cardinality.
+  Log: `tmp/turn-rename-turn-consumers-fast.log`; no complete tally.
+
+### Live state and cleanup
+
+After removing the rejected draft, development adoption converged to
+`6aa105fb-04b8-5401-8dab-67ebfee3a238`, source digest
+`b60d6338b62e031be70015e3d5d816888ba90a9200b5e9491ba8b3e27fc6b5a2`.
+The default debug route returned **HTTP 200, 49,718 bytes, 0.037061 s**.
+CUA reported **No browser is available**; no browser-paint proof is claimed.
+Default remained PID 87173 throughout and was never stopped or reforked.
+
+Literal occurrences in landed src/resources remain:
+`:seon.cluster.run/process` **93**, `claim-call` **6**, `release-call` **4**.
+The eleven deletion-induced test references from the previous handoff
+are not claimed resolved: their corresponding mechanisms remain in HEAD.
+No three-write count is claimed and no stable-id rollout was made.
+
+No scratch cluster was created or seeded. The execution checks used
+virtual source submissions or the inherited provider-reply fixtures;
+there was no deliberate live provider submission. Every owned test JVM
+and superseded adoption command was ended. Successful gates removed
+their own roots. `run.MGNliH` was removed only after process-table
+inspection found no holder; `run.QPYZxQ` had already been removed by its
+wrapper. No lane worktree was created. The one disposable edit script was
+deleted; the rejected source remains in Git, not only in scratch files.
