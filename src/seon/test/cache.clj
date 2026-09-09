@@ -65,7 +65,8 @@
          (.listFiles (io/file directory "references")))))
 
 (defn- reap! [parent]
-  (let [no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])
+  (let [parent (.getCanonicalFile (io/file parent))
+        no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])
         inactive (->> (.listFiles (io/file parent))
                       (filter #(Files/isDirectory (.toPath %) no-follow))
                       (remove referenced?)
@@ -77,7 +78,7 @@
       (fs/delete-recursively! (str parent) (str directory)))))
 
 (defn- ensure-base! [source snapshot digest classpath pid]
-  (let [parent (io/file source "target" "test-published-bases")
+  (let [parent (.getCanonicalFile (io/file source "target" "test-published-bases"))
         directory (io/file parent digest)
         base (io/file directory "base")
         checkout (io/file directory "checkout")

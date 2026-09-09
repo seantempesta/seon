@@ -155,6 +155,7 @@
   published-base-retention-preserves-live-users-and-symlink-targets
   (let [root (doto (io/file project-root "tmp" (str "base-retention-" (random-uuid))) .mkdirs)
         parent (doto (io/file root "cache") .mkdirs)
+        linked-parent (io/file root "linked-cache")
         sentinel (doto (io/file root "sentinel") .mkdirs)
         now (System/currentTimeMillis)
         current (ProcessHandle/current)]
@@ -174,7 +175,10 @@
       (java.nio.file.Files/createSymbolicLink
        (.toPath (io/file parent "4" "sentinel")) (.toPath sentinel)
        (make-array java.nio.file.attribute.FileAttribute 0))
-      (#'cache/reap! parent)
+      (java.nio.file.Files/createSymbolicLink
+       (.toPath linked-parent) (.toPath parent)
+       (make-array java.nio.file.attribute.FileAttribute 0))
+      (#'cache/reap! linked-parent)
       (is (= #{"0" "1" "2" "5"} (set (map #(.getName %) (.listFiles parent)))))
       (is (= "untouched" (slurp (io/file sentinel "keep"))))
       (is (.setLastModified (io/file parent "0/ready.edn")
