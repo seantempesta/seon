@@ -190,6 +190,28 @@
            (is (= b (evaluations @connection "b")))
            (submit "a")
            (is (= 1 (count (evaluations @connection "a")))))
+         (reset! transactions [])
+         (let [turn-id (submit "a" "(+ 1 1)\n(+ 2 2)\n(+ 3 3)")
+               measured @transactions]
+           (println {:seon.test/three-form-turn turn-id
+                     :seon.test/transactions measured
+                     :seon.test/transaction-count (count measured)
+                     :seon.test/datom-count (reduce + (map :seon.test/datoms measured))})
+           (is (= [30 13 2] (mapv :seon.test/datoms measured)))
+           (is (= 3 (count measured)))
+           (is (= 45 (reduce + (map :seon.test/datoms measured))))
+           (is (= 1 (count (turn/receipt-settle-batch-tx
+                            (mapv (fn [ordinal]
+                                    {::turn/id turn-id
+                                     :seon.cluster.eval/ordinal ordinal
+                                     :seon.eval/value "nil"})
+                                  (range 3))))))
+           (is (= ["2" "4" "6"]
+                  (mapv :seon.eval/value
+                        (filter #(= (:db/id (db/pull @connection [:db/id]
+                                                   [:seon.turn/id turn-id]))
+                                    (get-in % [:seon.cluster.eval/run :db/id]))
+                                (evaluation/of-agent @connection "a"))))))
          (submit "a" "(def private-state (atom 2))")
          (let [agent-context #(get-in (agent/armed routing %)
                                      [:seon.cluster.loop/cluster
@@ -430,6 +452,49 @@
                  (get-in resolved [:seon.test/subject :seon.fn/sym])))
           (is (= [test-symbol]
                  (seon.fn/gate-set @connection function-symbol))))))))
+
+(deftest batch-settlement-preserves-declaration-order
+  (support/with-database
+   (fn [connection]
+     (let [now (java.util.Date.)
+           rows [{:seon.test/sym "fixture.batch/target-test"
+                  :seon.test/ns [:seon.ns/name 'fixture.batch]
+                  :seon.test/source "(clojure.test/deftest target-test)"
+                  :seon.schema.admission/source :agent
+                  :seon.test/subject [:seon.fn/sym "fixture.batch/target"]}
+                 {:seon.fn/sym "fixture.batch/target"
+                  :seon.fn/ns [:seon.ns/name 'fixture.batch]
+                  :seon.fn/source "(defn target [] 1)"
+                  :seon.schema.admission/source :agent
+                  :seon.fn/arglists "([])"
+                  :seon.fn/private? false
+                  :seon.fn/spec "[:=> [:cat] :int]"}]]
+       (db/transact! connection
+                     [{:seon.ns/name 'fixture.batch}
+                      {:seon.cluster.agent/id "batch"}
+                      {:seon.turn/id "batch"
+                       :seon.turn/agent [:seon.cluster.agent/id "batch"]
+                       :seon.turn/opened-at now}])
+       (doseq [ordinal (range 2)]
+         (db/transact! connection
+                       (turn/receipt-start-tx
+                        {::turn/id "batch" :seon.cluster.eval/ordinal ordinal
+                         :seon.cluster.eval/at now})))
+       (let [result (db/transact!
+                     connection
+                     (turn/receipt-settle-batch-tx
+                      (mapv (fn [ordinal row]
+                              {::turn/id "batch" :seon.cluster.eval/ordinal ordinal
+                               :seon.eval/value "nil" :seon.program/row row})
+                            (range 2) rows)))
+             saved (db/pull @connection
+                            '[:seon.test/pending-subject
+                              {:seon.test/subject [:seon.fn/sym]}]
+                            [:seon.test/sym "fixture.batch/target-test"])]
+         (is (nil? (:seon.error/kind result)) (pr-str result))
+         (is (nil? (:seon.test/pending-subject saved)))
+         (is (= "fixture.batch/target"
+                (get-in saved [:seon.test/subject :seon.fn/sym]))))))))
 
 ;; Deterministic clock: every generated time is an offset from t0.
 (def ^:private t0-ms 1785000000000)

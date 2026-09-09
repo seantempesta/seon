@@ -9,7 +9,8 @@ tags: [research, runtime, sci]
 
 Current landing: slice 2 is complete in **`7296d173b`**. **RESET NEEDED: `7296d173b`.**
 The two required gates are green; fresh-schema HTTP proof is recorded below.
-Slices 3 and 4 remain unattempted. Earlier partial checkpoints are historical.
+Slice 3's virtual-turn measurement and writer consolidation are recorded below;
+slice 4 is pending. Earlier partial checkpoints are historical.
 
 ## Recovery checkpoint, 2026-09-09 06:54 UTC
 
@@ -181,7 +182,6 @@ inspection found no holder; `run.QPYZxQ` had already been removed by its
 wrapper. No lane worktree was created. The one disposable edit script was
 deleted; the rejected source remains in Git, not only in scratch files.
 
-
 ## Slice 1 resume, 2026-09-09 07:15–07:31 UTC
 
 Entering HEAD `46e275d3b`; the two prior checkpoints were accepted. This
@@ -306,7 +306,6 @@ test/seon/schedule_test.clj
 test/seon/turn_test.clj
 ```
 
-
 ## Completion evidence, 2026-09-09 07:36 UTC
 
 Implementation landed as **`b4d665f8956edfd12fc14d5c67553f3f76d75b9a`**.
@@ -353,7 +352,6 @@ removed. Inherited untracked `build/`, `workers/`, and
 `config/virtual-turns.edn` remain untouched. The namespace rename, write-count
 collapse, and stable-id rollout were not attempted in this resume.
 
-
 ### Final gates and stop, 2026-09-09 07:42 UTC
 
 **Slice 1 is complete.** The follow-up preserves the prompt fixture's
@@ -384,7 +382,6 @@ service input. Fresh construction returned HTTP 200 as recorded above.
 Every owned shell has ended, and the isolated scratch root/worktree is gone.
 The tracked tree is committed; only the inherited untracked paths remain.
 The slice finished inside its 30-minute bound, without beginning slice 2.
-
 
 ## Slice 2: turn namespace and component attempts, 2026-09-09
 
@@ -661,3 +658,80 @@ sent a signal. Default remains the owner's running process.
 
 The code gates and commit finished within the 30-minute slice; this final
 note closes the evidence before 08:13:50 UTC. No slice 3 or 4 work began.
+
+## Slice 3: virtual-turn writes, 2026-09-09 08:11 UTC
+
+The 30-minute deadline is 08:41:38 UTC. Owned paths are `src/seon/turn.clj`,
+`test/seon/turn_test.clj`, and this note. The faults-render lane's walk,
+error rendering, schema, and fixture edits are excluded by `--paths`.
+The named authorities were read end to end in the earlier checkpoints;
+§12 and the Datahike writer seam were read again for this slice.
+
+Dependency ledger: Datahike invokes a transaction function against its
+mid-transaction database and splices the returned data
+(`reference-code/datahike/src/datahike/db/transaction.cljc:1152`).
+`seon.cluster.loop/settle-batch!` already makes one actual transaction for
+all evaluated forms (`src/seon/cluster/loop.clj:594`). `system-run-call`
+now derives opening and source rows in one writer call; `open-call` still
+owns the absent-agent, duplicate-turn, and already-open fences. The new
+owner retains the namespace-assignment fence at that same writer.
+
+### Before and after, measured rather than assumed
+
+The canonical real-proc fixture submits `(+ 1 1)`, `(+ 2 2)`, `(+ 3 3)`
+as one virtual reply, listens to every transaction report until closed-at,
+and verifies saved values `["2" "4" "6"]` and zero provider attempts.
+It does not filter out empty transactions. Measurement happens after
+fixture acquisition and prior turns, with no concurrent work submitted.
+
+| Three-form virtual turn | Before | After |
+|---|---:|---:|
+| Actual transactions | 3 | 3 |
+| Datoms, including transaction instants | 45 | 45 |
+| Open / evaluations / close datoms | 30 / 13 / 2 | 30 / 13 / 2 |
+| Writer function calls | 2 / 3 / 1 | 1 / 1 / 1 |
+
+The assignment's five-transactions/25-datoms figure is not the current
+three-form baseline. The initial one-form measurement in this fixture
+still observes 4 transactions / 24 datoms, including an initial report
+containing only `:db/txInstant`; the warmed three-form measurement is
+3 / 45 before this change. The regression asserts the complete datom
+sequence, transaction count, total datoms, settlement call count, and
+saved results (`test/seon/turn_test.clj:193`).
+
+### Program declaration boundary
+
+Flattening every settlement against the same database was falsified by
+`batch-settlement-preserves-declaration-order`: a test declared before its
+function retained `:seon.test/pending-subject`, and its subject ref was
+absent (2 failed assertions). Program declarations therefore retain their
+ordered writer calls within the same transaction. The one-call-per-write
+claim here is for the §12 virtual no-op turns; it is **not** a claim that
+program-installing batches have been consolidated. No extra database
+simulation or second installation mechanism was introduced. The ordering
+regression is retained to prevent a superficially green no-op proof from
+breaking real declaration batches.
+
+### Live observation and gates
+
+At 08:24 UTC the live JVM's `receipt-settle-batch-tx` returned one
+`:db.fn/call` to `seon.turn/receipt-settle-batch-call` for three requests.
+This exercises hot-reloaded definitions: adopted source was
+`6aa113d8-a8b1-58ad-a6e9-e2b6a9dee2aa`, published source was
+`6aa11754-fb11-565c-a0b1-253b8b5876a0`; adoption convergence is not claimed.
+The default debug endpoint returned HTTP 200, 55,385 bytes, 0.084038 seconds.
+No provider request, scratch seed, or default lifecycle operation was made.
+No schema changes: this slice introduces no RESET NEEDED requirement.
+
+Final gates, 08:31 UTC, with `SEON_TEST_WORKERS=1`:
+
+- `bin/test --paths src/seon/turn.clj test/seon/turn_test.clj --
+  seon.turn-test seon.cluster.loop-test`: **49 tests / 364 assertions,
+  zero failures/errors** (`tmp/turn-three-writes-gate-final.log`).
+- `bin/test --platform --paths src/seon/turn.clj test/seon/turn_test.clj`:
+  **83 tests / 490 assertions, zero failures/errors**
+  (`tmp/turn-three-writes-platform-final.log`).
+
+Both successful roots were removed by the runner. The no-op virtual-turn
+proof is green; consolidation of program-installing writer calls remains
+explicitly unimplemented as explained above. No foreign files are included.

@@ -455,11 +455,6 @@
   [request]
   (plan-tx-for-author :agent request))
 
-(defn- system-plan-tx
-  "Transaction data freezing one system-authored plan on the open turn."
-  [request]
-  (plan-tx-for-author :system request))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The one identity a (run, ordinal) pair mints
 ;;; ---------------------------------------------------------------------------
@@ -638,6 +633,35 @@
 
 (declare receipt-start-tx)
 
+(defn system-run-call
+  "Open a system-authored turn and freeze its sources at the writer."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.turn/system-run-request]
+                  :seon.store/transaction-data]}
+  [database request]
+  (let [{agent-id :seon.cluster.agent/id
+         ::keys [id opened-at starting-ns sources trigger]} request
+        opened (first (open-call database
+                                 (cond-> {::id id
+                                          ::agent [:seon.cluster.agent/id agent-id]
+                                          ::opened-at opened-at}
+                                   trigger (assoc ::trigger trigger))))
+        agent-namespace (db/q '[:find ?name . :in $ ?agent
+                                :where [?agent :seon.cluster.agent/namespace ?ns]
+                                [?ns :seon.ns/name ?name]]
+                              database (::agent opened))
+        requested-namespace (resolve-namespace-name database starting-ns)
+        namespace-name (or requested-namespace agent-namespace)]
+    (when-not namespace-name
+      (refuse! `system-run-call ::starting-namespace-missing request))
+    (when (and requested-namespace (not= requested-namespace agent-namespace))
+      (refuse! `system-run-call ::starting-namespace-changed request))
+    (into [(merge opened
+                  (select-keys request [::plan-digest ::reply ::reply-blob ::reply-size])
+                  {::starting-ns (str "namespace:" namespace-name)})]
+          (source-rows database id (:db/id opened) 0 namespace-name
+                       :system opened-at sources))))
+
 (defn system-run-tx
   "Open, plan, and start every evaluation of one system-authored run.
 
@@ -647,28 +671,8 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.turn/system-run-request]
                   :seon.store/transaction-data]}
-  [database request]
-  (let [{agent-id :seon.cluster.agent/id
-         run-id ::id
-         opened-at ::opened-at
-         starting-ns ::starting-ns
-         plan-digest ::plan-digest
-         sources ::sources
-         trigger ::trigger} request]
-    (into []
-          (concat
-           (open-tx
-            (cond-> {::id run-id
-                     ::agent [:seon.cluster.agent/id agent-id]
-                     ::opened-at opened-at}
-              trigger (assoc ::trigger trigger)))
-           (system-plan-tx
-            (merge (select-keys request [::reply ::reply-blob ::reply-size])
-                   {::id run-id
-                    ::starting-ns starting-ns
-                    ::plan-digest plan-digest
-                    :seon.cluster.eval/at opened-at
-                    ::sources sources}))))))
+  [_database request]
+  [[:db.fn/call #'system-run-call request]])
 
 (defn append-generated-call
   "Append exactly one system-authored form to an open generated turn.
@@ -996,15 +1000,33 @@
       (analyze-settlement database request)
       request))))
 
+(defn receipt-settle-batch-call
+  "Settle independent evaluations together, retaining each terminal fence."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value
+         [:vector :seon.cluster.eval/settle-request]] [:vector :some]]}
+  [database requests]
+  (when (some :seon.program/row requests)
+    (refuse! `receipt-settle-batch-call ::ordered-declarations-required
+             {::evaluations requests}))
+  (let [identities (mapv (juxt ::id :seon.cluster.eval/ordinal) requests)]
+    (when-not (= (count identities) (count (set identities)))
+      (refuse! `receipt-settle-batch-call ::receipt-terminal
+               {::evaluations requests}))
+    (into [] (mapcat #(receipt-settle-call database %)) requests)))
+
 (defn receipt-settle-batch-tx
   "Transaction data settling an ordered turn batch in one commit.
 
-  Requests already carry the program rows produced by the turn's single
-  analysis batch, so this owner deliberately uses the non-analyzing arity."
+  Ordinary evaluations share one writer call. Program declarations retain
+  ordered calls: a later declaration must see earlier declarations in the
+  same transaction. Requests carry the turn's already analyzed rows."
   {:malli/schema
    [:=> [:cat [:vector :seon.cluster.eval/settle-request]] [:vector :some]]}
   [requests]
-  (into [] (mapcat receipt-settle-tx) requests))
+  (if (some :seon.program/row requests)
+    (into [] (mapcat receipt-settle-tx) requests)
+    [[:db.fn/call #'receipt-settle-batch-call requests]]))
 
 (defn- affected-schema-attributes
   "Database attributes derived by the affected schema forms."
