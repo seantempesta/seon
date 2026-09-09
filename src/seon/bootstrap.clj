@@ -708,7 +708,7 @@
         read? (not (root-read-agent-history? database))
         send? (not (root-messaged-agent? database))
         read-expression
-        (str "(db/q {:query '[:find ?at ?source ?result "
+        (str "(seon.db/q {:query '[:find ?at ?source ?result "
              ":in $ ?agent-id :where "
              "[?agent :seon.cluster.agent/id ?agent-id] "
              "[?run :seon.turn/agent ?agent] "
@@ -719,20 +719,20 @@
              "[?receipt :seon.cluster.eval/ordinal ?ordinal] "
              "[?receipt :seon.cluster.eval/at ?at] "
              "[?receipt :seon.eval/value ?result]] "
-             ":args [(db/db) " (pr-str agent-id) "] "
+             ":args [(seon.db/db) " (pr-str agent-id) "] "
              ":order-by '[?at :desc] :limit 2})")
         read-source
         (if send?
           read-expression
           (str "(let [history " read-expression "] "
-               "(assoc (run/complete \"Read " agent-id
+               "(assoc (my.run/complete \"Read " agent-id
                "'s recent history.\") :my.run/supervision history))"))
         send-expression
         (str "(my.message/send " (pr-str agent-id)
              " \"What are you doing?\")")
         send-source
         (str "(merge " send-expression
-             " (run/complete \"Read " agent-id
+             " (my.run/complete \"Read " agent-id
              "'s recent history and asked what it is doing.\"))")
         sources
         (cond-> []

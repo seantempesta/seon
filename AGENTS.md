@@ -229,8 +229,9 @@ designs. This is a target, not a claim that their removal is complete:
 
 **[TARGET] Waking and the loop (turn PRD §3, §14).** Schema-declared listened
 attributes identify wake datoms; answering derives from their `:t` and a
-qualifying turn's basis. A model-reply turn or a system turn holding the
-wakes' results answers them; opening alone does not. System turn 0 stores
+qualifying turn's basis. An accepted ordinary reply answers them; a
+system-only turn or opening alone does not (owner resume, 2026-09-09).
+System turn 0 stores
 the opening. Before each agent turn, the since-diff checks every distinct
 read form's latest evaluation and appends changed reads in a system turn;
 writes and effects never rerun. The partial owner is

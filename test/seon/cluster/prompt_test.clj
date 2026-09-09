@@ -11,7 +11,6 @@
             [seon.cluster.agent :as agent]
             [seon.cluster.prompt :as prompt]
             [seon.render :as render]
-            [seon.sci.kernel :as kernel]
             [seon.turn :as turn]
 
             [seon.blob :as blob]
@@ -137,21 +136,18 @@
          (is (= before after) "a stored observation changes only through a later evaluation")
          (is (not (str/includes? after "not evaluated yet"))))))))
 
-(deftest identical-context-reuses-retained-render-calls
+(deftest identical-context-does-not-depend-on-a-retained-prompt-cache
   (planted
    (fn [connection ctx]
-     (let [invoke kernel/invoke
-           calls (atom [])]
-       (with-redefs [kernel/invoke
-                     (fn [request] (swap! calls conj [(:seon.fn/sym request) (select-keys (first (:seon.sci.eval/args request)) [:seon.ns/name :db/id :seon.render/distance])]) (invoke request))]
-         (let [before (prompt/prompt @connection (request connection ctx))
-               _ (prompt/prompt @connection (request connection ctx))
-               initial (count @calls)
-               after (prompt/prompt @connection (request connection ctx))]
-           (is (pos? initial))
-           (is (= initial (count @calls)) (pr-str @calls))
-           (is (= (:seon.cluster.prompt/text before) (:seon.cluster.prompt/text after)))
-           (is (seq (:seon.render.web/ai-calls @(render/shared-cache ctx))))))))))
+     (let [database @connection
+           before (prompt/prompt database (request connection ctx))
+           basis (db/basis-t database)]
+       (reset! (render/shared-cache ctx) {})
+       (let [after (prompt/prompt database (request connection ctx))]
+         (is (seq (:seon.cluster.prompt/text before)))
+         (is (= (:seon.cluster.prompt/text before)
+                (:seon.cluster.prompt/text after)))
+         (is (= basis (db/basis-t @connection))))))))
 
 (deftest later-evaluations-preserve-the-opening-history
   (planted

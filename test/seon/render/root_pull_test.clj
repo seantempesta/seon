@@ -455,8 +455,7 @@
                                        (apply pull arguments))]
                          (#'web/refresh-root
                           (assoc render-request :seon.db/db database)
-                          retained call-id candidates))
-             appended (web/append-history [] [])]
+                          retained call-id candidates))]
          (is (= #{call-id} candidates)
              "the relevant attribute revision selects the root read")
          (is (zero? @pulls) "Datahike semantic evidence reuses the unchanged entity pull")
@@ -466,7 +465,6 @@
                (:seon.render.call/output initial-entry))
               (:datahike.pull/plan (:acquisition refreshed)))
              "W2 hands the retained compiled plan through its replay")
-         (is (empty? appended) "semantic equality appends no entry")
          (is (empty? (#'web/candidate-call-ids
                       {call-id (:entry refreshed)} database))
              "the consumed revision advances even when the result is equal"))))))

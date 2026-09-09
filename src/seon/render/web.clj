@@ -1959,12 +1959,6 @@
                          calls)]
     interest))
 
-(defn- reachable-invocation-keys
-  [calls ai-calls]
-  (into #{}
-        (keep :seon.render.call/invocation-key)
-        (mapcat vals (concat (vals calls) (vals ai-calls)))))
-
 (defn- candidate-call-ids
   [calls database]
   (into #{}
@@ -2427,22 +2421,6 @@
             ::fault-signatures pass-signatures)
      (when changed? packages)])))))
 
-(defn append-history
-  "Append newly observed identities, preserving every previously shown byte.
-
-  A reference path or database basis cannot make a stored evaluation new.
-  Later evaluations have their own identities; compaction discards the retained
-  generation rather than rewriting an earlier entry."
-  {:malli/schema [:=> [:cat [:vector :map] [:vector :map]] [:vector :map]]}
-  [entries observations]
-  (reduce
-   (fn [retained observation]
-     (if (some #(= (:seon.render.history/call-id %)
-                   (:seon.render.history/call-id observation)) retained)
-       retained
-       (conj retained observation)))
-   entries observations))
-
 (defn- history-segments
   [entries]
   (mapv (fn [position entry]
@@ -2477,100 +2455,26 @@
                             (= action :system-turn) (assoc :seon.turn/write? true))])]
     (if (:seon.error/kind result) result {:seon.db/db @connection})))
 
-(defn- context-value
-  [retained-values request]
-  (let [state retained-values
-        agent-id (:seon.cluster.agent/id request)
-        database (:seon.db/db request)
-        retained (get-in state [::ai-calls agent-id] {})
-        retained-invocations (::invocations state {})
-        entries (get-in state [::ai-entries agent-id] [])
-        candidates (candidate-call-ids retained database)
-        call-id (root-call-id :seon.render/ai agent-id)]
-    (if (and (seq entries) (empty? candidates))
-      [state {:seon.cluster.prompt/text (history-text entries)
-              :seon.render.history/segments (history-segments entries)
-              :seon.db/db database}]
-      (let [captured-calls (atom {})
-            captured-invocations (atom retained-invocations)
-            render-request
-            (assoc request
-                   :seon.render.walk/lookup
-                   [:seon.cluster.agent/id agent-id]
-                   :seon.render/distance
-                   (long (:seon.render/distance request 2))
-                   :seon.render/retained-calls retained
-                   :seon.render/captured-calls captured-calls
-                   :seon.render/invocations retained-invocations
-                   :seon.render/captured-invocations captured-invocations
-                   :seon.render/candidate-call-ids candidates)
-            root (refresh-root render-request retained call-id candidates)
-            refresh? (or (empty? entries)
-                         (:changed? root)
-                         (seq (disj candidates call-id)))
-            observations
-            (if refresh?
-              (render.walk/history
-               (assoc render-request
-                      :seon.render.walk/root-acquisition
-                      (:acquisition root)))
-              [])
-            cost-facts (into [] (mapcat :seon.db/tx-data) (vals @captured-calls))
-            cost-result (when (seq cost-facts)
-                          (db/transact! (:seon.db/connection request) cost-facts))
-            retained-calls
-            (if refresh?
-              (assoc (update-vals @captured-calls #(dissoc % :seon.db/tx-data))
-                     call-id (:entry root))
-              (assoc retained call-id (:entry root)))
-            entries (append-history entries observations)
-            state (-> state
-                      (assoc-in [::ai-calls agent-id] retained-calls)
-                      (assoc ::invocations @captured-invocations)
-                      (assoc-in [::ai-entries agent-id] entries))
-            state (update state ::invocations select-keys
-                          (reachable-invocation-keys (::calls state)
-                                                     (::ai-calls state)))]
-        (if (:seon.error/kind cost-result)
-          [retained-values cost-result]
-          [state {:seon.cluster.prompt/text (history-text entries)
-                  :seon.render.history/segments (history-segments entries)
-                  :seon.db/db database}])))))
-
 (defn derive-context!
-  "Compute the requesting turn's context directly, sharing retained evidence."
+  "Render the requesting agent's saved evaluations from its database value."
   {:malli/schema [:=> [:cat :seon.render/context-request]
                   [:or :seon.render/acquired-context
                    :seon.render/context-change-result :seon.error/value]]}
   [request]
-  (let [ctx (:seon.sci.eval/ctx request)
-        cache (render/shared-cache ctx)]
-    (schema/call-with-projection
-     (sci.kernel/context-projection ctx)
-     (fn []
-       (if (:seon.render/context-action request)
-         (change-context request)
-         (let [agent-id (:seon.cluster.agent/id request)
-               program [(some-> ctx :seon.sci.kernel/program-snapshot deref)
-                        (render/source-generation (:seon.db/db request))]
-               before @cache
-               before (if (= program (get-in before [::context-programs agent-id]))
-                        before
-                        (-> before (update ::ai-calls dissoc agent-id)
-                            (update ::ai-entries dissoc agent-id)))
-               [after result] (context-value before request)
-               basis (db/basis-t (:seon.db/db request))]
-           (swap! cache
-                  (fn [current]
-                    (if (> (long (get-in current [::context-bases agent-id] -1)) basis)
-                      current
-                      (-> current
-                          (assoc-in [::context-bases agent-id] basis)
-                          (assoc-in [::context-programs agent-id] program)
-                          (assoc-in [::ai-calls agent-id] (get-in after [::ai-calls agent-id]))
-                          (assoc-in [::ai-entries agent-id] (get-in after [::ai-entries agent-id]))
-                          (update ::invocations merge (::invocations after))))))
-           result))))))
+  (schema/call-with-projection
+   (sci.kernel/context-projection (:seon.sci.eval/ctx request))
+   (fn []
+     (if (:seon.render/context-action request)
+       (change-context request)
+       (let [entries (render.walk/history
+                      (assoc request :seon.render.walk/lookup
+                             [:seon.cluster.agent/id
+                              (:seon.cluster.agent/id request)]))]
+         (if (:seon.error/kind entries)
+           entries
+           {:seon.cluster.prompt/text (history-text entries)
+            :seon.render.history/segments (history-segments entries)
+            :seon.db/db (:seon.db/db request)}))))))
 
 (defn render-step
   "The render proc's transform, in Flow's four arities (F2 §1.1).

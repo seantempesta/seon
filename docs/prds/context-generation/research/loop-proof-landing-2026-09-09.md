@@ -294,3 +294,185 @@ does not follow symlinks. All owned operator/gate shells exited and were reaped.
 No worktree was created. Inherited untracked files were preserved. Git
 whitespace validation passed. The slice is committed with these explicit
 paths; its commit ID is reported in the lane summary.
+
+## Resumed slice: accepted compaction rule and additive virtual loop
+
+The orchestrator accepted `e6832e8d8` and reconstructed default. This slice
+uses the provisional ruling from the 2026-09-09 resume: exact bytes within
+one history generation; after compaction, the same sources and shown values,
+with new evaluation handles and timings permitted. It also follows the
+explicit resume rule that a system-only turn does not answer a wake.
+The earlier red results above are historical observations, not this slice's
+verdict. The named authorities were read end to end in the first slice.
+
+The prompt now renders `seon.eval/of-agent` through the evaluation schema's
+existing AI render pair. The current-neighborhood prompt cache and its
+replacement of earlier entries are removed. Ordinary `:open` first invokes
+the existing system-turn owner to append changed reads, then opens the reply.
+Answering derives from database transaction facts: a successful model attempt
+or an ordinary plan frozen after its turn's opening qualifies. Source submitted
+and frozen at opening, including a system turn, does not. There is no new
+turn-kind attribute or fictitious provider attempt. Root's generated supervision
+forms now use `seon.db/q`, `seon.db/db`, and `my.run/complete` explicitly.
+
+The recurring `seon.loop-proof-test/virtual-loop-end-to-end` retains the
+canonical database, real SCI, actual Flow proc, armed contracts, three-write
+assertion, live `result/e<id>` objects, stored shown text, and boot interruption
+assertions. Compaction compares forms and shown values; every acquired prompt
+is compared with its stored history. The root alias probe executes the generated
+query in a bare root namespace in this same regression.
+
+Snapshot fast proof: **1 test / 52 assertions / 0 failures / 0 errors**.
+Opening: **1 evaluation / 400 UTF-8 bytes**, SHA-256
+`2ddf7b76bb0b15e98daf1020f6d517ef75c3c4b668fa893a350720655d83cecc`.
+Compacted opening: **399 bytes**,
+`f77b6a8450323b9341b2361ad87ab6664cb0fab99ea43eea0bae6f60831527c7`.
+The three-form reply makes exactly **3 writes**, with **30 / 13 / 2 datoms**
+for open / evaluations / close; resulting history **659 bytes**,
+`0bab98fbba5a5ab67fa703c6dd52343d8bea1bbe7fb96df5ca3d5f4b61315357`.
+The explicit changed-read system turn appends **1** evaluation but leaves
+wake **536870931** unanswered, with answering basis **0**. The actual
+ordinary wake path appends inbox read then `(+ 1 1)` and answers the wake.
+These timing-bearing digests identify this exact invocation; no digest is
+asserted constant across separate fixture generations.
+
+### Default controls and curl, no provider
+
+Default was reconstructed by the orchestrator, not this lane. This slice
+observed PID **40078**, prepl **63396**, HTTP **7994**, and no-provider **true**.
+The default fixture already had **1** provider attempt at entry and retained
+exactly **1** throughout; the proof adds **0** attempts. The reproducible
+`loop_proof_probe_2026_09_09.clj` snapshot now also acquires the actual prompt
+and records its byte count, SHA-256, and equality with stored history.
+
+Every POST below used `/agent/juniper/context` with the page control's
+`action` form field and returned **204 / 0 response bytes**:
+
+| Action | Seconds | Observation after completion |
+|---|---:|---|
+| system-turn | 1.053210 | 13 evaluations, 5304 bytes |
+| system-turn | 0.463354 | 14 evaluations, 5726 bytes |
+| compact | 0.164364 | evaluations wiped |
+| system-turn | 0.373890 | 7 evaluations, 3973 bytes |
+| system-turn | 0.127040 | same 7 evaluations, identical 3973 bytes |
+| virtual-turn | 0.066134 | appended `(+ 1 1)` |
+| compact | 0.180669 | evaluations wiped |
+| system-turn | 0.952830 | 7 evaluations, 4138 bytes after the new message |
+| compact | 0.136693 | evaluations wiped |
+| system-turn | 0.896641 | same 7 sources and shown values, 4138 bytes |
+
+Measured UTF-8 prompt/history digests (actual prompt equals saved history in
+each snapshot):
+
+| Snapshot | Bytes | SHA-256 |
+|---|---:|---|
+| entry, 5 evaluations | 902 | `f21449e71192968bff83cd6d243a59da9842709bd948c7701f97080cd41184b6` |
+| first system turn | 5304 | `6c5bb7f3a093a66399e156128735d72289d0ad07124ea304dc55e734ea18e2e0` |
+| second system turn | 5726 | `33fe36fb09a2d984d85271b1e0bb1732ffbfe023304f38b3c0c363ebf903383a` |
+| fresh compacted generation and unchanged repeat | 3973 | `04a0d72e4dad59e6f0ca227f24cb063d8b83e2bc71829a768ab054db4668fee0` |
+| message refresh and ordinary reply, 10 evaluations | 5366 | `e6e294d958840eedf146972f679c0f8902c80bc996717559d92faf0fe13492a8` |
+| compacted message generation | 4138 | `445f0b681b2cfa5b5170efd9e8b1e7efaef92f8442030e2252c561373eb03870` |
+| next compacted generation, same forms and shown values | 4138 | `a57f085e68557a0c6afe1c6ca1a8efd8046aab7b89b92dfa663ed323da29ba25` |
+
+The second initial system turn legitimately refreshed old `(help)` read
+evidence affected by turn metadata. The unchanged-generation check follows
+compaction, when that legacy evaluation is gone; it appended **0** evaluations.
+
+Message `loop-proof/resume/wake-2026-09-09`, content
+`Virtual proof: refresh this inbox observation.`, committed at **:t 536871026**.
+The real no-provider proc appended exactly
+`["(my.message/inbox {})" "(+ 1 1)"]`. The prior eight evaluations' complete
+text remained an exact prefix. Unanswered wakes became **0**, answering basis
+**536871028**. GET `/ns/my.agents.juniper/debug?prompt=true` returned
+**200 / 70708 bytes / 0.319366 seconds**. This proves HTTP and database
+behavior; it does not claim browser paint. The previously filed inaccessible
+browser-window issue still bounds visual verification.
+
+The last two compactions compare actual vectors of source and shown value,
+not normalized prompt strings: equality **true**. Their differing digests
+are the expected fresh handles/timings under the provisional ruling.
+
+### Fresh scratch root and verification limits
+
+Started only `bin/seon --root tmp/loop-proof-root start loop-proof`, with the
+existing `turn_schema_no_provider_2026_09_09.edn` manifest, and installed the
+canonical Juniper fixture. Scratch HTTP **63807**, prepl **63800**; published
+source commit `6aa141f4-0da3-5c49-a6c6-244f1025b5ec`, source digest
+`7c7c6f7e01e32dae781e603d3f3a35d5ab867b4cdf3b960b8b867ed646717bc1`.
+Root's generated supervision query executed successfully without aliases,
+storing the completed disposition and `Read juniper's recent history.` result;
+evaluation error absent, provider attempts **0**. The first slice's actual
+scratch SIGKILL/boot proof remains recorded above; the recurring proof runs
+boot recovery again in this slice.
+
+The expanded exploratory run reported **160 tests / 1132 assertions /
+22 failures / 4 errors** before fixture corrections. A HEAD-only snapshot
+at `fd345e5e7`, using `--paths AGENTS.md`, independently reproduces
+**27 tests / 117 assertions / 17 failures / 2 errors** in
+`seon.bootstrap-test`, `seon.render.history-test`, and
+`seon.render.root-pull-test`. These are existing local legacy consumer
+boundaries, not another lane's uncommitted breakage. Obsolete tests asserting
+prompt-cache replacement were removed; current prompt behavior belongs to
+the recurring proof. The remaining legacy namespace failures are recorded
+in the existing consumer-fixture issue. No shared-tree load failure required
+a worktree, and no other lane's files or sessions were operated.
+
+A further probe of `system-turn` after a successful attempted model history
+hits `seon.render.transcript/render-history-ai`'s contract refusal. This is
+outside the no-provider proof, and remains a named issue rather than a green
+model-loop claim. Generated system-read preview still uses its existing SCI
+preview context; persistent private bindings in refreshed read forms have
+not been proven by this regression. No schema changed: this slice introduces
+no additional RESET NEEDED. It does not withdraw the first slice's historical
+service-reconstruction requirement, which the orchestrator has now handled.
+
+Files touched in this resumed slice:
+
+- `AGENTS.md` — align system-only wake wording with the resume instruction.
+- `src/seon/bootstrap.clj` — fully qualified generated supervision forms.
+- `src/seon/turn.clj` — ordinary opening refresh and transaction-based answering.
+- `src/seon/render/walk.clj` — saved evaluations are the prompt history.
+- `src/seon/render/web.clj` — remove mutable current-neighborhood prompt replacement.
+- `test/seon/loop_proof_test.clj` — one recurring proof with revised compaction and root query.
+- `test/seon/cluster/prompt_test.clj` — prompt byte stability independent of a retained cache.
+- `test/seon/turn_loop_test.clj` — actual stored opening before the call-phase fixture.
+- `test/seon/render/web_debug_test.clj` — remove retired prompt-cache assertions.
+- `test/seon/render/history_test.clj` — remove retired history-replacement assertions.
+- `test/seon/render/root_pull_test.clj` — remove vacuous retired helper assertion.
+- `docs/prds/context-generation/research/loop_proof_probe_2026_09_09.clj` — actual prompt measurements.
+- `docs/prds/context-generation/research/loop-proof-landing-2026-09-09.md` — this evidence.
+- `docs/seon/issues/ordinary-turns-do-not-use-the-additive-system-turn.md` — repaired virtual path and remaining boundaries.
+- `docs/seon/issues/turn-consumer-fixtures-read-retired-result-storage.md` — independent HEAD baseline.
+
+### Resumed final gates and cleanup
+
+Final namespace gate: **135 tests / 1032 assertions / 0 failures / 0 errors**,
+exit **0**, coordinator/test phase **116 seconds**. This includes the final
+root query assertion in the recurring proof. The immediately preceding
+revision was also green at **135 / 1028 / 0 / 0**. Exact command:
+
+```sh
+SEON_TEST_WORKERS=3 bin/test --paths src/seon/bootstrap.clj src/seon/render/walk.clj src/seon/render/web.clj src/seon/turn.clj test/seon/loop_proof_test.clj test/seon/render/history_test.clj test/seon/render/root_pull_test.clj test/seon/render/web_debug_test.clj test/seon/cluster/prompt_test.clj test/seon/turn_loop_test.clj -- seon.loop-proof-test seon.turn-test seon.turn-work-test seon.turn-loop-test seon.cluster.prompt-test seon.render.web-debug-test seon.render.web-test
+```
+
+The final publication observation has identical published and adopted source
+commit **`6aa14649-9ffc-50c5-aaf7-7bffa2ae9d2c`**. Default exercised in-place
+development adoption following the orchestrator's earlier reconstruction.
+Two initial convergence probe forms used the wrong `current` arity and old
+registry namespace; both returned explicit errors before the corrected
+observation above. They performed no lifecycle action or state mutation.
+
+Scratch down reaped PID **41959** through the root-scoped operator, and
+reported the store lock free. Process-table inspection found no Java or test
+runner holder for the scratch root or failed `run.OvBpOa`; both were deleted.
+Successful final namespace roots `run.hsg4xV` and `run.KUG37R` were removed
+by the runner. No worktree was created. Inherited untracked `build/`,
+`workers/`, and `config/virtual-turns.edn` were preserved.
+
+Platform gate: **83 tests / 490 assertions / 0 failures / 0 errors**, exit
+**0**, coordinator/test phase **52 seconds**, using the same explicit paths
+with `bin/test --platform --paths` and `SEON_TEST_WORKERS=3`. Its successful
+root `run.3N1jCB` was removed by the runner. The runner's printed long-test
+exclusions are not a claim that they passed; this lane never ran `--all` or
+`--full`. All owned test and operator shells exited and were reaped. Final
+whitespace validation passed; the commit includes only the listed paths.

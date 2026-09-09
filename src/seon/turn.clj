@@ -2713,44 +2713,30 @@
   (some? (next-agent-work db request)))
 
 (defn latest-answering-turn-t
-  "The `:t` of the newest turn of `agent-id` that ANSWERED, or 0.
+  "The opening transaction of the latest accepted ordinary reply, or zero.
 
-  A turn's own identity datom carries the `:t` of the transaction that
-  opened it, and that transaction's database value IS what the turn's
-  context projected from (`run/opening-db` derives the same `:t` from
-  the `opened-at` datom and hands it to `as-of`). So the basis is not
-  stored: Datahike already stamps it, and a stored copy was measured off
-  by one on every turn — swallowing a wake transacted with the turn that
-  answered it (prototype 0b.1).
-
-  ONLY A TURN WHOSE REPLY CAME FROM A MODEL ATTEMPT ANSWERS. The join is
-  to a `:seon.ai.attempt` of this turn carrying no
-  `:seon.ai.attempt/error` — an attempt row is written for every
-  attempt, and the absence of that error ref IS its success
-  (`seon.turn/record-attempt!`). A turn that died before its
-  reply, a turn whose every attempt failed, and a source submission
-  never showed the wakes to a model, so they answer nothing and the
-  wakes remain pending. A terminal provider refusal defers reopening
-  until a new outside wake arrives.
-
-  Joining on the REPLY instead would not say this: a source submission
-  stores the submitted text as the run's reply, and the verifier
-  measured one silently consuming a pending message
-  (verify-listened-attributes-2026-09-08 §2d). The turn bound still counts
-  every turn taken, answered or not."
+  A successful model attempt qualifies directly. Virtual replies use the
+  same writer protocol: the plan is frozen after opening, so its datom's
+  transaction is later than the turn identity's transaction. Submitted system
+  source freezes in the opening transaction and does not answer wakes.
+  Merely opening, or failing before any reply, cannot qualify. No provider
+  attempt is invented for the no-provider path."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.agent/id]
                   [:int {:min 0}]]}
-  [db agent-id]
+  [database agent-id]
   (or (db/q '[:find (max ?tx) .
               :in $ ?agent-id
               :where
               [?agent :seon.cluster.agent/id ?agent-id]
-              [?run :seon.turn/agent ?agent]
-              [?run :seon.turn/id _ ?tx]
-              [?run :seon.turn/attempts ?attempt]
-              (not [?attempt :seon.ai.attempt/error _])]
-            db agent-id)
+              [?turn :seon.turn/agent ?agent]
+              [?turn :seon.turn/id _ ?tx]
+              (or-join [?turn ?tx]
+                (and [?turn :seon.turn/attempts ?attempt]
+                     (not [?attempt :seon.ai.attempt/error _]))
+                (and [?turn :seon.turn/plan-digest _ ?reply-t]
+                     [(> ?reply-t ?tx)]))]
+            database agent-id)
       0))
 
 (defn unanswered-wakes
@@ -3892,7 +3878,10 @@
     ;; `:seon.turn/trigger` is retained as PROVENANCE ONLY — the
     ;; oldest message wake this turn opened for, which the page and the
     ;; context still name. It decides nothing.
-    (let [id (next-id @connection (:seon.cluster/name cluster) agent-id)
+    (let [refreshed (system-turn {:seon.turn.loop/cluster cluster
+                                 :seon.cluster.agent/id agent-id
+                                 :seon.turn/write? true})
+          id (next-id @connection (:seon.cluster/name cluster) agent-id)
           open-request
           (cond->
            {:seon.turn/id id
@@ -3904,10 +3893,12 @@
              :seon.turn/trigger
              [:seon.cluster.message/id
               (:seon.cluster.message/id work)]))
-          outcome (db/transact!
+          outcome (if (:seon.error/kind refreshed)
+                    refreshed
+                    (db/transact!
                    connection
                    {:tx-data
-                    [[:db.fn/call #'open-call open-request]]})]
+                    [[:db.fn/call #'open-call open-request]]}))]
       (cond
         (:seon.error/kind outcome)
         (do

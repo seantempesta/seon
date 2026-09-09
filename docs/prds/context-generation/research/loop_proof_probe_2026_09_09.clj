@@ -6,6 +6,7 @@
             [seon.db :as db]
             [seon.eval :as evaluation]
             [seon.operator.runtime :as runtime]
+            [seon.render :as render]
             [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.turn :as turn]))
@@ -20,8 +21,20 @@
      (fn []
        (let [saved (evaluation/of-agent database agent-id)
              text (str/join "\n\n" (map repl/render-ai saved))
-             encoded (.getBytes text "UTF-8")]
-         {:seon.test/evaluations (count saved)
+             encoded (.getBytes text "UTF-8")
+             turn-id (when (seq saved)
+                       (:seon.turn/id
+                        (db/pull database [:seon.turn/id]
+                                 (get-in (last saved) [:seon.cluster.eval/run :db/id]))))
+             acquired (when turn-id
+                        (render/acquire-context!
+                         (assoc handle :seon.db/db database
+                                :seon.turn/id turn-id
+                                :seon.cluster.agent/id agent-id
+                                :seon.sci.eval/time-limit-ms
+                                (:seon.config.eval/time-limit-ms handle))))
+             prompt-text (:seon.cluster.prompt/text acquired)]
+         (cond-> {:seon.test/evaluations (count saved)
           :seon.test/sources (mapv :seon.cluster.eval/source saved)
           :seon.test/bytes (alength encoded)
           :seon.test/sha256 (schema/sha-256 [encoded])
@@ -33,7 +46,12 @@
                   (ai/agent-overlay database agent-id)))
           :seon.test/attempts
           (count (db/q '[:find [?attempt ...] :where
-                         [?attempt :seon.ai.attempt/id]] database))})))))
+                         [?attempt :seon.ai.attempt/id]] database))}
+           prompt-text
+           (assoc :seon.test/prompt-bytes (alength (.getBytes prompt-text "UTF-8"))
+                  :seon.test/prompt-sha256 (schema/sha-256 [(.getBytes prompt-text "UTF-8")])
+                  :seon.test/prompt-equals-history? (= text prompt-text))
+           (:seon.error/kind acquired) (assoc :seon.test/prompt-error acquired)))))))
 
 (defn prepare-crash
   "Start bounded side-effect/loop/side-effect forms in the owned scratch cluster."

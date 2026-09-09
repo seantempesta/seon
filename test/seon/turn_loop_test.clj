@@ -555,7 +555,7 @@
           (is (empty? (ai/agent-overlay db "worker"))))))))
 
 (defn- prepare-call!
-  [connection agent-id run-id message-id]
+  [{connection :seon.db/connection :as cluster} agent-id run-id message-id]
   (db/transact! connection
               [{:seon.cluster.message/id message-id
                 :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
@@ -825,14 +825,7 @@
                     :seon.config.eval/time-limit-ms 2000
                     :seon.config/on-core-error :panic
                     :seon.sci.admit/caps
-                    (assoc
-                     (config/result-caps
-                      (test-support/effective-config))
-                     :seon.config.eval.result/max-depth 6
-                     :seon.config.eval.result/max-collection 8
-                     :seon.config.eval.result/max-string 4096
-                     :seon.config.eval.result/max-source 1048576
-                     :seon.config.eval.result/max-nodes 256)
+                    (config/result-caps (test-support/effective-config))
                     :seon.config.error/recurrence-limit 3
                     :seon.config.message/max-chain 8})
            unpaid {:seon.error/kind :seon.ai/transport-failure
@@ -867,7 +860,11 @@
         connection
         [{:seon.cluster.agent/id agent-id
           :seon.agent/settings {:seon.config.ai/thinking :high}}])
-       (prepare-call! connection agent-id "settings-run-1" "settings-message-1")
+       (let [opening (turn/system-turn {:seon.turn.loop/cluster cluster
+                                        :seon.cluster.agent/id agent-id
+                                        :seon.turn/write? true})]
+         (is (nil? (:seon.error/kind opening)) (pr-str opening)))
+       (prepare-call! cluster agent-id "settings-run-1" "settings-message-1")
        (with-render-context-proc
         cluster
         (fn [cluster]
@@ -931,15 +928,17 @@
               :seon.config/manifest
               {:seon.config.ai/model "after-apply"}})
             (prepare-call!
-             connection agent-id "settings-run-2" "settings-message-2")
+             cluster agent-id "settings-run-2" "settings-message-2")
+            (reset! overlays [])
+            (reset! resolutions [])
             (turn/turn
              {:seon.turn.loop/cluster cluster
               :seon.turn.work/next
               (call-work agent-id "settings-run-2")}
              now)
             (testing "both phases see the next run opened after config apply"
-              (is (= 6 (count @overlays)))
-              (is (= 4 (count @resolutions)))
+              (is (= 3 (count @overlays)))
+              (is (= 2 (count @resolutions)))
               (is (= "after-apply" (:seon.ai/model (last @requests))))
               (is (= :high (:seon.ai/thinking (last @requests))))
               (let [last-row (last (settings-attempts @connection))]

@@ -4,6 +4,7 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [sci.core :as sci]
+            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.config :as config]
@@ -40,7 +41,9 @@
              {:seon.cluster.agent/id "other"
               :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.other}}
              {:seon.cluster.agent/id "unobserved"
-              :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.unobserved}}])
+              :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.unobserved}}
+             {:seon.cluster.agent/id "root"
+              :seon.cluster.agent/namespace {:seon.ns/name 'my.agents.root}}])
            _ (is (nil? (:seon.error/kind configured)))
            ctx (support/fork-cluster-ctx connection)
            environment (support/environment "loop-proof" connection)
@@ -140,8 +143,12 @@
                    (is (= (mapv :seon.cluster.eval/source saved)
                           (mapv :seon.cluster.eval/source
                                 (evaluation/of-agent @connection "proof"))))
-                   (is (= (bytes-evidence text) (bytes-evidence after))
-                       "unchanged record regenerates identical opening bytes")
+                   (is (= (mapv :seon.eval/value saved)
+                          (mapv :seon.eval/value
+                                (evaluation/of-agent @connection "proof"))))
+                   (is (= after (stored-text @connection))
+                       "saved bytes remain exact within the new generation")
+                   (is (= after (:seon.cluster.prompt/text (prompt))))
                    (println {:seon.test/stage :compact
                              :seon.test/stored (bytes-evidence after)}))))
              (agent/arm! {:seon.turn.loop/cluster handle
@@ -162,6 +169,8 @@
                      (is (= expected (some-> (sci/resolve agent-ctx handle-symbol) deref)))
                      (is (nil? (sci/resolve ctx handle-symbol)))))
                  (is (str/starts-with? (stored-text @connection) prefix))
+                 (is (= (stored-text @connection)
+                        (:seon.cluster.prompt/text (prompt))))
                  (println {:seon.test/stage :virtual
                            :seon.test/turn id
                            :seon.test/transactions (count reports)
@@ -186,8 +195,11 @@
                    (is (= ["(my.message/inbox {})"]
                           (mapv :seon.cluster.eval/source changed)))
                    (is (str/starts-with? (stored-text @connection) prefix))
-                   (is (empty? (turn/unanswered-wakes @connection "proof" {})))
-                   (is (>= (turn/latest-answering-turn-t @connection "proof") wake-t))
+                   (is (= (stored-text @connection)
+                          (:seon.cluster.prompt/text (prompt))))
+                   (is (= 1 (count (turn/unanswered-wakes @connection "proof" {}))))
+                   (is (< (turn/latest-answering-turn-t @connection "proof") wake-t)
+                       "a system-only read refresh does not answer the wake")
                    (println {:seon.test/stage :wake
                              :seon.test/changed (count changed)
                              :seon.test/wake-t wake-t
@@ -224,6 +236,31 @@
                    (is (empty? (turn/unanswered-wakes @connection "proof" {})))
                    (println {:seon.test/stage :ordinary-wake
                              :seon.test/sources (mapv :seon.cluster.eval/source fresh)}))))
+             (testing "root's generated query executes without caller aliases"
+               (let [transaction (bootstrap/supervision-tx
+                                  @connection cluster/boot-process-identity
+                                  (java.util.Date.) "other")
+                     query-source (some #(when (and (map? %)
+                                                    (str/starts-with?
+                                                     (:seon.cluster.eval/source % "")
+                                                     "(seon.db/q"))
+                                           (:seon.cluster.eval/source %))
+                                        (tree-seq coll? seq transaction))]
+                 (is (string? query-source))
+                 (when query-source
+                   (let [preview (turn/preview-sources
+                                  {:seon.turn.loop/cluster handle
+                                   :seon.db/db @connection
+                                   :seon.sci.eval/ctx ctx
+                                   :seon.cluster.agent/id "root"
+                                   :seon.ns/name 'my.agents.root
+                                   :seon.cluster.reply/text query-source
+                                   :seon.sci.admit/caps (:seon.sci.admit/caps handle)})
+                         result (get-in preview [:seon.turn.loop/evaluated-sources 0
+                                                 :seon.sci.eval/evaluation])]
+                     (is (some? result) (pr-str preview))
+                     (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+                     (is (nil? (:seon.error/kind result)) (pr-str result))))))
              (testing "boot closes durable intent and never reexecutes it"
                (let [id (turn/next-id @connection "loop-proof" "other")
                      source "(seon.db/transact! [{:seon.cluster.agent/id \"must-not-execute\"}])"

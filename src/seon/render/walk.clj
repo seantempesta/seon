@@ -38,6 +38,7 @@
   holds anything."
   (:require [clojure.string :as str]
             [seon.db :as db]
+            [seon.eval :as evaluation]
             [seon.print :as print]
             [seon.render :as render]
             [seon.schema :as schema]
@@ -852,65 +853,26 @@
 ;;; The agent's history
 ;;; ---------------------------------------------------------------------------
 
-(defn- observation-basis
-  [captured call-id fallback]
-  (long (or (get-in @captured
-                    [call-id :seon.render.call/basis-transaction])
-            fallback)))
-
-(defn- history-entries
-  "Retain one successful projection under the rendered entity's identity."
-  [request value-units captured]
-  (let [basis (db/basis-t (:seon.db/db request))]
-    (into []
-          (keep
-           (fn [unit]
-             (let [rendered (:seon.render/output unit)
-                   lookup (:seon.render.walk/lookup unit)
-                   distance (:seon.render/distance unit)]
-               (when (and (string? rendered) (seq rendered)
-                          (nil? (:seon.error/value unit)))
-                 {:seon.render.history/call-id [lookup]
-                  :seon.render.history/basis-transaction
-                  (observation-basis captured [:seon.render/ai lookup distance] basis)
-                  :seon.render.history/subject lookup
-                  :seon.render.history/bytes rendered}))))
-          value-units)))
-
 (defn history
-  "Derive the agent's ordered prompt entries from one walk.
-
-  Each entry carries the bytes its unit's own `:seon.render/ai` producer
-  emitted — the ONE grammar the page and the history unit read (PRD §4)."
-  {:malli/schema [:=> [:cat :seon.render.walk/history-request] [:vector :map]]}
-  [{captured :seon.render/captured-calls
-    :as request}]
-  (let [captured (or captured (atom {}))
-        profile (render/request-profile request)
-        acquisition (or (:seon.render.walk/root-acquisition request)
-                        (root-acquisition request))
-        direct-acquisition
-        (update acquisition :seon.render.walk/members
-                (fn [members]
-                  (into {}
-                        (map (fn [[lookup member]]
-                               [lookup
-                                (dissoc member
-                                        :seon.render.walk/attribute)]))
-                        members)))
-        request (assoc request
-                       :seon.render/captured-calls captured
-                       :seon.render/profile profile
-                       :seon.render.walk/root-acquisition direct-acquisition)
-        ;; ONE PASS. The `:seon.render/ai` neighbourhood already carries the
-        ;; bytes the agent reads; walking a second `:seon.render/form`
-        ;; neighbourhood only ever existed to build a prompt line nothing
-        ;; else in the system produces.
-        value-units (neighborhood (assoc request :seon.render/output
-                                         :seon.render/ai))
-        root-lookup (:seon.render.walk/lookup request)
-        generic (->> (history-entries request value-units captured)
-                     (remove #(= root-lookup
-                                 (first (:seon.render.history/call-id %))))
-                     vec)]
-    generic))
+  "Render saved evaluations in chronological order through their schema pair."
+  {:malli/schema [:=> [:cat :seon.render.walk/history-request]
+                  [:or [:vector :map] :seon.error/value]]}
+  [{database :seon.db/db lookup :seon.render.walk/lookup :as request}]
+  (let [agent-id (:seon.cluster.agent/id
+                  (db/pull database [:seon.cluster.agent/id] lookup))
+        evaluations (evaluation/of-agent database agent-id)]
+    (if (:seon.error/kind evaluations)
+      evaluations
+      (reduce
+       (fn [entries saved]
+         (let [lookup [:seon.cluster.eval/id (:seon.cluster.eval/id saved)]
+               rendered (render/render-ai
+                         (assoc request :seon.render/value saved))]
+           (if (:seon.error/kind rendered)
+             (reduced rendered)
+             (conj entries
+                   {:seon.render.history/call-id [lookup]
+                    :seon.render.history/subject lookup
+                    :seon.render.history/basis-transaction (:t saved)
+                    :seon.render.history/bytes (or rendered "")}))))
+       [] evaluations))))

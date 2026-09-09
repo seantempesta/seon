@@ -106,3 +106,17 @@ contracts belongs to the existing consumer-fixture issue.
 Evidence: `tmp/turn-attempts-fast.log`; the rename landing note records the
 committed source and the narrower required gate. Preserve the distinction
 between actual shown text and old serialized-node fixtures when converting.
+
+## Loop-proof HEAD baseline, 2026-09-09
+
+At `fd345e5e7`, `SEON_TEST_WORKERS=3 bin/test-fast --paths AGENTS.md --
+seon.bootstrap-test seon.render.history-test seon.render.root-pull-test`
+reproduces **27 tests / 117 assertions / 17 failures / 2 errors**. Both
+errors reject old `ordered-episode` inputs; failures include old opening
+membership, result storage, history replacement, and root replay assumptions.
+This is a HEAD-only snapshot, not evidence about another lane's edits.
+The loop-proof slice deletes the retired prompt replacement assertions;
+its one canonical regression verifies stored-history prompts and executes
+root's fully qualified generated query. Remaining legacy namespace results
+are not claimed green. Measurements are in the loop-proof landing note;
+the baseline log was `tmp/loop-proof-resume-baseline.log`.

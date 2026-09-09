@@ -46,3 +46,22 @@ are answered. No provider request is used to establish these properties.
 
 Full measurements and the compaction design question live in
 `docs/prds/context-generation/research/loop-proof-landing-2026-09-09.md`.
+
+## Resumed proof, 2026-09-09
+
+The no-provider ordinary path now invokes `system-turn` before opening its
+reply; prompt acquisition renders saved evaluation entities, and the reply's
+post-opening plan transaction qualifies for answering. System-only turns
+remain non-answering under the explicit resume instruction. The scoped gate
+passes 135 tests / 1028 assertions, and default's real message probe appended
+exactly inbox read then virtual reply, retained the prior bytes, and answered
+wake 536871026 with basis 536871028. Compaction follows the provisional
+same-forms/same-shown-values rule. The landing note owns all exact digests.
+
+Keep this issue open for two integration boundaries beyond that virtual proof:
+an explicit system-turn after successful attempted model history encountered
+a `seon.render.transcript/render-history-ai` contract refusal; and the system
+read preview's use of a separate SCI context has not proven refresh of read
+forms depending on persistent private bindings. Neither is foreign lane
+breakage. The green virtual proof must not be reported as a complete model
+history or private-read custody proof.
