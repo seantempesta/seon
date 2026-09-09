@@ -153,7 +153,14 @@
            [:v :seon.schema/value]
            [:tx :int]
            [:added :boolean]],
-          :datoms [:vector :seon.db/datom],
+          :transaction-datom
+          [:tuple :seon.db/entity-id :qualified-keyword :seon.schema/value :boolean],
+          :datoms [:vector [:or :seon.db/datom :seon.db/transaction-datom]],
+          :tx :seon.db/basis-t,
+          :transaction-result
+          [:map
+           [:seon.db/tx :seon.db/tx]
+           [:seon.db/datoms :seon.db/datoms]],
           :index-page-cursor
           [:tuple :seon.schema/value :seon.schema/value :seon.schema/value
            :int :boolean],

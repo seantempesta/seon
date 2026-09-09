@@ -20,9 +20,48 @@ Pull describes one known entity or a known set, including nested and reverse ref
 
 Datahike transaction.cljc:640 (identity upsert), :738 (nested maps), :785 (cardinality-one replacement), :997 and :1059 (retractEntity versus retract); pull_api.cljc:304 (reverse refs and component collections). First-party idioms: seon.plan/render-plan-html resolves the plan owner; seon.agent/settings! consumes the full system transaction report; seon.db:335–423 captures read patterns. `datahike.api` has no entid function: use an identity pull.
 
-## Transaction report proposal — pending db.clj ownership
+## Transaction report implementation
 
-`src/seon/db.clj` is held by transact-feedback. The executable `report-face` hunk in the adjacent probe is the proposed agent-facing projection: `{:seon.db/tx t :seon.db/datoms [[e a v added?] ...]}`. It resolves e to an installed unique-identity lookup ref, consulting db-before for deleted identities; tempids are already resolved in tx-data. The next read is the db-after; tx-data already says what changed. Neither db-before nor db-after belongs in shown text. Keep the full report for system callers such as seon.agent/settings! that still consume db-after. The first measurements below print numeric targets inside ref-valued identities; the final probe follows those identities recursively with cycle protection and records its actual result at the end.
+The transact-feedback lane released `src/seon/db.clj` in `24953d294`. Its existing
+transaction owner now projects the agent call to `{:seon.db/tx t :seon.db/datoms
+[[e a v added?] ...]}`. It resolves entity identities against db-after, then
+db-before for deleted identities, recursively following identity refs with cycle
+protection. Tempids are already resolved in tx-data. The next read is the db-after;
+tx-data already says what changed. Neither database snapshot belongs in shown
+text. Explicit-connection system callers retain the full report they consume.
+
+SCI call preparation initially supplied the connection and selected that system
+arity. As `seon.db/db` already does, the explicit arity now also accepts a typed
+connection error and propagates it. Its distinct input contract preserves the
+one-argument call; the canonical regression executes the actual SCI boundary.
+`:seon.db/datoms` now accepts both native datom maps and the owner-requested
+four-member transaction vectors; native datom reads retain their values.
+Fast gate: **7 tests / 77 assertions**. Isolated gate: **7 tests / 81 assertions**.
+Combined platform with the error slice: **83 tests / 490 assertions**, all green.
+The live production projection over `datahike.api/with` returned **267 bytes**;
+[the result and unchanged default basis are recorded](context_cookbook_results_2026_09_09.edn).
+
+## Returned flat errors
+
+The evaluation recognizes a returned `:seon.error/kind` as its error. The value
+renderer invokes the existing schema-selected AI pair, fits once through its
+existing profile, and stores that shown text. REPL history emits it under
+`:seon.repl/error`; the live result retains the complete diagnostic. Throwable
+triage keeps its existing concise error format.
+
+The canonical bad transaction produced exactly **131 UTF-8 bytes**:
+
+```text
+Expected: [:string {:min 1, :description "The current human-readable work title."}]
+Got: 42
+Attribute: :my.plan.item/title at [0 3]
+```
+
+Fast regression: 38 tests / 170 assertions; isolated gate: **38 tests / 174
+assertions**, green. The bad transaction leaves its title unchanged. Default's
+hot-reloaded, re-armed evaluation point independently rendered the pure validator's
+returned diagnostic to the same 131 bytes without a database write;
+[the exact response is retained](context_cookbook_error_2026_09_09.edn).
 
 ## Verification boundary
 

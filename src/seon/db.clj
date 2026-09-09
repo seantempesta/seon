@@ -2581,6 +2581,32 @@
         [:div [:dt "Existing owner"]
          [:dd (pr-str (::conflict-owner conflict))]]])]))
 
+(defn- transaction-result
+  [report]
+  (if (error-value? report)
+    report
+    (let [before (:db-before report)
+          after (:db-after report)
+          identities (set (identity-attributes after))]
+      (letfn [(reference [eid visited]
+                (if (visited eid) eid
+                    (or (some (fn [database]
+                                (some (fn [datom]
+                                        (when (identities (:a datom))
+                                          [(:a datom)
+                                           (if (db.utils/ref? database (:a datom))
+                                             (reference (:v datom) (conj visited eid))
+                                             (:v datom))]))
+                                      (sort-by (comp str :a)
+                                               (d/datoms database :eavt eid))))
+                              [after before])
+                        eid)))]
+        {::tx (get (:tempids report) :db/current-tx)
+         ::datoms (mapv (fn [datom]
+                          [(reference (:e datom) #{}) (:a datom)
+                           (:v datom) (:added datom)])
+                        (:tx-data report))}))))
+
 (defn transact!
   "Validate authored transaction data and commit through the calling connection.
 
@@ -2590,22 +2616,30 @@
   Datahike owns native schema declarations, reference resolution, uniqueness,
   and transaction-function execution, retaining its refusal classifications.
 
+  With the connection omitted, return :seon.db/tx and :seon.db/datoms as
+  [entity attribute value added?] vectors. Entities use installed identity
+  lookup refs when available, including identities removed by this transaction.
+  Tempids are resolved. The next read observes the changed database.
+  Explicit-connection system callers retain Datahike's full report.
+
   When `*conn*` is bound, an explicit connection must have the same Datahike
   connection ID. An absent binding means the caller is outside an agent
   evaluation, so a live explicit connection is allowed."
   {:malli/schema
   [:function
     [:=> [:cat :seon.store/transaction]
-     [:or :map :seon.error/value]]
-    [:=> [:cat :seon.db/connection :seon.store/transaction]
+     [:or :seon.db/transaction-result :seon.error/value]]
+    [:=> [:cat [:or :seon.db/connection :seon.error/value] :seon.store/transaction]
      [:or :map :seon.error/value]]]}
   ([transaction]
    (or (missing-transaction-data-error transaction)
-       (transact-call (current-connection) transaction)))
+       (transaction-result (transact-call (current-connection) transaction))))
   ([connection transaction]
    (or
     (missing-transaction-data-error transaction)
     (cond
+      (error-value? connection) connection
+
       (not (connection? connection))
       (dependency-error
        ::transact!
