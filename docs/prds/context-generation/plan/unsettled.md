@@ -562,3 +562,24 @@ half-edit. Measured targets in the issue.
   §12 compaction proof end to end; `render-proc-faults-in-history-entries`
   re-verification; the ephemeral-port advertisement rewrite.
 
+## 2026-09-09 05:20 — the loop is NOT proven end to end; one ruling open
+
+- loop-proof `e6832e8d8`: one recurring regression on the canonical
+  fixture, intentionally red — 51 assertions, 6 failures across prompt
+  construction, compaction, changed-read refresh, and wake answering. It
+  repaired the page's Virtual-turn control (was 500), verified a real JVM
+  kill mid-turn closes the turn and re-executes nothing with zero provider
+  attempts, and drove all three controls on `default` by curl (Run system
+  turn 1.08 s; after Compact 6.38 s — cold; Compact 0.15 s). RESET NEEDED:
+  ninth refork of `default`.
+- **OPEN RULING (owner): compaction and byte identity.** Prompt bytes
+  carry `result/e<id>` handles (ids derive from turn identity, so they
+  change after compaction) and measured `:ms`. Three options in the note;
+  PROVISIONAL choice applied so work continues: (1) exact bytes within a
+  history generation; after compaction identical forms and values with
+  fresh handles and timings. (2) would strip handles/timing from prompts;
+  (3) would retain original observations and give up wipe-and-rerun.
+- Also seen: root's opening errors with `Unable to resolve symbol: db/q`
+  (a generated form uses an alias root's namespace lacks) — assigned.
+- Running: loop-proof on the red assertions under the provisional ruling.
+
