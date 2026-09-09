@@ -78,11 +78,11 @@
   "Wait for a background request or return its finished result.
 
   Takes a `:seon.effect/id` lookup ref and a continuation note. Returns the
-  finished descriptor, a `my.run/wait` value while pending, or a flat error.
+  finished descriptor, a `my.turn/wait` value while pending, or a flat error.
   Use it when the next run should resume after the request settles."
   {:malli/schema
-   [:=> [:cat :my.background/result :my.run/note]
-    [:or :my.background/receipt :my.run/wait :seon.error/value]]}
+   [:=> [:cat :my.background/result :my.turn/note]
+    [:or :my.background/receipt :my.turn/wait :seon.error/value]]}
   [result-ref note]
   (let [descriptor (poll result-ref)]
     (if (or (:seon.error/kind descriptor)

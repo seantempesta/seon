@@ -425,7 +425,7 @@
          connection
          [{:seon.ns/name namespace-name
            :seon.ns/source "(ns my.agents.call-edges)"
-           :seon.ns/requires [[:seon.ns/name 'my.run]]}
+           :seon.ns/requires [[:seon.ns/name 'my.turn]]}
           {:seon.agent/id "call-edges-agent"
            :seon.agent/namespace
            [:seon.ns/name namespace-name]}])

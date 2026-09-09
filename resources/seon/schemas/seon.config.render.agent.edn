@@ -8,5 +8,4 @@
                            [:enum
                             {:seon.config/dial true}
                             :single-line
-                            :multiline
-                            :tabular]}
+                            :multiline]}

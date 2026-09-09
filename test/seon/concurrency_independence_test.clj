@@ -534,8 +534,8 @@
             "each agent queried exactly the rows it had just committed")
         (is (= (+ 1001 (::index spec)) call-result)
             "the contracted function call used this agent's own definition")
-        (is (= {:my.run/disposition :completed
-                :my.run/result (str "complete|" (::agent-id spec) "|")}
+        (is (= {:my.turn/disposition :completed
+                :my.turn/result (str "complete|" (::agent-id spec) "|")}
                completion))))))
 
 (defn- run-scenario!

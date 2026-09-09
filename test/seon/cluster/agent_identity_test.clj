@@ -123,7 +123,7 @@
           (is (map? dials))
           (is (= 0 (:my.agent/turns-left dials))))
         (is (= [] (:seon.sci.admit/value (evaluate "(my.test/run)"))))
-        (is (= {:my.run/disposition :wait :my.run/note "Session complete."}
+        (is (= {:my.turn/disposition :wait :my.turn/note "Session complete."}
                (:seon.sci.admit/value (evaluate "(my.agent/done)"))))
         (is (= expected (:seon.sci.admit/value (evaluate "(seon.cluster.agent/whoami)"))))
         (is (= "Agent     supplied\nCluster   identity-cluster"

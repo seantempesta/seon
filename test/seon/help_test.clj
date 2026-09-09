@@ -40,13 +40,23 @@
          (is (identical? (sci/resolve ctx 'clojure.core/help)
                          (sci/resolve ctx 'seon.bootstrap/help))
              "bare help refers to the acquired macro rather than a boot-time copy")
-         (let [opening (turn/system-turn request)
+         (let [preview turn/preview-sources
+               entered? (atom false)
+               committed (atom nil)
+               opening (with-redefs [turn/preview-sources
+                                    (fn [evaluation-request]
+                                      (when (compare-and-set! entered? false true)
+                                        (reset! committed (turn/system-turn request)))
+                                      (preview evaluation-request))]
+                         (turn/system-turn request))
                saved (first (evaluation/of-agent @connection "help"))
                lines (some-> (:seon.eval/value saved) edn/read-string)
                evidence (:seon.cluster.eval/read-evidence saved)
                shown (repl/render-ai saved)]
            (is (nil? (:seon.error/kind opening)) (pr-str opening))
-           (is (string? (:seon.turn/id opening)))
+           (is (nil? (:seon.turn/id opening))
+               "a second real system pass committed while this pass evaluated")
+           (is (string? (:seon.turn/id @committed)))
            (is (= "(help)" (:seon.cluster.eval/source saved)))
            (is (= ["(help)" "(my.agent/identity)" "(my.plan/items)"
                    "(my.message/inbox)" "(my.agent/settings)"]
@@ -56,9 +66,18 @@
            (is (every? #(and (string? %) (not (str/includes? % "\n"))) lines))
            (is (= "You are at a Clojure REPL in your namespace my.agents.help. Every function in the program is callable."
                   (first lines)))
-           (is (= 3 (count (filter #(str/includes? % "▲") lines))))
+           (is (not-any? #(str/includes? % "▲") lines))
+           (is (str/includes? (nth lines 6) "(my.plan/complete! {:my.plan.item/id id})"))
+           (is (str/includes? (nth lines 7) ":my.message/to"))
            (is (str/starts-with? (last lines) "Tools: "))
            (is (str/includes? (last lines) "my.plan"))
+           (is (str/includes? (last lines) "my.turn — Return explicit completion"))
+           (is (not (str/includes? (last lines) "my.run")))
+           (is (not (str/includes? (last lines) "render-namespace-ai")))
+           (is (not (str/includes? (last lines) "usage-form")))
+           (is (true? (:seon.fn/internal?
+                       (db/pull @connection [:seon.fn/internal?]
+                                [:seon.fn/sym "my.turn/usage-form"]))))
            (is (not (seq (:seon.cluster.eval/output saved))))
            (is (seq evidence))
            (is (= 0 (turn/episode-runs @connection "help")))

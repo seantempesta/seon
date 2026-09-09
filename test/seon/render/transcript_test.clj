@@ -376,7 +376,7 @@
      :seon.cluster.eval/ordinal 0
      :seon.cluster.eval/at (at 3500)
      :seon.cluster.eval/result-edn
-     "{:my.run/disposition :wait :my.run/note \"waiting for the peer review\"}"
+     "{:my.turn/disposition :wait :my.turn/note \"waiting for the peer review\"}"
      :seon.cluster.eval/source "(seon.run/wait \"waiting for the peer review\")"}
     {:seon.cluster.message/id "decline-3"
      :seon.cluster.message/from [:seon.agent/id agent-id]
@@ -1025,8 +1025,8 @@
          (assoc :seon.cluster.eval/interrupted-at event-at)
          (= :receipt-wait event-kind)
          (assoc :seon.cluster.eval/result-edn
-                (pr-str {:my.run/disposition :wait
-                         :my.run/note content}))
+                (pr-str {:my.turn/disposition :wait
+                         :my.turn/note content}))
          (= :receipt-invalid event-kind)
          (assoc :seon.cluster.eval/result-edn "{")
          (= :receipt-mixed event-kind)

@@ -18,7 +18,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.cluster.message :as my.message]
-            [seon.run :as my.run]
+            [seon.run :as my.turn]
             [seon.ai :as ai]
             [seon.bootstrap :as bootstrap]
             [seon.flow :as seon.flow]
@@ -444,7 +444,7 @@
                     "form 1 SAW form 0's def — one ctx per run, not per
                      form — and its lazy sequence came back REALIZED")
                 (is (= (assoc (seon.run/complete "counted 6")
-                              :my.run/delivered-to :outside)
+                              :my.turn/delivered-to :outside)
                        (get results 2))
                     "and the disposition round-tripped through admission")))
             (testing "the real settlement retains queryable read evidence"
@@ -1226,7 +1226,7 @@
                               receipts))
                 "no form was refused")
             (is (= (assoc (seon.run/complete "refined")
-                          :my.run/delivered-to :outside)
+                          :my.turn/delivered-to :outside)
                    (get-in receipts [4 :result]))
                 "the run stayed open through the change and completed")))))))
 
@@ -2203,7 +2203,7 @@
                          [?schema :seon.schema/key
                           :my.agents.agent-a/combined-receipt ?tx]]
                        @connection)]
-              (is (= (assoc result :my.run/delivered-to :outside)
+              (is (= (assoc result :my.turn/delivered-to :outside)
                      (semantic-result
                       (:seon.cluster.eval/result-edn receipt)))
                   "settlement accretes delivery onto the disposition")
@@ -2225,7 +2225,7 @@
   ;; REVISED TWICE, each time toward one commit. First: a wait used to
   ;; leave the run open forever because the close refused (the measured
   ;; `:close` livelock — twelve passes, nine error facts). Then the F1
-  ;; seal folded in the ruled `my.run/wait` revision (README
+  ;; seal folded in the ruled `my.turn/wait` revision (README
   ;; owner-decisions #4): the wait's terminal transaction settles the
   ;; receipt AND closes the run in ONE commit, so the
   ;; unheld-open-planned intermediate state — the P1 feeder — never
@@ -3390,7 +3390,7 @@
          (turn/receipt-settle-tx
           {:seon.turn/id run-id
            :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/result-edn "{:introduced 'my.run}"}))
+           :seon.cluster.eval/result-edn "{:introduced 'my.turn}"}))
         (let [request {:seon.agent/id "agent-a"
                        :seon.db.process/id process}
               generated (turn/next-agent-work @connection request)
@@ -3453,7 +3453,7 @@
          (turn/receipt-settle-tx
           {:seon.turn/id run-id
            :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/result-edn "{:introduced 'my.run}"}))
+           :seon.cluster.eval/result-edn "{:introduced 'my.turn}"}))
         (let [request {:seon.agent/id "agent-a"
                        :seon.db.process/id process}
               generated (turn/next-agent-work @connection request)

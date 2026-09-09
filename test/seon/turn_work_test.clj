@@ -356,7 +356,7 @@
               :seon.agent/id agent-id
               :seon.cluster.eval/ordinal 0}
              (turn/next-agent-work @connection request)))
-      (terminal-receipt! connection 0 "{:introduced 'my.run}")
+      (terminal-receipt! connection 0 "{:introduced 'my.turn}")
       (let [derived (turn/next-agent-work @connection request)]
         (is (= {:seon.turn.work/situation :generate
                 :seon.turn/id run-id

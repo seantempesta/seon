@@ -175,7 +175,7 @@
 (defn- completion-values [receipts]
   (into []
         (comp (map :seon.eval.drive/value)
-              (filter #(= :completed (:my.run/disposition %))))
+              (filter #(= :completed (:my.turn/disposition %))))
         receipts))
 
 (defn completed-result
@@ -183,7 +183,7 @@
   {:malli/schema [:=> [:cat [:vector :seon.eval.drive/evaluation]]
                   [:maybe :seon.schema/value]]}
   [receipts]
-  (:my.run/result (last (completion-values receipts))))
+  (:my.turn/result (last (completion-values receipts))))
 
 (defn- model-attempts [db run-ids]
   (if (seq run-ids)

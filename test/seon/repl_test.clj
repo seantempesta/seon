@@ -120,8 +120,8 @@
               ":ns ")))))
 
 (deftest history-preserves-shown-text-without-applying-a-later-profile
-  (let [shown "[my.run/complete my.run/wait]"
-        emission {:seon.cluster.eval/source "(dir my.run)"
+  (let [shown "[my.turn/complete my.turn/wait]"
+        emission {:seon.cluster.eval/source "(dir my.turn)"
                   :seon.ns/name 'my.agents.juniper
                   :seon.eval/value shown}
         response (repl/response emission)]
@@ -174,11 +174,11 @@
 
 (deftest nothing-emitted-is-comment-shaped
   (testing "ruling 45: only the agent's own comment begins with a semicolon"
-    (let [emitted (repl/text {:seon.cluster.eval/source "(dir my.run)"
+    (let [emitted (repl/text {:seon.cluster.eval/source "(dir my.turn)"
                             :seon.ns/name 'my.agents.juniper
                             :seon.cluster.eval/ordinal 4
                             :seon.cluster.eval/output "complete\n"
-                            :seon.eval/value "[my.run/complete my.run/wait]"
+                            :seon.eval/value "[my.turn/complete my.turn/wait]"
                             :seon.eval/duration-ms 2})]
       (is (not (str/includes? emitted ";; result/"))
           "the result handle is a map key, never a comment")

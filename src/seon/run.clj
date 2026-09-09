@@ -1,9 +1,5 @@
 (ns seon.run
-  "The lifecycle protocol for every run.
-
-  Every run ends by calling `complete` or `wait`. An undisposed run is
-  unfinished work: it has neither answered its requester nor recorded what
-  must happen before work can continue."
+  "Construct completion and waiting values for an agent session."
   (:require [clojure.string :as str]
             [seon.db :as db]
             [seon.schema.edn :as schema.edn]))
@@ -15,8 +11,8 @@
 (schema.edn/load! {})
 
 (defn render-namespace-ai
-  "Present my.run as the lifecycle protocol, in use order."
-  {:malli/schema [:=> [:cat :my.run/namespace-unit] :seon.render/ai]}
+  "Present my.turn as the lifecycle protocol, in use order."
+  {:malli/schema [:=> [:cat :my.turn/namespace-unit] :seon.render/ai]}
   [unit]
   (let [database (:seon.db/db unit)
         docs
@@ -29,13 +25,13 @@
                    [?function :seon.fn/sym ?sym]
                    [?function :seon.fn/doc ?doc]]
                  database
-                 ["my.run/complete" "my.run/wait"])))]
+                 ["my.turn/complete" "my.turn/wait"])))]
     (str (:seon.ns/doc unit)
          "\n\n1. complete — "
-         (or (get docs "my.run/complete")
+         (or (get docs "my.turn/complete")
              "Finish completed work with a reply for its requester.")
          "\n\n2. wait — "
-         (or (get docs "my.run/wait")
+         (or (get docs "my.turn/wait")
              "Finish paused work with the condition needed to continue."))))
 
 (defn walkthrough
@@ -77,20 +73,20 @@
    {:seon.repl/comment
     "; Defined, contracted, proven. Report back and close this run."
     :seon.repl/form
-    '(my.run/complete
-      {:my.run/result (str "Built largest: a contracted function returning the row with "
+    '(my.turn/complete
+      {:my.turn/result (str "Built largest: a contracted function returning the row with "
            "the greatest :example/amount, or {} for empty input; its usage "
            "test is green.")})}])
 
 (defn usage-form
-  "Render my.run's listing followed by its canonical usage walkthrough.
+  "Render my.turn's listing followed by its canonical usage walkthrough.
 
   The usage declaration is the executable teaching source. Rendering the
   namespace refuses loudly when the indexed usage test is absent, so the
   generated opening cannot silently retain a hand-copied demonstration after
   its recurring anti-rot gate disappears."
   {:malli/schema
-   [:=> [:cat [:or :my.run/namespace-unit :my.run/usage-unit]]
+   [:=> [:cat [:or :my.turn/namespace-unit :my.turn/usage-unit]]
     :seon.render/form]}
   [unit]
   (let [database (:seon.db/db unit)
@@ -105,13 +101,13 @@
                database))]
     (when (and database (nil? usage-test))
       (throw
-       (ex-info "my.run has no declared usage walkthrough."
-                {:seon.error/kind :my.run/usage-walkthrough-absent
-                 :my.run/usage-walkthrough-absent true
+       (ex-info "my.turn has no declared usage walkthrough."
+                {:seon.error/kind :my.turn/usage-walkthrough-absent
+                 :my.turn/usage-walkthrough-absent true
                  :seon.error/message
-                 "my.run has no declared usage walkthrough."
-                 :seon.ns/name 'my.run})))
-    (into [{:seon.repl/form '(dir 'my.run)}] (walkthrough))))
+                 "my.turn has no declared usage walkthrough."
+                 :seon.ns/name 'my.turn})))
+    (into [{:seon.repl/form '(dir 'my.turn)}] (walkthrough))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The two dispositions
@@ -123,16 +119,16 @@
   Takes a non-blank continuation note and returns a wait disposition or a flat
   error. Use `wait` when this run cannot finish until a named event or reply;
   include everything the later run will need in the note."
-  {:malli/schema [:=> [:cat :my.run/note]
-                  [:or :my.run/wait :seon.error/value]]}
+  {:malli/schema [:=> [:cat :my.turn/note]
+                  [:or :my.turn/wait :seon.error/value]]}
   [note]
   (if (or (not (string? note)) (str/blank? note))
-    {:seon.error/kind :my.run/blank-note
-     :my.run/blank-note true
+    {:seon.error/kind :my.turn/blank-note
+     :my.turn/blank-note true
      :seon.error/message
      "wait needs a note saying what you are waiting for, as a string."}
-    {:my.run/disposition :wait
-     :my.run/note note}))
+    {:my.turn/disposition :wait
+     :my.turn/note note}))
 
 (defn complete
   "Finish this run with a reply for its requester.
@@ -140,15 +136,15 @@
   Takes non-blank reply text and returns a completed disposition or a flat
   error. Use `complete` when the requested work is finished and this text is
   the real reply its requester should receive."
-  {:malli/schema [:=> [:cat :my.run/result]
-                  [:or :my.run/completed :seon.error/value]]}
+  {:malli/schema [:=> [:cat :my.turn/result]
+                  [:or :my.turn/completed :seon.error/value]]}
   [result]
   ; agent-facing: a wrong TYPE is an agent mistake too — the error
   ; value answers, str/blank? on a non-string would throw
   (if (or (not (string? result)) (str/blank? result))
-    {:seon.error/kind :my.run/blank-result
-     :my.run/blank-result true
+    {:seon.error/kind :my.turn/blank-result
+     :my.turn/blank-result true
      :seon.error/message
      "complete needs the reply text you want delivered, as a string."}
-    {:my.run/disposition :completed
-     :my.run/result result}))
+    {:my.turn/disposition :completed
+     :my.turn/result result}))

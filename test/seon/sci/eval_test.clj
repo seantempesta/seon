@@ -983,11 +983,11 @@
 (deftest the-dispositions-are-callable-and-come-back-as-values
   (let [evaluation (run "(seon.run/complete \"done\")")]
     (is (ok? evaluation))
-    (is (= {:my.run/disposition :completed :my.run/result "done"}
+    (is (= {:my.turn/disposition :completed :my.turn/result "done"}
            (:seon.sci.admit/value evaluation))
         "the loop reads its disposition out of exactly this"))
   (let [evaluation (run "(seon.run/wait \"later\")")]
-    (is (= :wait (:my.run/disposition (:seon.sci.admit/value evaluation))))))
+    (is (= :wait (:my.turn/disposition (:seon.sci.admit/value evaluation))))))
 
 (deftest an-unbound-var-remains-structured-after-production-admission
   ;; A BARE HOST REFERENCE AT THE ROOT IS MISSING, not described: sci's
@@ -1547,8 +1547,8 @@
               :seon.sci.admit/caps caps
               :seon.sci.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic})]
-        (is (= {:my.run/disposition :completed
-                :my.run/result "done"}
+        (is (= {:my.turn/disposition :completed
+                :my.turn/result "done"}
                (:seon.sci.admit/value evaluation)))
         (is (some #(= {:seon.agent/id "scoped-agent"
                        :seon.turn/id "scoped-run"

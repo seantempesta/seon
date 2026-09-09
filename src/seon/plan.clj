@@ -217,7 +217,7 @@
                   (mapcat
                    (fn [node]
                      (let [needs (into []
-                                       (map stable-reference)
+                                       (map :my.plan.item/id)
                                        (sort-by :my.plan.item/id
                                                 (:my.plan.item/needs node)))
                            step
@@ -1001,7 +1001,7 @@
   [step]
   (when-let [needs (seq (:my.plan/needs step))]
     (str " — waiting for "
-         (str/join ", " (map (comp pr-str :my.plan.item/id) needs)))))
+         (str/join ", " (map pr-str needs)))))
 
 (defn- step-line
   [number step]
@@ -1058,7 +1058,7 @@
             (when-let [needs (seq (:my.plan/needs step))]
               [:p {:class "my-plan-relation"}
                [:strong "Waiting for "]
-               (str/join ", " (map :my.plan.item/id needs))])
+               (str/join ", " needs)])
             [:p {:class "my-plan-reference" :style {:color "var(--color-text-300)"}}
              [:strong "Reference "]
              [:code (pr-str [:my.plan.item/id (:my.plan.item/id step)])]]])]))

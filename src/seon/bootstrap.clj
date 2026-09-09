@@ -40,17 +40,18 @@
                        [(get-else $ ?namespace :seon.ns/doc "") ?doc]
                        [?function :seon.fn/ns ?namespace]
                        [?function :seon.fn/private? false]
+                       (not [?function :seon.fn/internal? true])
                        [?function :seon.fn/sym ?function-name]]
               database (instruction/toolkit-namespaces database))]
     [(str "You are at a Clojure REPL in your namespace " namespace-name
           ". Every function in the program is callable.")
-     (str "Reply with ;; thinking comments, each followed by the form it plans. ▲ Send only comments and forms; the prompt " namespace-name "=> is drawn for you.")
-     "▲ Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
+     (str "Reply with ;; thinking comments, each followed by the form it plans. Send only comments and forms; the prompt " namespace-name "=> is drawn for you.")
+     "Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
      "Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value."
      "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
-     "▲ When unsure how to call something, ask first: (dir my.plan) lists a namespace's functions as data; (doc seon.db/q) returns a docstring and contract as data."
-     "Your plan is your instructions: (my.plan/items). The current step's :done-when says what done means. (my.plan/complete! id) when it is."
-     "(my.message/inbox) is what you were sent. (my.message/send {:to \"root\" :content \"...\"}) sends. Sending a message does not end your turn."
+     "When unsure how to call something, ask first: (dir my.plan) lists a namespace's functions as data; (doc seon.db/q) returns a docstring and contract as data."
+     "Your plan is your instructions: (my.plan/items). The current step's :done-when says what done means. (my.plan/complete! {:my.plan.item/id id}) when it is."
+     "(my.message/inbox) is what you were sent. (my.message/send {:my.message/to \"root\" :my.message/content \"...\"}) sends. Sending a message does not end your turn."
      "(seon.db/q '[:find ...]) queries, (seon.db/pull '[*] eid) reads one entity, (seon.db/transact! [{...}]) writes. The database is your cluster's and is supplied for you."
      "A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours."
      "A mistake returns :error data, never an exception. Read :seon.error/message and try again."
@@ -765,7 +766,7 @@
           read-expression
           (str "(let [history " read-expression "] "
                "(assoc (seon.run/complete \"Read " agent-id
-               "'s recent history.\") :my.run/supervision history))"))
+               "'s recent history.\") :my.turn/supervision history))"))
         send-expression
         (pr-str (list 'my.message/send
                       {:my.message/to agent-id
@@ -817,7 +818,7 @@
         namespace-row
         {:seon.ns/name namespace-name
          :seon.ns/requires
-         [[:seon.ns/name 'my.run]
+         [[:seon.ns/name 'my.turn]
           [:seon.ns/name 'my.message]
           [:seon.ns/name 'seon.bootstrap]]
          :seon.ns/refers

@@ -23,7 +23,7 @@
             [datahike.api :as d]
             [seon.blob :as blob]
             [seon.db :as db]
-            [seon.run :as my.run]
+            [seon.run :as my.turn]
             [seon.ai :as ai]
             [seon.config :as config]
             [seon.cluster.agent :as cluster.agent]
@@ -263,7 +263,7 @@
                                          (when (= :explicit value) explicit))
                   message/reply (fn [actual-db request]
                                   (is (= db actual-db))
-                                  (is (= {:my.run/result "done"
+                                  (is (= {:my.turn/result "done"
                                           :seon.agent/id "agent-1"
                                           :seon.cluster.message/trigger "m-1"}
                                          request))
@@ -1064,9 +1064,9 @@
   (is (= (seon.run/complete "done")
          (turn/disposition (seon.run/complete "done"))))
   (testing "and anything else is not a disposition"
-    (doseq [value [42 nil "done" {:my.run/disposition :invented}
+    (doseq [value [42 nil "done" {:my.turn/disposition :invented}
                    {:seon.error/message "boom" :seon.error/kind :x}
-                   {:my.run/disposition :completed}]]
+                   {:my.turn/disposition :completed}]]
       (is (nil? (turn/disposition value))
           (str "must not read as a disposition: " (pr-str value))))))
 
@@ -1174,7 +1174,7 @@
                  terminal)
               "the episode verdict names the missing disposition")
           (is (str/includes? rendered
-                             "ended without my.run/complete or my.run/wait")
+                             "ended without my.turn/complete or my.turn/wait")
               "the following history carries the system-authored notice"))))))
 
 ;;; THE CLASS-KILLER: what boot installs must cover what the loop writes

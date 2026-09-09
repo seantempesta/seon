@@ -398,14 +398,11 @@
                  (= output :seon.render/ai) (print/fit profile))
           options (cond-> (assoc (print-options unit)
                                  :seon.print/length nil
-                                 :seon.print/level nil)
+                                 :seon.print/level nil
+                                 :seon.print/table? false)
                     (= :single-line
                        (:seon.render.profile/composition profile))
-                    (assoc :seon.print/width 0 :seon.print/table? false)
-
-                    (= :tabular
-                       (:seon.render.profile/composition profile))
-                    (assoc :seon.print/table? true))
+                    (assoc :seon.print/width 0))
           emitted (print/emit-both tree options)
           truncated? (boolean
                       (or (:seon.render.value/more? display)

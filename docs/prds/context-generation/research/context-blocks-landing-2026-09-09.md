@@ -600,3 +600,115 @@ Slice-1 platform gate: **83 tests / 490 assertions / zero failures or
 errors**, with one worker. The selected snapshot included the generator
 and real-graph regression changes. Earlier scratch initialization failure
 remains explicitly separate from this gate's successful published-base boot.
+
+## 14:50 resume — slice 2: prompt data and truthful tools
+
+RESET NEEDED: `my.run` is renamed to the PRD §5 name `my.turn`, including
+its request/result keys, schema resource, readers and tests. The system
+owner `seon.run` still constructs the same disposition values. A new
+`:seon.fn/internal?` declaration excludes presentation helpers from the
+Tools summary without changing callability; static indexing and authored
+function admission both preserve that declaration. The namespace docstring
+now describes completion and waiting without claiming that every reply must
+end with either. Tools remains a program-graph query.
+
+The value renderer always disables table inference, including a supplied
+`:table? true` or `:derived`; standalone `seon.print` retains its table
+feature. Removed the obsolete `:tabular` profile option. Plan `:needs`
+projections return item ids while the stored dependency edges remain refs.
+The virtual/no-provider fallback reply is empty. Real explicitly submitted
+forms still evaluate. Help has no revision triangles; its plan and message
+examples now use the actual declared request keys.
+
+A fresh scratch boot exposed an additional race that the earlier isolated
+fixture did not exercise: a system pass evaluated against pre-compaction
+history, then appended five reads after that history had been cleared.
+The following opening was help plus the same five reads. The serial
+transaction writer now checks that the history from which an append was
+derived is still current. A deterministic regression interleaves two real
+system passes through real SCI and the canonical database; only one append
+commits. No timing field is stripped and no history survives compaction.
+The subsequent live reseed has exactly six evaluations, help first.
+
+The scratch CLI cold-publication boundary remains open. The gate's complete
+published base was copied into the stopped, owned scratch root and
+`seon.cluster.export/reidentify!` adjusted the copied store's identity,
+exactly as the canonical file-backed fixture does. Fresh boot then reached
+web and MCP readiness on port 7833. An earlier publisher call through the
+default JVM remained within that JVM's process root; it did not initialize
+the scratch root. The final history-commit guard was hot-reloaded into the
+scratch JVM for this live reseed. Default was never stopped or reforked.
+
+I read the following scratch prompt top to bottom. It is 5803 bytes, SHA-256 `6a81378d6e49b711f0aca05e6e00580780a6204365a5abc5e76d8264d26ef24c`.
+
+```clojure
+;; I should understand how this REPL works before I act.
+my.agents.juniper=> (help)
+#:seon.repl{:value ["You are at a Clojure REPL in your namespace my.agents.juniper. Every function in the program is callable."
+  "Reply with ;; thinking comments, each followed by the form it plans. Send only comments and forms; the prompt my.agents.juniper=> is drawn for you."
+  "Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
+  "Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value."
+  "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
+  "When unsure how to call something, ask first: (dir my.plan) lists a namespace's functions as data; (doc seon.db/q) returns a docstring and contract as data."
+  "Your plan is your instructions: (my.plan/items). The current step's :done-when says what done means. (my.plan/complete! {:my.plan.item/id id}) when it is."
+  "(my.message/inbox) is what you were sent. (my.message/send {:my.message/to \"root\" :my.message/content \"...\"}) sends. Sending a message does not end your turn."
+  "(seon.db/q '[:find ...]) queries, (seon.db/pull '[*] eid) reads one entity, (seon.db/transact! [{...}]) writes. The database is your cluster's and is supplied for you."
+  "A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours."
+  "A mistake returns :error data, never an exception. Read :seon.error/message and try again."
+  "Each reply is one turn. :turns-left in your settings counts down. (my.agent/done) ends your session early."
+  "Tools: my.agent — Read and update my record through request maps. (done, identity, settings, settings!); my.background — Start and inspect capability requests that may finish later. (await, background, poll); my.edit — Edit source files only when their expected digest still matches. (exact, form, lines); my.fs — Read, write, inspect, and find files with bounded results. (glob, read, stat, write); my.message — The inter-agent message protocol, with optional request-map calls; call preparation supplies my database and identity. (decline, inbox, read, send); my.note — My durable notes through one request map per call. (add!, forget!, notes); my.plan — The calling agent’s plan protocol. Each operation takes one request map. (add!, blocked, complete!, current, current!, item, items, plan, ready, ready-subjects, steps, update!); my.shell — Bounded foreground argv-vector process requests. (run); my.test — Run the tests declared in my namespace. (run); my.turn — Return explicit completion or waiting data for my session. (complete, wait); my.web — Fetch web resources and search the configured provider. (fetch, search)"], :result result/e3b1c11b89513, :ms 585}
+
+;; I should know my identity, namespace, and its steward.
+my.agents.juniper=> (my.agent/identity)
+#:seon.repl{:value #:my.agent{:id "juniper", :namespace my.agents.juniper, :steward "juniper"}, :result result/ed25ec5adc95c, :ms 74}
+
+;; I should follow my plan and verify the current step's completion criterion.
+my.agents.juniper=> (my.plan/items)
+#:seon.repl{:value [{:my.plan.item/id "juniper/query", :my.plan.item/title "Query the orders",
+    :my.plan/done-when "I have read the order ids, customers, and amounts.",
+    :my.plan/needs [], :my.plan/state :current} {:my.plan.item/id "juniper/aggregate",
+    :my.plan.item/title "Find the customer with the largest total", :my.plan/done-when
+    "A grouped sum query identifies the customer and their total.", :my.plan/needs
+    ["juniper/query"], :my.plan/state :blocked} {:my.plan.item/id "juniper/transact",
+    :my.plan.item/title "Add an order of 40 for that customer", :my.plan/done-when
+    "The transaction result identifies the new order.", :my.plan/needs ["juniper/aggregate"],
+    :my.plan/state :blocked} {:my.plan.item/id "juniper/requery", :my.plan.item/title
+    "Read the customer's new total", :my.plan/done-when "A fresh grouped sum query includes the new order.",
+    :my.plan/needs ["juniper/transact"], :my.plan/state :blocked} {:my.plan.item/id
+    "juniper/reply", :my.plan.item/title "Tell root the customer and new total",
+    :my.plan/done-when "The sent message contains the customer and verified new total.",
+    :my.plan/needs ["juniper/requery"], :my.plan/state :blocked} {:my.plan.item/id
+    "juniper/done", :my.plan.item/title "Finish the session", :my.plan/done-when
+    "All preceding plan items are complete.", :my.plan/needs ["juniper/reply"],
+    :my.plan/state :blocked}], :result result/e301a93f8da98, :ms 87}
+
+;; I should check my inbox for anything I need to respond to.
+my.agents.juniper=> (my.message/inbox)
+#:seon.repl{:value [#:my.message{:at #inst "2026-09-09T12:00:00.000-00:00", :content "Which customer has the largest total? Add an order of 40 for them and tell me the new total.",
+    :from "root", :id "juniper/largest-customer"}], :result result/e77f0a99b3d48, :ms 82}
+
+;; I should check my overrides and how many turns I have left.
+my.agents.juniper=> (my.agent/settings)
+#:seon.repl{:value {:my.agent/turns-left 20, :seon.config.ai/no-provider true, :seon.config.eval/time-limit-ms
+  10000, :seon.config.run/max-episode-runs 20}, :result result/e7530319b29d2, :ms 76}
+
+;; What data is in my namespace?
+my.agents.juniper=> (seon.db/q (quote [:find ?attribute (count ?entity) :in $ [?attribute ...] :where [?entity ?attribute _]]) [:example/amount :example/customer :example/order])
+#:seon.repl{:value [[:example/amount 4] [:example/customer 4] [:example/order 4]], :result result/ed308a58c8319, :ms 73}
+```
+
+Slice-2 final path-limited gate: **51 tests / 417 assertions / zero failures
+or errors**, one worker. The additional interleaving check is included;
+the earlier fast check was 2 tests / 131 assertions. The initial platform
+pass was 83 tests / 490 assertions; a second platform pass covers the final
+history-commit guard before this slice is reported.
+
+The final separate platform pass is **83 tests / 490 assertions / zero
+failures or errors**. Default adoption refused at schema population:
+`:seon.schema/generatable?` was required but absent from a submitted schema
+row. This is the exact publication boundary, not an attribution to another
+lane. The selected slice's canonical publication and fresh boot succeeded.
+After that refused adoption, default's debug page still returned HTTP 200
+(91,740 HTML bytes). Its historical prompt was not reseeded in this slice.
+RESET NEEDED remains recorded for this commit; the orchestrator owns the
+single default refork. No provider call was made.

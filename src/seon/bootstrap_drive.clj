@@ -62,7 +62,7 @@
     :seon.bootstrap-drive/objective
     (str
      "Find, by querying the program graph rather than relying on its name, "
-     "the function in this cluster that accepts :my.run/result. Use that "
+     "the function in this cluster that accepts :my.turn/result. Use that "
      "function to end this run with the exact text discovered-by-contract.")}
 
    :o3

@@ -19,7 +19,7 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.db :as db]
-            [seon.run :as my.run]
+            [seon.run :as my.turn]
             [seon.ai :as ai]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
@@ -1891,7 +1891,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest wait-closes-in-terminal-tx-test
-  ;; seed 2026072820 — the ruled `my.run/wait` revision folded into F1
+  ;; seed 2026072820 — the ruled `my.turn/wait` revision folded into F1
   ;; (README owner-decisions #4): the wait's terminal transaction
   ;; settles the receipt AND closes the run in ONE commit, so the
   ;; unheld-open-planned intermediate state — the P1 feeder — exists at

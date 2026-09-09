@@ -85,7 +85,7 @@
   THE CTX IS SUPPLIED, NOT BUILT HERE. `build-base-ctx` is the minimum
   N3 needs —
   `clojure.core` and `clojure.string` in their interrupt-aware form
-  plus bare `help`, the two `my.run` dispositions, and both `my.message`
+  plus bare `help`, the two `my.turn` dispositions, and both `my.message`
   values — and a caller may pass its own. `acquire!` then intersects core-provenanced
   program namespaces with the JVM's loaded namespace set and binds their
   actual compiled Vars. The set is computed, never listed. Agent-authored
@@ -107,7 +107,7 @@
             [clojure.test.check.generators :as gen]
             [my.background]
             [my.message]
-            [my.run]
+            [my.turn]
             [sci.core :as sci]
             [sci.impl.vars :as sci.vars]
             [sci.impl.utils :as sci.utils]

@@ -275,7 +275,7 @@
                                            [?turn :seon.turn/agent ?agent]
                                            [?turn :seon.turn/id _ ?t]
                                            [(>= ?t ?since)]
-                                           [?turn :seon.turn/reply "(+ 1 1)"]
+                                           [?turn :seon.turn/reply ""]
                                            [?turn :seon.turn/closed-at]]
                                          @connection wake-t))]
                  (agent/arm! {:seon.turn.loop/cluster handle
@@ -290,6 +290,8 @@
                    (is (seq fresh))
                    (is (= "(my.message/inbox)" (:seon.cluster.eval/source (first fresh)))
                        "changed read must precede the no-provider reply")
+                   (is (= ["(my.message/inbox)"] (mapv :seon.cluster.eval/source fresh))
+                       "no-provider turns do not invent placeholder forms")
                    (is (empty? (turn/unanswered-wakes @connection "juniper" {})))
                    (println {:seon.test/stage :ordinary-wake
                              :seon.test/sources (mapv :seon.cluster.eval/source fresh)}))))

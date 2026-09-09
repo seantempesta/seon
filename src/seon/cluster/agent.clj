@@ -134,7 +134,7 @@
       :seon.ns/name namespace-name
       :seon.ns/requires
       [[:seon.ns/name 'my.message]
-       [:seon.ns/name 'my.run]
+       [:seon.ns/name 'my.turn]
        [:seon.ns/name 'seon.db]]}
      {:seon.agent/id agent-id
       :seon.agent/namespace namespace-tempid}
@@ -294,7 +294,7 @@
            "\nInjected callables: help — " (doc-line #'bootstrap/help)
            " dir — " (doc-line #'bootstrap/dir)
            " doc — " (doc-line #'bootstrap/doc)
-           "\nEvery run ends with my.run/complete or my.run/wait; "
+           "\nEvery run ends with my.turn/complete or my.turn/wait; "
            "an undisposed run is unfinished work."))))
 
 (defn render-creation-ai

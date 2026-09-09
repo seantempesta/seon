@@ -11,10 +11,10 @@
   [connection]
   (db/transact!
    connection
-   [{:seon.ns/name 'my.run}
+   [{:seon.ns/name 'my.turn}
     {:seon.ns/name 'my.message}
     {:seon.ns/name 'my.agents.situation
-     :seon.ns/requires [[:seon.ns/name 'my.run]
+     :seon.ns/requires [[:seon.ns/name 'my.turn]
                         [:seon.ns/name 'my.message]]}
     {:seon.agent/id "situation"
      :seon.agent/namespace [:seon.ns/name 'my.agents.situation]}
@@ -42,7 +42,7 @@
                 [:seon.turn/id "situation-run"]
                 :seon.turn/turns-remaining 0
                 :seon.agent/protocol-namespaces
-                ['my.message 'my.run]}
+                ['my.message 'my.turn]}
                situation))
         (is (= '(seon.bootstrap/help-value)
                (macroexpand '(seon.bootstrap/help))))
@@ -60,7 +60,7 @@
           (let [text (agent/render-situation-ai situation)]
             (is (string? text))
             (is (.contains text "You are agent situation"))
-            (is (.contains text "my.run/complete"))))))))
+            (is (.contains text "my.turn/complete"))))))))
 
 (deftest the-agent-id-supplier-reads-only-the-turn-environment
   (is (= "situation"

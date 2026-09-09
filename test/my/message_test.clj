@@ -5,7 +5,7 @@
   contract is that both shapes validate, that they are the ONLY
   functions, that a bad argument comes back as a value an agent can
   read rather than a throw it cannot, and — the one thing this suite
-  adds over `my.run`'s — that the error value is a REAL
+  adds over `my.turn`'s — that the error value is a REAL
   `:seon.error/value`, so the declared output schemas are ones the
   functions actually keep."
   (:require [clojure.test :refer [deftest is testing]]
@@ -177,7 +177,7 @@
   ;; `:seon.error/value` REQUIRES a kind. A function whose declared
   ;; output is `[:or … :seon.error/value]` and which returns a bare
   ;; `{:seon.error/message …}` is outside its own contract. This
-  ;; assertion is what stops that hole opening here — and `my.run`'s
+  ;; assertion is what stops that hole opening here — and `my.turn`'s
   ;; own error values now satisfy the same schema (the canary that
   ;; deliberately asserted its defect fired when 932ff55fb fixed it,
   ;; exactly as designed, and was deleted with the issue's archival).

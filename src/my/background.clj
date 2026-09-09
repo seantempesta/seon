@@ -59,6 +59,6 @@
 
 (defn await
   "Return a background result or the condition I am waiting for."
-  {:malli/schema [:=> [:cat [:map [:my.background/result :my.background/result] [:my.run/note :my.run/note]]] [:or :my.background/receipt :my.run/wait :seon.error/value]]}
+  {:malli/schema [:=> [:cat [:map [:my.background/result :my.background/result] [:my.turn/note :my.turn/note]]] [:or :my.background/receipt :my.turn/wait :seon.error/value]]}
   [request]
-  (background/await (:my.background/result request) (:my.run/note request)))
+  (background/await (:my.background/result request) (:my.turn/note request)))

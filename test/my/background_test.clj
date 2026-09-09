@@ -69,8 +69,8 @@
         (is (= {:seon.effect/id "background-result"
                 :seon.effect/request-edn "{}"}
                (background/poll [:seon.effect/id "background-result"])))
-        (is (= {:my.run/disposition :wait
-                :my.run/note "Use the result."
+        (is (= {:my.turn/disposition :wait
+                :my.turn/note "Use the result."
                 :my.background/result
                 [:seon.effect/id "background-result"]}
                (background/await

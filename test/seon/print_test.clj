@@ -75,18 +75,18 @@
 
 (deftest print-nodes-expose-symbols-and-entity-identities-without-shape-rules
   (let [node (admitted-node
-              {:frontier/symbol 'my.run/complete
+              {:frontier/symbol 'my.turn/complete
                :frontier/namespace 'my.message
                :frontier/entity
                {:seon.cluster.message/id "task-1"
                 :frontier/nested
-                [[:seon.ns/name 'my.run]
+                [[:seon.ns/name 'my.turn]
                  {:seon.agent/id "worker"}]}})]
-    (is (= #{'my.run/complete
+    (is (= #{'my.turn/complete
              'my.message
-             'my.run
+             'my.turn
              [:seon.cluster.message/id "task-1"]
-             [:seon.ns/name 'my.run]
+             [:seon.ns/name 'my.turn]
              [:seon.agent/id "worker"]}
            (print/references
             #{:seon.cluster.message/id :seon.ns/name

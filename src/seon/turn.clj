@@ -69,7 +69,7 @@
                   :seon.cluster.eval/settle-request]}
   [{:keys [:seon.turn/id
            :seon.cluster.eval/ordinal :seon.sci.eval/evaluation
-           :seon.problems/form-problem :my.run/value]
+           :seon.problems/form-problem :my.turn/value]
     settlement-evaluation :seon.turn.loop/settlement-evaluation}]
   (let [error (or (:seon.cluster.eval/error evaluation)
                   (:seon.cluster.eval/error form-problem))
@@ -158,7 +158,7 @@
              (:seon.program/row evaluation))
       (::form-facts evaluation)
       (assoc ::form-facts (::form-facts evaluation))
-      value (assoc :my.run/value value))))
+      value (assoc :my.turn/value value))))
 
 (defn settlement-projection
   "Project an evaluation into receipt, defs, and staged-blob data."
@@ -1798,7 +1798,7 @@
     ;; A completed/wait disposition deliberately closes the run and
     ;; leaves any later authored forms unstarted. That is not recovery.
     (when-let [ordinal (when-not (contains? #{:completed :wait}
-                                            (:my.run/disposition last-value))
+                                            (:my.turn/disposition last-value))
                          (first missing))]
       {:seon.cluster.eval/ordinal ordinal
        ::missing-results (count missing)})))
@@ -1843,8 +1843,8 @@
                           last
                           receipt-value
                           (#(when (and (map? %)
-                                       (= :wait (:my.run/disposition %)))
-                              (:my.run/note %))))
+                                       (= :wait (:my.turn/disposition %)))
+                              (:my.turn/note %))))
             state
             (cond
               cut (str "It was interrupted at form "
@@ -1881,7 +1881,7 @@
               note (str "It paused, leaving this note: " note)
 
               (::undisposed-at unit)
-              (str "It ended without my.run/complete or my.run/wait. "
+              (str "It ended without my.turn/complete or my.turn/wait. "
                    "Its trigger remains unanswered; nothing was retried.")
 
               (some? (::closed-at unit)) "It completed."
@@ -2060,8 +2060,8 @@
       (:seon.error/kind declared) declared
 
       :else
-      (let [plan (system-plan database (:seon.turn/forms declared)
-                              (latest-evaluations database agent-id))
+      (let [latest (latest-evaluations database agent-id)
+            plan (system-plan database (:seon.turn/forms declared) latest)
             selected (filterv #(not= :unchanged (:seon.turn/status %)) plan)
             previews (mapv
                       #((requiring-resolve 'seon.turn/preview-sources)
@@ -2111,9 +2111,22 @@
                                  :seon.turn.loop/evaluated-sources evaluated})
                       report (blob/with-publication!
                               connection (:seon.blob/staged-writes prepared)
-                              #(db/transact! connection (:seon.db/tx-data prepared)))]
+                              #(db/transact!
+                                connection
+                                [[:db.fn/call
+                                  (fn [current]
+                                    ;; Compaction or another system pass may
+                                    ;; have changed history during evaluation.
+                                    ;; The writer admits this append only against
+                                    ;; the history from which it was derived.
+                                    (if (= latest (latest-evaluations current agent-id))
+                                      (:seon.db/tx-data prepared)
+                                      []))]]))]
                   (if (:seon.error/kind report) report
-                      (assoc result :seon.turn/id turn-id)))
+                      (cond-> result
+                        (some #(and (= :seon.turn/id (:a %))
+                                    (= turn-id (:v %))) (:tx-data report))
+                        (assoc :seon.turn/id turn-id))))
                 result)))))))
 
 (defn compact-call
@@ -2168,7 +2181,7 @@
                    :seon.error/value]]}
   [request]
   ((requiring-resolve 'seon.cluster.agent/submit-source!)
-   (update request :seon.cluster.reply/text #(or % "(+ 1 1)"))))
+   (update request :seon.cluster.reply/text #(or % ""))))
 
 
 
@@ -3001,13 +3014,13 @@
 
 (defn disposition
   "The disposition an admitted eval value carries, or nil.
-  The loop reads `my.run`'s two values out of the LAST form's admitted
+  The loop reads `my.turn`'s two values out of the LAST form's admitted
   result. Anything else — a number, a map that merely looks similar, an
   error value — is not a disposition, and a run whose plan ends without
   one simply stays open for the next wake."
-  {:malli/schema [:=> [:cat :any] [:maybe :my.run/value]]}
+  {:malli/schema [:=> [:cat :any] [:maybe :my.turn/value]]}
   [value]
-  (when (schema/valid-candidate-value? :my.run/value value)
+  (when (schema/valid-candidate-value? :my.turn/value value)
     value))
 
 (defn messages
@@ -3196,10 +3209,10 @@
     agent-id :seon.agent/id
     trigger :seon.cluster.message/trigger}]
   (or (messages (:seon.sci.admit/value evaluation))
-      (when (= :completed (:my.run/disposition settled))
+      (when (= :completed (:my.turn/disposition settled))
         (message/reply
          db
-         (cond-> {:my.run/result (:my.run/result settled)
+         (cond-> {:my.turn/result (:my.turn/result settled)
                   :seon.agent/id agent-id}
            trigger (assoc :seon.cluster.message/trigger trigger))))
       (when problem ((requiring-resolve 'seon.problems/assignment-value) problem))))
@@ -3277,8 +3290,8 @@
         raw-settled (disposition (:seon.sci.admit/value evaluation))
         settled
         (cond-> raw-settled
-          (= :completed (:my.run/disposition raw-settled))
-          (assoc :my.run/delivered-to
+          (= :completed (:my.turn/disposition raw-settled))
+          (assoc :my.turn/delivered-to
                  (or (some->> trigger (message/sender database))
                      :outside)))
         evaluation
@@ -3346,12 +3359,12 @@
                   :seon.sci.eval/evaluation evaluation
                   :seon.turn.loop/settlement-evaluation settlement-evaluation}
            problem (assoc :seon.problems/form-problem problem)
-           settled (assoc :my.run/value settled)))
+           settled (assoc :my.turn/value settled)))
         side-tx
         (concat
          (when (or undisposed?
                    (contains? #{:completed :wait}
-                              (:my.run/disposition settled)))
+                              (:my.turn/disposition settled)))
            (close-tx
             (cond-> {:seon.turn/id run-id
                      :seon.db.process/id process
@@ -4099,7 +4112,7 @@
           text (:seon.cluster.prompt/text rendered)]
       (cond
         (:seon.config.ai/no-provider settings)
-        (freeze! {:seon.ai/text "(+ 1 1)"})
+        (freeze! {:seon.ai/text ""})
 
         (:seon.error/kind captured)
         ;; A refused prompt/capture closes this run and records the refusal.
@@ -4307,7 +4320,7 @@
                                :seon.turn.loop/admitted-form form
                                :seon.sci.eval/evaluation evaluation})]
             (if (contains? #{:completed :wait}
-                           (:my.run/disposition (:seon.sci.admit/value evaluation)))
+                           (:my.turn/disposition (:seon.sci.admit/value evaluation)))
               results
               (recur (next remaining) (inc ordinal)
                      (or (:seon.sci.eval/ending-ns evaluation) namespace-name)

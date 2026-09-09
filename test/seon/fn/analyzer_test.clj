@@ -195,7 +195,7 @@
               :seon.ns.refer/target-ns 'clojure.edn
               :seon.ns.refer/target-name 'read-string}}}
           ::analyzer/available-functions
-          [{:seon.fn/sym "my.run/complete"
+          [{:seon.fn/sym "my.turn/complete"
             :seon.fn/private? false
             :seon.fn/arglists "([message])"}
            {:seon.fn/sym "other/private-helper"
@@ -207,7 +207,7 @@
            "(read \"{:also :kept}\")"
            "(seon.run/complete \"done\")"
            "(other/private-helper 1)"
-           "(my.run/complete)"
+           "(my.turn/complete)"
            "(broken)"]})]
     (testing "the synthetic namespace prelude resolves persisted aliases"
       (is (empty? (::analyzer/findings (nth analysis 1))))

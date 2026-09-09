@@ -46,7 +46,7 @@
                     [:seon.turn.loop/settlement-evaluation :seon.turn.loop/evaluation]
                     [:seon.problems/form-problem {:optional true} :seon.problems/form-problem]
 
-                    [:my.run/value {:optional true} :my.run/value]],
+                    [:my.turn/value {:optional true} :my.turn/value]],
                    :record-evaluated-request
                    [:map
                     [:seon.turn.loop/cluster :seon.turn.loop/cluster]

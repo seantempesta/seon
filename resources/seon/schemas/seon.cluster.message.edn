@@ -92,7 +92,7 @@
                          :my.message/reason]],
                        :reply-request
                        [:map
-                        [:my.run/result :my.run/result]
+                        [:my.turn/result :my.turn/result]
                         [:seon.agent/id :seon.agent/id]
                         [:seon.cluster.message/trigger
                          {:optional true}

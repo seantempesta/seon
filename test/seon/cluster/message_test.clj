@@ -778,7 +778,7 @@
                             :value (seon.cluster.message/send "bob" "how many?")})
       (is (= {:my.message/to "alice" :my.message/content "25"}
              (message/reply @connection
-                            {:my.run/result "25"
+                            {:my.turn/result "25"
                              :seon.agent/id "bob"
                              :seon.cluster.message/trigger
                              (id/digest 12 [:seon.cluster.message/id "r-1" 0 0])}))
@@ -790,7 +790,7 @@
     (fn [connection]
       (ask! connection "m-0" "alice" "how many?")
       (is (nil? (message/reply @connection
-                               {:my.run/result "25"
+                               {:my.turn/result "25"
                                 :seon.agent/id "alice"
                                 :seon.cluster.message/trigger "m-0"}))
           "delivery to a human is a surface, not a message to an agent
@@ -812,7 +812,7 @@
                             :run "r-2"
                             :value (seon.cluster.message/send "alice" "25")})
       (is (nil? (message/reply @connection
-                               {:my.run/result "There are 25."
+                               {:my.turn/result "There are 25."
                                 :seon.agent/id "alice"
                                 :seon.cluster.message/trigger
                                 (id/digest 12 [:seon.cluster.message/id "r-2" 0 0])}))
@@ -828,7 +828,7 @@
                               :value (seon.cluster.message/send "alice" "how many?")})
         (is (= "bob" (:my.message/to
                       (message/reply @connection
-                                     {:my.run/result "25"
+                                     {:my.turn/result "25"
                                       :seon.agent/id "alice"
                                       :seon.cluster.message/trigger
                                       (id/digest 12 [:seon.cluster.message/id "r-1" 0 0])})))

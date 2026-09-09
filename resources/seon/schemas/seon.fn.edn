@@ -1,4 +1,5 @@
 #:seon.fn{:arglists :string,
+          :internal? [:boolean {:description "Omit this implementation helper from the Tools summary; callability is unchanged."}],
           :doc-order [:int {:min 0 :description "Optional ordering priority in namespace documentation."}],
           :arglists-override? :boolean,
           :macro?
@@ -32,6 +33,7 @@
             :seon.fn/arglists-override?]
            [:seon.fn/doc {:optional true} :seon.fn/doc]
            [:seon.fn/private? {:optional true} :seon.fn/private?]
+           [:seon.fn/internal? {:optional true} :seon.fn/internal?]
            [:seon.fn/doc-order {:optional true} :seon.fn/doc-order]
            [:seon.fn/macro? {:optional true} :seon.fn/macro?]
            [:seon.fn/spec {:optional true} :seon.fn/spec]

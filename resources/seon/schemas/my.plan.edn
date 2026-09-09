@@ -57,8 +57,8 @@
           :needs
           [:vector
            {:description
-            "The derived stable references a step is waiting for."}
-           :my.plan/stable-item-reference],
+            "The ids of the plan items this step is waiting for."}
+           :my.plan.item/id],
           :parent
           [:and
            {:description

@@ -1118,7 +1118,7 @@
      ;; says so, so under the contracts every cluster arms the contract
      ;; refuses first — same crossing, same function named, and the agent
      ;; still reads a flat value because its forms cross the SCI kernel
-     ;; (`my.run-test`, `my.message-test` prove that boundary).
+     ;; (`my.turn-test`, `my.message-test` prove that boundary).
      (let [refusal (test-support/refusal-data
                     #(db/pull-many @connection schema-pattern ["not-an-eid"]))]
        (is (= :seon.instrument/contract-violated (:seon.error/kind refusal)))

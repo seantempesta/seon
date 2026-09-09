@@ -1,0 +1,38 @@
+#:my.turn{:completed
+         [:map
+          [:my.turn/disposition [:= :completed]]
+          [:my.turn/result :my.turn/result]
+          [:my.turn/delivered-to
+           {:optional true}
+           :my.turn/delivered-to]],
+         :delivered-to [:or :seon.agent/id [:= :outside]],
+         :disposition [:enum :wait :completed],
+         :note [:string {:min 1}],
+         :namespace-unit
+         [:map
+          {:seon.render/ai my.turn/render-namespace-ai,
+           :seon.render/form my.turn/usage-form}
+          [:seon.ns/name [:= my.turn]]
+          [:seon.db/db {:optional true} :seon.db/database-value]
+          [:seon.ns/doc {:optional true} :seon.ns/doc]],
+         :usage-unit
+         [:map
+          {:seon.db/attributes true,
+           :seon.render/form my.turn/usage-form}
+          [:seon.test/sym :seon.test/sym]
+          [:seon.test/usage [:= true]]],
+         :result [:string {:min 1}],
+         :value [:or :my.turn/wait :my.turn/completed],
+         :wait
+         [:map
+          [:my.turn/disposition [:= :wait]]
+          [:my.turn/note :my.turn/note]
+          [:my.background/result
+           {:optional true}
+           :my.background/result]],
+         :blank-note [:= true]
+         :blank-note-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a run wait whose note is blank"} [:my.turn/blank-note :my.turn/blank-note] [:seon.error/message :seon.error/message]]
+         :blank-result [:= true]
+         :blank-result-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a run completion whose result is blank"} [:my.turn/blank-result :my.turn/blank-result] [:seon.error/message :seon.error/message]]
+         :usage-walkthrough-absent [:= true]
+         :usage-walkthrough-absent-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark my.turn when its usage walkthrough is absent"} [:my.turn/usage-walkthrough-absent :my.turn/usage-walkthrough-absent] [:seon.error/message :seon.error/message]]}

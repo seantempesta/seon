@@ -168,7 +168,7 @@
                       {:optional true}
                       :seon.program/row]
 
-                     [:my.run/value {:optional true} :my.run/value]],
+                     [:my.turn/value {:optional true} :my.turn/value]],
                     :settle-evaluation-request
                     [:map
                      [:seon.turn.loop/cluster
@@ -206,7 +206,7 @@
                     :evaluation-settlement
                     [:map
                      [:seon.turn.loop/settled
-                      [:or :nil :my.run/value]]
+                      [:or :nil :my.turn/value]]
                      [:seon.turn.loop/evaluation
                       :seon.turn.loop/evaluation]
                      [:seon.turn.loop/receipt

@@ -758,14 +758,14 @@
                  :seon.db.process/id "generated-process"
                  :seon.cluster.eval/at t0
                  :seon.cluster.eval/ordinal 1
-                 :seon.cluster.eval/source "(dir 'my.run)"
+                 :seon.cluster.eval/source "(dir 'my.turn)"
                  :seon.ns/name 'my.agents.generated})))))
       (db/transact!
        connection
        (turn/receipt-settle-tx
         {::turn/id "generated-run"
          :seon.cluster.eval/ordinal 0
-         :seon.eval/value "{:introduced 'my.run}"}))
+         :seon.eval/value "{:introduced 'my.turn}"}))
       (is (= ::committed
              (transact-or-refusal
               connection
@@ -774,10 +774,10 @@
                 :seon.db.process/id "generated-process"
                 :seon.cluster.eval/at t1
                 :seon.cluster.eval/ordinal 1
-                :seon.cluster.eval/source "(dir 'my.run)"
+                :seon.cluster.eval/source "(dir 'my.turn)"
                 :seon.ns/name 'my.agents.generated}))))
       (is (= [[0 :system "(help)"]
-              [1 :system "(dir 'my.run)"]]
+              [1 :system "(dir 'my.turn)"]]
              (db/q {:query
                     '[:find ?ordinal ?author ?source
                       :where

@@ -1,0 +1,32 @@
+---
+type: issue
+status: open
+severity: blocker
+tags: [issue, publication, schema, adoption]
+---
+
+# Live publication refuses a schema row without its generatable declaration
+
+## Problem
+
+On 2026-09-09 at 21:17 UTC, `bin/seon init --dev default --changed
+src/seon/turn.clj` refused during `:seon.schema/rows` population:
+`Attribute :seon.schema/generatable? expected :boolean, got :seon.error/unknown.`
+The diagnostic path was `[0 :seon.schema/generatable?]`.
+
+## Evidence
+
+The context-blocks selected-path snapshot published and booted successfully;
+its gate passed 51 tests / 417 assertions and the separate platform gate
+passed 83 / 490. The live process's publication boundary differs from that
+fresh selected snapshot. No foreign edit was changed and the underlying
+cause has not been attributed. Default remained HTTP 200 after refusal.
+
+## Owner
+
+The canonical schema-row population and the live publication projection.
+
+## Acceptance
+
+The same live publication produces complete schema rows, records its source
+commit, and adopts it successfully, or explicitly reports the required reset.

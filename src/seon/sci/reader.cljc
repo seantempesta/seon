@@ -277,6 +277,8 @@
             namespace-name
             (assoc :seon.fn/ns [:seon.ns/name namespace-name])
             doc (assoc :seon.fn/doc doc)
+            (true? (:seon.fn/internal? metadata))
+            (assoc :seon.fn/internal? true)
             (:seon.fn/doc-order metadata)
             (assoc :seon.fn/doc-order (:seon.fn/doc-order metadata))
             schema (assoc :seon.fn/spec (pr-str schema))

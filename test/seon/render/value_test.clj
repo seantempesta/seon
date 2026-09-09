@@ -58,6 +58,17 @@
     (is (str/includes? (hiccup/->string (value/render-html (unit raw)))
                        "seon-print-map"))))
 
+(deftest collection-cardinality-never-changes-values-into-text-tables
+  (doseq [n [0 1 2 3]
+          choice [:derived true false]]
+    (let [rows (mapv (fn [i] {:my.message/id (str i)
+                             :my.message/content "Read this message."}) (range n))
+          projection (value/prepare
+                      (assoc (unit rows) :seon.print/options {:seon.print/table? choice}))
+          shown (value/render-ai-data projection)]
+      (is (= rows (edn/read-string shown)) shown)
+      (is (false? (get-in projection [:seon.render.value/options :seon.print/table?]))))))
+
 (deftest declared-producers-still-have-absolute-precedence
   (support/with-database
    (fn [connection]

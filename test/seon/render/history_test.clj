@@ -117,7 +117,7 @@
        (is (valid? projection :seon.render/form '(help)))
        (is (valid? projection :seon.render/form entry))
        (is (valid? projection :seon.render/form
-                   [entry {:seon.repl/form '(dir 'my.run)}]))
+                   [entry {:seon.repl/form '(dir 'my.turn)}]))
        (is (not (valid? projection :seon.render/form
                         {:seon.repl/comment "; no act"})))
        (is (valid? projection :seon.render/form
@@ -138,11 +138,11 @@
     :seon.repl/subject [:seon.agent/id "worker"]
     :seon.repl/entry {:seon.repl/form '(help)}}
    {:seon.repl/key :run-namespace
-    :seon.repl/subject 'my.run
-    :seon.repl/entry {:seon.repl/form '(dir (quote my.run))}}
+    :seon.repl/subject 'my.turn
+    :seon.repl/entry {:seon.repl/form '(dir (quote my.turn))}}
    {:seon.repl/key :complete-doc
-    :seon.repl/subject 'my.run/complete
-    :seon.repl/entry {:seon.repl/form '(doc (quote my.run/complete))}}
+    :seon.repl/subject 'my.turn/complete
+    :seon.repl/entry {:seon.repl/form '(doc (quote my.turn/complete))}}
    {:seon.repl/key :message-namespace
     :seon.repl/subject 'my.message
     :seon.repl/entry {:seon.repl/form '(dir (quote my.message))}}
@@ -173,11 +173,11 @@
           :seon.sci.admit/print-node
           (settled-node {:seon.agent/id "worker"
                          :seon.agent/protocol-namespaces
-                         ['my.message 'my.run]
+                         ['my.message 'my.turn]
                          :outside/reference 'outside.ns})}
          {:seon.repl/key :run-namespace
           :seon.sci.admit/print-node
-          (settled-node ['my.run/complete 'my.run/wait])}
+          (settled-node ['my.turn/complete 'my.turn/wait])}
          {:seon.repl/key :message-namespace
           :seon.sci.admit/print-node
           (settled-node ['my.message/inbox 'my.message/read])}
@@ -236,8 +236,8 @@
   (let [root-settled
         [{:seon.repl/key :root
           :seon.sci.admit/print-node
-          (settled-node {:seon.agent/protocol-namespaces ['my.run]})}]
+          (settled-node {:seon.agent/protocol-namespaces ['my.turn]})}]
         result (walk/ordered-episode
                 (episode-request episode-candidates root-settled))]
     (is (= [:root :run-namespace] (mapv :seon.repl/key result)))
-    (is (= '(dir (quote my.run)) (:seon.repl/form (peek result))))))
+    (is (= '(dir (quote my.turn)) (:seon.repl/form (peek result))))))

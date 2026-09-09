@@ -145,7 +145,7 @@
   THIS IS DERIVED, NOT REMEMBERED, and the live drive is the argument.
   Alice delegated correctly; bob read \"agent alice sent you: how many
   primes under 100?\", worked it out, and called
-  `(my.run/complete \"25\")` — which addressed nobody, because
+  `(my.turn/complete \"25\")` — which addressed nobody, because
   completion had no recipient. Alice waited forever for an answer that
   had already been computed. Asking the model to remember \"reply by
   message, THEN complete\" would be a protocol an agent can forget on
@@ -174,7 +174,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.message/reply-request]
                   [:maybe :my.message/message]]}
-  [db {:keys [:seon.cluster.message/trigger :my.run/result
+  [db {:keys [:seon.cluster.message/trigger :my.turn/result
               :seon.agent/id]}]
   (let [asker (and trigger (sender db trigger))
         answering-us? (and trigger

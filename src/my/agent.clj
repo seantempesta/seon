@@ -12,7 +12,7 @@
 
 (defn done
   "End my session now; a later outside wake may start another session."
-  {:malli/schema [:=> [:cat :my.plan/request] [:or :my.run/wait :seon.error/value]]}
+  {:malli/schema [:=> [:cat :my.plan/request] [:or :my.turn/wait :seon.error/value]]}
   [_request]
   (run/wait "Session complete."))
 

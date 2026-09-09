@@ -55,3 +55,21 @@ regression also seeds the order fixture, wakes it once, verifies each opening
 source occurs exactly once, then changes one read and verifies one append.
 The remaining presentation defects below this issue's original observation
 are the next ordered slice; this note remains open until they are handled.
+
+## Live race and presentation repair
+
+The fresh scratch boot reproduced help sixth plus duplicated reads even with
+read evidence present. A system pass evaluated against pre-compaction
+history, then committed after fixture cleanup. `system-turn` now admits an
+append inside the serial writer only while its originating history remains
+current. The deterministic regression interleaves two real SCI system passes
+and verifies one retained opening. The live scratch reseed now contains
+exactly six evaluations with help first (5,803 bytes).
+
+The same slice removes revision triangles, disables table inference at the
+value renderer, removes arithmetic placeholders from the no-provider and
+virtual-turn paths, renames the ruled surface to `my.turn`, declares internal
+helpers so Tools excludes them, and projects plan dependencies as ids.
+The landing note contains the complete scratch prompt. Default reseeding
+and the final trial remain the final assigned slice, so this issue stays open
+until that live verification is recorded.

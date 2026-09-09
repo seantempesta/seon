@@ -147,7 +147,7 @@
                         {:my.plan.item/needs #{[:my.plan.item/id "prepare"]}})]
         (is (= [prepare] (plan/ready @connection "alice")))
         (is (= [verify] (plan/blocked @connection "alice")))
-        (is (= ["prepare"] (mapv :my.plan.item/id (:my.plan/needs verify))))
+        (is (= ["prepare"] (:my.plan/needs verify)))
         (is (= [prepare verify] (plan/steps @connection "alice")))
         (is (= :my.plan/not-owned
                (:seon.error/kind (plan/start! "prepare" connection "bob"))))
@@ -260,7 +260,7 @@
                                   @connection))
             html (plan/render-plan-html (render-view connection current))
             ai (plan/format-plan-ai current)]
-        (is (= [{:my.plan.item/id "prepare"}] (:my.plan/needs step))
+        (is (= ["prepare"] (:my.plan/needs step))
             "a dependency travels as its stable identity")
         (is (empty? (filter entity-ids (numbers-in html))))
         (is (empty? (filter entity-ids (numbers-in current))))

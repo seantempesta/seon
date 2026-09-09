@@ -45,7 +45,7 @@
        (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
        (is (= "juniper/render-plan"
               (get-in result [:seon.sci.admit/value 0 :my.plan.item/id])))
-       (is (= [{:my.plan.item/id "juniper/render-plan"}]
+       (is (= ["juniper/render-plan"]
               (get-in result [:seon.sci.admit/value 1 0 :my.plan/needs])))
        (is (= [] (get-in result [:seon.sci.admit/value 2])))
        (is (not (str/includes? shown "ExceptionInfo")) shown)

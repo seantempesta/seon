@@ -3,7 +3,7 @@
                       :max-depth [:int {:min 0}],
                       :max-children [:int {:min 0}],
                       :composition
-                      [:enum :single-line :multiline :tabular],
+                      [:enum :single-line :multiline],
                       :profile
                       [:map
                        [:seon.render.profile/id
