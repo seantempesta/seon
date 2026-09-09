@@ -8,7 +8,7 @@
             :error
             [:string
              {:description
-              "The text of the throwable one evaluation ended in, as Clojure's own concise REPL error derived from the recorded ex-triage data. Exactly one of :seon.repl/value and :seon.repl/error is present."}],
+              "Saved shown text for a returned flat error, or Clojure's concise throwable text from recorded ex-triage data. Exactly one of :seon.repl/value and :seon.repl/error is present."}],
             :result
             [:string
              {:min 1,

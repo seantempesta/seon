@@ -1874,6 +1874,9 @@
                        (:seon.cluster.eval/source request)]))]
     (cond-> {:seon.sci.admit/value value
              :seon.eval/value (if (string? shown) shown (pr-str shown))}
+      (:seon.error/kind value)
+      (assoc :seon.cluster.eval/error
+             (or (:seon.error/message value) (str (:seon.error/kind value))))
       record (assoc :seon.sci.admit/record record))))
 
 (defn- success-evaluation
@@ -1898,6 +1901,8 @@
             (:seon.eval/value admitted)
             (assoc :seon.eval/value
                    (:seon.eval/value admitted))
+            (:seon.cluster.eval/error admitted)
+            (assoc :seon.cluster.eval/error (:seon.cluster.eval/error admitted))
 )
     ;; HOW LONG THE FORM TOOK IS A KEY OF THE EVALUATION, not something two
     ;; readers dig out of the diagnostic record by different routes. The

@@ -111,8 +111,11 @@
     :as emission}]
   (let [value (value-text emission)
         error (error-text emission)
+        shown-error (when (and error value
+                               (not (:seon.cluster.eval/triage-edn emission)))
+                      value)
         by-key {:seon.repl/value (when (and (nil? error) (some? value)) value)
-                :seon.repl/error (some-> error pr-str)
+                :seon.repl/error (some-> (or shown-error error) pr-str)
                 ;; AN EVALUATION BOOT CUT SAYS SO. Without this the response
                 ;; for an interrupted evaluation carried `:ms` alone and read
                 ;; exactly like one still running — absence of signal read as

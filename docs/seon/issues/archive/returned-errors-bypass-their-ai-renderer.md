@@ -1,11 +1,20 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, sci, wave/context-fixes]
 ---
 
 # Render returned flat errors through their declared AI projection
+
+Resolved 2026-09-09 by the context-cookbook lane. Returned flat errors now enter
+the schema-selected AI pair at evaluation time and emit saved shown text under
+:seon.repl/error. The canonical bad-transaction regression retains the complete
+diagnostic, leaves the target unchanged, and observes 131 bytes beginning with
+Expected:. Isolated error/REPL/value gate: 38 tests / 174 assertions; platform:
+83 tests / 490 assertions, all green. A read-only default JVM observation produced
+the same shown text. Evidence and exact bytes:
+[context cookbook](../../../prds/context-generation/research/context-cookbook-2026-09-09.md).
 
 The transact-feedback scratch proof on 2026-09-09 returned an evidence-complete
 :seon.db/invalid-write. Its declared seon.db/render-rejection-ai prints the
@@ -31,4 +40,4 @@ preserving historical shown text. Use the existing schema render pair and
 single value-renderer profile boundary.
 
 Exact bytes, script, and verification boundaries are in
-[the transaction landing note](../../prds/context-generation/research/transact-feedback-landing-2026-09-09.md).
+[the transaction landing note](../../../prds/context-generation/research/transact-feedback-landing-2026-09-09.md).
