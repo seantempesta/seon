@@ -37,3 +37,17 @@ Page-feed reproduced the same class in `run.WGAuvB` on 2026-09-08: one
 prepared worker and six visible CPUs caused `pool-2` to exit 1 without
 `seon/test/runner` on its classpath. Its retry uses one worker and two visible
 CPUs; no runner file was edited.
+
+Hook-async reproduced this in `run.0eCRor`, based on `ef424c37c` plus its
+operator paths: `SEON_TEST_WORKERS=2` prepared two checkouts, while the
+coordinator reported nine workers. `pool-3` exited 1 before readiness with
+the same missing-runner diagnostic. No platform assertions ran. The retry
+sets both `SEON_TEST_WORKERS=2` and the existing JVM worker-count property
+(`JAVA_TOOL_OPTIONS='-XX:ActiveProcessorCount=4 -Dseon.test.worker-count=2'`).
+The protected launcher and runner files remain untouched.
+
+Turn-cut reproduced the same boundary in `run.filFjF`: three prepared
+checkouts, but `pool-4` launched and exited 1 with the missing-runner
+classpath error. The retry sets `SEON_TEST_WORKERS=3` and
+`JAVA_TOOL_OPTIONS='-XX:ActiveProcessorCount=6 -Dseon.test.worker-count=3'`.
+No launcher or runner edits were included.

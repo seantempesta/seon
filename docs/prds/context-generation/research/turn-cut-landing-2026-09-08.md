@@ -7,6 +7,39 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
+## Final checkpoint for this continuation
+
+Commits: `ff9507c1b` (private objects/shown text), `a16e8d269`
+(nested result data regression). Platform retry passed **82 inherited tests,
+486 assertions, zero failures/errors**. The first platform invocation failed
+before assertions because the coordinator exceeded its three prepared worker
+checkouts; the documented test-only CPU setting aligned both counts on retry.
+See `docs/seon/issues/platform-worker-count-exceeds-prepared-checkouts.md`.
+
+Current literal occurrences in src/resources, excluding alias expansion:
+`:seon.def/` **0**, evaluation result-edn **0**, evaluation result-blob **0**,
+run process **93**, work situation **35**, run trigger **23**, run
+opening-commit-id **0**, run plan-digest **10**, run undisposed-at **7**,
+context capture **20**, context contribution **96**. The remaining counts
+are not deletion claims. Custody removal, the `seon.turn` consolidation,
+stable evaluation ids, generated-opening replacement, prompt capture removal,
+automatic compaction, and the three-write loop are unfinished. No production
+edits for that next consolidation were made in this continuation.
+
+The successful gates removed their roots. The failed platform root was
+removed after the coordinator exited and the process table showed no holder.
+Both lane scratch worktrees and the scratch JVM are gone. Every lane-owned
+background shell has ended; default was never stopped or restarted.
+
+Files in the conversion are exactly the 37 paths listed by
+`git show --format= --name-only ff9507c1b`: the bootstrap, cluster, context,
+SCI evaluation/admission, REPL, rendering, evaluation-drive and error owners;
+their schema and regression paths; the landing note and HTTP probe. The
+renderer correction touches `src/seon/render/value.clj`, adds
+`test/seon/sci/shown_text_test.clj`, updates this note and the nested-plan
+issue, and records the blocked-plan and isolated-root issues. This checkpoint
+also updates the existing worker-count issue; no runner files were changed.
+
 ## Nested result data regression
 
 The regression passes at `22f6163e5` and `77abbf43a`, and fails after
