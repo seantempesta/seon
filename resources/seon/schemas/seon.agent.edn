@@ -7,7 +7,7 @@
                         :seon.agent/settings
                         :seon.agent/namespace
                         :seon.turn/_agent
-                        :seon.error/_agent],
+                        :seon.error/_steward],
                        :seon.render/ai
                        seon.cluster.agent/render-identity-ai,
                        :seon.render/html

@@ -4,6 +4,7 @@
             [datahike.api :as d]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.error :as error]
             [seon.eval :as evaluation]
             [seon.operator :as operator]
             [seon.operator.runtime :as runtime]
@@ -301,3 +302,48 @@
           (pr-str result))
     (mapv #(select-keys % [:title :bytes :unchanged?])
           (concat read-results (:results speculative) proposed-results))))
+
+(defn probe-fault-blocks!
+  "Verify root and routed-steward source using default and a speculative value."
+  []
+  (let [connection (operator/connection "default")
+        database @connection
+        projection (schema/projection-from-database database)]
+    (schema/call-with-projection
+     projection
+     (fn []
+       (let [routed (:db-after
+                     (d/with database
+                             [{:seon.error/id "cookbook/routed"
+                               :seon.error/kind :seon.ai/no-credential
+                               :seon.error/message "Verify repair routing."
+                               :seon.error/agent [:seon.agent/id "root"]
+                               :seon.error/steward [:seon.agent/id "juniper"]}]))
+             records
+             (mapv
+              (fn [[label basis agent-id]]
+                (let [source (error/render-faults-ai
+                              {:seon.db/db basis
+                               :seon.render.walk/attribute :seon.error/steward
+                               :seon.render/value {:seon.error/steward [:seon.agent/id agent-id]}})]
+                  (cond-> {:label label :emitted? (boolean source)}
+                    source
+                    (merge
+                     (let [result (binding [db/*conn* connection db/*read-database* basis]
+                                    (eval (read-string source)))
+                           shown (pr-str result)]
+                       {:source source :source-bytes (byte-count source)
+                        :output shown :bytes (byte-count shown)})))))
+              [["root-empty" database "root"]
+               ["ordinary-empty" database "juniper"]
+               ["routed-steward" routed "juniper"]])
+             after @connection
+             result {:basis (db/basis-t database) :records records
+                     :default-basis-after (db/basis-t after)
+                     :probe-id-absent? (nil? (:seon.error/id
+                                             (db/pull after [:seon.error/id]
+                                                      [:seon.error/id "cookbook/routed"])))
+                     :default-unchanged? (= (db/basis-t database) (db/basis-t after))}]
+         (spit "docs/prds/context-generation/research/context_cookbook_faults_2026_09_09.edn"
+               (pr-str result))
+         result)))))

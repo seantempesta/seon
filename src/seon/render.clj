@@ -366,12 +366,20 @@
       ;; attribute's value, possibly as its pulled connected entities. Both
       ;; reach the producer in the attribute's transaction shape, which is
       ;; the shape its declared input accepts.
-      (get (render.value/transacted
-            (if (and (map? value) (contains? value attribute))
-              value
-              {attribute value})
-            (:seon.db/db request))
-           attribute)
+      (let [attribute-value
+            (get (render.value/transacted
+                  (if (and (map? value) (contains? value attribute))
+                    value
+                    {attribute value})
+                  (:seon.db/db request))
+                 attribute)
+            unit (producer-argument request)]
+        ;; The declared contract decides whether this pair takes the raw
+        ;; attribute or its render unit with database custody.
+        (if (and (not (schema/function-accepts-in? projection selected [attribute-value]))
+                 (schema/function-accepts-in? projection selected [unit]))
+          unit
+          attribute-value))
       (if (floor-producer? selected)
         (render-argument request)
         (producer-argument request)))))

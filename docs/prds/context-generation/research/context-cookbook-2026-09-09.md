@@ -104,6 +104,33 @@ green. HEAD-only probing reproduced the stale namespace declaration provenance
 and partial cluster fixtures; this slice corrects their setup and asserts write
 success before reading. The unrelated `help_trial_2026_09_09.clj` edit is excluded.
 
+### Root and steward fault reads
+
+The agent's declared fault concern follows `:seon.error/_steward`. Root emits
+its repair query at turn 0; an ordinary agent emits it only after a fault is
+routed to it. A fault happening to an agent does not assign repair work.
+The existing pair takes a render unit carrying the database. The render seam
+uses the declared input contract to select the attribute value or the full unit;
+schema coherence admits that envelope for scalar references as well as maps.
+No current database is fetched inside the renderer.
+
+Canonical system turns verify root's empty read and evidence, the absence of an
+ordinary empty read, and a later routed fault. Fast gate: **23 tests / 264
+assertions**; isolated gate: **23 / 268**; platform green. The live default probe
+returned **240 source bytes / 2 result bytes** for root and **243 / 79** for a
+speculative Juniper fault. [Exact source and output](context_cookbook_faults_2026_09_09.edn).
+The default basis advanced during that read-only probe; a separate read at basis
+536871837 confirmed the speculative fault id was absent. No probe transaction
+was committed. The source probe is `probe-fault-blocks!` in the retained script.
+
+Default adoption initially used the old schema coherence function and refused
+this pair's unit input. Reloading that owning namespace addressed the stale
+function, but another lifecycle operation then stopped default while our
+explicit adoption waited for the lock. That waiting client was canceled; this
+note claims hot-reloaded function outputs and isolated armed system-turn proof,
+not completed default adoption. RESET NEEDED: include this slice in the owner's
+batched publication/refork if the existing branch cannot adopt it.
+
 ### Current provider prompt
 
 The complete [provider prompt](context_cookbook_prompt_2026_09_09.txt) was acquired

@@ -148,6 +148,7 @@
             [seon.id :as id]
             [seon.error.refusal :as error.refusal]
             [seon.print :as print]
+            [seon.repl :as repl]
             [seon.render.route :as render.route]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
@@ -1379,33 +1380,67 @@
                    :seon.error/message (str "Fault entity was not acquired: " (pr-str fault))})))
        (sort-by fault-order)))
 
+(defn- faults-input
+  [unit]
+  (let [value (:seon.render/value unit)]
+    (get value (:seon.render.walk/attribute unit) value)))
+
+(defn faults-form
+  "Read repair work for root, or for an agent with a routed fault."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/form]]}
+  [unit]
+  (let [agent (faults-input unit)
+        row (db/pull (:seon.db/db unit)
+                     '[:seon.agent/id {:seon.error/_steward [:seon.error/id]}]
+                     agent)]
+    (if (or (= "root" (:seon.agent/id row))
+            (seq (:seon.error/_steward row))
+            (:seon.error/kind row))
+      {:seon.repl/comment ";; I should inspect faults routed to me as steward; fixing them is my job."
+       :seon.repl/form
+       (list 'seon.db/q
+             (list 'quote
+                   [:find [(list 'pull '?f [:seon.error/kind :seon.error/message :seon.instrument/fn]) '...]
+                    :where ['?f :seon.error/steward agent]]))}
+      nil)))
+
 (defn render-faults-ai
-  "Render each fault through the error entity's AI pair."
-  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
-  [faults]
-  (str/join "\n" (map render-ai (fault-entities faults))))
+  "Emit the steward's read, or render already acquired fault entities."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:maybe :seon.render/source]]}
+  [unit]
+  (let [faults (faults-input unit)]
+    (if (and (sequential? faults) (every? map? faults))
+      (when (seq faults) (str/join "\n" (map render-ai (fault-entities faults))))
+      (let [entry (faults-form unit)]
+        (when-let [form (:seon.repl/form entry)]
+          (str (:seon.repl/comment entry) "\n" (repl/source-text form)))))))
 
 (defn render-faults-html
-  "Render each fault through the error entity's HTML pair, newest first."
+  "Render faults routed to a steward, or already acquired faults, newest first."
   {:malli/schema [:function
-                  [:=> [:cat :seon.schema/value] :seon.render/hiccup]
-                  [:=> [:cat :seon.schema/value :seon.db/database-value]
-                   :seon.render/hiccup]]}
-  ([faults]
-  (let [entities (fault-entities faults)]
+                  [:=> [:cat :seon.render/unit] :seon.render/hiccup]
+                  [:=> [:cat :seon.schema/value :seon.db/database-value] :seon.render/hiccup]]}
+  ([unit] (render-faults-html (faults-input unit) (:seon.db/db unit)))
+  ([faults database]
+  (let [acquired? (and (sequential? faults) (not (keyword? (first faults))))
+        row (when-not acquired?
+              (db/pull database '[{:seon.error/_steward [* {:seon.error/run [:seon.turn/id]}]}]
+                       faults))
+        references (cond acquired? faults
+                         (:seon.error/kind row) [row]
+                         :else (:seon.error/_steward row))
+        entities (fault-entities
+                  (mapv #(if (map? %) %
+                             (db/pull database '[* {:seon.error/run [:db/id :seon.turn/id]}] %))
+                        references))]
     (into [:section {:class "seon-family-entry seon-error-faults"}
            [:h2 (str "Faults (" (count entities) ")")]]
           (if (seq entities)
             (map render-html entities)
             [[:p {:class "seon-error-faults-empty"}
-              "No fault is recorded against this agent."]]))))
-  ([faults database]
-   (render-faults-html
-    (mapv (fn [fault]
-            (if (map? fault) fault
-                (db/pull database '[* {:seon.error/run [:db/id :seon.turn/id]}]
-                         fault)))
-          faults))))
+              (if acquired? "No fault is recorded against this agent."
+                  "No fault is routed to this agent.")]])))))
 
 (defn time-limit-prose
   "`:seon.render/ai` — evaluation time-limit evidence without guessing cause."

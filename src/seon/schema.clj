@@ -1537,8 +1537,9 @@
                            (:seon.schema.projection/compile-options projection))]
                       (when (or (= input-form schema-key)
                                 (= input-form :seon.schema/value)
-                                (and (= input-form :seon.render/unit)
-                                     (map-shaped-schema? declaring))
+                                ;; A render unit carries any value under
+                                ;; :seon.render/value, including scalar refs.
+                                (= input-form :seon.render/unit)
                                 (schema-accepts-schema? input declaring))
                         input-form))))
                 arities)]

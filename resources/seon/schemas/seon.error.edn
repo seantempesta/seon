@@ -12,6 +12,9 @@
               {:description
                "The agent this fault is ROUTED TO for repair: the steward of the namespace of the function that failed (:seon.instrument/fn -> :seon.fn/ns -> :seon.ns/steward), decided inside the committing transaction. A LISTENED ATTRIBUTE: asserting it wakes that agent. Distinct from :seon.error/agent, which is the agent this fault happened TO. Also an INSIDE wake — a fault is the population's own activity and never resets the steward's turn bound; the bound is what stops a fault about an agent's own code looping.",
                :seon.db/index true,
+               :seon.render/ai seon.error/render-faults-ai,
+               :seon.render/html seon.error/render-faults-html,
+               :seon.render/form seon.error/faults-form,
                :seon.wake/listen true,
                :seon.wake/opens-turn? true,
                :seon.wake/inside true}
