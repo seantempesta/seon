@@ -17,7 +17,7 @@ Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
 
-## Blocker (62)
+## Blocker (65)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -49,6 +49,7 @@ See `README.md` for the convention.
 | [Development adoption can mix host and SCI generations](development-adoption-can-mix-host-and-sci-generations.md) | blocker | adoption follow-up wave (after turn-cut lands) |
 | [Development adoption tries to reload an unavailable test namespace](development-adoption-loads-test-namespace-off-classpath.md) | blocker | adoption follow-up wave (after turn-cut lands) |
 | [Development adoption refuses cohosted clusters](development-adoption-refuses-cohosted-clusters.md) | blocker | adoption follow-up wave (after turn-cut lands) |
+| [Development adoption retains old web service inputs](development-adoption-retains-old-web-service-inputs.md) | blocker | adoption follow-up wave |
 | [Cut the ~42 MB of store each eval sample costs](eval-samples-cost-42mb-of-store-each.md) | blocker | eval-scale economics wave |
 | [Route failover context through the captured rendered history](failover-adds-an-uncaptured-system-context-fragment.md) | blocker | strict dogfood provider-context repair |
 | [Bound fault evidence and measure store growth](fault-facts-store-megabyte-evidence-inline-and-rewrite-gigabyte-leaves.md) | blocker | live-drive render repair wave |
@@ -62,6 +63,7 @@ See `README.md` for the convention.
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 | [Derive a completion reply from the triggering message](message-completion-replies-from-the-wrong-agent-and-duplicates-the-trigger.md) | blocker | message delivery repair wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
+| [A missing provider credential retries into nine faults in two seconds, and fault entities render as raw maps](no-credential-attempts-retry-into-a-fault-storm-and-render-raw.md) | blocker | page follow-up wave |
 | [Answer no-forms replies with correction or re-wake](no-forms-replies-close-without-correction-or-rewake.md) | blocker | OWNER DESIGN GATE (correction vs re-wake) |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
 | [Plan renderer and its tests disagree during development publication](plan-renderer-arity-change-blocks-development-publication.md) | blocker | page follow-up wave (after turn-cut lands) |
@@ -85,11 +87,10 @@ See `README.md` for the convention.
 | [Resolve the declaration population once per admission, not once per node](value-admission-resolves-the-declaration-population-per-node.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Render walk-unit hiccup as markup, never escaped EDN text](walk-units-render-their-hiccup-as-escaped-edn-text.md) | blocker | ui verification wave |
 
-## Friction (158)
+## Friction (161)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Dependency resolution can fail in Maven model validation](dependency-resolution-can-race-maven-model-validation.md) | friction | runner follow-up wave (concurrent classpath builds) |
 | [A blocking realization is not bounded by admission's interrupt](a-blocking-realization-is-not-bounded-by-the-interrupt.md) | friction | issues sweep wave (2026-09-09) |
 | [Stop a failed turn from waking itself through its own fault message](a-failed-turn-wakes-itself-through-its-own-fault-message.md) | friction | live-drive context repair wave |
 | [A live cluster arms ten fewer contracts than it declares](a-live-cluster-arms-ten-fewer-contracts-than-it-declares.md) | friction | wave/contract-gate |
@@ -141,6 +142,7 @@ See `README.md` for the convention.
 | [`default` falls back to an ephemeral web port after a refork](default-falls-back-to-an-ephemeral-web-port-after-a-refork.md) | friction | adoption follow-up wave (after turn-cut lands) |
 | [Default web request times out during partial adoption](default-web-request-times-out-during-partial-adoption.md) | friction | adoption follow-up wave (after turn-cut lands) |
 | [Bound dependency-cache preparation before the test coordinator starts](dependency-cache-lock-wait-has-no-deadline.md) | friction | wave/test-fixture |
+| [Dependency resolution can fail in Maven model validation](dependency-resolution-can-race-maven-model-validation.md) | friction | runner follow-up wave (concurrent classpath builds) |
 | [Development adoption cannot load the canonical test support](development-adoption-cannot-load-test-support.md) | friction | adoption follow-up wave (after turn-cut lands) |
 | [Development adoption drops the web server while it reloads](development-adoption-drops-the-web-server.md) | friction | adoption follow-up wave (after turn-cut lands) |
 | [`doc` prints schema bodies and flattens arity alternatives — the primary teaching surface is ugly and misleading](doc-contract-lines-print-schema-bodies-and-flatten-arity-alternatives.md) | friction | page follow-up wave (after turn-cut lands) |
@@ -193,6 +195,7 @@ See `README.md` for the convention.
 | [Read foreign live roots in operator status](operator-status-refuses-foreign-live-root.md) | friction | drive-1 defect wave |
 | [Include non-installed operator and MCP leaves in the sink proof](output-sink-query-excludes-operator-and-mcp-scripts.md) | friction | program-index production-subject wave |
 | [Derive fleet state from events, not a 20 ms ping absence](oversight-treats-a-20ms-ping-absence-as-state.md) | friction | render oversight event wave |
+| [Parallel published-base acquisition can lose a filestore key](parallel-test-base-connect-can-lose-a-filestore-key.md) | friction | runner follow-up wave |
 | [Classify parallel-only test failures by their shared resource](parallel-test-stress-exposes-eleven-isolation-sensitive-tests.md) | friction | parallel stress triage wave |
 | [Partial hot reload leaves a live JVM running mixed old and new code](partial-hot-reload-produces-mixed-code-with-no-warning.md) | friction | general |
 | [Record posh's cardinality-one pull-analysis arity defect](posh-cardinality-one-pull-analysis-has-an-arity-defect.md) | friction | upstream-delta sweep |
@@ -229,6 +232,7 @@ See `README.md` for the convention.
 | [Give `seon.cluster.loop/settle!` a complete public contract](settle-is-public-without-a-complete-contract.md) | friction | unreadable-reply lane coordination |
 | [Identify shared store growth during renderer changes](shared-store-grows-during-render-source-work.md) | friction | page follow-up wave (after turn-cut lands) |
 | [Cut the 11.8 s source load back under the ten-second law](source-load-is-118s-against-the-ten-second-law.md) | friction | load-time incident |
+| [Investigate the scratch config publication fingerprint collision](source-publication-fingerprint-collision-after-config-property-reordering.md) | friction | adoption follow-up wave |
 | [A stale dev-dependency cache serves wrong classes silently](stale-dev-dependency-cache-serves-wrong-classes-silently.md) | friction | boot-velocity wave |
 | [Name the stale clj-kondo cache entry that blocks correct code](stale-language-specific-kondo-cache-blocks-correct-code.md) | friction | dev-tooling face hygiene |
 | [The stop contract rejects the stopped instance it promises to accept](stop-contract-rejects-stopped-instances.md) | friction | issues sweep wave (2026-09-09) |
@@ -242,6 +246,7 @@ See `README.md` for the convention.
 | [Keep interpreter-private markers out of the time-limit face](time-limit-face-exposes-interpreter-interrupt-marker.md) | friction | SCI failure-face repair wave |
 | [Order transcript receipt and comment candidates by numeric facts](transcript-candidate-window-orders-receipts-and-comments-by-id.md) | friction | transcript ordering follow-up |
 | [Render transcript entries as forms and actual values](transcript-renderer-encodes-entries-as-comment-forms.md) | friction | strict REPL display wave |
+| [Turn consumers retain obsolete fixture and observation contracts](turn-consumer-fixtures-read-retired-result-storage.md) | friction | turn-rename lane (running, 2026-09-09) |
 | [Turn source syntax blocks default adoption](turn-source-syntax-blocks-default-adoption-2026-09-08.md) | friction | turn-cut lane (running, 2026-09-09) |
 | [Two turn backstops fire and the sliding fault channel keeps the wrong one](two-turn-backstops-fire-and-the-sliding-fault-channel-keeps-the-wrong-one.md) | friction | turn-cut lane (running, 2026-09-09) |
 | [Close the 2026-08-01 unlogged findings (interop policy, agent write surface, rot)](unlogged-findings-2026-08-01.md) | friction | general |
