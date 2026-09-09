@@ -1661,9 +1661,17 @@
                   declared-units
                   (declared-entity-units projection database acquisition)
                   reverse-units
-                  (into (filterv reverse-attribute? declared-units)
-                        (comp (map reverse-attribute) (distinct))
-                        (sort (installed-ref-attributes database)))
+                  (into []
+                        (comp
+                         (map :seon.schema/key)
+                         (keep #(projection-form projection %))
+                         (map schema.form/attr-form-properties)
+                         (mapcat :seon.render/units)
+                         (filter reverse-attribute?)
+                         (distinct))
+                        (when (map? acquisition)
+                          (schema/matching-shapes-in
+                           projection (value/transacted acquisition database))))
                   ;; ONE pull per declared reverse relationship, each asking
                   ;; for the connected entities themselves: a relationship
                   ;; too large for the declared work bound refuses as that

@@ -1,0 +1,9 @@
+{
+  "url": "http://127.0.0.1:7994/ns/my.agents.juniper/debug",
+  "status": 200,
+  "milliseconds": 37.46320796199143,
+  "bytes": 273505,
+  "sha256": "08458ef7b99b661de8ae4ea139d36159b67d8223c99681e48fd8ee95782cfbfa",
+  "expected": "Entity attributes and connections",
+  "present": true
+}

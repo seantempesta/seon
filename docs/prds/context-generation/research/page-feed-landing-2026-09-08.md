@@ -540,3 +540,32 @@ and retains status, time, size, and SHA-256 evidence.
 
 Adoption-cache path-limited gate: 23 tests, 96 assertions, zero failures/errors
 across web context, debug, and root-pull namespaces.
+
+`77abbf43a` was adopted onto default at
+`6aa0e00d-7994-5f5c-b3a5-8d751a708c14`, digest
+`ea2dc3799ca437e9b2a03ee1dce96012cc6894fb9fba7e5259747ab94a2f2d03`.
+The default GET showed the changed heading: HTTP200,37.463208 ms,273505 bytes.
+No default lifecycle operation or render-cache reset was used.
+
+### Schema-declared reverse filtering
+
+The later components hunk is now applied, with the existing total map check
+before `value/transacted`. Reverse concern acquisition follows the matching
+entity schemas' `:seon.render/units`, not every installed reference attribute.
+The earlier component-membership correction continues reading actual installed
+schema facets; it does not reintroduce the refused application query against
+`:db/isComponent`. A canonical synthetic declaration proves both declared refs
+survive a one-item graph window and an undeclared installed ref is excluded.
+
+Scratch adoption `6aa0e086-2fdb-534b-97f8-8a096f4caf77` preserved PID61496.
+Chrome returned200 in1176.137417 ms cold /6.383583 ms warm,76497 bytes, with
+six blocks: identity, plan, settings, messages, turns, and faults. The undeclared
+defs and namespace-steward blocks are absent. Blocks remain1568 px with paired
+762.609375 px columns and1600 px document width. The raw graph is still present.
+The screenshot was opened and inspected.
+
+![Declared reverse concerns on scratch](page-feed-filter-scratch-2026-09-08.png)
+
+The path-limited filtering gate passed11 tests/53 assertions, zero failures/errors.
+Its initial fast attempt caught an extra closing parenthesis in the edited test;
+that was corrected before the passing gate and successful scratch adoption.

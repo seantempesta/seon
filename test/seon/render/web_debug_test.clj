@@ -119,12 +119,19 @@
   (support/with-database
    {::support/extra-schema
     [{:db/ident ::left :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
-     {:db/ident ::right :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}]}
+     {:db/ident ::right :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
+     {:db/ident ::hidden :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
+     {:seon.schema/key ::declared-concerns
+      :seon.schema/form
+      (pr-str [:map {:seon.db/attributes true
+                     :seon.render/units [::_left ::_right]}
+               [:seon.cluster.agent/id :seon.cluster.agent/id]])}]}
    (fn [connection]
      (db/transact! connection
                    [{:seon.cluster.agent/id "relationships"}
                     {::left [:seon.cluster.agent/id "relationships"]}
-                    {::right [:seon.cluster.agent/id "relationships"]}])
+                    {::right [:seon.cluster.agent/id "relationships"]}
+                    {::hidden [:seon.cluster.agent/id "relationships"]}])
      (let [database @connection
            projection (schema/projection-from-database database)
            result (schema/call-with-projection
@@ -139,7 +146,9 @@
                      {}))
            output (:seon.render.call/output (:seon.render.web/debug-data-entry result))]
        (is (seq (get-in output [:seon.render.web/reverse-values ::_left])))
-       (is (seq (get-in output [:seon.render.web/reverse-values ::_right])))))))
+       (is (seq (get-in output [:seon.render.web/reverse-values ::_right])))
+       (is (nil? (get-in output [:seon.render.web/reverse-values ::_hidden]))
+           "an installed reverse ref is not automatically an entity concern")))))
 
 
 (deftest reverse-declarations-receive-the-actual-relationship-value
