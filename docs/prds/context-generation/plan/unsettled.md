@@ -629,3 +629,35 @@ half-edit. Measured targets in the issue.
 - The data chart PRD (`agent-data-chart-prd-2026-09-09.md`) is written for
   iteration with the owner; five questions open.
 
+## 2026-09-09 15:40 — data first: research, PRD r2 with roadmap, three lanes at high effort
+
+- Research grounded the design: read evidence is exact for explicit pull
+  selectors and pattern-only queries, attribute-level for `not`/`or`/pull-
+  in-find (`db.clj:335-423`); agent listens can union into the wake
+  matcher at one map lookup (`wake.clj:428-438`); raw db forms store the
+  same evidence as generated ones (`turn.clj:4279`); the reader accepts
+  only `#inst`/`#uuid` and the agent has no clock — "datomic.tx" refs
+  give time as the transaction (proven); a nested map under a
+  cardinality-one component replaces it SILENTLY; `retractEntity`
+  removes, `:db/retract` orphans; a raw message without id/at is valid
+  datoms and an invalid message (`research/raw-data-forms-probe-2026-09-09.md`).
+- Trials: Haiku on raw data forms 8/8, wrote correct pull/q/transact/
+  get-in; two defects were my example's (`(now)`) and a trimmed line.
+- PRDs: chart r2 (`agent-data-chart-prd-2026-09-09.md`) with eight rulings,
+  raw-form bytes per item, schema feedback at every seam (§9), a fourteen-
+  step roadmap with one batched reset; turn PRD §18c supersedes §18's
+  wrapper forms. Owner rulings this hour: ids = `(seon.id/id data [n])`;
+  turns live inside the runtime component; the inbox is an edge
+  (`:seon.message/inbox`) retracted when handled, read by reverse pull;
+  faults at turn 0 go to root; steward routing by namespace.
+- Landed: `e915d2de0` (help first; data never a table), `ca9bb4120`
+  (component members in stored position order), `26ec13420`
+  (`transact!` validates authored data before Datahike; refusal carries
+  attribute, expected form, offending value, path). Open blocker filed by
+  the lane: a returned flat error renders as `:value` through the
+  structural printer instead of `#:seon.repl{:error …}` through its
+  declared AI pair (`returned-errors-bypass-their-ai-renderer.md`).
+- Running: transact-feedback (that seam next), context-blocks (tombstone,
+  reader rule, second trial), context-cookbook (executed forms, tuned
+  returns, block functions).
+
