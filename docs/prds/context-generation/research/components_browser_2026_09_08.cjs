@@ -22,6 +22,10 @@ const fs = require('node:fs');
     for (const [name, selector] of [['identity', '.seon-agent-identity-entry'], ['plan', '.my-plan'], ['settings', '.seon-agent-settings']]) {
       const component = page.locator(selector).first();
       if (await component.count() && await component.isVisible()) {
+        const bounds = await component.boundingBox();
+        await page.setViewportSize({width: 1440, height: Math.max(1100, Math.ceil(bounds.height) + 240)});
+        await component.scrollIntoViewIfNeeded();
+        await page.evaluate(() => window.scrollBy(0, -180));
         await component.screenshot({path: `${prefix}-${name}.png`});
       }
     }

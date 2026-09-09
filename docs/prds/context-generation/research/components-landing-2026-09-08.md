@@ -10,7 +10,9 @@ tags: [research, agent, render]
 The retired-record cut is `67fe1675d`; settings is `e96001a7c`; this commit
 contains the useful render pairs and data-returning documentation. Identity
 aggregation in the protected debug-page loop remains an integration hunk,
-linked below. **RESET NEEDED: `67fe1675d`** for old default datoms.
+linked below. The earlier reset-needed flag is **superseded** by the final
+live verification: default has the new record shape and no checked retired
+datoms. No default lifecycle operation was performed.
 
 Read AGENTS.md and the turn PRD §0, §1a, §4/§4a, §13, and §17 end to end,
 plus the plan README and working edge. The AGENTS.md lane-rules preamble
@@ -261,3 +263,55 @@ workaround were used throughout. No full suite was run. Scratch source was
 HEAD `2531b2e70` plus the components files; the final isolated gates additionally
 include landed page-feed `985a830b5`. The proposed protected web hunk is not
 part of either proof.
+
+
+## Final default verification and cleanup
+
+Implementation commits, in requested order:
+
+1. `67fe1675d` — retired agent record fields and open-turn derivation.
+2. `e96001a7c` — one settings component and consuming overrides.
+3. `8b48a7c47` — useful render pairs and data-returning `doc`/`dir`.
+
+Final default adoption succeeded at source commit
+`6aa09fd1-1bbd-52ab-a9ae-a4a290e2cad6`, digest
+`bbf73f197859463cd797fd6e103a4654aa6e85f696f8d1ce15bb1c249c0194ae`.
+Reseeding the updated Juniper fixture returned its objective and current
+step in 96 ms. The [final read-only probe](components_default_verify_2026_09_08.clj)
+verified the complete agent key set and absence of the checked retired
+attributes in 268 ms (normalized below):
+
+```clojure
+{:agent-keys [:db/id :seon.agent/plan :seon.agent/settings
+              :seon.cluster.agent/id :seon.cluster.agent/namespace]
+ :retired-datoms #{}}
+```
+
+This supersedes the first-checkpoint **RESET NEEDED** flag; no additional
+reset is requested on this evidence. The default cluster was never stopped,
+reforked, or restarted by this lane.
+
+I inspected the [final default debug page](components-default-final-2026-09-08.png),
+[plan](components-default-final-plan-2026-09-08.png), and
+[settings](components-default-final-settings-2026-09-08.png). The
+[captured AI/HTML bytes](components-default-final-2026-09-08.json) show useful
+component content and no retired cluster/instructions/run block. Identity
+is still split by the protected per-attribute page loop. The proposed hunk
+passes `git apply --check` at later page-feed commit `baa1dde54`; it remains
+unapplied and unverified as running code. The earlier `:seon.render/cache`
+adoption failure is no longer the final default state.
+
+Cleanup used the creating checkout's operator to stop scratch PID 8533,
+start instant `2026-09-08T23:16:10.344Z`, generation
+`cb80f90a-b2a7-4a79-ad7c-126fe821e6d2`. Its process-table absence was checked
+before deleting `tmp/components-root` and removing `tmp/components-wt`.
+The main checkout's operator had incorrectly returned an empty process
+census for that same explicit root; the
+[operator issue](../../../seon/issues/operator-down-misses-a-live-scratch-jvm-from-another-checkout.md)
+records the exact discrepancy without guessing its cause.
+
+Holderless owned failures `run.fv5GcQ`, `run.EOVWot`, and `run.m5UkjS` were
+removed after checking lane status and the process table. Their subjects
+had been re-observed by the passing final gates. Successful isolated roots
+were removed by the runner itself. Source symlinks were not followed during
+cleanup. Unrelated working edits and other lanes' roots were preserved.

@@ -44,3 +44,11 @@ bound. Page-feed then landed `985a830b5`, including the cache schema
 alias. No default restart or refork was attempted; final source adoption
 is the next authorized convergence boundary. Scoped component gates and
 scratch adoption remain independent of this failure.
+
+
+Final components verification after `8b48a7c47`: default adoption completed
+at `6aa09fd1-1bbd-52ab-a9ae-a4a290e2cad6`. Juniper reseeding returned in
+96 ms; a following record query returned in 268 ms, and Playwright loaded
+and captured the debug page successfully. The component checkpoint's
+cache-schema failure is not the final observed state. This does not claim
+that every earlier timeout reported by other owners has been resolved.
