@@ -7,10 +7,10 @@ tags: [research, runtime, sci]
 
 # Turn rename: bounded continuation
 
-Current landing: slice 2 is complete in **`7296d173b`**. **RESET NEEDED: `7296d173b`.**
-The two required gates are green; fresh-schema HTTP proof is recorded below.
-Slice 3's virtual-turn measurement and writer consolidation are recorded below;
-slice 4 is pending. Earlier partial checkpoints are historical.
+Current landing: slice 3's virtual no-op proof is committed in **`558fdc1cc`**;
+the core of slice 4 is committed in **`f7cc8465c`**. **RESET NEEDED: `f7cc8465c`**
+for changed identity facts and handles. The remaining identity audit and its
+gates are recorded below. Earlier slice 1/2 checkpoints are historical.
 
 ## Recovery checkpoint, 2026-09-09 06:54 UTC
 
@@ -835,3 +835,88 @@ migration proof. **RESET NEEDED** remains for old identity facts/handles.
 Remaining within this slice: effect, maintenance, captured-context, and
 error-notification ids found by the generated-identity audit. The 19-path
 core checkpoint is committed before changing those owners.
+
+Core checkpoint commit: **`f7cc8465c`**. Its 19 paths were committed before
+the remaining owners were edited. `with-database` is a real branch fork:
+it calls `d/branch!` on the canonical sealed base, connects with its own
+writer, and deletes the branch after releasing both connections
+(`test/seon/test_support.clj:579`). The refork comparison is not an
+in-memory map impersonating the writer.
+
+### Remaining identity owners, 08:53 UTC
+
+Effect ids now derive from turn/form/effect ordinals. Scheduled fire ids
+derive from task/nominal instant; maintenance receipt, request, and result
+ids derive from the preceding durable identity. Context capture ids derive
+from turn/basis and contribution ids from capture/position. Error notices
+derive from error/recipient/reason, retaining idempotence per recipient.
+
+The real effect probe found one remaining evaluation-id derivation in
+`seon.sci.eval/evaluate`: database transaction provenance still used the
+old `pr-str` identity and therefore could not resolve the durable
+evaluation. It now calls `id/evaluation`, the same owner used by the turn
+and handle. Its regression opens, executes, and settles a real capability
+effect from an armed SCI evaluation.
+
+The zero-time-limit test previously called invalid input through the armed
+public boundary but expected the unarmed implementation's return value.
+It now verifies the contract refusal and unchanged database basis. Fast
+verification of effect/schedule/context/loop: **46 tests / 239 assertions,
+zero failures/errors** (`tmp/turn-stable-ids-tail-fast-2.log`).
+
+The remaining `random-uuid` uses found in first-party source are fresh
+fault occurrences, preview executions and browser tabs, publication/test
+invocations, listener registrations, or temporary storage resources. Named
+program/agent/config/task identities are authored names; Datahike tempids
+are transaction-local aliases. Neither is a generated durable opaque id.
+No provider was called, no scratch cluster was seeded, and default was
+never stopped, reforked, or restarted by this lane.
+
+### Final gates and cleanup, 09:00 UTC
+
+The final tail gate is **69 tests / 598 assertions, zero failures/errors**;
+explicit platform is **83 tests / 490 assertions, zero failures/errors**.
+There is **no worker-state drift report** in the final gate. The preceding
+tail invocation passed its assertions but reported 44 newly wrapped test
+functions after the context test. That test's custom preservation fixture
+was replaced with `test-support/preserving-instrumentation-state`, and
+both gates were rerun. Acquisition-refusal ids also now use `id/digest`
+directly rather than a separately prefixed hash.
+
+Commands used `SEON_TEST_WORKERS=1 bin/test --paths <these paths> --
+seon.effect-test seon.schedule-test seon.context-test seon.cluster.loop-test
+seon.turn-test`, plus `bin/test --platform --paths <these paths>`:
+
+```
+src/seon/context.clj
+src/seon/effect.clj
+src/seon/error.clj
+src/seon/schedule.clj
+src/seon/sci/eval.clj
+src/seon/turn.clj
+test/seon/context_test.clj
+test/seon/effect_test.clj
+test/seon/schedule_test.clj
+docs/prds/context-generation/research/turn-rename-landing-2026-09-09.md
+docs/seon/issues/turn-consumer-fixtures-read-retired-result-storage.md
+```
+
+Logs: `tmp/turn-stable-ids-tail-gate-final.log` and
+`tmp/turn-stable-ids-tail-platform-final.log`. Successful roots
+`run.CiyUqV` and `run.kUVxo3` were removed by the runner. All owned runner
+and publication-client shells have ended; no scratch cluster or worktree
+was created. The inherited `build/`, `workers/`, and
+`config/virtual-turns.edn` remain untouched.
+
+Final live adoption and publication both name
+`6aa11fcb-c6a4-5a3e-98b2-0d0d737649d9`. The live acquisition-id owner
+returns 64 hex characters. Default debug: **HTTP 200, 55,717 bytes,
+0.027908 seconds**. No browser-paint claim is made.
+
+**RESET NEEDED: adopt the final identity commit onto a fresh default fork.**
+The old identity facts and handles were not migrated. The one remaining
+writer limitation is explicit: program-installing batches retain ordered
+transaction-function calls; only the §12 no-op virtual turns have exactly
+one function call for each of their three writes. The separately verified
+bootstrap fixture failures remain in the consumer issue. No remaining
+finding is left only in chat.

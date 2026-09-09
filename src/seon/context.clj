@@ -31,7 +31,7 @@
   basis, the ordered contribution records and the trusted-input
   snapshot commit in ONE turn-owned transaction BEFORE the unobservable
   remote call. `capture-tx` is PURE — tx-data out, the LOOP commits —
-  and identity is derived from provenance (`<run-id>-context-<basis-t>`),
+  and identity is derived through `seon.id` from turn and basis transaction,
   so re-deriving the same prompt at the same basis upserts rather than
   double-writing, and a released run re-entering `:call` at a new basis
   creates the new capture the honestly-different prompt deserves.
@@ -44,6 +44,7 @@
   (:require [seon.ai.tokens :as tokens]
             [seon.turn :as run]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.error :as error]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
@@ -471,7 +472,8 @@
   [capture-id record]
   (let [position (:seon.context.contribution/position record)
         failure (get record :seon.error/value)]
-    (cond-> {:seon.context.contribution/id (str capture-id "-" position)
+    (cond-> {:seon.context.contribution/id
+             (id/digest 12 [:seon.context.contribution/id capture-id position])
              :seon.context.contribution/position position
              :seon.render.block/name (:seon.render.block/name record)
              :seon.context.contribution/hash
@@ -513,7 +515,7 @@
         ; every value shape; `database-value-identity` is not — its output
         ; contract requires a commit id, which an as-of value does not have.
         basis-t (long (db/basis-t db))
-        capture-id (str run-id "-context-" basis-t)]
+        capture-id (id/digest 12 [:seon.context.capture/id run-id basis-t])]
     [(cond-> {:seon.context.capture/id capture-id
               :seon.context.capture/run [:seon.turn/id run-id]
               :seon.context.capture/basis-t basis-t}

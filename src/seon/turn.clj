@@ -854,7 +854,7 @@
 
 (defn- current-receipt
   "The receipt identified by run and ordinal, or nil.
-  Identity is `(pr-str [id ordinal])` — AT MOST ONE ATTEMPT PER FORM,
+  Identity comes from `seon.id/evaluation` — AT MOST ONE ATTEMPT PER FORM,
   EVER, held by the identity itself: re-execution across any custody
   change is unrepresentable, strictly stronger than the epoch this
   replaced (custody revision 2026-07-28)."

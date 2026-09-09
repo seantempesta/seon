@@ -116,6 +116,7 @@
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.effect :as effect]
             [seon.env :as env]
             [seon.error :as error]
@@ -1236,16 +1237,12 @@
 
 (defn- acquisition-refusal-id
   [refusal]
-  (str "acquire-"
-       (schema/sha-256
-        [(.getBytes
-          (pr-str [(get-in refusal [:seon.error/data ::acquisition-row])
-                   (:seon.error/kind refusal)
-                   (get-in refusal
-                           [:seon.error/data ::acquisition-cause-kind])
-                   (get-in refusal
-                           [:seon.error/data ::acquisition-cause-message])])
-          "UTF-8")])))
+  (id/digest 64
+             [::acquisition-refused
+              (get-in refusal [:seon.error/data ::acquisition-row])
+              (:seon.error/kind refusal)
+              (get-in refusal [:seon.error/data ::acquisition-cause-kind])
+              (get-in refusal [:seon.error/data ::acquisition-cause-message])]))
 
 (defn- record-acquisition-refusals!
   "Record contained row refusals through the one durable error owner."
@@ -2110,7 +2107,7 @@
                            [::custody :seon.db/connection])
         receipt (when (and run-id (some? form-ordinal))
                   [:seon.cluster.eval/id
-                   (pr-str [run-id form-ordinal])])
+                   (id/evaluation run-id form-ordinal)])
         namespace-name (or (second namespace-ref)
                            (when (and connection agent-id)
                              (agent-namespace @connection agent-id))

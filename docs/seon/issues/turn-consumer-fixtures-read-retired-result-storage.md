@@ -47,7 +47,30 @@ Logs and rejected-draft identity are recorded in
 [the landing note](../../prds/context-generation/research/turn-rename-landing-2026-09-09.md).
 These are local fixture/consumer boundaries, not another lane's failure.
 
-## Acceptance
+## Identity-slice observations, 2026-09-09 08:52 UTC
+
+The HEAD-only bootstrap probe reports **8 tests / 45 assertions, 5 failures
+and 1 error**, unchanged by the stable-id edits. The error is
+`drive-free-generation-is-pure-deterministic-and-pull-gated`: the new
+`ordered-episode` contract rejects the fixture's `:seon.repl/entry`.
+The remaining failures expect the former generated opening membership and
+supervision source. Exact logs and counts are in the
+[landing note](../../prds/context-generation/research/turn-rename-landing-2026-09-09.md).
+
+`test/seon/test_support.clj:624` claims `seed-cluster!` seeds a complete
+config path, but writes only `{:seon.config/cluster cluster-name}` before
+ensuring the cluster entity. The evaluate-sources fixture subsequently
+failed armed with 69 missing effective-config fields. That caller now
+installs `config/compile-manifest`'s desired row, and its real SCI proof
+passes. The shared fixture was excluded from this lane's ownership;
+its misleading completeness claim and other callers still need review.
+
+The obsolete SCI test that restored earlier result objects from print-node
+facts was deleted under turn PRD §14–§15. Persistent-context continuity and
+fresh-context loss are covered by the real virtual-turn fixture. The other
+legacy transcript expectations listed below remain unconverted.
+
+## Acceptance criteria
 
 Use canonical populated databases, real SCI/procs for execution proofs,
 exact terminal facts for waits, and the declared event bound for arming.

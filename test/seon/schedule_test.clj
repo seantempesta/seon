@@ -230,7 +230,7 @@
       (let [task-id "schedule-test/interrupted"
             observed-at (instant "2025-04-05T12:34:45Z")
             nominal-at (instant "2025-04-05T12:34:00Z")
-            fire-id (pr-str [task-id nominal-at])
+            fire-id (id/digest 12 [:seon.schedule.fire/id task-id nominal-at])
             request
             (merge (dissoc (execution-context) :seon.cluster.loop/cluster)
                    {:seon.schedule.task/id task-id

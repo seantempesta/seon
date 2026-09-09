@@ -1,7 +1,8 @@
 (ns seon.effect
   "The one system-side owner for declared capability requests.
 
-  A request identity is `[run-id form-ordinal effect-ordinal]`. Its receipt is
+  A request identity derives from turn, form ordinal, and effect ordinal.
+  Its receipt is
   committed before the protected JVM handler runs on the process-root `:io`
   executor; terminal data is bounded and committed once. Recovery interrupts
   an open receipt and never dispatches it again."
@@ -15,6 +16,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.flow :as flow]
+            [seon.id :as id]
             [seon.sci.admit :as admit]
             [seon.sci.kernel :as kernel]
             [seon.schema :as schema]
@@ -623,9 +625,9 @@
                          (:seon.sci.admit/caps dials))}
                        marker))
                (let [effect-id
-                     (pr-str [(:seon.turn/id *request-context*)
-                              (:seon.cluster.eval/ordinal *request-context*)
-                              effect-ordinal])
+                     (id/digest 12 [::id (:seon.turn/id *request-context*)
+                                    (:seon.cluster.eval/ordinal *request-context*)
+                                    effect-ordinal])
                      result-ref [:seon.effect/id effect-id]
                      opened-at (Date.)
                      open-request

@@ -262,19 +262,19 @@
 
 (defn- nominal-fire-id
   [task-id nominal-at]
-  (pr-str [task-id nominal-at]))
+  (id/digest 12 [:seon.schedule.fire/id task-id nominal-at]))
 
 (defn- receipt-identity
   [claimed-fire-id]
-  (str "maintenance-receipt/" claimed-fire-id))
+  (id/digest 12 [:seon.maintenance.receipt/id claimed-fire-id]))
 
 (defn- request-identity
   [claimed-fire-id]
-  (str "maintenance-request/" claimed-fire-id))
+  (id/digest 12 [:seon.maintenance.request/id claimed-fire-id]))
 
 (defn- result-identity
   [claimed-receipt-id]
-  (str "maintenance-result/" claimed-receipt-id))
+  (id/digest 12 [:seon.maintenance.result/id claimed-receipt-id]))
 
 (defn- error-identity
   [claimed-receipt-id]

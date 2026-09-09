@@ -9,6 +9,7 @@
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.flow :as flow]
+            [seon.id :as id]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support])
@@ -173,7 +174,7 @@
       (let [settled (CountDownLatch. 1)
             observation (atom nil)
             launcher ::fresh-thread-launcher
-            effect-id (pr-str ["effect-run" 3 0])
+            effect-id (id/digest 12 [:seon.effect/id "effect-run" 3 0])
             result-ref [:seon.effect/id effect-id]]
         (with-redefs
           [flow/submit!
@@ -309,7 +310,7 @@
                 :seon.config.flow.io/queue-depth 1
                 :seon.config.flow.io/concurrency 1
                 :seon.config.agent/turn-completion-backstop-ms 60000}})
-            effect-id (pr-str ["effect-run" 3 0])
+            effect-id (id/digest 12 [:seon.effect/id "effect-run" 3 0])
             gate (promise)
             arm (kernel/arm @probe-ctx 150)
             submitting-arm (kernel/current-arm)]
@@ -399,7 +400,7 @@
                  :seon.config.flow.io/queue-depth 1
                  :seon.config.flow.io/concurrency 1
                  :seon.config.agent/turn-completion-backstop-ms 60000}})
-              effect-id (pr-str ["effect-run" 3 0])
+              effect-id (id/digest 12 [:seon.effect/id "effect-run" 3 0])
               gate (promise)]
           (reset! handler-gate gate)
           (try
@@ -529,7 +530,7 @@
               (str "unbounded detached work must be refused loudly; got "
                    (pr-str result)))
           (is (nil? (db/pull @connection [:seon.effect/id]
-                             [:seon.effect/id (pr-str ["effect-run" 3 0])]))
+                             [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])]))
               "and refused before any receipt is opened")))))
 
   (testing "a nonsense explicit limit is refused, never treated as absent"
@@ -539,15 +540,16 @@
                                   {:seon.cluster.agent/id "effect-agent"}
                                   {:seon.turn/id "effect-run"}])
         (install-arm-probe! connection)
-        (let [result
-              (binding [effect/*request-context*
-                        (request-context connection)]
-                (effect/request! #'arm-probe-owner
-                                 {:seon.effect-test/iterations 1}
-                                 {:seon.effect/background? true
-                                  :seon.effect/time-limit-ms 0}))]
-          (is (= :seon.effect/invalid-time-limit
-                 (:seon.error/kind result))))))))
+        (let [basis (db/basis-t @connection)]
+          (is (thrown? clojure.lang.ExceptionInfo
+                       (binding [effect/*request-context*
+                                 (request-context connection)]
+                         (effect/request! #'arm-probe-owner
+                                          {:seon.effect-test/iterations 1}
+                                          {:seon.effect/background? true
+                                           :seon.effect/time-limit-ms 0}))))
+          (is (= basis (db/basis-t @connection))
+              "the armed input contract refuses before an effect can open"))))))
 
 (deftest capability-reachability-is-a-database-query
   (test-support/with-database
@@ -582,7 +584,7 @@
                                {:seon.effect-test/value 7}))
             receipt
             (db/pull @connection '[* {:seon.effect/owner [:seon.fn/sym]}]
-                     [:seon.effect/id (pr-str ["effect-run" 3 0])])]
+                     [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
         (testing "the handler ran on the shared io executor with effective facts"
           (is (= 7 (:seon.effect-test/value first-result)))
           (is (true? (:seon.effect-test/virtual-thread? first-result)))
@@ -616,7 +618,7 @@
         (is (= :seon.effect/invalid-request (:seon.error/kind result)))
         (is (nil? (db/pull @connection [:seon.effect/id]
                            [:seon.effect/id
-                            (pr-str ["effect-run" 3 0])])))))))
+                            (id/digest 12 [:seon.effect/id "effect-run" 3 0])])))))))
 
 (deftest an-oversized-request-is-refused-and-never-dispatched
   ;; THE CLASS: this refusal read `:seon.sci.admit/capped?`, and when that key
@@ -647,7 +649,7 @@
         (is (str/includes? (:seon.error/message result)
                            ":seon.config.eval.result/max-bytes"))
         (is (nil? (db/pull @connection [:seon.effect/id]
-                           [:seon.effect/id (pr-str ["effect-run" 3 0])]))
+                           [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])]))
             "nothing was opened, so nothing was dispatched")))))
 
 (deftest interrupted-handlers-mark-the-open-receipt-without-a-result
@@ -668,7 +670,7 @@
                 receipt
                 (db/pull @connection '[*]
                          [:seon.effect/id
-                          (pr-str ["effect-run" 3 0])])]
+                          (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
             (is (= :seon.effect/interrupted (:seon.error/kind result)))
             (is (inst? (:seon.effect/interrupted-at receipt)))
             (is (nil? (:seon.effect/result-edn receipt)))))))))
@@ -679,7 +681,7 @@
       (db/transact! connection [(cluster-config 600000)
                                 {:seon.turn/id "effect-run"}
                                 {:seon.cluster.eval/id
-                                 (pr-str ["effect-run" 3])
+                                 (run/receipt-identity "effect-run" 3)
                                  :seon.cluster.eval/run
                                  [:seon.turn/id "effect-run"]
                                  :seon.cluster.eval/ordinal 3
@@ -705,7 +707,7 @@
               :seon.boot/cluster-name "default"})
             receipt
             (db/pull @connection '[*]
-                     [:seon.effect/id (pr-str ["effect-run" 3 0])])]
+                     [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
         (is (= 9 (get-in evaluation
                          [:seon.sci.admit/value
                           :seon.effect-test/value])))
@@ -728,7 +730,7 @@
         (install-capability! connection)
         (db/transact!
          connection
-         [{:seon.effect/id (pr-str ["effect-run" 3 0])
+         [{:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])
            :seon.effect/run [:seon.turn/id "effect-run"]
            :seon.effect/owner [:seon.fn/sym "seon.effect-test/capability-owner"]
            :seon.effect/form-ordinal 3
@@ -743,7 +745,7 @@
            ::run/now now}))
         (let [receipt (db/pull @connection '[*]
                                [:seon.effect/id
-                                (pr-str ["effect-run" 3 0])])]
+                                (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
           (is (= now (:seon.effect/interrupted-at receipt)))
           (is (nil? (:seon.effect/result-edn receipt)))
           (is (some? (::run/closed-at

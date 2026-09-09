@@ -6,29 +6,15 @@
             [seon.instrument :as instrument]
             [seon.test-support :as test-support]))
 
-(def ^:private function-schemas-state
-  (ns-resolve 'malli.core '-function-schemas*))
-
 (def ^:dynamic ^:private *connection* nil)
 
 (defn- preserving-instrumentation-state
   [body]
   (test-support/with-database
    (fn [connection]
-     (let [instrumented-roots (into {}
-                                    (map (juxt identity deref))
-                                    (instrument/instrumented))
-           function-schemas @@function-schemas-state]
-       (try
-         (binding [*connection* connection]
-           (body))
-         (finally
-           (try
-             (instrument/remove!)
-             (finally
-               (reset! @function-schemas-state function-schemas)))
-           (doseq [[instrumented-var root] instrumented-roots]
-             (alter-var-root instrumented-var (constantly root)))))))))
+     (test-support/preserving-instrumentation-state
+      #(binding [*connection* connection]
+         (body))))))
 
 (use-fixtures :each preserving-instrumentation-state)
 

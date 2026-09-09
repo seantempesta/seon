@@ -993,7 +993,7 @@
 
 (defn- message-tx
   "One explanation message: the notice's ai projection, STORED.
-  The id is DERIVED from the error and the reason, which makes delivery
+  The id is DERIVED from error, recipient, and reason, which makes delivery
   idempotent by construction — re-committing the same error upserts the
   same message instead of double-sending it, and the double-send
   question the plan has been carrying since 2026-07-26 does not arise on
@@ -1001,7 +1001,8 @@
   its ABSENCE on an ordinary user message is what makes the storm fence
   computable without a flag."
   [fact recipient reason notification]
-  {:seon.cluster.message/id (str (:seon.error/id fact) "-" (name reason))
+  {:seon.cluster.message/id
+   (id/digest 12 [::notification (:seon.error/id fact) recipient reason])
    :seon.cluster.message/to [:seon.cluster.agent/id recipient]
    :seon.cluster.message/content
    (ai-prose
