@@ -12,6 +12,32 @@ Surface: MCP, cluster `default`, JVM mode, explicit `(seon.operator/connection "
 
 The target schema is absent on default. The writes below actually ran through `datahike.api/with` on a speculative value derived from default, after the probe installed the explicitly listed proposed attributes there. These establish dependency semantics, not production schema validation, wake delivery, or live target-schema adoption. Event ids are fixed probe inputs; real messages mint fresh event ids.
 
+## Namespace declarations through dir
+
+The directory macro evaluates a finite reverse-reference schema pull in the
+agent's own read. Even an empty directory therefore observes later declarations;
+the existing acquired function summaries remain unchanged. Canonical real-SCI
+regression: fast **2 tests / 49 assertions**, isolated **2 / 51**, platform green.
+The fresh default JVM returned these **385 shown UTF-8 bytes** from a **23-byte
+form**. The full evaluation also records attribute-level dependencies; only the
+finite pull's index patterns are exact. [Executed evidence](context_cookbook_directory_2026_09_09.edn).
+
+```clojure
+;; I should inspect my namespace's functions and schema declarations before querying its data.
+(dir my.agents.juniper)
+```
+
+```clojure
+[#:seon.schema{:form ":int", :key :example/amount} #:seon.schema{:form ":string",
+    :key :example/customer} #:seon.schema{:form "[:string #:seon.db{:identity true}]",
+    :key :example/order} #:seon.schema{:form "[:map #:seon.db{:attributes true} [:example/order :example/order] [:example/amount :example/amount] [:example/customer :example/customer]]",
+    :key :example/order-row}]
+```
+
+Browser observation remains unavailable: computer-use returned "No browser is
+available" on the default URL. Canonical HTML assertions are evidence of rendered
+content, not observed browser paint.
+
 ## Read choice and evidence
 
 Pull describes one known entity or a known set, including nested and reverse refs. Use q for value filters, joins, and aggregates; combine q with inner pull when both filtering and shaping. The live reverse message pull recorded index patterns and returned the incoming messages in one form. Pattern-only aggregate q also recorded index patterns. Inner pull and not recorded attribute-level evidence: correct but coarse. Explicit finite selectors recorded index patterns; wildcard/recursive selectors cannot make that claim. Source: src/seon/db.clj:335–423. Index-pattern presence means constraints at each pattern, not a fully joined result dependency. An invalid read is a refusal, never an empty healthy block.

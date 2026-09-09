@@ -374,3 +374,38 @@
          (spit "docs/prds/context-generation/research/context_cookbook_identity_2026_09_09.edn"
                (pr-str result))
          result)))))
+
+(defn probe-directory!
+  "Execute the agent's directory form and retain its shown text and evidence."
+  []
+  (let [connection (operator/connection "default")
+        database @connection
+        projection (schema/projection-from-database database)
+        handle (:seon.turn.loop/cluster (get @runtime/running-instances "default"))]
+    (schema/call-with-projection
+     projection
+     (fn []
+       (let [source (repl/source-text '(dir my.agents.juniper))
+             captured (atom [])
+             evaluation
+             (binding [db/*read-evidence-sink* captured]
+               ((requiring-resolve 'seon.sci.eval/evaluate)
+                {:seon.cluster.eval/source source
+                 :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                 :seon.db/db database
+                 :seon.sci.admit/caps (:seon.sci.admit/caps handle)
+                 :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)
+                 :seon.config/on-core-error :panic}))
+             output (pr-str (:seon.sci.admit/value evaluation))
+             shown (:seon.eval/value evaluation)
+             result {:source source :source-bytes (byte-count source)
+                     :output output :bytes (byte-count output)
+                     :shown shown :shown-bytes (byte-count shown)
+                     :evidence (mapv #(if (seq (:seon.db/read-index-patterns %))
+                                       :index-patterns :attribute-level) @captured)
+                     :basis (db/basis-t database)
+                     :default-unchanged? (= (db/basis-t database) (db/basis-t @connection))}]
+         (assert (not (:seon.cluster.eval/error evaluation)))
+         (spit "docs/prds/context-generation/research/context_cookbook_directory_2026_09_09.edn"
+               (pr-str result))
+         result)))))

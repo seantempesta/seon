@@ -1156,7 +1156,7 @@
    {:ns (sci/create-ns 'clojure.repl)}))
 
 (defn- program-dir-var
-  "An SCI dir macro returning public summaries with their input/output specs."
+  "Return public function summaries and read the namespace's declared schemas."
   [_ctx documentation]
   (let [by-namespace
         (group-by (comp symbol namespace symbol :seon.fn/sym)
@@ -1165,17 +1165,24 @@
     (sci/new-macro-var
      'dir
      (fn [_form _env namespace-name]
-       (if-let [rows (get by-namespace namespace-name)]
-         (list 'quote
-               (mapv (fn [row]
-                       (cond-> (dissoc row :seon.fn/arities)
-                         (:seon.fn/doc row)
-                         (update :seon.fn/doc #(first (str/split-lines %)))))
-                     rows))
-         ;; Resolve in the calling agent's context, which can own namespaces
-         ;; absent from the acquired program-only base.
-         (list 'if (list 'clojure.core/find-ns (list 'quote namespace-name))
-               [] (list 'quote (documentation-unavailable namespace-name)))))
+       (let [rows (mapv (fn [row]
+                          (cond-> (dissoc row :seon.fn/arities)
+                            (:seon.fn/doc row)
+                            (update :seon.fn/doc #(first (str/split-lines %)))))
+                        (get by-namespace namespace-name))]
+         ;; This pull runs with the agent's form, so even an empty directory
+         ;; records the reverse edge that a later declaration will change.
+         `(let [namespace# (seon.db/pull
+                            '[:seon.ns/name
+                              {:seon.schema/_ns [:seon.schema/key :seon.schema/form]}]
+                            '~[:seon.ns/name namespace-name])]
+            (cond
+              (:seon.error/kind namespace#) namespace#
+              (or (:seon.ns/name namespace#)
+                  (clojure.core/find-ns '~namespace-name)
+                  ~(boolean (seq rows)))
+              (into '~rows (sort-by :seon.schema/key (:seon.schema/_ns namespace#)))
+              :else '~(documentation-unavailable namespace-name)))))
      {:ns (sci/create-ns 'clojure.repl)})))
 
 (defn- install-program-doc!
