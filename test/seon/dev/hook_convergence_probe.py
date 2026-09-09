@@ -74,7 +74,7 @@ if __name__ == "__main__":
         sys.exit(0)
     if "--five-only" not in sys.argv:
         print(json.dumps({"one": edit(PATHS[1])}), flush=True)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         started = time.monotonic()
         requests = []
         for path in PATHS:

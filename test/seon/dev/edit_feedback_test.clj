@@ -49,7 +49,7 @@
     (is (= [failure failure failure nil]
            (edn/read-string (::stdout result))))))
 
-(deftest concurrent-editors-receive-the-one-publication-covering-their-paths
+(deftest concurrent-editors-queue-without-waiting-for-publication
   (let [directory (fixture-directory)
         config (io/file directory "hook.edn")
         state (io/file directory "state")
@@ -80,10 +80,16 @@
                                   :tool_input {:file_path path}})})))
                   paths)
             responses (mapv #(test-support/await-event! % "coalesced hook result") requests)
+            worker-state (edn/read-string (slurp (io/file state ".source-worker.edn")))
+            worker-handle (java.lang.ProcessHandle/of (:seon.hook/pid worker-state))
+            _ (when (.isPresent worker-handle)
+                (.get (.onExit (.get worker-handle)) 30 java.util.concurrent.TimeUnit/SECONDS))
             result-files (vec (.listFiles (io/file state "source-publications")))]
         (is (= 1 (count result-files)) "one real operator request covers five editors")
         (doseq [response responses]
-          (is (zero? (::exit response)) (::stderr response)))
+          (is (zero? (::exit response)) (::stderr response))
+          (is (str/includes? (::stdout response) "queued for publication"))
+          (is (str/includes? (::stdout response) "seon.cluster.source/current")))
         (when (= 1 (count result-files))
           (let [result (edn/read-string (slurp (first result-files)))
                 id (:seon.hook/publication result)

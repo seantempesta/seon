@@ -1306,8 +1306,7 @@
                                  (publish-source-paths paths config id))
                     result (source-result-path id)]
                 (io/make-parents result)
-                ;; One newline terminates the result. Every editor tails this
-                ;; same file and reads only a complete terminal line.
+                ;; Persist the terminal result for independent convergence inspection.
                 (with-pending-lock
                   #(spit result (str (pr-str (assoc batch
                                                    :seon.hook/worker-pid
@@ -1321,7 +1320,7 @@
         (with-pending-lock #(.delete source-worker-path))))))
 
 (defn- current-source-feedback
-  "Join one quiet publication and wait for the result covering this edit."
+  "Queue this edit in the root's detached publication worker and return immediately."
   [event config]
   (let [paths (->> (event-file-paths event)
                    (filter source-index-path?)
@@ -1329,28 +1328,10 @@
     (when (and (= (:hook_event_name event) "PostToolUse")
                (get-in config [:current-source :enabled] true)
                (seq paths))
-      (let [id (with-pending-lock #(enqueue-source-unlocked! paths))
-            result-path (source-result-path id)
-            child (process/process ["tail" "-n" "+1" "-f" (str result-path)]
-                                   {:out :stream :err :string})]
-        (try
-          (with-open [reader (io/reader (:out child))]
-            (try
-             (let [line (future (.readLine reader))
-                  ; Queue and publication each have the configured bound;
-                  ; tail delivers the completed result on its next interval.
-                  result (deref line
-                                (+ 1000 (* 2000 (get-in config [:current-source :timeout-seconds] 180)))
-                                ::timeout)]
-              (if (or (= ::timeout result) (nil? result))
-                (str "ADVISORY — current-src publication refused: no result arrived at "
-                     result-path ". Convergence is unknown.")
-                (str "Publication " id " covered " (str/join ", " paths)
-                     ": " (:seon.hook/feedback (edn/read-string result)))))
-             (finally (process/destroy-tree child))))
-          (finally
-            (process/destroy-tree child)
-            @child))))))
+      (let [id (with-pending-lock #(enqueue-source-unlocked! paths))]
+        (str "queued for publication " id ": " (str/join ", " paths)
+             ". Check convergence by comparing the cluster's :seon.source/commit-id"
+             " with seon.cluster.source/current. Result: " (source-result-path id))))))
 
 
 (defn- feedback-response [feedback]
