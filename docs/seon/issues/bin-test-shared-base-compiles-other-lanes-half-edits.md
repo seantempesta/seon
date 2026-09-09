@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, test, runner, tooling, pre-read]
 ---
@@ -122,3 +122,25 @@ construction for `database-projections-follow-exact-committed-identity` at
 edits preceded this baseline; no foreign edit is attributed as its cause.
 The assignment's stop boundary was honored; see the
 [partial registry census](../../prds/context-generation/research/cluster-scoped-registry-landing-2026-09-08.md).
+
+
+## Resolution — 2026-09-08
+
+`45e5c6c56` publishes from the prepared HEAD-plus-selected-paths checkout,
+keyed by its first-party bytes. The preparation runner verifies that its
+`seon/fn.clj` resource resolves from that exact checkout before publishing.
+Coordinator and canonical fixtures reuse the publication's saved manifest;
+ordinary fixtures fork through a memory frontend over the read-only base.
+`f7aeaffbf` handles snapshots whose cache producer predates the classpath
+field, so a newer launcher never blindly slurps a missing field.
+
+The selected-path regression verifies the dependency/preparation and worker
+bytes, including admitted additions/deletions and an excluded foreign edit.
+The owned-file isolated runner gate passed 41 tests / 259 assertions with
+zero failures or errors; `90d381603` also fixes complete worker COW views
+and exclusion of generated worker output. See the
+[runner base cache landing note](../../prds/context-generation/research/runner-base-cache-landing-2026-09-08.md)
+for snapshot IDs, cache reuse, direct default-JVM evidence, and exact gates.
+The historical observations above are retained as incident evidence; the
+indexer's diagnostics for concurrently changing non-snapshot inputs are a
+separate boundary, not a claim made by this isolated-gate fix.

@@ -22,6 +22,14 @@
            [java.lang ProcessHandle]
            [java.util.concurrent CountDownLatch TimeUnit]))
 
+(deftest ^{:seon.test/platform "Coordinator consumes the prepared worker count."}
+  coordinator-uses-the-prepared-worker-count
+  (is (= 2 (#'runner/worker-count 16 "2")))
+  (is (= 1 (#'runner/worker-count 16 "1")))
+  (is (= 8 (#'runner/worker-count 16 nil)))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be positive"
+                        (#'runner/worker-count 16 "0"))))
+
 (def ^:private at (java.util.Date. 1785283200000))
 (def ^:private git-sha (apply str (repeat 40 "a")))
 (def ^:private run-id "test-run-1")
@@ -1093,10 +1101,47 @@
         (when (.exists fixture-root)
           (test-support/delete-recursively! fixture-root))))))
 
+(defn- launcher-checkout!
+  "Give a launcher fixture its own cache authority as well as its own run roots."
+  [fixture-root]
+  (let [checkout (io/file fixture-root "checkout")
+        log (io/file fixture-root "checkout.log")
+        script (str "set -euo pipefail\n"
+                    "origin=$1\ncheckout=$2\n"
+                    "mkdir -p \"$checkout/docs\" \"$checkout/bin\" \"$checkout/src/seon/test\" \"$checkout/test\" \"$checkout/.agents/skills\" \"$checkout/.claude\" \"$checkout/.clj-kondo\"\n"
+                    "cd \"$checkout\"\n"
+                    "cp \"$origin/bin/test\" \"$origin/bin/_java-home-resolver\" bin/\n"
+                    "cp \"$origin/src/seon/fs.clj\" src/seon/fs.clj\n"
+                    "cp \"$origin/src/seon/test/cache.clj\" src/seon/test/cache.clj\n"
+                    "printf '{:paths [\"src\"]}\\n' > bb.edn\n"
+                    "printf 'tmp/\\ntarget/\\n' > .gitignore\n"
+                    "touch docs/fixture test/fixture_test.clj .agents/skills/fixture .clj-kondo/fixture\n"
+                    "ln -s .agents/skills seon-skills\n"
+                    "ln -s ../.agents/skills .claude/skills\n"
+                    "ln -s \"$origin/reference-code\" reference-code\n"
+                    "git init -q\ngit add -- docs bin src test bb.edn .gitignore .agents .claude .clj-kondo seon-skills reference-code\n"
+                    "git -c user.name=\"$(git -C \"$origin\" config user.name)\" -c user.email=\"$(git -C \"$origin\" config user.email)\" commit -qm baseline\n")
+        _ (.mkdirs fixture-root)
+        child (.start (doto (ProcessBuilder. ^java.util.List
+                                             ["/bin/bash" "-c" script "launcher-checkout"
+                                              (.getPath project-root) (.getPath checkout)])
+                        (.redirectErrorStream true)
+                        (.redirectOutput log)))]
+    (try
+      (when-not (.waitFor child test-support/event-backstop-seconds TimeUnit/SECONDS)
+        (throw (ex-info "Launcher fixture checkout did not finish."
+                        {::runner/worker-root (.getPath checkout)})))
+      (when-not (zero? (.exitValue child))
+        (throw (ex-info "Launcher fixture checkout failed."
+                        {::runner/task-output (slurp log)})))
+      checkout
+      (finally (stop-process-tree! child)))))
+
 (deftest interrupted-launcher-awaits-its-runner-before-retaining-the-root
   (let [fixture-root
         (io/file project-root "tmp" "test-runner-interrupt"
                  (str (random-uuid)))
+        checkout (launcher-checkout! fixture-root)
         fake-bin (io/file fixture-root "bin")
         fake-clojure (io/file fake-bin "clojure")
         reaped-file (io/file fixture-root "child-reaped.txt")
@@ -1133,9 +1178,9 @@
             (doto
              (ProcessBuilder.
               ^java.util.List
-              [(str (io/file project-root "bin" "test"))
-               "seon.test-runner-test"])
-              (.directory project-root)
+              [(str (io/file checkout "bin" "test"))
+               "--paths" "bin/test" "--" "seon.test-runner-test"])
+              (.directory checkout)
               (.redirectErrorStream true))
             _ (.put (.environment builder)
                     "SEON_TEST_RUN_PARENT" (.getCanonicalPath run-parent))
@@ -1384,6 +1429,7 @@
   (let [fixture-root
         (io/file project-root "tmp" "test-runner-worker-cache"
                  (str (random-uuid)))
+        checkout (launcher-checkout! fixture-root)
         fake-bin (io/file fixture-root "bin")
         fake-clojure (io/file fake-bin "clojure")
         run-parent (io/file fixture-root "runs")
@@ -1421,9 +1467,9 @@
             (doto
              (ProcessBuilder.
               ^java.util.List
-              [(str (io/file project-root "bin" "test"))
+              [(str (io/file checkout "bin" "test"))
                "--paths" "bin/test" "--" "seon.test-runner-test"])
-              (.directory project-root)
+              (.directory checkout)
               (.redirectErrorStream true))
             _ (.put (.environment builder)
                     "SEON_TEST_RUN_PARENT" (.getCanonicalPath run-parent))
@@ -1449,9 +1495,9 @@
             (doto
              (ProcessBuilder.
               ^java.util.List
-              [(str (io/file project-root "bin" "test"))
+              [(str (io/file checkout "bin" "test"))
                "--paths" "bin/test" "--" "seon.test-runner-test"])
-              (.directory project-root)
+              (.directory checkout)
               (.redirectErrorStream true))
             _ (.put (.environment builder)
                     "SEON_TEST_RUN_PARENT" (.getCanonicalPath run-parent))
@@ -1483,6 +1529,7 @@
   (let [fixture-root
         (io/file project-root "tmp" "test-runner-root-claim"
                  (str (random-uuid)))
+        checkout (launcher-checkout! fixture-root)
         fake-bin (io/file fixture-root "bin")
         fake-clojure (io/file fake-bin "clojure")
         fake-cp (io/file fake-bin "cp")
@@ -1529,8 +1576,9 @@
             (doto
              (ProcessBuilder.
               ^java.util.List
-              [(str (io/file project-root "bin" "test")) "seon.fs-test"])
-              (.directory project-root)
+              [(str (io/file checkout "bin" "test"))
+               "--paths" "bin/test" "--" "seon.fs-test"])
+              (.directory checkout)
               (.redirectErrorStream true))
             environment (.environment builder)
             _ (.put environment "SEON_TEST_RUN_PARENT"
@@ -2025,6 +2073,54 @@
             (is (str/includes? output "src/added.txt") output)
             (is (str/includes? output "src/deleted.txt") output)
             (is (not (str/includes? output "src/foreign.txt")) output))))
+      (finally
+        (when-let [process @child] (stop-process-tree! process))
+        (test-support/delete-recursively! root)))))
+
+
+(deftest fast-selected-paths-exclude-a-broken-foreign-file
+  (let [root (doto (io/file project-root "tmp" (str "fast-paths-" (random-uuid))) .mkdirs)
+        script (io/file root "probe.sh")
+        log (io/file root "output.txt")
+        child (atom nil)]
+    (try
+      (spit script
+            (str "set -euo pipefail\n"
+                 "origin=$1\nfixture=$2\nmkdir -p \"$fixture\"\n"
+                 "git -C \"$origin\" archive HEAD | tar -x -C \"$fixture\"\n"
+                 "cd \"$fixture\"\n"
+                 "rmdir reference-code/* 2>/dev/null || true\n"
+                 "rm -rf reference-code\n"
+                 "ln -s \"$origin/reference-code\" reference-code\n"
+                 "for path in bin/test bin/test-fast src/seon/test/fast.clj src/seon/test/arm.clj src/seon/test/runner.clj; do cp \"$origin/$path\" \"$path\"; done\n"
+                 "git init -q\n"
+                 "git add -f -- bin src test resources config deps.edn bb.edn .agents .claude seon-skills .gitignore .clj-kondo script dev_cache.clj reference-code\n"
+                 "git -c user.name=\"$(git -C \"$origin\" config user.name)\" -c user.email=\"$(git -C \"$origin\" config user.email)\" commit -qm baseline\n"
+                 "printf '(' > src/seon/repl.clj\n"
+                 "cat > test/seon/fast_paths_fixture_test.clj <<'CLJ'\n"
+                 "(ns seon.fast-paths-fixture-test (:require [clojure.test :refer [deftest is]] [seon.instrument :as instrument]))\n"
+                 "(deftest selected-working-bytes (is (= :selected (identity :selected))) (is (seq (instrument/instrumented))))\n"
+                 "CLJ\n"
+                 "SEON_TEST_RUN_PARENT=\"$fixture/tmp/test-runs\" bin/test --fast --paths test/seon/fast_paths_fixture_test.clj -- seon.fast-paths-fixture-test\n"
+                 "test \"$(cat src/seon/repl.clj)\" = '('\n"
+                 "test -z \"$(find tmp/test-runs -name 'run.*' -type d -print)\"\n"))
+      (let [process (.start
+                     (doto (ProcessBuilder. ^java.util.List
+                                            ["/bin/bash" (.getPath script)
+                                             (.getPath project-root)
+                                             (.getPath (io/file root "checkout"))])
+                       (.redirectErrorStream true)
+                       (.redirectOutput log)))]
+        (reset! child process)
+        (is (.waitFor process (* 12 test-support/event-backstop-seconds)
+                      TimeUnit/SECONDS)
+            "the real armed snapshot JVM must finish within the subprocess bound")
+        (when-not (.isAlive process)
+          (let [output (slurp log)]
+            (is (zero? (.exitValue process)) output)
+            (is (str/includes? output "CONTRACTS ARMED") output)
+            (is (str/includes? output "Ran 1 tests containing 2 assertions.") output)
+            (is (str/includes? output "0 failures, 0 errors.") output))))
       (finally
         (when-let [process @child] (stop-process-tree! process))
         (test-support/delete-recursively! root)))))

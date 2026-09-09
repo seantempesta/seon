@@ -84,6 +84,7 @@ explicit_selection=0
 namespaces=()
 changed_paths=()
 snapshot_paths=()
+fast_iteration=0
 
 set_mode() {
   if [ -n "$requested_mode" ] && [ "$requested_mode" != "$1" ]; then
@@ -118,6 +119,10 @@ while [ $# -gt 0 ]; do
       ;;
     --platform)
       set_mode platform
+      shift
+      ;;
+    --fast)
+      fast_iteration=1
       shift
       ;;
     --paths)
@@ -187,6 +192,12 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+if [ "$fast_iteration" -eq 1 ] &&
+   { [ ${#snapshot_paths[@]} -eq 0 ] || [ "$explicit_selection" -ne 1 ]; }; then
+  echo 'bin/test: --fast requires --paths FILE... -- NAMESPACE...' >&2
+  exit 64
+fi
 
 if [ "$explicit_selection" -eq 1 ]; then
   if [ -n "$requested_mode" ]; then
@@ -332,6 +343,114 @@ printf 'pid=%s process-start=%s suite-start=%s git=%s selection=%s\n' \
   "$git_sha" \
   "$selection" >"$run_root/test-run.txt"
 
+remove_run_root() {
+  case "$run_root" in
+    "$run_parent"/run.*)
+      bb --config "$source_root/bb.edn" -e \
+        '(require (quote [seon.fs :as fs]))
+         (apply fs/delete-recursively! *command-line-args*)' \
+        "$run_parent" "$run_root"
+      ;;
+    *) echo "bin/test: refusing unexpected run-root cleanup: $run_root" >&2; return 70 ;;
+  esac
+}
+
+suite_pid=
+runner_reap_backstop_seconds=10
+
+reap_runner() {
+  local requested_signal=$1
+  local runner_pid runner_exit reap_watchdog_pid
+  if [ -z "$suite_pid" ]; then
+    return 0
+  fi
+
+  runner_pid=$suite_pid
+  suite_pid=
+  if kill -0 "$runner_pid" 2>/dev/null; then
+    kill -"$requested_signal" "$runner_pid" 2>/dev/null || true
+    (
+      sleep "$runner_reap_backstop_seconds"
+      if kill -0 "$runner_pid" 2>/dev/null; then
+        echo "bin/test: RUNNER REAP BACKSTOP fired for pid=$runner_pid; forcing exit" >&2
+        kill -KILL "$runner_pid" 2>/dev/null || true
+      fi
+    ) &
+    reap_watchdog_pid=$!
+  else
+    reap_watchdog_pid=
+  fi
+
+  if wait "$runner_pid"; then
+    runner_exit=0
+  else
+    runner_exit=$?
+  fi
+  if [ -n "$reap_watchdog_pid" ]; then
+    kill "$reap_watchdog_pid" 2>/dev/null || true
+    wait "$reap_watchdog_pid" 2>/dev/null || true
+  fi
+  printf 'runner-exit=%s runner-reaped-at=%s\n' \
+    "$runner_exit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    >>"$run_root/test-run.txt"
+}
+
+launch_runner() {
+  "$@" &
+  suite_pid=$!
+  printf 'runner-pid=%s runner-started-at=%s\n' \
+    "$suite_pid" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    >>"$run_root/test-run.txt"
+}
+
+await_runner() {
+  local runner_pid=$suite_pid runner_exit
+  if wait "$runner_pid"; then
+    runner_exit=0
+  else
+    runner_exit=$?
+  fi
+  printf 'runner-exit=%s runner-reaped-at=%s\n' \
+    "$runner_exit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    >>"$run_root/test-run.txt"
+  suite_pid=
+  return "$runner_exit"
+}
+
+retain_run_root() {
+  local caught_signal=$1
+  local status=$2
+  trap - HUP INT TERM
+  reap_runner TERM
+  printf 'retained-reason=signal-%s\n' "$caught_signal" >>"$run_root/test-run.txt"
+  if [ "$fast_iteration" -eq 1 ]; then
+    echo "bin/test-fast: interrupted by $caught_signal; removing snapshot $run_root" >&2
+  else
+    echo "bin/test: interrupted by $caught_signal; retained isolated operator root $run_root" >&2
+  fi
+  exit "$status"
+}
+
+reap_runner_on_launcher_exit() {
+  local status=$?
+  trap - EXIT HUP INT TERM
+  if [ -n "$suite_pid" ]; then
+    reap_runner TERM
+    printf 'retained-reason=launcher-exit-%s\n' "$status" \
+      >>"$run_root/test-run.txt"
+  fi
+  if [ "$fast_iteration" -eq 1 ]; then
+    cd "$source_root"
+    remove_run_root
+  fi
+  exit "$status"
+}
+
+trap 'retain_run_root HUP 129' HUP
+trap 'retain_run_root INT 130' INT
+trap 'retain_run_root TERM 143' TERM
+trap reap_runner_on_launcher_exit EXIT
+
 phase_started=$SECONDS
 record_phase() {
   local phase=$1
@@ -343,6 +462,7 @@ record_phase() {
 
 populate_checkout_root() {
   local target_root=$1 entry entries
+  local -a sources=()
   mkdir -p "$target_root/data" "$target_root/logs" \
     "$target_root/target" "$target_root/tmp"
   entries=$({
@@ -358,15 +478,16 @@ populate_checkout_root() {
     case "$entry" in
       data|logs|target|tmp|workers) ;;
       reference-code) ln -s "$source_root/$entry" "$target_root/$entry" ;;
-      *)
-        case "$(uname -s)" in
-          Darwin) cp -cRP "$source_root/$entry" "$target_root/$entry" ;;
-          Linux) cp -a --reflink=auto "$source_root/$entry" "$target_root/$entry" ;;
-          *) cp -pRP "$source_root/$entry" "$target_root/$entry" ;;
-        esac
-        ;;
+      *) sources+=("$source_root/$entry") ;;
     esac
   done <<< "$entries"
+  if [ ${#sources[@]} -gt 0 ]; then
+    case "$(uname -s)" in
+      Darwin) cp -cRP "${sources[@]}" "$target_root/" ;;
+      Linux) cp -a --reflink=auto "${sources[@]}" "$target_root/" ;;
+      *) cp -pRP "${sources[@]}" "$target_root/" ;;
+    esac
+  fi
 
   ln -s "$source_root/.git" "$target_root/.git"
   if [ -e "$source_root/.env" ]; then
@@ -425,6 +546,16 @@ git -C "$source_root" --work-tree="$run_root" ls-files --others --exclude-standa
   done
 echo "bin/test: end snapshot differences"
 record_phase snapshot
+
+# test-fast shares this exact snapshot and child lifecycle, but stops before
+# dependency-cache preparation, worker copies, and base publication.
+if [ "$fast_iteration" -eq 1 ]; then
+  echo "bin/test-fast: selected snapshot $run_root"
+  cd "$run_root"
+  launch_runner clojure -M:test -m seon.test.fast "${namespaces[@]}"
+  if await_runner; then status=0; else status=$?; fi
+  exit "$status"
+fi
 
 # The dependency preparation and all workers consume this same snapshot.
 rmdir "$run_root/target"
@@ -558,94 +689,6 @@ if [ -z "$result_root" ]; then
   result_root="$run_root/data/clusters"
 fi
 
-suite_pid=
-runner_reap_backstop_seconds=10
-
-reap_runner() {
-  local requested_signal=$1
-  local runner_pid runner_exit reap_watchdog_pid
-  if [ -z "$suite_pid" ]; then
-    return 0
-  fi
-
-  runner_pid=$suite_pid
-  suite_pid=
-  if kill -0 "$runner_pid" 2>/dev/null; then
-    kill -"$requested_signal" "$runner_pid" 2>/dev/null || true
-    (
-      sleep "$runner_reap_backstop_seconds"
-      if kill -0 "$runner_pid" 2>/dev/null; then
-        echo "bin/test: RUNNER REAP BACKSTOP fired for pid=$runner_pid; forcing exit" >&2
-        kill -KILL "$runner_pid" 2>/dev/null || true
-      fi
-    ) &
-    reap_watchdog_pid=$!
-  else
-    reap_watchdog_pid=
-  fi
-
-  if wait "$runner_pid"; then
-    runner_exit=0
-  else
-    runner_exit=$?
-  fi
-  if [ -n "$reap_watchdog_pid" ]; then
-    kill "$reap_watchdog_pid" 2>/dev/null || true
-    wait "$reap_watchdog_pid" 2>/dev/null || true
-  fi
-  printf 'runner-exit=%s runner-reaped-at=%s\n' \
-    "$runner_exit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-    >>"$run_root/test-run.txt"
-}
-
-launch_runner() {
-  "$@" &
-  suite_pid=$!
-  printf 'runner-pid=%s runner-started-at=%s\n' \
-    "$suite_pid" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-    >>"$run_root/test-run.txt"
-}
-
-await_runner() {
-  local runner_pid=$suite_pid runner_exit
-  if wait "$runner_pid"; then
-    runner_exit=0
-  else
-    runner_exit=$?
-  fi
-  printf 'runner-exit=%s runner-reaped-at=%s\n' \
-    "$runner_exit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
-    >>"$run_root/test-run.txt"
-  suite_pid=
-  return "$runner_exit"
-}
-
-retain_run_root() {
-  local caught_signal=$1
-  local status=$2
-  trap - HUP INT TERM
-  reap_runner TERM
-  printf 'retained-reason=signal-%s\n' "$caught_signal" >>"$run_root/test-run.txt"
-  echo "bin/test: interrupted by $caught_signal; retained isolated operator root $run_root" >&2
-  exit "$status"
-}
-
-reap_runner_on_launcher_exit() {
-  local status=$?
-  trap - EXIT HUP INT TERM
-  if [ -n "$suite_pid" ]; then
-    reap_runner TERM
-    printf 'retained-reason=launcher-exit-%s\n' "$status" \
-      >>"$run_root/test-run.txt"
-  fi
-  exit "$status"
-}
-
-trap 'retain_run_root HUP 129' HUP
-trap 'retain_run_root INT 130' INT
-trap 'retain_run_root TERM 143' TERM
-trap reap_runner_on_launcher_exit EXIT
-
 echo "bin/test: isolated operator root $run_root pid=$$ selection=$selection"
 cd "$run_root"
 set +e
@@ -687,6 +730,7 @@ coordinator_jvm_arguments=(
   "-J-Dseon.test.source-root=$source_root"
   "-J-Dseon.test.changed-paths-file=$changed_paths_file"
   "-J-Dseon.test.worker-parent=$worker_parent"
+  "-J-Dseon.test.worker-count=$worker_count"
   "-J-Dseon.test.published-base=$shared_published_base"
 )
 if [ -n "$persistent_results_root" ]; then
@@ -710,19 +754,8 @@ record_phase coordinator-and-tests
 cd "$source_root"
 
 if [ "$status" -eq 0 ]; then
-  case "$run_root" in
-    "$run_parent"/run.*)
-      bb --config "$source_root/bb.edn" -e \
-        '(require (quote [seon.fs :as fs]))
-         (apply fs/delete-recursively! *command-line-args*)' \
-        "$run_parent" "$run_root"
-      echo "bin/test: removed successful isolated operator root $run_root"
-      ;;
-    *)
-      echo "bin/test: refusing unexpected run-root cleanup: $run_root" >&2
-      exit 70
-      ;;
-  esac
+  remove_run_root
+  echo "bin/test: removed successful isolated operator root $run_root"
 else
   echo "bin/test: retained failed isolated operator root $run_root" >&2
 fi

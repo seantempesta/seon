@@ -211,8 +211,9 @@ was built by the ordinary publisher. No published store was copied.
 | Tally | 15 tests / 50 assertions / 0 failures / 0 errors | same |
 
 Evidence: `tmp/runner-base-cache-isolated-cold.log` and
-`tmp/runner-base-cache-isolated-warm.log`. The whole warm run, including
-tests, is below the 60-second fixed-cost target. This isolates cache-lock
+`tmp/runner-base-cache-isolated-warm.log`. The measured warm phases, including
+tests, total less than 60 seconds; the later measurements also time launcher
+cleanup before claiming the total wall-time target. This isolates cache-lock
 contention, not CPU contention: eight lanes were active, with three other
 coordinators and six workers observed. It predates the dependency-only key
 correction. The old-harness baseline has not yet produced a completed tally.
@@ -338,3 +339,70 @@ Final owned-file gate on frozen `b7e8a9143` plus `bin/test` and
 596.35 s including cleanup. This is the runner's nested lifecycle suite,
 not the performance selection. Successful root `run.CVyzaZ` was removed.
 Evidence: `tmp/runner-cache-final-owned-gate.log`.
+
+
+## Prepared worker count is the coordinator's authority
+
+The first platform attempt set `SEON_TEST_WORKERS=2`. The launcher prepared
+two pool checkouts, but `runner/worker-count` independently chose the host
+count, and `pool-3` exited before readiness because its checkout contained
+no runner source. This is the override branch of `90170c3c8`, independent
+of the three regressions compared above. Evidence:
+`tmp/runner-cache-final-platform.log`, root `run.6KqNzE`,
+`workers/pool-3/logs/worker-stderr.log`. No assertion tally was produced.
+
+The launcher now passes `seon.test.worker-count`; the coordinator consumes
+that prepared count instead of choosing again. A pure platform regression
+checks prepared counts 1 and 2 on a 16-processor input, the direct-call
+default, and refusal of zero. The checked-in definition was hot-reloaded
+in the default JVM and returned 1, 2, and 8 for those valid cases in 11 ms.
+This is direct Var evidence, not a claim of completed development adoption.
+
+## Resume after the machine lockup
+
+The three-revision comparison above rules out `90170c3c8` as the cause of
+those three launcher regressions. Its independent override mismatch is
+fixed by passing the prepared count to the coordinator. Worker checkout
+population now batches first-party entries into one COW `cp` per worker.
+The test-fast lane's shared snapshot/lifecycle implementation is retained;
+its regression invokes `bin/test --fast` directly so the separately landed
+`bin/test-fast` wrapper is not required by this runner slice. The sibling
+launcher fixtures now own a separate cache authority: fake publications
+cannot enter the real shared cache.
+
+Two completed source-edit gates before the lockup both reused dependency
+classes `be25ec7be762a5aa35f684128ca7d48bc907fc7c3d9fe6c54f16192477057646`.
+The first waited 2 ms and held the dependency lock 2,408 ms; the second
+waited 2 ms and held it 1,867 ms, including classpath preparation. Neither
+printed `inputs changed; rebuilding`. Their distinct source digests were
+`1266885db7a8fec6029e99d47d6f8cf3391a26bdb5f6f41e50e6e046e3d935a8`
+and `9ce69a835d3ac3b0f844c560612adba6d001f6ff57b2e7143b21c5b90a3e8aec`.
+Both ran `seon.repl-test`: 15 tests / 50 assertions / zero failures/errors.
+Evidence: `tmp/runner-source-edit-one.log`, `tmp/runner-source-edit-two.log`.
+Total walls were 157.55 s and 204.55 s; cold publication was 95 s and 89 s.
+An unchanged repeat reused the second base in 5 ms and passed the same
+15/50 tally, but total wall was 93.85 s (dependency/classpath 8 s, copies
+12 s, publication 0 s, coordinator/tests 59 s). This is not evidence of a
+whole invocation under 60 s. Seven to eight JVMs were observed; CPU load
+was not isolated. Evidence: `tmp/runner-source-edit-warm.log`.
+
+On resume, descriptor status found default alive with no orphan JVMs.
+MCP runtime status answered and all three observed plumbing procs replied;
+it also reported two error signatures, two errored evaluations and three
+failed runs. This is health observation, not a claim those errors are fixed.
+No default lifecycle operation was performed. `bin/mcp-server` is already
+clean: `ef424c37c` landed the missing `src` classpath entry after the earlier
+`e88c2e5d2` resource entry. There is no remaining MCP launcher diff to commit.
+
+Resume gate at `0d2a2191b` plus exactly `bin/test`,
+`src/seon/test/runner.clj`, and `test/seon/test_runner_test.clj`: **43 tests /
+270 assertions / zero failures/errors**, exit 0. Phase seconds:
+snapshot 1, dependency/classpath 2, worker COW views 4, cold publication 32,
+coordinator/tests 85. Dependency lock wait 1 ms / hold 717 ms; publication
+lock wait 0 ms / work 32,631 ms. Three prepared pool workers were consumed
+correctly. Both real concurrent nested gates reached their tallies.
+Evidence: `tmp/runner-resume-gate.log`; successful root `run.9mcaxA` removed.
+
+The same selected-path platform gate completed green; exact tally and phase
+lines are in `tmp/runner-resume-platform.log`. The published base was reused
+rather than rebuilt. This gate includes the prepared-worker-count regression.

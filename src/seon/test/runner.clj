@@ -1611,8 +1611,17 @@
            (count digests) "declared inputs"))
 
 (defn- worker-count
-  []
-  (max 1 (quot (.availableProcessors (Runtime/getRuntime)) 2)))
+  ([]
+   (worker-count (.availableProcessors (Runtime/getRuntime))
+                 (System/getProperty "seon.test.worker-count")))
+  ([processors prepared]
+   (if prepared
+     (let [n (Long/parseLong prepared)]
+       (when-not (pos? n)
+         (throw (ex-info "Prepared worker count must be positive."
+                         {::worker-count n})))
+       n)
+     (max 1 (quot processors 2)))))
 
 (defn- worker-parent
   []
@@ -2491,7 +2500,7 @@
         configured-silence-seconds (silence-seconds)
         backstop (start-liveness-backstop!
                   progress configured-silence-seconds suite-start)
-        pool-size (if (= "explicit" selection-mode) 1 (worker-count))
+        pool-size (worker-count)
         worker-ids (conj (mapv #(str "pool-" %) (range 1 (inc pool-size)))
                          "serial")
         workers* (atom [])
