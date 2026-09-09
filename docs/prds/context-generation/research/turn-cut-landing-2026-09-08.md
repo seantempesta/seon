@@ -7,7 +7,26 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
+## Nested result data regression
+
+The regression passes at `22f6163e5` and `77abbf43a`, and fails after
+`ff9507c1b`: shown text omits the title and substitutes `format-item-ai`.
+The value printer now reserves entity producer selection for HTML; AI prints
+the actual data under its profile. The one-line production fix and canonical
+SCI regression passed fast and path-isolated gates: **23 tests, 91 assertions,
+zero failures/errors**, one new and 22 inherited tests. No database write is
+added. The served default plan block shows the id/title after convergence to
+`6aa0eb45-8cdb-53bd-94f9-35e7292775e5`: **158,305 bytes / 0.139602 s**.
+Browser automation refused `cgWindowNotFound`; no paint claim. A separate
+blocked-plan projection error is recorded in
+`docs/seon/issues/blocked-plan-values-refuse-pull-during-ai-projection.md`.
+Both owned scratch worktrees were removed after their processes ended.
+
 ## Private objects and shown-text conversion, continuation
+
+Commit: **ff9507c1b**.
+
+RESET NEEDED ff9507c1b
 
 The agent proc now owns one SCI context. Before its next turn it receives
 changed base bindings, comparing snapshotted roots rather than mutable Var
@@ -67,10 +86,9 @@ test now records attribute sets as well as counts so the next loop cut can
 identify their authority. This is not a claim of the required three-write
 open/store/close model.
 
-Default was neither stopped nor restarted. Read-only MCP observed five old
-def entities and zero new shown-text facts at source commit
-`6aa0e2a4-2815-52a4-a198-67194e28c091`; this is explicitly NOT live proof of
-the conversion. HTTP subsequently returned **218,212 bytes in 2.044847 s**,
+Default was neither stopped nor restarted. Earlier retired-attribute counts
+were not validated against typed query errors and are withdrawn; counting an
+error map does not count entities. HTTP returned **218,212 bytes in 2.044847 s**,
 54 entries, zero inline evidence, zero printer summaries and zero depth labels.
 Native Chrome and Brave observations both refused with `cgWindowNotFound`,
 so no new browser-paint claim is made. The repeatable HTTP probe now records
@@ -85,10 +103,25 @@ rename, process custody removal, the remaining opening/prompt deletions and
 the final transaction-count target are still unfinished.
 
 Later MCP inspection found the stored-def schema definition absent and the
-shown-text schema present, with five old def entities still in default. Adoption
+shown-text schema present. The claimed five remaining def entities was an
+unverified error-map count, not evidence of datoms. Adoption
 was not yet converged: adopted `6aa0e566-5adc-516a-80aa-bd7b8f2957e4`, published
-`6aa0e7b8-5bc2-5377-9732-483dbe4ac5fd`. A reset is needed to discard those
-retired datoms; only the owner operates default's lifecycle.
+`6aa0e7b8-5bc2-5377-9732-483dbe4ac5fd`. The RESET NEEDED notice flags the
+schema deletion, not a verified residual datom count. Only the owner operates
+default's lifecycle.
+
+## Unauthorized provider attempt during scratch verification
+
+Starting the isolated operator normally allowed its root agent to call DeepSeek
+before a fixed reply seam was installed. This violated the owner's explicit
+no-provider instruction. The scratch cluster was stopped and was not restarted.
+Read-only inspection of its store, with no flow boot, found attempt
+`e89261e7-6365-455b-b819-7d27641efe34-attempt-0`, at
+`2026-09-09T05:05:13Z`, endpoint `https://api.deepseek.com/chat/completions`,
+finish reason `stop`, **6,472 prompt tokens and 674 completion tokens**.
+Context was transmitted; this was not merely an attempted connection. The
+canonical virtual-turn tests did not call a provider, but this live verification
+did. No successful scratch virtual-turn or Juniper page proof is claimed.
 
 ## Evaluation presentation continuation
 
