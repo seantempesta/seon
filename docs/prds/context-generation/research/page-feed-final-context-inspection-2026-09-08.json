@@ -1,0 +1,9 @@
+{
+  "url": "http://127.0.0.1:7994/ns/my.agents.juniper/debug?prompt=true",
+  "status": 200,
+  "milliseconds": 1551.456082961522,
+  "bytes": 224169,
+  "sha256": "0e2046b533b2202e5c64c1dd03b3fd6dc708bd4c85a6fff658758b8ce6b1e63d",
+  "expected": "Would-be system turn",
+  "present": true
+}

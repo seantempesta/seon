@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, performance]
 ---
@@ -22,3 +22,13 @@ read-evidence cache without stale output or duplicating the turn algorithm.
 
 Full stacks, exact bytes, timestamps, and runnable probes are recorded in the
 [page-feed landing note](../../prds/context-generation/research/page-feed-landing-2026-09-08.md).
+
+
+Resolved by `3fe446205`: ordinary paired-entity inspection no longer executes the
+optional context algorithm; `prompt=true` remains explicit. Identity input excludes
+reverse concerns, and shared caller results are published correctly. Default's
+combined three-tab/two-turn/write-per-second probe measured 691.343083 ms maximum
+first SSE and 851.743250 ms maximum plain GET over 30 samples, all HTTP 200.
+Both turns were accepted and overlap is recorded in five consecutive samples.
+The path-limited web gate passed 71 tests / 419 assertions and platform passed
+82 tests / 486 assertions. Exact evidence is in the linked landing note.

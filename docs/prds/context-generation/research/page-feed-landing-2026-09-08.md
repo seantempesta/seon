@@ -616,3 +616,77 @@ submission was refused as already running. The retained EDN states this explicit
 only Juniper was newly submitted. Final default proof must check both submissions.
 
 ![Paired blocks with explicit context inspection](page-feed-preview-scratch-2026-09-08.png)
+
+
+### Final default verification of the 18:55 follow-up
+
+Implementation commits, in requested order:
+
+1. `77abbf43a`: adopted source commit participates in shared render evidence.
+2. `1338b67b4`: later components filtering hunk applied. Earlier identity grouping
+   was already in `f518fd478`.
+3. `3fe446205`: explicit algorithm inspection, identity input separation, and
+   shared caller/proc cache corrections.
+4. Prompt stale expectations were already fixed in `22f6163e5`, following
+   `f518fd478` / `f77bab880`; no duplicate prompt edit was needed.
+
+Default adoption explicitly logged `development reload seon.render.web` and
+converged at `6aa0e7ff-6232-5578-a71a-c835483fc608`, digest
+`ae1ed9884f0a4249a531652c5710cf2db5d38045371d5d821919c137379f0965`.
+It also reloaded the concurrently published `seon.repl` and `seon.sci.eval`.
+Those foreign edits were preserved, not included in the lane's isolated gates
+or commits. The earlier local-plan-registry refusal remains separately recorded;
+this successful adoption and actual browser paint supersede the negative
+pre-filter capture, without claiming a repair to that foreign schema boundary.
+
+Chrome verified six blocks on default: the agent schema pair, plan, settings,
+messages, turns/history, and faults. Each block was 1568 px wide, with AI and
+HTML columns of 762.609375 px, in a 1600 px document. The first measured debug GET
+returned 200 in 61.806667 ms and the next in 54.438459 ms, both exactly 149104
+bytes. The screenshot was opened and visually inspected.
+
+![Original page before the lane changes](page-feed-before-2026-09-08.png)
+![Final default page after adoption](page-feed-final-default-2026-09-08.png)
+
+The combined probe opened three real Chrome debug tabs before submitting both
+source turns. Both submissions were accepted:
+`source:39eb94f7-4c5b-46c2-a15f-c007a7f5b26f` (Juniper) and
+`source:4f456ac6-b4ff-402c-83b0-e2136b87f5ef` (root). Their ordinary source was
+`(my.shell/run {:my.shell/argv ["/bin/sleep" "5"] :my.shell/cwd "/Users/sean/src/seon"})`.
+The existing writer probe committed 25 transactions at one-second spacing with
+zero refusals. Five consecutive samples from epoch-ms 1788930122542 through
+1788930126546 recorded both turns open. Both later closed: Juniper at
+2026-09-09T05:02:07Z and root at 2026-09-09T05:02:38Z.
+
+Across all 30 new SSE connections, first-event maximum was **691.343083 ms**;
+all 30 returned 200. Across 30 concurrent plain GETs, maximum was **851.743250 ms**;
+all returned 200. Restricting to the five samples while both turns were open,
+first SSE maximum remained **691.343083 ms** and plain GET maximum was
+**623.265959 ms**. This verifies the <2 s combined-traffic target and the <1 s
+plain-page target. Exact timestamps, event bytes and GET sizes are in
+`page-feed-final-traffic-2026-09-08.json`; submitted identities and observed open
+facts are in the companion turns/writes EDN files. The same committed browser
+and live Clojure probes reproduce the measurement.
+
+Explicit `?prompt=true` still renders `Would-be system turn`: HTTP 200,
+1551.456083 ms, 224169 bytes, SHA-256
+`0e2046b533b2202e5c64c1dd03b3fd6dc708bd4c85a6fff658758b8ce6b1e63d`.
+It is accessible through `Inspect context algorithm` on the ordinary debug page.
+
+Final platform gate: **82 tests / 486 assertions, zero failures/errors**, using
+`JAVA_TOOL_OPTIONS=-XX:ActiveProcessorCount=2 SEON_TEST_WORKERS=1 bin/test --paths`
+with the same isolated five-path overlay and `--platform`. The targeted web gate
+was **71 tests / 419 assertions**, with `SEON_TEST_WORKERS=3`. Neither used
+`--all` or `--full`. The platform sample observed active clj-kondo analysis while
+that gate ran; it completed normally, so no timeout or silent hang was inferred.
+
+Default PID 22932 remained running throughout: no stop, refork, restart, manual
+cache clear, or half-edit reload. Scratch PID 61496 was stopped through its own
+operator root after verification; its process and all lane test workers were
+confirmed absent before scratch-root/worktree cleanup. Named issue authorities
+and the components landing/hunk were read end to end.
+
+Cleanup completed: `tmp/page-feed-root` and `tmp/page-feed-cache-wt` are absent.
+The final post-cleanup default debug GET returned 200 in 192.997 ms; PID 22932
+was still alive. Main HEAD advanced concurrently to `ff9507c1b` after the isolated
+gates; the gate basis and adopted source above identify precisely what was tested.
