@@ -1791,78 +1791,39 @@
              (receipt-terminal-assertions receipt request)]))))
 
 (defn recover-tx
-  "Transaction data recovering one run from dead-process facts."
+  "Transaction data closing one interrupted turn at boot."
   {:malli/schema [:=> [:cat [:map
                              [::id ::id]
-                             [::live-processes [:set ::process]]
                              [::now :inst]]]
                   [:vector :some]]}
   [request]
   [[:db.fn/call #'recover-call request]])
 
 (defn recover-call
-  "Recover one interrupted run during boot recovery.
-  When the run's holder is NOT a live process — dead, or absent
-  entirely — THE RUN gets `::interrupted-at` asserted at `::now`, every
-  running receipt (one carrying NO terminal fact) gets
-  `:seon.cluster.eval/interrupted-at` asserted at `::now`, every open effect
-  receipt gets `:seon.effect/interrupted-at`, and dead custody is released.
-  An ordinary run is CLOSED at `::now`. A
-  generated run stays open and attached: its settled receipts are the
-  append-only derivation prefix, so the per-agent entry reclaims it and
-  derives only the next ordinal. No authored form re-executes.
-  The run stamp is what makes \"which runs did the last recovery touch?\" a
-  query instead of a process-local boot counter, and it is the ONLY
-  distinction available for a run whose dead process settled no receipt
-  row at all.
-  EVERY settled receipt is left byte-untouched:
-  the receipt read and the stamp share this one transaction, so a
-  stale-basis recovery stamping a settled receipt is unrepresentable
-  (custody revision, Revision 4). A run held by a live process, a
-  closed run, and a missing run all need nothing — recovery is
-  idempotent and never refuses. NOTHING here re-opens, re-plans, or
-  re-executes.
-
-  THE CLOSE IS THE WHOLE POINT for a planned agent run (owner ruling 25(b),
-  2026-07-29). An
-  interrupted run used to be left OPEN with its unsettled ordinals, so
-  the next pass derived `:resume` and executed a plan suffix that had
-  never started before the crash — with a fresh sci ctx that had lost
-  every def, require and alias the prefix established, and with nothing
-  stopping a capability-shaped form from making a post-crash external
-  call. Both were live-reproduced
-  (`research/repl-workflows-2026-07-29.md` §7). Closing here makes the
-  whole class unrepresentable rather than handled: there is no cold resume
-  of an authored plan to restore a context for. A generated prefix contains
-  only system-authored forms with terminal receipts, and its continuation is
-  a fresh append at the next ordinal. This is
-  the crash model's \"the agent adapts\" clause made literal — the
-  interruption is in the agent's next context and the agent decides.
-
-  Recovery closes the turn from its own facts; no agent pointer is stored."
+  "At boot, close every open turn and interrupt its unfinished evaluations
+  and effects. The process root's lifetime lock excludes another JVM;
+  a saved holder or a generated-source tag cannot exempt an open turn.
+  Missing and already closed turns are no-ops. Completed evaluations
+  remain unchanged, with eligibility decided inside the serial writer."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map
                         [::id ::id]
-                        [::live-processes [:set ::process]]
                         [::now :inst]]]
                   [:vector :some]]}
   [db request]
-  (let [{::keys [id live-processes now]} request
+  (let [{::keys [id now]} request
         run (current-run db id)
-        holder (::process run)
-        generated? (= :generate (:seon.cluster.work/situation run))]
+        holder (::process run)]
     (if (or (nil? run)
-            (not (open? run))
-            (contains? live-processes holder))
+            (not (open? run)))
       []
       (let [interrupted
             (into (interrupt-stamps db (:db/id run) now)
                   (effect/interruption-stamps db (:db/id run) now))]
-        (cond-> (into interrupted
-                      (when (some? holder)
-                        (retract-custody run)))
-          (not generated?)
-          (conj [:db/add (:db/id run) ::closed-at now]))))))
+        (conj (into interrupted
+                    (when (some? holder)
+                      (retract-custody run)))
+              [:db/add (:db/id run) ::closed-at now])))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The family default renders — what a run, a form and a receipt LOOK

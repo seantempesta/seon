@@ -1181,15 +1181,10 @@
                       (assoc-in model
                                 [:receipts [run-id ordinal] :settled]
                                 kind))
-    :recover (let [[live] args]
-               (reduce
+    :recover (reduce
                 (fn [acc [run-id entry]]
-                  (let [holder (:process entry)]
                     (cond
                       (:closed entry) acc
-                      ;; a live holder's run needs nothing — its
-                      ;; running receipts are its own business
-                      (contains? live holder) acc
                       :else
                       (let [agent-id (:agent entry)]
                         (-> (stamp-running-receipts acc run-id)
@@ -1199,9 +1194,9 @@
                                             ;; recovery marks what it cut
                                             (assoc :interrupted true)
                                             (dissoc :process)))
-                            (update :pointers dissoc agent-id))))))
+                            (update :pointers dissoc agent-id)))))
                 model
-                (:runs model)))))
+                (:runs model))))
 
 (defn- execute!
   "Run one command against the real database. Returns ::committed or
@@ -1417,6 +1412,7 @@
          30
          (prop/for-all [states (gen/vector receipt-state-gen 1 5)
                         dead? gen/boolean
+                        generated? gen/boolean
                         round gen/nat]
            (with-model-database
              (fn [connection]
@@ -1453,8 +1449,11 @@
                             (assoc :seon.cluster.eval/error
                                    (str "boom-" ordinal))))
                         states)))
-                 (let [receipts-before (pull-receipts connection run-id)
-                       terminals-before (pull-terminals connection run-id)
+                 (when generated?
+                   (db/transact! connection
+                                 [{::run/id run-id
+                                   :seon.cluster.work/situation :generate}]))
+                 (let [terminals-before (pull-terminals connection run-id)
                        recovery
                        (run/recover-tx
                         {::run/id run-id
@@ -1466,21 +1465,16 @@
                        _ (db/transact! connection recovery)
                        entity (run-entity connection run-id)]
                    (and
+                    (= (count states) (count (pull-receipts connection run-id)))
                     ;; settled receipts are IDENTICAL, whole entities
                     (= terminals-before (pull-terminals connection run-id))
-                    (if dead?
-                      ;; a dead holder's running receipts are stamped
-                      ;; and the interrupted run is ended atomically
-                      (and (every? run/terminal?
-                                   (pull-receipts connection run-id))
-                           (nil? (::run/process entity))
-                           (some? (::run/closed-at entity))
-                           (nil? (open-run-id connection agent-id)))
-                      ;; a live holder's run needs NOTHING: custody
-                      ;; kept, running receipts still running
-                      (and (= receipts-before
-                              (pull-receipts connection run-id))
-                           (= "live-process" (::run/process entity))))))))))
+                    (every? run/terminal?
+                            (pull-receipts connection run-id))
+                    (nil? (::run/process entity))
+                    (= t2 (::run/closed-at entity))
+                    (empty? (run/recover-call @connection
+                                             {::run/id run-id ::run/now t2}))
+                    (nil? (open-run-id connection agent-id))))))))
          :seed 20260727)]
     (is (true? (:result check))
         (str "recovery property failed: " (pr-str check)))))

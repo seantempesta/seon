@@ -114,6 +114,24 @@
                            (into #{} (map :a) (:tx-data report))})
                    (async/offer! events report)))
        (try
+         (let [previous-id "previous-jvm"
+               seeded (db/transact!
+                       connection
+                       [{:seon.cluster.run/id previous-id
+                         :seon.cluster.run/agent [:seon.cluster.agent/id "a"]
+                         :seon.cluster.run/opened-at (java.util.Date. 0)
+                         :seon.cluster.run/process cluster/boot-process-identity}])]
+           (is (nil? (:seon.error/kind seeded)) (pr-str seeded))
+           (is (nil? (:seon.cluster.run/closed-at
+                      (db/pull @connection '[*]
+                               [:seon.cluster.run/id previous-id]))))
+           (is (= 1 (:seon.boot/recovered-runs
+                     (#'cluster/recover-runs! connection))))
+           (is (some? (:seon.cluster.run/closed-at
+                        (db/pull @connection '[*]
+                                 [:seon.cluster.run/id previous-id]))))
+           (is (empty? (evaluations @connection "a"))
+               "boot invents no evaluation when the prior JVM stored no reply"))
          (doseq [id ["a" "b"]]
            (agent/arm! {:seon.cluster.loop/cluster handle
                         :seon.cluster.agent/routing routing
