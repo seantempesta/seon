@@ -661,3 +661,28 @@ half-edit. Measured targets in the issue.
   reader rule, second trial), context-cookbook (executed forms, tuned
   returns, block functions).
 
+## 2026-09-09 17:10 — the live loop defect was duplicate graphs; help and page items pending
+
+- loop-live `e12ba7535`: concurrent arming created TWO graphs for one
+  agent, each holding a turn-completion permit — the second's settlement
+  refused as run-closed, the first never finished (the 282 s backstop
+  stall on adopted `default`); and the intentional empty virtual reply
+  became a no-forms fault. Arming now serializes on the routing entry;
+  an empty virtual reply settles as zero sources. Wake→settled 2.1 s
+  fresh, 1.2 s after adoption, zero faults; the new `transact!`
+  validation was NOT the refusal. Regression extended in
+  `loop_proof_test`.
+- context-blocks ended (slices 1–4; paid trial withheld because the live
+  fixture was polluted by that stall). Eleventh refork; Juniper reseeded;
+  page shows nine evaluations, four closed turns.
+- Cookbook landed: transaction report as resolved changes (`07ed79283`),
+  returned flat errors through their AI pair (`6f7c6faa3`), positioned
+  components ordered (`ca9bb4120`, `619301acf`), forms as agent source
+  (`a47f39882`), faults to root and routed stewards (`2bbc4d472`), nested
+  pull shapes shown (`51a98c973`), `dir` shows declared schemas
+  (`3e84110bc`). Pending: help's render pair and wording, settings
+  effective values, the turns block HTML-only, "Context now" on the page,
+  plan ids by example, the trimmed tools line (chart §14a).
+- Owner review point: when the cookbook's help and page slices land and
+  the fixture is reseeded.
+
