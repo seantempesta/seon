@@ -525,3 +525,15 @@ half-edit. Measured targets in the issue.
   a refusal — loop.clj is turn-rename's; handed to it at its next resume.
 - Running: turn-rename (three writes per turn; stable ids).
 
+## 2026-09-09 03:20 — stable ids everywhere; three writes on warm turns
+
+- turn-rename `f7cc8465c` (turn and evaluation identities and handles
+  through `seon.id`), `5c2817a00` (derived effect, maintenance, context,
+  and fault identities), `52fa2da2d` (evidence). Stable ids match across
+  fixture reforks. Warm virtual turns: 3 transactions / 45 datoms (was
+  5 / 25 — fewer transactions, the datoms now include evaluation rows).
+  Cold first turn still carries a metadata-only first write and ordered
+  declaration calls — slice 5. RESET NEEDED: seventh refork of `default`.
+- Running: turn-rename slice 5 (refusal → one fault, no second turn; cold
+  turn writes; the turn loop rename).
+
