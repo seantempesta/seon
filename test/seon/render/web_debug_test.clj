@@ -3,6 +3,11 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.render.web :as web]
+            [seon.render.walk :as walk]
+            [seon.db :as db]
+            [seon.config :as config]
+            [seon.error :as error]
+            [seon.render :as render]
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
@@ -41,3 +46,112 @@
     (is (= (str/index-of html function-name) (str/last-index-of html function-name)))
     (is (not (str/includes? html "Context now")))
     (is (not (str/includes? html "Would-be system turn")))))
+
+
+(deftest every-declared-attribute-has-an-ordered-pair-even-when-absent
+  (support/with-database
+   {::support/extra-schema
+    [{:seon.schema/key ::name :seon.schema/form ":string"}
+     {:seon.schema/key ::notes :seon.schema/form ":string"}
+     {:seon.schema/key ::record
+      :seon.schema/form
+      (pr-str [:map {:seon.db/attributes true}
+               [::name ::name]
+               [::notes {:optional true} ::notes]])}]}
+   (fn [connection]
+     (let [database @connection
+           projection (schema/projection-from-database database)
+           declared (#'web/declared-entity-units projection database {::name "Example"})
+           html (#'web/debug-found-values-html
+                 projection {:seon.db/db database} {} {} declared
+                 {:seon.render.data/incoming {:seon.render.data/complete? true}}
+                 {} {} nil nil)
+           nodes (tree-seq coll? seq html)
+           units (keep #(when (and (vector? %) (= :article (first %)))
+                          (:data-seon-unit (second %))) nodes)
+           headings (filter #(and (vector? %) (= :h4 (first %))) nodes)]
+       (is (= [::name ::notes] declared))
+       (is (= (mapv str declared) (vec units)))
+       (is (= [[ :h4 "AI"] [:h4 "HTML"] [:h4 "AI"] [:h4 "HTML"]]
+              (filterv #(#{"AI" "HTML"} (second %)) headings)))))))
+
+(deftest history-preserves-numeric-entity-lookups
+  (support/with-database
+   (fn [connection]
+     (db/transact! connection [{:my.plan/objective "An anonymous component"}])
+     (let [database @connection
+           eid (db/q '[:find ?e . :where [?e :my.plan/objective "An anonymous component"]]
+                     database)
+           entries (#'walk/history-entries
+                    {:seon.db/db database}
+                    [{:seon.render.walk/lookup eid
+                      :seon.render.walk/path []
+                      :seon.render/distance 0
+                      :seon.render/output "The component's shown text."}]
+                    (atom {}))]
+       (is (integer? eid))
+       (is (= 1 (count entries)))
+       (is (= eid (:seon.render.history/subject (first entries))))
+       (is (= "The component's shown text."
+              (:seon.render.history/bytes (first entries))))))))
+
+(deftest reverse-blocks-do-not-depend-on-the-graph-page
+  (support/with-database
+   {::support/extra-schema
+    [{:db/ident ::left :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
+     {:db/ident ::right :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}]}
+   (fn [connection]
+     (db/transact! connection
+                   [{:seon.cluster.agent/id "relationships"}
+                    {::left [:seon.cluster.agent/id "relationships"]}
+                    {::right [:seon.cluster.agent/id "relationships"]}])
+     (let [database @connection
+           projection (schema/projection-from-database database)
+           result (schema/call-with-projection
+                   projection
+                   #(#'web/acquire-debug-data
+                     projection database
+                     {:seon.render.debug/subject [:seon.cluster.agent/id "relationships"]
+                      :seon.render.data/limit 1
+                      :seon.render.data/max-ref-attributes 1
+                      :seon.render.data/max-result-weight 4000
+                      :seon.render.web/pull-max-work 4000}
+                     {}))
+           output (:seon.render.call/output (:seon.render.web/debug-data-entry result))]
+       (is (seq (get-in output [:seon.render.web/reverse-values ::_left])))
+       (is (seq (get-in output [:seon.render.web/reverse-values ::_right])))))))
+
+
+(deftest reverse-declarations-receive-the-actual-relationship-value
+  (support/with-database
+   (fn [connection]
+     (db/transact! connection [{:seon.cluster/name "reverse-render-fixture"}])
+     (let [effective (config/defaults)
+           caps (config/result-caps effective)
+           ctx (support/fork-cluster-ctx connection)
+           fault (error/normalize
+                  {:seon.error/source {:seon.error/kind ::fixture
+                                       :seon.error/message "A declared fault card."}
+                   :seon.error/id "reverse-render-fixture"
+                   :seon.error/at (java.util.Date.)
+                   :seon.error/process "reverse-render-fixture"
+                   :seon.sci.admit/caps caps
+                   :seon.config.error/max-evidence-bytes
+                   (:seon.config.error/max-evidence-bytes effective)})
+           experiment (#'web/selected-unit-experiment
+                       {:seon.db/db @connection
+                        :seon.db/connection connection
+                        :seon.sci.eval/ctx ctx
+                        :seon.sci.admit/caps caps
+                        :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
+                        :seon.config/on-core-error :panic
+                        :seon.render/profile (render/agent-render-profile effective)
+                        :seon.render/captured-calls (atom {})
+                        :seon.render/captured-invocations (atom {})}
+                       :seon.error/_agent :seon.render/html [fault]
+                       [:seon.error/id "reverse-render-fixture"]
+                       {:seon.render.data/path [] :seon.render.data/offset 0})
+           preview (get-in experiment [:seon.render/previews 'seon.error/render-faults-html])]
+       (is (some? preview))
+       (is (str/includes? (pr-str preview) "Faults (1)"))
+       (is (str/includes? (pr-str preview) "A declared fault card."))))))

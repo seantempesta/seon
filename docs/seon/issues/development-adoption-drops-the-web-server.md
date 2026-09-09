@@ -84,3 +84,18 @@ debug URL returned 404 in 0.001537 s. A subsequent MCP evaluation reported
 `repl-unavailable` because the advertisement was missing. The lane did not
 stop or restart default; this observation cannot attribute an outage to
 adoption. Live availability verification remains required.
+
+
+## In-place handler change and verification boundary, 2026-09-08
+
+The server now resolves the handler Var for each request (`dd7fc589a`);
+program adoption does not require stopping or rebinding http-kit. No port
+rewrite is needed on that path. Two earlier 200 ms curl runs returned 300/300
+HTTP 200 across adoption stages, but adoption refused its final convergence
+check. A later 600-request debug load recorded 125 HTTP 200 and 475 curl
+10-second deadlines while adoption waited on the lifecycle lock. The old
+JVM then disappeared; its last observed log line was an invalid-schema dev
+panic, not evidence of an http-kit-only restart. No default lifecycle action
+was performed by this lane. A fully converged, zero-outage adoption is still
+a pending proof; do not mark this resolved from the handler change alone.
+See [the landing note](../../prds/context-generation/research/page-feed-landing-2026-09-08.md).

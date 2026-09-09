@@ -196,3 +196,73 @@ existing platform worker-count boundary at three workers (see the existing
 `platform-worker-count-exceeds-prepared-checkouts.md` issue). Integration
 with landed agent-record commit `67fe1675d` also passed the focused path
 gate: **17 tests, 72 assertions, zero failures/errors**.
+
+
+## Final attribute-block slice
+
+Every declared attribute stays in schema order, including absent values,
+with one AI/HTML pair. The header uses the matching value schema's title
+(or schema key), and its description. Components use their schema pair.
+Reverse relationships are discovered from all installed ref declarations,
+independently of the bounded graph page. Their declared attribute is carried
+into the existing renderer's argument preparation; this is what supplies a
+fault-list renderer with the actual list instead of a request envelope.
+The history walk accepts numeric component entity IDs. A missing evaluation
+query is one line naming the unavailable function.
+
+The final page gate passed **6 tests / 25 assertions, zero failures/errors**
+with `bin/test --paths src/seon/render/web.clj
+ test/seon/render/web_debug_test.clj -- seon.render.web-debug-test`.
+The regression includes two reverse relationships with graph limits set to
+one, an absent declared attribute, and a real canonical normalized fault
+rendered through its declared function and real SCI context.
+
+Playwright measured **1,568 px** block width and **762.609 px** for each
+AI/HTML column at a 1,600 px viewport, with identical column y-coordinates
+and no horizontal page overflow. Scratch contains its historical probe
+faults as well as the normalized preview fixture. The latest recorded debug
+GETs returned HTTP 200, **1,113,094 bytes**, in **5,745.768 ms cold** and
+**36.743 ms warm**. The cold diagnostic-page result is a remaining latency
+defect, not a successful sub-three-second claim.
+
+Before:
+![Before: squeezed hand-labelled blocks](page-feed-before-2026-09-08.png)
+
+After:
+![After: full-width schema-derived attribute pairs](page-feed-after-2026-09-08.png)
+
+[Plan pair](page-feed-after-2026-09-08-plan.png),
+[fault pair](page-feed-after-2026-09-08-faults.png),
+[measured geometry and GETs](page-feed-after-2026-09-08.json),
+[reproducible browser probe](../../../../test/seon/render/page_feed_layout_probe.cjs).
+
+## Default observations after the caller-thread commit
+
+Shared commit **985a830b5** carries the caller-thread architecture. The
+subsequent adoption reached reload, SCI acquisition and re-instrumentation,
+but refused final convergence because source changed during adoption.
+Its request first waited over **178 seconds** for the existing operator
+lifecycle lock. No foreign process/session was operated.
+
+The 120-second, 200 ms debug curl loop recorded **125 HTTP 200 responses and
+475 curl deadline failures** (10-second limit), with no observed HTTP 500.
+This falsifies availability under that load and is not a zero-outage proof.
+[Raw continuity observations](page-feed-default-architecture-adoption-2026-09-08.json).
+Later PID **91455** was absent and no HTTP listener remained. Its final
+observed log line was a dev panic for `:malli.core/invalid-schema`; the log
+and advertisement disappeared before the underlying schema could be
+identified. The lane did not stop, refork, start, or restart default.
+A replacement was then observed as PID **22932**, start instant
+**2026-09-08T23:51:15.703Z**, HTTP **7994**, prepl **54281**. Its debug GET
+returned HTTP 200 in **839.529 ms**, **477,960 bytes**, and the loaded
+`acquire-context!` had the direct one-argument arity.
+
+On that fresh default, three debug tabs plus 25 one-second-target writes
+produced **20/20 HTTP 200 GETs and 20/20 HTTP 200 first SSE events**.
+The first-event maximum was **1,941.973 ms**, meeting the feed target.
+Plain GET median was **818.823 ms**, maximum **1,459.968 ms**. Both Juniper
+and root had open ordinary turns in the first seven write observations;
+GETs in that changing-content interval still exceeded one second. The
+stricter plain-page load target therefore remains incompletely verified.
+[Default HTTP measurements](page-feed-default-current-2026-09-08.json),
+[write and open-turn observations](page-feed-default-current-writes-2026-09-08.edn).

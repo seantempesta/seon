@@ -28,7 +28,7 @@
                         :error (:seon.error/kind result)
                         :open (db/q '[:find ?agent-id ?run-id
                                       :where [?a :seon.cluster.agent/id ?agent-id]
-                                      [?a :seon.cluster.agent/run ?r]
+                                      [?r :seon.cluster.run/agent ?a]
                                       [?r :seon.cluster.run/id ?run-id]
                                       (not [?r :seon.cluster.run/closed-at])]
                                     database)}))
@@ -131,3 +131,27 @@
                      :samples rows}]
          (spit output-path (pr-str result))
          result)))))
+
+(defn seed-fault-preview!
+  "A canonical normalized fault fixture, only for the explicit scratch cluster."
+  [cluster-name]
+  (let [handle (:seon.cluster.loop/cluster
+                (get @runtime/running-instances cluster-name))
+        config (seon.config/defaults)]
+    (schema/call-with-projection
+     (kernel/context-projection (:seon.sci.eval/ctx handle))
+     (fn []
+       (let [fact (seon.error/normalize
+                   {:seon.error/source
+                    {:seon.error/kind :page-feed/fixture
+                     :seon.error/message "A scratch fixture fault for the reverse-reference preview."}
+                    :seon.error/id "page-feed-fixture-fault"
+                    :seon.error/at (java.util.Date.)
+                    :seon.error/process "page-feed-preview"
+                    :seon.cluster.agent/id "juniper"
+                    :seon.sci.admit/caps (seon.config/result-caps config)
+                    :seon.config.error/max-evidence-bytes
+                    (:seon.config.error/max-evidence-bytes config)})
+             result (db/transact! (:seon.db/connection handle) [fact])]
+         {:error (:seon.error/kind result)
+          :basis (db/basis-t @(:seon.db/connection handle))})))))

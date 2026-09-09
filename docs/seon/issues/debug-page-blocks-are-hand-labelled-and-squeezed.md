@@ -1,6 +1,6 @@
 ---
 type: defect
-status: open
+status: resolved
 severity: blocker
 tags: [web, render, debug-page, ugly-output, hand-maintained-list]
 ---
@@ -47,3 +47,19 @@ never a `case`. Nothing on this page may be a hand-maintained list.
   collapsible, not a third column stealing the page.
 - A missing target function renders ONE line naming it.
 - Proof: screenshot before/after in the landing note; the owner reads it.
+
+
+## Resolution, 2026-09-08
+
+The later owner ruling supersedes the scalar grouping above: EVERY declared
+attribute is shown in schema order, including absent values, with its own
+AI/HTML pair. Components select their entity schema pair. Reverse concerns
+are independent of graph pagination and use their declared render inputs.
+The hard-coded labels are deleted; headings and descriptions derive from
+schema metadata. A missing function is shown once. The instrumented page
+gate passes 6 tests / 25 assertions, including absent fields and reverse
+relationship selection. Playwright measured 1,568 px blocks and 762.609 px
+columns at 1,600 px viewport width.
+
+Screenshots and remaining performance limitations are in
+[the landing note](../../prds/context-generation/research/page-feed-landing-2026-09-08.md).

@@ -1,6 +1,6 @@
 ---
 type: defect
-status: open
+status: resolved
 severity: blocker
 tags: [render, walk, history, debug-page, class/total-boundary]
 ---
@@ -29,3 +29,17 @@ the fact; reproduce with `(seon.render.walk/history-entries db agent)` on
 A render must never throw (AGENTS §2.4): whatever the shape, the history
 renders a typed elision naming the attribute, and the proc keeps serving
 the page. Fix the shape at its writer AND make the walk total.
+
+
+## Verified cause and resolution, 2026-09-08
+
+The numeric value is a legitimate anonymous component's entity lookup, not
+an incorrectly written evaluation field. `history-entries` called `first`
+on that lookup while detecting namespace identities. It now inspects a
+lookup's first element only when the lookup is a vector. The numeric entity
+ID and its shown text remain intact; no elision or writer change is needed.
+`seon.render.web-debug-test/history-preserves-numeric-entity-lookups` proves
+this with the canonical database and armed contracts (four assertions).
+The context demand channel is also gone: context acquisition runs on its
+caller's thread. See the
+[landing note](../../prds/context-generation/research/page-feed-landing-2026-09-08.md).

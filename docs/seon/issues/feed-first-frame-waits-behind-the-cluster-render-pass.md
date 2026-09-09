@@ -78,3 +78,18 @@ agent's SCI context: derive them on the caller's thread (request thread,
 feed thread, turn proc). The render proc keeps exactly one job — publishing
 deltas to open tabs after a wake — and never sits between a caller and its
 own result. Measure: plain page < 1 s warm while an agent turn is in flight.
+
+
+## Caller-thread change and remaining measurements, 2026-09-08
+
+Commit `985a830b5` removes the context demand channel and proc-owned page
+refresh. GET, feed first paint and turn context derive directly with shared
+retained-evidence caches; the proc publishes tab deltas. The declared tap
+backstop writes a typed Datastar refusal before close. The paused-proc
+regressions and path gates pass. On fresh default PID 22932, 20/20 first
+SSE events arrived within 1,941.973 ms with three debug tabs and one write per
+second. Plain GETs still reached 1,459.968 ms while content changed, and a
+scratch page containing accumulated diagnostic faults had a 5,745.768 ms
+cold acquisition. Keep this issue open for those remaining latency defects.
+Exact positive and negative observations are in the
+[landing note](../../prds/context-generation/research/page-feed-landing-2026-09-08.md).

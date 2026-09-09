@@ -1,0 +1,245 @@
+{
+  "gets": [
+    {
+      "status": 200,
+      "milliseconds": 5745.767833,
+      "bytes": 1113094
+    },
+    {
+      "status": 200,
+      "milliseconds": 36.74266699999862,
+      "bytes": 1113094
+    }
+  ],
+  "units": [
+    {
+      "attribute": ":seon.cluster.agent/id",
+      "title": ":seon.cluster.agent/id",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 345.234375,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 345.234375,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.cluster.agent/cluster",
+      "title": ":seon.cluster/cluster",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 708.71875,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 708.71875,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.cluster.agent/instructions",
+      "title": ":seon.cluster.agent/instructions",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 1102.8125,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 1102.8125,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.agent/plan",
+      "title": ":my.plan/entity",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 1386.3125,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 1386.3125,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.cluster.agent/namespace",
+      "title": ":seon.ns/ns",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 2084.484375,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 2084.484375,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.agent/settings",
+      "title": ":seon.agent/settings",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 2515.765625,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 2515.765625,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.cluster.agent/run",
+      "title": ":seon.cluster.agent/run",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 2820.90625,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 2820.90625,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.cluster.message/inbound-content",
+      "title": ":seon.cluster.message/inbound-content",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 3082.25,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 3082.25,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.cluster.message/_to",
+      "title": ":seon.cluster.message/_to",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 3446.78125,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 3446.78125,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.cluster.run/_agent",
+      "title": ":seon.cluster.run/_agent",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 4814.359375,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 4814.359375,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.error/_agent",
+      "title": ":seon.error/_agent",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 22897.71875,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 22897.71875,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.ns/_steward",
+      "title": ":seon.ns/_steward",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 25848.171875,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 25848.171875,
+          "width": 762.609375
+        }
+      ]
+    }
+  ],
+  "scrollWidth": 1600
+}

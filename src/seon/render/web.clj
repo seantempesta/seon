@@ -1154,6 +1154,7 @@
   (let [call-id [::unit-render attribute output]
         request (assoc render-request
                        :seon.render/value value
+                       :seon.render.walk/attribute (forward-attribute attribute)
                        :seon.render.value/root root
                        :seon.render.data/cursor cursor
                        :seon.render/output output
@@ -1228,11 +1229,13 @@
                               %) matches))
         schema-key (:seon.schema/key matching)
         form (projection-form projection schema-key)
-        properties (schema.form/attr-form-properties form)]
+        properties (schema.form/attr-form-properties form)
+        attribute-properties (some-> (projection-form projection (forward-attribute attribute))
+                                     schema.form/attr-form-properties)]
     {:seon.schema/key schema-key
      :seon.schema/form form
-     :seon.render.web/block-title (or (:title properties) (some-> schema-key str)
-                                     (str attribute))
+     :seon.render.web/block-title (or (:title properties) (:title attribute-properties)
+                                     (some-> schema-key str) (str attribute))
      :seon.render.web/block-description
      (or (:description properties)
          (attribute-description projection attribute)
@@ -1267,10 +1270,10 @@
                :data-seon-unit (str attribute)}
      [:header {:class "seon-debug-value-header"}
       [:div
-       [:h2 [:code (str attribute)]]
-       (when-let [schema-key (:seon.schema/key metadata)]
+       [:h2 (:seon.render.web/block-title metadata)]
+       (when (not= (str attribute) (:seon.render.web/block-title metadata))
          [:div {:class "seon-debug-value-label"}
-          [:code (str schema-key)]])
+          [:code (str attribute)]])
        (when description
          [:p {:class "seon-debug-description"} description])]
       (when (seq references)
@@ -1299,8 +1302,7 @@
           (experiment-preview-html :seon.render/html
                                    (:seon.render/html experiments))
           [:p {:class "seon-debug-empty"}
-           "No value is stored or connected for this attribute."])
-]]]
+           "No value is stored or connected for this attribute."])]]]
      [:details {:class "seon-debug-data-details"}
       [:summary "Raw data and schema"]
       [:h4 "Raw data"]
@@ -1614,9 +1616,8 @@
                   (declared-entity-units projection database acquisition)
                   reverse-units
                   (into (filterv reverse-attribute? declared-units)
-                        (comp (map :a) (map reverse-attribute) (distinct))
-                        (get-in observation [:seon.render.data/incoming
-                                             :seon.render.data/datoms]))
+                        (comp (map reverse-attribute) (distinct))
+                        (sort (installed-ref-attributes database)))
                   ;; ONE pull per declared reverse relationship, each asking
                   ;; for the connected entities themselves: a relationship
                   ;; too large for the declared work bound refuses as that
