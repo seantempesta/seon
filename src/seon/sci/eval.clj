@@ -299,7 +299,7 @@
    ;; registration delta in `declared-row`; validating this source expression
    ;; here would execute zero times and reject ordinary `(do ... schema)`.
    (when (:seon.schema/key event)
-     (assoc (select-keys event [:seon.schema/key :seon.schema/form])
+     (assoc (select-keys event [:seon.schema/key :seon.schema/form :seon.schema/ns])
             :seon.schema.admission/source :agent))
    (when (:seon.ns/name event)
      (program/declaration-row event :contracted :agent))))

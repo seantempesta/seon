@@ -4302,12 +4302,16 @@
                            handle (assoc :seon.repl/handle handle))]
           (when handle
             ((requiring-resolve 'seon.sci.eval/bind-result!) ctx handle (:seon.sci.admit/value evaluation)))
-          (recur (next remaining) (inc ordinal)
-                 (or (:seon.sci.eval/ending-ns evaluation) namespace-name)
-                 (conj results
-                       {:seon.cluster.eval/ordinal ordinal
-                        :seon.turn.loop/admitted-form form
-                        :seon.sci.eval/evaluation evaluation})))
+          (let [results (conj results
+                              {:seon.cluster.eval/ordinal ordinal
+                               :seon.turn.loop/admitted-form form
+                               :seon.sci.eval/evaluation evaluation})]
+            (if (contains? #{:completed :wait}
+                           (:my.run/disposition (:seon.sci.admit/value evaluation)))
+              results
+              (recur (next remaining) (inc ordinal)
+                     (or (:seon.sci.eval/ending-ns evaluation) namespace-name)
+                     results))))
         results))))
 
 (defn preview-sources

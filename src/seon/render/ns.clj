@@ -854,7 +854,7 @@
 (defn render-ai
   "Render a namespace as valid, distance-sensitive Clojure."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or [:maybe :string] :seon.error/value]]}
+                  [:or [:maybe :seon.render/source] :seon.error/value]]}
   [unit]
   (let [database (:seon.db/db unit)
         namespace-name (:seon.ns/name unit)
@@ -864,11 +864,13 @@
                                   [?agent :seon.agent/namespace ?namespace]
                                   [?agent :seon.agent/id ?id]] database namespace-name))]
     (if agent-id
-      (let [attributes (sort (db/q '[:find [?key ...] :in $ ?name
-                                    :where [?namespace :seon.ns/name ?name]
-                                           [?schema :seon.schema/ns ?namespace]
-                                           [?schema :seon.schema/key ?key]]
-                                  database namespace-name))]
+      (let [installed (:schema (db/schema-database database))
+            attributes (sort (filter #(contains? installed %)
+                                     (db/q '[:find [?key ...] :in $ ?name
+                                             :where [?namespace :seon.ns/name ?name]
+                                                    [?schema :seon.schema/ns ?namespace]
+                                                    [?schema :seon.schema/key ?key]]
+                                           database namespace-name)))]
         (when (seq attributes)
           (str ";; What data is in my namespace?\n"
                (pr-str (list 'seon.db/q

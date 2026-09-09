@@ -288,3 +288,130 @@ The final path gate after the documentation wording update passed the real
 SCI plan API regression: 1 test / 20 assertions / zero failures or errors.
 The broader 46-test gate and 83-test platform gate above cover the same
 implementation; the subsequent changes clarified docstrings only.
+
+## Slice 6 — the order scenario and its real loop
+
+The live installer and `seon.loop-proof-test` now share
+`test/seon/context_blocks_fixture.clj`. Schema is admitted by ordinary
+SCI replies through the actual agent graph. The fixture installs four orders:
+Ada 60 + 55, Bea 100, Cy 40. The largest individual order and largest
+customer total differ. Root asks for the largest customer, a new order of
+40, and the new total; six dependent plan items cover query, aggregate,
+transact, re-query, reply, and done. The installer replaces only Juniper's
+scenario facts, removes its old messages/faults/plan items and setup history,
+and stores the new opening. Program identities are retained.
+
+Three root causes were falsified by the end-to-end regression. The SCI
+admission selector dropped `:seon.schema/ns` after the reader produced it;
+it now preserves that fact. The namespace renderer's return contract said
+string instead of source, so its generated query never entered the opening;
+it now declares source. Installed attribute selection uses Datahike's schema
+map, including dynamically admitted attributes, and emits one count query.
+The batch evaluator also continued past a terminal disposition; it now stops
+at the existing completed/wait value, making `(my.agent/done)` end execution.
+
+The fast loop passed 1 test / 86 assertions, including the six opening forms,
+stored prompt equality, genuine compaction, changed-read ordering, the
+115→155 transaction, delivery to root, a declared SCI test run through
+`(my.test/run)`, and absence of a transaction authored after `done`.
+The subsequent fixture cleanup adjustment is covered by the commit gate.
+
+The old scratch context reproduced the already recorded
+[development adoption environment boundary](../../../seon/issues/development-adoption-retains-old-web-service-inputs.md):
+`seon.env/advance-projection!` received no replacement environment.
+A fresh scratch fork admitted the same declarations successfully. Default's
+source remains `6aa14a3f-fc45-564d-94f1-0946b2309c90`; after slice 5 its debug
+page was fetched again and its adoption refused the old overlay renderer.
+**RESET NEEDED remains for `3f07beb88` and the source accumulated through
+this fixture commit.** Only the lane's scratch cluster was reforked.
+
+Commit gate: 2 tests / 110 assertions / zero failures or errors.
+Platform: 83 tests / 490 assertions / zero failures or errors, one worker.
+The live reseed caught a distinction the agent-only test harness cannot model:
+the cluster armer can still have an earlier wake in flight after the fixture
+agent was disarmed. The live wrapper now uses the existing armer acknowledgement
+before the shared installer's final disarm and history cleanup. Clearing history
+before that acknowledgement allowed a concurrently opened turn to survive with
+a count-derived identity that collided with the next turn. This was fixture
+cleanup racing normal operation, not evidence against ordinary compaction
+(which retains turn identities). The bounded installer reports admission or
+closure failure rather than silently accepting missing schema.
+
+
+The final live fixture uses one writer transaction for the authored plan,
+orders, settings, and root message. This also removes a needless basis race
+between a plan API call and the rest of a seed. The separate plan API remains
+verified in slice 5 and in real SCI. Fresh scratch publication:
+`6aa1bae9-3672-53d3-b43b-bf7125d57e4f`. The final opening contains exactly six
+evaluations. I read the whole provider prompt below top to bottom. It has no
+ExceptionInfo objects, keyword settings inventory, empty inbox request map,
+probe messages, or no-provider reply. The two fixed help examples still reflect
+the literal §18a text; the argument-shape discrepancy is recorded above and is
+left for the required trial, as ruled.
+
+Exact scratch provider prompt: **5,921 UTF-8 bytes**, SHA-256
+`c7892d25b24e07d2d5e9575ef7ab9e3b7ac0a4383dc0b6fae53c7e0befc30c8d`.
+The payload is the bytes between the following fences, excluding the newline
+before the closing fence. The default capture follows after the orchestrator's
+single refork; these scratch bytes are explicitly not labelled default.
+
+```clojure
+;; I should understand how this REPL works before I act.
+my.agents.juniper=> (help)
+#:seon.repl{:value ["You are at a Clojure REPL in your namespace my.agents.juniper. Every function in the program is callable."
+  "Reply with ;; thinking comments, each followed by the form it plans. ▲ Send only comments and forms; the prompt my.agents.juniper=> is drawn for you."
+  "▲ Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
+  "Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value."
+  "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
+  "▲ When unsure how to call something, ask first: (dir my.plan) lists a namespace's functions as data; (doc seon.db/q) returns a docstring and contract as data."
+  "Your plan is your instructions: (my.plan/items). The current step's :done-when says what done means. (my.plan/complete! id) when it is."
+  "(my.message/inbox) is what you were sent. (my.message/send {:to \"root\" :content \"...\"}) sends. Sending a message does not end your turn."
+  "(seon.db/q '[:find ...]) queries, (seon.db/pull '[*] eid) reads one entity, (seon.db/transact! [{...}]) writes. The database is your cluster's and is supplied for you."
+  "A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours."
+  "A mistake returns :error data, never an exception. Read :seon.error/message and try again."
+  "Each reply is one turn. :turns-left in your settings counts down. (my.agent/done) ends your session early."
+  "Tools: my.agent — Read and update my record through request maps. (done, identity, settings, settings!); my.background — Start and inspect capability requests that may finish later. (await, background, poll); my.edit — Edit source files only when their expected digest still matches. (exact, form, lines); my.fs — Read, write, inspect, and find files with bounded results. (glob, read, stat, write); my.message — The inter-agent message protocol, with optional request-map calls; call preparation supplies my database and identity. (decline, inbox, read, send); my.note — My durable notes through one request map per call. (add!, forget!, notes); my.plan — The calling agent’s plan protocol. Each operation takes one request map. (add!, blocked, complete!, current, current!, item, items, plan, ready, ready-subjects, steps, update!); my.run — Every run ends by calling `complete` or `wait`, with one request map. (complete, render-namespace-ai, usage-form, wait); my.shell — Bounded foreground argv-vector process requests. (run); my.test — Run the tests declared in my namespace. (run); my.web — Fetch web resources and search the configured provider. (fetch, search)"], :result result/e3b1c11b89513, :ms 353}
+
+;; I should know my identity, namespace, and its steward.
+my.agents.juniper=> (my.agent/identity)
+#:seon.repl{:value #:my.agent{:id "juniper", :namespace my.agents.juniper, :steward "juniper"}, :result result/ed25ec5adc95c, :ms 56}
+
+;; I should follow my plan and verify the current step's completion criterion.
+my.agents.juniper=> (my.plan/items)
+#:seon.repl{:value [{:my.plan.item/id "juniper/query", :my.plan.item/title "Query the orders",
+    :my.plan/done-when "I have read the order ids, customers, and amounts.",
+    :my.plan/needs [], :my.plan/state :current} {:my.plan.item/id "juniper/aggregate",
+    :my.plan.item/title "Find the customer with the largest total", :my.plan/done-when
+    "A grouped sum query identifies the customer and their total.", :my.plan/needs
+    [#:my.plan.item{:id "juniper/query"}], :my.plan/state :blocked} {:my.plan.item/id
+    "juniper/transact", :my.plan.item/title "Add an order of 40 for that customer",
+    :my.plan/done-when "The transaction result identifies the new order.",
+    :my.plan/needs [#:my.plan.item{:id "juniper/aggregate"}], :my.plan/state
+    :blocked} {:my.plan.item/id "juniper/requery", :my.plan.item/title "Read the customer's new total",
+    :my.plan/done-when "A fresh grouped sum query includes the new order.",
+    :my.plan/needs [#:my.plan.item{:id "juniper/transact"}], :my.plan/state
+    :blocked} {:my.plan.item/id "juniper/reply", :my.plan.item/title "Tell root the customer and new total",
+    :my.plan/done-when "The sent message contains the customer and verified new total.",
+    :my.plan/needs [#:my.plan.item{:id "juniper/requery"}], :my.plan/state
+    :blocked} {:my.plan.item/id "juniper/done", :my.plan.item/title "Finish the session",
+    :my.plan/done-when "All preceding plan items are complete.", :my.plan/needs
+    [#:my.plan.item{:id "juniper/reply"}], :my.plan/state :blocked}], :result result/e301a93f8da98, :ms 56}
+
+;; I should check my inbox for anything I need to respond to.
+my.agents.juniper=> (my.message/inbox)
+#:seon.repl{:value [#:my.message{:at #inst "2026-09-09T12:00:00.000-00:00", :content "Which customer has the largest total? Add an order of 40 for them and tell me the new total.",
+    :from "root", :id "juniper/largest-customer"}], :result result/e77f0a99b3d48, :ms 58}
+
+;; I should check my overrides and how many turns I have left.
+my.agents.juniper=> (my.agent/settings)
+#:seon.repl{:value {:my.agent/turns-left 20, :seon.config.ai/no-provider true, :seon.config.eval/time-limit-ms
+  10000, :seon.config.run/max-episode-runs 20}, :result result/e7530319b29d2, :ms 57}
+
+;; What data is in my namespace?
+my.agents.juniper=> (seon.db/q (quote [:find ?attribute (count ?entity) :in $ [?attribute ...] :where [?entity ?attribute _]]) [:example/amount :example/customer :example/order])
+#:seon.repl{:value [[:example/order 4] [:example/customer 4] [:example/amount 4]], :result result/ed308a58c8319, :ms 51}
+```
+
+The final gate after the single-transaction fixture simplification passed
+1 test / 86 assertions / zero failures or errors. A later live capture still
+matched all 5,921 bytes exactly and retained exactly six evaluations.
