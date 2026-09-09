@@ -11,10 +11,11 @@
   [f]
   (support/with-database
     (fn [connection]
-      (db/transact! connection
-                    [{:seon.agent/id "alice"}
-                     {:seon.agent/id "bob"}
-                     {:seon.cluster.message/id "subject-1"}])
+      (let [written (db/transact! connection
+                                  [{:seon.agent/id "alice"}
+                                   {:seon.agent/id "bob"}
+                                   [:db/add "subject" :seon.cluster.message/id "subject-1"]])]
+        (is (:db-after written) (pr-str written)))
       (f connection))))
 
 (deftest add-upserts-current-content-by-identity

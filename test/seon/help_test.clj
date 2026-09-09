@@ -57,12 +57,12 @@
            (is (string? (:seon.turn/id @committed)))
            (is (= "(help)" (:seon.cluster.eval/source saved)))
            (is (= ['help 'seon.db/pull 'seon.db/pull 'seon.db/pull
-                   'seon.db/pull 'dir]
+                   'seon.db/pull 'seon.db/pull 'dir]
                   (mapv (comp first edn/read-string :seon.cluster.eval/source)
                         (evaluation/of-agent @connection "help"))))
            (let [entries (evaluation/of-agent @connection "help")
-                 empty-reads (subvec entries 2 5)]
-             (is (= ["nil" "nil" "nil"] (mapv :seon.eval/value empty-reads)))
+                 empty-reads (subvec entries 2 6)]
+             (is (= ["nil" "nil" "nil" "nil"] (mapv :seon.eval/value empty-reads)))
              (is (every? #(seq (:seon.cluster.eval/read-evidence %)) empty-reads)))
            (is (vector? lines) (pr-str lines))
            (is (= 13 (count lines)))
@@ -70,11 +70,13 @@
            (is (= "You are at a Clojure REPL in your namespace my.agents.help. Every function in the program is callable."
                   (first lines)))
            (is (not-any? #(str/includes? % "▲") lines))
-           (is (str/includes? (nth lines 6) "(my.plan/complete! {:my.plan.item/id id})"))
+           (is (str/includes? (nth lines 6) "identity-less nested map replaces it"))
            (is (str/includes? (nth lines 7) ":my.message/to"))
+           (is (str/includes? (nth lines 7) "retractEntity"))
+           (is (str/includes? (nth lines 10) "datomic.tx"))
            (is (str/starts-with? (last lines) "Tools: "))
            (is (str/includes? (last lines) "my.plan"))
-           (is (str/includes? (last lines) "my.turn — Return explicit completion"))
+           (is (str/includes? (last lines) "my.turn"))
            (is (not (str/includes? (last lines) "my.run")))
            (is (not (str/includes? (last lines) "render-namespace-ai")))
            (is (not (str/includes? (last lines) "usage-form")))
@@ -101,7 +103,7 @@
                            [[:db/add [:seon.fn/sym "seon.bootstrap/help-value"]
                              :seon.fn/source (str source "\n")]])
              (is (false? (db/read-evidence-current? @connection evidence))))
-           (let [initial (subvec (evaluation/of-agent @connection "help") 2 5)
+           (let [initial (subvec (evaluation/of-agent @connection "help") 2 6)
                  written (db/transact!
                           connection
                           [{:seon.agent/id "help"
@@ -110,7 +112,9 @@
                            {:seon.cluster.message/id "new-message"
                             :seon.cluster.message/to [:seon.agent/id "help"]
                             :seon.cluster.message/content "Observe the new message"
-                            :seon.cluster.message/at (java.util.Date. 0)}])]
+                            :seon.cluster.message/at (java.util.Date. 0)}
+                           {:my.note/id "first-note" :my.note/agent [:seon.agent/id "help"]
+                            :my.note/content "Observe the first note"}])]
              (is (:db-after written) (pr-str written))
              (is (every? #(false? (db/read-evidence-current?
                                    @connection (:seon.cluster.eval/read-evidence %))) initial))
@@ -118,7 +122,8 @@
              (let [latest (into {} (map (juxt :seon.cluster.eval/source :seon.eval/value))
                                 (evaluation/of-agent @connection "help"))]
                (doseq [[entry text] (map vector initial
-                                        ["Observe the new plan" "Observe the new message" "no-provider true"])]
+                                        ["Observe the new plan" "Observe the new message" "no-provider true"
+                                         "Observe the first note"])]
                  (is (str/includes? (get latest (:seon.cluster.eval/source entry)) text))))))
          (finally
            (doseq [channel [(:seon.cluster.wake/channel handle)

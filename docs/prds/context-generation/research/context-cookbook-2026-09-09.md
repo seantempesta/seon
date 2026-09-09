@@ -40,6 +40,26 @@ content, not observed browser paint.
 
 ## Read choice and evidence
 
+Notes now enter the declared turn-0 traversal, including an empty **3-byte**
+result. The canonical system-turn regression verifies that the first note changes
+that retained read. The render contract check accepts an explicit render-unit
+branch in a union while retaining the existing collection call.
+
+Help now states pull/q/inner-pull selection, component replacement, retractEntity,
+schema feedback, and transaction-as-time. Its first revision was **3513 raw
+bytes** and exceeded the profile, clipping the tools line. Listing namespace names
+and asking `dir` for details reduced it to **2498 raw / 2522 shown bytes**, with
+all thirteen lines intact. The current-schema transaction-time example was
+executed with `datahike.api/with`: **344 report bytes**, then **91 bytes** from
+pulling the transaction instant. [Exact notes, help, write, and time outputs](context_cookbook_notes_help_2026_09_09.edn).
+An explicit agent-scoped SCI evaluation of `(seon.turn/turns-left)` on default
+returned `16`, **2 bytes**; help names this actual derived read.
+
+Notes/help fast gate: **25 tests / 274 assertions**; isolated **25 / 278**;
+platform **83 / 490**, all green. The note fixture now asserts its setup write
+and uses db/add for an identity-only subject instead of submitting an incomplete
+message entity.
+
 The current-schema plan, settings, and inbox pairs now emit raw pulls. A pull's
 flat refusal remains visible: selecting a missing key with a default had hidden
 one during the empty-component probe. The existing declared traversal emits the
@@ -307,6 +327,70 @@ These later executed forms are exactly the bytes emitted by the current block pa
 ```
 
 ## Earlier equivalent-source probes
+
+### Notes, help, and transaction time
+
+```clojure
+;; I should read my saved notes; an empty read will observe the first note I add.
+(seon.db/pull
+  '[{:my.note/_agent [:my.note/id :my.note/content {:my.note/about [:my.plan.item/id]}]}]
+  [:seon.agent/id "juniper"])
+```
+
+Actual output: **3 UTF-8 bytes**.
+
+```clojure
+nil
+```
+
+```clojure
+;; I should inspect the REPL rules before choosing forms.
+(help)
+```
+
+Actual output: **2522 UTF-8 bytes**.
+
+```clojure
+["You are at a Clojure REPL in your namespace my.agents.juniper. Every function in the program is callable."
+  "Reply with ;; thinking comments, each followed by the form it plans. Send only comments and forms; the prompt my.agents.juniper=> is drawn for you."
+  "Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
+  "Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value."
+  "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
+  "When unsure, inspect data first: (dir my.agents.juniper) lists your namespace's public functions and schema declarations; (doc seon.db/q) returns its docstring and contract."
+  "Your plan is your instructions. Read its current step and completion criterion before acting; mark it complete only after seeing the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it."
+  "Read incoming messages with a reverse-ref pull on your agent. (my.message/send {:my.message/to \"root\" :my.message/content \"...\"}) sends; sending does not end your turn. Remove an entity and its incoming refs with (seon.db/transact! [[:db.fn/retractEntity lookup-ref]]); retract removes only the named fact."
+  "Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.cluster.message/_to; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied."
+  "A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours."
+  "A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value \"datomic.tx\" names this write, for example (seon.db/transact! [{:my.note/id \"observation\" :my.note/agent [:seon.agent/id \"juniper\"] :my.note/content \"Verified\" :my.note/about \"datomic.tx\"}]); pull :db/txInstant through that ref."
+  "Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) ends your session early."
+  "Tools: my.agent, my.background, my.edit, my.fs, my.message, my.note, my.plan, my.shell, my.test, my.turn, my.web. Inspect one with dir."]
+```
+
+```clojure
+;; I should link this note to the transaction that records my observation.
+(seon.db/transact!
+  [{:my.note/id "observation",
+    :my.note/agent [:seon.agent/id "juniper"],
+    :my.note/content "Verified",
+    :my.note/about "datomic.tx"}])
+```
+
+Actual output: **344 UTF-8 bytes**.
+
+```clojure
+#:seon.db{:tx 536871087, :datoms [[536871087 :db/txInstant #inst "2026-09-09T23:21:05.466-00:00" true] [[:my.note/id "observation"] :my.note/id "observation" true] [[:my.note/id "observation"] :my.note/agent 36179 true] [[:my.note/id "observation"] :my.note/content "Verified" true] [[:my.note/id "observation"] :my.note/about 536871087 true]]}
+```
+
+```clojure
+;; I should pull the referenced transaction's instant.
+(seon.db/pull '[:my.note/id {:my.note/about [:db/txInstant]}] [:my.note/id "observation"])
+```
+
+Actual output: **91 UTF-8 bytes**.
+
+```clojure
+#:my.note{:id "observation", :about #:db{:txInstant #inst "2026-09-09T23:21:05.466-00:00"}}
+```
 
 ## Identity
 

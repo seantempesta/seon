@@ -5,6 +5,7 @@
                        [:seon.agent/plan
                         :seon.cluster.message/_to
                         :seon.agent/settings
+                        :my.note/_agent
                         :seon.agent/namespace
                         :seon.turn/_agent
                         :seon.error/_steward],

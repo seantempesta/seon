@@ -34,14 +34,12 @@
                        [?agent :seon.agent/namespace ?namespace]
                        [?namespace :seon.ns/name ?name]] database agent-id)
         tools
-        (db/q '[:find ?name ?doc ?function-name
+        (db/q '[:find [?name ...]
                 :in $ [?name ...]
                 :where [?namespace :seon.ns/name ?name]
-                       [(get-else $ ?namespace :seon.ns/doc "") ?doc]
                        [?function :seon.fn/ns ?namespace]
                        [?function :seon.fn/private? false]
-                       (not [?function :seon.fn/internal? true])
-                       [?function :seon.fn/sym ?function-name]]
+                       (not [?function :seon.fn/internal? true])]
               database (instruction/toolkit-namespaces database))]
     [(str "You are at a Clojure REPL in your namespace " namespace-name
           ". Every function in the program is callable.")
@@ -49,20 +47,18 @@
      "Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
      "Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value."
      "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
-     "When unsure how to call something, ask first: (dir my.plan) lists a namespace's functions as data; (doc seon.db/q) returns a docstring and contract as data."
-     "Your plan is your instructions: (my.plan/items). The current step's :done-when says what done means. (my.plan/complete! {:my.plan.item/id id}) when it is."
-     "(my.message/inbox) is what you were sent. (my.message/send {:my.message/to \"root\" :my.message/content \"...\"}) sends. Sending a message does not end your turn."
-     "(seon.db/q '[:find ...]) queries, (seon.db/pull '[*] eid) reads one entity, (seon.db/transact! [{...}]) writes. The database is your cluster's and is supplied for you."
+     (str "When unsure, inspect data first: (dir " namespace-name
+          ") lists your namespace's public functions and schema declarations; (doc seon.db/q) returns its docstring and contract.")
+     "Your plan is your instructions. Read its current step and completion criterion before acting; mark it complete only after seeing the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it."
+     "Read incoming messages with a reverse-ref pull on your agent. (my.message/send {:my.message/to \"root\" :my.message/content \"...\"}) sends; sending does not end your turn. Remove an entity and its incoming refs with (seon.db/transact! [[:db.fn/retractEntity lookup-ref]]); retract removes only the named fact."
+     "Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.cluster.message/_to; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied."
      "A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours."
-     "A mistake returns :error data, never an exception. Read :seon.error/message and try again."
-     "Each reply is one turn. :turns-left in your settings counts down. (my.agent/done) ends your session early."
+     (str "A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value \"datomic.tx\" names this write, for example (seon.db/transact! [{:my.note/id \"observation\" :my.note/agent [:seon.agent/id "
+          (pr-str agent-id)
+          "] :my.note/content \"Verified\" :my.note/about \"datomic.tx\"}]); pull :db/txInstant through that ref.")
+     "Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) ends your session early."
      (str "Tools: "
-          (str/join "; "
-                    (for [[namespace-name rows] (sort-by key (group-by first tools))]
-                      (str namespace-name " — "
-                           (first (str/split-lines (second (first rows))))
-                           " (" (str/join ", " (sort (map #(name (symbol (nth % 2))) rows)))
-                           ")"))))]))
+          (str/join ", " (sort tools)) ". Inspect one with dir.")]))
 
 (defn situation
   "Derive one agent's live opening seeds from current database facts."

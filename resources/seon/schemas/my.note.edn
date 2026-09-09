@@ -1,5 +1,8 @@
 #:my.note{:id [:string {:min 1, :seon.db/identity true}],
-          :agent :seon.db/ref,
+          :agent [:and {:seon.render/ai seon.note/render-notes-ai
+                        :seon.render/html seon.note/render-notes-html
+                        :seon.render/form seon.note/render-notes-form}
+                  :seon.db/ref],
           :content [:string {:min 1}],
           :about :seon.db/ref,
           :note

@@ -6,6 +6,7 @@
   Datahike retains its history."
   (:require [clojure.string :as str]
             [seon.db :as db]
+            [seon.repl :as repl]
             [seon.render.value :as render.value]
             [seon.schema.edn :as schema.edn]))
 
@@ -58,13 +59,21 @@
   (str "Note " (note-line (note-value note))))
 
 (defn render-notes-ai
-  "Render the bounded current note collection as text."
-  {:malli/schema [:=> [:cat :my.note/notes] :seon.render/ai]}
+  "Read this agent's notes, including the absence that later notes change."
+  {:malli/schema [:=> [:cat [:or :my.note/notes :seon.render/unit]] :seon.render/source]}
   [notes]
-  (if (seq notes)
+  (if (map? notes)
+    (str ";; I should read my saved notes; an empty read will observe the first note I add.\n"
+         (repl/source-text
+          (list 'seon.db/pull
+                (list 'quote '[{:my.note/_agent
+                               [:my.note/id :my.note/content
+                                {:my.note/about [:my.plan.item/id]}]}])
+                [:seon.agent/id (:seon.agent/id notes)])))
+    (if (seq notes)
     (str "Current notes (" (count notes) "):\n"
          (str/join "\n" (map #(str "- " (note-line %)) notes)))
-    "No current notes."))
+    "No current notes.")))
 
 (defn- note-html
   [note]
@@ -83,12 +92,20 @@
 
 (defn render-notes-html
   "Render the bounded current note collection as Hiccup."
-  {:malli/schema [:=> [:cat :my.note/notes] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat [:or :my.note/notes :seon.render/unit]]
+                  [:or :seon.render/hiccup :seon.error/value]]}
   [notes]
-  (into [:section {:class "seon-family-entry my-notes"}
+  (let [pulled (when (map? notes)
+                 (db/pull (:seon.db/db notes)
+                          '[{:my.note/_agent [*]}]
+                          [:seon.agent/id (:seon.agent/id notes)]))
+        notes (if (map? notes) (get pulled :my.note/_agent []) notes)]
+    (if (:seon.error/kind pulled)
+      pulled
+      (into [:section {:class "seon-family-entry my-notes"}
          [:h3 (str "Current notes (" (count notes) ")")]]
         (map note-html)
-        notes))
+        notes))))
 
 (defn render-note-form
   "Render the current database read for one note."
@@ -100,7 +117,7 @@
 
 (defn render-notes-form
   "Render the current database read for this agent's notes."
-  {:malli/schema [:=> [:cat :my.note/notes] :seon.render/form]}
+  {:malli/schema [:=> [:cat [:or :my.note/notes :seon.render/unit]] :seon.render/form]}
   [_notes]
   (list 'my.note/notes))
 

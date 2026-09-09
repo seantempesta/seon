@@ -1540,6 +1540,9 @@
                                 ;; A render unit carries any value under
                                 ;; :seon.render/value, including scalar refs.
                                 (= input-form :seon.render/unit)
+                                (and (vector? input-form)
+                                     (= :or (first input-form))
+                                     (some #{:seon.render/unit} (rest input-form)))
                                 (schema-accepts-schema? input declaring))
                         input-form))))
                 arities)]

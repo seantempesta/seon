@@ -9,6 +9,8 @@
             [seon.operator :as operator]
             [seon.operator.runtime :as runtime]
             [seon.agent :as agent]
+            [seon.bootstrap :as bootstrap]
+            [seon.note :as note]
             [seon.cluster.message :as message]
             [seon.plan :as plan]
             [seon.render :as render]
@@ -447,3 +449,46 @@
          (spit "docs/prds/context-generation/research/context_cookbook_blocks_2026_09_09.edn"
                (pr-str result))
          (mapv #(select-keys % [:label :source-bytes :bytes :shown-bytes :evidence]) records))))))
+
+(defn probe-notes-help!
+  "Execute the notes read and help's transaction-time example without a commit."
+  []
+  (let [connection (operator/connection "default") database @connection
+        projection (schema/projection-from-database database)]
+    (schema/call-with-projection
+     projection
+     (fn []
+       (let [source (note/render-notes-ai {:seon.db/db database :seon.agent/id "juniper"})
+             notes (binding [db/*conn* connection db/*read-database* database]
+                     (eval (read-string source)))
+             help (bootstrap/help-value database "juniper")
+             handle (:seon.turn.loop/cluster (get @runtime/running-instances "default"))
+             shown-help (:seon.eval/value
+                         ((requiring-resolve 'seon.sci.eval/evaluate)
+                          {:seon.cluster.eval/source "(help)" :seon.agent/id "juniper"
+                           :seon.db/db database :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                           :seon.sci.admit/caps (:seon.sci.admit/caps handle)
+                           :seon.sci.eval/time-limit-ms 10000 :seon.config/on-core-error :panic}))
+             line (nth help 10)
+             write-form (read-string (subs line (str/index-of line "(seon.db/transact!")))
+             report (d/with database (second write-form))
+             time-form '(seon.db/pull '[:my.note/id {:my.note/about [:db/txInstant]}]
+                                     [:my.note/id "observation"])
+             time-value (binding [db/*conn* connection db/*read-database* (:db-after report)]
+                          (eval time-form))
+             record (fn [source output]
+                      {:source source :source-bytes (byte-count source)
+                       :output (pr-str output) :bytes (byte-count (pr-str output))})
+             result {:basis (db/basis-t database)
+                     :notes (record source notes)
+                     :help (assoc (record "(help)" help)
+                                  :shown shown-help :shown-bytes (byte-count shown-help))
+                     :write (record (repl/source-text write-form)
+                                    (#'db/transaction-result report))
+                     :time (record (repl/source-text time-form) time-value)
+                     :default-unchanged? (= (db/basis-t database) (db/basis-t @connection))}]
+         (assert (inst? (get-in time-value [:my.note/about :db/txInstant])))
+         (spit "docs/prds/context-generation/research/context_cookbook_notes_help_2026_09_09.edn"
+               (pr-str result))
+         (mapv (fn [key] [key (select-keys (get result key) [:source-bytes :bytes])])
+               [:notes :help :write :time]))))))

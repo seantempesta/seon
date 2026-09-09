@@ -8,6 +8,7 @@
       prior (slurp path)
       result (edn/read-string (slurp (str root "context_cookbook_rechecked_2026_09_09.edn")))
       blocks (edn/read-string (slurp (str root "context_cookbook_blocks_2026_09_09.edn")))
+      notes-help (edn/read-string (slurp (str root "context_cookbook_notes_help_2026_09_09.edn")))
       records (concat (:reads result) (:writes result) (:proposed-reads result))
       _ (assert (every? :unchanged? records))
       prefix (subs prior 0 (or (str/index-of prior "\n## Agent-source recheck\n")
@@ -61,6 +62,16 @@
                      source-bytes " source bytes; **" shown-bytes " shown UTF-8 bytes**; evidence "
                      (pr-str evidence) ".\n\n```clojure\n" shown "\n```\n")))
              "\n## Earlier equivalent-source probes\n"
+             "\n### Notes, help, and transaction time\n"
+             (str/join
+              (for [[kind thought] [[:notes nil]
+                                    [:help "I should inspect the REPL rules before choosing forms."]
+                                    [:write "I should link this note to the transaction that records my observation."]
+                                    [:time "I should pull the referenced transaction's instant."]]
+                    :let [{:keys [source output bytes shown shown-bytes]} (get notes-help kind)]]
+                (str "\n```clojure\n" (when thought (str ";; " thought "\n")) source
+                     "\n```\n\nActual output: **" (or shown-bytes bytes)
+                     " UTF-8 bytes**.\n\n```clojure\n" (or shown output) "\n```\n")))
              (str/join (map #(section :read %) (:reads result)))
              "\n## Write examples\n\nThe proposed identity, transaction-time, message, and runtime attributes exist only in the speculative value. "
              "These are dependency-semantic probes, not a claim that the data lane's schema is installed.\n"
