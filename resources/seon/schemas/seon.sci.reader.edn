@@ -1,4 +1,6 @@
 {:seon.sci.reader/tag :symbol
+ :seon.sci.reader/fabricated-response [:= true]
+ :seon.sci.reader/fabricated-response-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify a fabricated REPL response in agent source"} [:seon.sci.reader/fabricated-response :seon.sci.reader/fabricated-response] [:seon.error/message :seon.error/message]]
  :seon.sci.reader/unreadable [:= true]
  :seon.sci.reader/unreadable-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark unreadable Clojure source"} [:seon.sci.reader/unreadable :seon.sci.reader/unreadable] [:seon.error/message :seon.error/message]]
  :seon.sci.reader/oversize [:= true]

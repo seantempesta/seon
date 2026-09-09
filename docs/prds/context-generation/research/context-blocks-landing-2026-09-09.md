@@ -741,3 +741,72 @@ the full publication/rename/boot test took **118,903 ms**. Separate platform:
 The default debug page remained HTTP 200. Its stored history still contains
 the earlier arithmetic placeholder and prior help values, pending the final
 fixture reseed; this test-only slice did not rewrite those historical bytes.
+
+## 14:50 resume — slice 4: reply-reader rule
+
+Read §18b end to end. Leading prompt symbols are removed only at top-level
+reader positions at the start of a line; strings, comments and nested forms
+retain their bytes. A top-level map carrying `seon.repl` keys becomes the
+reader's declared fabricated-response error, with the owner's exact message.
+The existing ordered evaluation path executes preceding forms and stores
+that error without evaluating the map. The reply parser also now consumes
+per-form reader failures through its existing prose-recovery mechanism;
+seven old parser failures reproduced on HEAD before this correction.
+
+Initial fast and isolated gate verification: **42 tests / 418 assertions /
+zero failures or errors**. The first attempt substituted an order query
+because the saved trial's unrestricted all-datoms query exceeded the loop
+backstop in value rendering. A captured virtual-thread stack identified
+complete-set print-key sorting before AI elision; no Flow fault had occurred.
+Once the concurrent renderer changes landed, this slice corrected that
+existing renderer to traverse only the retained AI set members. HTML still
+orders complete values. Saved shown text, not canonical sorting, owns
+historical prompt stability. The loop now submits the **exact unchanged
+first trial reply**, verifies its actual query result/read evidence, and
+then verifies the fabricated-response error. The reproducible no-provider
+script is `reply_reader_trial_probe_2026_09_09.clj`.
+
+The new data-first namespace block landed during verification. The loop
+compares stored forms to the generator's actual source sequence instead of
+the superseded six-form roster. An empty, existing namespace must return
+`[]` from dir; it is not unavailable documentation. This slice fixes that
+at the existing SCI macro, resolving existence in the calling agent's
+context rather than the program-only base. Acquired doc/dir refresh
+evidence remains a separate issue:
+`docs/seon/issues/acquired-dir-data-has-no-read-evidence.md`. The loop
+retains positive evidence checks for every generated database read and help.
+The value traversal and empty-dir integration fixes extended this slice
+beyond its 30-minute target; the additional work is named here explicitly.
+
+The separate platform pass before these final two fixes was **83 tests /
+490 assertions / zero failures or errors**. The previously reported foreign
+blob-reachability failure did not reproduce in that snapshot; no registry
+or transaction-owner files were changed by this lane.
+
+RESET NEEDED: this slice declares the fabricated-response error schema.
+Default's process remained PID 37586; no lifecycle command was sent to it.
+No paid call was made in this slice. The final paid trial belongs to the
+fixture/review slice after the current prompt is captured.
+
+The final path-limited reader/value/documentation/loop gate passed **67 tests /
+548 assertions / zero failures or errors**, one worker. A broader diagnostic
+`seon.sci.eval-test` run (with documentation) reported **68 tests / 305
+assertions / 43 failures / 12 errors**; it still expects retired storage,
+unchecked population, and old instrumentation restoration. That namespace
+was left unchanged and its observed failures were filed in
+`docs/seon/issues/sci-evaluation-tests-still-expect-retired-storage.md`.
+The changed directory behavior is covered by the dedicated canonical
+documentation test and the complete loop proof.
+
+The second platform pass hit the already recorded cohost-start/reachability
+sweep race: **83 tests / 474 assertions / zero failures / one error**.
+Its isolated confirmation passed. A final unchanged-source platform rerun
+is recorded below; this does not close that separate race. Default
+adoptions during concurrent edits reported source changes during adoption;
+no partial adoption is claimed as convergence. The page remained HTTP 200
+and its stored old history was observed, pending final reseeding.
+
+Final platform rerun: **83 tests / 490 assertions / zero failures or errors**,
+one worker. The isolated reader gate and this platform pass cover the final
+source implementation. RESET NEEDED remains recorded for the new reader
+error declaration; the orchestrator owns default's one batched refork.

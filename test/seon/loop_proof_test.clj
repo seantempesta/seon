@@ -1,5 +1,6 @@
 (ns seon.loop-proof-test
   (:require [clojure.core.async :as async]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -32,8 +33,7 @@
      (let [configured
            (db/transact!
             connection
-            [{:seon.cluster/name "loop-proof"}
-             (:seon.config/desired-row
+            [(:seon.config/desired-row
               (config/compile-manifest
                {:seon.boot/cluster-name "loop-proof"
                 :seon.config/manifest {:seon.config.ai/no-provider true}}))
@@ -43,7 +43,8 @@
               :seon.agent/namespace {:seon.ns/name 'my.agents.unobserved}}
              {:seon.agent/id "root"
               :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
-           _ (is (nil? (:seon.error/kind configured)))
+           _ (is (nil? (:seon.error/kind configured)) (pr-str configured))
+           _ (cluster/ensure-cluster-entity! connection "loop-proof" cluster/boot-process-identity)
            ctx (support/fork-cluster-ctx connection)
            environment (support/environment "loop-proof" connection)
            routing (agent/routing)
@@ -95,7 +96,25 @@
                                                [:seon.turn/id id])))]
                    (is (string? id) (pr-str result))
                    (when (and id (not (closed?)))
-                     (support/await-event! events ::closed (fn [_] (closed?))))
+                     (try
+                       (support/await-event! events ::closed (fn [_] (closed?)))
+                       (catch Throwable failure
+                         (let [turn-row (db/pull @connection '[*] [:seon.turn/id id])]
+                           (prn {:seon.test/unfinished-turn turn-row
+                                 :seon.test/evaluations
+                                 (mapv #(select-keys % [:seon.cluster.eval/source
+                                                       :seon.cluster.eval/error
+                                                       :seon.cluster.eval/ordinal
+                                                       :seon.eval/value])
+                                       (filter #(= (:db/id turn-row)
+                                                   (get-in % [:seon.cluster.eval/run :db/id]))
+                                               (evaluation/of-agent @connection "juniper")))}))
+                         (when-let [fault (async/poll! faults)]
+                           (prn (update-vals fault
+                                            #(if (instance? Throwable %)
+                                               {:seon.error/message (ex-message %)
+                                                :seon.error/data (ex-data %)} %))))
+                         (throw failure))))
                    (is (boolean (closed?)))
                    id))]
            (swap! routing assoc :seon.agent/fault-channel faults)
@@ -125,7 +144,8 @@
                                                     [(:seon.cluster.eval/source entry)
                                                      (count (:seon.cluster.eval/read-evidence entry))]) saved)})
                    (is (seq saved))
-                   (is (every? (comp seq :seon.cluster.eval/read-evidence) saved))
+                   (is (every? (comp seq :seon.cluster.eval/read-evidence)
+                               (remove #(str/starts-with? (:seon.cluster.eval/source %) "(dir ") saved)))
                    (is (nil? (:seon.turn/id refresh)) (pr-str (:seon.turn/forms refresh))))))
              (fixture/install! handle routing)
              (testing "fresh opening and stable stored prompt"
@@ -137,12 +157,15 @@
                      second-prompt (prompt)]
                  (is (string? (:seon.turn/id opening)) (pr-str (keys opening)))
                  (is (= first-id (:seon.turn/id opening)))
-                 (is (= ["(help)" "(my.agent/identity)" "(my.plan/items)"
-                         "(my.message/inbox)" "(my.agent/settings)"]
-                        (mapv :seon.cluster.eval/source (take 5 saved))))
-                 (is (= 6 (count saved)))
-                 (is (every? (comp seq :seon.cluster.eval/read-evidence) saved)
-                     "every seeded read stores its dependency evidence")
+                 (is (= "(help)" (:seon.cluster.eval/source (first saved))))
+                 (is (= (mapv :seon.cluster.eval/source (:seon.turn/forms opening))
+                        (mapv :seon.cluster.eval/source saved)))
+                 (is (= (count saved) (count (distinct (map :seon.cluster.eval/source saved)))))
+                 ;; Acquired doc/dir macros return quoted program data; their missing
+                 ;; refresh evidence is recorded separately from database reads.
+                 (is (every? (comp seq :seon.cluster.eval/read-evidence)
+                             (remove #(str/starts-with? (:seon.cluster.eval/source %) "(dir ") saved))
+                     "every seeded database read and help store dependency evidence")
                  (is (= 4 (count (db/q '[:find [?key ...] :in $ ?name :where
                                            [?n :seon.ns/name ?name]
                                            [?s :seon.schema/ns ?n]
@@ -363,6 +386,27 @@
              (testing "the scenario crosses the real query, write, message, and session boundaries"
                (agent/arm! {:seon.turn.loop/cluster handle
                            :seon.agent/routing routing :seon.agent/id "juniper"})
+               (testing "the exact saved trial query evaluates before its fabricated-response error"
+                 (let [trial (edn/read-string
+                              (slurp "docs/prds/context-generation/research/help_trial_2026_09_09.edn"))
+                       reply-text (get-in trial [:seon.trial/completion :seon.ai/text])
+                       _ (is (string? reply-text))
+                       parsed (turn/planned-sources reply-text 'my.agents.juniper (count reply-text))
+                       _ (is (= 2 (count parsed)))
+                       _ (is (= "(seon.db/q '[:find ?e ?attr ?v :where [?e ?attr ?v]])"
+                                (:seon.cluster.eval/source (first parsed))))
+                       id (submit reply-text)
+                       turn-eid (:db/id (db/pull @connection [:db/id] [:seon.turn/id id]))
+                       saved (filterv #(= turn-eid (get-in % [:seon.cluster.eval/run :db/id]))
+                                      (evaluation/of-agent @connection "juniper"))]
+                   (is (= 2 (count saved)))
+                   (is (str/starts-with? (:seon.cluster.eval/source (first saved)) "(seon.db/q"))
+                   (is (nil? (:seon.cluster.eval/error (first saved))))
+                   (is (seq (:seon.eval/value (first saved))))
+                   (is (seq (:seon.cluster.eval/read-evidence (first saved))))
+                   (is (str/includes? (:seon.cluster.eval/error (second saved))
+                                      "You wrote a response. Only the REPL writes responses; send forms and wait."))
+                   (is (str/starts-with? (:seon.cluster.eval/source (second saved)) "#:seon.repl"))))
                (submit "(seon.db/q '[:find ?customer (sum ?amount) :where [?order :example/customer ?customer] [?order :example/amount ?amount]])")
                (is (str/includes? (:seon.eval/value (last (evaluation/of-agent @connection "juniper"))) "115"))
                (submit "(seon.db/transact! [{:example/order \"a3\" :example/customer \"Ada\" :example/amount 40}])")

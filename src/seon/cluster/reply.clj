@@ -157,6 +157,8 @@
                           ::source form-source
                           ::start start
                           ::end end}
+                   (:seon.sci.reader/error event)
+                   (assoc ::error (:seon.sci.reader/error event))
                    (:seon.sci.reader/ns event)
                    (assoc ::ns (:seon.sci.reader/ns event)))))
              events)))))
@@ -186,6 +188,22 @@
               (::start event)
               (recur (inc newline) (dec remaining-lines))))))
       (::start event))))
+
+(defn- strip-prompt-markers
+  "Remove leading prompt symbols at reader-proven top-level positions."
+  [source events]
+  (reduce
+   (fn [text event]
+     (let [form (::form event)
+           token (when (symbol? form) (str form))
+           start (form-start source event)
+           line-start (inc (.lastIndexOf source "\n" (dec start)))]
+       (if (and token (nil? (namespace form))
+                (> (count token) 2) (str/ends-with? token "=>")
+                (str/blank? (subs source line-start start)))
+         (str (subs text 0 start) (subs text (::end event)))
+         text)))
+   source (reverse events)))
 
 (defn- structured-code-indexes
   "Structured forms beginning a code line or following code on that line."
@@ -359,7 +377,7 @@
 
 (defn sources
   "The ordered plan forms in one model reply, or a flat error value.
-  Strips code fences, then reads through THE ONE reader
+  Strips code fences and leading prompt markers, then reads through THE ONE reader
   (`seon.sci.reader/read`), returning each form's EXACT source text in
   order — each carrying `:seon.ns/name`, the namespace that form was
   written under, whenever the reader attributed one. Attribution is the
@@ -409,10 +427,18 @@
                        (:seon.error/data admission-events)))
        (loop [source (unfenced text)
               recovered-lines #{}]
-         (let [events (parsed-events source namespace-name (count source))]
+         (let [events (parsed-events source namespace-name (count source))
+               recovered (when (vector? events)
+                           (some #(when-let [failure (::error %)]
+                                    (comment-prose-failure source failure recovered-lines))
+                                 events))]
            ; the reader refuses #= and unknown tags by itself — there is no
            ; blocklist here, and there must never be one
-           (if (map? events)
+           (cond
+             recovered
+             (recur (:source recovered) (conj recovered-lines (:line recovered)))
+
+             (map? events)
              (let [message (:seon.error/message events)
                    tag (:seon.sci.reader/tag (:seon.error/data events))]
                (if (= :seon.sci.reader/refused-tag (:seon.error/kind events))
@@ -424,8 +450,12 @@
                    (recur recovered-source (conj recovered-lines line))
                    (refused ::unreadable {::unreadable text} message
                             {::text text}))))
-             (let [forms (plan-sources source events)]
-               (if (seq forms)
-                 (vec forms)
-                 (refused ::no-forms {::no-forms true}
-                          (no-forms-message source) {::text text}))))))))))
+             :else
+             (let [without-markers (strip-prompt-markers source events)]
+               (if (not= source without-markers)
+                 (recur without-markers recovered-lines)
+                 (let [forms (plan-sources source events)]
+                   (if (seq forms)
+                     (vec forms)
+                     (refused ::no-forms {::no-forms true}
+                              (no-forms-message source) {::text text}))))))))))))

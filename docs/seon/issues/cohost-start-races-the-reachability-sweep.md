@@ -37,3 +37,14 @@ The admission/sweep implementation was not changed by this slice.
 The final single-worker platform rerun passed **83 tests / 490 assertions,
 zero failures/errors** (`tmp/custody-corrected-platform.log`). This verifies
 the final custody snapshot; it does not resolve the parallel boot/sweep race.
+
+## 2026-09-09 reply-reader slice recurrence
+
+The final reader/value/empty-directory snapshot at `6f7c6faa3` reproduced the
+same refusal with one worker: **83 tests / 474 assertions, zero failures,
+one error**. The isolated confirmation passed; the runner reported no
+preceding worker-global change. The earlier platform snapshot passed
+83 / 490. Log: `tmp/context-blocks/resume-slice4-final-platform.log`;
+retained root: `tmp/test-runs/run.Xh7E6w`. The reply-reader slice does not
+change cohost startup or sweep admission. Final rerun numbers are in the
+context-blocks landing note; a green rerun does not resolve this race.

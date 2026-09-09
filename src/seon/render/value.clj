@@ -309,17 +309,20 @@
                        (vector? value) :seon.print/vector :else :seon.print/list)
             child-key (if map-value? :seon.print/entries :seon.print/items)
             limit (if ai? (:seon.render.profile/max-children profile) Long/MAX_VALUE)
-            ;; Complete print keys determine order. Omitted map values are
-            ;; never visited, even to choose the retained prefix.
+            ;; Map keys and HTML sets use complete print keys for ordering.
+            ;; AI sets traverse only retained members; saved shown text owns
+            ;; their historical order. Omitted map values are never visited.
             key-node #(value-node % unit profile :seon.render/html depth [] remaining)
             key-text #(print/emit-text % {:seon.print/length nil :seon.print/level nil
                                          :seon.print/width 0 :seon.print/table? false})
             entries (cond
                       map-value? (sort-by (comp key-text first)
                                          (map (fn [[k v]] [(key-node k) k v]) value))
-                      set-value? (let [members (map (fn [v] [(key-node v) v v]) value)]
-                                   (if (sorted? value) members
-                                       (sort-by (comp key-text first) members)))
+                      set-value? (if ai?
+                                   (map (fn [v] [nil v v]) value)
+                                   (let [members (map (fn [v] [(key-node v) v v]) value)]
+                                     (if (sorted? value) members
+                                         (sort-by (comp key-text first) members))))
                       :else (map-indexed (fn [i v] [nil i v]) value))
             children
             (when-not selected

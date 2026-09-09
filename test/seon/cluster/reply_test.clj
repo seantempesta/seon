@@ -30,6 +30,15 @@
   [source]
   (sci/parse-string (sci/init {}) source))
 
+(deftest prompt-markers-are-removed-only-at-top-level-line-starts
+  (let [sources (reply/sources
+                 ";; I should query next.\nmy.agents.juniper=> (inc 1)\n  another.ns=> (dec 3)"
+                 'my.agents.juniper)]
+    (is (= ["(inc 1)" "(dec 3)"] (mapv :seon.cluster.eval/source sources)))
+    (is (= ";; I should query next." (:seon.cluster.eval/comment (first sources)))))
+  (let [text "(identity \"first line\nmy.agents.juniper=> (inc 1)\")"]
+    (is (= text (:seon.cluster.eval/source (first (reply/sources text)))))))
+
 (defn- error? [value]
   (and (map? value) (string? (:seon.error/message value))))
 
@@ -279,17 +288,30 @@
 ;;; Refusals — flat values, never throws
 ;;; ---------------------------------------------------------------------------
 
+(defn- read-errors
+  [text]
+  (let [result (reply/sources text)]
+    (if (map? result)
+      [result]
+      (into []
+            (mapcat (fn [source]
+                      (let [text (:seon.cluster.eval/source source)]
+                        (keep :seon.sci.reader/error
+                              (reader/read {:seon.sci.reader/text text
+                                            :seon.config.eval.result/max-source (count text)})))))
+            result))))
+
 (deftest every-refusal-is-a-value
   (testing "unbalanced input refuses with a position, and does not hang"
-    (let [refused (sources "(defn f [x]\n  (+ x 1)")]
+    (let [refused (first (read-errors "(defn f [x]\n  (+ x 1)"))]
       (is (error? refused))
-      (is (= :seon.cluster.reply/unreadable (:seon.error/kind refused)))
-      (is (str/includes? (:seon.error/message refused) "1")
+      (is (= :seon.sci.reader/unreadable (:seon.error/kind refused)))
+      (is (pos-int? (get-in refused [:seon.error/data :seon.sci.reader/line]))
           "the reader's own position reaches the agent")))
   (testing "an invalid token inside a structured form is malformed code"
-    (let [refused (sources "(+ 1\n  80s)")]
+    (let [refused (first (read-errors "(+ 1\n  80s)"))]
       (is (error? refused))
-      (is (= :seon.cluster.reply/unreadable (:seon.error/kind refused)))))
+      (is (= :seon.sci.reader/unreadable (:seon.error/kind refused)))))
   (testing "read-eval is refused by the reader, not by a blocklist"
     (let [refused (sources "#=(System/exit 1)")]
       (is (error? refused))
@@ -313,14 +335,14 @@
         classes (fn [text]
                   (into #{}
                         (map :seon.schema/key)
-                        (schema/matching-shapes-in projection
-                                                   (reply/sources text))))]
+                        (mapcat #(schema/matching-shapes-in projection %)
+                                (read-errors text))))]
     (is (contains? (classes "   \n\n  ")
                    :seon.cluster.reply/no-forms-error))
     (is (contains? (classes "I only explained myself.")
                    :seon.cluster.reply/no-forms-error))
     (is (contains? (classes "(defn f [x]")
-                   :seon.cluster.reply/unreadable-error))
+                   :seon.sci.reader/unreadable-error))
     (is (contains? (classes "#foo/bar [1 2]")
                    :seon.cluster.reply/refused-tag-error))))
 

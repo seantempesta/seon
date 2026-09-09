@@ -37,6 +37,19 @@
   [value]
   (contains? value :seon.error/kind))
 
+(deftest fabricated-responses-are-reader-errors-with-exact-source
+  (let [source "#:seon.repl{:value (throw (ex-info \"must not run\" {}))}"
+        parsed (events (str "(inc 1)\n" source))]
+    (is (= 2 (count parsed)))
+    (is (nil? (:seon.sci.reader/error (first parsed))))
+    (is (= source (:seon.sci.reader/source (second parsed))))
+    (is (= "You wrote a response. Only the REPL writes responses; send forms and wait."
+           (get-in parsed [1 :seon.sci.reader/error :seon.error/message])))
+    (doseq [text ["(identity #:seon.repl{:value 2})"
+                  "'#:seon.repl{:value 2}"
+                  "\"my.agents.juniper=>\\n#:seon.repl{:value 2}\""]]
+      (is (not-any? :seon.sci.reader/error (events text))))))
+
 (defn- read-kinds
   [read-events]
   (mapv #(if (:seon.sci.reader/error %) :error :form) read-events))

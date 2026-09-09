@@ -573,7 +573,18 @@
                               form
                               (when (::attribution? state) (::ns state))
                               (select-keys state [::ns ::aliases ::refers])))]
-                   {::nested-declarations nested}))]
+                   {::nested-declarations nested}))
+                event
+                (cond-> event
+                  (and (map? form)
+                       (some #(and (keyword? %)
+                                   (= "seon.repl" (namespace %))) (keys form)))
+                  (assoc ::error
+                         (error-value
+                          ::fabricated-response
+                          "You wrote a response. Only the REPL writes responses; send forms and wait."
+                          {::text source ::line source-line
+                           ::column source-column ::phase "reply"})))]
             (recur (next-reading-context state form)
                    (conj events event))))))))
 

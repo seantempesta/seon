@@ -1165,14 +1165,17 @@
     (sci/new-macro-var
      'dir
      (fn [_form _env namespace-name]
-       (list 'quote
-             (if-let [rows (get by-namespace namespace-name)]
+       (if-let [rows (get by-namespace namespace-name)]
+         (list 'quote
                (mapv (fn [row]
                        (cond-> (dissoc row :seon.fn/arities)
                          (:seon.fn/doc row)
                          (update :seon.fn/doc #(first (str/split-lines %)))))
-                     rows)
-               (documentation-unavailable namespace-name))))
+                     rows))
+         ;; Resolve in the calling agent's context, which can own namespaces
+         ;; absent from the acquired program-only base.
+         (list 'if (list 'clojure.core/find-ns (list 'quote namespace-name))
+               [] (list 'quote (documentation-unavailable namespace-name)))))
      {:ns (sci/create-ns 'clojure.repl)})))
 
 (defn- install-program-doc!

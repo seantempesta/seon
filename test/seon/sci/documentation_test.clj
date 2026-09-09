@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.config :as config]
+            [seon.db :as db]
             [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
 
@@ -20,6 +21,7 @@
            documentation (run "(doc my.agent/settings!)")
            missing (run "(doc my.agent/does-not-exist)")
            missing-ns (run "(dir missing.namespace)")
+           empty-ns (run "(do (in-ns 'fixture.empty-doc) (dir fixture.empty-doc))")
            rows (:seon.sci.admit/value directory)
            row (:seon.sci.admit/value documentation)]
        (is (seq rows))
@@ -27,7 +29,9 @@
        (is (every? :seon.fn/spec rows))
        (is (every? #(not (str/includes? (:seon.fn/doc %) "\n")) rows))
        (is (= "my.agent/settings!" (:seon.fn/sym row)))
-       (is (str/includes? (:seon.fn/doc row) "one owned component"))
+       (is (= (:seon.fn/doc (db/pull @connection [:seon.fn/doc]
+                                    [:seon.fn/sym "my.agent/settings!"]))
+              (:seon.fn/doc row)))
        (is (seq (:seon.fn/arities row)))
        (is (seq (get-in row [:seon.fn/arities 0 :seon.fn.arity/input-refs])))
        (doseq [result [directory documentation missing missing-ns]]
@@ -35,4 +39,6 @@
        (is (= :seon.sci.eval/documentation-unavailable
               (get-in missing [:seon.sci.admit/value :seon.error/kind])))
        (is (= :seon.sci.eval/documentation-unavailable
-              (get-in missing-ns [:seon.sci.admit/value :seon.error/kind])))))))
+              (get-in missing-ns [:seon.sci.admit/value :seon.error/kind])))
+       (is (= [] (:seon.sci.admit/value empty-ns)))
+       (is (nil? (:seon.cluster.eval/error empty-ns)))))))
