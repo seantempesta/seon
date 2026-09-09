@@ -333,7 +333,7 @@ the concurrently edited evaluation boundary: `:seon.eval/entity` declared
 that shape (`:seon.schema/render-contract-incoherent`). No foreign files or
 sessions were operated. The committed web/ns Vars were loaded in default and
 re-instrumented in place (911 registered/instrumented); this observation is a
-**hot reload**, not successful program-fact adoption. Default remained PID22932.
+**hot reload**, not successful program-fact adoption. Default remained PID 22932.
 Its debug GETs returned 200 in 17.852125 and 8.227375 ms, 1328357 bytes. Chrome
 verified identity, plan, settings, and reverse concerns at 1568 px with paired
 762.609375 px columns.
@@ -413,7 +413,7 @@ measurements, not averaged away.
 The additional scratch identity change passes only the scalar entity attributes
 to the grouped identity pair, leaving components in their own blocks. Chrome
 verified 1568 px blocks and two 762.609375 px columns, with no horizontal overflow.
-The cache-cleared GET took 2628.648208 ms and the warm GET 19.146625 ms, both200,
+The cache-cleared GET took 2628.648208 ms and the warm GET 19.146625 ms, both 200,
 1004703 bytes. This older scratch code did not include the subsequently committed
 lazy diagnostic-details change; it is not a latency claim for that combined page.
 
@@ -425,3 +425,80 @@ those paths had no uncommitted edits. No foreign session or file was operated.
 
 Combined HEAD-plus-owned-paths gate after `adfdcc839`: 27 tests, 166 assertions,
 zero failures/errors across prompt, web context, debug, and namespace renderers.
+
+### Committed adoption and final acceptance measurements
+
+`22f6163e5` landed the history/cost slice. Development adoption then completed
+at source commit `6aa0db4f-b37a-5712-923e-f55a3828146b`, digest
+`92a9486c3f7b9f02cfac9924abb5f600f0c5fc35424cffd55d613a9fe129f615`.
+The operator reported schema declarations, program reconciliation, namespace
+reload, SCI acquisition, JVM instrumentation, and convergence. Default stayed
+PID 22932 throughout; no stop, refork, or restart was performed. The listener
+probe spans reconciliation and reload: **900/900 HTTP200**, 200 ms target
+intervals, maximum **4.508 ms**. It requests CSS to isolate socket availability
+from page derivation; the dynamic page is measured separately.
+
+Chrome observed adopted debug GETs **1534.247916 ms cold / 5.653625 ms warm**,
+HTTP200, **279925 bytes**. All eight declared/grouped/reverse blocks remained
+1568 px wide, with 762.609375 px AI and HTML columns and 1600 px document width.
+The identity pair now shows its namespace as well as its id.
+
+![Adopted default page](page-feed-adopted-default-2026-09-08.png)
+
+After clearing the shared render cache, default context acquisition took
+**283.779208 ms** for **14164 characters**. Twelve subsequent direct samples
+were **17.478542–24.612959 ms**, versus the historical queue-excluded derivation's
+**17.479875–27.979208 ms**. Every pair produced identical text. The evaluation
+pair now supplies REPL text, so character counts differ from the earlier raw
+map fallback; these are observations on the named adopted source, not a claim
+that shrinking bytes alone accounts for the speedup.
+
+With three Chrome debug tabs, two submitted bounded turns, and one-second basis
+writes, **30/30 changed-content plain GETs returned 200**, maximum
+**689.743834 ms**. While both turns were observed open, GETs at epoch ms
+1788926892742 and 1788926895738 took **614.589333 / 557.557542 ms** and returned
+**242820 / 257902 bytes**, respectively. This verifies changed content below 1 s,
+not merely a cached unchanged page. Cold context is below 2 s.
+
+The required separate feed write-load proof has **20/20 HTTP200 first events**,
+maximum **1699.843583 ms**, with three debug tabs and 20 successful writes from
+epoch 1788927087664 through1788927106670 (19.006 seconds for 19 intervals).
+The accompanying plain GET maximum was **615.926833 ms**. This verifies the
+first-event target under one write per second.
+
+The stronger simultaneous-turn-and-write probe still measured a **2994.7665 ms**
+first event. Virtual-thread-aware sampling found 30 active page stacks: 13 entered
+`debug-prompt`'s context algorithm functions, 8 entered source preview evaluation,
+and the rest acquired/rendered page data. No sampled caller waited on the render
+proc. The complete active stacks are retained. This additional load case remains
+an explicit performance limitation, not a passing assertion for the separate
+write-load target.
+
+Platform verification initially ran 82 tests / 470 assertions with one cohost-boot
+error: `A reachability sweep is in progress; retry start later.` The isolated
+confirmation passed. A one-worker retry with six visible CPUs failed before
+readiness because HEAD's coordinator launched `pool-2` against an unprepared
+checkout; its stderr could not locate `seon/test/runner`. These are distinct
+foreign boundaries in cluster/store boot and the concurrently owned runner.
+The next retry uses one worker and two visible CPUs, aligning HEAD's derivation
+without editing either owner.
+
+Final platform retry: `JAVA_TOOL_OPTIONS=-XX:ActiveProcessorCount=2
+SEON_TEST_WORKERS=1 bin/test --platform --paths <the six history-slice paths>`
+passed **82 tests, 486 assertions, zero failures/errors**. The preceding
+three-worker race and worker-launch refusal remain recorded rather than being
+presented as passing runs. The path-limited prompt/page gate passed 27 tests,
+166 assertions. All required gates used at most 3 workers; no all/full gate ran.
+
+Cleanup used the operator only on the explicit page-feed scratch root. It
+reaped the old recorded scratch JVM 97554, then the scratch-root operator stopped
+page-feed and its empty JVM 36264. Both process identities were verified absent
+before deleting the root. The four page-feed worktrees and this continuation's
+failed test roots were removed after verifying no live JVM held them. Reference
+and node-module links were unlinked without following their targets. Default
+PID 22932 was untouched. Evidence scripts, measurements, and screenshots remain
+committed under this research directory and test/seon/render/.
+
+After scratch cleanup, a final default debug curl returned HTTP200 in
+1498.884 ms, 292220 bytes; PID 22932 was still alive. The path-limited
+evidence diff passed its whitespace check.

@@ -1,0 +1,281 @@
+{
+  "base": "http://127.0.0.1:7994",
+  "gets": [
+    {
+      "status": 200,
+      "milliseconds": 57.70074999999997
+    },
+    {
+      "status": 200,
+      "milliseconds": 59.249667000000045
+    },
+    {
+      "status": 200,
+      "milliseconds": 51.447291999999834
+    }
+  ],
+  "events": [
+    {
+      "at": 1788927082770,
+      "status": 200,
+      "milliseconds": 11.76050000000032,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307915
+    },
+    {
+      "at": 1788927083771,
+      "status": 200,
+      "milliseconds": 5.415417000000161,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307915
+    },
+    {
+      "at": 1788927084773,
+      "status": 200,
+      "milliseconds": 5.516665999999532,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307915
+    },
+    {
+      "at": 1788927085776,
+      "status": 200,
+      "milliseconds": 5.246874999999818,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307915
+    },
+    {
+      "at": 1788927086778,
+      "status": 200,
+      "milliseconds": 5.335500000000138,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307915
+    },
+    {
+      "at": 1788927087778,
+      "status": 200,
+      "milliseconds": 1313.4398339999989,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307919
+    },
+    {
+      "at": 1788927089092,
+      "status": 200,
+      "milliseconds": 1576.4157500000001,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307921
+    },
+    {
+      "at": 1788927090670,
+      "status": 200,
+      "milliseconds": 1437.5457910000005,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307917
+    },
+    {
+      "at": 1788927092109,
+      "status": 200,
+      "milliseconds": 1687.4406249999993,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307921
+    },
+    {
+      "at": 1788927093798,
+      "status": 200,
+      "milliseconds": 1454.355958,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307920
+    },
+    {
+      "at": 1788927095254,
+      "status": 200,
+      "milliseconds": 1421.1261659999982,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307921
+    },
+    {
+      "at": 1788927096677,
+      "status": 200,
+      "milliseconds": 1441.1723330000023,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307921
+    },
+    {
+      "at": 1788927098120,
+      "status": 200,
+      "milliseconds": 1430.7828340000015,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307921
+    },
+    {
+      "at": 1788927099552,
+      "status": 200,
+      "milliseconds": 1476.177917000001,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307918
+    },
+    {
+      "at": 1788927101030,
+      "status": 200,
+      "milliseconds": 1469.1515409999993,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307921
+    },
+    {
+      "at": 1788927102501,
+      "status": 200,
+      "milliseconds": 1536.0903749999998,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307920
+    },
+    {
+      "at": 1788927104038,
+      "status": 200,
+      "milliseconds": 1535.8209169999973,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307919
+    },
+    {
+      "at": 1788927105576,
+      "status": 200,
+      "milliseconds": 1699.843582999998,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307921
+    },
+    {
+      "at": 1788927107277,
+      "status": 200,
+      "milliseconds": 1389.4637079999993,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307915
+    },
+    {
+      "at": 1788927108668,
+      "status": 200,
+      "milliseconds": 5.510082999997394,
+      "event": "event: datastar-patch-elements",
+      "bytes": 307915
+    }
+  ],
+  "plain": [
+    {
+      "at": 1788927082770,
+      "status": 200,
+      "milliseconds": 615.9268329999995,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927083771,
+      "status": 200,
+      "milliseconds": 49.0687080000007,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927084773,
+      "status": 200,
+      "milliseconds": 29.441415999999663,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927085776,
+      "status": 200,
+      "milliseconds": 29.348665999999866,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927086778,
+      "status": 200,
+      "milliseconds": 29.42150000000038,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927087778,
+      "status": 200,
+      "milliseconds": 240.92979200000082,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927089092,
+      "status": 200,
+      "milliseconds": 239.8974159999998,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927090670,
+      "status": 200,
+      "milliseconds": 203.1352079999997,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927092109,
+      "status": 200,
+      "milliseconds": 271.91270799999984,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927093798,
+      "status": 200,
+      "milliseconds": 182.43554199999926,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927095254,
+      "status": 200,
+      "milliseconds": 181.88858400000026,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927096677,
+      "status": 200,
+      "milliseconds": 234.56229200000234,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927098120,
+      "status": 200,
+      "milliseconds": 233.80899999999747,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927099552,
+      "status": 200,
+      "milliseconds": 182.2403340000019,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927101030,
+      "status": 200,
+      "milliseconds": 182.56254199999967,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927102501,
+      "status": 200,
+      "milliseconds": 181.55833300000086,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927104038,
+      "status": 200,
+      "milliseconds": 523.768583000001,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927105576,
+      "status": 200,
+      "milliseconds": 247.27516699999978,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927107277,
+      "status": 200,
+      "milliseconds": 276.46524999999747,
+      "bytes": 293072
+    },
+    {
+      "at": 1788927108668,
+      "status": 200,
+      "milliseconds": 34.34379199999967,
+      "bytes": 293072
+    }
+  ]
+}

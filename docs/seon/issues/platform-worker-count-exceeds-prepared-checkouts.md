@@ -32,3 +32,8 @@ Components reproduced this at snapshot `run.fv5GcQ` on 2026-09-08:
 `SEON_TEST_WORKERS=3 bin/test --paths <components paths> --platform`.
 The retry uses the documented six-visible-processors setting only in test
 processes, preserving the protected runner files.
+
+Page-feed reproduced the same class in `run.WGAuvB` on 2026-09-08: one
+prepared worker and six visible CPUs caused `pool-2` to exit 1 without
+`seon/test/runner` on its classpath. Its retry uses one worker and two visible
+CPUs; no runner file was edited.
