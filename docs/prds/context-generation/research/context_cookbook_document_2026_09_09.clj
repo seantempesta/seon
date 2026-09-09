@@ -9,6 +9,7 @@
       result (edn/read-string (slurp (str root "context_cookbook_rechecked_2026_09_09.edn")))
       blocks (edn/read-string (slurp (str root "context_cookbook_blocks_2026_09_09.edn")))
       notes-help (edn/read-string (slurp (str root "context_cookbook_notes_help_2026_09_09.edn")))
+      root-agents (edn/read-string (slurp (str root "context_cookbook_root_agents_2026_09_09.edn")))
       records (concat (:reads result) (:writes result) (:proposed-reads result))
       _ (assert (every? :unchanged? records))
       prefix (subs prior 0 (or (str/index-of prior "\n## Agent-source recheck\n")
@@ -62,6 +63,10 @@
                      source-bytes " source bytes; **" shown-bytes " shown UTF-8 bytes**; evidence "
                      (pr-str evidence) ".\n\n```clojure\n" shown "\n```\n")))
              "\n## Earlier equivalent-source probes\n"
+             "\n### Root's generated agents read\n\n```clojure\n" (:source root-agents)
+             "\n```\n\nActual output: **" (:bytes root-agents)
+             " UTF-8 bytes**; q plus inner pull has attribute-level evidence.\n\n```clojure\n"
+             (:output root-agents) "\n```\n"
              "\n### Notes, help, and transaction time\n"
              (str/join
               (for [[kind thought] [[:notes nil]

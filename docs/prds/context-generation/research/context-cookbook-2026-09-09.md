@@ -40,6 +40,24 @@ content, not observed browser paint.
 
 ## Read choice and evidence
 
+Root's existing agent pair now emits the derived agents query once and displays
+agent links with current steps in HTML. Ordinary agents omit that read. Default
+returned **271 source / 128 result bytes**; inner pull records attribute-level
+evidence. Fast gate **3 tests / 80 assertions**; isolated **3 / 84**; platform
+**83 / 490**, all green. [Exact root source and result](context_cookbook_root_agents_2026_09_09.edn).
+
+### Remaining schema boundary
+
+At default basis **536871104**, a query for the target runtime, addressable plan
+and settings, completion transaction, and message attributes found only the
+positive control `:seon.agent/id`. [Exact candidates and installed result](context_cookbook_schema_boundary_2026_09_09.edn).
+The proposed write forms remain speculative `datahike.api/with` evidence.
+Runtime/listen generation, target completion-write teaching, and the complete
+root measures/cluster block remain unfinished; the data chart roadmap assigns
+their schema foundation to steps 4–8 before block generation. This slice's root
+read covers identities and current work, not that complete measures portfolio.
+RESET NEEDED after those data commits; default was not operated by this lane.
+
 Notes now enter the declared turn-0 traversal, including an empty **3-byte**
 result. The canonical system-turn regression verifies that the first note changes
 that retained read. The render contract check accepts an explicit render-unit
@@ -327,6 +345,26 @@ These later executed forms are exactly the bytes emitted by the current block pa
 ```
 
 ## Earlier equivalent-source probes
+
+### Root's generated agents read
+
+```clojure
+;; I should review every agent and its current work with a filtered, shaped query.
+(seon.db/q
+  '[:find
+    [(pull
+       ?agent
+       [:seon.agent/id {:seon.agent/plan [{:my.plan/current-step [:my.plan.item/title]}]}])
+     ...]
+    :where
+    [?agent :seon.agent/id]])
+```
+
+Actual output: **128 UTF-8 bytes**; q plus inner pull has attribute-level evidence.
+
+```clojure
+[#:seon.agent{:id "root"} #:seon.agent{:id "juniper", :plan #:my.plan{:current-step #:my.plan.item{:title "Query the orders"}}}]
+```
 
 ### Notes, help, and transaction time
 

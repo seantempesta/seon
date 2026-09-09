@@ -12,6 +12,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.note :as note]
             [seon.cluster.message :as message]
+            [seon.cluster.agent :as cluster.agent]
             [seon.plan :as plan]
             [seon.render :as render]
             [seon.repl :as repl]
@@ -492,3 +493,26 @@
                (pr-str result))
          (mapv (fn [key] [key (select-keys (get result key) [:source-bytes :bytes])])
                [:notes :help :write :time]))))))
+
+(defn probe-root-agents!
+  "Execute root's exact generated agents read on default."
+  []
+  (let [connection (operator/connection "default") database @connection
+        projection (schema/projection-from-database database)]
+    (schema/call-with-projection
+     projection
+     (fn []
+       (let [full (cluster.agent/render-identity-ai {:seon.db/db database :seon.agent/id "root"})
+             source (subs full (+ 2 (str/last-index-of full "\n\n")))
+             sink (atom [])
+             output (binding [db/*conn* connection db/*read-database* database
+                              db/*read-evidence-sink* sink]
+                      (eval (read-string source)))
+             record {:source source :source-bytes (byte-count source)
+                     :output (pr-str output) :bytes (byte-count (pr-str output))
+                     :basis (db/basis-t database)
+                     :evidence (mapv #(if (seq (:seon.db/read-index-patterns %))
+                                       :index-patterns :attribute-level) @sink)}]
+         (spit "docs/prds/context-generation/research/context_cookbook_root_agents_2026_09_09.edn"
+               (pr-str record))
+         record)))))

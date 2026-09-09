@@ -186,13 +186,23 @@
                 (when namespace-name (str "\nNamespace " namespace-name))
                 (when cluster-name (str "\nCluster   " cluster-name))))))))
 
+(def ^:private root-agents-query
+  '[:find [(pull ?agent
+                 [:seon.agent/id
+                  {:seon.agent/plan
+                   [{:my.plan/current-step [:my.plan.item/title]}]}]) ...]
+    :where [?agent :seon.agent/id]])
+
 (defn render-identity-ai
   "Read identity, namespace, and stewardship as data in one block."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [unit]
   (let [form (identity-form unit)]
     (str ";; I should understand how this REPL works before I act.\n(help)\n\n"
-         (:seon.repl/comment form) "\n" (repl/source-text (:seon.repl/form form)))))
+         (:seon.repl/comment form) "\n" (repl/source-text (:seon.repl/form form))
+         (when (= "root" (:seon.agent/id unit))
+           (str "\n\n;; I should review every agent and its current work with a filtered, shaped query.\n"
+                (repl/source-text (list 'seon.db/q (list 'quote root-agents-query))))))))
 
 (defn render-id-ai
   "Read the identity concern from its identifying attribute."
@@ -237,7 +247,24 @@
                    steward
                    (conj [:div [:dt "Steward"]
                           [:dd [:a {:href (route/path :seon.render.route/agent {:id steward})}
-                                steward]]])))])))))
+                                steward]]])))
+           (when (and (= "root" agent-id) (:seon.db/db unit))
+             (let [agents (db/q root-agents-query (:seon.db/db unit))]
+               (if (:seon.error/kind agents)
+                 [:p (:seon.error/message agents)]
+                 [:section {:class "seon-root-agents"}
+                  [:h3 "Agents"]
+                  [:table
+                   [:thead [:tr [:th "Agent"] [:th "Current step"]]]
+                   (into [:tbody]
+                         (map (fn [row]
+                                [:tr
+                                 [:td [:a {:href (route/path :seon.render.route/agent
+                                                            {:id (:seon.agent/id row)})}
+                                       (:seon.agent/id row)]]
+                                 [:td (get-in row [:seon.agent/plan :my.plan/current-step
+                                                  :my.plan.item/title] "None selected")]]))
+                         (sort-by :seon.agent/id agents))]])))])))))
 
 (defn render-id-html
   "Render the identity unit as a compact labeled card.

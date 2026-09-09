@@ -1,0 +1,1 @@
+{:basis 536871104, :candidates [:seon.agent/id :seon.agent/runtime :my.plan/agent :seon.config/agent :my.plan.item/completed-tx :seon.message/id :seon.message/read-tx], :installed [:seon.agent/id]}

@@ -106,6 +106,18 @@
          (is (= 1 (count (repair-reads "root"))) (pr-str (sources "root")))
          (is (empty? (repair-reads "repair")))
          (is (empty? (repair-reads "happened")))
+         (let [agent-reads (fn [id]
+                            (filter #(str/includes? (:seon.cluster.eval/source %) "?agent :seon.agent/id")
+                                    (evaluation/of-agent @connection id)))
+               entry (first (agent-reads "root"))]
+           (is (= 1 (count (agent-reads "root"))))
+           (is (empty? (agent-reads "repair")))
+           (is (seq (:seon.cluster.eval/read-evidence entry)))
+           (is (= (set agents)
+                  (set (map :seon.agent/id (edn/read-string (:seon.eval/value entry))))))
+           (is (str/includes? (pr-str (agent/render-identity-html
+                                      {:seon.db/db @connection :seon.agent/id "root"}))
+                              "seon-root-agents")))
          (let [root-read (first (filter #(str/includes? (:seon.cluster.eval/source %) ":seon.error/steward")
                                        (evaluation/of-agent @connection "root")))]
            (is (= "[]" (:seon.eval/value root-read)))
