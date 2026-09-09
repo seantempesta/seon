@@ -500,3 +500,15 @@ half-edit. Measured targets in the issue.
 - RESET NEEDED `b4d665f89`: fifth refork of `default`, Juniper reseeded.
 - Running: turn-rename slice 2, the `seon.turn` rename (medium).
 
+## 2026-09-09 02:20 — seon.turn landed
+
+- turn-rename `7296d173b`, `624d26784` (medium effort, one 30-minute
+  slice): turn facts and the writer renamed into `seon.turn`
+  (`:seon.turn/id|agent|opened-at|closed-at|reply|attempts`), schema
+  resource renamed, callers/tests/render functions updated. Gate 105/702,
+  platform 83/490; fresh page 200 with history and controls. RESET NEEDED:
+  sixth refork of `default`, Juniper reseeded.
+- Running: turn-rename slices 3–4 (three writes per turn; stable ids);
+  faults-render (walk total, terminal refusals, no-provider setting, fault
+  render pair).
+
