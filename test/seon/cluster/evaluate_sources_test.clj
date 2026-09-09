@@ -17,13 +17,18 @@
    (fn [connection]
      (support/seed-cluster! connection "preview-batch")
      (db/transact! connection
+                   [(:seon.config/desired-row
+                     (config/compile-manifest
+                      {:seon.boot/cluster-name "preview-batch"
+                       :seon.config/manifest {}}))])
+     (db/transact! connection
                    (agent/creation-tx
                     {:seon.cluster.agent/id "preview-batch-agent"
                      :seon.ns/name 'my.agents.preview-batch
                      :seon.cluster/name "preview-batch"}))
      ;; THE RUN AND ITS EVALUATION ROWS EXIST BEFORE ANY FORM RUNS, exactly
      ;; as the turn's one intent commit makes them: a handle is the stored
-     ;; evaluation's own entity id, so a form can only name an earlier value
+     ;; evaluation's durable identity, so a form can only name an earlier value
      ;; when that value's evaluation actually persisted.
      (db/transact! connection
                    [{:seon.turn/id "preview-run"
@@ -44,10 +49,7 @@
                          connection "preview-batch-agent")
      (let [database @connection
            earlier-handle
-           (admit/result-handle
-            (:db/id (db/pull database [:db/id]
-                             [:seon.cluster.eval/id
-                              (run/receipt-identity "preview-run" 2)])))
+           (admit/result-handle (run/receipt-identity "preview-run" 2))
            base (support/fork-cluster-ctx connection)
            forked (sci.eval/fork-for-turn
                    {:seon.sci.eval/ctx base

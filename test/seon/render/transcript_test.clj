@@ -441,7 +441,7 @@
                     "my.agents.transcript=> (do (println \"side effect\") "
                     "(+ 20 22))\n"
                     "#:seon.repl{:value 42, :result "
-                    (admit/result-handle result-eid) ", "
+                    (admit/result-handle "eval-result") ", "
                     ":out \"side effect\\n\"}"))
               "comment above, one form on the prompt line, one response map")
           (is (str/includes? ai "waiting for the peer review"))
@@ -1139,7 +1139,7 @@
                 (:seon.render.history/form (first entries)))
              "the form is the form; its comment is a fact beside it")
          (is (= (str "#:seon.repl{:value 42, :result "
-                     (admit/result-handle evaluation) ", "
+                     (admit/result-handle "eval-result") ", "
                      ":out \"side effect\\n\"}")
                 (:seon.render.history/printed-value (first entries)))
              "the printed value is the one REPL response, output as its own key")
@@ -1170,7 +1170,7 @@
                                                    :seon.cluster.eval/comment
                                                    :seon.cluster.eval/output])
                                :seon.repl/handle
-                               (admit/result-handle evaluation))}])]
+                               (admit/result-handle "eval-result"))}])]
            (is (= (mapv :seon.render.history/bytes entries)
                   (mapv :seon.render.history/bytes
                         (transcript/history-entries in-memory))))
@@ -1349,7 +1349,7 @@
                (mapv (fn [ordinal]
                        (let [stored (db/pull
                                      stored-db
-                                     [:db/id :seon.cluster.eval/result-edn
+                                     [:db/id :seon.cluster.eval/id :seon.cluster.eval/result-edn
                                       :seon.cluster.eval/result-blob]
                                      [:seon.cluster.eval/id
                                       (run/receipt-identity
@@ -1357,7 +1357,7 @@
                          (when (and (int? (:db/id stored))
                                     (admit/restorable-node
                                      (:seon.cluster.eval/result-edn stored)))
-                           (admit/result-handle (:db/id stored)))))
+                           (admit/result-handle (:seon.cluster.eval/id stored)))))
                      (range (count outcomes)))
                page-unit (assoc (unit connection)
                                 :seon.cluster.agent/id "one-grammar-agent"

@@ -7,7 +7,7 @@
   random generator, no per-family scheme, no second truncation anywhere).
 
   `random-uuid` remains for a genuinely fresh EVENT with no identity of its
-  own (a run opened, a tab opened). A thing that IS its parts — an
+  own (a fault occurrence, a tab opened). A thing that IS its parts — an
   evaluation of ordinal N in turn T on branch B, a rendered value at a
   path — takes `digest` of those parts, never a fresh random."
   (:require [clojure.string :as str])
@@ -49,11 +49,16 @@
 
 (defn evaluation
   "The id of one evaluation: ordinal `ordinal` of turn `turn-id` on the
-  branch `branch-id`. Its handle is `(symbol-in \"result\" \\e id)`."
-  {:malli/schema [:=> [:cat :string :string [:int {:min 0}]]
-                  [:string {:min 12 :max 12}]]}
-  [branch-id turn-id ordinal]
-  (digest evaluation-length [branch-id turn-id ordinal]))
+  branch `branch-id`. The two-argument arity takes a turn identity that
+  already includes its branch. Its handle is `(symbol-in \"result\" \\e id)`."
+  {:malli/schema
+   [:function
+    [:=> [:cat :string [:int {:min 0}]] [:string {:min 12 :max 12}]]
+    [:=> [:cat :string :string [:int {:min 0}]] [:string {:min 12 :max 12}]]]}
+  ([turn-id ordinal]
+   (digest evaluation-length [turn-id ordinal]))
+  ([branch-id turn-id ordinal]
+   (digest evaluation-length [branch-id turn-id ordinal])))
 
 (defn valid?
   "Whether `id` is `length` lowercase hex characters."

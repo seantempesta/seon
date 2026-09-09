@@ -50,6 +50,7 @@
             [seon.error :as error]
             [seon.flow :as seon.flow]
             [seon.fn :as seon.fn]
+            [seon.id :as id]
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.sci.admit :as admit]
@@ -806,12 +807,9 @@
                ::refused-outcome outcome)))))
 
 (defn- attempt-id
-  "One model attempt's identity: derived, so nothing allocates a uuid.
-  `<run-id>-attempt-<ordinal>` — the same (run, ordinal) idiom receipts
-  use, and the reason a re-entered `:call` pass appends to the chain
-  instead of overwriting its first row."
+  "One model attempt's identity, derived from its turn and ordinal."
   [run-id ordinal]
-  (str run-id "-attempt-" ordinal))
+  (id/digest 12 [:seon.ai.attempt/id run-id ordinal]))
 
 (defn- attempts
   "How many model attempts this run has already recorded.
@@ -1114,7 +1112,7 @@
     ;; `:seon.turn/trigger` is retained as PROVENANCE ONLY — the
     ;; oldest message wake this turn opened for, which the page and the
     ;; context still name. It decides nothing.
-    (let [id (str (random-uuid))
+    (let [id (run/next-id @connection (:seon.cluster/name cluster) agent-id)
           open-request
           (cond->
            {:seon.turn/id id
@@ -1466,7 +1464,8 @@
               entity-id (when run-id
                           (evaluation-entity-id
                            database (run/receipt-identity run-id ordinal)))
-              handle (when entity-id (admit/result-handle entity-id))
+              handle (when entity-id
+                       (admit/result-handle (run/receipt-identity run-id ordinal)))
               request
               (cond-> (assoc (evaluation-request
                        {::admitted-form form

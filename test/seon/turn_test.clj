@@ -50,7 +50,7 @@
        (is (= before (db/basis-t @connection)))
        (is (= 1 (count (evaluations @connection "busy"))))))))
 
-(deftest virtual-turns-use-the-proc-and-compaction-is-agent-scoped
+(defn- virtual-turn-fixture []
   (support/with-database
    (fn [connection]
      (db/transact!
@@ -74,6 +74,7 @@
            faults (async/chan (async/sliding-buffer 16))
            events (async/chan (async/sliding-buffer 1))
            transactions (atom [])
+           stable-identities (atom nil)
            handle (support/cluster-handle
                    {:seon.env/environment environment
                     :seon.db/connection connection
@@ -211,7 +212,10 @@
                         (filter #(= (:db/id (db/pull @connection [:db/id]
                                                    [:seon.turn/id turn-id]))
                                     (get-in % [:seon.cluster.eval/run :db/id]))
-                                (evaluation/of-agent @connection "a"))))))
+                                (evaluation/of-agent @connection "a")))))
+           (reset! stable-identities
+                   [turn-id (mapv :seon.cluster.eval/id
+                                  (take-last 3 (evaluation/of-agent @connection "a")))]))
          (submit "a" "(def private-state (atom 2))")
          (let [agent-context #(get-in (agent/armed routing %)
                                      [:seon.cluster.loop/cluster
@@ -330,12 +334,21 @@
                             (:seon.render/context-channel handle)
                             (:seon.cluster.loop/completion handle)
                             (:seon.cluster.loop/stream-channel handle)]]
-             (async/close! channel))))))))
+             (async/close! channel))))
+       @stable-identities))))
+
+(deftest virtual-turns-use-the-proc-and-compaction-is-agent-scoped
+  (let [first-fork (virtual-turn-fixture)
+        refork (virtual-turn-fixture)]
+    (is (= first-fork refork)
+        "the same virtual turns on fresh canonical forks retain their turn and evaluation identities")
+    (is (= 3 (count (second first-fork))))))
 
 (deftest evaluation-ai-is-only-the-repl-session
   (let [rendered
         (repl/render-ai
          {:db/id 7042
+          :seon.cluster.eval/id "7042"
           :seon.cluster.eval/source "(+ 40 2)"
           :seon.cluster.eval/ordinal 0
           :seon.cluster.eval/ns {:seon.ns/name 'my.probe}
@@ -1152,7 +1165,7 @@
             (let [receipt (db/pull @connection
                                   '[*]
                                   [:seon.cluster.eval/id
-                                   (pr-str ["receipts" 0])])]
+                                   (turn/receipt-identity "receipts" 0)])]
               (is (= "42" (:seon.eval/value receipt))
                   "the first terminal outcome is preserved")
               (is (nil? (:seon.eval/missing receipt))
@@ -1179,7 +1192,7 @@
             (is (= t1 (:seon.cluster.eval/interrupted-at
                        (db/pull @connection '[*]
                                [:seon.cluster.eval/id
-                                (pr-str ["receipts" 1])])))
+                                (turn/receipt-identity "receipts" 1)])))
                 "the takeover stamped the dead custody's running receipt
                  in the SAME transaction — the intermediate state never
                  exists")
@@ -1385,13 +1398,13 @@
             (-> model
                 (assoc-in [:runs run-id :digest] digest)
                 (assoc-in [:receipts [run-id ordinal]]
-                          {:id (pr-str [run-id ordinal])
+                          {:id (turn/receipt-identity run-id ordinal)
                            :run run-id :ordinal ordinal})))
     :receipt-start (let [[run-id ordinal] args]
                      ;; no :settled key: a started receipt is running
                      ;; by the absence of any terminal fact
                      (assoc-in model [:receipts [run-id ordinal]]
-                               {:id (pr-str [run-id ordinal])
+                               {:id (turn/receipt-identity run-id ordinal)
                                 :run run-id
                                 :ordinal ordinal}))
     :receipt-settle (let [[run-id ordinal kind] args]
@@ -1622,7 +1635,7 @@
                   (vec (map-indexed
                         (fn [ordinal state]
                           (cond-> {:seon.cluster.eval/id
-                                   (pr-str [run-id ordinal])
+                                   (turn/receipt-identity run-id ordinal)
                                    :seon.cluster.eval/run
                                    [:seon.turn/id run-id]
                                    :seon.cluster.eval/ordinal ordinal
@@ -1691,7 +1704,7 @@
 
                                    ::turn/now t2}))
       (let [receipt (db/pull @connection '[*]
-                            [:seon.cluster.eval/id (pr-str ["order-b" 0])])]
+                            [:seon.cluster.eval/id (turn/receipt-identity "order-b" 0)])]
         (is (= "2" (:seon.eval/value receipt)))
         (is (nil? (:seon.cluster.eval/interrupted-at receipt))
             "the settled receipt is byte-untouched — no contradiction
@@ -1790,7 +1803,7 @@
          :seon.error/agent [:seon.cluster.agent/id "juno"]}])
       (let [database @connection
             faults (db/pull-many
-                    database '[*]
+                    database '[* {:seon.error/run [:db/id :seon.turn/id]}]
                     (mapv :db/id
                           (:seon.error/_agent
                            (db/pull database [:seon.error/_agent]
@@ -1800,16 +1813,17 @@
                 [:h2 "Faults (2)"]]
                (subvec rendered 0 3)))
         (is (= ["newer fault" "older fault"]
-               (mapv #(last (nth (nth % 3) 2)) (subvec rendered 3)))
+               (mapv #(some #{"newer fault" "older fault"}
+                            (tree-seq coll? seq %)) (subvec rendered 3)))
             "newest first, and each fault keeps the one error card")
         (is (= [":seon.instrument/contract-violated"
                 ":seon.instrument/contract-violated"]
                (mapv #(last (nth % 2)) (subvec rendered 3)))
             "each card names the fault's kind")
-        (is (str/includes? (pr-str (last (nth rendered 4)))
-                           "in run run-1")
+        (is (str/includes? (hiccup/->string (nth rendered 4)) "run-1")
             "a fault that names a run links to it by its stable id")
-        (is (= 5 (count (nth rendered 3)))
+        (is (not (str/includes? (hiccup/->string (nth rendered 3))
+                                "seon-error-run"))
             "and the newest fault, which names no run, has no run line")
         (is (not (str/includes? (pr-str rendered) "seon.error/signature"))
             "a card states the fault, not every stored attribute of it")

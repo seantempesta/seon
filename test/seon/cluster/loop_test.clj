@@ -219,10 +219,10 @@
         (is (= 100.0 (:seon.ai.model/last-tokens-per-second model)))
         (is (= 1
                (db/q
-                '[:find (count ?attempt) .
+                '[:find (count ?attempt) . :in $ ?id
                   :where
-                  [?attempt :seon.ai.attempt/id "gauge-run-attempt-0"]]
-                @connection))
+                  [?attempt :seon.ai.attempt/id ?id]]
+                @connection (#'cluster.loop/attempt-id "gauge-run" 0)))
             "the durable attempt and display gauges settle together")))))
 
 (deftest evaluation-request-projects-the-admitted-form-and-cluster-controls
@@ -475,7 +475,7 @@
                  (:seon.sci.eval/ending-ns
                   (db/pull @connection
                            [:seon.sci.eval/ending-ns]
-                           [:seon.cluster.eval/id (pr-str [run-id 0])]))))
+                           [:seon.cluster.eval/id (run/receipt-identity run-id 0)]))))
           (let [fold-evaluations (private-loop-fn 'fold-evaluations)
                 fold-namespace (private-loop-fn 'fold-namespace)
                 resumed-namespace

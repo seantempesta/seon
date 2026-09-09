@@ -145,6 +145,7 @@
             [clojure.string :as str]
             [seon.ai.tokens :as tokens]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.error.refusal :as error.refusal]
             [seon.print :as print]
             [seon.render.route :as render.route]
@@ -259,8 +260,7 @@
   path or a timestamp would make every occurrence unique and the derived
   recurrence count (which is the escalation rule) always one."
   [process class-name error-kind frame]
-  (schema/sha-256 [(.getBytes (pr-str [process class-name error-kind frame])
-                              "UTF-8")]))
+  (id/digest 64 [process class-name error-kind frame]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Flat diagnostics — one evidence-complete construction

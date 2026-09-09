@@ -54,6 +54,7 @@
   resolved (about entity, recipient), so concurrent terminal
   transactions upsert one answer at Datahike's serial commit point."
   (:require [seon.db :as db]
+            [seon.id :as id]
             [clojure.string :as str]
             [seon.render.route :as route]
             [seon.schema.edn :as schema.edn]))
@@ -194,12 +195,12 @@
               db agent-id)))
 
 (defn- message-id
-  "One outbound message's identity: `<run>-<ordinal>-<index>`.
+  "One outbound message's identity, derived from turn, ordinal, and index.
   The same derived-identity idiom as receipts and attempt rows, and for
   the same reason: an identity that is a function of where the message
   came from is one nothing has to allocate, remember, or reconcile."
   [run-id ordinal index]
-  (str run-id "-" ordinal "-message-" index))
+  (id/digest 12 [::id run-id ordinal index]))
 
 (defn- identified-entities
   "Entities whose installed unique identity attribute equals `identity`.
@@ -251,12 +252,12 @@
   the resolved entity id is stable within the database where the unique
   message id performs the upsert."
   [about recipient]
-  (str "assignment-" (pr-str [about recipient])))
+  (id/digest 12 [::assignment about recipient]))
 
 (defn- inbound-message-id
   "One outside message's identity, derived at the serial writer basis."
   [db index]
-  (str "inbound-" (db/basis-t db) "-" index))
+  (id/digest 12 [::inbound (db/basis-t db) index]))
 
 (defn inbound-tx
   "Derive one outside message row or a flat refusal value.

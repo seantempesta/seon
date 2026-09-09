@@ -791,7 +791,7 @@
             sources (cluster.loop/planned-sources text namespace-name max-source)]
         (if (:seon.error/kind sources)
           sources
-          (let [run-id (str "source:" (random-uuid))
+          (let [run-id (run/next-id database (:seon.cluster/name handle) agent-id)
                 now (Date.)
                 staged-reply (run/stage-reply! connection text)
                 outcome

@@ -6,6 +6,7 @@
             [seon.ai.tokens :as tokens]
             [seon.turn :as run]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.render :as render]
             [seon.render.walk :as walk]
             [seon.schema :as schema]
@@ -102,14 +103,14 @@
   {:malli/schema [:=> [:cat :seon.cluster.agent/id]
                   :seon.turn/id]}
   [agent-id]
-  (str "bootstrap:" agent-id))
+  (id/digest 12 [::turn agent-id]))
 
 (defn task-message-id
   "The deterministic identity of one agent's real bootstrap task message."
   {:malli/schema [:=> [:cat :seon.cluster.agent/id]
                   :seon.cluster.message/id]}
   [agent-id]
-  (str "bootstrap-task:" agent-id))
+  (id/digest 12 [::task-message agent-id]))
 
 (defn task-message
   "The small real assignment that the shipped bootstrap episode completes."
@@ -633,13 +634,13 @@
 
 (defn- digest-value
   [value]
-  (schema/sha-256 [(.getBytes (pr-str value) "UTF-8")]))
+  (id/digest 64 value))
 
 (defn supervision-run-id
   "The deterministic identity of root's first-agent supervision run."
   {:malli/schema [:=> [:cat] :seon.turn/id]}
   []
-  "bootstrap-supervision:root")
+  (id/digest 12 [::supervision "root"]))
 
 (defn- settled-form-sources
   [database agent-id]

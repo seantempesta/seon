@@ -223,8 +223,8 @@
     ;; have no handle, and the response then carries no `:result` key.
     ;; A MISSING VALUE NAMES NOTHING EITHER — it stored no node at all, so
     ;; the same predicate that binds the fork's handles refuses here.
-    (and (int? (:db/id unit)) (string? (:seon.eval/value unit)))
-    (assoc :seon.repl/handle (admit/result-handle (:db/id unit))))))
+    (and (string? (:seon.cluster.eval/id unit)) (string? (:seon.eval/value unit)))
+    (assoc :seon.repl/handle (admit/result-handle (:seon.cluster.eval/id unit))))))
 
 (defn render-ai
   "`:seon.render/ai` — one evaluation, as the REPL session it was."

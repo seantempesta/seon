@@ -516,8 +516,8 @@
   [entry]
   (let [entity (::entity entry)]
     (or (:seon.repl/handle entity)
-        (when (and (int? (:db/id entity)) (string? (::result entry)))
-          (admit/result-handle (:db/id entity))))))
+        (when (and (string? (:seon.cluster.eval/id entity)) (string? (::result entry)))
+          (admit/result-handle (:seon.cluster.eval/id entity))))))
 
 (defn- emission
   "One transcript entry as the REPL emission `seon.repl` renders.

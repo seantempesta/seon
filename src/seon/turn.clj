@@ -14,6 +14,7 @@
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.fn :as seon.fn]
+            [seon.id :as id]
             [seon.program :as program]
             [seon.render.route :as render.route]
             [seon.schema :as schema]
@@ -23,8 +24,7 @@
             [seon.error :as error]
             [seon.render.walk :as walk]
             [seon.repl :as repl]
-            [seon.sci.reader :as reader])
-  (:import [java.nio.charset StandardCharsets]))
+            [seon.sci.reader :as reader]))
 
 (schema.edn/load! {})
 
@@ -470,6 +470,21 @@
 ;;; ever existed. The families are merged; the ambiguity class is
 ;;; unwritable, not qualified away.
 
+(defn next-id
+  "Identify the next turn from branch, agent, and its ordinal.
+
+  The caller hands this identity to the writer. Compaction retains turns;
+  competing openers derive the same identity and the writer admits one."
+  {:malli/schema [:=> [:cat :seon.db/database-value :string
+                       :seon.cluster.agent/id] ::id]}
+  [database branch-id agent-id]
+  (id/digest 12
+             [::id branch-id agent-id
+              (or (db/q '[:find (count ?turn) . :in $ ?agent-id
+                          :where [?agent :seon.cluster.agent/id ?agent-id]
+                          [?turn :seon.turn/agent ?agent]]
+                        database agent-id) 0)]))
+
 (defn receipt-identity
   "The `:seon.cluster.eval/id` of one run's ordinal.
   Agent-facing: this is the problem identity an owner is asked to repair,
@@ -477,15 +492,14 @@
   {:malli/schema [:=> [:cat ::id :seon.cluster.eval/ordinal]
                   :seon.cluster.eval/id]}
   [run-id ordinal]
-  (pr-str [run-id ordinal]))
+  (id/evaluation run-id ordinal))
 
 (defn plan-digest
   "The SHA-256 identity of one ordered source plan."
   {:malli/schema [:=> [:catn [:sources :seon.cluster.reply/sources]]
                   ::plan-digest]}
   [sources]
-  (schema/sha-256
-   [(.getBytes (pr-str sources) StandardCharsets/UTF_8)]))
+  (id/digest 64 sources))
 
 (defn- resolve-namespace-name
   [db namespace-ref]
@@ -774,10 +788,7 @@
 
 (defn- refresh-run-id
   [db prior-form-id]
-  (str "refresh:"
-       (schema/sha-256
-        [(.getBytes (pr-str [prior-form-id (db/commit-id db)])
-                    StandardCharsets/UTF_8)])))
+  (id/digest 12 [::refresh prior-form-id (db/basis-t db)]))
 
 (defn refresh-call
   "Append one ordinary system run from a prior refreshable evaluation."
@@ -821,9 +832,7 @@
             source (:seon.cluster.eval/source prior)
             opened-at (current-transaction-instant db)
             plan-digest
-            (schema/sha-256
-             [(.getBytes (pr-str [source (:seon.ns/name namespace)])
-                         StandardCharsets/UTF_8)])
+            (id/digest 64 [source (:seon.ns/name namespace)])
             open-rows
             (open-call db
                        {::id run-id
@@ -2076,7 +2085,7 @@
                           (mapv #(if-let [text (get text-by-source (source-key %))]
                                    (assoc % :seon.turn/text text) %) plan)}]
               (if (and write? (seq evaluated))
-                (let [turn-id (str (random-uuid))
+                (let [turn-id (next-id database (:seon.cluster/name handle) agent-id)
                       prepared (record-evaluated-tx
                                 {:seon.cluster.loop/cluster handle
                                  :seon.db/db database

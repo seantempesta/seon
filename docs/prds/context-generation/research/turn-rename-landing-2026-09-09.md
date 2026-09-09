@@ -735,3 +735,103 @@ Final gates, 08:31 UTC, with `SEON_TEST_WORKERS=1`:
 Both successful roots were removed by the runner. The no-op virtual-turn
 proof is green; consolidation of program-installing writer calls remains
 explicitly unimplemented as explained above. No foreign files are included.
+
+Slice 3 committed as **`558fdc1cc`**, before its deadline.
+
+## Slice 4: stable identities, started 08:31:40 UTC
+
+Deadline: **09:01:40 UTC**. The audit falsified the assumption that durable
+evaluation identities already used `seon.id`: `turn/receipt-identity`
+still used `pr-str`, and `admit/result-handle` still used Datahike entity
+numbers. Both now use the stable identity family. `next-id` includes the
+logical branch name, agent, and count of that agent's turns; compaction
+retains turns. Concurrent openers propose the same identity, so the
+existing writer's duplicate/open-turn fences admit at most one.
+
+The canonical real-proc fixture now runs twice on fresh fixture forks.
+It compares the measured virtual turn and its three durable evaluation
+ids. Private-object isolation, actual SCI handle resolution, compaction,
+and boot closing unfinished turns remain exercised. Early measurement
+produced turn **`fca949c72a87`** on both forks, each with **3 transactions /
+45 datoms**. The final assertion checks evaluation ids as well.
+
+Attempts derive from turn/ordinal; outbound messages from turn/form/index;
+assignments from resolved subject/recipient; inbound messages from writer
+basis/index. Bootstrap turns and task messages derive from their agent;
+supervision has its fixed logical identity parts. Fault occurrences remain
+fresh events, while the existing content signature now calls `id/digest`
+directly with unchanged SHA-256 bytes. Authored names are intrinsic
+identities, not generated ids.
+
+**RESET NEEDED for the identity commit**, despite no new schema attributes:
+old facts carry the former identity spelling and old in-memory handles.
+No migration or compatibility lookup path was introduced. The owner must
+refork default; this lane never operates its lifecycle.
+
+The deleted `a-later-turn-reaches-the-values-its-earlier-forms-produced`
+test reconstructed result objects from stored print nodes in a fresh
+context. That contradicts §14–§15. Its surviving behavior is tested through
+the actual persistent agent context in the virtual-turn fixture, including
+the proof that a fresh acquisition cannot restore the private object.
+No recovery expectation was converted to claim object restoration works.
+
+### Verification boundary identified at HEAD
+
+`seon.bootstrap-test` at HEAD, with **none** of this slice's source edits,
+reproduces **8 tests / 45 assertions, 5 failures / 1 error**
+(`tmp/turn-stable-ids-bootstrap-head.log`). Failures are the generated
+opening/member expectations; the error is in
+`drive-free-generation-is-pure-deterministic-and-pull-gated`. The same
+five failures and error appeared with this slice's bootstrap identity
+changes. They are not counted green. The scoped gate exercises the
+bootstrap identity consumers through the actual proc and loop fixtures.
+Fault-render fixture expectations were updated to the landed renderer's
+content and expanded turn ref, without editing its rendering functions.
+
+### Core identity checkpoint, 08:46 UTC
+
+The core path gate is green: **84 tests / 613 assertions, zero
+failures/errors**. Explicit platform: **83 tests / 490 assertions, zero
+failures/errors**. Both use `SEON_TEST_WORKERS=1`, `bin/test --paths`,
+and exactly these owned paths (platform adds `--platform`):
+
+```
+AGENTS.md
+docs/prds/context-generation/research/turn-rename-landing-2026-09-09.md
+src/seon/bootstrap.clj
+src/seon/cluster/agent.clj
+src/seon/cluster/loop.clj
+src/seon/cluster/message.clj
+src/seon/error.clj
+src/seon/id.clj
+src/seon/render/transcript.clj
+src/seon/repl.clj
+src/seon/sci/admit.clj
+src/seon/turn.clj
+test/seon/cluster/evaluate_sources_test.clj
+test/seon/cluster/loop_test.clj
+test/seon/cluster/message_test.clj
+test/seon/render/transcript_test.clj
+test/seon/repl_test.clj
+test/seon/sci/eval_test.clj
+test/seon/turn_test.clj
+```
+
+Namespaces: `seon.id-test seon.turn-test seon.cluster.loop-test
+seon.cluster.message-test seon.repl-test seon.cluster.evaluate-sources-test`.
+Logs: `tmp/turn-stable-ids-gate.log`, `tmp/turn-stable-ids-platform.log`.
+The evaluate-sources fixture now installs the canonical compiled config
+row instead of relying on `seed-cluster!`'s empty config identity. Its
+explicit-basis, stable-handle, no-publication proof then passes armed.
+
+Live default adopted and published source both equal
+`6aa11c82-aa0c-5d0a-92f3-a4be003147d1`. The three evaluation ids are
+`c77994ce66ca`, `7697ad031d0a`, `cd683bb03b71`; the live handle owner returns
+`result/ec77994ce66ca`, `result/e7697ad031d0a`, `result/ecd683bb03b71`.
+Default debug returns HTTP 200, 55,717 bytes, 0.084447 seconds. These are
+in-place adoption and HTTP observations, not browser paint or an old-data
+migration proof. **RESET NEEDED** remains for old identity facts/handles.
+
+Remaining within this slice: effect, maintenance, captured-context, and
+error-notification ids found by the generated-identity audit. The 19-path
+core checkpoint is committed before changing those owners.

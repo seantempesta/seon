@@ -21,6 +21,7 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.db :as db]
+            [seon.id :as id]
             [my.message :as my.message]
             [seon.cluster.loop :as cluster.loop]
             [seon.cluster.message :as message]
@@ -459,8 +460,8 @@
                           []
                           (filterv ::known? recipients))
             rows (mapv (fn [{::keys [candidate-index to content]}]
-                         (let [id (str run-id "-" ordinal "-message-"
-                                       candidate-index)]
+                         (let [id (id/digest 12 [:seon.cluster.message/id
+                                                run-id ordinal candidate-index])]
                            (cond-> {::id id ::to to ::from sender
                                     ::content content
                                     ::depth (if trigger depth 0)}
@@ -779,7 +780,7 @@
                             {:my.run/result "25"
                              :seon.cluster.agent/id "bob"
                              :seon.cluster.message/trigger
-                             "r-1-0-message-0"}))
+                             (id/digest 12 [:seon.cluster.message/id "r-1" 0 0])}))
           "bob completing a run alice triggered owes alice the answer —
            derived from the trigger, never remembered by the agent"))))
 
@@ -806,14 +807,14 @@
       (ask! connection "m-0" "alice" "ask bob")
       (deliver! connection {:sender "alice" :trigger "m-0" :run "r-1"
                             :value (my.message/send "bob" "how many?")})
-      (deliver! connection {:sender "bob" :trigger "r-1-0-message-0"
+      (deliver! connection {:sender "bob" :trigger (id/digest 12 [:seon.cluster.message/id "r-1" 0 0])
                             :run "r-2"
                             :value (my.message/send "alice" "25")})
       (is (nil? (message/reply @connection
                                {:my.run/result "There are 25."
                                 :seon.cluster.agent/id "alice"
                                 :seon.cluster.message/trigger
-                                "r-2-0-message-0"}))
+                                (id/digest 12 [:seon.cluster.message/id "r-2" 0 0])}))
           "alice completing on bob's ANSWER owes bob nothing — the
            delegation ends when the delegator completes, which is what
            puts the chain bound back to being a backstop")))
@@ -829,7 +830,7 @@
                                      {:my.run/result "25"
                                       :seon.cluster.agent/id "alice"
                                       :seon.cluster.message/trigger
-                                      "r-1-0-message-0"})))
+                                      (id/digest 12 [:seon.cluster.message/id "r-1" 0 0])})))
             "bob's message was caused by the HUMAN's, not by alice's")))))
 
 ;;; ---------------------------------------------------------------------------
@@ -866,12 +867,12 @@
         (commit-inbound!
          connection
          (inbound-request "bob" (str "burst-" index))))
-      (let [ids (db/q '[:find [?id ...]
-                       :where [?message :seon.cluster.message/id ?id]]
-                     @connection)
-            inbound-ids (filter #(str/starts-with?
-                                  % "inbound-")
-                                ids)]
+      (let [inbound-ids (db/q '[:find [?id ...]
+                               :where [?message :seon.cluster.message/id ?id]
+                               [?message :seon.cluster.message/to ?recipient]
+                               [?recipient :seon.cluster.agent/id "bob"]
+                               (not [?message :seon.cluster.message/from])]
+                             @connection)]
         (is (= 64 (count inbound-ids)))
         (is (= 64 (count (distinct inbound-ids)))
             "every accepted writer basis yields a distinct identity")))))

@@ -13,7 +13,7 @@
                   "; the agent's comment, verbatim, above the prompt"
                   :seon.cluster.eval/source "(+ 1 1)"
                   :seon.ns/name 'my.agents.juniper
-                  :seon.repl/handle (admit/result-handle 41)
+                  :seon.repl/handle (admit/result-handle "41")
                   :seon.eval/value "2"
                   :seon.eval/duration-ms 3})]
       (is (= (str "; the agent's comment, verbatim, above the prompt\n"
@@ -27,7 +27,7 @@
                 "#:seon.repl{:value 2, :result result/e41, :ms 3}")
            (repl/text {:seon.cluster.eval/source "(+ 1 1)"
                        :seon.ns/name 'my.agents.juniper
-                       :seon.repl/handle (admit/result-handle 41)
+                       :seon.repl/handle (admit/result-handle "41")
                        :seon.eval/value "2"
                        :seon.eval/duration-ms 3})))))
 
@@ -36,7 +36,7 @@
     (let [emission {:seon.eval/duration-ms 1
                     :seon.sci.eval/ending-ns 'my.agents.probe
                     :seon.cluster.eval/output "hi\n"
-                    :seon.repl/handle (admit/result-handle 2)
+                    :seon.repl/handle (admit/result-handle "2")
                     :seon.eval/value "41"
                     :seon.cluster.eval/source "(do (println \"hi\") 41)"
                     :seon.ns/name 'my.agents.juniper}
@@ -209,13 +209,14 @@
     (is (str/includes? emitted ":ms 30000"))))
 
 (deftest the-handle-is-the-evaluations-own-identity
-  (testing "a stored evaluation names its value by its entity id, not its ordinal"
-    (let [handle (admit/result-handle 8143)]
+  (testing "a stored evaluation names its value by its stable identity"
+    (let [handle (admit/result-handle "8143")]
       (is (qualified-symbol? handle))
       (is (= 'result (symbol (namespace handle)))
           "the handle is interned in the one `result` namespace")
       (is (str/includes?
            (repl/render-ai {:db/id 8143
+                            :seon.cluster.eval/id "8143"
                             :seon.cluster.eval/source "(+ 1 1)"
                             :seon.cluster.eval/ordinal 0
                             :seon.eval/value "2"})
@@ -223,6 +224,7 @@
   (testing "two evaluations at the same ordinal never share a handle"
     (let [emitted (fn [entity-id]
                     (repl/render-ai {:db/id entity-id
+                                     :seon.cluster.eval/id (str entity-id)
                                      :seon.cluster.eval/source "(+ 1 1)"
                                      :seon.cluster.eval/ordinal 0
                                      :seon.eval/value
@@ -231,6 +233,7 @@
   (testing "shown text identifies an opaque live object without restoring it"
     (is (str/includes?
          (repl/render-ai {:db/id 8144
+                          :seon.cluster.eval/id "8144"
                           :seon.cluster.eval/source "(atom 1)"
                           :seon.ns/name 'my.agents.juniper
                           :seon.eval/value "#object[clojure.lang.Atom]"})

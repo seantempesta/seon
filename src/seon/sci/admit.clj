@@ -44,6 +44,7 @@
             [sci.impl.namespaces :as sci.namespaces]
             [sci.impl.types :as sci.types]
             [sci.lang]
+            [seon.id :as id]
             [seon.print :as print]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
@@ -611,15 +612,15 @@
         node))))
 
 (defn result-handle
-  "The symbol naming one stored evaluation's value: `result/e<entity id>`.
+  "The symbol naming one evaluation's value: `result/e<evaluation id>`.
 
   The handle is derived from the evaluation's OWN identity, so two runs of one
   agent can never mint the same name for two values (ruling 69 as amended
-  2026-09-07). An evaluation that never persisted has no entity id and
+  2026-09-07). An evaluation that never persisted has no identity and
   therefore no handle at all."
-  {:malli/schema [:=> [:cat :int] :qualified-symbol]}
-  [entity-id]
-  (symbol "result" (str "e" entity-id)))
+  {:malli/schema [:=> [:cat :seon.cluster.eval/id] :qualified-symbol]}
+  [evaluation-id]
+  (id/symbol-in "result" \e evaluation-id))
 
 (defn print-node-edn
   "Return canonical readable EDN for one admitted print node.
