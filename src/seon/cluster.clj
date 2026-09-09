@@ -2333,6 +2333,7 @@
                         :seon.sci.admit/caps (config/result-caps dials)}
                        (select-keys view
                                     [:seon.turn.loop/cluster
+                                     :seon.cluster.agent/routing
                                      :seon.render.web/pages-mult
                                      :seon.render.web/registration
                                      :seon.render.web/latest-packages
@@ -2764,6 +2765,7 @@
      ;; wake channel a freshly opened tab offers into
      :seon.render.web/view
      (assoc view
+            :seon.cluster.agent/routing routing
             :seon.render.web/pages-mult pages-mult
             :seon.render.web/fault-channel
             (:seon.flow/fault-channel fanout))

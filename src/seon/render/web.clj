@@ -2470,7 +2470,8 @@
                          :seon.db/connection connection
                          :seon.turn.loop/cluster cluster
                          :seon.cluster.agent/routing
-                         (:seon.cluster.agent/routing cluster)})
+                         (or (:seon.cluster.agent/routing request)
+                             (:seon.cluster.agent/routing cluster))})
         result (turn-function-result
                 function [(cond-> prepared
                             (= action :system-turn) (assoc :seon.turn/write? true))])]

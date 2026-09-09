@@ -21,3 +21,8 @@ Re-observed after fresh turn-rename construction on 2026-09-09 at
 The page itself returns HTTP 200; this retained rendering defect is not a
 claim that every result on the page is correct. Source and reset evidence
 are in the turn rename landing note.
+
+Reproduced during loop-proof, 2026-09-09: the live system-turn preview on
+default stores two ExceptionInfo-shaped values for `(my.plan/blocked)`, each
+naming the same `seon.db/pull` integer-contract refusal. This is unreadable
+shown text, not a successful plan observation. No new cause is attributed.

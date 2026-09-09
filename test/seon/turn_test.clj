@@ -89,12 +89,17 @@
                     (async/chan (async/sliding-buffer 1))})
            submit (fn [id & [source]]
                     (let [source (or source "(+ 1 1)")
-                          result (turn/virtual-turn!
-                                  {:seon.turn.loop/cluster handle
+                          result (#'web/change-context
+                                  {:seon.render/context-action :virtual-turn
+                                   :seon.turn.loop/cluster handle
                                    :seon.cluster.agent/routing routing
                                    :seon.cluster.agent/id id
                                    :seon.cluster.reply/text source})
-                          turn-id (:seon.turn/id result)
+                          turn-id (when-not (:seon.error/kind result)
+                                    (:seon.turn/id
+                                     (db/pull @connection [:seon.turn/id]
+                                              (get-in (last (evaluation/of-agent @connection id))
+                                                      [:seon.cluster.eval/run :db/id]))))
                           closed? #(some? (:seon.turn/closed-at
                                            (db/pull @connection
                                                     [:seon.turn/closed-at]
