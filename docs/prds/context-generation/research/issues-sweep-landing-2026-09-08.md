@@ -619,3 +619,16 @@ implemented by this lane. The registered-render selection blocker overlaps
 uncommitted render-owner edits and is left open. The runner wedge note
 requires review against the current exact-process-exit exchange before
 claiming closure. This is continued triage, not a completed sweep.
+
+Flow resume gate is now green: 21 tests / 200 assertions, 0 failures/errors,
+39 seconds coordinator/tests. Its first resumed gate found explicit nil
+projections and a redundant Malli collection in old fixtures. Those now
+carry the canonical environment and verify the already-armed production
+bridge. The lifecycle injection and Monitor resource notes are resolved and
+archived. Native selected-snapshot lint: 0 errors / 532 warnings, 3,995 ms.
+
+The runner sweep gate found a different root cause from the historical
+worker wedge: 43 tests / 272 assertions, 6 failures, all from nested cache
+reclamation crossing the worker's linked published-cache root.
+`published-test-cache-reclamation-refuses-its-linked-root.md` records the
+exact boundary and canonical-root repair; that repair is still being gated.

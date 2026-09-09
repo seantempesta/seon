@@ -96,7 +96,7 @@
   (let [launcher
         (sut/start-work-launcher!
          (-> request
-             (assoc :seon.env/environment @test-environment)
+             (update :seon.env/environment #(or % @test-environment))
              (update ::sut/configuration
                      #(merge test-io-configuration %))))]
     (reset! test-work-launcher launcher)
@@ -722,38 +722,45 @@
           (sut/stop-work-launcher! launcher-a))))))
 
 (deftest turn-evaluation-completion-is-a-flat-diagnostic-value
-  (install-test-work-launcher!
-   {::sut/configuration
-    (assoc test-launcher-configuration
-           :seon.config.flow.compute/queue-depth 1
-           :seon.config.flow.compute/concurrency 1)})
-  (try
-    (let [evaluation
-          (#'cluster.loop/submit-evaluation!!
-           {:seon.env/environment @test-environment
-            :seon.flow/work-launcher @test-work-launcher}
-           sci.eval/evaluate
-           "turn-boundary-0"
-           {:seon.cluster.eval/source
-            "(reduce + (map inc (range 500)))"
-            :seon.sci.admit/caps
-            (config/result-caps (config/defaults))
-            :seon.sci.eval/time-limit-ms 1000
-            :seon.config/on-core-error :panic})
-          record (:seon.sci.admit/record evaluation)]
-      (is (map? evaluation))
-      (is (= 125250 (:seon.sci.admit/value evaluation)))
-      (is (pos? (:seon.eval/fn-entries record)))
-      (is (int? (:seon.eval/duration-ms record)))
-      (is (= -1 (:seon.eval/allocated-bytes record))))
-    (finally
-      (stop-test-work-launcher!))))
+  (test-support/with-database
+    (fn [connection]
+      (let [environment (test-support/environment "flow-evaluation" connection)
+            ctx (test-support/fork-cluster-ctx connection "flow-evaluation")]
+        (install-test-work-launcher!
+         {:seon.env/environment environment
+          ::sut/configuration
+          (assoc test-launcher-configuration
+                 :seon.config.flow.compute/queue-depth 1
+                 :seon.config.flow.compute/concurrency 1)})
+        (try
+          (let [evaluation
+                (#'cluster.loop/submit-evaluation!!
+                 {:seon.env/environment environment
+                  :seon.flow/work-launcher @test-work-launcher}
+                 sci.eval/evaluate
+                 "turn-boundary-0"
+                 {:seon.cluster.eval/source
+                  "(reduce + (map (fn [n] (inc n)) (range 500)))"
+                  :seon.cluster.eval/ns [:seon.ns/name 'clojure.core]
+                  :seon.sci.eval/ctx ctx
+                  :seon.db/db @connection
+                  :seon.sci.admit/caps
+                  (config/result-caps (config/defaults))
+                  :seon.sci.eval/time-limit-ms 1000
+                  :seon.config/on-core-error :panic})
+                record (:seon.sci.admit/record evaluation)]
+            (is (map? evaluation))
+            (is (= 125250 (:seon.sci.admit/value evaluation)))
+            (is (pos? (:seon.eval/fn-entries record)))
+            (is (int? (:seon.eval/duration-ms record)))
+            (is (= -1 (:seon.eval/allocated-bytes record))))
+          (finally
+            (stop-test-work-launcher!)))))))
 
 (defn- start-test-fanout!
   [connection graph started fault-buffer-capacity monitor-buffer-capacity]
   (sut/start-error-fanout!
-   {:seon.env/environment @test-environment
-    ::sut/projection (schema/current-projection)
+   {:seon.env/environment (test-support/environment "fault-test" connection)
     ::sut/graph graph
     ::sut/started started
     ::sut/fault-buffer-capacity fault-buffer-capacity
@@ -785,7 +792,7 @@
                   (is (= ::sut/unsupported-command (:seon.error/kind result)))
                   (is (m/validate :seon.error/value result
                                   {:registry (:seon.schema.projection/registry
-                                              (schema/current-projection))}))
+                                              (schema/projection-from-database @connection))}))
                   (is (= [:source command {}]
                          (get-in result [:seon.error/data
                                          :seon.error/diagnostic-offending]))))))
@@ -843,16 +850,6 @@
 (deftest fault-committer-runs-with-the-projection-handed-at-construction
   (let [commit-core-fault!
         (var-get (ns-resolve 'seon.cluster 'commit-fault!))
-        resolve-var #'schema.datahike/resolve-datahike-form-in
-        resolve-filter (mi/-filter-var #{resolve-var})
-        ;; THE WORKER'S ENTERING WRAPPER, RESTORED BELOW. `mi/unstrument!`
-        ;; strips whatever is there, so arming a narrow filter of this test's
-        ;; own also removes the wrapper the WORKER armed — and every later
-        ;; task in that pooled JVM then asserts this test's timing rather
-        ;; than its own subject (AGENTS §5.7: own nothing global). The
-        ;; runner's drift report named this test.
-        entering-root (when (some-> resolve-var deref meta ::mi/original)
-                        @resolve-var)
         caps (assoc (config/result-caps
                      (test-support/effective-config))
                     :seon.config.eval.result/max-depth 8
@@ -902,8 +899,9 @@
           (try
             ;; Reproduce the live boundary: both config/effective and this
             ;; public bridge require the projection on the committer thread.
-            (mi/clj-collect! {:ns ['seon.schema.datahike]})
-            (mi/instrument! {:filters [resolve-filter]})
+            (is (some? (-> #'schema.datahike/resolve-datahike-form-in
+                           deref meta ::mi/original))
+                "the canonical gate already armed the production bridge")
             (async/>!! (:error-chan started) contract-fault)
             (let [transaction
                   (test-support/await-event!
@@ -922,25 +920,29 @@
                      (:seon.instrument/expected stored)))
               (is (boolean? (:seon.error/capped? stored))))
             (finally
-              (mi/unstrument! {:filters [resolve-filter]})
-              (when entering-root
-                (alter-var-root resolve-var (constantly entering-root)))
               (stop-database-events! connection transactions)
               (sut/stop-error-fanout! fanout)
               (stop-source-testbed! testbed))))))))
 
 (deftest fault-committer-own-error-channel-reaches-the-last-resort
-  (let [{::keys [graph started] :as testbed} (source-testbed)
+  (with-fault-database
+    (fn [connection]
+      (let [{::keys [graph started] :as testbed} (source-testbed)
         losses (async/chan 1)
         step-var (ns-resolve 'seon.flow 'fault-committer-step)
+        original-step @step-var
         reporter-var (ns-resolve 'seon.flow 'report-committer-loss!)
-        fanout (start-test-fanout! nil graph started 2 2)]
+        fanout (start-test-fanout! connection graph started 2 2)]
     (try
       (with-redefs-fn
         {step-var
-         (fn [& _]
-           (throw (ex-info "committer wrapper failed"
-                           {:seon.test/committer-wrapper-failed true})))
+         (fn
+           ([] (original-step))
+           ([request] (original-step request))
+           ([state transition] (original-step state transition))
+           ([_state _input _fault]
+            (throw (ex-info "committer wrapper failed"
+                            {:seon.test/committer-wrapper-failed true}))))
          reporter-var #(async/offer! losses %)}
         (fn []
           (async/>!! (:error-chan started) (synthetic-core-fault 0))
@@ -954,7 +956,7 @@
       (finally
         (sut/stop-error-fanout! fanout)
         (stop-source-testbed! testbed)
-        (async/close! losses)))))
+        (async/close! losses)))))))
 
 (deftest core-fault-signatures-bound-durable-and-stderr-output
   (let [commit-core-fault!
@@ -1367,8 +1369,7 @@
               {::keys [graph started] :as testbed} (source-testbed)
               fanout
               (sut/start-error-fanout!
-               {:seon.env/environment @test-environment
-                ::sut/projection (schema/current-projection)
+               {:seon.env/environment (test-support/environment "fault-test" connection)
                 ::sut/graph graph
                 ::sut/started started
                 ::sut/fault-buffer-capacity fault-buffer-capacity
@@ -1550,63 +1551,70 @@
             (.request socket 1)
             nil))
         socket
-        (-> client
-            .newWebSocketBuilder
-            (.buildAsync
-             (URI/create (str "ws://127.0.0.1:" port "/flow-socket"))
-             listener)
-            .join)]
-    (test-support/await-event! initial-and-ping ::monitor-datafy-and-ping)
-    [socket @complete-messages]))
+        (test-support/await-event!
+         (-> client
+             .newWebSocketBuilder
+             (.buildAsync
+              (URI/create (str "ws://127.0.0.1:" port "/flow-socket"))
+              listener))
+         ::monitor-socket-open)]
+    [socket complete-messages initial-and-ping]))
 
 (deftest flow-monitor-attaches-and-publishes-the-render-graph
-  (install-test-work-launcher!
-   {::sut/configuration
-    (assoc test-launcher-configuration
-           :seon.config.flow.compute/queue-depth 2
-           :seon.config.flow.compute/concurrency 1)})
-  (let [{::sut/keys [graph started]} @test-work-launcher
-        client (HttpClient/newHttpClient)
-        fanout
-        (sut/start-error-fanout!
-         {:seon.env/environment @test-environment
-          ::sut/projection (schema/current-projection)
-          ::sut/graph graph
-          ::sut/started started
-          ::sut/fault-buffer-capacity 8
-          ::sut/monitor-buffer-capacity 8
-          ::sut/read-core-error-mode (constantly :record)
-          ::sut/commit-fault! (fn [_])
-          ::sut/commit-drop! (fn [_])
-          ::sut/panic! (fn [_])})
-        monitor-state
-        (flow-monitor/start-server
-         {:flow (::sut/graph fanout)
-          :port 0})]
-    (try
-      (let [port (:port @monitor-state)
-            request
-            (-> (HttpRequest/newBuilder)
-                (.uri (URI/create
-                       (str "http://127.0.0.1:" port "/index.html")))
-                .GET
-                .build)
-            response
-            (.send client request (HttpResponse$BodyHandlers/ofString))
-            [socket messages] (monitor-websocket-messages client port)
-            graph-message (first messages)]
-        (is (= 200 (.statusCode response)))
-        (is (str/includes? (.body response) "<title>Flow Monitor</title>"))
-        (is (str/includes? graph-message "~:datafy"))
-        (doseq [pid ["~:seon.flow/work-launcher"
-                     "~:seon.flow/capacity-observer"]]
-          (is (str/includes? graph-message pid)
-              (str "monitor graph data names " pid)))
-        (.join (.sendClose
-                ^WebSocket socket
-                WebSocket/NORMAL_CLOSURE
-                "test complete")))
-      (finally
-        (flow-monitor/stop-server monitor-state)
-        (sut/stop-error-fanout! fanout)
-        (stop-test-work-launcher!)))))
+  (with-open [launcher
+              (test-support/closeable
+               (install-test-work-launcher!
+                {::sut/configuration
+                 (assoc test-launcher-configuration
+                        :seon.config.flow.compute/queue-depth 2
+                        :seon.config.flow.compute/concurrency 1)})
+               (fn [_] (stop-test-work-launcher!)))
+              client
+              (test-support/closeable
+               (HttpClient/newHttpClient)
+               (fn [^HttpClient value]
+                 (.shutdownNow value)
+                 (when-not (.awaitTermination
+                            value (java.time.Duration/ofSeconds
+                                   test-support/event-backstop-seconds))
+                   (throw (ex-info "Monitor HTTP client did not terminate" {})))))
+              fanout
+              (test-support/closeable
+               (sut/start-error-fanout!
+                {:seon.env/environment @test-environment
+                 ::sut/projection (schema/current-projection)
+                 ::sut/graph (::sut/graph @launcher)
+                 ::sut/started (::sut/started @launcher)
+                 ::sut/fault-buffer-capacity 8
+                 ::sut/monitor-buffer-capacity 8
+                 ::sut/read-core-error-mode (constantly :record)
+                 ::sut/commit-fault! (fn [_])
+                 ::sut/commit-drop! (fn [_])
+                 ::sut/panic! (fn [_])})
+               sut/stop-error-fanout!)
+              monitor
+              (test-support/closeable
+               (flow-monitor/start-server {:flow (::sut/graph @fanout) :port 0})
+               flow-monitor/stop-server)]
+    (let [port (:port @@monitor)
+          request
+          (-> (HttpRequest/newBuilder)
+              (.uri (URI/create (str "http://127.0.0.1:" port "/index.html")))
+              (.timeout (java.time.Duration/ofSeconds
+                         test-support/event-backstop-seconds))
+              .GET
+              .build)
+          response (.send ^HttpClient @client request (HttpResponse$BodyHandlers/ofString))
+          [socket messages ready] (monitor-websocket-messages @client port)]
+      (with-open [connection (test-support/closeable socket #(.abort ^WebSocket %))]
+        (test-support/await-event! ready ::monitor-datafy-and-ping)
+        (let [graph-message (first @messages)]
+          (is (= 200 (.statusCode response)))
+          (is (str/includes? (.body response) "<title>Flow Monitor</title>"))
+          (is (str/includes? graph-message "~:datafy"))
+          (doseq [pid ["~:seon.flow/work-launcher" "~:seon.flow/capacity-observer"]]
+            (is (str/includes? graph-message pid)
+                (str "monitor graph data names " pid)))
+          (test-support/await-event!
+           (.sendClose ^WebSocket @connection WebSocket/NORMAL_CLOSURE "test complete")
+           ::monitor-socket-closed))))))

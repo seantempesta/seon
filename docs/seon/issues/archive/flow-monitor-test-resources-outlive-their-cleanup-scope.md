@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, flow, test, class/n4, wave/test-fixture]
 ---
@@ -52,3 +52,13 @@ setup/body failure after each acquisition count and cleanup failures at every
 resource, asserting that each acquired resource closes once and no later one
 opens. HTTP and WebSocket waits use declared event bounds. Verification is
 running; the note remains open until the isolated gate passes.
+
+## Verified — 2026-09-09
+
+`bin/test --paths test/seon/flow_test.clj -- seon.flow-test`: 21 tests /
+200 assertions, zero failures/errors; coordinator/tests 39 seconds.
+The resource unwinding class regression also landed with `2531b2e70`.
+Fault fixtures carry the canonical database projection through their
+environment; the bridge regression uses the gate's entering wrapper rather
+than collecting incompatible schemas or mutating instrumentation.
+Selected native clj-kondo: zero errors / 532 warnings, 3,995 ms.

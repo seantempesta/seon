@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, flow, test, wave/test-fixture]
 ---
@@ -20,3 +20,13 @@ invokes lifecycle transitions separately from the transform catch that attaches
 the original step function and throws only from the transform arity. The
 existing fault-channel class regression must pass in the armed isolated gate
 before this note is archived.
+
+## Verified — 2026-09-09
+
+`bin/test --paths test/seon/flow_test.clj -- seon.flow-test`: 21 tests /
+200 assertions, zero failures/errors; coordinator/tests 39 seconds.
+The resource unwinding class regression also landed with `2531b2e70`.
+Fault fixtures carry the canonical database projection through their
+environment; the bridge regression uses the gate's entering wrapper rather
+than collecting incompatible schemas or mutating instrumentation.
+Selected native clj-kondo: zero errors / 532 warnings, 3,995 ms.
