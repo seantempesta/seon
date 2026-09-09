@@ -17,7 +17,7 @@ Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
 
-## Blocker (66)
+## Blocker (65)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
