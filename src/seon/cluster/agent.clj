@@ -156,9 +156,10 @@
 (defn identity-form
   "Return the database read that reproduces an agent's identity."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
-  [_unit]
+  [unit]
   {:seon.repl/comment ";; I should know my identity, namespace, and its steward."
-   :seon.repl/form (list 'my.agent/identity)})
+   :seon.repl/form (list 'seon.db/pull (list 'quote identity-selector)
+                         [:seon.agent/id (:seon.agent/id unit)])})
 
 (defn whoami
   "Describe the current agent's identity, namespace, and cluster.

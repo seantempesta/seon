@@ -58,9 +58,10 @@
                "a second real system pass committed while this pass evaluated")
            (is (string? (:seon.turn/id @committed)))
            (is (= "(help)" (:seon.cluster.eval/source saved)))
-           (is (= ["(help)" "(my.agent/identity)" "(my.plan/items)"
-                   "(my.message/inbox)" "(my.agent/settings)"]
-                  (mapv :seon.cluster.eval/source (evaluation/of-agent @connection "help"))))
+           (is (= ['help 'seon.db/pull 'my.plan/items 'my.message/inbox
+                   'my.agent/settings 'dir]
+                  (mapv (comp first edn/read-string :seon.cluster.eval/source)
+                        (evaluation/of-agent @connection "help"))))
            (is (vector? lines) (pr-str lines))
            (is (= 13 (count lines)))
            (is (every? #(and (string? %) (not (str/includes? % "\n"))) lines))

@@ -871,13 +871,15 @@
                                                     [?schema :seon.schema/ns ?namespace]
                                                     [?schema :seon.schema/key ?key]]
                                            database namespace-name)))]
-        (when (seq attributes)
-          (str ";; What data is in my namespace?\n"
+        (str ";; I should inspect what I have defined and which schemas I declared.\n"
+             (pr-str (list 'dir namespace-name))
+             (when (seq attributes)
+               (str "\n\n;; I should count the facts under my declared attributes.\n"
                (pr-str (list 'seon.db/q
                              (list 'quote '[:find ?attribute (count ?entity)
                                             :in $ [?attribute ...]
                                             :where [?entity ?attribute _]])
-                             (vec attributes))))))
+                             (vec attributes)))))))
       (let [data (render-data unit)]
         (if (error-value? data) data (ai-text data))))))
 

@@ -32,7 +32,9 @@
      (let [unit {:seon.db/db @connection
                  :seon.agent/id "record-agent"}
            source (agent/render-identity-ai unit)
-           form (edn/read-string source)
+           form (with-open [reader (PushbackReader. (StringReader. source))]
+                  (is (= '(help) (read reader)))
+                  (read reader))
            selector (second (second form))
            observed (db/pull @connection selector (nth form 2))]
        (is (= "record-agent" (:seon.agent/id observed)))
@@ -265,11 +267,8 @@
                    (str/includes? fitted-html "source-tail-marker"))
               "HTML preserves every source byte regardless of the AI profile"))))))
 
-(deftest source-less-agent-namespace-routes-to-the-full-stub
-  ;; AN EMPTY AGENT NAMESPACE IS THE ORDINARY FIRST MOMENT OF EVERY AGENT,
-  ;; and this used to render `{:seon.error/message …}` straight into that
-  ;; agent's own context. The wanted shape is an ordinary Clojure comment for
-  ;; AI and ordinary prose for HTML — never an error value.
+(deftest source-less-agent-namespace-emits-a-dir-read
+  ;; An empty namespace still teaches the same executable inspection form.
   (support/with-database
     (fn [connection]
       (db/transact! connection
@@ -283,9 +282,7 @@
             unit (namespace-unit db 'my.agents.fresh 1 256)
             ai (sut/render-ai unit)
             html-text (hiccup/->string (sut/render-html unit))]
-        (is (str/includes? ai "(ns my.agents.fresh)"))
-        (is (str/includes? ai ";; No definitions are indexed in this namespace yet"))
-        (is (str/includes? ai "it belongs to agent fresh"))
+        (is (= '(dir my.agents.fresh) (edn/read-string ai)))
         (is (not (str/includes? ai ":seon.error/message"))
             "the empty state is never an error value in the agent's context")
         (is (str/includes? html-text
