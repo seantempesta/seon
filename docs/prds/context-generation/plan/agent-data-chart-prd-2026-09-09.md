@@ -315,6 +315,7 @@ Detail on demand with the same `pull`/`q` against any agent's record.
 | C2, wrapper forms | Haiku | vector + 3 lines | 8/8; clean reply |
 | paid, wrapper forms | deepseek-v4-flash | vector | 10/12; wrote the marker AND fabricated a `#:seon.repl` response → reader rule §18b |
 | C3, raw data forms | Haiku | vector, data-first | 8/8; correct pull/q/transact/get-in; wrote `(now)` (my bad example) and completed a step early (line trimmed) |
+| plan operations, live help + raw plan block | Haiku | live (16:30) | complete/current/retitle via `my.plan` guesses; chained `sort-by`+`map` unprompted; could NOT add (no shape shown), could NOT remove (no verb, `retractEntity` untaught), did not know the id rule — the plan block must teach its writes by example and the id rule must be visible |
 
 ## 16. Roadmap — from here to there (owner: "this is the goal")
 
@@ -342,6 +343,23 @@ before writes, schema before renders, platform seams before blocks.
 Steps 4–7 are one reset. Nothing is hand-tuned to the scenario; every
 render is a function of the record; every block is a form the agent
 could type.
+
+## 14a. Page and help rulings from the owner's review (2026-09-09 16:30)
+
+- `(help)` returns `#:seon.help{:lines […]}` with its own render pair; the
+  AI pair prints the lines bare; no quoted strings. The identity block
+  performs help. Wording leads with: the prompt shows your namespace and
+  is drawn for you; send only `;;` comments and forms; results are data
+  you chain with `->>`, `sort-by`, `filter`, `map`, `get-in`.
+- Settings AI block shows the EFFECTIVE values grouped by namespace
+  (provider first), not overrides only.
+- The turns concern block: HTML shows turn headers; AI shows nothing —
+  the prompt section is the AI side. "Run …" vocabulary retired from the
+  header. "Context now" must show the turn's evaluations (page defect).
+- Plan item ids derive from the title (`(seon.id/id title 8)` or the
+  slug) and the plan block shows one add (with the id) and one
+  `retractEntity` remove in its comment/`doc`; the tools line stops
+  advertising verbs.
 
 ## 15. Open for the owner
 
