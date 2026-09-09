@@ -462,3 +462,15 @@ half-edit. Measured targets in the issue.
   lane resumed on it), plus doc edits from record-render/test-fast.
 - Running: turn-cut, issues-sweep.
 
+## 2026-09-09 01:05 — issues-sweep landed; only turn-cut in flight
+
+- issues-sweep `10b034289` … `afe773c00` (five commits): armed indexing
+  fixtures repaired, `fn.clj` gated green (30/175), Flow fault fixtures
+  canonical, Monitor resources scoped, published cache root resolved
+  before reclamation; eight issue notes archived. Gates green: fn, Flow
+  21/200, runner 43/270, platform 83/490, markdown 31/376.
+- `bin/issues-index --check` reports 137 diagnostics after the archive
+  wave — orchestrator's index maintenance, next.
+- Adoption of `default` is refused while turn-cut's rename is in flight
+  (schema edits); RESET NEEDED expected with its commit.
+
