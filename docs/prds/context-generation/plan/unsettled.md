@@ -549,3 +549,16 @@ half-edit. Measured targets in the issue.
   vocabulary row, each gated and committed alone.
 - `default` adoption failed on the half-edit; re-adopting clean HEAD.
 
+## 2026-09-09 04:40 — the turn loop lives in seon.turn
+
+- turn-rename at HIGH effort, two sub-slices: `7004818dc` (loop/work
+  schema identities under `seon.turn`, gate 58/324) and `120caf85e` (the
+  per-agent loop, work derivation, and proc moved into `seon.turn`;
+  callers and tests updated; AGENTS.md 'turn loop' row landed with source
+  links; gate 138/1035). Platform 83/490 both times. RESET NEEDED: eighth
+  refork of `default`. Three bounded stops at medium preceded this; the
+  sub-slice cut plus high effort landed it in under an hour.
+- Remaining from the PRD cut: ordered declaration calls on the cold turn;
+  §12 compaction proof end to end; `render-proc-faults-in-history-entries`
+  re-verification; the ephemeral-port advertisement rewrite.
+
