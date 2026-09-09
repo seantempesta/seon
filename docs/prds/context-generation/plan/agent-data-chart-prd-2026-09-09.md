@@ -1,7 +1,7 @@
 ---
 type: prd
 status: working
-tags: [prd, agent-record, render, context-generation, data-first]
+tags: [prd, render, agent-context]
 ---
 
 # The agent's data, item by item — data first
@@ -302,6 +302,33 @@ Detail on demand with the same `pull`/`q` against any agent's record.
 | C2, wrapper forms | Haiku | vector + 3 lines | 8/8; clean reply |
 | paid, wrapper forms | deepseek-v4-flash | vector | 10/12; wrote the marker AND fabricated a `#:seon.repl` response → reader rule §18b |
 | C3, raw data forms | Haiku | vector, data-first | 8/8; correct pull/q/transact/get-in; wrote `(now)` (my bad example) and completed a step early (line trimmed) |
+
+## 16. Roadmap — from here to there (owner: "this is the goal")
+
+Each step is a lane slice: one commit, gated, RESET NEEDED where marked
+(schema change; the orchestrator batches reforks). Order matters: reads
+before writes, schema before renders, platform seams before blocks.
+
+| # | change | kind | reset | owner / lane |
+|---|---|---|---|---|
+| 1 | `transact!` validates against the projection; refusal carries the schema form, offending value, path, candidates (§9.1–2) | platform seam | no | transact-feedback (running) |
+| 2 | Read evidence exact for `not`/`or` pattern clauses and `pull` in `:find` (§0.6) | platform seam | no | next lane |
+| 3 | `(seon.id/id {:parts :length})` as the one id entry; message ids random 8; plan item ids from title slug | function | no | next lane |
+| 4 | Time is the transaction: NEW `:my.plan.item/completed-tx`, `:seon.message/read-tx` (refs); DELETE `:my.plan.item/completed-at`, `:seon.cluster.message/at`, `/ordinal`; instants derive from `:db/txInstant` | schema | yes | data lane |
+| 5 | Addressable components: NEW unique identity refs `:my.plan/agent`, `:seon.config/agent`; rename `:my.plan.item/expected-result` → `:done-when` | schema | yes (batch with 4) | data lane |
+| 6 | Messages family move `:seon.cluster.message/*` → `:seon.message/*`; `:seon.message/read-tx`; `my.message/reason` folded; `my.message/send` mints the id and writes both facts | schema | yes (batch) | data lane |
+| 7 | NEW runtime component `:seon.agent/runtime` (turn, trigger, listens; `:seon.runtime/agent` identity); DELETE `:seon.turn/plan-digest`, `supersedes`, `undisposed-at`, `background-results`, `error`; `:seon.eval/value` → `/shown`; `:seon.eval/missing`, `/size` gone; `:seon.error/run` → `/turn`; `:seon.ai.attempt/sent-body` gone, `reasoning` off by default | schema | yes (batch) | data lane |
+| 8 | Agent-declared listens union into the wake matcher (`wake.clj:428-438`), derived outside the per-datom loop | platform seam | no | runtime lane |
+| 9 | Value renderer: sort a component set by `:position` when every member has one; never a table | render | no | render lane |
+| 10 | Generated blocks per §1–§8 and §11: raw `pull`/`q` forms in the thinking voice, every read block once at turn 0 even when empty (faults, inbox) | generate | no | render lane |
+| 11 | `dir`/`doc` structure and the docstring convention (§9.4); contract violations carry the doc map (§9.3); declared schemas render (§9.5) | function | no | render lane |
+| 12 | `my.plan`/`my.note` become documented data (`doc` shows the transactions); `my.*` keeps `send`, `done`, `help`, `dir`, `doc` | delete | no | render lane |
+| 13 | Root's derived agents block and the cluster block (§12) | render | no | root lane |
+| 14 | The fixture rewritten to the new shapes; reseed; read the prompt as the model would; rerun the harness; record bytes and score | proof | reseed | each lane at its landing |
+
+Steps 4–7 are one reset. Nothing is hand-tuned to the scenario; every
+render is a function of the record; every block is a form the agent
+could type.
 
 ## 15. Open for the owner
 
