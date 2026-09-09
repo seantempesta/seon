@@ -1238,3 +1238,24 @@ step in the same reply; then "write your next reply"), sends it through
 over its text: right functions, right argument shapes, no prompt marker,
 no premature `complete!`, no invented syntax. Numbers go in the landing
 note each run; the help text changes only when a score says so.
+
+### 18b. The reply reader is the defence against transcript mimicry (2026-09-09)
+
+The first paid trial (`research/help_trial_2026_09_09.edn`, deepseek-v4-flash,
+10/12) answered every comprehension question and then wrote the prompt
+marker and a fabricated `#:seon.repl{…}` response after its own query. No
+help wording fixes that; the mechanism does:
+
+- The reader accepts `;;` comments and forms. A leading `<ns>=>` marker is
+  stripped from a line and the form behind it is kept.
+- A `#:seon.repl{…}` map in a reply is never evaluated. It is a fabricated
+  response, returned to the agent as `:error` data — "You wrote a response.
+  Only the REPL writes responses; send forms and wait." — and the forms
+  before it still evaluate. The mistake is visible on the next turn like
+  any other.
+- OPEN (owner): the prompt today ends with a bare `<ns>=>`, which invites
+  the continuation. Whether the turn boundary should be the provider's
+  message boundary instead of an in-text prompt is a design decision.
+
+The harness (§18a) reruns after every change to the reader or to help;
+its score is the record.

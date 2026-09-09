@@ -611,3 +611,21 @@ half-edit. Measured targets in the issue.
   provisional); root defaulting to virtual turns without a provider; the
   first real provider turn (paid).
 
+## 2026-09-09 14:40 — §18 landed through slice 7; the first paid trial; two blockers
+
+- context-blocks at HIGH effort: `105acca21` (request maps for every
+  `my.*` API), `3f07beb88` (`:seon.agent/*`), `e506861ac` (`(help)` stored
+  first), `e4372b061` (block forms in the thinking voice; turn budget),
+  `c89f2fb93` (plan write API), `ee9feedb4` (the order scenario),
+  `4d4e47cd0` (the trial harness; one paid run: deepseek-v4-flash,
+  $0.0004, 10/12 — 7/7 comprehension; the reply wrote the prompt marker and
+  FABRICATED a `#:seon.repl` response). PRD §18b: the reader strips the
+  marker and returns a fabricated response as `:error`; the prompt-ending
+  boundary is an open owner decision.
+- Blockers found reading the live prompt: a seeded opening without read
+  evidence re-emits the whole opening on the first wake (prompt held the
+  opening twice); a renamed core predicate leaves a tombstone that refuses
+  a fresh boot (recovered by a complete republication). Both filed.
+- The data chart PRD (`agent-data-chart-prd-2026-09-09.md`) is written for
+  iteration with the owner; five questions open.
+
