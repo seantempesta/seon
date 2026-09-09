@@ -2321,6 +2321,17 @@
                            (conj path 1) entity-form false)
     :else nil))
 
+(defn- write-many-values
+  "Datahike map syntax admits a collection or one scalar/identity lookup ref."
+  [database attribute value]
+  (if (and (coll? value) (not (map? value))
+           (not (and (= 2 (count value))
+                     (keyword? (first value))
+                     (db.utils/is-attr? database (first value) :db.unique/identity)
+                     (not (datahike.schema/entity-spec-attr? attribute)))))
+    value
+    [value]))
+
 (defn- write-value
   "Normalize Datahike's reference and many-value syntax for Malli only."
   [database projection attribute value single?]
@@ -2329,11 +2340,11 @@
         normalize (if (db.utils/ref? database attribute)
                     #(if (or (map? %) (sequential? %)) 0 %)
                     identity)]
-    (if (and many? (coll? value) (not (map? value)))
-      (case (schema.datahike/form-head form)
-        :set (into #{} (map normalize) value)
-        :vector (mapv normalize value)
-        (mapv normalize value))
+    (if many?
+      (let [values (write-many-values database attribute value)]
+        (case (schema.datahike/form-head form)
+          :set (into #{} (map normalize) values)
+          (mapv normalize values)))
       (normalize value))))
 
 (defn- write-attribute-error
@@ -2349,7 +2360,8 @@
 
       :else
       (let [many? (and (not single?) (db.utils/multival? database attribute))
-            children (if (and many? (coll? value) (not (map? value)))
+            children (if (and many?
+                              (identical? value (write-many-values database attribute value)))
                        (map-indexed vector value) [[nil value]])
             nested-error
             (when (db.utils/ref? database attribute)

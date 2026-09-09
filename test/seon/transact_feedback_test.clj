@@ -85,10 +85,13 @@
               :my.plan.item/title "Valid" :my.plan.item/agent -1
               :my.plan.item/needs #{"feedback/next"}}
              {:db/id "feedback/next" :my.plan.item/id "feedback/next"
-              :my.plan.item/title "Next"}
+              :my.plan.item/title "Next"
+              :my.plan.item/needs [:my.plan.item/id "feedback/step"]}
+             {:my.plan.item/id "feedback/single" :my.plan.item/title "Single"
+              :my.plan.item/needs "feedback/step"}
              [:db/add "feedback/step" :my.plan.item/needs "datomic.tx"]])]
        (is (nil? (:seon.error/kind result)) (pr-str result))
-       (is (= #{"feedback/step" "feedback/next"}
+       (is (= #{"feedback/step" "feedback/next" "feedback/single"}
               (set (db/q '[:find [?id ...] :where [_ :my.plan.item/id ?id]] @connection))))
        (is (some? (db/q '[:find ?instant . :where
                           [?step :my.plan.item/id "feedback/step"]

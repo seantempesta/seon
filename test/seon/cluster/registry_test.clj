@@ -94,11 +94,17 @@
            (store/open-store! (assoc store-request :seon.store/dir dir))]
        (try
          (db/transact! (:seon.store/connection-object opened) probe-schema)
-         (db/transact! (:seon.store/connection-object opened)
-                     [{:seon.schema/key :seon.registry.test/payload-blob
-                       :seon.schema/form ":seon.blob/digest"}
-                      {:seon.schema/key :seon.registry.test/archive-blob
-                       :seon.schema/form ":seon.blob/digest"}])
+         (let [report
+               (db/transact! (:seon.store/connection-object opened)
+                             [[:db/add "payload-schema" :seon.schema/key
+                               :seon.registry.test/payload-blob]
+                              [:db/add "payload-schema" :seon.schema/form
+                               ":seon.blob/digest"]
+                              [:db/add "archive-schema" :seon.schema/key
+                               :seon.registry.test/archive-blob]
+                              [:db/add "archive-schema" :seon.schema/form
+                               ":seon.blob/digest"]])]
+           (assert (:db-after report) (pr-str report)))
          (write-marker! (:seon.store/connection-object opened) "ancestral")
          (registry/branch! {:seon.store/store opened
                             :seon.cluster.registry/from :db
