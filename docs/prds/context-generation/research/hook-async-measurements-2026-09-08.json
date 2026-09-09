@@ -1,0 +1,112 @@
+{
+  "hook": {
+    "launch_span_seconds": 1.5414624999975786,
+    "five": [
+      {
+        "path": "src/seon/cluster.clj",
+        "seconds": 0.3331570830196142,
+        "converged": false,
+        "feedback": "clj-kondo findings:\nsrc/seon/cluster.clj:150:13 [warning/shadowed-var] Shadowed var: clojure.core/ref\nsrc/seon/cluster.clj:161:16 [warning/shadowed-var] Shadowed var: clojure.core/name\nsrc/seon/cluster.clj:181:14 [warning/shadowed-var] Shadowed var: clojure.core/name\nsrc/seon/cluster.clj:197:14 [warning/shadowed-var] Shadowed var: clojure.core/name\nsrc/seon/cluster.clj:295:9 [warning/shadowed-var] Shadowed var: seon.cluster/nil-deref?\nsrc/seon/cluster.clj:372:13 [warning/unused-binding] unused binding profile\nsrc/seon/cluster.clj:1129:22 [warning/shadowed-var] Shadowed var: clojure.core/symbol\nsrc/seon/cluster.clj:1167:20 [warning/shadowed-var] Shadowed var: clojure.core/symbol\nsrc/seon/cluster.clj:2276:13 [warning/shadowed-var] Shadowed var: clojure.core/agent\n\nqueued for publication cc0568d6-960e-4acf-b40c-e95aaf5dca53: /Users/sean/src/seon/src/seon/cluster.clj. Check convergence by comparing the cluster's :seon.source/commit-id with seon.cluster.source/current. Result: /Users/sean/src/seon/tmp/source-publications/cc0568d6-960e-4acf-b40c-e95aaf5dca53.edn",
+        "exit": 0,
+        "stderr": ""
+      },
+      {
+        "path": "src/seon/cluster/source.clj",
+        "seconds": 0.07550558308139443,
+        "converged": false,
+        "feedback": "clj-kondo findings:\nsrc/seon/cluster/source.clj:174:4 [warning/shadowed-var] Shadowed var: seon.cluster.source/database\n\nqueued for publication cc0568d6-960e-4acf-b40c-e95aaf5dca53: /Users/sean/src/seon/src/seon/cluster/source.clj. Check convergence by comparing the cluster's :seon.source/commit-id with seon.cluster.source/current. Result: /Users/sean/src/seon/tmp/source-publications/cc0568d6-960e-4acf-b40c-e95aaf5dca53.edn",
+        "exit": 0,
+        "stderr": ""
+      },
+      {
+        "path": "test/seon/cluster/source_test.clj",
+        "seconds": 0.08038062497507781,
+        "converged": false,
+        "feedback": "clj-kondo findings:\ntest/seon/cluster/source_test.clj:423:13 [warning/shadowed-var] Shadowed var: clojure.core/identity\n\nqueued for publication cc0568d6-960e-4acf-b40c-e95aaf5dca53: /Users/sean/src/seon/test/seon/cluster/source_test.clj. Check convergence by comparing the cluster's :seon.source/commit-id with seon.cluster.source/current. Result: /Users/sean/src/seon/tmp/source-publications/cc0568d6-960e-4acf-b40c-e95aaf5dca53.edn",
+        "exit": 0,
+        "stderr": ""
+      },
+      {
+        "path": "test/seon/cluster/boot_test.clj",
+        "seconds": 0.16407083300873637,
+        "converged": false,
+        "feedback": "clj-kondo findings:\ntest/seon/cluster/boot_test.clj:127:9 [warning/shadowed-var] Shadowed var: clojure.core/key\ntest/seon/cluster/boot_test.clj:549:9 [warning/shadowed-var] Shadowed var: clojure.core/identity\ntest/seon/cluster/boot_test.clj:962:17 [warning/shadowed-var] Shadowed var: clojure.core/future\ntest/seon/cluster/boot_test.clj:1044:44 [warning/shadowed-var] Shadowed var: clojure.core/name\ntest/seon/cluster/boot_test.clj:1163:35 [warning/shadowed-var] Shadowed var: clojure.core/name\n\nqueued for publication cc0568d6-960e-4acf-b40c-e95aaf5dca53: /Users/sean/src/seon/test/seon/cluster/boot_test.clj. Check convergence by comparing the cluster's :seon.source/commit-id with seon.cluster.source/current. Result: /Users/sean/src/seon/tmp/source-publications/cc0568d6-960e-4acf-b40c-e95aaf5dca53.edn",
+        "exit": 0,
+        "stderr": ""
+      },
+      {
+        "path": "test/seon/dev/edit_feedback_test.clj",
+        "seconds": 0.07807037502061576,
+        "converged": false,
+        "feedback": "queued for publication cc0568d6-960e-4acf-b40c-e95aaf5dca53: /Users/sean/src/seon/test/seon/dev/edit_feedback_test.clj. Check convergence by comparing the cluster's :seon.source/commit-id with seon.cluster.source/current. Result: /Users/sean/src/seon/tmp/source-publications/cc0568d6-960e-4acf-b40c-e95aaf5dca53.edn",
+        "exit": 0,
+        "stderr": ""
+      }
+    ]
+  },
+  "hook_terminal": "#:seon.hook{:publication \"cc0568d6-960e-4acf-b40c-e95aaf5dca53\", :queued-at 1788930436953, :paths [\"/Users/sean/src/seon/src/seon/cluster.clj\" \"/Users/sean/src/seon/src/seon/cluster/source.clj\" \"/Users/sean/src/seon/test/seon/cluster/boot_test.clj\" \"/Users/sean/src/seon/test/seon/cluster/source_test.clj\" \"/Users/sean/src/seon/test/seon/dev/edit_feedback_test.clj\"], :edited-at 1788930437932, :worker-pid 80052, :feedback \"converged: \u25cf :current-src commit 6aa0e7ff-6232-5578-a71a-c835483fc608 digest ae1ed9884f0a4249a531652c5710cf2db5d38045371d5d821919c137379f0965\"}\n",
+  "status": {
+    "init_pid": 81443,
+    "status_seconds": 0.23974183306563646,
+    "status_exit": 0,
+    "status_output": "CLUSTER                     PID STATE       PREPL URL                      DRIFT\n----------------------------------------------------------------------------------------------------------------\ndefault                   22932 alive       54281 http://127.0.0.1:7994    -\n1/1 clusters alive\nroot footprint: not scanned (status --verbose); filesystem usable: 481.26 GiB (25.9%)\nroster deferred: a live JVM owns the store; status is derived from claims and advertisements\ntest evidence: UNKNOWN; not queried by descriptor-only status; use status --verbose\nrecorded JVM pid 22932 generation 1c0888ab-937d-4782-86f8-839902c1ad0d alive\norphan seon JVMs: none\n",
+    "holder_before": "{:seon.boot/pid 81443, :seon.boot/start-instant #inst \"2026-09-09T05:10:40.010-00:00\", :seon.operator.lock/path \"/Users/sean/src/seon/data/operator/root-lifecycle.lock\", :seon.operator.lock/command \"init --dev default --changed bin/seon-hook\", :seon.operator.lock/acquired-at #inst \"2026-09-09T05:11:23.891-00:00\", :seon.operator.lock/hold-timeout-ms 900000, :seon.operator.lock/hold-deadline #inst \"2026-09-09T05:26:23.891-00:00\"}\n",
+    "holder_after": "{:seon.boot/pid 81443, :seon.boot/start-instant #inst \"2026-09-09T05:10:40.010-00:00\", :seon.operator.lock/path \"/Users/sean/src/seon/data/operator/root-lifecycle.lock\", :seon.operator.lock/command \"init --dev default --changed bin/seon-hook\", :seon.operator.lock/acquired-at #inst \"2026-09-09T05:11:23.891-00:00\", :seon.operator.lock/hold-timeout-ms 900000, :seon.operator.lock/hold-deadline #inst \"2026-09-09T05:26:23.891-00:00\"}\n",
+    "held_before": true,
+    "held_after": true
+  },
+  "init_exit": 0,
+  "init_terminal": "\u25cf :current-src commit 6aa0ea63-8166-5b3b-b2ef-478880af03a8 digest 6f757dee5d1ca6ac60f9334dd2235cdd9408f8886c28fa34aa814350343d70a0",
+  "status_second_sample": {
+    "status_seconds": 0.20300566602963954,
+    "status_exit": 0,
+    "holder_before": "{:seon.boot/pid 81443, :seon.boot/start-instant #inst \"2026-09-09T05:10:40.010-00:00\", :seon.operator.lock/path \"/Users/sean/src/seon/data/operator/root-lifecycle.lock\", :seon.operator.lock/command \"init --dev default --changed bin/seon-hook\", :seon.operator.lock/acquired-at #inst \"2026-09-09T05:11:23.891-00:00\", :seon.operator.lock/hold-timeout-ms 900000, :seon.operator.lock/hold-deadline #inst \"2026-09-09T05:26:23.891-00:00\"}\n",
+    "holder_after": "{:seon.boot/pid 81443, :seon.boot/start-instant #inst \"2026-09-09T05:10:40.010-00:00\", :seon.operator.lock/path \"/Users/sean/src/seon/data/operator/root-lifecycle.lock\", :seon.operator.lock/command \"init --dev default --changed bin/seon-hook\", :seon.operator.lock/acquired-at #inst \"2026-09-09T05:11:23.891-00:00\", :seon.operator.lock/hold-timeout-ms 900000, :seon.operator.lock/hold-deadline #inst \"2026-09-09T05:26:23.891-00:00\"}\n",
+    "held_before": true,
+    "held_after": true,
+    "status_output": "CLUSTER                     PID STATE       PREPL URL                      DRIFT\n----------------------------------------------------------------------------------------------------------------\ndefault                   22932 alive       54281 http://127.0.0.1:7994    -\n1/1 clusters alive\nroot footprint: not scanned (status --verbose); filesystem usable: 481.26 GiB (25.9%)\nroster deferred: a live JVM owns the store; status is derived from claims and advertisements\ntest evidence: UNKNOWN; not queried by descriptor-only status; use status --verbose\nrecorded JVM pid 22932 generation 1c0888ab-937d-4782-86f8-839902c1ad0d alive\norphan seon JVMs: none\n"
+  },
+  "gates": {
+    "hook": {
+      "commit": "ef424c37c",
+      "tests": 9,
+      "assertions": 72,
+      "failures": 0,
+      "errors": 0
+    },
+    "platform": {
+      "root": "run.Qh9rU7",
+      "tests": 82,
+      "assertions": 486,
+      "failures": 0,
+      "errors": 0,
+      "workers": 2
+    },
+    "operator_iteration": {
+      "root": "run.J9nTWl",
+      "tests": 36,
+      "assertions": 235,
+      "failures": 2,
+      "errors": 1
+    },
+    "operator_final": {
+      "commit": "e136c6af1",
+      "root": "run.Kb6Qft",
+      "tests": 36,
+      "assertions": 239,
+      "failures": 0,
+      "errors": 0,
+      "coordinator_seconds": 770
+    },
+    "platform_final": {
+      "basis": "e136c6af1074e6cff90da2901c579486485ff36e",
+      "root": "run.1rXuOc",
+      "tests": 82,
+      "assertions": 486,
+      "failures": 0,
+      "errors": 0,
+      "workers": 2,
+      "coordinator_seconds": 50
+    }
+  }
+}
