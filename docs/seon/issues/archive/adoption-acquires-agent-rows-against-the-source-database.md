@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: blocker
-tags: [dev-cluster, adoption, sci, acquisition, class/p1]
+tags: [issue, dev-cluster, adoption, sci, acquisition, class/p1]
 ---
 
 # Development adoption refuses the whole cluster when an agent-installed row's namespace is read from the source database

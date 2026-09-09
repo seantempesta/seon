@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: friction
-tags: [testing, runner, classpath, class/concurrency]
+tags: [issue, testing, runner, classpath, class/concurrency]
 ---
 
 # Concurrent classpath builds corrupt the Maven model cache

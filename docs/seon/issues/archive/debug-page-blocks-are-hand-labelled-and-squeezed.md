@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: blocker
-tags: [web, render, debug-page, ugly-output, hand-maintained-list]
+tags: [issue, web, render, debug-page, ugly-output, hand-maintained-list]
 ---
 
 # The debug page's blocks are hand-labelled and the AI/HTML previews are squeezed

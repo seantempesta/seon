@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [agent, run-loop, observability, wave/why-awake]
+tags: [issue, agent, run-loop, observability, wave/why-awake]
 date: 2026-09-08
 ---
 

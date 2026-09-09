@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: cleanup
-tags: [mcp, admission, cleanup]
+tags: [issue, mcp, admission, cleanup]
 ---
 
 # The MCP envelope still reports the retired `capped?` key

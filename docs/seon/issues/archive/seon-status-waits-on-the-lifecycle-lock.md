@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: friction
-tags: [operator, dev-cluster, class/availability]
+tags: [issue, operator, dev-cluster, class/availability]
 ---
 
 # `bin/seon status` waits on the operator lifecycle lock

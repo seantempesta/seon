@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: open
 severity: friction
-tags: [adoption, web, dev-cluster, class/availability]
+tags: [issue, adoption, web, dev-cluster, class/availability]
 ---
 
 # Development adoption drops the web server while it reloads

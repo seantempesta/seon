@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: blocker
-tags: [render, walk, history, debug-page, class/total-boundary]
+tags: [issue, render, walk, history, debug-page, class/total-boundary]
 ---
 
 # The render proc faults in `seon.render.walk/history-entries` on a Long

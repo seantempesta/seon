@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: open
 severity: friction
-tags: [web, operator, dev-cluster, class/availability]
+tags: [issue, web, operator, dev-cluster, class/availability]
 ---
 
 # `default` falls back to an ephemeral web port after a refork

@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: blocker
-tags: [render, value-renderer, ai-projection, ugly-output, plan]
+tags: [issue, render, value-renderer, ai-projection, ugly-output, plan]
 ---
 
 # A plan item nested in a result prints its render form, not its data

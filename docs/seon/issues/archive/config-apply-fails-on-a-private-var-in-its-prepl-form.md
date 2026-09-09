@@ -1,5 +1,5 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: friction
 tags: [issue, operator, config]

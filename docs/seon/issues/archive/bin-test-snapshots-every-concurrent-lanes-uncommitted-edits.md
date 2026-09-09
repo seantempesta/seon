@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: friction
-tags: [testing, runner, lanes, class/shared-tree]
+tags: [issue, testing, runner, lanes, class/shared-tree]
 ---
 
 # `bin/test` snapshots every concurrent lane's uncommitted edits

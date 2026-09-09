@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: blocker
-tags: [schema, reconciliation, boot, testing, class/p1]
+tags: [issue, schema, reconciliation, boot, testing, class/p1]
 ---
 
 # Schema row reconciliation never converges on `:seon.render/units`

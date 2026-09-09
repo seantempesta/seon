@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: open
 severity: blocker
-tags: [web, render, feed, class/availability, class/bounded-execution]
+tags: [issue, web, render, feed, class/availability, class/bounded-execution]
 ---
 
 # The feed's first frame waits behind the cluster render pass, unbounded and silent

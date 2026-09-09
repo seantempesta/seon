@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: blocker
-tags: [render, web, debug, testing]
+tags: [issue, render, web, debug, testing]
 ---
 
 # A valid graph model did not prove a visible, interactive graph

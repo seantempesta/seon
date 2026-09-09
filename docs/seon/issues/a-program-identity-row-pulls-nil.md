@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: open
 severity: friction
-tags: [program-graph, schema, ruling-47]
+tags: [issue, program-graph, schema, ruling-47]
 ---
 
 # A program identity row pulls nil

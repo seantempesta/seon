@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: friction
-tags: [testing, instrument, class/absence-as-health]
+tags: [issue, testing, instrument, class/absence-as-health]
 ---
 
 # `declared-program-namespaces` returns `[]` in silence

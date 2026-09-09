@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: blocker
-tags: [custody, cluster, db, class/absence-as-health]
+tags: [issue, custody, cluster, db, class/absence-as-health]
 ---
 
 # A write from one cluster into another cluster's branch is not refused

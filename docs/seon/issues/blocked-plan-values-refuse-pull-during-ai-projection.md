@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: open
 severity: friction
-tags: [render, plan, contracts]
+tags: [issue, render, plan, contracts]
 ---
 
 # Blocked plan values refuse pull during AI projection

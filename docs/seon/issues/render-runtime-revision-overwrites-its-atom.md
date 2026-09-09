@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: blocker
-tags: [wave/live-drive-render, wave/render-test]
+tags: [issue, wave/live-drive-render, wave/render-test]
 ---
 
 # Render revision state overwrote its input atom

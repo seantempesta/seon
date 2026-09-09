@@ -3,7 +3,7 @@ type: issue
 status: resolved
 severity: blocker
 date: 2026-09-08
-tags: [dev, tooling, runtime]
+tags: [issue, dev, tooling, runtime]
 ---
 
 # Hook publication cannot load seon.id in Babashka

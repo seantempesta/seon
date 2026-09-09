@@ -1,8 +1,8 @@
 ---
-type: defect
+type: issue
 status: resolved
 severity: blocker
-tags: [testing, instrument, runner, class/absence-as-health]
+tags: [issue, testing, instrument, runner, class/absence-as-health]
 ---
 
 # The test runner's mid-run re-arm kills the worker under its own contract

@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [wake, run-loop, architecture, wave/why-awake]
+tags: [issue, wake, run-loop, architecture, wave/why-awake]
 date: 2026-09-08
 ---
 
