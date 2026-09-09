@@ -101,3 +101,8 @@ therefore integrates each isolated slice in order, using `:seon.turn/*` in
 its regressions and loop hunk. The earlier worktree commit ids are prototype
 evidence; the final shared-tree commits below supersede their integration
 boundaries.
+
+Final integration slice 1: `a90ed5cce`, canonical gate 1 test / 7 assertions.
+Final integration slice 2: canonical gate 52 tests / 236 assertions, green.
+Adoption reached JVM instrumentation but reported source changed during
+adoption; concurrent `seon.turn` edits are preserved.

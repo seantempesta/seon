@@ -403,6 +403,30 @@
         (dissoc :seon.ai/thinking)))
     target))
 
+(defn- configured-targets
+  [dials]
+   (let [primary-settings (primary-setting-entries dials)
+         primary
+         (if (:seon.config.ai/no-auth dials)
+           (dissoc primary-settings :seon.ai/api-key-variable)
+           (dissoc primary-settings :seon.config.ai/no-auth))]
+     (cond-> {:seon.ai/primary primary}
+       (:seon.config.ai.backup/model dials)
+       (assoc :seon.ai/backup
+              (cond-> (assoc primary :seon.ai/model
+                             (:seon.config.ai.backup/model dials))
+                (:seon.config.ai.backup/endpoint dials)
+                (assoc :seon.ai/endpoint
+                       (:seon.config.ai.backup/endpoint dials))
+                (:seon.config.ai.backup/api-key-variable dials)
+                (->
+                 (dissoc :seon.config.ai/no-auth)
+                 (assoc :seon.ai/api-key-variable
+                        (:seon.config.ai.backup/api-key-variable dials)))
+                (:seon.config.ai.backup/timeout-ms dials)
+                (assoc :seon.ai/timeout-ms
+                       (:seon.config.ai.backup/timeout-ms dials)))))))
+
 (defn targets
   "The primary descriptor row and the OPTIONAL backup, from the dials.
   PURE, and the ONE assembly for both roles — a second hand-written
@@ -427,30 +451,9 @@
     [:=> [:cat :seon.config/effective] :seon.ai/targets]
     [:=> [:cat :seon.db/database-value :seon.config/effective]
      :seon.ai/targets]]}
-  ([dials]
-   (let [primary-settings (primary-setting-entries dials)
-         primary
-         (if (:seon.config.ai/no-auth dials)
-           (dissoc primary-settings :seon.ai/api-key-variable)
-           (dissoc primary-settings :seon.config.ai/no-auth))]
-     (cond-> {:seon.ai/primary primary}
-       (:seon.config.ai.backup/model dials)
-       (assoc :seon.ai/backup
-              (cond-> (assoc primary :seon.ai/model
-                             (:seon.config.ai.backup/model dials))
-                (:seon.config.ai.backup/endpoint dials)
-                (assoc :seon.ai/endpoint
-                       (:seon.config.ai.backup/endpoint dials))
-                (:seon.config.ai.backup/api-key-variable dials)
-                (->
-                 (dissoc :seon.config.ai/no-auth)
-                 (assoc :seon.ai/api-key-variable
-                        (:seon.config.ai.backup/api-key-variable dials)))
-                (:seon.config.ai.backup/timeout-ms dials)
-                (assoc :seon.ai/timeout-ms
-                       (:seon.config.ai.backup/timeout-ms dials)))))))
+  ([dials] (configured-targets dials))
   ([database dials]
-   (let [{:seon.ai/keys [primary backup]} (targets dials)
+   (let [{:seon.ai/keys [primary backup]} (configured-targets dials)
          primary-model (model-details database (:seon.ai/model primary))
          backup-model (some->> backup :seon.ai/model
                                (model-details database))
@@ -842,7 +845,10 @@
   Returns the final snapshot or the first flat data error. The caller
   turns that value into a completion, so a streamed call and a one-shot
   call keep the same success/error boundary downstream."
-  {:malli/schema [:=> [:cat [:sequential :string] [:maybe :seon.ai/sink]]
+  {:malli/schema [:=> [:cat [:fn {:error/message "must be a sequential stream"
+                                 :gen/schema [:sequential :string]}
+                            clojure.core/sequential?]
+                       [:maybe :seon.ai/sink]]
                   [:or :seon.ai/partial :seon.error/value]]}
   [lines sink]
   (reduce (fn [snapshot line]
@@ -1075,15 +1081,15 @@
     ambiguously paid, and ambiguously paid is terminal. This is why a
     plain `::timeout` does NOT fail over, and it is the strictest
     reading of the ruling rather than the convenient one;
-  - a request that provably never left this machine — no credential, a
+  - a transient request failure that provably never left this machine — a
     refused connection, an unresolved host, a failed handshake, a
     CONNECT timeout — cost nothing, so a backup may be called
     immediately and, with no backup, the same call may be retried;
   - a provider REJECTION carrying no output cost nothing either, and
     splits by what it says: `:rate-limit`/`:server` mean \"not now\"
     (fail over, else back off), `:authentication`/`:authorization`/
-    `:model`/`:credential` mean \"not here\" (fail over to a different
-    target, but never back off — repeating it changes nothing), and
+    `:model`/`:credential` mean \"not here\" (terminal; repeating or
+    switching targets does not repair configuration), and
     `:request` means \"not this\" (terminal: a backup would reject the
     same request).
 
@@ -1104,9 +1110,8 @@
 
       (contains? #{:credential :authentication :authorization :model}
                  error-class)
-      ;; a different target may work; the same one never will, so this
-      ;; is the one free class that must NOT back off
-      (if backup? :failover-now :fail)
+      ;; Static configuration refusals are terminal for this turn.
+      :fail
 
       (= :transport-before-send error-class)
       (if backup? :failover-now :backoff)

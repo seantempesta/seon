@@ -1,5 +1,6 @@
 #:seon.config.ai{:api-key-variable
-                 [:string {:min 1, :seon.config/per-agent true}],
+                 [:string {:min 1, :seon.config/optional true,
+                           :seon.config/per-agent true}],
                  :endpoint
                  [:string {:min 1, :seon.config/per-agent true}],
                  :extra-body-edn

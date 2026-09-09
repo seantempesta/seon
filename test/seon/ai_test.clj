@@ -1151,7 +1151,7 @@
                  (pr-str (mapv #(or (:seon.error/message %) :ok) outcomes)))))
       (finally (.stop server 0)))))
 
-(deftest payment-required-primary-selects-the-configured-backup
+(deftest payment-required-primary-is-terminal-with-a-configured-backup
   (let [server (start-stub!)]
     (try
       (let [{:seon.ai/keys [primary backup]}
@@ -1178,11 +1178,9 @@
                (get-in failure
                        [:seon.error/data :seon.ai/error-class]))
             "payment exhaustion is a free 'not here' refusal")
-        (is (= :failover-now action))
-        (is (= "backup-probe" (:seon.ai/model selected-target)))
-        (is (= "https://backup.example.invalid/v1/chat/completions"
-               (:seon.ai/endpoint selected-target))
-            "the primary rejection selects the configured backup target")
+        (is (= :fail action))
+        (is (nil? selected-target)
+            "static refusal never selects a second provider")
         (is (= :fail
                (ai/disposition
                 {:seon.error/value failure :seon.ai/backup? false}))
@@ -1303,9 +1301,6 @@
     output? :fail
     (contains? #{:rate-limit :server :transport-before-send} error-class)
     (if backup? :failover-now :backoff)
-    (contains? #{:credential :authentication :authorization :model}
-               error-class)
-    (if backup? :failover-now :fail)
     :else :fail))
 
 (defn- partition-value
@@ -1389,7 +1384,7 @@
               true))
           "counterexample: without before-send evidence the proof is false"))))
 
-(deftest a-missing-credential-is-provably-free
+(deftest a-missing-credential-is-terminal-even-with-a-backup
   (let [value (ai/complete {:seon.ai/endpoint "http://127.0.0.1:1/v1"
                             :seon.ai/model "probe"
                             :seon.ai/max-tokens 32
@@ -1399,7 +1394,7 @@
     (is (= :seon.ai/no-credential (:seon.error/kind value)))
     (is (false? (:seon.ai/request-transmitted? (:seon.error/data value)))
         "no network call happened at all")
-    (is (= :failover-now (disposed value true)))
+    (is (= :fail (disposed value true)))
     (is (= :fail (disposed value false))
         "and with no backup there is nothing to wait for — a missing
          credential is not a condition that improves with time")))
