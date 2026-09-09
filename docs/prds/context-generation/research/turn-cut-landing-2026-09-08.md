@@ -7,6 +7,209 @@ tags: [research, runtime, sci]
 
 # Turn-cut: incomplete landing
 
+## 2026-09-09 bounded handoff (06:45 UTC)
+
+This section supersedes earlier continuation status below. No custody,
+rename, or further schema-deletion slice landed on the shared branch in this
+resume. The owner requested a documented partial if the slices could not be
+made green within 30 minutes. The shared source draft is incomplete, and the
+isolated consumer conversion contains invalid proofs; it is not ready to land.
+No foreign failure is being used as the stopping reason.
+
+### Commits and preserved candidate
+
+Previously landed: `ff9507c1b` removes stored private defs/results;
+`a16e8d269` repairs nested shown-text rendering. Their prior gates and reset
+boundary are recorded below.
+
+`78c8fc1d6` is a path-limited **isolated candidate**, parent `587dcf344`,
+152 changed files, 9,354 insertions / 9,997 deletions. It is retained under
+local branch `turn-cut-gated-2026-09-09`, **not merged into shared HEAD**.
+Its full file inventory is `git show --format= --name-status 78c8fc1d6`.
+It combines custody removal, the three owners into `seon.turn`, `my.turn`,
+and evaluation storage renaming. It is not the requested separated slices.
+
+RESET NEEDED 78c8fc1d6 — conditional on a corrected candidate being landed;
+do not refork default merely for this unmerged candidate.
+
+The candidate's gate passed 84 tests / 567 assertions; its platform gate
+passed 82 tests / 486 assertions, both zero failures/errors. These results
+cover those selected tests only. Review during this resume found mechanical
+consumer edits replacing recovery queries with literal nil, including a
+`(is (nil? nil))` assertion in `seon.cluster.turn-test`, and an obsolete
+replacement binding in `seon.cluster.agent-test`. Therefore these green
+results do **not** establish preservation of all §5.6 proofs. Do not land
+this commit unchanged.
+
+### Exact shared draft and gate boundary
+
+At shared HEAD `e23e74022`, the following 21 paths contain the uncommitted
+custody draft (these edits are left in place; unrelated edits were preserved):
+
+```text
+resources/seon/schemas/seon.cluster.loop.edn
+resources/seon/schemas/seon.cluster.prompt.edn
+resources/seon/schemas/seon.cluster.run.edn
+resources/seon/schemas/seon.cluster.work.edn
+resources/seon/schemas/seon.context.capture.edn
+resources/seon/schemas/seon.context.edn
+resources/seon/schemas/seon.problems.edn
+resources/seon/schemas/seon.render.web.edn
+resources/seon/schemas/seon.schedule.edn
+src/seon/bootstrap.clj
+src/seon/cluster.clj
+src/seon/cluster/agent.clj
+src/seon/cluster/loop.clj
+src/seon/cluster/run.clj
+src/seon/cluster/work.clj
+src/seon/context.clj
+src/seon/eval/drive.clj
+src/seon/problems.clj
+src/seon/render.clj
+src/seon/render/web.clj
+src/seon/schedule.clj
+```
+
+The draft removes claim/release and holder checks, makes recovery close every
+open run and interrupt unfinished evaluations, and carries execution
+provenance under `:seon.db.process/id`. It has not renamed the namespaces.
+Two schemas still incorrectly require that provenance in `terminal-request`
+and `agent-request`; the isolated candidate fixes those requirements.
+Some comments and unused process arguments still describe the old custody.
+`config/virtual-turns.edn` also remains an untracked lane file; its recipe
+and the unsafe Juniper override are explained below.
+
+Exact commit-gate invocation: `bin/test --paths` followed by the 21 paths
+above, then `-- seon.cluster.run-test seon.cluster.loop-test`. Publication
+refused before any tests ran, with `:seon.fn/index-refused` and these **11
+new integration findings caused by the deletion**, not inherited failures:
+
+| test path (under test/seon/) | line | unresolved reference |
+|---|---:|---|
+| cluster/agent_test.clj | 1245 | run/claim-tx |
+| cluster/loop_test.clj | 331 | run/claim-tx |
+| cluster/loop_test.clj | 1728 | work/interruption |
+| cluster/run_test.clj | 211 | run/held? |
+| cluster/run_test.clj | 248 | run/claim-tx |
+| cluster/run_test.clj | 811 | run/release-tx |
+| cluster/turn_test.clj | 291 | work/interruption |
+| cluster/work_test.clj | 530 | work/interruption |
+| effect_test.clj | 730 | run/claim-tx |
+| fn_test.clj | 441 | run/claim-tx |
+| gen/loop_test.clj | 240 | work/interruption |
+
+`bin/test --platform --paths` with those same paths also exited 1 during
+publication with the same unresolved references. **No current shared-slice
+platform pass is claimed.** Logs: `tmp/turn-cut-custody-gate-2026-09-09.log`
+and `tmp/turn-cut-custody-platform-2026-09-09.log`.
+
+An isolated attempt to split the gated candidate back into the old run/loop
+namespaces initially ran 46 tests / 232 assertions with four failures and
+one error. All five were new mistakes in that reverse conversion: Datalog
+`:keys` still named the renamed evaluation family; two receipt-transition
+Vars resolved in the wrong namespace; `error-tx` resolved in the wrong
+namespace; the committed-family assertion retained the renamed namespace.
+Fixing these yielded **46 tests / 251 assertions, zero failures/errors**
+under `bin/test-fast seon.cluster.run-test seon.cluster.loop-test`.
+No new class test was added in this resume; these are 46 adapted inherited
+tests. The broader consumer conversion is rejected because of the literal-nil
+recovery checks described above. It was not committed as production work.
+
+### Reviewable abandoned diffs and remaining work
+
+The disposable scripts are not proofs. Their useful state is preserved as
+patch blobs in Git, protected by named refs; neither patch is a commit or a
+passing implementation:
+
+- `refs/turn-cut/custody-test-port-2026-09-09` =
+  `dc296f4c7970e0fdc96a194bf8366507888dd5b3`, 143,732 bytes,
+  based on `e23e74022`. Includes the 21-path draft and 26 test-consumer paths.
+  Inspect with `git show refs/turn-cut/custody-test-port-2026-09-09`.
+- `refs/turn-cut/prompt-cut-2026-09-09` =
+  `d9208711de6933d1a3db967c1ea2826e27ef5b38`, 57,908 bytes,
+  based on `78c8fc1d6`. This unfinished deletion reduces context.clj to
+  message-custody; deletes capture/contribution schemas and their two tests;
+  changes turn, cluster/prompt, render/transcript, render/web, and the prompt
+  schema. It was not tested. The prompt test still calls deleted
+  `context/contribution-hash`; calibration fixtures and the loop capture
+  regression still need conversion. Provider `sent-body` storage is untouched.
+
+Custody still needs honest boot-close consumer proofs and the two contract
+fixes in the shared draft. The rename must be separated from custody and
+ported onto current HEAD without dropping newer function/runner changes.
+Remaining §1a deletions, digest evaluation identities, automatic compaction,
+configured fixture bootstrap, and the three-transaction grouping are unfinished.
+
+The ordinary virtual source turn measured **five transactions, 25 datoms**:
+1 + 1 transaction-metadata datoms, 16 intent datoms, 5 result datoms, and
+2 close datoms. It does not satisfy the required three-transaction proof.
+Generated-prefix growth remains implemented and its two tests remain.
+
+### Reference counts and live observation
+
+Literal occurrences in src/resources, excluding alias expansion:
+
+| spelling | shared HEAD | shared draft | isolated 78c8fc1d6 |
+|---|---:|---:|---:|
+| :seon.cluster.run/process | 93 | 0 | 0 |
+| seon.cluster.run | 774 | 631 | 0 |
+| seon.cluster.work | 95 | 92 | 0 |
+| seon.cluster.loop | 201 | 201 | 0 |
+| seon.cluster.eval | 801 | 800 | 0 |
+| my.run | 91 | 90 | 0 |
+| claim-call | 6 | 0 | 0 |
+| release-call | 4 | 0 | 0 |
+
+Default HTTP observation during this resume: 200, **49,717 bytes /
+0.057590 seconds**. CUA returned `No browser is available`; no paint or
+adoption proof is claimed. The earlier MCP observation timed out reading
+runtime health, recorded in the existing MCP issue. Default was never
+stopped, restarted, or reforked.
+
+All test processes in this resume capped workers at three and removed
+DEEPSEEK_API_KEY, MOONSHOT_API_KEY, META_MODEL_API_KEY, and OPENROUTER_API_KEY.
+No scratch operator or provider turn was started in this resume. Before this
+resume, a broader fast invocation entered a real boot fixture without an
+explicit no-provider bound; its completed fixture was already deleted and
+the retained incomplete source branch refused the attempt audit. That run
+cannot support a zero-attempt claim. The audit source is preserved in
+`78c8fc1d6:docs/prds/context-generation/research/turn_cut_attempt_audit_2026_09_09.clj`.
+The earlier confirmed 6,472-token scratch incident remains recorded below.
+
+Read AGENTS.md and the named PRD end to end, with its later owner amendments;
+read the requested §5.6 and listened-attributes research, and applied the
+Datahike, data-oriented Clojure, testing, REPL, flow, and provider skills.
+
+Cleanup completed after the process table showed no holder of either lane
+worktree or either failed gate root. Removed `tmp/turn-cut-wt`,
+`tmp/turn-cut-custody-wt`, `run.n7Er4G`, and `run.dcYbaQ`; removed all nine
+`tmp/turn-cut-*.py` scripts, including the two named by the owner. Symlinks
+were unlinked before recursive worktree removal. All lane-launched shells
+and test JVMs have exited. Other lanes' roots, processes, and edits were
+left alone. The shared custody draft remains explicitly unfinished.
+
+## Scratch provider prevention, continuation
+
+There is no implemented virtual model name: changing the model string alone
+does not prevent HTTP. The existing derivation refuses model turns when
+`:seon.config.run/max-episode-runs` is absent from both the config singleton
+and the agent settings component (`seon.cluster.work/max-episode-runs` and
+`episode-capped?`). `config/virtual-turns.edn` selects the compiler's explicit
+absence decision. Pass it at first boot, before any agent is armed:
+
+```sh
+unset SEON_OPERATOR_EPHEMERAL_OWNER_PID
+bin/seon --root tmp/turn-cut-root start turn-cut --config config/virtual-turns.edn
+```
+
+For subsequent fixture data, seed without messages and without a per-agent
+turn-bound override. Do not call the current Juniper research installer in
+this mode: it writes both messages and a per-agent bound of four, which
+overrides the absent cluster bound. Do not rely on retracting messages or
+changing settings after seeding; the agent may already have woken. The
+canonical virtual-turn proof uses source submissions and no provider.
+This recipe is source-grounded; no new scratch boot is claimed yet.
+
 ## Final checkpoint for this continuation
 
 Commits: `ff9507c1b` (private objects/shown text), `a16e8d269`
