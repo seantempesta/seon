@@ -1,11 +1,15 @@
 ---
 type: research
-status: incomplete
+status: complete
 date: 2026-09-09
 tags: [research, runtime, sci]
 ---
 
 # Turn rename: bounded continuation
+
+Current landing: slice 2 is complete in **`7296d173b`**. **RESET NEEDED: `7296d173b`.**
+The two required gates are green; fresh-schema HTTP proof is recorded below.
+Slices 3 and 4 remain unattempted. Earlier partial checkpoints are historical.
 
 ## Recovery checkpoint, 2026-09-09 06:54 UTC
 
@@ -423,8 +427,7 @@ The required gate runs in `tmp/turn-rename-wt`, detached from `a991283de`,
 with HEAD plus only the paths below. `reference-code` is linked. The
 concurrent `ordered-episode` edit in `src/seon/render/walk.clj`, its
 `resources/seon/schemas/seon.repl.edn` change, and untracked
-`test/seon/render/episode_test.clj` are excluded. Only the three renamed
-attribute references in the walk owner belong to this slice. The foreign
+`test/seon/render/episode_test.clj` are excluded. Only namespace substitutions on four lines of the walk owner belong to this slice. The foreign
 test still contains four old turn references and is not edited by this lane.
 Inherited untracked `build/`, `workers/`, and `config/virtual-turns.edn` are
 preserved. Documentation/probe additions accompany the implementation; the
@@ -623,3 +626,38 @@ reads the path-limited owned snapshot using Git's `--work-tree` option,
 leaving the foreign working-tree episode hunks intact. No shared source
 file is restored or replaced to construct that commit. Final commit ID,
 default publication observation, and root/shell cleanup follow below.
+
+### Commit and cleanup
+
+Implementation **`7296d173b`**: 117 paths, 5,335 insertions / 4,974 deletions.
+The commit's `src`, `test`, and `resources` have zero `seon.cluster.run/`
+references. Its walk change is exactly four namespace-substitution lines;
+none of the foreign episode schema, test, or behavior hunks entered it.
+
+The final explicit default publication waited behind an existing operator
+client publishing `src/seon/ai.clj`. A pre-cancellation ownership check found
+that our client had acquired the lock, so it was not signalled; it was
+allowed to complete. The preceding read-only source comparison returned
+adopted `6aa10d39-844d-5bb6-aab2-23edcb76326e` and published
+`6aa113d8-a8b1-58ad-a6e9-e2b6a9dee2aa` — not converged.
+
+The owned scratch JVM is down. A process-table check found no java/bb/bash
+holder of the owned worktree before removal; its reference-code symlink
+was unlinked without traversing the target, then the worktree and all
+its retained test roots were removed. The three disposable edit scripts
+were deleted. No foreign worktree, session, or files were changed.
+Main-tree residue is exactly the foreign `seon.repl.edn`/`render/walk.clj`
+edits and episode test, plus the inherited untracked paths.
+
+Final publication observation, 08:10 UTC: the owned client exited with the
+same `seon.env/advance-projection!` invalid-input refusal after loaded
+definitions. A successful read-only comparison still returns adopted
+`6aa10d39-844d-5bb6-aab2-23edcb76326e` versus published
+`6aa113d8-a8b1-58ad-a6e9-e2b6a9dee2aa`. The final default request returns
+HTTP 500, 200 bytes, 0.025887 seconds, with the `preview-sources` missing-key
+message recorded above. **RESET NEEDED: `7296d173b`.** The final publication
+client and every other owned shell have ended; no attempted cancellation
+sent a signal. Default remains the owner's running process.
+
+The code gates and commit finished within the 30-minute slice; this final
+note closes the evidence before 08:13:50 UTC. No slice 3 or 4 work began.
