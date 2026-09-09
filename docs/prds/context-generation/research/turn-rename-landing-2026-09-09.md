@@ -8,7 +8,7 @@ tags: [research, runtime, sci]
 # Turn rename: bounded continuation
 
 Current landing: slice 3's virtual no-op proof is committed in **`558fdc1cc`**;
-the core of slice 4 is committed in **`f7cc8465c`**. **RESET NEEDED: `f7cc8465c`**
+slice 4 is committed in **`f7cc8465c`** and **`5c2817a00`**. **RESET NEEDED: `5c2817a00`**
 for changed identity facts and handles. The remaining identity audit and its
 gates are recorded below. Earlier slice 1/2 checkpoints are historical.
 
@@ -913,9 +913,11 @@ Final live adoption and publication both name
 returns 64 hex characters. Default debug: **HTTP 200, 55,717 bytes,
 0.027908 seconds**. No browser-paint claim is made.
 
-**RESET NEEDED: adopt the final identity commit onto a fresh default fork.**
-The old identity facts and handles were not migrated. The one remaining
-writer limitation is explicit: program-installing batches retain ordered
+**RESET NEEDED: `5c2817a00`**, the final identity commit, on a fresh default fork.
+The old identity facts and handles were not migrated. The remaining
+writer limitations are explicit: the initial startup measurement's extra
+metadata-only transaction was not attributed in this slice, so the counted
+three-write proof is for warmed virtual turns. Program-installing batches retain ordered
 transaction-function calls; only the §12 no-op virtual turns have exactly
 one function call for each of their three writes. The separately verified
 bootstrap fixture failures remain in the consumer issue. No remaining
