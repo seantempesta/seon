@@ -30,11 +30,12 @@ verified baseline and source inventory are in
   before calling the provider and passes only that string as `:seon.ai/prompt`
   (`src/seon/turn.clj:4050-4096`;
   `resources/seon/schemas/seon.context.capture.edn:1-26`).
-- Do not claim cross-turn cache stability today. Ordering is deterministic, but
-  rendered text starts with a changing database basis and ends with basis plus
-  transaction time (`src/seon/render/walk.clj:595-625`;
-  `src/seon/render.clj:293-307,386-391`). The acceptance boundary is in
-  `docs/seon/issues/ai-context-bypasses-render-proc-retained-bytes.md`.
+- Historical evaluations render their saved shown text unchanged; system turns
+  append changed reads and compaction regenerates the opening
+  (`src/seon/repl.clj:229`; `src/seon/turn.clj:2033`). Verify the provider prompt
+  against those exact stored bytes, including handles and timing, as
+  `test/seon/loop_proof_test.clj:109` does. Never strip timing or preserve old
+  evaluations across compaction to manufacture stability.
 - Omit an unverified endpoint, model identifier, field, or default. A missing
   provider fact is a research boundary, not permission to infer a value.
 

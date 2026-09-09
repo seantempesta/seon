@@ -337,7 +337,6 @@ cleanup racing normal operation, not evidence against ordinary compaction
 (which retains turn identities). The bounded installer reports admission or
 closure failure rather than silently accepting missing schema.
 
-
 The final live fixture uses one writer transaction for the authored plan,
 orders, settings, and root message. This also removes a needless basis race
 between a plan API call and the rest of a seed. The separate plan API remains
@@ -415,3 +414,145 @@ my.agents.juniper=> (seon.db/q (quote [:find ?attribute (count ?entity) :in $ [?
 The final gate after the single-transaction fixture simplification passed
 1 test / 86 assertions / zero failures or errors. A later live capture still
 matched all 5,921 bytes exactly and retained exactly six evaluations.
+
+## Slice 7 — default capture and one paid comprehension trial
+
+I re-read AGENTS.md and turn PRD §10, §13–§16, §18 and §18a end to end;
+the amended §18a owns the single help vector. Slices 3–6 landed as
+`e506861ac`, `e4372b061`, `c89f2fb93`, and `ee9feedb4`. The rename's
+**RESET NEEDED** boundary is recorded with `3f07beb88`. During this slice I
+observed default return in JVM PID 37586 with the new agent schema. I did
+not stop, refork, or restart default. The exact default capture below is
+from that new JVM, after reseeding the assigned Juniper scenario.
+
+The committed [trial harness](help_trial_2026_09_09.clj) calls the actual
+`seon.render/acquire-context!` owner and `seon.ai/complete`. It ranks priced,
+credentialed model rows from default by estimated request cost, records its
+admission before HTTP, and refuses an existing evidence path. One HTTP call
+was made; no model reply was evaluated. No help wording was changed after
+this run. [Raw evidence](help_trial_2026_09_09.edn) contains the exact trial
+prompt, fixed questions, model price rows, reply, normalized usage and score.
+
+| Measurement | Observed |
+|---|---:|
+| Selected model | `deepseek-v4-flash` |
+| Estimated request cost, flash | $0.00088732 |
+| Estimated request cost, pro | $0.00275703 |
+| Estimated request cost, muse-spark-1.1 | $0.0115065 |
+| Input / output / cached tokens | 2196 / 415 / 0 |
+| Estimated actual cost at configured prices | $0.00042364 |
+| Provider-owner latency | 3737 ms |
+| Numbered comprehension cues | 7 / 7 |
+| Structural checks | 3 / 5 |
+| Total | **10 / 12** |
+
+The failed checks were `:no-prompt-marker` and `:syntax`: the reply printed
+`my.agents.juniper=>` and invented a `#:seon.repl` result, including customers
+and amounts absent from the fixture. Its query parsed, but queried every
+datom rather than restricting to order attributes. The scorer's seven text
+checks are lexical cue checks, not a semantic correctness proof. Its five
+structural checks use the Clojure reader, the actual Datalog parser, SCI
+resolution, the program graph and a query over verdict facts. In particular,
+passing argument shapes does not prove that a query answers the right task.
+The observed reply defect is tracked in
+[the trial issue](../../../seon/issues/help-trial-copies-prompt-and-invents-results.md).
+
+**Evidence limitation:** the actual paid prompt was 6,657 UTF-8 bytes,
+SHA-256 `3336e4f1bda362f3fe23acfdb3ed69e14f95ad76e016847538890b4eea07d249`.
+It contained the six opening evaluations but also two turn-backstop notices
+inside the inbox value. This is not reported as a clean-fixture trial. The
+preflight originally checked evaluation sources and order count; after this
+observation it also refuses extra inbox message identities and captures from
+the same immutable database value it checked. This admission improvement
+made no second provider call and did not alter the saved reply or score.
+The fixed help function's code SHA-256 was
+`e60dbcccc6ed371fc6f68d68d90c8458c56824a83073b8a01f822ca5cd9d2e12`.
+
+The live armer can recreate Juniper work during reseeding: one installer
+attempt returned `agent-already-running`, and two changed-read evaluations
+appeared before the opening. I then disarmed only the assigned fixture
+agent, cleared its setup history and generated the opening once. The next
+capture had exactly six evaluations, one root message, four orders and
+`:my.agent/turns-left 20`. This is a live fixture/turn-loop boundary, not a
+claim that passing the isolated loop regression proves the concurrently
+operated default stays frozen. Related foreign work is already recorded in
+[the seeded-opening issue](../../../seon/issues/seeded-opening-stores-no-read-evidence-so-the-first-wake-re-emits-everything.md).
+That issue also owns the stale `my.run` description and internal helpers
+exposed by the correctly derived Tools line. I did not edit that lane's file.
+
+I read this final default prompt top to bottom. It contains no ExceptionInfo,
+settings keyword inventory, empty inbox request map, probe messages or fault
+notices. HTTP GET of default's debug page returned 200 after the capture;
+this is an HTTP observation, not a claim of browser paint (CUA was unavailable).
+
+Exact clean default prompt: **5,921 UTF-8 bytes**, SHA-256
+`d696642f0d18305a6773c1a20e260d8821bb86a53921fd9a1434cb1925cc077e`. The payload is between these fences,
+excluding the newline immediately before the closing fence.
+
+```clojure
+;; I should understand how this REPL works before I act.
+my.agents.juniper=> (help)
+#:seon.repl{:value ["You are at a Clojure REPL in your namespace my.agents.juniper. Every function in the program is callable."
+  "Reply with ;; thinking comments, each followed by the form it plans. ▲ Send only comments and forms; the prompt my.agents.juniper=> is drawn for you."
+  "▲ Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
+  "Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value."
+  "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
+  "▲ When unsure how to call something, ask first: (dir my.plan) lists a namespace's functions as data; (doc seon.db/q) returns a docstring and contract as data."
+  "Your plan is your instructions: (my.plan/items). The current step's :done-when says what done means. (my.plan/complete! id) when it is."
+  "(my.message/inbox) is what you were sent. (my.message/send {:to \"root\" :content \"...\"}) sends. Sending a message does not end your turn."
+  "(seon.db/q '[:find ...]) queries, (seon.db/pull '[*] eid) reads one entity, (seon.db/transact! [{...}]) writes. The database is your cluster's and is supplied for you."
+  "A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours."
+  "A mistake returns :error data, never an exception. Read :seon.error/message and try again."
+  "Each reply is one turn. :turns-left in your settings counts down. (my.agent/done) ends your session early."
+  "Tools: my.agent — Read and update my record through request maps. (done, identity, settings, settings!); my.background — Start and inspect capability requests that may finish later. (await, background, poll); my.edit — Edit source files only when their expected digest still matches. (exact, form, lines); my.fs — Read, write, inspect, and find files with bounded results. (glob, read, stat, write); my.message — The inter-agent message protocol, with optional request-map calls; call preparation supplies my database and identity. (decline, inbox, read, send); my.note — My durable notes through one request map per call. (add!, forget!, notes); my.plan — The calling agent’s plan protocol. Each operation takes one request map. (add!, blocked, complete!, current, current!, item, items, plan, ready, ready-subjects, steps, update!); my.run — Every run ends by calling `complete` or `wait`, with one request map. (complete, render-namespace-ai, usage-form, wait); my.shell — Bounded foreground argv-vector process requests. (run); my.test — Run the tests declared in my namespace. (run); my.web — Fetch web resources and search the configured provider. (fetch, search)"], :result result/e25b2eb43877e, :ms 363}
+
+;; I should know my identity, namespace, and its steward.
+my.agents.juniper=> (my.agent/identity)
+#:seon.repl{:value #:my.agent{:id "juniper", :namespace my.agents.juniper, :steward "juniper"}, :result result/ed2ebde8e1d8f, :ms 65}
+
+;; I should follow my plan and verify the current step's completion criterion.
+my.agents.juniper=> (my.plan/items)
+#:seon.repl{:value [{:my.plan.item/id "juniper/query", :my.plan.item/title "Query the orders",
+    :my.plan/done-when "I have read the order ids, customers, and amounts.",
+    :my.plan/needs [], :my.plan/state :current} {:my.plan.item/id "juniper/aggregate",
+    :my.plan.item/title "Find the customer with the largest total", :my.plan/done-when
+    "A grouped sum query identifies the customer and their total.", :my.plan/needs
+    [#:my.plan.item{:id "juniper/query"}], :my.plan/state :blocked} {:my.plan.item/id
+    "juniper/transact", :my.plan.item/title "Add an order of 40 for that customer",
+    :my.plan/done-when "The transaction result identifies the new order.",
+    :my.plan/needs [#:my.plan.item{:id "juniper/aggregate"}], :my.plan/state
+    :blocked} {:my.plan.item/id "juniper/requery", :my.plan.item/title "Read the customer's new total",
+    :my.plan/done-when "A fresh grouped sum query includes the new order.",
+    :my.plan/needs [#:my.plan.item{:id "juniper/transact"}], :my.plan/state
+    :blocked} {:my.plan.item/id "juniper/reply", :my.plan.item/title "Tell root the customer and new total",
+    :my.plan/done-when "The sent message contains the customer and verified new total.",
+    :my.plan/needs [#:my.plan.item{:id "juniper/requery"}], :my.plan/state
+    :blocked} {:my.plan.item/id "juniper/done", :my.plan.item/title "Finish the session",
+    :my.plan/done-when "All preceding plan items are complete.", :my.plan/needs
+    [#:my.plan.item{:id "juniper/reply"}], :my.plan/state :blocked}], :result result/ef845d902efe4, :ms 71}
+
+;; I should check my inbox for anything I need to respond to.
+my.agents.juniper=> (my.message/inbox)
+#:seon.repl{:value [#:my.message{:at #inst "2026-09-09T12:00:00.000-00:00", :content "Which customer has the largest total? Add an order of 40 for them and tell me the new total.",
+    :from "root", :id "juniper/largest-customer"}], :result result/eb983e404a3c3, :ms 61}
+
+;; I should check my overrides and how many turns I have left.
+my.agents.juniper=> (my.agent/settings)
+#:seon.repl{:value {:my.agent/turns-left 20, :seon.config.ai/no-provider true, :seon.config.eval/time-limit-ms
+  10000, :seon.config.run/max-episode-runs 20}, :result result/ed99a007c24a1, :ms 65}
+
+;; What data is in my namespace?
+my.agents.juniper=> (seon.db/q (quote [:find ?attribute (count ?entity) :in $ [?attribute ...] :where [?entity ?attribute _]]) [:example/amount :example/customer :example/order])
+#:seon.repl{:value [[:example/amount 4] [:example/customer 4] [:example/order 4]], :result result/ed85aa589da77, :ms 57}
+```
+
+Final slice-7 path-limited gate: **2 tests / 98 assertions / zero failures
+or errors**, covering `seon.help-trial-test` and `seon.loop-proof-test`.
+Separate `--platform`: **83 tests / 490 assertions / zero failures or
+errors**. Both used `SEON_TEST_WORKERS=1`. A read-only call of the revised
+preflight returned the clean 5,921-byte default prompt; recomputing the
+saved reply's score reproduced 10/12 with no additional provider call.
+A subsequent default capture matched every byte of the clean capture.
+The owned scratch cluster was downed and its holderless root removed;
+the two retained failed gate roots from earlier slices were also removed
+only after their subjects passed and no process held those roots.
