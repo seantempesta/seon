@@ -448,3 +448,17 @@ half-edit. Measured targets in the issue.
   runner-base-cache resumed to finish and commit the gate residue
   (bin/test, runner.clj, test-fast, mcp-server, fn.clj).
 
+## 2026-09-09 00:15 — the gate is 5× faster; residue down to two lanes' work
+
+- runner-base-cache `b1cb47f14`, `7bc62158b`, `14ad349cc`: snapshot
+  runner lifecycle, batched copy-on-write worker copies, prepared worker
+  count consumed; test-fast's snapshot wrapper landed. Matched
+  `seon.repl-test` run: 89.66 s → 17.54 s wall (dependency/classpath 23 s
+  → 1 s; publication 37 s → 0; tests 28 s → 13 s). Gates green: runner
+  43/270, platform 83/490.
+- Uncommitted residue now: turn-cut's in-flight rename (expected, lane
+  running) and issues-sweep's `src/seon/fn.clj` (gate red at the fixture
+  boundary `fn-test-selected-source-gate-retains-invalid-fixtures`;
+  lane resumed on it), plus doc edits from record-render/test-fast.
+- Running: turn-cut, issues-sweep.
+
