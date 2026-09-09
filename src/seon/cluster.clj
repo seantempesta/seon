@@ -2299,7 +2299,10 @@
     :seon.boot/population :seon.schedule/root-maintenance}))
 
 (defn- serve!
-  "Bind the cluster's web view, or refuse LOUDLY.
+  "Bind the cluster's web view and publish its actual URL and port.
+
+  Every bind rewrites the existing PREPL advertisement before returning the
+  updated instance. A publication failure closes the new listener and throws.
 
   The last layer, deliberately: everything it renders must already
   stand, and a failure here must not be able to cost the run loop. It
@@ -2316,8 +2319,13 @@
   binds an ephemeral one and says BOTH numbers, because a name collision
   must not look like a broken build and a moved bookmark must not fail
   silently."
-  [connection cluster-name dials view]
-  (let [wanted (or (:seon.config.web/port dials)
+  [instance dials]
+  (let [advertisement (:seon.boot/advertisement instance)
+        cluster-name (:seon.boot/cluster-name advertisement)
+        connection (:seon.boot/cluster-connection instance)
+        view (assoc (:seon.render.web/view instance)
+                    :seon.turn.loop/cluster (:seon.turn.loop/cluster instance))
+        wanted (or (:seon.config.web/port dials)
                    (web/derived-port cluster-name))
         served (web/start!
                 ;; THE VIEW HALF comes from the armed layer, not from
@@ -2351,7 +2359,20 @@
                      " will not reach this cluster"))
       (log/info (str "seon " cluster-name " view: "
                      (:seon.render.web/url served))))
-    served))
+    (let [advertisement (merge advertisement
+                               (select-keys served [:seon.render.web/url
+                                                    :seon.render.web/port]))]
+      (try
+        (write-advertisement!
+         (cluster-paths (get-in instance [:seon.boot/config :seon.boot/root])
+                        cluster-name)
+         advertisement)
+        (assoc instance
+               :seon.render.web/served served
+               :seon.boot/advertisement advertisement)
+        (catch Throwable cause
+          (web/stop! served)
+          (throw cause))))))
 
 (defn- tagged-run
   "The tagged agent's open turn, or nil.
@@ -2932,22 +2953,8 @@
            instance (publish!
                      (merge instance
                             (arm-agents! instance connection cluster-name)))
-           dials (config/effective @connection cluster-name)
-           served (serve! connection cluster-name dials
-                          (assoc (:seon.render.web/view instance)
-                                 :seon.turn.loop/cluster
-                                 (:seon.turn.loop/cluster instance)))
-           advertisement (assoc (:seon.boot/advertisement instance)
-                                :seon.render.web/url
-                                (:seon.render.web/url served)
-                                :seon.render.web/port
-                                (:seon.render.web/port served))]
-       (write-advertisement!
-        (cluster-paths (:seon.boot/root config) cluster-name)
-        advertisement)
-       (publish! (assoc instance
-                        :seon.render.web/served served
-                        :seon.boot/advertisement advertisement))))))
+           dials (config/effective @connection cluster-name)]
+       (publish! (serve! instance dials))))))
 
 (defn- stand-boot-layers!
   "Stand the ordered boot layers above the REPL.
