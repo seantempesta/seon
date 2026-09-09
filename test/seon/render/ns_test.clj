@@ -6,6 +6,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
+            [seon.cluster.agent :as agent]
             [malli.registry :as mr]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
@@ -30,7 +31,7 @@
                      :seon.cluster.agent/namespace "namespace"}])
      (let [unit {:seon.db/db @connection
                  :seon.cluster.agent/id "record-agent"}
-           source (sut/render-agent-ai unit)
+           source (agent/render-identity-ai unit)
            form (edn/read-string source)
            selector (second (second form))
            observed (db/pull @connection selector (nth form 2))]
@@ -241,14 +242,10 @@
                              :seon.render.profile/composition :multiline
                              :seon.print/requery-id
                              [:seon.ns/name namespace-name])
-              fitted (print/fit
-                      {:seon.print/face :seon.print/projected
-                       :seon.render/output :seon.render/html
-                       :seon.print/value raw}
-                      profile)
               fitted-html
-              (hiccup/->string
-               (print/emit-hiccup fitted (print/default-options)))]
+              (hiccup/->string (sut/render-html
+                               (assoc (namespace-unit @connection namespace-name 1 100000)
+                                      :seon.render/profile profile)))]
           (is (< (.indexOf raw-html "Useful namespace summary.")
                  (.indexOf raw-html "fixture.presentation/useful")
                  (.indexOf raw-html "Requires")
@@ -264,9 +261,9 @@
                    (str/includes? raw-html "(defn useful [value] value)")
                    (not (str/includes? raw-html "<details open")))
               "exact namespace and member source remain in disclosures")
-          (is (and (str/includes? fitted-html "seon-print-html-elision")
-                   (not (str/includes? fitted-html "source-tail-marker")))
-              "the final output bounds later detail honestly"))))))
+          (is (and (not (str/includes? fitted-html "seon-print-html-elision"))
+                   (str/includes? fitted-html "source-tail-marker"))
+              "HTML preserves every source byte regardless of the AI profile"))))))
 
 (deftest source-less-agent-namespace-routes-to-the-full-stub
   ;; AN EMPTY AGENT NAMESPACE IS THE ORDINARY FIRST MOMENT OF EVERY AGENT,
@@ -521,26 +518,14 @@
             db @connection
             budgets [64 96 128 192 256 384 512 768 1024 1536 2048
                      3072 4096 6144 8192]
-            ai-candidate
-            (some (fn [budget]
-                    (let [text (sut/render-ai
-                                (namespace-unit db budget-ns 2 budget))
-                          rendered (edn/read-string text)
-                          function-symbols
-                          (into #{} (keep :seon.fn/sym) rendered)]
-                      (when (and (contains? function-symbols "fixture.budget/a")
-                                 (contains? function-symbols "fixture.budget/b")
-                                 (not-any? :seon.schema/key rendered)
-                                 (not-any? :seon.schema/form rendered))
-                        {:budget budget :text text})))
-                  budgets)]
-        (testing "compact budgets admit the callable API before schemas"
-          (is (map? ai-candidate))
-          (when ai-candidate
-            (is (some #(= :seon.print/elided (:seon.print/face %))
-                      (edn/read-string (:text ai-candidate))))
-            (is (<= (tokens/estimate (:text ai-candidate))
-                    (:budget ai-candidate)))))))))
+            rendered (mapv #(sut/render-ai
+                              (namespace-unit db budget-ns 2 %)) budgets)]
+        (testing "the namespace renderer preserves declared data for the value projection"
+          (is (apply = rendered))
+          (let [rows (edn/read-string (first rendered))]
+            (is (= #{"fixture.budget/a" "fixture.budget/b"}
+                   (into #{} (keep :seon.fn/sym) rows)))
+            (is (some :seon.schema/key rows))))))))
 
 ;; DELETED 2026-08-29 (owner gate ruling): compact registered-map
 ;; rendering is the filed issue

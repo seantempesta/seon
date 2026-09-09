@@ -12,32 +12,7 @@
             [seon.ai.tokens :as tokens]
             [seon.cluster.agent :as agent]
             [seon.render.block :as block]
-            [seon.render.value :as value]
             [seon.render.hiccup :as hiccup]))
-
-(def ^:private agent-identity-selector
-  '[:seon.cluster.agent/id
-    {:seon.cluster.agent/namespace
-     [:seon.ns/name {:seon.ns/steward [:seon.cluster.agent/id]}]}])
-
-(defn render-agent-ai
-  "Read identity, namespace, and stewardship in one compact block."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
-  [unit]
-  (str "; This is my identity and namespace; its steward is responsible for it.\n"
-       (pr-str (list 'seon.db/pull (list 'quote agent-identity-selector)
-                     [:seon.cluster.agent/id (:seon.cluster.agent/id unit)]))))
-
-(defn render-agent-html
-  "Show identity, namespace, and stewardship together."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
-  [unit]
-  (let [row (db/pull (:seon.db/db unit) agent-identity-selector
-                     [:seon.cluster.agent/id (:seon.cluster.agent/id unit)])
-        rendered (value/render-html (assoc unit :seon.render/value row))]
-    [:article {:class "seon-family-entry seon-agent-identity-entry"}
-     [:h3 "Identity"]
-     rendered]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Concrete program-graph reads

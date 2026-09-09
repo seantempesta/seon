@@ -1250,7 +1250,8 @@
                                           (forward-attribute attribute))
         root (:seon.render.debug/subject debug-request)
         cursor {:seon.render.data/path
-                (if (reverse-attribute? attribute) [] [attribute])
+                (if (or (reverse-attribute? attribute)
+                        (= attribute :seon.cluster.agent/agent)) [] [attribute])
                 :seon.render.data/offset 0}
         value (if present? (connected-value related value) value)
         experiments
@@ -1329,12 +1330,27 @@
                         (remove #{:db/id})
                         (remove declared)
                         distinct
-                        (sort-by str))]
+                        (sort-by str))
+        agent? (some? (:seon.cluster.agent/id acquisition))
+        components (when agent?
+                     (into #{}
+                           (keep (fn [[attribute properties]]
+                                   (when (:db/isComponent properties) attribute)))
+                           (:schema (db/schema-database
+                                     (:seon.db/db render-request)))))
+        units (cond->> (concat declared-units additional)
+                agent? (filter #(or (reverse-attribute? %)
+                                    (get components %))))]
   [:section {:id "debug-units" :class "seon-debug-found-values"}
    [:h1 {:class "seon-debug-caption"} "Attributes and connections"]
    (if (:seon.error/kind acquisition)
      (debug-value-html acquisition)
-     (into [:div]
+     (into (cond-> [:div]
+             agent?
+             (conj (debug-found-value
+                    projection render-request debug-request
+                    :seon.cluster.agent/agent acquisition true related
+                    context-selection context-source-call)))
            (map (fn [attribute]
                   (let [entry (find (if (reverse-attribute? attribute)
                                      reverse-values acquisition) attribute)]
@@ -1342,7 +1358,7 @@
                       projection render-request debug-request attribute
                       (when entry (val entry)) (some? entry) related
                       context-selection context-source-call))))
-           (concat declared-units additional)))
+           units))
    (when-not (get-in observation [:seon.render.data/incoming
                                   :seon.render.data/complete?])
      [:p {:class "seon-debug-empty"}

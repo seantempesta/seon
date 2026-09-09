@@ -155,3 +155,38 @@
        (is (some? preview))
        (is (str/includes? (pr-str preview) "Faults (1)"))
        (is (str/includes? (pr-str preview) "A declared fault card."))))))
+
+(deftest agent-identity-groups-scalars-and-keeps-declared-components
+  (support/with-database
+   (fn [connection]
+     (db/transact! connection [{:seon.cluster/name "identity-blocks"}
+                              {:seon.cluster.agent/id "identity-blocks"}])
+     (let [database @connection
+           ctx (support/fork-cluster-ctx connection)
+           projection (schema/projection-from-database database)
+           effective (config/defaults)
+           request {:seon.db/db database
+                    :seon.db/connection connection
+                    :seon.sci.eval/ctx ctx
+                    :seon.sci.admit/caps (config/result-caps effective)
+                    :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
+                    :seon.config/on-core-error :panic
+                    :seon.render/profile (render/agent-render-profile effective)
+                    :seon.render/captured-calls (atom {})
+                    :seon.render/captured-invocations (atom {})}
+           entity {:seon.cluster.agent/id "identity-blocks"}
+           declared (#'web/declared-entity-units projection database entity)
+           html (#'web/debug-found-values-html
+                 projection request
+                 {:seon.render.debug/subject [:seon.cluster.agent/id "identity-blocks"]}
+                 entity declared
+                 {:seon.render.data/incoming {:seon.render.data/complete? true}}
+                 {} {} nil nil)
+           units (into []
+                       (keep #(when (and (vector? %) (= :article (first %)))
+                                (:data-seon-unit (second %))))
+                       (tree-seq coll? seq html))]
+       (is (= [":seon.cluster.agent/agent" ":seon.agent/plan"
+               ":seon.agent/settings"] units))
+       (is (str/includes? (pr-str html) "seon.cluster.agent/render-identity-ai"))
+       (is (str/includes? (pr-str html) "seon.cluster.agent/render-identity-html"))))))

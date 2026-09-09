@@ -266,3 +266,61 @@ GETs in that changing-content interval still exceeded one second. The
 stricter plain-page load target therefore remains incompletely verified.
 [Default HTTP measurements](page-feed-default-current-2026-09-08.json),
 [write and open-turn observations](page-feed-default-current-writes-2026-09-08.edn).
+
+## 18:00 follow-up: identity grouping and active-thread profile
+
+Read `components-landing-2026-09-08.md` and its proposed web patch end to end.
+The scratch browser probe falsified the patch's `db/q` of `:db/isComponent`:
+that keyword is installed schema metadata, not a queryable application attribute.
+The corrected grouping reads `(:schema (db/schema-database database))`, the same
+Datahike authority used by the walk. It groups scalar identity through the agent
+schema pair, retaining plan/settings in schema order and reverse concerns.
+The duplicate `seon.render.ns/render-agent-*` pair is removed; its regression
+calls the declared owner `seon.cluster.agent/render-identity-ai`.
+
+Fresh `page-feed` scratch, Juniper seeded, Chrome at 1600 px: debug GETs were
+200 in 1686.7465 ms cold and 11.507625 ms warm, 834181 bytes. Blocks measured
+1568 px, each AI/HTML column 762.609375 px, matching vertical coordinates;
+scroll width was 1600 px. The first probe lacked generated CSS and was rejected;
+these measurements follow `npm run css:build` in the isolated checkout.
+
+![Grouped identity and schema components on scratch](page-feed-grouped-scratch-2026-09-08.png)
+
+The old scratch dataset reproduced cold context at 6626.281125 ms, 30105
+characters. A synchronized `jcmd Thread.dump_to_file -format=json` probe
+captured 16 active acquisition stacks: 9 blocked in the synchronous transaction
+at `seon.render/render-call`, and 5 rebuilding `call-preparation/current-snapshot`.
+The dump-instrumented run took 10894.609834 ms; that is profiling overhead plus
+work, not an acceptance timing. Exact active stacks are retained in
+`page-feed-cold-context-stacks-2026-09-08.json`. The per-render cost writes
+advance the database repeatedly and trigger intervening snapshot rebuilds.
+
+### Completed default checks after `baa1dde54`
+
+In-place adoption converged to source `6aa0cc22-3f59-529e-93a1-9a8abd170221`,
+digest `e2f1e079784697d73d5de51ecdeeb6f51af5399d1e5fdff349bcbeeda7bb5b92`.
+Default stayed PID 22932, HTTP 7994, prepl 54281. A 200 ms curl schedule across
+that adoption made 600 requests to `/css/output.css`: zero non-200, maximum
+9.165 ms. This verifies the listener across adoption, separately from dynamic
+render latency; it does not erase the earlier failed debug-load probe.
+
+With three debug tabs and two submitted source turns, 30 plain GETs all returned
+200, maximum 790.504750 ms; the observer recorded both turns open in its first
+three one-second samples. The first-event maximum was 1016.792625 ms. Turn ids:
+`source:ed23bc35-be97-42f3-9ecd-d29fbf9c3299` and
+`source:1a2a03cb-125d-4acd-a52b-9cd464fea1b2`.
+A subsequent 25-write, one-per-second probe with three debug tabs returned
+20/20 first events and plain GETs with status 200: first-event maximum
+14.454500 ms, plain maximum 393.335459 ms. Writes completed without refusal
+from epoch ms 1788923044465 through 1788923068476. These writes changed basis;
+the separate changed-content target remains subject to the follow-up profile.
+The `baa1dde54` platform gate passed 82 tests, 486 assertions, zero failures or
+errors, with `SEON_TEST_WORKERS=3` (`page-feed-final-platform.log`).
+
+Identity-grouping gate: `SEON_TEST_WORKERS=3 bin/test --paths
+src/seon/render/web.clj src/seon/render/ns.clj test/seon/render/ns_test.clj
+test/seon/render/web_debug_test.clj -- seon.render.web-debug-test
+seon.render.ns-test` passed 16 tests, 113 assertions, zero failures/errors.
+The namespace tests now verify unclipped HTML through the production renderer;
+they no longer apply the AI-only fit operation to HTML or expect the retired
+function-before-schema budget selection.
