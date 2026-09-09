@@ -1419,7 +1419,16 @@
               ;; `:fail`, and an exhausted schedule reaches the same
               ;; place: the run closes with the error, and step 2's
               ;; delivery machinery does the rest
-              :else (fail! failure))))))))
+              :else
+              (let [closed (db/transact!
+                            connection
+                            (run/close-tx {:seon.turn/id run-id
+                                           :seon.turn/closed-at now}))]
+                ;; The attempt already owns the fault. Closing must not
+                ;; turn that same occurrence into another fault entity.
+                (if (:seon.error/kind closed)
+                  (fail! closed)
+                  (report :error 0))))))))))
 
 (defn- evaluation-entity-id
   "The entity id of one already-transacted evaluation, or nil.

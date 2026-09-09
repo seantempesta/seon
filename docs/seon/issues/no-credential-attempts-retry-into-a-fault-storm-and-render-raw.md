@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, ai, faults, render, debug-page, fixture, class/total-boundary]
 ---
@@ -39,7 +39,6 @@ Proof: reseed on a fresh cluster → at most one fault for the missing
 credential, or none when the fixture's settings say no provider; the
 faults block shows no "items, depth" text.
 
-
 ## 2026-09-09 faults-render verification
 
 AI static disposition is terminal (`3f26b8af3`, 52 tests / 236 assertions).
@@ -50,7 +49,6 @@ remains open: fixing AI disposition alone does not establish one fault.
 The lane requested permission to extend its loop ownership beyond no-provider;
 see the dated faults-render landing note for the exact boundary and seed proof.
 
-
 The no-provider setting and fixture landed in `a4a0d457c`; canonical gate
 1 test / 13 assertions. Scratch reseed produced zero provider attempts,
 provider faults and token usage. The default served faults concern was then
@@ -58,3 +56,16 @@ measured at 11,618 bytes, nine error cards, zero `items, depth` occurrences.
 The committed HTML/AI evidence and browser-tool limitation are recorded in
 [the landing note](../../prds/context-generation/research/faults-render-landing-2026-09-09.md).
 The remaining defect is duplicate loop settlement/automatic new turns.
+
+## 2026-09-09 turn owner completion
+
+The terminal attempt branch now closes without minting a second fault.
+The work reader derives deferral from the closed failed provider turn;
+pending wakes remain unanswered until a new outside wake permits opening.
+The canonical no-provider-absent, credential-absent regression measures
+one fault, one attempt, one closed turn and no next work. It also verifies
+that a new outside message permits opening. Isolated gate: 40 tests /
+215 assertions; platform: 83 tests / 490 assertions; both green.
+Together with the earlier fixture and rendering proofs above, this resolves
+the issue. Exact paths and live adoption evidence are in the
+[turn landing note](../../prds/context-generation/research/turn-rename-landing-2026-09-09.md).

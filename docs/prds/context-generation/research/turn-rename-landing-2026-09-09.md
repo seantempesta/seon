@@ -922,3 +922,47 @@ transaction-function calls; only the §12 no-op virtual turns have exactly
 one function call for each of their three writes. The separately verified
 bootstrap fixture failures remain in the consumer issue. No remaining
 finding is left only in chat.
+
+## Slice 5.1 — terminal provider refusal (2026-09-09, 09:05 UTC)
+
+Read `faults-render-landing-2026-09-09.md` end to end and the binding turn
+PRD §4, §12, §14–§16. The inherited tree was clean apart from `build/`,
+`workers/`, and `config/virtual-turns.edn`; those paths remain untouched.
+Default PID 77143 answered both the operator and MCP. No lifecycle operation
+was performed on default and no scratch cluster was seeded.
+
+Dependency ledger: Datahike's `:db.fn/call` executes against the serial
+writer's current database (`reference-code/datahike/src/datahike/db/transaction.cljc:1152`).
+The existing `seon.turn/close-tx` is the closing authority. The existing
+`seon.cluster.work/outside-wake-t` supplies the transaction boundary for
+deferral; no new status, counter, or copied basis is stored.
+
+`record-attempt!` already commits the provider fault and its attempt ref.
+The terminal branch now closes that turn without recording the same failure
+again. A refused close still enters the existing failure settlement owner.
+The work reader derives deferral from a closed turn without a reply that
+has a failed attempt at or after the latest outside wake. Its old wakes
+remain unanswered; only a new outside wake permits another turn.
+
+The canonical regression calls the ordinary `loop/turn` open and call
+branches with a real SCI fixture. Both cluster and agent no-provider settings
+are absent. Its credential variable is verified absent before the call.
+It measures one `:seon.ai/no-credential` fault, one attempt, one closed turn,
+no next work and no self-rewake, then proves a new outside message permits
+opening. Fast gate: 2 tests / 24 assertions, zero failures/errors.
+The first wider snapshot found exactly the older work assertion that a
+failed attempt should reopen (40 tests / 215 assertions, one failure).
+That assertion now verifies the ruled deferral.
+
+Owned paths: `src/seon/cluster/loop.clj`, `src/seon/cluster/work.clj`,
+`test/seon/no_provider_test.clj`, `test/seon/cluster/work_test.clj`, this
+note, and `docs/seon/issues/no-credential-attempts-retry-into-a-fault-storm-and-render-raw.md`.
+No schema change; RESET is not needed for this slice.
+
+Final isolated gate: **40 tests / 215 assertions**, zero failures/errors.
+Platform gate: **83 tests / 490 assertions**, zero failures/errors.
+Both used `SEON_TEST_WORKERS=1`; no full suite was run. Logs:
+`tmp/terminal-refusal-gate-final.log` and `tmp/terminal-refusal-platform.log`.
+The first adoption loaded the new reader but reported source changed during
+adoption. A subsequent explicit development adoption is running; source
+identity convergence and served HTML will be recorded separately.

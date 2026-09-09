@@ -402,10 +402,10 @@
                      [?config :seon.config.run/max-episode-runs ?value]]
             database)))
 
-(defn- episode-capped?
+(defn- opening-deferred?
   "True when `agent-id` may open no turn at all: the turn count has
-  reached the dial, the dial is absent, or the wake declarations cannot
-  carry a bound.
+  reached the dial, the dial is absent, the wake declarations cannot
+  carry a bound, or a provider refusal awaits a new outside wake.
 
   FAIL-CLOSED IN BOTH DIRECTIONS. The dial's absence was already
   fail-closed; the DECLARATIONS' absence was fail-open, and on the more
@@ -418,7 +418,22 @@
   (let [limit (max-episode-runs db agent-id)]
     (or (nil? limit)
         (some? (wake/declarations-refusal db))
-        (>= (episode-runs db agent-id) limit))))
+        (>= (episode-runs db agent-id) limit)
+        ;; A terminal provider refusal leaves the wake unanswered, but
+        ;; cannot itself authorize another attempt. A new outside wake
+        ;; moves this basis and permits another turn.
+        (some? (db/q '[:find ?turn .
+                       :in $ ?agent-id ?since
+                       :where
+                       [?agent :seon.cluster.agent/id ?agent-id]
+                       [?turn :seon.turn/agent ?agent]
+                       [?turn :seon.turn/id _ ?tx]
+                       [(>= ?tx ?since)]
+                       [?turn :seon.turn/closed-at _]
+                       (not [?turn :seon.turn/reply _])
+                       [?turn :seon.turn/attempts ?attempt]
+                       [?attempt :seon.ai.attempt/error _]]
+                     db agent-id (outside-wake-t db agent-id))))))
 
 (defn- openable-wakes
   "The unanswered wakes `agent-id`'s next turn answers, under the bound.
@@ -438,22 +453,20 @@
   wake open a turn at the cap forever, which is precisely the paid loop
   a turn whose provider fails now produces."
   [db agent-id]
-  (if (episode-capped? db agent-id)
+  (if (opening-deferred? db agent-id)
     []
     (unanswered-wakes db agent-id {})))
 
 (defn deferred-triggers
-  "The unanswered wakes the turn bound is deferring, oldest first.
-  Non-empty exactly while the agent is at the cap (or the dial is
-  absent) AND wakes are pending. PRESENCE, no stored anything: the
-  refusal wrote nothing, so this derivation is the whole deferred state
-  — the next outside wake moves the anchor and this derives to empty."
+  "The pending message wakes deferred by the turn bound or provider refusal.
+  A closed turn with a failed attempt and no reply awaits a new outside
+  wake. It does not answer the old wakes or authorize its own retry."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.agent/id]
                   [:vector [:map [:seon.cluster.message/id
                                   :seon.cluster.message/id]]]]}
   [db agent-id]
-  (if (episode-capped? db agent-id)
+  (if (opening-deferred? db agent-id)
     (into []
           (comp (keep :seon.cluster.message/id)
                 (map (fn [id] {:seon.cluster.message/id id})))
@@ -497,8 +510,9 @@
   ordinal with no terminal receipt — so a turn never recomputes it;
   when no such ordinal remains the situation is `:close`. With no open
   run, the `:open` arm selects an unanswered trigger under the episode
-  gate. A closed run already answers its trigger, including when that run
-  closed on a refusal; answered triggers never derive work again. A deferred
+  gate. A successful provider attempt answers its earlier wakes. A provider
+  refusal leaves them unanswered and defers reopening until a new outside
+  wake arrives. A deferred
   trigger simply derives no work — no consumer ever sees a decision to
   refuse."
   {:malli/schema [:=> [:cat :seon.db/database-value
@@ -570,13 +584,14 @@
   (`seon.cluster.loop/record-attempt!`). A turn that died before its
   reply, a turn whose every attempt failed, and a source submission
   never showed the wakes to a model, so they answer nothing and the
-  wakes open the next turn.
+  wakes remain pending. A terminal provider refusal defers reopening
+  until a new outside wake arrives.
 
   Joining on the REPLY instead would not say this: a source submission
   stores the submitted text as the run's reply, and the verifier
   measured one silently consuming a pending message
-  (verify-listened-attributes-2026-09-08 §2d). What keeps the reopening
-  finite is the turn bound, which counts turns TAKEN, answered or not."
+  (verify-listened-attributes-2026-09-08 §2d). The turn bound still counts
+  every turn taken, answered or not."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.agent/id]
                   [:int {:min 0}]]}

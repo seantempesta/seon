@@ -559,8 +559,8 @@
   ;;   a failed attempt    — the provider never answered;
   ;;   a successful one    — the model saw the context.
   ;;
-  ;; Only the third answers. The turn bound is what keeps the reopening
-  ;; finite; it counts turns TAKEN, so all three spend it.
+  ;; Only the third answers. A terminal provider refusal also defers
+  ;; reopening until a new outside wake arrives.
   (with-database
     (fn [connection]
       (configure-cap! connection 100)
@@ -599,10 +599,8 @@
             "the wake was never shown to a model")
         (is (zero? (work/latest-answering-turn-t (db/db connection)
                                                  agent-id))))
-      (testing "and the wakes still open the next turn"
-        (is (= :open
-               (:seon.cluster.work/situation
-                (work/next-agent-work (db/db connection) request)))))
+      (testing "the failed attempt cannot authorize another turn"
+        (is (nil? (work/next-agent-work (db/db connection) request))))
       (testing "a turn whose attempt succeeded answers"
         (open-run! connection {})
         (let [database (db/db connection)]
