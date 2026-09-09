@@ -714,12 +714,12 @@
 
 (defn- assert-clean-analysis!
   [analysis first-party-functions]
-  (when (seq (blocking-findings analysis first-party-functions))
-    (throw (ex-info "Static program analysis found blocking errors."
-                    {:seon.error/kind ::index-refused
-                     ::findings
-                     (publication-findings analysis first-party-functions)
-                     :seon.fn/index-refused true}))))
+  (let [findings (blocking-findings analysis first-party-functions)]
+    (when (seq findings)
+      (throw (ex-info "Static program analysis found blocking errors."
+                      {:seon.error/kind ::index-refused
+                       ::findings findings
+                       :seon.fn/index-refused true})))))
 
 (defn- analysis-rows-by-file
   [analysis first-party-functions contexts]
@@ -2016,7 +2016,7 @@
     [:=> [:cat :seon.fn/index-request [:fn clojure.core/ifn?]]
      :seon.reconcile/result]]}
   ([request]
-   (index! request nil))
+   (index! request (constantly nil)))
   ([{connection :seon.db/connection process :seon.db/process
      previous-database :seon.source/previous-database
      source-database :seon.source/database :as request}

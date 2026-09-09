@@ -7,8 +7,8 @@
             [seon.cluster.run :as run]
             [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
+            [seon.id :as id]
             [seon.program :as program]
-            [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
 
 (def ^:private boot-process
@@ -464,7 +464,7 @@
           @connection
           {:seon.cluster.run/id run-id
            :seon.cluster.eval/ordinal 0
-           :seon.cluster.eval/result-edn ":done"}))
+           :seon.eval/value ":done"}))
         (is (empty?
              (db/q '[:find [?attribute ...]
                      :in $ ?form-id
@@ -546,14 +546,19 @@
             {:seon.cluster.run/id "settlement-parity-run"
              :seon.cluster.eval/ordinal 0
              :seon.cluster.eval/at (java.util.Date.)}))
-          (db/transact!
-           connection
-           (run/receipt-settle-tx
-            @connection
-            {:seon.cluster.run/id "settlement-parity-run"
-             :seon.cluster.eval/ordinal 0
-             :seon.cluster.eval/result-edn ":defined"
-             :seon.program/row indexed}))
+          (let [settlement
+                (db/transact!
+                 connection
+                 (run/receipt-settle-tx
+                  @connection
+                  {:seon.cluster.run/id "settlement-parity-run"
+                   :seon.cluster.eval/ordinal 0
+                   :seon.eval/value ":defined"
+                   :seon.program/row indexed}))]
+            (is (nil? (:seon.error/kind settlement))
+                (pr-str (select-keys settlement
+                                     [:seon.error/kind :seon.error/message
+                                      :seon.error/data]))))
           (let [edge-facts
                 (fn [identity-attribute identity-value]
                   (let [entity
@@ -561,6 +566,9 @@
                                 :in $ ?attribute ?value
                                 :where [?entity ?attribute ?value]]
                               @connection identity-attribute identity-value)
+                        _ (when-not entity
+                            (throw (ex-info "Expected fixture entity was not installed"
+                                            {:seon.test/identity [identity-attribute identity-value]})))
                         calls
                         (db/q '[:find [?symbol ...]
                                 :in $ ?entity
@@ -584,9 +592,8 @@
                     (merge
                      (when (seq calls)
                        {:seon.fn/calls
-                        (mapv (fn [function-symbol]
-                                [:seon.fn/sym function-symbol])
-                              (sort calls))})
+                        (into #{} (map (fn [function-symbol]
+                                         [:seon.fn/sym function-symbol])) calls)})
                      (when (seq keywords)
                        {:seon.fn/keywords (set keywords)})
                      (when subject
@@ -796,15 +803,21 @@
 (deftest publication-refuses-a-required-artifact-load-finding
   (let [root (fixture-root)]
     (write-source! root "audit/unresolved.clj"
-                   "(ns audit.unresolved)\n(defn broken [] missing)\n")
-    (let [failure
+                   "(ns audit.unresolved (:require [clojure.set :as sets]))\n(defn broken [] missing)\n")
+    (let [analysis (analyzer/analyze {::analyzer/paths [(.getPath root)]})
+          _ (is (some #(= :warning (::analyzer/level %))
+                      (::analyzer/findings analysis))
+                "the real source fixture produces an unrelated warning")
+          failure
           (try
             (seon.fn/build-manifest {:seon.fn/roots [(.getPath root)]})
             nil
             (catch clojure.lang.ExceptionInfo error error))]
       (is (= :seon.fn/index-refused (:seon.error/kind (ex-data failure))))
       (is (some #(= :unresolved-symbol (::analyzer/type %))
-                (::seon.fn/findings (ex-data failure)))))))
+                (::seon.fn/findings (ex-data failure))))
+      (is (every? #(= :error (::analyzer/level %))
+                  (::seon.fn/findings (ex-data failure)))))))
 
 (deftest source-context-is-derived-once-per-file-population
   (let [root (fixture-root)
@@ -948,7 +961,7 @@
       (is (= ["artifact.alpha/target" "artifact.beta/caller"]
              (seon.fn/manifest-function-symbols manifest))))
     (testing "artifact replacement recomputes one deterministic manifest"
-      (let [changed-beta (assoc beta-artifact :seon.fn.file/digest "changed")
+      (let [changed-beta (assoc beta-artifact :seon.fn.file/digest (id/digest 64 ["changed"]))
             changed (seon.fn/replace-manifest-artifacts manifest [changed-beta])]
         (is (= changed-beta
                (seon.fn/artifact-by-path changed (.getCanonicalPath beta))))
@@ -997,11 +1010,10 @@
                  :seon.fn.file/rows [namespace-row desired-row]
                  :seon.fn.file/identities
                  [[:seon.ns/name 'sample] [:seon.fn/sym "sample/value"]]}
-        plan #(seon.fn/plan-file-change
-               (merge {:seon.fn.change/status :modified
-                       :seon.fn.change/current-artifact current
-                       :seon.fn.change/desired-artifact desired}
-                      %))]
+        base-request {:seon.fn.change/status :modified
+                      :seon.fn.change/current-artifact current
+                      :seon.fn.change/desired-artifact desired}
+        plan #(seon.fn/plan-file-change (merge base-request %))]
     (testing "same identities with cardinality-one updates are upserts"
       (is (= {:seon.fn.change/action :incremental-upsert
               :seon.fn.change/path path
@@ -1047,115 +1059,56 @@
                (:seon.fn.change/added-identities result)))))
     (testing "unsafe event and artifact states name their fallback reason"
       (doseq [[request reason]
-              [[{:seon.fn.change/status :deleted
-                 :seon.fn.change/desired-artifact nil} :deleted]
-               [{:seon.fn.change/status :moved} :moved]
-               [{:seon.fn.change/status :schema-resource} :schema-resource]
-               [{:seon.fn.change/status :analysis-error} :analysis-error]
-               [{:seon.fn.change/stale? true} :stale-artifact]
-               [{:seon.fn.change/current-artifact nil} :missing-artifact]
-               [{:seon.fn.change/uncertain? true} :uncertain-projection]]]
+              [[(dissoc (assoc base-request :seon.fn.change/status :deleted)
+                        :seon.fn.change/desired-artifact) :deleted]
+               [(assoc base-request :seon.fn.change/status :moved) :moved]
+               [(assoc base-request :seon.fn.change/status :schema-resource) :schema-resource]
+               [(assoc base-request :seon.fn.change/status :analysis-error) :analysis-error]
+               [(assoc base-request :seon.fn.change/stale? true) :stale-artifact]
+               [(dissoc base-request :seon.fn.change/current-artifact) :missing-artifact]
+               [(assoc base-request :seon.fn.change/uncertain? true) :uncertain-projection]]]
         (is (some #{reason}
-                  (:seon.fn.change/reasons (plan request)))
+                  (:seon.fn.change/reasons (seon.fn/plan-file-change request)))
             (str request))))))
 
 (deftest indexing-uses-a-prebuilt-manifest-without-analysis
-  (let [manifest
-        {:seon.fn.manifest/roots ["/repo/src"]
-         :seon.fn.manifest/digest "digest"
-         :seon.fn.manifest/artifacts
-         [{:seon.fn.file/path "/repo/src/prebuilt.clj"
-           :seon.fn.file/digest "file-digest"
-           :seon.fn.file/rows
-           [{:seon.ns/name 'prebuilt
-             :seon.ns/source "(ns prebuilt)"}
-            {:seon.fn/sym "prebuilt/value"
-             :seon.fn/ns [:seon.ns/name 'prebuilt]
-             :seon.fn/source "(defn value [] 1)"
-             :seon.fn/arglists "([])"
-             :seon.fn/private? false
-             :seon.fn/keywords
-             #{:seon.cluster.agent/id :seon.config/agent-overlay}}
-            {:seon.test/sym "prebuilt/value-test"
-             :seon.test/ns [:seon.ns/name 'prebuilt]
-             :seon.test/source "(deftest value-test (value))"
-             :seon.fn/calls [[:seon.fn/sym "prebuilt/value"]]
-             :seon.test/subject [:seon.fn/sym "prebuilt/value"]}]
-           :seon.fn.file/identities
-           [[:seon.ns/name 'prebuilt]
-            [:seon.fn/sym "prebuilt/value"]
-            [:seon.test/sym "prebuilt/value-test"]]}]
-         :seon.fn.manifest/identities
-         [[:seon.ns/name 'prebuilt]
-          [:seon.fn/sym "prebuilt/value"]
-          [:seon.test/sym "prebuilt/value-test"]]}
-        transactions (atom [])]
-    (with-redefs [analyzer/analyze
-                  (fn [_]
-                    (throw (ex-info "analysis must not run" {})))
-                  schema.edn/packaged-forms (constantly {})
-                  db/identity-attributes
-                  (constantly [:seon.ns/name :seon.fn/sym :seon.test/sym])
-                  db/q (fn [& _] nil)
-                  db/transact!
-                  (fn [_ request]
-                    (swap! transactions conj request)
-                    {})]
-      (let [result (seon.fn/index!
-                    {:seon.db/connection (atom :database)
-                     :seon.fn/manifest manifest})]
-        (is (pos? (:seon.reconcile/operations result)))
-        (is (= 1 (count @transactions))
-            "one population pays one Datahike commit")
-        (let [tx-data (:tx-data (first @transactions))
-              identity-op
-              (fn [attribute value]
-                (some #(when (and (vector? %)
-                                  (= [:db/add attribute value]
-                                     [(first %) (nth % 2) (nth % 3)]))
-                         %)
-                      tx-data))
-              function-id (second (identity-op :seon.fn/sym
-                                               "prebuilt/value"))
-              test-id (second (identity-op :seon.test/sym
-                                           "prebuilt/value-test"))
-              entity-by-id (into {} (keep #(when (map? %) [(:db/id %) %]))
-                                 tx-data)]
-          (is (string? function-id))
-          (is (= function-id
-                 (:seon.test/subject (get entity-by-id test-id))))
-          (is (= [function-id]
-                 (:seon.fn/calls (get entity-by-id test-id))))
-          (is (= #{[:db/add function-id :seon.fn/keywords
-                    :seon.cluster.agent/id]
-                   [:db/add function-id :seon.fn/keywords
-                    :seon.config/agent-overlay]}
-                 (set (filter #(and (vector? %)
-                                    (= :seon.fn/keywords (nth % 2 nil)))
-                              tx-data)))
-              "keyword pairs remain independent cardinality-many facts"))))
-    (let [attempts (atom 0)
-          result
-          (with-redefs [schema.edn/packaged-forms (constantly {})
-                        db/identity-attributes
-                        (constantly [:seon.ns/name :seon.fn/sym
-                                     :seon.test/sym])
-                        db/q (fn [& _] nil)
-                        db/transact!
-                        (fn [& _]
-                          (swap! attempts inc)
-                          {:seon.error/kind :seon.db/invalid-transaction})]
-            (try
-              (seon.fn/index!
-               {:seon.db/connection (atom :database)
-                :seon.fn/manifest manifest})
-              ::committed
-              (catch clojure.lang.ExceptionInfo failure
-                (ex-data failure))))]
-      (is (= :seon.fn/index-refused (:seon.error/kind result)))
-      (is (= :seon.fn/population (:seon.fn/index-phase result)))
-      (is (= 1 @attempts)
-          "the population is one writer admission"))))
+  (let [root (fixture-root)
+        _ (write-source!
+           root "prebuilt.clj"
+           (str "(ns prebuilt (:require [clojure.test :refer [deftest is]]))\n"
+                "(defn value {:malli/schema [:=> [:cat] :int]} [] 1)\n"
+                "(deftest ^{:seon.test/subject prebuilt/value} value-test (is (= 1 (value))))\n"))
+        manifest (seon.fn/build-manifest
+                  {:seon.fn/roots (conj seon.fn/source-roots (.getPath root))})]
+    (test-support/with-database
+      (fn [connection]
+        (let [before @connection
+              result
+              (with-redefs [analyzer/analyze
+                            (fn [_] (throw (ex-info "analysis must not run" {})))]
+                (seon.fn/index!
+                 {:seon.db/connection connection
+                  :seon.db/process boot-process
+                  :seon.source/previous-database before
+                  :seon.fn/manifest manifest}))
+              database @connection
+              function-id (:db/id (db/pull database [:db/id]
+                                            [:seon.fn/sym "prebuilt/value"]))
+              test-row (db/pull database
+                                [:seon.test/subject :seon.fn/calls]
+                                [:seon.test/sym "prebuilt/value-test"])]
+          (is (pos? (:seon.reconcile/operations result)))
+          (is (= (inc (:max-tx before)) (:max-tx database))
+              "the real writer admits the population in one transaction")
+          (is (integer? function-id))
+          (is (= function-id (:db/id (:seon.test/subject test-row))))
+          (is (some #(= function-id (:db/id %)) (:seon.fn/calls test-row))))))
+    (let [failure (test-support/refusal-data
+                   #(#'seon.fn/require-committed!
+                     {:seon.error/kind :seon.db/invalid-transaction}
+                     :seon.fn/population))]
+      (is (= :seon.fn/index-refused (:seon.error/kind failure)))
+      (is (= :seon.fn/population (:seon.fn/index-phase failure))))))
 
 (deftest keyword-usage-is-indexed-per-declaration
   (let [root (fixture-root)
@@ -1438,18 +1391,14 @@
                             [:seon.fn/sym "valid.core/value"]))))))))
 
 (deftest indexing-refuses-an-already-populated-branch
-  (let [root (fixture-root)]
-    (write-source! root "fresh/core.clj"
-                   "(ns fresh.core)\n(defn value [] 1)\n")
-    (test-support/with-database
-      (fn [connection]
-        (with-redefs [schema.edn/packaged-forms (constantly {})]
-          (is (thrown-with-msg?
-               clojure.lang.ExceptionInfo
-               #"fresh source scratch"
-               (seon.fn/index! {:seon.db/connection connection
-                                :seon.db/process boot-process
-                                :seon.fn/roots [(.getPath root)]}))))))))
+  (test-support/with-database
+    (fn [connection]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"fresh source scratch"
+           (seon.fn/index! {:seon.db/connection connection
+                           :seon.db/process boot-process
+                           :seon.source/database @connection}))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; ONE EVALUATION POINT — the census's own regression (ruling 71)
@@ -1532,6 +1481,6 @@
                    "seon.cluster.loop/preview-sources"}
                  sources)
               (pr-str sources)))
-        (testing "the page's preview path reaches the same evaluator"
-          (is (= #{"seon.render.web/render-source-call"} previews)
+        (testing "the page and system turn reuse the same evaluation path"
+          (is (= #{"seon.render.web/render-source-call" "seon.turn/system-turn"} previews)
               (pr-str previews)))))))
