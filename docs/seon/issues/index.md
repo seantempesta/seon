@@ -17,7 +17,7 @@ Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
 
-## Blocker (65)
+## Blocker (66)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -63,9 +63,9 @@ See `README.md` for the convention.
 | [Explain the 24-second live root pull of 189 members](live-root-pull-of-189-members-takes-24-seconds.md) | blocker | render acquisition performance wave |
 | [Derive a completion reply from the triggering message](message-completion-replies-from-the-wrong-agent-and-duplicates-the-trigger.md) | blocker | message delivery repair wave |
 | [Make namespace removal rebuild contracted definitions only](namespace-removal-does-not-rebuild-contracted-only.md) | blocker | per-run fork context wave |
-| [A missing provider credential retries into nine faults in two seconds, and fault entities render as raw maps](no-credential-attempts-retry-into-a-fault-storm-and-render-raw.md) | blocker | page follow-up wave |
 | [Answer no-forms replies with correction or re-wake](no-forms-replies-close-without-correction-or-rewake.md) | blocker | OWNER DESIGN GATE (correction vs re-wake) |
 | [Bound orderly-stop completion joins](orderly-stop-completion-joins-have-no-bound.md) | blocker | wedge class-kill continuation |
+| [Connect ordinary turns to the additive system-turn algorithm](ordinary-turns-do-not-use-the-additive-system-turn.md) | blocker | turn follow-up wave |
 | [Plan renderer and its tests disagree during development publication](plan-renderer-arity-change-blocks-development-publication.md) | blocker | page follow-up wave (after turn-cut lands) |
 | [Platform runner exceeds the configured worker checkouts](platform-worker-count-exceeds-prepared-checkouts.md) | blocker | wave/contract-gate |
 | [Quote prose in printed data, never splice it](prose-renders-splice-unquoted-into-printed-data.md) | blocker | results-as-data rip-out |
@@ -85,9 +85,10 @@ See `README.md` for the convention.
 | [Register an empty agent namespace in its turn fork](turn-fork-omits-an-empty-agent-namespace.md) | blocker | turn-cut lane (running, 2026-09-09) |
 | [Development acquisition refuses an uncontracted live function](uncontracted-live-function-blocks-development-acquisition.md) | blocker | adoption follow-up wave (after turn-cut lands) |
 | [Resolve the declaration population once per admission, not once per node](value-admission-resolves-the-declaration-population-per-node.md) | blocker | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
+| [Carry agent routing into the virtual-turn control](virtual-turn-control-loses-agent-routing.md) | blocker | turn follow-up wave |
 | [Render walk-unit hiccup as markup, never escaped EDN text](walk-units-render-their-hiccup-as-escaped-edn-text.md) | blocker | ui verification wave |
 
-## Friction (161)
+## Friction (162)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -110,6 +111,7 @@ See `README.md` for the convention.
 | [Blob get assumes the file-store callback shape](blob-get-assumes-file-store-callback-shape.md) | friction | blob storage repair wave |
 | [Blocked plan values refuse pull during AI projection](blocked-plan-values-refuse-pull-during-ai-projection.md) | friction | page follow-up wave (after turn-cut lands) |
 | [Lead a boot refusal with the layer that refused and why](boot-refusal-has-no-render-producer.md) | friction | operator status-face hygiene |
+| [Browser observation has no accessible window](browser-ui-observation-has-no-accessible-window.md) | friction | issues sweep wave |
 | [Keep candidate program metadata independent of its parent](candidate-context-shares-parent-program-metadata.md) | friction | agent context; coordinate with turn batching |
 | [Make the changed-test report readable at a glance](changed-test-report-is-one-enormous-line.md) | friction | dev-tooling face hygiene |
 | [Make every durable contract predicate identifiable](class-anonymous-contracts-cannot-survive-publication.md) | friction | class-kill queue |
@@ -139,7 +141,6 @@ See `README.md` for the convention.
 | [The debug page's HTML render carries no agent-scoped environment](debug-html-render-carries-no-agent-scoped-environment.md) | friction | page follow-up wave (after turn-cut lands) |
 | [Make the debug left pane the exact bytes the agent received](debug-left-pane-is-not-the-exact-prompt.md) | friction | visual-QA fix wave |
 | [Stop sending debug pages patches for elements they do not have](debug-pages-receive-block-patches-for-elements-they-do-not-have.md) | friction | UI watchability wave (2026-08-10 route walk) |
-| [`default` falls back to an ephemeral web port after a refork](default-falls-back-to-an-ephemeral-web-port-after-a-refork.md) | friction | adoption follow-up wave (after turn-cut lands) |
 | [Default web request times out during partial adoption](default-web-request-times-out-during-partial-adoption.md) | friction | adoption follow-up wave (after turn-cut lands) |
 | [Bound dependency-cache preparation before the test coordinator starts](dependency-cache-lock-wait-has-no-deadline.md) | friction | wave/test-fixture |
 | [Dependency resolution can fail in Maven model validation](dependency-resolution-can-race-maven-model-validation.md) | friction | runner follow-up wave (concurrent classpath builds) |
@@ -247,6 +248,7 @@ See `README.md` for the convention.
 | [Order transcript receipt and comment candidates by numeric facts](transcript-candidate-window-orders-receipts-and-comments-by-id.md) | friction | transcript ordering follow-up |
 | [Render transcript entries as forms and actual values](transcript-renderer-encodes-entries-as-comment-forms.md) | friction | strict REPL display wave |
 | [Turn consumers retain obsolete fixture and observation contracts](turn-consumer-fixtures-read-retired-result-storage.md) | friction | turn-rename lane (running, 2026-09-09) |
+| [Turn evaluations bypass work submission](turn-evaluations-bypass-work-submission.md) | friction | turn follow-up wave |
 | [Turn source syntax blocks default adoption](turn-source-syntax-blocks-default-adoption-2026-09-08.md) | friction | turn-cut lane (running, 2026-09-09) |
 | [Two turn backstops fire and the sliding fault channel keeps the wrong one](two-turn-backstops-fire-and-the-sliding-fault-channel-keeps-the-wrong-one.md) | friction | turn-cut lane (running, 2026-09-09) |
 | [Close the 2026-08-01 unlogged findings (interop policy, agent write surface, rot)](unlogged-findings-2026-08-01.md) | friction | general |
