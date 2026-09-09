@@ -419,3 +419,19 @@ half-edit. Measured targets in the issue.
   bin/mcp-server, src/seon/fn.clj, src/seon/test/runner.clj (runner-base-
   cache, test-fast, issues-sweep); reviewed and resumed next.
 
+## 2026-09-08 19:40 — regression fixed; defs and result blobs gone; refork four
+
+- turn-cut `a16e8d269`: nested values render their data again (the
+  shown-text path had substituted a nested value's block source; bisect
+  confirmed `ff9507c1b`). `ff9507c1b` deleted stored defs and result
+  serialization/blobs — RESET NEEDED honoured with the day's fourth refork
+  of `default`. Incident: the lane's scratch boot woke seeded agents and
+  sent 6,472 prompt tokens to DeepSeek; lanes now silence the provider
+  (settings component) before seeding a scratch.
+- hook-async `ef424c37c`: the edit hook returns feedback after queuing one
+  coalesced publication (the asynchronous hook is finally committed).
+- Page after `a16e8d269`: 158 KB / 0.14 s.
+- Running: turn-cut (custody removal, `seon.turn` rename, delete rows,
+  stable ids, compaction + three-transaction proof); hook-async (`bin/seon
+  status` without the lock; landing note).
+
