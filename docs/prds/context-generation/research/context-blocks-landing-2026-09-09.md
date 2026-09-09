@@ -810,3 +810,130 @@ Final platform rerun: **83 tests / 490 assertions / zero failures or errors**,
 one worker. The isolated reader gate and this platform pass cover the final
 source implementation. RESET NEEDED remains recorded for the new reader
 error declaration; the orchestrator owns default's one batched refork.
+
+## 14:50 resume — slice 5: default capture and paid-trial boundary
+
+Default converged in place after `e262fdca4`: published and adopted source
+both read `6aa1dba5-4724-543f-8bc6-eb3d72cb5f1d`. Its page returned HTTP 200
+(92,630 HTML bytes before reseeding). The shared fixture then produced the
+following exact opening. I read it top to bottom: help is first; the vector
+has no revision triangles; identity is the newly landed raw pull; the plan
+has six ordered steps and dependency ids; the inbox has only root's largest-
+customer instruction; settings show 20 turns; the namespace directory is
+empty data; the declared-attribute query returns three counts of four. There
+are no arithmetic placeholders, probe messages, table-shaped values, or
+ExceptionInfo objects in this capture.
+
+The raw identity pull's AI value compresses the namespace to its lookup ref,
+so its selected steward is not shown. The empty directory also does not yet
+list the fixture's four declared schemas. These are limits of the ongoing
+data-first presentation work; this capture is not a claim that §18c is done.
+Acquired directory refresh evidence remains recorded separately.
+
+Exact UTF-8 bytes: **6116**, SHA-256 `ab0ca9fdfad45efb53950c1d7b88771a8dfe9e5bc28af9e8d0b0c2b567e49bae`.
+The linked `.txt` artifact has no terminal newline; the fence delimiter
+below is not part of those bytes. No `:ms` field was stripped.
+
+```clojure
+;; I should understand how this REPL works before I act.
+my.agents.juniper=> (help)
+#:seon.repl{:value ["You are at a Clojure REPL in your namespace my.agents.juniper. Every function in the program is callable."
+  "Reply with ;; thinking comments, each followed by the form it plans. Send only comments and forms; the prompt my.agents.juniper=> is drawn for you."
+  "Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
+  "Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value."
+  "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
+  "When unsure how to call something, ask first: (dir my.plan) lists a namespace's functions as data; (doc seon.db/q) returns a docstring and contract as data."
+  "Your plan is your instructions: (my.plan/items). The current step's :done-when says what done means. (my.plan/complete! {:my.plan.item/id id}) when it is."
+  "(my.message/inbox) is what you were sent. (my.message/send {:my.message/to \"root\" :my.message/content \"...\"}) sends. Sending a message does not end your turn."
+  "(seon.db/q '[:find ...]) queries, (seon.db/pull '[*] eid) reads one entity, (seon.db/transact! [{...}]) writes. The database is your cluster's and is supplied for you."
+  "A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours."
+  "A mistake returns :error data, never an exception. Read :seon.error/message and try again."
+  "Each reply is one turn. :turns-left in your settings counts down. (my.agent/done) ends your session early."
+  "Tools: my.agent — Read and update my record through request maps. (done, identity, settings, settings!); my.background — Start and inspect capability requests that may finish later. (await, background, poll); my.edit — Edit source files only when their expected digest still matches. (exact, form, lines); my.fs — Read, write, inspect, and find files with bounded results. (glob, read, stat, write); my.message — The inter-agent message protocol, with optional request-map calls; call preparation supplies my database and identity. (decline, inbox, read, send); my.note — My durable notes through one request map per call. (add!, forget!, notes); my.plan — The calling agent’s plan protocol. Each operation takes one request map. (add!, blocked, complete!, current, current!, item, items, plan, ready, ready-subjects, steps, update!); my.shell — Bounded foreground argv-vector process requests. (run); my.test — Run the tests declared in my namespace. (run); my.turn — Return explicit completion or waiting data for my session. (complete, wait); my.web — Fetch web resources and search the configured provider. (fetch, search)"], :result result/e25b2eb43877e, :ms 89}
+
+;; I should know my identity, namespace, and its steward.
+my.agents.juniper=> (seon.db/pull
+  '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]
+  [:seon.agent/id "juniper"])
+#:seon.repl{:value #:seon.agent{:id "juniper", :namespace [:seon.ns/name my.agents.juniper]}, :result result/ed2ebde8e1d8f, :ms 6}
+
+;; I should follow my plan and verify the current step's completion criterion.
+my.agents.juniper=> (my.plan/items)
+#:seon.repl{:value [{:my.plan.item/id "juniper/query", :my.plan.item/title "Query the orders",
+    :my.plan/done-when "I have read the order ids, customers, and amounts.",
+    :my.plan/needs [], :my.plan/state :current} {:my.plan.item/id "juniper/aggregate",
+    :my.plan.item/title "Find the customer with the largest total", :my.plan/done-when
+    "A grouped sum query identifies the customer and their total.", :my.plan/needs
+    ["juniper/query"], :my.plan/state :blocked} {:my.plan.item/id "juniper/transact",
+    :my.plan.item/title "Add an order of 40 for that customer", :my.plan/done-when
+    "The transaction result identifies the new order.", :my.plan/needs ["juniper/aggregate"],
+    :my.plan/state :blocked} {:my.plan.item/id "juniper/requery", :my.plan.item/title
+    "Read the customer's new total", :my.plan/done-when "A fresh grouped sum query includes the new order.",
+    :my.plan/needs ["juniper/transact"], :my.plan/state :blocked} {:my.plan.item/id
+    "juniper/reply", :my.plan.item/title "Tell root the customer and new total",
+    :my.plan/done-when "The sent message contains the customer and verified new total.",
+    :my.plan/needs ["juniper/requery"], :my.plan/state :blocked} {:my.plan.item/id
+    "juniper/done", :my.plan.item/title "Finish the session", :my.plan/done-when
+    "All preceding plan items are complete.", :my.plan/needs ["juniper/reply"],
+    :my.plan/state :blocked}], :result result/ef845d902efe4, :ms 88}
+
+;; I should check my inbox for anything I need to respond to.
+my.agents.juniper=> (my.message/inbox)
+#:seon.repl{:value [#:my.message{:at #inst "2026-09-09T12:00:00.000-00:00", :content "Which customer has the largest total? Add an order of 40 for them and tell me the new total.",
+    :from "root", :id "juniper/largest-customer"}], :result result/eb983e404a3c3, :ms 86}
+
+;; I should check my overrides and how many turns I have left.
+my.agents.juniper=> (my.agent/settings)
+#:seon.repl{:value {:my.agent/turns-left 20, :seon.config.ai/no-provider true, :seon.config.eval/time-limit-ms
+  10000, :seon.config.run/max-episode-runs 20}, :result result/ed99a007c24a1, :ms 90}
+
+;; I should inspect what I have defined and which schemas I declared.
+my.agents.juniper=> (dir my.agents.juniper)
+#:seon.repl{:value [], :result result/ed85aa589da77, :ms 4}
+
+;; I should count the facts under my declared attributes.
+my.agents.juniper=> (seon.db/q
+  '[:find ?attribute (count ?entity) :in $ [?attribute ...] :where [?entity ?attribute _]]
+  [:example/amount :example/customer :example/order])
+#:seon.repl{:value [[:example/customer 4] [:example/amount 4] [:example/order 4]], :result result/e646fecbddd61, :ms 76}
+```
+
+The clean capture did not remain the live fixture. The ordinary no-provider
+turn opened but had no reply, plan digest, or evaluation; its completion
+backstop later sent a fault message, and the changed inbox/settings appended
+once. The harness refused before HTTP, and its paid artifact was absent.
+A subsequent reseed reached a fault-renderer refusal. The full live/fresh
+boundary is recorded in
+`docs/seon/issues/adopted-default-no-provider-turn-does-not-settle.md`.
+This is not a recurrence of the whole-opening duplication: the original
+seven stored evaluations remain one prefix.
+
+The harness preflight now checks a nonempty, unique, system-authored opening
+from one turn rather than hard-coding six forms. Its expected turn count is
+read from the saved settings value that the model actually sees; the live
+count is recorded separately. A refresh plan is not an opening roster:
+acquired dir data has no read evidence and is absent from the refresh plan.
+The first preflight caught that distinction before any model call.
+
+Cheapest configured candidate: `deepseek-v4-flash`; admitted worst-case
+estimate $0.00086394, followed by `deepseek-v4-pro` at $0.002684385 and
+`muse-spark-1.1` at $0.01129775. **Paid calls in this follow-up: zero; score
+pending.** The existing historical 10/12 artifact was not overwritten.
+The orchestrator was asked to perform the reserved batched default refork
+before the remaining paid trial. This lane sent no lifecycle command to
+default. Its own scratch cluster was downed and its root removed; the
+superseded failed gate roots were removed after verifying no live holder.
+
+Before the final preflight adjustment, the slice's path-limited harness/loop
+gate passed **2 tests / 125 assertions / zero failures or errors** and the
+separate platform gate passed **83 tests / 490 assertions / zero failures
+or errors**, each with one worker. The final harness gate is recorded below.
+
+Final slice-5 preparation gate: **2 tests / 125 assertions / zero failures
+or errors**. Final separate platform: **83 tests / 490 assertions / zero
+failures or errors**, one worker. All owned command sessions ended and the
+scratch cluster/root was removed. The trial artifact is still absent: no
+paid request crossed the provider boundary. Slice 5's capture and harness
+correction are committed; the single paid trial and its score remain pending
+the orchestrator's reserved reset. This is an explicit incomplete step,
+not a passing trial or a claim that the live fixture remains clean.

@@ -33,3 +33,22 @@
                                 [:seon.cluster.eval/error :seon.eval/duration-ms
                                  :seon.cluster.eval/read-evidence]))
                  (:seon.turn.loop/evaluated-sources result)))))))
+
+(defn observe
+  "Read the fixture's current turn and fault boundary without changing it."
+  [cluster-name]
+  (let [handle (:seon.turn.loop/cluster
+                (get @runtime/running-instances cluster-name))
+        database (db/db (:seon.db/connection handle))]
+    {:seon.test/basis (db/basis-t database)
+     :seon.test/turns
+     (db/q '[:find (pull ?turn [:db/id :seon.turn/id :seon.turn/opened-at
+                               :seon.turn/closed-at :seon.turn/plan-digest])
+             :where [?agent :seon.agent/id "juniper"]
+                    [?turn :seon.turn/agent ?agent]] database)
+     :seon.test/messages
+     (db/q '[:find ?id ?content
+             :where [?agent :seon.agent/id "juniper"]
+                    [?message :seon.cluster.message/to ?agent]
+                    [?message :seon.cluster.message/id ?id]
+                    [?message :seon.cluster.message/content ?content]] database)}))

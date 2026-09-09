@@ -1,6 +1,7 @@
 (ns help-trial-2026-09-09
   (:refer-clojure :exclude [run!])
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [datalog.parser :as datalog]
             [sci.core :as sci]
@@ -129,12 +130,19 @@
        (let [database (db/db (:seon.db/connection handle))
              evaluations (evaluation/of-agent database "juniper")
              sources (mapv :seon.cluster.eval/source evaluations)
+             shown-settings (some-> (some #(when (= "(my.agent/settings)" (:seon.cluster.eval/source %)) %) evaluations)
+                                    :seon.eval/value edn/read-string)
+             shown-turns-left (:my.agent/turns-left shown-settings)
              messages (db/q '[:find [?id ...] :where
                               [?agent :seon.agent/id "juniper"]
                               [?message :seon.cluster.message/to ?agent]
                               [?message :seon.cluster.message/id ?id]] database)]
-         (when-not (and (= 6 (count sources)) (= "(help)" (first sources))
-                        (= "(my.plan/items)" (nth sources 2 nil))
+         (when-not (and (seq sources)
+                        (= 1 (count (set (map #(get-in % [:seon.cluster.eval/run :db/id]) evaluations))))
+                        (every? #(= :system (:seon.cluster.eval/author %)) evaluations)
+                        (= (count sources) (count (distinct sources)))
+                        (= "(help)" (first sources))
+                        (nat-int? shown-turns-left)
                         (= #{"juniper/largest-customer"} (set messages))
                         (not-any? :seon.cluster.eval/error evaluations)
                         (= 4 (db/q '[:find (count ?order) . :where [?order :example/order]] database)))
@@ -181,7 +189,8 @@
               :seon.trial/request (assoc target :seon.ai/prompt full-prompt)
               :seon.trial/model model
               :seon.trial/candidates (mapv #(select-keys % [:seon.ai.model/id :seon.trial/estimated-usd]) candidates)
-              :seon.trial/turns-left (:my.agent/turns-left (checked (agent/settings database "juniper")))
+              :seon.trial/turns-left shown-turns-left
+              :seon.trial/live-turns-left (:my.agent/turns-left (checked (agent/settings database "juniper")))
               :seon.trial/help-code-sha256
               (schema/sha-256 [(.getBytes ^String (:seon.fn/source
                                                   (db/pull database [:seon.fn/source]
