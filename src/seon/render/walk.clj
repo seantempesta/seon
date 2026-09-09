@@ -798,7 +798,9 @@
 
   The returned vector contains the settled prefix plus at most one next entry
   awaiting execution. Calling this pure function again with that entry's
-  settled print node extends the same byte-stable prefix."
+  settled evaluation extends the same byte-stable prefix. Saved shown text
+  is an observation, never decoded to recover references. Only an actual
+  print node supplied by an older caller can introduce structural references."
   {:malli/schema [:=> [:cat :seon.repl/pull-result] :seon.repl/episode]}
   [{root-key :seon.repl/root-key
     candidates :seon.repl/candidates
@@ -806,8 +808,7 @@
     identity-attributes :seon.print/identity-attributes
     intent-subjects :my.plan/intent-subjects}]
   (let [settled-by-key
-        (into {} (map (juxt :seon.repl/key
-                            :seon.sci.admit/print-node)) settled)
+        (into {} (map (juxt :seon.repl/key identity)) settled)
         ordered-candidates (vec candidates)]
     (loop [remaining ordered-candidates
            frontier (into #{} (mapcat reference-keys) intent-subjects)
@@ -832,15 +833,17 @@
                              :seon.repl/key (:seon.repl/key selected)
                              :seon.repl/subject (:seon.repl/subject selected))
                 episode (conj episode entry)
-                settled-node (get settled-by-key (:seon.repl/key selected))]
-            (if-not settled-node
+                settlement (get settled-by-key (:seon.repl/key selected))
+                settled-node (:seon.sci.admit/print-node settlement)]
+            (if-not settlement
               episode
               (recur (into [] (remove #(= (:seon.repl/key selected)
                                            (:seon.repl/key %))
                                       remaining))
                      (into frontier
                            (mapcat reference-keys)
-                           (print/references identity-attributes settled-node))
+                           (when (print/node? settled-node)
+                             (print/references identity-attributes settled-node)))
                      (into explained
                            (reference-keys (:seon.repl/subject selected)))
                      episode))))))))
