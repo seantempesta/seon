@@ -596,3 +596,18 @@ half-edit. Measured targets in the issue.
 - The owner's compaction ruling remains open; the PRD carries the
   provisional choice marked as such.
 
+## 2026-09-09 06:45 — platform tail landed; no lane running
+
+- platform-tail `c6db5d67c` (every web binding publishes its actual URL
+  and port — the ephemeral-port advertisement drift is closed and its
+  issue archived), `dd51f4df0` (history lookups reverified against saved
+  evaluations; the history-entries-on-a-Long issue archived as resolved by
+  the shown-text and ordered-episode changes), `a2e3fe8ba` (the cold
+  declaration turn measured; the call-consolidation boundary recorded, no
+  production change).
+- Tree clean; index clean; `default` on the ninth refork serving the
+  Juniper fixture at 0.05–0.7 s with zero faults.
+- Waiting on the owner: compaction byte-identity ruling (PRD §16a
+  provisional); root defaulting to virtual turns without a provider; the
+  first real provider turn (paid).
+
