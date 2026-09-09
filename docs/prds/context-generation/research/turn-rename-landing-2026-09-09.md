@@ -1030,3 +1030,203 @@ No schema change and no RESET needed. Logs: `tmp/cold-turn-gate.log`,
 `tmp/cold-turn-platform.log`; their successful roots were removed by the
 runner and both shells exited. The ordered declaration-call decision remains
 pending; this commit claims the cold-write fix, not that broader reduction.
+
+## Slice 5.3 — turn proc owner (started 2026-09-09, 09:23 UTC)
+
+**STOPPED, NOT LANDED.** The implementation described below is preserved
+as stash `430e96c631ef997a8c97495259127d681c6eae1a`, named
+`turn-loop-rename-draft-2026-09-09`. Only this state note is committed.
+The working tree's production files have returned to accepted HEAD.
+RESET NEEDED applies when the draft is eventually landed; default's partial
+reload also needs the orchestrator's recovery now.
+
+Slice 5.2 landed as **346e1de7c**. The ordered declaration-call decision
+above remains pending.
+
+The per-agent proc is now `seon.turn/step`; the agent graph references that
+Var. Work selection and transition functions moved into the same namespace,
+and the old loop/work namespaces and schema resources are deleted. Their
+request attributes now live under `:seon.turn/*`; the former work `forms`
+key becomes `:seon.turn/form-settlements` to preserve its distinct meaning.
+All source, test, resource, operator/MCP handle readers and the maintained
+Juniper fixture use the new owner. AGENTS.md's turn-loop row is landed with
+links to the proc, transition, work selector and graph.
+
+**RESET NEEDED for this rename commit:** the loop/work schema identities
+were replaced. The lane never operated default's lifecycle. The five
+higher-level owners already depending on the turn writer are resolved at
+their call boundaries to avoid namespace load cycles; no compatibility
+namespace was introduced. Ordered declaration semantics are unchanged.
+
+An initial isolated gate passed **120 tests / 926 assertions**, and platform
+passed **83 / 490**. Final verification found two stale aliases introduced
+by a mechanical string-preservation edit. Correct lexical preservation fixes
+those references while retaining generated SCI source's `run/complete`
+alias; clj-kondo then reported **zero errors**. The final expanded gate adds
+the agent lifecycle namespace; its result is recorded below.
+
+Fresh-boot probe: the owned `tmp/turn-loop-root` used the committed
+`turn_loop_no_provider_2026_09_09.edn` config before any seed. The committed
+`turn_loop_fresh_probe_2026_09_09.clj` verifies that setting, installs the
+agent settings component, then loads the maintained Juniper fixture.
+It reported zero attempts and zero faults. `seon.eval/of-agent` returned
+four Juniper evaluations. Debug HTTP returned **200 / 42,868 bytes /
+2.126062 seconds**. Runtime health also exposed a stored root evaluation
+error, `Unable to resolve symbol: db/q`; this is not a clean-health claim.
+CUA reported no browser surface and Chrome returned `cgWindowNotFound`;
+the HTTP observation does not establish browser paint.
+
+The move also exposed an existing execution-boundary discrepancy: production
+evaluations run directly while the bounded submission helper is unused.
+The reopened issue `docs/seon/issues/agent-turns-bypass-the-bounded-compute-door.md`
+records the evidence; the flow skill reference now describes the actual
+path. This rename does not change execution admission.
+
+Scratch adoption and publication converged at
+`6aa12ae5-f5b5-54a3-8743-eb8a36cd447e`. The post-adoption debug request was
+**200 / 42,868 bytes / 2.402008 seconds**. Its durable root evaluation error
+remained visible in health. The earlier preparation/adoption attempts
+refused the two stale aliases; those failures are superseded by the clean
+analysis and the successful scratch adoption, not attributed to another lane.
+
+Default's final in-place adoption published source but refused while
+reloading `seon.cluster.agent`: `Unable to resolve var: turn/step in this
+context` at line 423. This is a reload-order boundary in the old JVM, not a
+successful adoption claim. The fresh scratch loaded the same owner and
+converged as recorded above. RESET remains needed; default was not stopped,
+reforked, or restarted by this lane.
+
+Final platform gate: **83 tests / 490 assertions**, zero failures/errors.
+The scratch operator down command reported its exact PID terminated and
+the store flock free. Its root and the two holderless failed preparation
+roots (`run.oxaVzy`, `run.ZXYKlI`) were deleted after process-table checks.
+
+Default debug after the failed adoption returned **500 / 26 bytes /
+0.010095 seconds**. The current default page is not verified working.
+Its adopted commit remains `6aa12433-aa36-5678-b80e-5c77e97d1537`, while
+publication is `6aa12b11-bb63-5ce1-b280-81ab59220331`. Reading through the
+new operator connection accessor returned nil after the partial reload;
+the explicit old handle supplied the database for this comparison.
+
+Exact owned paths for the rename commit (the inherited untracked `build/`,
+`workers/`, and `config/virtual-turns.edn` are excluded):
+
+```text
+.agents/skills/llm-providers/SKILL.md
+.agents/skills/seon-flow-architecture/references/workloads-and-scheduling.md
+AGENTS.md
+docs/prds/context-generation/research/juniper_fixture_2026_09_06.clj
+docs/prds/context-generation/research/turn-rename-landing-2026-09-09.md
+docs/seon/issues/archive/agent-turns-bypass-the-bounded-compute-door.md
+docs/seon/issues/turn-consumer-fixtures-read-retired-result-storage.md
+resources/seon/schemas/seon.boot.edn
+resources/seon/schemas/seon.cluster.agent.edn
+resources/seon/schemas/seon.cluster.loop.edn
+resources/seon/schemas/seon.cluster.work.edn
+resources/seon/schemas/seon.context.edn
+resources/seon/schemas/seon.problems.edn
+resources/seon/schemas/seon.schedule.edn
+resources/seon/schemas/seon.turn.edn
+resources/seon/schemas/seon.wake.edn
+script/seon/dev/mcp.clj
+src/seon/ai.clj
+src/seon/bootstrap.clj
+src/seon/cluster.clj
+src/seon/cluster/agent.clj
+src/seon/cluster/loop.clj
+src/seon/cluster/wake.clj
+src/seon/cluster/work.clj
+src/seon/context.clj
+src/seon/eval/drive.clj
+src/seon/operator.clj
+src/seon/oversight.clj
+src/seon/problems.clj
+src/seon/render/transcript.clj
+src/seon/render/web.clj
+src/seon/schedule.clj
+src/seon/turn.clj
+test/seon/ai_stream_fold_test.clj
+test/seon/background_test.clj
+test/seon/blob_threshold_test.clj
+test/seon/bootstrap_test.clj
+test/seon/cluster/agent_test.clj
+test/seon/cluster/armed_test.clj
+test/seon/cluster/boot_test.clj
+test/seon/cluster/evaluate_sources_test.clj
+test/seon/cluster/loop_test.clj
+test/seon/cluster/message_test.clj
+test/seon/cluster/problem_routing_test.clj
+test/seon/cluster/program_restart_test.clj
+test/seon/cluster/prompt_test.clj
+test/seon/cluster/resume_artifact_routing_test.clj
+test/seon/cluster/turn_test.clj
+test/seon/cluster/wake_test.clj
+test/seon/cluster/work_test.clj
+test/seon/concurrency_independence_test.clj
+test/seon/concurrency_streams_test.clj
+test/seon/concurrency_test.clj
+test/seon/config_application_test.clj
+test/seon/context_selection_test.clj
+test/seon/db_test.clj
+test/seon/effect_test.clj
+test/seon/error_test.clj
+test/seon/flow_configuration_test.clj
+test/seon/flow_test.clj
+test/seon/fn_test.clj
+test/seon/gen/loop_test.clj
+test/seon/no_provider_test.clj
+test/seon/operator_test.clj
+test/seon/oversight_test.clj
+test/seon/program_test.clj
+test/seon/receipt_write_carrier_test.clj
+test/seon/render/transcript_test.clj
+test/seon/render/web_performance_test.clj
+test/seon/render/web_test.clj
+test/seon/render_coverage_test.clj
+test/seon/render_simplification_test.clj
+test/seon/render_source_test.clj
+test/seon/schedule_test.clj
+test/seon/schema/datahike_test.clj
+test/seon/schema_usage_guard_test.clj
+test/seon/sci/eval_instrumentation_test.clj
+test/seon/sci/eval_test.clj
+test/seon/test_support.clj
+test/seon/turn_test.clj
+test/seon/turn_loop_test.clj
+test/seon/turn_work_test.clj
+docs/prds/context-generation/research/turn_loop_fresh_probe_2026_09_09.clj
+docs/prds/context-generation/research/turn_loop_no_provider_2026_09_09.edn
+docs/seon/issues/agent-turns-bypass-the-bounded-compute-door.md
+```
+
+Final expanded gate was stopped at 09:51 UTC to preserve the slice bound.
+It selected 142 tests and reported 131 completed tasks, but produced no
+final assertion/failure tally; it is **not green**. The last completed task
+was `seon.cluster.agent-test/install-gate-failure-settles-commits-and-cancels-the-turn-backstop`
+(26,229 ms); the next was `n-agent-parallel-turns-property`. Inspection
+confirms the former still queries `:seon.cluster.eval/result-edn` under
+`some?` at `test/seon/cluster/agent_test.clj:1275`, the fixture class already
+recorded in `turn-consumer-fixtures-read-retired-result-storage.md`.
+No final verdict is inferred from its task completion. Repair the canonical
+terminal observation, gate the actual agent proc, and review the rest of
+that namespace before landing this draft. Earlier 120-test green results
+exclude this additional namespace and do not substitute for that proof.
+
+Exact final logs: `tmp/turn-loop-rename-gate-final2.log` and
+`tmp/turn-loop-rename-platform-final2.log`; snapshot digest
+`a80a825bebe92ae5df9d896a00c9c9004f880ece5de0ee535970644b37da8d52`.
+The launcher received TERM, its reaping backstop forced coordinator exit
+137, and the launcher exited 143. The remaining owned worker exited before a follow-up TERM could be
+delivered; the process table then confirmed it absent. No foreign session was operated. The draft also contains the
+updated consumer issue and reopened execution-admission issue; they are
+quarry alongside the implementation, not independently landed fixes.
+
+Remaining work: ordered declaration-call decision from slice 5.2; the
+canonical agent regression boundary above; review/load-order proof for
+moving the proc into `seon.turn`; final green path gate plus platform;
+then path-limited rename commit and orchestrator RESET. Slices 5.1 and the
+cold-write portion of 5.2 remain committed and green.
+
+All owned runner, adoption, probe and shutdown shells exited. The interrupted
+run root was removed after its coordinator and worker were confirmed absent;
+the log and exact snapshot identity above remain available.
