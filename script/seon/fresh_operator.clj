@@ -2441,7 +2441,7 @@
         (parse-init-arguments arguments)
         _ (operator.state/claim-root-under-lock!
            (repository-root) root (ephemeral-owner root) name)
-        dependency-cache (dev.kondo/ensure-dependency-cache! root)
+        dependency-cache (dev.kondo/ensure-dependency-cache! (str (repository-root)))
         _ (when (= :unavailable
                    (:seon.dev.clj-kondo/status dependency-cache))
             (fail! "The clj-kondo dependency cache could not be prepared."
@@ -2553,8 +2553,8 @@
   (let [verbose? (parse-status-arguments arguments)
         root (.getCanonicalPath (java.io.File. root))
         truth
-        (reconciled-truth!
-         root {:seon.fresh-operator/read-offline-roster? true
+        (cluster-truth
+         root {:seon.fresh-operator/read-offline-roster? verbose?
                :seon.fresh-operator/probe-jvms? false})
         rows (own-cluster-truth truth)
         roster (:seon.fresh-operator/roster (meta truth))
@@ -2589,21 +2589,18 @@
                (:seon.fresh-operator/registered? %)
                (:seon.fresh-operator/branch-open? %))
           rows))
-        _ (doseq [row rows]
-            (operator.state/claim-root-under-lock!
-             (repository-root) root (ephemeral-owner root)
-             (:seon.fresh-operator/name row)))
-        _ (when (.exists (java.io.File. root))
-            (operator.state/mark-root-created-under-lock!
-             (repository-root) root))
         name-width (max 22 (reduce max 0 (map (comp count :seon.fresh-operator/name)
                                                rows)))
         row-format (str "%-" name-width "s %8s %-9s %7s %-24s %s")
-        footprint (operator.state/record-footprint-under-lock!
-                   (repository-root) root)
+        footprint (if verbose?
+                    (operator.state/footprint (str (fs/path root "data")))
+                    (operator.state/filesystem-space root))
         test-statuses
-        (derive-namespace-test-statuses
-         (test-status-observation! root rows))
+        (if verbose?
+          (derive-namespace-test-statuses
+           (test-status-observation! root rows))
+          {:seon.error/kind :seon.error/unknown
+           :seon.error/message "not queried by descriptor-only status; use status --verbose"})
         status-now (java.util.Date.)]
     (println (format row-format
                      "CLUSTER" "PID" "STATE" "PREPL" "URL" "DRIFT"))
@@ -2632,9 +2629,10 @@
                  "-")))))
     (println (str alive-count "/" live-state-count " clusters alive"))
     (println
-     (format "root footprint: %.2f GiB; filesystem usable: %.2f GiB (%.1f%%)"
-             (/ (double (:seon.operator.footprint/file-bytes footprint))
-                1073741824.0)
+     (format "%sfilesystem usable: %.2f GiB (%.1f%%)"
+             (if-let [file-bytes (:seon.operator.footprint/file-bytes footprint)]
+               (format "root footprint: %.2f GiB; " (/ (double file-bytes) 1073741824.0))
+               "root footprint: not scanned (status --verbose); ")
              (/ (double (:seon.operator.footprint/usable-bytes footprint))
                 1073741824.0)
              (* 100.0 (:seon.operator.footprint/usable-ratio footprint))))
@@ -3088,7 +3086,8 @@
     "                 fork a dormant named cluster from current-src;\n"
     "                 refuse an existing cluster unless --force destroys it\n"
     "  status [--verbose]\n"
-    "                 list clusters and bounded test evidence; --verbose lists tests\n"
+    "                 read descriptors without the lifecycle lock;\n"
+    "                 --verbose also reads database test evidence and scans disk use\n"
     "  open [NAME]    open the advertised web URL\n"
     "  stop [--force] [NAME]\n"
     "                 omit NAME only when exactly one cluster exists;\n"
@@ -3123,7 +3122,7 @@
                    {:seon.fresh-operator/command command
                     :seon.fresh-operator/usage? true})))]
     (try
-      (if (contains? #{"start" "config" "export" "init" "status"
+      (if (contains? #{"start" "config" "export" "init"
                        "stop" "down" "reset"}
                      command)
         (with-operator-lock root (str/join " " arguments) run-command)

@@ -27,6 +27,8 @@
 (def ^:private operator-classpath
   (str (io/file project-root "script")
        java.io.File/pathSeparator
+       (io/file project-root "src")
+       java.io.File/pathSeparator
        (io/file project-root "resources")))
 
 (defn- fresh-root
@@ -676,24 +678,37 @@
        nil
        nil)
       (operator-private-value 'write-process-record! (str root) record)
-      (let [process
-            (.start
-             (doto
-              (ProcessBuilder.
-               ^java.util.List
-               [(str (io/file project-root "bin" "seon"))
-                "--root" (str root) "status"])
-              (.directory project-root)
-              (.redirectErrorStream true)))
-            output-future (process-output process)
-            outcome (await-process! process output-future "isolated status")]
-        (is (::completed? outcome) (::output outcome))
-        (is (= 0 (::exit outcome)) (::output outcome))
-        (is (str/includes? (::output outcome) "recorded JVM pid 1")
-            (::output outcome))
-        (is (.isFile
-             (io/file (str (operator.state/root-lifecycle-lock-path root))))
-            "the selected root owns the lifecycle lock its command took"))
+      (let [lock-file (io/file (str (operator.state/root-lifecycle-lock-path root)))
+            claim-file (io/file (str (operator.state/root-claim-path project-root root)))
+            before (slurp claim-file)]
+        (io/make-parents lock-file)
+        (with-open [file (java.io.RandomAccessFile. lock-file "rw")
+                    channel (.getChannel file)
+                    lock (.lock channel)]
+          (let [started (System/nanoTime)
+                process
+                (.start
+                 (doto
+                  (ProcessBuilder.
+                   ^java.util.List
+                   [(str (io/file project-root "bin" "seon"))
+                    "--root" (str root) "status"])
+                  (.directory project-root)
+                  (.redirectErrorStream true)))
+                output-future (process-output process)
+                _ (when-not (.waitFor process 2 TimeUnit/SECONDS)
+                    (terminate-process-tree! process))
+                outcome (await-process! process output-future "isolated status")
+                elapsed-ms (/ (- (System/nanoTime) started) 1000000.0)]
+            (is (.isValid lock) "the lifecycle lock stayed held throughout status")
+            (is (::completed? outcome) (::output outcome))
+            (is (= 0 (::exit outcome)) (::output outcome))
+            (is (< elapsed-ms 2000) (str "status took " elapsed-ms " ms"))
+            (is (str/includes? (::output outcome) "recorded JVM pid 1")
+                (::output outcome))
+            (is (= before (slurp claim-file)) "status does not rewrite root custody")
+            (is (str/includes? (::output outcome) "test evidence: UNKNOWN")
+                "descriptor-only status does not claim unqueried test health"))))
       (finally
         (operator-private-value
          'clear-process-record! (str root) record)
@@ -1442,7 +1457,7 @@
             (::output live-status))
         (let [stopped (run-operator root "stop" name)]
           (is (= 0 (::exit stopped)) (::output stopped)))
-      (let [stopped-status (run-operator root "status")]
+      (let [stopped-status (run-operator root "status" "--verbose")]
         (is (= 0 (::exit stopped-status)) (::output stopped-status))
         (is (str/includes? (::output stopped-status) name)
             (::output stopped-status))
@@ -1484,7 +1499,9 @@
         (delete-recursively! root)))))
 
 (deftest add-refreshes-a-genuinely-stale-wrapper-before-current-start
-  (let [root (fresh-root)
+  (test-support/preserving-instrumentation-state
+   (fn []
+    (let [root (fresh-root)
         form (operator-private-value 'add-form (str root) "scratch" {})
         start-var #'cluster/start!
         start-meta (meta start-var)
@@ -1524,7 +1541,7 @@
         start-filter (mi/-filter-var #{start-var})
         apply-current!
         (fn [_]
-          (mi/clj-collect! {:ns ['seon.cluster]})
+          (mi/-collect! start-var)
           (mi/instrument! {:filters [start-filter]})
           {:seon.instrument/registered 1
            :seon.instrument/instrumented 1})]
@@ -1542,7 +1559,7 @@
           {:seon.config/on-core-error :panic})
         instrument/apply! apply-current!]
         (alter-meta! start-var assoc :malli/schema stale-schema)
-        (mi/clj-collect! {:ns ['seon.cluster]})
+        (mi/-collect! start-var)
         (mi/instrument! {:filters [start-filter]})
         (alter-meta! start-var assoc :malli/schema current-schema)
         (is (thrown? Exception (cluster/start! current-request))
@@ -1561,9 +1578,8 @@
             "both operator config reads run inside the cluster projection"))
       (finally
         (alter-meta! start-var (constantly start-meta))
-        ;; with-redefs already restored the original instrumented root.
-        (mi/clj-collect! {:ns ['seon.cluster]})
-        (reset! (var-get instances-var) instances-before)))))
+        (reset! (var-get instances-var) instances-before)
+        (delete-recursively! root)))))))
 
 (deftest start-sweep-refusal-is-retryable-and-unwinds-the-partial-instance
   (let [root (fresh-root)
