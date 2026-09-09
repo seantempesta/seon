@@ -712,3 +712,32 @@ After that refused adoption, default's debug page still returned HTTP 200
 (91,740 HTML bytes). Its historical prompt was not reseeded in this slice.
 RESET NEEDED remains recorded for this commit; the orchestrator owns the
 single default refork. No provider call was made.
+
+## 14:50 resume — slice 3: predicate publication regression
+
+The requested full sequence is now a committed canonical regression:
+publish the old registered predicate and a schema that names it; publish
+the renamed source through `seon.cluster.source/upsert!` and `seon.fn/index!`;
+retain the old identity; remove its temporary host namespace; fork and boot
+a fresh cluster. Both projections come from the actual published database.
+The old identity has no definition facts and no SCI callable; the new
+`seon.shell/stdin?` does resolve. Fast result: **1 test / 11 assertions /
+zero failures or errors**.
+
+The proposed tombstone cause was falsified for the current implementation.
+`seon.schema/derive-projection-from-database` already joins current schema
+forms and function contracts, and `seon.fn/reconcile-tx` retracts the old
+source/spec/namespace facts while retaining the identity. No production
+filter was added to conceal a live schema's invalid predicate reference.
+The original refused publication's offending row was not retained before
+its complete republication; its cause remains explicitly unattributed in
+the issue. This slice adds the previously missing full regression, not a
+claim that the original failure was reproduced. No schema change or new
+reset is required here; RESET NEEDED from `e915d2de0` remains outstanding.
+
+Slice-3 isolated gate: **1 test / 11 assertions / zero failures or errors**;
+the full publication/rename/boot test took **118,903 ms**. Separate platform:
+**83 tests / 490 assertions / zero failures or errors**. Both used one worker.
+The default debug page remained HTTP 200. Its stored history still contains
+the earlier arithmetic placeholder and prior help values, pending the final
+fixture reseed; this test-only slice did not rewrite those historical bytes.
