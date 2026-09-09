@@ -7,6 +7,14 @@ tags: [issue, mcp, sci, wave/dev-mcp]
 
 # Repair development MCP error locations and status scope
 
+## 2026-09-08 turn-cut observation
+
+At 2026-09-09 05:54 UTC, `runtime_status {}` selected the main-root
+`default` process (PID 87173) but returned health and Flow as `unknown`
+with `Read timed out`. The debug route independently returned HTTP 200,
+49,717 bytes in 0.057302 seconds. This establishes a failed MCP health
+observation, not a dead cluster. No lifecycle operation was attempted.
+
 ## Problem
 
 The development MCP face has three related diagnosis defects:

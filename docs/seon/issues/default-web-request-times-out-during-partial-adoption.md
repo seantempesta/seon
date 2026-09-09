@@ -24,3 +24,8 @@ Issues-sweep independently re-observed the boundary on 2026-09-08:
 `curl --max-time 20 http://127.0.0.1:7994` exited 28 after 20.003488 seconds,
 HTTP 000, zero bytes. Default MCP JVM probes still returned normally. The
 protected web/adoption owners were left unchanged; the cause remains unproven.
+
+2026-09-08, issues-sweep recurrence: `bin/seon status` reported default alive,
+PID 36758, PREPL 51624, HTTP 7994. A bounded request to `/` returned HTTP 000,
+zero bytes, curl exit 28 after 20.008842 seconds. This observation establishes
+an unanswered request, not an adoption cause or a closed listening socket.
