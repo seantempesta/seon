@@ -537,3 +537,15 @@ half-edit. Measured targets in the issue.
 - Running: turn-rename slice 5 (refusal → one fault, no second turn; cold
   turn writes; the turn loop rename).
 
+## 2026-09-09 04:00 — refusals close once; cold turn at three writes; loop rename bounded twice
+
+- turn-rename `c9530a1e7`: a terminal provider refusal records ONE fault
+  and defers reopening (faults-render's handoff closed); `346e1de7c`: the
+  cold first turn is 3 transactions / 23 datoms (scheduled executions
+  recovered at boot). Ordered declaration calls still open.
+- The turn loop rename stopped within the bound a second time (draft in
+  stash `430e96c63`, 80 files; expanded agent gate not green). Resumed at
+  HIGH effort in sub-slices: schema identities → namespace move →
+  vocabulary row, each gated and committed alone.
+- `default` adoption failed on the half-edit; re-adopting clean HEAD.
+
