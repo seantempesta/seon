@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Iterate: bin/test-fast <namespace...>
-# One JVM in the working tree; no operator root, checkout copy, or published
+# --paths FILE... -- NS... reuses bin/test’s HEAD-plus-paths snapshot.
+# Plain NS... runs in the working tree; no operator root or published
 # base preparation. Uses the worker's exact program loading and contract arm.
 # Canonical database fixtures build their in-memory base once per JVM. Tests
 # explicitly exercising file-backed boot still own their fixture publication.
@@ -9,9 +10,12 @@
 # bin/test --paths <files...> -- <namespaces...>; --platform before reporting.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+if [ "${1-}" = --paths ]; then
+  exec bin/test --fast "$@"
+fi
 source bin/_java-home-resolver
 if [ "$#" -eq 0 ]; then
-  echo 'Usage: bin/test-fast <namespace...>' >&2
+  echo 'Usage: bin/test-fast [--paths FILE... --] <namespace...>' >&2
   exit 64
 fi
 for namespace in "$@"; do
