@@ -154,6 +154,44 @@ returned diagnostic to the same 131 bytes without a database write;
 
 ## Verification boundary
 
+### Final scratch capture and single trial
+
+The canonical Juniper installer reseeded `cookbook` under
+`tmp/context-cookbook-root`. The scratch JVM adopted commit
+`6aa1ec2a-d4a3-5d36-8e11-e727d5577a2f`; its eight unique opening reads, four
+orders, one fixture message, twenty remaining turns, and absence of Juniper
+evaluation errors passed the harness preconditions. I read the
+[whole 7553-byte prompt](context_cookbook_final_prompt_2026_09_09.txt) end to end.
+It stayed byte-for-byte equal after root's agents-read adoption. The earlier
+capture was 9757 bytes; this dated capture is 2204 bytes smaller, not a controlled
+model-quality comparison.
+
+The single request contained **8104 UTF-8 bytes** including the questions.
+Configured prices and present credentials selected
+`deepseek/deepseek-v4-flash-20260731` via OpenRouter, estimated **$0.00071448**
+with a 2048-token output bound. It returned **HTTP 402, insufficient credits**,
+in **229 ms**, after transmission and before model output. There is no reply,
+usage, actual cost, or comprehension score. No second request was made.
+[Original request context and response](context_cookbook_trial_2026_09_09.edn);
+[corrected assessment](context_cookbook_trial_assessment_2026_09_09.edn).
+The original harness's 1/12 score merely scored absent text and is invalid as
+comprehension evidence. The harness now reports `:unavailable` on provider errors.
+Its canonical regression uses the two actual retained responses: refusal gets no
+score; the earlier successful response retains 10/12. Fast and isolated gates:
+**1 test / 7 assertions**; platform **83 / 490**, green.
+
+[The provider-credit boundary is recorded](../../../seon/issues/context-cookbook-trial-provider-has-no-credits.md).
+Scratch root also had 20 malformed agent-authored evaluations before Juniper's
+seed; neither an attempt-id query nor the turns' attempt refs explained their
+origin. [That separate observation remains unassigned](../../../seon/issues/scratch-root-has-agent-errors-without-attempt-facts.md).
+It is not evidence against the independently verified Juniper fixture.
+
+Cleanup verified: the scratch operator's `down` completed, pid 6100 exited,
+and `tmp/context-cookbook-root` was deleted after checking for open files.
+The lane's two retained test roots and 1,143,148,974-byte diagnostic log were
+removed; their findings remain in the committed evidence. No scratch worktree
+was created, and all lane shell commands completed.
+
 The first batch exceeded the MCP 20-second request bound but completed and wrote its evidence file; a second session returned `(+ 1 1)` in 1 ms. No alternate transport was used. These probes committed no database writes. Default was never stopped, restarted, or reforked. Schema-dependent blocks and reseeding require the chart data lane's landing and the owner's batched reset; RESET NEEDED when that schema commit is known.
 
 The later platform gate on HEAD `3d13aa0f7` failed two blob-reachability tests:

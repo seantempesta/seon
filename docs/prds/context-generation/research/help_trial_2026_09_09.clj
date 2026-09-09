@@ -13,7 +13,8 @@
             [seon.eval :as evaluation]
             [seon.operator.runtime :as runtime]
             [seon.render :as render]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.turn :as turn]))
 
 ; Load in default's JVM, then call (help-trial-2026-09-09/run!).
 ; prepare captures and checks one immutable database value.
@@ -106,7 +107,12 @@
          [:argument-shapes (and (seq calls) (every? shape? my-calls)
                                 (every? query-shape? (filter #(= 'seon.db/q (first %)) calls)))]
          [:no-prompt-marker (not (prompt-marker? text))]
-         [:no-premature-complete (and (seq calls) (not-any? #(= 'my.plan/complete! (first %)) calls))]
+         [:no-premature-complete
+          (and (seq calls)
+               (not-any? #(or (= 'my.plan/complete! (first %))
+                              (and (= 'seon.db/transact! (first %))
+                                   (some #{:my.plan.item/completed-at :my.plan.item/completed-tx}
+                                         (tree-seq coll? seq (rest %))))) calls))]
          [:syntax (and (vector? forms) (seq forms) (every? seq? forms)
                        (empty? unknown) (not (str/includes? text "```")))]]
         facts (mapv (fn [[check passed]] [check (boolean passed)]) checks)
@@ -119,20 +125,40 @@
      :seon.trial/forms (if (vector? forms) forms [])
      :seon.trial/reader-valid? (vector? forms)}))
 
+(defn assessment
+  "Score a model reply; a provider refusal is unavailable evidence, not a score."
+  [database ctx completion turns-left]
+  (if (:seon.error/kind completion)
+    {:seon.trial/score-status :unavailable
+     :seon.trial/score-error (:seon.error/kind completion)}
+    {:seon.trial/score-status :measured
+     :seon.trial/score (score database ctx (:seon.ai/text completion "") turns-left)}))
+
 (defn prepare
-  "Capture default's prompt and rank configured models by estimated cost."
-  []
-  (let [handle (:seon.turn.loop/cluster (get @runtime/running-instances "default"))]
-    (when-not handle (throw (ex-info "The default cluster is not running" {})))
+  "Capture the selected cluster's prompt and rank configured models by cost."
+  ([] (prepare "default"))
+  ([cluster-name]
+  (let [handle (:seon.turn.loop/cluster (get @runtime/running-instances cluster-name))]
+    (when-not handle (throw (ex-info "The selected cluster is not running" {:seon.cluster/name cluster-name})))
     (schema/call-with-projection-state
      (:seon.sci.eval/projection-state handle)
      (fn []
        (let [database (db/db (:seon.db/connection handle))
              evaluations (evaluation/of-agent database "juniper")
              sources (mapv :seon.cluster.eval/source evaluations)
-             shown-settings (some-> (some #(when (= "(my.agent/settings)" (:seon.cluster.eval/source %)) %) evaluations)
-                                    :seon.eval/value edn/read-string)
-             shown-turns-left (:my.agent/turns-left shown-settings)
+             shown-settings
+             (some-> (some #(when (or (= "(my.agent/settings)" (:seon.cluster.eval/source %))
+                                      (some #{:seon.agent/settings}
+                                            (tree-seq coll? seq (read-forms (:seon.cluster.eval/source %))))) %)
+                           evaluations)
+                     :seon.eval/value edn/read-string)
+             live-turns-left (:my.agent/turns-left (checked (agent/settings database "juniper")))
+             ; At the verified initial system turn the shown configured limit
+             ; equals the remaining budget. No turn count is invented in prose.
+             shown-turns-left (or (:my.agent/turns-left shown-settings)
+                                  (when (zero? (turn/episode-runs database "juniper"))
+                                    (get-in shown-settings [:seon.agent/settings
+                                                           :seon.config.run/max-episode-runs])))
              messages (db/q '[:find [?id ...] :where
                               [?agent :seon.agent/id "juniper"]
                               [?message :seon.cluster.message/to ?agent]
@@ -143,10 +169,11 @@
                         (= (count sources) (count (distinct sources)))
                         (= "(help)" (first sources))
                         (nat-int? shown-turns-left)
+                        (= live-turns-left shown-turns-left)
                         (= #{"juniper/largest-customer"} (set messages))
                         (not-any? :seon.cluster.eval/error evaluations)
                         (= 4 (db/q '[:find (count ?order) . :where [?order :example/order]] database)))
-           (throw (ex-info "Default needs the ruled fixture after its planned refork; no model was called."
+           (throw (ex-info "The selected cluster needs the ruled initial fixture; no model was called."
                            {:seon.trial/sources sources :seon.trial/message-ids messages})))
          (let [turn-id (:seon.turn/id
                         (db/pull database [:seon.turn/id]
@@ -158,11 +185,11 @@
                                                 :seon.sci.eval/time-limit-ms
                                                 (:seon.config.eval/time-limit-ms handle)}))))
                _ (when-not (string? prompt)
-                   (throw (ex-info "Default prompt acquisition returned no text; no model was called." {})))
+                   (throw (ex-info "Prompt acquisition returned no text; no model was called." {})))
                full-prompt (str prompt questions)
                input-tokens (tokens/estimate full-prompt)
                max-output 2048
-               dials (checked (config/effective database "default"))
+               dials (checked (config/effective database cluster-name))
                candidates
                (->> (ai/models database)
                     (map #(update % :seon.ai.model/provider (fn [reference] (db/pull database '[*] reference))))
@@ -185,28 +212,32 @@
                                              :seon.config.ai/thinking :disabled
                                              :seon.config.ai/max-tokens max-output
                                              :seon.config.ai/timeout-ms 120000))))]
-             {:seon.trial/prompt prompt :seon.trial/questions questions
+             {:seon.cluster/name cluster-name
+              :seon.trial/prompt prompt :seon.trial/questions questions
+              :seon.trial/prompt-bytes (alength (.getBytes ^String prompt "UTF-8"))
+              :seon.trial/request-bytes (alength (.getBytes ^String full-prompt "UTF-8"))
               :seon.trial/request (assoc target :seon.ai/prompt full-prompt)
               :seon.trial/model model
               :seon.trial/candidates (mapv #(select-keys % [:seon.ai.model/id :seon.trial/estimated-usd]) candidates)
               :seon.trial/turns-left shown-turns-left
-              :seon.trial/live-turns-left (:my.agent/turns-left (checked (agent/settings database "juniper")))
+              :seon.trial/live-turns-left live-turns-left
               :seon.trial/help-code-sha256
               (schema/sha-256 [(.getBytes ^String (:seon.fn/source
                                                   (db/pull database [:seon.fn/source]
-                                                           [:seon.fn/sym "seon.bootstrap/help-value"])) "UTF-8")])})))))))
+                                                           [:seon.fn/sym "seon.bootstrap/help-value"])) "UTF-8")])}))))))))
 
 (defn run!
   "Make one call and save its prompt, reply, usage, prices, and score."
   ([] (run! "docs/prds/context-generation/research/help_trial_2026_09_09.edn"))
-  ([path]
+  ([path] (run! "default" path))
+  ([cluster-name path]
    (when (.exists (io/file path))
      (throw (ex-info "A trial result already exists; choose a new path for a new tuning step." {:seon.trial/path path})))
-   (let [prepared (prepare)
+   (let [prepared (prepare cluster-name)
          ; Record the admitted call before sending. Even a transport failure
          ; leaves evidence, and rerunning cannot silently make a second call.
          _ (spit path (pr-str (dissoc prepared :seon.trial/request)))
-         handle (:seon.turn.loop/cluster (get @runtime/running-instances "default"))
+         handle (:seon.turn.loop/cluster (get @runtime/running-instances cluster-name))
          completion (schema/call-with-projection-state
                      (:seon.sci.eval/projection-state handle)
                      #(ai/complete (:seon.trial/request prepared)))
@@ -224,12 +255,13 @@
          result (schema/call-with-projection-state
                  (:seon.sci.eval/projection-state handle)
                  #(merge (dissoc prepared :seon.trial/request)
-                         {:seon.trial/completion (dissoc completion :seon.ai.attempt/sent-body)
-                          :seon.trial/score (score database (:seon.sci.eval/ctx handle) (:seon.ai/text completion "")
-                                                  (:seon.trial/turns-left prepared))}))
+                         {:seon.trial/completion (dissoc completion :seon.ai.attempt/sent-body)}
+                         (assessment database (:seon.sci.eval/ctx handle) completion
+                                     (:seon.trial/turns-left prepared))))
          recorded (cond-> result
                     usage (assoc :seon.trial/usage usage)
                     cost (assoc :seon.trial/estimated-actual-usd cost))]
      (spit path (pr-str recorded))
-     (select-keys recorded [:seon.trial/score :seon.trial/completion :seon.trial/candidates
+     (select-keys recorded [:seon.trial/score :seon.trial/score-status :seon.trial/score-error
+                           :seon.trial/completion :seon.trial/candidates
                            :seon.trial/usage :seon.trial/estimated-actual-usd]))))

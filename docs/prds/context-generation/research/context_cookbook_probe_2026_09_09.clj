@@ -516,3 +516,36 @@
          (spit "docs/prds/context-generation/research/context_cookbook_root_agents_2026_09_09.edn"
                (pr-str record))
          record)))))
+
+(defn probe-schema-boundary!
+  "Check the proposed attributes beside an installed positive control."
+  []
+  (let [database @(operator/connection "default")
+        candidates [:seon.agent/id :seon.agent/runtime :my.plan/agent
+                    :seon.config/agent :my.plan.item/completed-tx
+                    :seon.message/id :seon.message/read-tx]
+        installed (db/q '[:find [?attribute ...] :in $ [?attribute ...]
+                           :where [_ :db/ident ?attribute]] database candidates)
+        record {:basis (db/basis-t database) :candidates candidates :installed installed}]
+    (assert (some #{:seon.agent/id} installed))
+    (spit "docs/prds/context-generation/research/context_cookbook_schema_boundary_2026_09_09.edn"
+          (pr-str record))
+    record))
+
+(defn probe-scratch-root-errors!
+  "Retain root's evaluation evidence from the explicitly selected scratch JVM."
+  [cluster-name]
+  (let [database @(operator/connection cluster-name)
+        rows (evaluation/of-agent database "root")
+        _ (assert (seq rows))
+        failed (filter :seon.cluster.eval/error rows)
+        record {:root-error-count (count failed)
+                :examples (mapv #(select-keys % [:seon.cluster.eval/source
+                                                :seon.cluster.eval/error
+                                                :seon.cluster.eval/author])
+                                (take 4 failed))
+                :attempt-ids (db/q '[:find [?id ...] :where [_ :seon.ai.attempt/id ?id]] database)
+                :basis (db/basis-t database)}]
+    (spit "docs/prds/context-generation/research/context_cookbook_scratch_root_errors_2026_09_09.edn"
+          (pr-str record))
+    record))

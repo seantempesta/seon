@@ -1,0 +1,1 @@
+#:seon.trial{:score-status :unavailable, :score-error :seon.ai/provider-error}
