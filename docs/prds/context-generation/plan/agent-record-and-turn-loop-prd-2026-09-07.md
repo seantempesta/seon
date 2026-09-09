@@ -1200,3 +1200,41 @@ the new total." The plan holds those steps, current first: query, aggregate,
 transact, re-query, reply, done. Every step is checkable by query. Nothing
 in the code is tuned to this scenario; the fixture is data.
 
+### 18a. `(help)` content, tuned by trial (2026-09-09)
+
+`help` returns a VECTOR of one-line strings (honest data; prints clean;
+stable bytes). Starting content, verified by three Haiku comprehension
+trials (7/7 on every variant; the reply defects they exposed are the three
+lines marked ▲):
+
+```
+You are at a Clojure REPL in your namespace <ns>. Every function in the program is callable.
+Reply with ;; thinking comments, each followed by the form it plans. ▲ Send only comments and forms; the prompt <ns>=> is drawn for you.
+▲ Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work.
+Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value.
+result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys.
+▲ When unsure how to call something, ask first: (dir my.plan) lists a namespace's functions as data; (doc seon.db/q) returns a docstring and contract as data.
+Your plan is your instructions: (my.plan/items). The current step's :done-when says what done means. (my.plan/complete! id) when it is.
+(my.message/inbox) is what you were sent. (my.message/send {:to "root" :content "..."}) sends. Sending a message does not end your turn.
+(seon.db/q '[:find ...]) queries, (seon.db/pull '[*] eid) reads one entity, (seon.db/transact! [{...}]) writes. The database is your cluster's and is supplied for you.
+A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours.
+A mistake returns :error data, never an exception. Read :seon.error/message and try again.
+Each reply is one turn. :turns-left in your settings counts down. (my.agent/done) ends your session early.
+Tools: <derived: each agent-facing namespace with its public functions>
+```
+
+The `<ns>` and `Tools:` lines are derived from the record and the program
+graph; every other line is fixed text in the function. Nothing is tuned to
+a scenario.
+
+**The trial harness is code, not a chat exercise:** a committed probe
+(`research/help_trial_2026_09_09.clj`, rerunnable) that generates the prompt
+from `default` exactly as the provider would receive it, appends a fixed
+question set (what to write before a form; what comes back and when; how
+to reuse a `result/…`; what to do when unsure of a call; the current
+instruction; turn vs session end and turns left; whether to complete a
+step in the same reply; then "write your next reply"), sends it through
+`seon.ai` to the cheapest configured model, and SCORES the reply by query
+over its text: right functions, right argument shapes, no prompt marker,
+no premature `complete!`, no invented syntax. Numbers go in the landing
+note each run; the help text changes only when a score says so.
