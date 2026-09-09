@@ -489,3 +489,14 @@ half-edit. Measured targets in the issue.
   first, then the rename, then the three-transaction proof — with the
   30-minute slice rule in its brief from the start.
 
+## 2026-09-09 01:50 — custody removed (turn-rename at medium effort)
+
+- turn-rename `34e47f595` (boot closes every open turn, interrupts
+  unfinished evaluations, idempotent — live probe on a copy of default),
+  `46e275d3b`, `b4d665f89` (turn custody removed; process provenance rides
+  `:seon.db.process/id` on requests; `open?` = no `closed-at`), `f1e09e711`
+  (reset proof). Gate 48/356, platform 83/490. Two low-effort sessions had
+  stalled on this slice; medium effort landed it in 30 minutes.
+- RESET NEEDED `b4d665f89`: fifth refork of `default`, Juniper reseeded.
+- Running: turn-rename slice 2, the `seon.turn` rename (medium).
+
