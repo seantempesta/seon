@@ -1,39 +1,21 @@
 (ns seon.render.agent
-  "The schema-declared AI and HTML renderers for one agent entity.
+  "Identity projections for agent entities reached by the walk.
 
-  Both functions consume the same flattened render-call unit and describe
-  identity plus current run state. The schema-declared session producers in
-  `seon.render.transcript` compose this unchanged status with session history
-  until bootstrap forms replace the status section in slice 2.
-
-  Crash walk: pure renders over a database value. A kill loses a prompt
-  that re-derives.")
+  Lifecycle state derives from turn facts at the turn owner.")
 
 ;;; ---------------------------------------------------------------------------
 ;;; The renders
 ;;; ---------------------------------------------------------------------------
 
 (defn agent-ai
-  "The unchanged status section for one agent session.
-
-  The agent family's schema default, declared on `:seon.cluster.agent/agent`
-  in `resources/seon/schema.edn`. Deliberately ONE sentence: an agent
-  reached as a neighbour wants a name and whether it is busy, and
-  everything else about it is its own neighbourhood's business, one hop
-  further out.
-
-  Presence is the state — an agent with no `/run` is idle, and there is
-  no status attribute to read."
+  "Name the agent from its identity; lifecycle belongs to its turn facts."
   {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
   (when-let [id (get unit :seon.cluster.agent/id)]
-    (str "Agent " id
-         (if (get unit :seon.cluster.agent/run)
-           " is running now."
-           " is idle."))))
+    (str "Agent " id ".")))
 
 (defn agent-html
-  "The unchanged HTML status section for one agent session."
+  "Render the agent identity as HTML."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:maybe :seon.render/hiccup]]}
   [unit]

@@ -324,3 +324,50 @@ seon.render.ns-test` passed 16 tests, 113 assertions, zero failures/errors.
 The namespace tests now verify unclipped HTML through the production renderer;
 they no longer apply the AI-only fit operation to HTML or expect the retired
 function-before-schema budget selection.
+
+### Grouped default observation and performance correction
+
+Commit `f518fd478` landed the grouping. Full development adoption was refused by
+the concurrently edited evaluation boundary: `:seon.eval/entity` declared
+`seon.repl/render-ai`, but its input `:seon.repl/entity-request` did not accept
+that shape (`:seon.schema/render-contract-incoherent`). No foreign files or
+sessions were operated. The committed web/ns Vars were loaded in default and
+re-instrumented in place (911 registered/instrumented); this observation is a
+**hot reload**, not successful program-fact adoption. Default remained PID22932.
+Its debug GETs returned 200 in 17.852125 and 8.227375 ms, 1328357 bytes. Chrome
+verified identity, plan, settings, and reverse concerns at 1568 px with paired
+762.609375 px columns.
+
+![Grouped default, committed Vars reloaded in place](page-feed-grouped-default-2026-09-08.png)
+
+On the fresh scratch dataset, a changed-plan-objective probe with three debug
+tabs returned 16/16 plain GETs under 1 s (maximum 969.994333 ms), and 16/16
+first events under 2 s (maximum 1760.146958 ms). Fifteen content writes succeeded;
+the first landed at epoch ms 1788924378501, the last at 1788924404521. Their
+one-second sleeps plus transaction time did not establish a write-per-second
+cadence; the separate basis-write probe above owns that claim. A subsequent
+GET profiled with virtual-thread-aware dumps returned 200 in 437.700 ms,
+134664 bytes. Its active sample was in schema value decoding, not a proc wait
+(`page-feed-changed-page-stacks-2026-09-08.json`).
+
+The performance change carries each new render cost as `:seon.db/tx-data` in
+the existing captured-call value. Context acquisition commits all such facts
+once after derivation, then removes pending transaction data before retaining
+calls. It no longer advances the connection between every renderer invocation.
+The regression requires multiple cost facts and exactly one transaction.
+Remaining render readers also derive cluster custody from the database's
+cluster row rather than the retired agent/cluster ref, and identity rendering
+no longer calls an agent idle because the retired agent/run field is absent.
+
+After loading and re-arming these changes on scratch, cold acquisition was
+429.214459 ms for 44124 characters. Twelve warm acquisitions took
+25.651333–29.042375 ms and preserved exactly the same text in every comparison.
+This is a fresh current-schema fixture, not a same-dataset speedup ratio against
+the earlier long-lived scratch root. The old root's active stacks establish the
+repeated-write cause independently of that dataset difference.
+
+Cost-batching gate: path-limited `bin/test` with
+`seon.render.web-context-test seon.render.root-pull-test
+seon.render.web-debug-test` passed 20 tests, 81 assertions, zero failures/errors.
+The canonical paused-proc fixture records multiple real cost facts in exactly
+one transaction and independently obtains both context and HTTP200 on callers.

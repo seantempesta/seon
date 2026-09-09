@@ -2539,9 +2539,13 @@
                       :seon.render.walk/root-acquisition
                       (:acquisition root)))
               [])
+            cost-facts (into [] (mapcat :seon.db/tx-data) (vals @captured-calls))
+            cost-result (when (seq cost-facts)
+                          (db/transact! (:seon.db/connection request) cost-facts))
             retained-calls
             (if refresh?
-              (assoc @captured-calls call-id (:entry root))
+              (assoc (update-vals @captured-calls #(dissoc % :seon.db/tx-data))
+                     call-id (:entry root))
               (assoc retained call-id (:entry root)))
             entries (append-history entries observations)
             state (-> state
@@ -2551,9 +2555,11 @@
             state (update state ::invocations select-keys
                           (reachable-invocation-keys (::calls state)
                                                      (::ai-calls state)))]
-        [state {:seon.cluster.prompt/text (history-text entries)
-                :seon.render.history/segments (history-segments entries)
-                :seon.db/db database}]))))
+        (if (:seon.error/kind cost-result)
+          [retained-values cost-result]
+          [state {:seon.cluster.prompt/text (history-text entries)
+                  :seon.render.history/segments (history-segments entries)
+                  :seon.db/db database}])))))
 
 (defn derive-context!
   "Compute the requesting turn's context directly, sharing retained evidence."

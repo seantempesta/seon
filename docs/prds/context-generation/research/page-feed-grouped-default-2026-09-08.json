@@ -1,0 +1,169 @@
+{
+  "gets": [
+    {
+      "status": 200,
+      "milliseconds": 17.852125000000342,
+      "bytes": 1328357
+    },
+    {
+      "status": 200,
+      "milliseconds": 8.227375000000393,
+      "bytes": 1328357
+    }
+  ],
+  "units": [
+    {
+      "attribute": ":seon.cluster.agent/agent",
+      "title": ":seon.cluster.agent/agent",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 345.234375,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 345.234375,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.agent/plan",
+      "title": ":my.plan/entity",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 742.890625,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 742.890625,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.agent/settings",
+      "title": ":seon.config/agent-overlay",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 1530.234375,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 1530.234375,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.cluster.message/_to",
+      "title": ":seon.cluster.message/_to",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 2821.140625,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 2821.140625,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.cluster.run/_agent",
+      "title": ":seon.cluster.run/_agent",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 4597.78125,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 4597.78125,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.def/_agent",
+      "title": ":seon.def/_agent",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 14086.578125,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 14086.578125,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.error/_agent",
+      "title": ":seon.error/_agent",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 15045.09375,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 15045.09375,
+          "width": 762.609375
+        }
+      ]
+    },
+    {
+      "attribute": ":seon.ns/_steward",
+      "title": ":seon.ns/_steward",
+      "width": 1568,
+      "columns": [
+        {
+          "label": "AI",
+          "x": 30.59375,
+          "y": 16396.484375,
+          "width": 762.609375
+        },
+        {
+          "label": "HTML",
+          "x": 806.796875,
+          "y": 16396.484375,
+          "width": 762.609375
+        }
+      ]
+    }
+  ],
+  "scrollWidth": 1600
+}

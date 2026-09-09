@@ -1360,6 +1360,8 @@
                            :seon.render.call/invocation-key invocation-key)]
             (when (and call-id captured-calls)
               (swap! captured-calls assoc call-id entry))
+            ;; Carry cost facts with the captured call. Context acquisition
+            ;; commits the complete set once, after deriving from its DB value.
             ;; Render cost serves the agent-context consumer. A real prompt
             ;; request structurally carries the held run id through
             ;; the turn caller; web page, root, and debug renders do not. They
@@ -1371,9 +1373,8 @@
                        captured-calls
                        (:seon.cluster.run/id request)
                        (:seon.db/connection request))
-              (db/transact!
-               (:seon.db/connection request)
-               [(render-cost-fact request selected output rendered)]))
+              (swap! captured-calls assoc-in [call-id :seon.db/tx-data]
+                     [(render-cost-fact request selected output rendered)]))
                 rendered))))))))
 
 (defn shared-cache
@@ -1512,14 +1513,9 @@
       (db/db)))
 
 (defn- custody-cluster-name
-  [db agent-id]
+  [database]
   (db/q '[:find ?cluster-name .
-         :in $ ?agent-id
-         :where
-         [?agent :seon.cluster.agent/id ?agent-id]
-         [?agent :seon.cluster.agent/cluster ?cluster]
-         [?cluster :seon.cluster/name ?cluster-name]]
-       db agent-id))
+          :where [_ :seon.cluster/name ?cluster-name]] database))
 
 (defn- repl-state
   [db agent-id]
@@ -1585,7 +1581,7 @@
          (walk-error "No calling agent is bound to this evaluation.")
 
          :else
-         (let [cluster-name (custody-cluster-name db agent-id)
+         (let [cluster-name (custody-cluster-name db)
                effective (when cluster-name
                            (config/effective db cluster-name))
                caps (or (:seon.sci.admit/caps *walk-context*)

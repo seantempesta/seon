@@ -1002,15 +1002,10 @@
 
 (defn- agent-config
   "The effective configuration of the cluster this agent belongs to."
-  [database agent-id]
+  [database]
   (let [cluster-name
         (db/q '[:find ?cluster-name .
-                :in $ ?agent-id
-                :where
-                [?agent :seon.cluster.agent/id ?agent-id]
-                [?agent :seon.cluster.agent/cluster ?cluster]
-                [?cluster :seon.cluster/name ?cluster-name]]
-              database agent-id)
+                :where [_ :seon.cluster/name ?cluster-name]] database)
         effective (when (and cluster-name
                              (not (:seon.error/kind cluster-name)))
                     (config/effective database cluster-name))]
@@ -1033,7 +1028,7 @@
   {:malli/schema [:=> [:cat :seon.render.transcript/history-request]
                   [:or :seon.render.transcript/history :seon.error/value]]}
   [{database :seon.db/db agent-id :seon.cluster.agent/id}]
-  (let [effective (agent-config database agent-id)
+  (let [effective (agent-config database)
         limit (long (:seon.config.render.agent/max-children effective))
         caps (config/result-caps effective)
         rows (db/q {:query '[:find ?run ?opened

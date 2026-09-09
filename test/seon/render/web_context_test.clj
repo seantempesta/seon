@@ -51,6 +51,14 @@
            (is virtual?)
            (is (string? (:seon.cluster.prompt/text result)) (pr-str result))
            (is (= 200 (.get page-result support/event-backstop-seconds TimeUnit/SECONDS)))
+           (let [costs (db/q '[:find ?cost ?tx
+                               :in $ ?basis
+                               :where [?cost :seon.render.cost/estimated-tokens _ ?tx]
+                                      [(> ?tx ?basis)]]
+                             @connection (db/basis-t (:seon.db/db request)))]
+             (is (< 1 (count costs)) "the cold context records multiple render costs")
+             (is (= 1 (count (set (map second costs))))
+                 "all costs cross the writer in one transaction"))
            (is (identical? (render/shared-cache ctx) (render/shared-cache ctx)))
            (is (seq (:seon.render.web/ai-calls @(render/shared-cache ctx))))
            (is (seq (:seon.render.web/calls @(render/shared-cache ctx))))))))))
