@@ -1155,9 +1155,9 @@
                (assoc selected
                       :seon.turn/id
                       (get-in facts [:seon.cluster.eval/run :seon.turn/id])
-                      :seon.cluster.loop/evaluated-sources
+                      :seon.turn.loop/evaluated-sources
                       [{:seon.cluster.eval/ordinal (:seon.cluster.eval/ordinal facts)
-                        :seon.cluster.loop/admitted-form
+                        :seon.turn.loop/admitted-form
                         {:seon.cluster.eval/source (:seon.render.history/form (first entries))
                          :seon.cluster.eval/ns
                          [:seon.ns/name (get-in facts [:seon.cluster.eval/ns :seon.ns/name])]}
@@ -1175,7 +1175,7 @@
                   (mapv :seon.render.history/bytes
                         (transcript/history-entries in-memory))))
            (is (= [] (transcript/history-entries
-                      (assoc in-memory :seon.cluster.loop/evaluated-sources [])))))
+                      (assoc in-memory :seon.turn.loop/evaluated-sources [])))))
          (is (= [] (transcript/history-entries
                     (assoc selected :seon.context.contribution/evaluations #{})))))
        (is (= basis (db/basis-t @connection))
@@ -1279,7 +1279,7 @@
                            :seon.sci.eval/ctx base
                            :seon.cluster.wake/channel channel
                            :seon.render/context-channel channel
-                           :seon.cluster.loop/completion channel
+                           :seon.turn.loop/completion channel
                            :seon.sci.admit/caps (config/result-caps defaults)
                            :seon.config.eval/time-limit-ms 5000
                            :seon.config/on-core-error :record})
@@ -1305,7 +1305,7 @@
                                       (swap! evaluations inc)
                                       (original-evaluate request))]
                  (loop/evaluate-sources
-                  {:seon.cluster.loop/cluster cluster
+                  {:seon.turn.loop/cluster cluster
                    :seon.db/db database
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
                    :seon.cluster.agent/id "one-grammar-agent"
@@ -1313,7 +1313,7 @@
                    :seon.ns/name 'my.agents.one-grammar
                    :seon.cluster.reply/sources sources}))
                prepared (run/record-evaluated-tx
-                         {:seon.cluster.loop/cluster cluster
+                         {:seon.turn.loop/cluster cluster
                           :seon.db/db database
                           :seon.turn/id "one-grammar-stored"
                           :seon.turn/agent
@@ -1323,7 +1323,7 @@
                           :seon.turn/reply reply
                           :seon.turn/opened-at opened-at
                           :seon.turn/closed-at (java.util.Date.)
-                          :seon.cluster.loop/evaluated-sources outcomes})
+                          :seon.turn.loop/evaluated-sources outcomes})
                committed (blob/with-publication!
                            connection (:seon.blob/staged-writes prepared)
                            #(db/transact! connection
@@ -1362,7 +1362,7 @@
                page-unit (assoc (unit connection)
                                 :seon.cluster.agent/id "one-grammar-agent"
                                 :seon.turn/id "one-grammar-stored"
-                                :seon.cluster.loop/evaluated-sources
+                                :seon.turn.loop/evaluated-sources
                                 (mapv (fn [outcome handle]
                                         (-> outcome
                                             (update :seon.sci.eval/evaluation

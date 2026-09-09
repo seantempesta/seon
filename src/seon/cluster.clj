@@ -2332,7 +2332,7 @@
                         :seon.cluster.agent/id root-agent-id
                         :seon.sci.admit/caps (config/result-caps dials)}
                        (select-keys view
-                                    [:seon.cluster.loop/cluster
+                                    [:seon.turn.loop/cluster
                                      :seon.render.web/pages-mult
                                      :seon.render.web/registration
                                      :seon.render.web/latest-packages
@@ -2534,8 +2534,8 @@
               ;; the cluster's ONE stream conn (F2 §2.1): sliding-1, so
               ;; the newest complete snapshot wins and the provider fold
               ;; is never parked by presentation
-              :seon.cluster.loop/stream-channel stream-channel
-              :seon.cluster.loop/completion completion
+              :seon.turn.loop/stream-channel stream-channel
+              :seon.turn.loop/completion completion
               :seon.sci.admit/caps (config/result-caps dials)
               :seon.config.eval/time-limit-ms
               (:seon.config.eval/time-limit-ms dials)
@@ -2589,14 +2589,14 @@
     {:procs {:seon.cluster.agent/armer
              {:proc (flow/var-process
                      #'cluster.agent/armer-step :io
-                     (env/carry {:seon.cluster.loop/cluster handle
+                     (env/carry {:seon.turn.loop/cluster handle
                                  :seon.cluster.agent/routing routing}
                                 environment))}
              :seon.render.web/render
              {:proc (flow/var-process
                      #'web/render-step :io
                      (env/carry (assoc view
-                                       :seon.cluster.loop/cluster handle
+                                       :seon.turn.loop/cluster handle
                                        :seon.cluster.agent/routing routing)
                                 environment))}
              :seon.search/index
@@ -2751,11 +2751,11 @@
     ;; armed, while the running proc owns every later wake.
     (cluster.agent/armer-step
      (cluster.agent/armer-step
-      {:seon.cluster.loop/cluster handle
+      {:seon.turn.loop/cluster handle
        :seon.cluster.agent/routing routing})
      ::cluster.agent/arm
      ::cluster.agent/boot)
-    {:seon.cluster.loop/cluster handle
+    {:seon.turn.loop/cluster handle
      :seon.flow/graph graph
      :seon.flow/error-fanout fanout
      :seon.cluster.agent/routing routing
@@ -2796,11 +2796,11 @@
   ;; holding sockets belonging to somebody outside this process
   (when-let [served (:seon.render.web/served instance)]
     (web/stop! served))
-  (when-let [handle (:seon.cluster.loop/cluster instance)]
+  (when-let [handle (:seon.turn.loop/cluster instance)]
     (wake/unlisten! {:seon.cluster.wake/connection
                      (:seon.db/connection handle)
                      :seon.cluster.wake/key :seon.cluster.agent/route}))
-  (when-let [handle (:seon.cluster.loop/cluster instance)]
+  (when-let [handle (:seon.turn.loop/cluster instance)]
     (let [armer-channel (:seon.cluster.wake/channel handle)
           quiesced (async/promise-chan)]
       (when-not (async.protocols/closed? armer-channel)
@@ -2834,8 +2834,8 @@
     ;; `flow/stop` only queues `::flow/stop`, so a render pass holding
     ;; the branch connection would otherwise still be deriving when the
     ;; connection is released
-    (async/<!! (:seon.cluster.loop/completion
-                (:seon.cluster.loop/cluster instance)))
+    (async/<!! (:seon.turn.loop/completion
+                (:seon.turn.loop/cluster instance)))
     (some-> (get-in instance [:seon.render.web/view
                               :seon.render.web/completion])
             async/<!!)
@@ -2847,8 +2847,8 @@
     (search/close! (:seon.search/index instance)))
   (when-let [fanout (:seon.flow/error-fanout instance)]
     (flow/stop-error-fanout! fanout))
-  (when-let [handle (:seon.cluster.loop/cluster instance)]
-    (some-> (:seon.cluster.loop/stream-channel handle) async/close!))
+  (when-let [handle (:seon.turn.loop/cluster instance)]
+    (some-> (:seon.turn.loop/stream-channel handle) async/close!))
   ;; the render pipeline's own ports, after the proc that reads them has
   ;; published its completion: a tab still looping on a tap sees its tap
   ;; close and falls out of the loop
@@ -2933,8 +2933,8 @@
            dials (config/effective @connection cluster-name)
            served (serve! connection cluster-name dials
                           (assoc (:seon.render.web/view instance)
-                                 :seon.cluster.loop/cluster
-                                 (:seon.cluster.loop/cluster instance)))
+                                 :seon.turn.loop/cluster
+                                 (:seon.turn.loop/cluster instance)))
            advertisement (assoc (:seon.boot/advertisement instance)
                                 :seon.render.web/url
                                 (:seon.render.web/url served)

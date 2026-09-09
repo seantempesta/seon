@@ -326,7 +326,7 @@
   "One agent's cluster handle, carrying every structural member production
   arms and leaving the cluster's own identity to the caller.
 
-  `:seon.cluster.loop/cluster` declares three channels, the admission caps
+  `:seon.turn.loop/cluster` declares three channels, the admission caps
   and five dials; `seon.cluster/arm-agent-instance!` builds all of them from
   the cluster's compiled decisions. A fixture that hands `turn`, `settle!`,
   `evaluate-sources` or `terminal-data` a handful of the members it happens
@@ -344,7 +344,7 @@
   (let [decisions (config/defaults)]
     (merge {:seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
             :seon.render/context-channel (async/chan (async/sliding-buffer 1))
-            :seon.cluster.loop/completion (async/promise-chan)
+            :seon.turn.loop/completion (async/promise-chan)
             :seon.sci.admit/caps (config/result-caps decisions)
             :seon.config.eval/time-limit-ms
             (:seon.config.eval/time-limit-ms decisions)

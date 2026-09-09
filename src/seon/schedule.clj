@@ -615,17 +615,17 @@
                    @connection)
              "default")
          instance (get @operator.runtime/running-instances cluster-name)
-         cluster (:seon.cluster.loop/cluster instance)]
+         cluster (:seon.turn.loop/cluster instance)]
      (when-not cluster
        (throw (ex-info "The cluster execution handle is unavailable."
                        {:seon.error/kind ::missing-execution-handle
                         :seon.cluster/name cluster-name :seon.schedule/missing-execution-handle true})))
      (fire-due! connection agent-id observed-at
                 (assoc (execution-context @connection cluster)
-                       :seon.cluster.loop/cluster cluster))))
+                       :seon.turn.loop/cluster cluster))))
   ([connection agent-id observed-at context]
-   (let [cluster (:seon.cluster.loop/cluster context)
-         common-request (dissoc context :seon.cluster.loop/cluster)]
+   (let [cluster (:seon.turn.loop/cluster context)
+         common-request (dissoc context :seon.turn.loop/cluster)]
     (reduce
    (fn [fire-count task]
      (let [database @connection
@@ -748,7 +748,7 @@
           ::fires 0
           ::listener-key (random-uuid)))
   ([state transition]
-   (let [connection (get-in state [:seon.cluster.loop/cluster
+   (let [connection (get-in state [:seon.turn.loop/cluster
                                    :seon.db/connection])
          listener-key (::listener-key state)]
      (case transition
@@ -774,15 +774,15 @@
 
        state)))
   ([state _input _message]
-   (let [connection (get-in state [:seon.cluster.loop/cluster
+   (let [connection (get-in state [:seon.turn.loop/cluster
                                    :seon.db/connection])
          agent-id (:seon.cluster.agent/id state)
          observed-at (Date.)
-         cluster (get-in state [:seon.cluster.loop/cluster])
+         cluster (get-in state [:seon.turn.loop/cluster])
          fires (fire-due!
                 connection agent-id observed-at
                 (assoc (execution-context @connection cluster)
-                       :seon.cluster.loop/cluster cluster))
+                       :seon.turn.loop/cluster cluster))
          next-at (earliest-next-at @connection agent-id observed-at)]
      [(-> state
           (update ::passes inc)

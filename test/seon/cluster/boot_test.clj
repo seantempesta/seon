@@ -1685,7 +1685,7 @@
             (is (not (contains? error-kinds
                                 :seon.bootstrap/prefix-drift)))
             (is (not (contains? error-kinds
-                                :seon.cluster.loop/trigger-already-answered))))
+                                :seon.turn.loop/trigger-already-answered))))
           (finally
             (schema/call-with-projection
              (schema/projection-from-database @connection)

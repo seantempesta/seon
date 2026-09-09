@@ -851,7 +851,7 @@
                     ;; refused when no evaluator was named; the evaluator is a
                     ;; Var now, and a fixture that hands less than production
                     ;; hands is the defect.
-                    :seon.cluster.loop/cluster
+                    :seon.turn.loop/cluster
                     {:seon.db/connection connection
                      :seon.cluster/name "source-cache"
                      :seon.sci.admit/caps caps
@@ -918,7 +918,7 @@
                     (fn []
                       ((ns-resolve 'seon.render.web 'page-refresh)
                        (assoc invalidated
-                              :seon.cluster.loop/cluster
+                              :seon.turn.loop/cluster
                               {:seon.db/connection connection
                                :seon.cluster/name "source-cache"
                                :seon.sci.admit/caps caps

@@ -35,7 +35,7 @@
                  :seon.sci.eval/ctx ctx})]
     (try
       (let [preview (loop/preview-sources
-                     {:seon.cluster.loop/cluster handle
+                     {:seon.turn.loop/cluster handle
                       :seon.db/db @connection
                       :seon.sci.eval/ctx ctx
                       :seon.cluster.agent/id "walker"
@@ -43,7 +43,7 @@
                       :seon.cluster.reply/text source
                       :seon.sci.admit/caps caps})
             prepared (run/record-evaluated-tx
-                       {:seon.cluster.loop/cluster handle
+                       {:seon.turn.loop/cluster handle
                         :seon.db/db @connection
                         :seon.turn/id run-id
                         :seon.turn/agent [:seon.cluster.agent/id "walker"]
@@ -51,8 +51,8 @@
                         :seon.turn/reply source
                         :seon.turn/opened-at (:seon.turn/opened-at preview)
                         :seon.turn/closed-at (:seon.turn/closed-at preview)
-                        :seon.cluster.loop/evaluated-sources
-                        (:seon.cluster.loop/evaluated-sources preview)})]
+                        :seon.turn.loop/evaluated-sources
+                        (:seon.turn.loop/evaluated-sources preview)})]
         (let [result (blob/with-publication!
                       connection (:seon.blob/staged-writes prepared)
                       #(db/transact! connection (:seon.db/tx-data prepared)))]
@@ -61,7 +61,7 @@
           result))
       (finally
         (doseq [key [:seon.cluster.wake/channel :seon.render/context-channel
-                    :seon.cluster.loop/completion]]
+                    :seon.turn.loop/completion]]
           (when-let [channel (get handle key)] (async/close! channel)))))))
 
 (defn- planted

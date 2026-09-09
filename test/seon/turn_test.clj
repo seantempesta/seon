@@ -85,12 +85,12 @@
                      (:seon.sci.eval/projection-state ctx))
                     :seon.sci.eval/ctx ctx
                     :seon.db.process/id cluster/boot-process-identity
-                    :seon.cluster.loop/stream-channel
+                    :seon.turn.loop/stream-channel
                     (async/chan (async/sliding-buffer 1))})
            submit (fn [id & [source]]
                     (let [source (or source "(+ 1 1)")
                           result (turn/virtual-turn!
-                                  {:seon.cluster.loop/cluster handle
+                                  {:seon.turn.loop/cluster handle
                                    :seon.cluster.agent/routing routing
                                    :seon.cluster.agent/id id
                                    :seon.cluster.reply/text source})
@@ -141,7 +141,7 @@
            (is (empty? (evaluations @connection "a"))
                "boot invents no evaluation when the prior JVM stored no reply"))
          (doseq [id ["a" "b"]]
-           (agent/arm! {:seon.cluster.loop/cluster handle
+           (agent/arm! {:seon.turn.loop/cluster handle
                         :seon.cluster.agent/routing routing
                         :seon.cluster.agent/id id}))
          (reset! transactions [])
@@ -220,7 +220,7 @@
                                   (take-last 3 (evaluation/of-agent @connection "a")))]))
          (submit "a" "(def private-state (atom 2))")
          (let [agent-context #(get-in (agent/armed routing %)
-                                     [:seon.cluster.loop/cluster
+                                     [:seon.turn.loop/cluster
                                       :seon.sci.eval/agent-ctx])
                a-context (agent-context "a")
                private-object @(sci/resolve a-context 'my.agents.a/private-state)]
@@ -243,7 +243,7 @@
                          [{:seon.cluster.agent/id "c"
                            :seon.cluster.agent/namespace
                            {:seon.ns/name 'my.agents.c}}])
-           (agent/arm! {:seon.cluster.loop/cluster handle
+           (agent/arm! {:seon.turn.loop/cluster handle
                         :seon.cluster.agent/routing routing
                         :seon.cluster.agent/id "c"})
            (submit "c" "(+ 3 3)")
@@ -262,7 +262,7 @@
                                (db/q '[:find [?key ...]
                                        :where [_ :seon.schema/key ?key]]
                                      @connection)))))
-         (let [request {:seon.cluster.loop/cluster handle
+         (let [request {:seon.turn.loop/cluster handle
                         :seon.cluster.agent/id "a"
                         :seon.turn/write? true}
                opening (turn/system-turn request)
@@ -334,8 +334,8 @@
            (doseq [channel [events faults
                             (:seon.cluster.wake/channel handle)
                             (:seon.render/context-channel handle)
-                            (:seon.cluster.loop/completion handle)
-                            (:seon.cluster.loop/stream-channel handle)]]
+                            (:seon.turn.loop/completion handle)
+                            (:seon.turn.loop/stream-channel handle)]]
              (async/close! channel))))
        @stable-identities))))
 
@@ -711,10 +711,10 @@
                 :seon.db.process/id "generated-process"
                 ::turn/opened-at t0
                 ::turn/starting-ns [:seon.ns/name 'my.agents.generated]}))))
-      (is (= {:seon.cluster.work/situation :generate
+      (is (= {:seon.turn.work/situation :generate
               ::turn/starting-ns {:seon.ns/name 'my.agents.generated}}
              (db/pull @connection
-                      '[:seon.cluster.work/situation
+                      '[:seon.turn.work/situation
                         {:seon.turn/starting-ns [:seon.ns/name]}]
                       [::turn/id "generated-run"])))
       (is (empty?
@@ -1652,7 +1652,7 @@
                  (when generated?
                    (db/transact! connection
                                  [{::turn/id run-id
-                                   :seon.cluster.work/situation :generate}]))
+                                   :seon.turn.work/situation :generate}]))
                  (let [terminals-before (pull-terminals connection run-id)
                        recovery
                        (turn/recover-tx

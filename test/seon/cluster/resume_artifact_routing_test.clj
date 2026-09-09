@@ -91,6 +91,6 @@
              :seon.config.message/max-chain 16})]
        (db/transact! connection (:seon.cluster.message/rows delivery)))
      (is (= :unrouted-red
-            (:seon.cluster.work/form-state
+            (:seon.turn.work/form-state
              (work/form-settlement @connection "resume-receipt-1")))
          "even a stale/manual assignment cannot turn X2 into routed"))))

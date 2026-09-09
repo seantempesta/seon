@@ -310,7 +310,7 @@
   [database request]
   (let [agent-id (:seon.cluster.agent/id request)
         run-id (:seon.turn/id request)
-        evaluated-sources (:seon.cluster.loop/evaluated-sources request)
+        evaluated-sources (:seon.turn.loop/evaluated-sources request)
         in-memory? (some? evaluated-sources)
         contribution-id (:seon.context.contribution/id request)
         contribution
@@ -364,7 +364,7 @@
             current-source
             (if in-memory?
               (mapv (fn [{ordinal :seon.cluster.eval/ordinal
-                          form :seon.cluster.loop/admitted-form}]
+                          form :seon.turn.loop/admitted-form}]
                       {:seon.cluster.eval/ordinal ordinal
                        :seon.cluster.eval/source (:seon.cluster.eval/source form)
                        :seon.ns/name (second (:seon.cluster.eval/ns form))})
@@ -376,7 +376,7 @@
           (cond-> {:seon.context.comparison/status :ready
            :seon.context.comparison/baseline-evaluations
            (ordered-run-evaluations database baseline-run)}
-            in-memory? (assoc :seon.cluster.loop/evaluated-sources evaluated-sources)
+            in-memory? (assoc :seon.turn.loop/evaluated-sources evaluated-sources)
             (not in-memory?)
             (assoc :seon.context.comparison/refreshed-evaluations
                    (ordered-run-evaluations database (:db/id refreshed)))))))))

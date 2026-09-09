@@ -259,7 +259,7 @@
                              :seon.boot/cluster-name name
                              :seon.config/manifest applied})
             connection (:seon.boot/cluster-connection instance)
-            handle (:seon.cluster.loop/cluster instance)
+            handle (:seon.turn.loop/cluster instance)
             launcher (:seon.flow/work-launcher instance)]
         (try
           (testing "the database representation is fixed at store creation"

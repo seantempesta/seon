@@ -170,9 +170,9 @@
            memory-basis (db/basis-t @connection)
            memory-request
            (assoc (request "compact-agent" "not-persisted" "compact-choice")
-                  :seon.cluster.loop/evaluated-sources
+                  :seon.turn.loop/evaluated-sources
                   [{:seon.cluster.eval/ordinal 0
-                    :seon.cluster.loop/admitted-form
+                    :seon.turn.loop/admitted-form
                     {:seon.cluster.eval/source "(identity 1)"
                      :seon.cluster.eval/ns [:seon.ns/name 'compact.context]}
                     :seon.sci.eval/evaluation
@@ -182,14 +182,14 @@
            _ (is (= :ready (:seon.context.comparison/status memory-comparison)))
            _ (is (= expected (set (:seon.context.comparison/baseline-evaluations
                                    memory-comparison))))
-           _ (is (= (:seon.cluster.loop/evaluated-sources memory-request)
-                    (:seon.cluster.loop/evaluated-sources memory-comparison)))
+           _ (is (= (:seon.turn.loop/evaluated-sources memory-request)
+                    (:seon.turn.loop/evaluated-sources memory-comparison)))
            _ (is (= :seon.context/unfinished-evaluation
                     (:seon.context/selection-refused
                      (context/comparison
                       @connection
                       (update-in memory-request
-                                 [:seon.cluster.loop/evaluated-sources 0
+                                 [:seon.turn.loop/evaluated-sources 0
                                   :seon.sci.eval/evaluation]
                                  dissoc :seon.cluster.eval/result-edn)))))
            _ (is (= :different-source
@@ -197,8 +197,8 @@
                      (context/comparison
                       @connection
                       (assoc-in memory-request
-                                [:seon.cluster.loop/evaluated-sources 0
-                                 :seon.cluster.loop/admitted-form :seon.cluster.eval/ns]
+                                [:seon.turn.loop/evaluated-sources 0
+                                 :seon.turn.loop/admitted-form :seon.cluster.eval/ns]
                                 [:seon.ns/name 'another.context])))))
            committed
            (db/transact!

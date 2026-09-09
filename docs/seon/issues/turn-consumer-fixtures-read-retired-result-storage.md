@@ -72,6 +72,17 @@ legacy transcript expectations listed below remain unconverted.
 
 ## Acceptance criteria
 
+Schema sub-slice, 2026-09-09: the agent fixture now executes real SCI,
+observes saved `:seon.eval/value`, waits for terminal facts rather than
+truthiness of a read error, supplies complete compiler-produced config,
+and hands its armer the canonical projection executor and error fanout.
+The old trigger fence test is deleted with that retired mechanism.
+Wake assertions permit coalescing and exclude non-answering turn provenance.
+An injected install-gate core exception is observed on Flow's error channel
+with its diagnostic backstop still active; it is not an evaluation outcome.
+The turn rename landing note owns gate counts. Other consumer namespaces
+and the broader history observations below remain outside this repair.
+
 Use canonical populated databases, real SCI/procs for execution proofs,
 exact terminal facts for waits, and the declared event bound for arming.
 Every future and graph must finish cleanup before restoring instrumentation

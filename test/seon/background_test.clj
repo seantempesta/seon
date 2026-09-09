@@ -29,7 +29,7 @@
            :seon.effect/duration-ms 3
            :seon.effect/settled-at now
            :seon.effect/to [:seon.cluster.agent/id "background-agent"]}])
-        (is (= {:seon.cluster.work/situation :open
+        (is (= {:seon.turn.work/situation :open
                 :seon.cluster.agent/id "background-agent"}
                (work/next-agent-work
                 @connection

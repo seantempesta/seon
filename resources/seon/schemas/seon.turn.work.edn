@@ -1,4 +1,4 @@
-#:seon.cluster.work{:agent-request
+#:seon.turn.work{:agent-request
                     [:map
                      [:seon.cluster.agent/id :seon.cluster.agent/id]
                      ],
@@ -7,13 +7,13 @@
                     :wake-request
                     [:map
                      {:description
-                      "How much of an agent's wake history a derivation wants: absent means the unanswered ones, :any means every one of them. :seon.cluster.work/attributes says WHICH listened attributes are bound: absent means only those that open a turn, :listened means every listened attribute (what a context shows)."}
-                     [:seon.cluster.work/answered?
+                      "How much of an agent's wake history a derivation wants: absent means the unanswered ones, :any means every one of them. :seon.turn.work/attributes says WHICH listened attributes are bound: absent means only those that open a turn, :listened means every listened attribute (what a context shows)."}
+                     [:seon.turn.work/answered?
                       {:optional true}
-                      :seon.cluster.work/answered?]
-                     [:seon.cluster.work/attributes
+                      :seon.turn.work/answered?]
+                     [:seon.turn.work/attributes
                       {:optional true}
-                      :seon.cluster.work/attributes]],
+                      :seon.turn.work/attributes]],
                     :attributes
                     [:enum
                      {:description
@@ -30,10 +30,10 @@
                      [:seon.problems/id
                       {:optional true}
                       :seon.problems/id]
-                     [:seon.cluster.work/form-state
-                      :seon.cluster.work/form-state]
-                     [:seon.cluster.work/settled?
-                      :seon.cluster.work/settled?]],
+                     [:seon.turn.work/form-state
+                      :seon.turn.work/form-state]
+                     [:seon.turn.work/settled?
+                      :seon.turn.work/settled?]],
                     :form-state
                     [:enum
                      :unevaluated
@@ -44,39 +44,39 @@
                      :owner-fixed
                      :owner-declared-cant],
                     :forms
-                    [:vector :seon.cluster.work/form-settlement],
+                    [:vector :seon.turn.work/form-settlement],
                     :next
                     [:multi
-                     {:dispatch :seon.cluster.work/situation}
+                     {:dispatch :seon.turn.work/situation}
                      [:resume
                       [:map
-                       [:seon.cluster.work/situation [:= :resume]]
+                       [:seon.turn.work/situation [:= :resume]]
                        [:seon.turn/id :seon.turn/id]
                        [:seon.cluster.agent/id :seon.cluster.agent/id]
                        [:seon.cluster.eval/ordinal
                         :seon.cluster.eval/ordinal]]]
                      [:call
                       [:map
-                       [:seon.cluster.work/situation [:= :call]]
+                       [:seon.turn.work/situation [:= :call]]
                        [:seon.turn/id :seon.turn/id]
                        [:seon.cluster.agent/id
                         :seon.cluster.agent/id]]]
                      [:generate
                       [:map
-                       [:seon.cluster.work/situation [:= :generate]]
+                       [:seon.turn.work/situation [:= :generate]]
                        [:seon.turn/id :seon.turn/id]
                        [:seon.cluster.agent/id
                         :seon.cluster.agent/id]]]
                      [:open
                       [:map
-                       [:seon.cluster.work/situation [:= :open]]
+                       [:seon.turn.work/situation [:= :open]]
                        [:seon.cluster.agent/id :seon.cluster.agent/id]
                        [:seon.cluster.message/id
                         {:optional true}
                         :seon.cluster.message/id]]]
                      [:close
                       [:map
-                       [:seon.cluster.work/situation [:= :close]]
+                       [:seon.turn.work/situation [:= :close]]
                        [:seon.turn/id :seon.turn/id]
                        [:seon.cluster.agent/id
                         :seon.cluster.agent/id]]]],
@@ -84,9 +84,9 @@
                     :plan-settlement
                     [:map
                      [:seon.turn/id :seon.turn/id]
-                     [:seon.cluster.work/forms
-                      [:vector :seon.cluster.work/form-settlement]]
-                     [:seon.cluster.work/settled?
-                      :seon.cluster.work/settled?]],
+                     [:seon.turn.work/forms
+                      [:vector :seon.turn.work/form-settlement]]
+                     [:seon.turn.work/settled?
+                      :seon.turn.work/settled?]],
                     :settled? :boolean,
                     :situation [:enum :resume :call :generate :open :close]}

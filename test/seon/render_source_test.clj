@@ -36,7 +36,7 @@
   caller's. This used to be `(merge (config/defaults) …)` — a SECOND
   mechanism for the same shape (§2.5), and one that pours every effective
   config dial into the handle rather than the members
-  `:seon.cluster.loop/cluster` declares, so a renamed dial would leave the
+  `:seon.turn.loop/cluster` declares, so a renamed dial would leave the
   fixture working while production broke."
   [connection ctx channel cluster-name]
   (support/cluster-handle
@@ -46,7 +46,7 @@
     :seon.sci.eval/ctx ctx
     :seon.cluster.wake/channel channel
     :seon.render/context-channel channel
-    :seon.cluster.loop/completion channel
+    :seon.turn.loop/completion channel
     :seon.sci.admit/caps caps
     :seon.config.eval/time-limit-ms 2000
     :seon.config/on-core-error :panic}))
@@ -87,7 +87,7 @@
                     :seon.sci.admit/caps caps :seon.sci.eval/time-limit-ms 2000
                     :seon.config/on-core-error :panic
                     :seon.cluster.agent/id "memory-preview-agent"
-                    :seon.cluster.loop/cluster cluster}
+                    :seon.turn.loop/cluster cluster}
            preview
            (with-redefs [db/transact! (fn [& _] (throw (ex-info "preview wrote database facts" {})))
                          blob/stage! (fn [& _] (throw (ex-info "preview staged a blob" {})))
@@ -107,7 +107,7 @@
                first-output))
            entry (get @calls [:memory-preview])
            cached-id (:seon.render.call/source-run-id entry)
-           state {:seon.cluster.loop/cluster cluster
+           state {:seon.turn.loop/cluster cluster
                   :seon.render.web/interest (atom {})
                   :seon.render.web/invocations @invocations
                   :seon.render.web/calls {[:memory-preview] @calls}
@@ -274,7 +274,7 @@
               :seon.sci.admit/caps caps :seon.sci.eval/time-limit-ms 2000
               :seon.config/on-core-error :panic
               :seon.cluster.agent/id "source-contract-agent"
-              :seon.cluster.loop/cluster cluster
+              :seon.turn.loop/cluster cluster
               :seon.cluster.agent/routing (atom {})})
            stored-run (db/pull database '[*] [:seon.turn/id "stored-transcript"])
            output-refs

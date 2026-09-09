@@ -124,7 +124,7 @@
          (boolean
           (and (map? instance)
                (:seon.sci.eval/ctx instance)
-               (:seon.cluster.loop/cluster instance)))])
+               (:seon.turn.loop/cluster instance)))])
       @@(ns-resolve 'seon.cluster (symbol "running-instances"))))))
 
 (defn- cluster-layer-states
@@ -604,7 +604,7 @@
       (let [instances# @@(ns-resolve 'seon.cluster
                                    (symbol "running-instances"))
           instance# (get instances# ~cluster)
-          cluster# (:seon.cluster.loop/cluster instance#)]
+          cluster# (:seon.turn.loop/cluster instance#)]
       (if-not (and instance#
                    (:seon.sci.eval/ctx instance#)
                    cluster#)

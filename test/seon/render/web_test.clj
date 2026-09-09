@@ -150,7 +150,7 @@
                      :seon.sci.eval/ctx ctx
                      :seon.config/on-core-error :record
                      :seon.db.process/id process
-                     :seon.cluster.loop/stream-channel stream-channel
+                     :seon.turn.loop/stream-channel stream-channel
 })
             graph (flow.core/create-flow
                    {:procs
@@ -159,7 +159,7 @@
                              #'web/render-step :io
                              (assoc view
                                     :seon.env/environment @test-environment
-                                    :seon.cluster.loop/cluster
+                                    :seon.turn.loop/cluster
 handle))}}
                     :conns []})
             pages-mult (async/mult pages-channel)
@@ -187,7 +187,7 @@ handle))}}
                         :seon.cluster.wake/fault-channel fault-channel
                         :seon.cluster.wake/key ::route})
           (reset! server (web/start!
-                          {:seon.cluster.loop/cluster handle
+                          {:seon.turn.loop/cluster handle
                            :seon.store/connection-object connection
                            :seon.cluster.agent/id agent-id
                            :seon.sci.admit/caps caps
@@ -2135,7 +2135,7 @@ handle))}}
                  {:seon.cluster.agent/id "agent-a"
                   :seon.cluster/name "web-fault-test"
                   :seon.ns/name 'my.agents.fault-test}))
-  {:seon.cluster.loop/cluster
+  {:seon.turn.loop/cluster
    (support/cluster-handle
    {:seon.cluster/name "web-fault-test"
     :seon.db/connection connection

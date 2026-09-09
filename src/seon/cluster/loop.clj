@@ -352,7 +352,7 @@
     (sci.eval/unrun-evaluation
      {:seon.sci.admit/value
       {:seon.error/kind :seon.flow/time-limit
-       :seon.flow/time-limit ::turn
+       :seon.flow/time-limit :seon.turn.loop/turn
        :seon.error/message message
        :seon.error/data {:seon.flow/submission-wait-ms submission-wait-ms}}
       :seon.cluster.eval/ns (:seon.cluster.eval/ns request)
@@ -411,7 +411,7 @@
   "The message-family value one completed evaluation asks to deliver."
   [{db :seon.db/db
     evaluation :seon.sci.eval/evaluation
-    settled ::settled
+    settled :seon.turn.loop/settled
     problem :seon.problems/form-problem
     agent-id :seon.cluster.agent/id
     trigger :seon.cluster.message/trigger}]
@@ -427,12 +427,12 @@
 (defn- delivery-rows
   "Delivery rows and refusal transaction data for one asked value."
   [{db :seon.db/db
-    cluster ::cluster
-    asked ::asked
+    cluster :seon.turn.loop/cluster
+    asked :seon.turn.loop/asked
     agent-id :seon.cluster.agent/id
     run-id :seon.turn/id
     ordinal :seon.cluster.eval/ordinal
-    now ::now
+    now :seon.turn.loop/now
     problem :seon.problems/form-problem
     trigger :seon.cluster.message/trigger}]
   (let [receipt-eid
@@ -477,14 +477,14 @@
   (try
     (operation)
     (catch Throwable failure
-      (merge {:seon.error/kind ::phase-failed
+      (merge {:seon.error/kind :seon.turn.loop/phase-failed
               :seon.error/message
-              (or (ex-message failure) (.getName (class failure))) :seon.cluster.loop/phase-failed true}
+              (or (ex-message failure) (.getName (class failure))) :seon.turn.loop/phase-failed true}
              (error/refusal failure)))))
 
 (defn- evaluation-terminal-data
-  [{cluster ::cluster
-    now ::now
+  [{cluster :seon.turn.loop/cluster
+    now :seon.turn.loop/now
     agent-id :seon.cluster.agent/id
     run-id :seon.turn/id
     process :seon.db.process/id
@@ -492,7 +492,7 @@
     evaluation :seon.sci.eval/evaluation
     problem :seon.problems/form-problem
     trigger :seon.cluster.message/trigger
-    batch? ::batch?}]
+    batch? :seon.turn.loop/batch?}]
   (let [database @(get cluster :seon.db/connection)
         raw-settled (disposition (:seon.sci.admit/value evaluation))
         settled
@@ -541,19 +541,19 @@
         asked (asked-value
                (cond-> {:seon.db/db database
                         :seon.sci.eval/evaluation evaluation
-                        ::settled settled
+                        :seon.turn.loop/settled settled
                         :seon.cluster.agent/id agent-id}
                  problem (assoc :seon.problems/form-problem problem)
                  trigger (assoc :seon.cluster.message/trigger trigger)))
         delivery
         (delivery-rows
          (cond-> {:seon.db/db database
-                  ::cluster cluster
-                  ::asked asked
+                  :seon.turn.loop/cluster cluster
+                  :seon.turn.loop/asked asked
                   :seon.cluster.agent/id agent-id
                   :seon.turn/id run-id
                   :seon.cluster.eval/ordinal ordinal
-                  ::now now}
+                  :seon.turn.loop/now now}
            problem (assoc :seon.problems/form-problem problem)
            trigger (assoc :seon.cluster.message/trigger trigger)))
         [settlement-evaluation _ settlement-stages]
@@ -564,7 +564,7 @@
                   :seon.db.process/id process
                   :seon.cluster.eval/ordinal ordinal
                   :seon.sci.eval/evaluation evaluation
-                  ::settlement-evaluation settlement-evaluation}
+                  :seon.turn.loop/settlement-evaluation settlement-evaluation}
            problem (assoc :seon.problems/form-problem problem)
            settled (assoc :my.run/value settled)))
         side-tx
@@ -583,10 +583,10 @@
         tx-data (if batch?
                   (vec side-tx)
                   (into (run/receipt-settle-tx database receipt) side-tx))]
-    {::settled settled
-     ::undisposed? undisposed?
-     ::evaluation evaluation
-     ::receipt receipt
+    {:seon.turn.loop/settled settled
+     :seon.turn.loop/undisposed? undisposed?
+     :seon.turn.loop/evaluation evaluation
+     :seon.turn.loop/receipt receipt
      :seon.blob/staged-writes settlement-stages
      :seon.db/tx-data tx-data}))
 
@@ -598,13 +598,13 @@
   (let [connection (:seon.db/connection cluster)
         process (:seon.db.process/id cluster)
         prepared (mapv #(evaluation-terminal-data
-                         (assoc % ::batch? true
+                         (assoc % :seon.turn.loop/batch? true
                                   :seon.db.process/id process))
                        requests)
         namespace-rows
         (into []
               (comp
-               (map ::receipt)
+               (map :seon.turn.loop/receipt)
                (map :seon.program/row)
                (mapcat :seon.ns/requires)
                (map second)
@@ -617,7 +617,7 @@
          (into [] (mapcat :seon.blob/staged-writes) prepared)
          :seon.db/tx-data
          (into (into namespace-rows
-                     (run/receipt-settle-batch-tx (mapv ::receipt prepared)))
+                     (run/receipt-settle-batch-tx (mapv :seon.turn.loop/receipt prepared)))
                (mapcat :seon.db/tx-data)
                prepared)}
         ;; `with-publication!` IS TOTAL OVER AN EMPTY VECTOR — it calls the
@@ -697,7 +697,7 @@
   "Settle every begun ordinal after the atomic turn settlement is refused."
   [cluster requests prepared refusal]
   (let [connection (:seon.db/connection cluster)
-        {now ::now
+        {now :seon.turn.loop/now
          agent-id :seon.cluster.agent/id
          run-id :seon.turn/id}
         (first requests)
@@ -710,7 +710,7 @@
         receipts
         (mapv
          (fn [entry]
-           (-> (::receipt entry)
+           (-> (:seon.turn.loop/receipt entry)
                ;; `evaluation-terminal-data` already projected and staged the
                ;; durable def values. Re-projecting raw in-memory defs here
                ;; discarded those values and made a refused definition
@@ -732,9 +732,9 @@
     (when (:seon.error/kind outcome)
       (throw
        (ex-info "Batch refusal settlement was refused."
-                {:seon.error/kind ::terminal-refusal-settlement-refused
-                 ::settlement outcome
-                 ::refused-outcome refusal})))
+                {:seon.error/kind :seon.turn.loop/terminal-refusal-settlement-refused
+                 :seon.turn.loop/settlement outcome
+                 :seon.turn.loop/refused-outcome refusal})))
     {:prepared prepared
      :outcome outcome
      :refused-outcome refusal}))
@@ -752,10 +752,10 @@
   returned transaction report, never a value constructed before commit."
   {:malli/schema
    [:=>
-    [:cat :seon.cluster.loop/settle-request]
-    :seon.cluster.loop/settlement]}
-  [{cluster ::cluster
-    now ::now
+    [:cat :seon.turn.loop/settle-request]
+    :seon.turn.loop/settlement]}
+  [{cluster :seon.turn.loop/cluster
+    now :seon.turn.loop/now
     agent-id :seon.cluster.agent/id
     run-id :seon.turn/id
     ordinal :seon.cluster.eval/ordinal
@@ -788,23 +788,23 @@
                      {:tx-data (:seon.db/tx-data transaction)})))))
         outcome (commit prepared)]
     (if-not (:seon.error/kind outcome)
-      (assoc prepared ::outcome outcome)
+      (assoc prepared :seon.turn.loop/outcome outcome)
       (let [refusal
             (refusal-terminal-data
              cluster @connection now agent-id run-id process ordinal
-             (::receipt prepared) outcome)
+             (:seon.turn.loop/receipt prepared) outcome)
             refused (commit refusal)]
         (when (:seon.error/kind refused)
           (throw
            (ex-info "Terminal refusal settlement was refused."
-                    {:seon.error/kind ::terminal-refusal-settlement-refused
-                     :seon.cluster.loop/terminal-refusal-settlement-refused
+                    {:seon.error/kind :seon.turn.loop/terminal-refusal-settlement-refused
+                     :seon.turn.loop/terminal-refusal-settlement-refused
                      (:seon.turn/rule outcome)
-                     ::settlement refused
-                     ::refused-outcome outcome})))
+                     :seon.turn.loop/settlement refused
+                     :seon.turn.loop/refused-outcome outcome})))
         (assoc refusal
-               ::outcome refused
-               ::refused-outcome outcome)))))
+               :seon.turn.loop/outcome refused
+               :seon.turn.loop/refused-outcome outcome)))))
 
 (defn- attempt-id
   "One model attempt's identity, derived from its turn and ordinal."
@@ -885,7 +885,7 @@
            :seon.ai.attempt/failover-from :seon.ai.attempt/delay-ms]
     run-id :seon.turn/id
     agent-id :seon.cluster.agent/id
-    evidence ::attempt-evidence}]
+    evidence :seon.turn.loop/attempt-evidence}]
   (cond-> (merge {:seon.ai/target target
                   :seon.ai/settings settings
                   :seon.turn/id run-id
@@ -910,7 +910,7 @@
     {:seon.ai/primary primary
      :seon.ai/backup backup
      :seon.ai/settings settings
-     ::schedule (if backup [] (ai/delays strategy rand))}))
+     :seon.turn.loop/schedule (if backup [] (ai/delays strategy rand))}))
 
 (defn- record-attempt!
   "Commit ONE model attempt and its error or truncation facts.
@@ -1067,9 +1067,9 @@
 
 (defn- evaluation-request
   "One admitted form projected into the guarded evaluation request."
-  [{form ::admitted-form
-    evaluation-namespace ::evaluation-namespace
-    cluster ::cluster
+  [{form :seon.turn.loop/admitted-form
+    evaluation-namespace :seon.turn.loop/evaluation-namespace
+    cluster :seon.turn.loop/cluster
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
     run-id :seon.turn/id
@@ -1093,7 +1093,7 @@
 
 (defn- open-turn
   "Open one turn before any paid provider call."
-  [{cluster ::cluster work ::work now ::now report ::report}]
+  [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report}]
   (let [connection (:seon.db/connection cluster)
         process (:seon.db.process/id cluster)
         agent-id (:seon.cluster.agent/id work)]
@@ -1104,9 +1104,9 @@
     ;; wake: every wake with `:t` at or before the opening transaction
     ;; is answered by the turn whose context contained it, so two wakes
     ;; in one commit are one paid call and a wake arriving mid-turn
-    ;; opens the next one. The `::trigger-already-answered` fence is
+    ;; opens the next one. The `:seon.turn.loop/trigger-already-answered` fence is
     ;; gone with the reference it guarded — `open-call`'s
-    ;; `::agent-already-running` is what stops two openers, and the
+    ;; `:seon.turn.loop/agent-already-running` is what stops two openers, and the
     ;; derivation is what stops a second turn for an answered wake.
     ;;
     ;; `:seon.turn/trigger` is retained as PROVENANCE ONLY — the
@@ -1133,8 +1133,8 @@
         (do
           ;; The open transaction formed no run, so settlement records the
           ;; error and escalation with no run attribution or close.
-          (settle! {::cluster cluster
-                    ::now now
+          (settle! {:seon.turn.loop/cluster cluster
+                    :seon.turn.loop/now now
                     :seon.cluster.agent/id agent-id
                     :seon.error/value outcome})
           (report :error 0))
@@ -1144,7 +1144,7 @@
 
 (defn- call-turn
   "Call the provider and freeze the returned plan."
-  [{cluster ::cluster work ::work now ::now report ::report}]
+  [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report}]
   (let [connection (:seon.db/connection cluster)
         process (:seon.db.process/id cluster)
         agent-id (:seon.cluster.agent/id work)
@@ -1186,7 +1186,7 @@
           settings (:seon.ai/settings providers)
           primary (:seon.ai/primary providers)
           backup (:seon.ai/backup providers)
-          schedule (::schedule providers)
+          schedule (:seon.turn.loop/schedule providers)
           ;; STREAMING IS ON BY CONSTRUCTION (F2 §2.1): the sink is
           ;; one `offer!` of the run id plus the complete
           ;; `:seon.ai/partial` snapshot
@@ -1195,7 +1195,7 @@
           ;; provider fold, and a streamed call and a one-shot call
           ;; return the same completion value. There is no dial; a
           ;; handle with no stream channel simply calls one-shot.
-          stream-channel (:seon.cluster.loop/stream-channel cluster)
+          stream-channel (:seon.turn.loop/stream-channel cluster)
           sink (when stream-channel
                  (fn [snapshot]
                    (async/offer! stream-channel
@@ -1204,8 +1204,8 @@
                                   :seon.ai/partial snapshot})))
           fail!
           (fn [failure]
-            (settle! {::cluster cluster
-                      ::now now
+            (settle! {:seon.turn.loop/cluster cluster
+                      :seon.turn.loop/now now
                       :seon.cluster.agent/id agent-id
                       :seon.turn/id run-id
                       :seon.error/value failure})
@@ -1251,18 +1251,18 @@
                 (empty? sources) (fail! prepared)
                 :else
                 (resume-turn
-                 {::cluster cluster
-                  ::work (assoc work
-                                :seon.cluster.work/situation :resume
+                 {:seon.turn.loop/cluster cluster
+                  :seon.turn.loop/work (assoc work
+                                :seon.turn.work/situation :resume
                                 :seon.cluster.eval/ordinal 0)
-                  ::now now
-                  ::report report}))))
+                  :seon.turn.loop/now now
+                  :seon.turn.loop/report report}))))
           ;; THE PROMPT REQUEST NAMES THE HELD RUN — `prompt` derives
           ;; the trigger from the run's own creating transaction
           ;; (`message/trigger`), never a re-asked queue: the recorded
           ;; cause is the prompt's cause. One derivation, one owner.
           ;; NOTHING THROWS INTO THE AGENT LOOP: the prompt owner
-          ;; refuses by throwing (`::no-trigger`, `::missing-input`),
+          ;; refuses by throwing (`:seon.turn.loop/no-trigger`, `:seon.turn.loop/missing-input`),
           ;; and this one call site turns that refusal into the flat
           ;; error value the loop already records — the same shape a
           ;; refused transaction takes through `db/transact!`.
@@ -1361,7 +1361,7 @@
                                          :seon.turn/id run-id
                                          :seon.cluster.agent/id agent-id
                                          :seon.ai.attempt/ordinal ordinal
-                                         ::attempt-evidence evidence}
+                                         :seon.turn.loop/attempt-evidence evidence}
                                          failure
                                          (assoc :seon.error/value failure)
                                          failover-from
@@ -1448,9 +1448,9 @@
   An explicit database is the basis of every form. Otherwise each form sees
   the connection's current value, as in an ordinary turn. Results and namespace
   changes advance the same fork; callers decide whether to persist outcomes."
-  {:malli/schema [:=> [:cat :seon.cluster.loop/evaluate-sources-request]
-                  :seon.cluster.loop/evaluated-sources]}
-  [{cluster ::cluster
+  {:malli/schema [:=> [:cat :seon.turn.loop/evaluate-sources-request]
+                  :seon.turn.loop/evaluated-sources]}
+  [{cluster :seon.turn.loop/cluster
     snapshot :seon.db/db
     ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
@@ -1477,9 +1477,9 @@
                        (admit/result-handle (run/receipt-identity run-id ordinal)))
               request
               (cond-> (assoc (evaluation-request
-                       {::admitted-form form
-                        ::evaluation-namespace namespace-name
-                        ::cluster cluster
+                       {:seon.turn.loop/admitted-form form
+                        :seon.turn.loop/evaluation-namespace namespace-name
+                        :seon.turn.loop/cluster cluster
                         :seon.sci.eval/ctx ctx
                         :seon.cluster.agent/id agent-id
                         :seon.cluster.eval/ordinal ordinal
@@ -1521,7 +1521,7 @@
                  (or (:seon.sci.eval/ending-ns evaluation) namespace-name)
                  (conj results
                        {:seon.cluster.eval/ordinal ordinal
-                        ::admitted-form form
+                        :seon.turn.loop/admitted-form form
                         :seon.sci.eval/evaluation evaluation})))
         results))))
 
@@ -1534,9 +1534,9 @@
   `result/eN` handle is bound (ruling 59c). The renderer that shows a preview
   calls this and renders the returned evaluations; it never forks or parses
   on its own."
-  {:malli/schema [:=> [:cat :seon.cluster.loop/preview-sources-request]
-                  [:or :seon.cluster.loop/preview :seon.error/value]]}
-  [{cluster ::cluster
+  {:malli/schema [:=> [:cat :seon.turn.loop/preview-sources-request]
+                  [:or :seon.turn.loop/preview :seon.error/value]]}
+  [{cluster :seon.turn.loop/cluster
     database :seon.db/db
     base-ctx :seon.sci.eval/ctx
     agent-id :seon.cluster.agent/id
@@ -1556,9 +1556,9 @@
                      (:seon.config.eval.result/max-source caps))]
         (if (map? sources)
           sources
-          {:seon.cluster.loop/evaluated-sources
+          {:seon.turn.loop/evaluated-sources
            (evaluate-sources
-            {::cluster cluster
+            {:seon.turn.loop/cluster cluster
              :seon.db/db database
              :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
              :seon.cluster.agent/id agent-id
@@ -1573,7 +1573,7 @@
 
 (defn- resume-turn
   "Evaluate an intent-frozen turn in memory, then settle the whole batch once."
-  [{cluster ::cluster work ::work now ::now report ::report}]
+  [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report}]
   (let [connection (:seon.db/connection cluster)
         agent-id (:seon.cluster.agent/id work)
         run-id (:seon.turn/id work)
@@ -1592,8 +1592,8 @@
     (if-let [failure (some #(when (:seon.error/kind %) %)
                            [forked trigger])]
       (do
-        (settle! {::cluster cluster
-                  ::now now
+        (settle! {:seon.turn.loop/cluster cluster
+                  :seon.turn.loop/now now
                   :seon.cluster.agent/id agent-id
                   :seon.turn/id run-id
                   :seon.error/value failure})
@@ -1605,7 +1605,7 @@
             evaluated
             (phase
              #(evaluate-sources
-               {::cluster cluster
+               {:seon.turn.loop/cluster cluster
                 :seon.sci.eval/ctx ctx
                 :seon.cluster.agent/id agent-id
                 :seon.turn/id run-id
@@ -1624,7 +1624,7 @@
             defining
             (into []
                   (keep-indexed
-                   (fn [index {form ::admitted-form evaluation :seon.sci.eval/evaluation}]
+                   (fn [index {form :seon.turn.loop/admitted-form evaluation :seon.sci.eval/evaluation}]
                      (when (:seon.program/row evaluation)
                        [index
                         {:seon.cluster.eval/source
@@ -1640,8 +1640,8 @@
               [])]
         (if (:seon.error/kind analyzed)
           (do
-            (settle! {::cluster cluster
-                      ::now now
+            (settle! {:seon.turn.loop/cluster cluster
+                      :seon.turn.loop/now now
                       :seon.cluster.agent/id agent-id
                       :seon.turn/id run-id
                       :seon.error/value analyzed})
@@ -1662,7 +1662,7 @@
                  (map vector defining analyzed))
                 gated
                 (mapv
-                 (fn [{ordinal :seon.cluster.eval/ordinal form ::admitted-form
+                 (fn [{ordinal :seon.cluster.eval/ordinal form :seon.turn.loop/admitted-form
                        evaluation :seon.sci.eval/evaluation :as item}]
                    (assoc item :seon.sci.eval/evaluation
                           (gate-function-install
@@ -1681,8 +1681,8 @@
                              :seon.cluster.eval/ordinal ordinal
                              :seon.sci.eval/evaluation evaluation}))]
                      (cond->
-                      {::cluster cluster
-                       ::now now
+                      {:seon.turn.loop/cluster cluster
+                       :seon.turn.loop/now now
                        :seon.cluster.agent/id agent-id
                        :seon.turn/id run-id
                        :seon.cluster.eval/ordinal ordinal
@@ -1713,18 +1713,18 @@
                                {:seon.program/row row
                                 :seon.sci.eval/evaluation evaluation}))))
                         gated)})
-                (if (or (::settled last-prepared)
-                        (::undisposed? last-prepared))
+                (if (or (:seon.turn.loop/settled last-prepared)
+                        (:seon.turn.loop/undisposed? last-prepared))
                   (report :closed (count gated))
                   (report :released (count gated)))))))))))
 (defn- close-turn
-  [{cluster ::cluster work ::work now ::now report ::report}]
+  [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report}]
   (let [outcome (db/transact!
                  (:seon.db/connection cluster)
                  (run/close-tx {:seon.turn/id (:seon.turn/id work)
                                 :seon.turn/closed-at now}))]
     (if (:seon.error/kind outcome)
-      (do (settle! {::cluster cluster ::now now
+      (do (settle! {:seon.turn.loop/cluster cluster :seon.turn.loop/now now
                      :seon.cluster.agent/id (:seon.cluster.agent/id work)
                      :seon.error/value outcome})
           (report :error 0))
@@ -1732,7 +1732,7 @@
 
 (defn- generate-turn
   "Append and execute one dependency-ready generated bootstrap form."
-  [{cluster ::cluster work ::work now ::now report ::report :as request}]
+  [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report :as request}]
   (let [connection (:seon.db/connection cluster)
         process (:seon.db.process/id cluster)
         agent-id (:seon.cluster.agent/id work)
@@ -1770,8 +1770,8 @@
     (cond
       (:seon.error/kind entry)
       (do
-        (settle! {::cluster cluster
-                  ::now now
+        (settle! {:seon.turn.loop/cluster cluster
+                  :seon.turn.loop/now now
                   :seon.cluster.agent/id agent-id
                   :seon.turn/id run-id
                   :seon.error/value entry})
@@ -1794,8 +1794,8 @@
                :seon.turn/closed-at now}))]
         (if (:seon.error/kind terminal)
           (do
-            (settle! {::cluster cluster
-                      ::now now
+            (settle! {:seon.turn.loop/cluster cluster
+                      :seon.turn.loop/now now
                       :seon.cluster.agent/id agent-id
                       :seon.turn/id run-id
                       :seon.error/value terminal})
@@ -1824,16 +1824,16 @@
                        (:seon.repl/comment entry)))))]
         (if (:seon.error/kind appended)
           (do
-            (settle! {::cluster cluster
-                      ::now now
+            (settle! {:seon.turn.loop/cluster cluster
+                      :seon.turn.loop/now now
                       :seon.cluster.agent/id agent-id
                       :seon.turn/id run-id
                       :seon.error/value appended})
             (report :error 0))
           (resume-turn
-           (assoc request ::work
+           (assoc request :seon.turn.loop/work
                   (assoc work
-                         :seon.cluster.work/situation :resume
+                         :seon.turn.work/situation :resume
                          :seon.cluster.eval/ordinal ordinal))))))))
 
 (defn turn
@@ -1858,28 +1858,28 @@
   half-second-per-commit cliff with no signal. A handle without projection
   state leaves whatever the caller handed in place, so a fixture that binds
   its own projection keeps it."
-  {:malli/schema [:=> [:cat :seon.cluster.loop/turn-request :inst]
-                  :seon.cluster.loop/turn-report]}
-  [{:keys [:seon.cluster.loop/cluster] work :seon.cluster.work/next}
+  {:malli/schema [:=> [:cat :seon.turn.loop/turn-request :inst]
+                  :seon.turn.loop/turn-report]}
+  [{:keys [:seon.turn.loop/cluster] work :seon.turn.work/next}
    now]
   (let [agent-id (:seon.cluster.agent/id work)
         run-id (:seon.turn/id work)
         report (fn [outcome forms-run]
                  (cond-> {:seon.cluster.agent/id agent-id
-                          :seon.cluster.work/situation
-                          (:seon.cluster.work/situation work)
-                          :seon.cluster.loop/forms-run forms-run
-                          :seon.cluster.loop/outcome outcome}
+                          :seon.turn.work/situation
+                          (:seon.turn.work/situation work)
+                          :seon.turn.loop/forms-run forms-run
+                          :seon.turn.loop/outcome outcome}
                    run-id (assoc :seon.turn/id run-id)))
-        request {::cluster cluster
-                 ::work work
-                 ::now now
-                 ::report report}
+        request {:seon.turn.loop/cluster cluster
+                 :seon.turn.loop/work work
+                 :seon.turn.loop/now now
+                 :seon.turn.loop/report report}
         pass (fn []
-               (let [request (update request ::cluster merge
+               (let [request (update request :seon.turn.loop/cluster merge
                                      (ai/agent-overlay
                                       @(:seon.db/connection cluster) agent-id))]
-                 (case (:seon.cluster.work/situation work)
+                 (case (:seon.turn.work/situation work)
                    :open (open-turn request)
                    :call (call-turn request)
                    :generate (generate-turn request)

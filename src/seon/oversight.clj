@@ -129,7 +129,7 @@
              ;; remains observable without inventing another counter.
              (get-in mailbox [::flow/outs ::agent/episode])))]
     (cond-> {:seon.cluster.agent/id agent-id
-             :seon.cluster.work/episode-runs
+             :seon.turn.work/episode-runs
              (work/episode-runs db agent-id)}
       run-id
       (assoc :seon.turn/id run-id)
@@ -240,7 +240,7 @@
           (let [agent-id (:seon.cluster.agent/id agent)
                 story (agent-story-text agent)
                 run-id (:seon.turn/id agent)
-                episode-runs (:seon.cluster.work/episode-runs agent)]
+                episode-runs (:seon.turn.work/episode-runs agent)]
             (if (= "parked" story)
               (str agent-id ": parked")
               (str agent-id ": " story
@@ -286,7 +286,7 @@
             [:td (:seon.cluster.agent/id agent)]
             [:td story]
             [:td (or (:seon.turn/id agent) "—")]
-            [:td (:seon.cluster.work/episode-runs agent)]
+            [:td (:seon.turn.work/episode-runs agent)]
             [:td (occupancy-text (:seon.oversight/mailbox agent))]
             [:td (occupancy-text (:seon.oversight/turn-buffer agent))]]))]]
      [:dl

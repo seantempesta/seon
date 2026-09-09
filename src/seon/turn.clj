@@ -60,7 +60,7 @@
   [{:keys [:seon.turn/id
            :seon.cluster.eval/ordinal :seon.sci.eval/evaluation
            :seon.problems/form-problem :my.run/value]
-    settlement-evaluation :seon.cluster.loop/settlement-evaluation}]
+    settlement-evaluation :seon.turn.loop/settlement-evaluation}]
   (let [error (or (:seon.cluster.eval/error evaluation)
                   (:seon.cluster.eval/error form-problem))
         kind (or (:seon.error/kind (:seon.sci.admit/value evaluation))
@@ -153,7 +153,7 @@
 (defn settlement-projection
   "Project an evaluation into receipt, defs, and staged-blob data."
   {:malli/schema
-   [:=> [:cat :seon.cluster.loop/cluster :seon.cluster.loop/evaluation]
+   [:=> [:cat :seon.turn.loop/cluster :seon.turn.loop/evaluation]
     [:tuple :map :map [:vector :seon.blob/staged-write]]]}
   [cluster evaluation]
   ;; A VALUE IS STORED FAITHFULLY OR IT IS MISSING. Admission already made
@@ -375,14 +375,14 @@
                         [::agent ::agent]
                         [::trigger {:optional true} ::trigger]
                         [::starting-ns {:optional true} ::starting-ns]
-                        [:seon.cluster.work/situation
+                        [:seon.turn.work/situation
                          {:optional true}
-                         :seon.cluster.work/situation]
+                         :seon.turn.work/situation]
                         [::opened-at ::opened-at]]]
                   [:vector :some]]}
   [db request]
   (let [{::keys [id agent trigger opened-at starting-ns]
-         situation :seon.cluster.work/situation} request
+         situation :seon.turn.work/situation} request
         agent-eid (:db/id (db/pull db [:db/id] agent))
         run-tempid (str "seon.turn/" id)
         background-results (unanswered-background-results db agent-eid)]
@@ -396,7 +396,7 @@
       :else [(cond-> {:db/id run-tempid
                       ::id id
                       ::agent agent-eid
-                      :seon.cluster.work/situation (or situation :call)
+                      :seon.turn.work/situation (or situation :call)
                       ::opened-at opened-at}
                trigger (assoc ::trigger trigger)
                starting-ns (assoc ::starting-ns starting-ns)
@@ -613,7 +613,7 @@
              0))]
     (when (some? (::plan-digest run))
       (refuse! `plan-call ::plan-frozen request))
-    (when-not (= :call (:seon.cluster.work/situation run))
+    (when-not (= :call (:seon.turn.work/situation run))
       (refuse! `plan-call ::not-call-situation request))
     (when-not starting-namespace
       (refuse! `plan-call ::starting-namespace-missing request))
@@ -637,9 +637,9 @@
                              [::agent ::agent]
                              [::trigger {:optional true} ::trigger]
                              [::starting-ns {:optional true} ::starting-ns]
-                             [:seon.cluster.work/situation
+                             [:seon.turn.work/situation
                               {:optional true}
-                              :seon.cluster.work/situation]
+                              :seon.turn.work/situation]
                              [::opened-at ::opened-at]]]
                   [:vector :some]]}
   [request]
@@ -729,7 +729,7 @@
                   db run-eid (dec ordinal))))]
     (when (some? (::plan-digest held))
       (refuse! `append-generated-call ::plan-frozen request))
-    (when-not (= :generate (:seon.cluster.work/situation held))
+    (when-not (= :generate (:seon.turn.work/situation held))
       (refuse! `append-generated-call ::not-generate-situation request))
     (when-not (= expected ordinal)
       (refuse! `append-generated-call ::generated-ordinal request))
@@ -775,7 +775,7 @@
             (cond-> {::id run-id
                      ::agent [:seon.cluster.agent/id agent-id]
                      ::starting-ns [:seon.ns/name namespace-name]
-                     :seon.cluster.work/situation :generate
+                     :seon.turn.work/situation :generate
                      ::opened-at opened-at}
               trigger (assoc ::trigger trigger)))])))
 
@@ -1571,15 +1571,15 @@
     [:map
      [:seon.db/tx-data :seon.store/transaction-data]
      [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
-  [{cluster :seon.cluster.loop/cluster
+  [{cluster :seon.turn.loop/cluster
     database :seon.db/db
-    evaluated :seon.cluster.loop/evaluated-sources
+    evaluated :seon.turn.loop/evaluated-sources
     :as request}]
   (let [id (::id request)
         staged-reply (stage-reply! (:seon.db/connection cluster) (::reply request))
         staged-evaluations
         (mapv (fn [{:keys [:seon.cluster.eval/ordinal
-                          :seon.cluster.loop/admitted-form
+                          :seon.turn.loop/admitted-form
                           :seon.sci.eval/evaluation]}]
                 (let [settled evaluation]
                   {:seon.cluster.eval/receipt
@@ -1587,7 +1587,7 @@
                                    {::id id
                                     :seon.cluster.eval/ordinal ordinal
                                     :seon.sci.eval/evaluation evaluation
-                                    :seon.cluster.loop/settlement-evaluation
+                                    :seon.turn.loop/settlement-evaluation
                                     settled})
                                   :seon.cluster.eval/at
                                   (:seon.cluster.eval/at evaluation)
@@ -1607,7 +1607,7 @@
         (merge (select-keys request [::id ::agent ::starting-ns ::opened-at ::closed-at])
                (dissoc staged-reply :seon.blob/staged-writes)
                {::sources (mapv (fn [item]
-                                  (let [form (:seon.cluster.loop/admitted-form item)]
+                                  (let [form (:seon.turn.loop/admitted-form item)]
                                     {:seon.cluster.eval/source (:seon.cluster.eval/source form)
                                      :seon.ns/name (resolve-namespace-name
                                                     database (:seon.cluster.eval/ns form))}))
@@ -2026,7 +2026,7 @@
   evaluated sources as one closed system turn with no provider attempt."
   {:malli/schema [:=> [:cat :seon.turn/system-request]
                   [:or :seon.turn/system-result :seon.error/value]]}
-  [{handle :seon.cluster.loop/cluster
+  [{handle :seon.turn.loop/cluster
     agent-id :seon.cluster.agent/id
     write? :seon.turn/write?}]
   (let [connection (:seon.db/connection handle)
@@ -2055,7 +2055,7 @@
             selected (filterv #(not= :unchanged (:seon.turn/status %)) plan)
             previews (mapv
                       #((requiring-resolve 'seon.cluster.loop/preview-sources)
-                        {:seon.cluster.loop/cluster handle
+                        {:seon.turn.loop/cluster handle
                          :seon.db/db database
                          :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                          :seon.cluster.agent/id agent-id
@@ -2065,10 +2065,10 @@
                       selected)]
         (or (some #(when (:seon.error/kind %) %) previews)
             (let [evaluated (mapv (fn [ordinal source preview]
-                                    (cond-> (assoc (first (:seon.cluster.loop/evaluated-sources preview))
+                                    (cond-> (assoc (first (:seon.turn.loop/evaluated-sources preview))
                                                    :seon.cluster.eval/ordinal ordinal)
                                       (:seon.cluster.eval/comment source)
-                                      (assoc-in [:seon.cluster.loop/admitted-form
+                                      (assoc-in [:seon.turn.loop/admitted-form
                                                  :seon.cluster.eval/comment]
                                                 (:seon.cluster.eval/comment source))))
                                   (range) selected previews)
@@ -2076,7 +2076,7 @@
                   (into {} (map (fn [source item]
                                   [(source-key source)
                                    (repl/text
-                                    (merge (:seon.cluster.loop/admitted-form item)
+                                    (merge (:seon.turn.loop/admitted-form item)
                                            (:seon.sci.eval/evaluation item)
                                            {:seon.ns/name (:seon.ns/name source)}))])
                                 selected evaluated))
@@ -2087,7 +2087,7 @@
               (if (and write? (seq evaluated))
                 (let [turn-id (next-id database (:seon.cluster/name handle) agent-id)
                       prepared (record-evaluated-tx
-                                {:seon.cluster.loop/cluster handle
+                                {:seon.turn.loop/cluster handle
                                  :seon.db/db database
                                  :seon.turn/id turn-id
                                  :seon.turn/agent [:seon.cluster.agent/id agent-id]
@@ -2098,7 +2098,7 @@
                                  (:seon.turn/opened-at (first previews))
                                  :seon.turn/closed-at
                                  (:seon.turn/closed-at (peek previews))
-                                 :seon.cluster.loop/evaluated-sources evaluated})
+                                 :seon.turn.loop/evaluated-sources evaluated})
                       report (blob/with-publication!
                               connection (:seon.blob/staged-writes prepared)
                               #(db/transact! connection (:seon.db/tx-data prepared)))]

@@ -252,7 +252,7 @@
                (let [deferred (work/deferred-triggers db agent-id)]
                  (when (seq deferred)
                    {:seon.cluster.agent/id agent-id
-                    :seon.cluster.work/episode-runs
+                    :seon.turn.work/episode-runs
                     (work/episode-runs db agent-id)
                     :seon.problems/deferred-count (count deferred)}))))
        vec))
@@ -493,7 +493,7 @@
     "deferred agents"
     (for [entry (:seon.problems/deferred-agents found)]
       (row "agent" (:seon.cluster.agent/id entry)
-           "episode runs" (:seon.cluster.work/episode-runs entry)
+           "episode runs" (:seon.turn.work/episode-runs entry)
            "deferred" (:seon.problems/deferred-count entry))))
    (family-section
     "unstewarded namespaces"
@@ -534,7 +534,7 @@
                " and revise the remaining plan from current facts."))
         (for [entry (:seon.problems/deferred-agents found)]
           (str "Agent " (:seon.cluster.agent/id entry) " has run "
-               (:seon.cluster.work/episode-runs entry)
+               (:seon.turn.work/episode-runs entry)
                " self-triggered runs since the last outside trigger; "
                (:seon.problems/deferred-count entry)
                " triggers are deferred until one arrives."))
@@ -578,7 +578,7 @@
         (for [entry (:seon.problems/deferred-agents found)]
           (str "seon.problems deferred-agent agent="
                (:seon.cluster.agent/id entry)
-               " episode-runs=" (:seon.cluster.work/episode-runs entry)
+               " episode-runs=" (:seon.turn.work/episode-runs entry)
                " deferred=" (:seon.problems/deferred-count entry)
                " (agent-sent triggers wait for an outside trigger)"))
         (for [entry (:seon.problems/unowned-namespaces found)]

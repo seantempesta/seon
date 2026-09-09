@@ -180,7 +180,7 @@
           (cluster/ensure-entity!
            connection
            (get-in first-instance
-                   [:seon.cluster.loop/cluster
+                   [:seon.turn.loop/cluster
                     :seon.db.process/id])
            {:seon.cluster.agent/id "restart-a"
             :seon.cluster/name cluster-name
@@ -250,7 +250,7 @@
                  (semantic-result
                   (authored-result @connection "restart-a" 14)))
               "a computed require changes lint and eval state for the next form")
-          (is (= :seon.cluster.loop/lint-rejected
+          (is (= :seon.turn.loop/lint-rejected
                  (:seon.error/kind
                   (semantic-result
                    (authored-result @connection "restart-a" 15))))
@@ -351,7 +351,7 @@
           (cluster/ensure-entity!
            connection
            (get-in second-instance
-                   [:seon.cluster.loop/cluster
+                   [:seon.turn.loop/cluster
                     :seon.db.process/id])
            {:seon.cluster.agent/id "restart-b"
             :seon.cluster/name cluster-name

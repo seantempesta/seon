@@ -14,7 +14,7 @@
                 :reference-at :inst,
                 :proc-request
                 [:map
-                 [:seon.cluster.loop/cluster :seon.cluster.loop/cluster]
+                 [:seon.turn.loop/cluster :seon.turn.loop/cluster]
                  [:seon.cluster.agent/id :seon.cluster.agent/id]
                  [:seon.schedule/channel :seon.flow/channel]],
                 :channel :seon.flow/channel,
@@ -25,7 +25,7 @@
                   :seon.operator/repository-root]
                  [:seon.operator/managed-root :seon.operator/managed-root]
                  [:seon.boot/log-dir :seon.boot/log-dir]
-                 [:seon.cluster.loop/cluster
+                 [:seon.turn.loop/cluster
                   :seon.schedule/execution-handle]],
                 :execution-handle
                 [:map

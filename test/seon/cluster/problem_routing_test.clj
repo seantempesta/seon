@@ -178,12 +178,12 @@
                  @connection
                  (:seon.problems/id problem)))
            "the ordinary loop shape emits no author-to-author message")
-       (is (= {:seon.cluster.work/form-state :unrouted-red
-               :seon.cluster.work/settled? false}
+       (is (= {:seon.turn.work/form-state :unrouted-red
+               :seon.turn.work/settled? false}
               (select-keys
                (work/form-settlement @connection "form-0")
-               [:seon.cluster.work/form-state
-                :seon.cluster.work/settled?]))
+               [:seon.turn.work/form-state
+                :seon.turn.work/settled?]))
            "the red problem still keeps its plan unsettled")))))
 
 (deftest historical-reds-are-outside-the-live-attempt-chain
@@ -244,7 +244,7 @@
                (my.message/decline
                 "planner" "problem-6" "The required contract is absent."))
      (let [settlement (work/plan-settlement @connection run-id)
-           forms (:seon.cluster.work/forms settlement)]
+           forms (:seon.turn.work/forms settlement)]
        (is (= [:unevaluated
                :running
                :succeeded
@@ -252,17 +252,17 @@
                :unrouted-red
                :owner-fixed
                :owner-declared-cant]
-              (mapv :seon.cluster.work/form-state forms)))
+              (mapv :seon.turn.work/form-state forms)))
        (is (= [false false true false false true true]
-              (mapv :seon.cluster.work/settled? forms)))
-       (is (false? (:seon.cluster.work/settled? settlement))
+              (mapv :seon.turn.work/settled? forms)))
+       (is (false? (:seon.turn.work/settled? settlement))
            "one unsettled form keeps the plan unsettled regardless of run state")
        (is (schema/valid-candidate-value?
-            :seon.cluster.work/plan-settlement settlement))
+            :seon.turn.work/plan-settlement settlement))
        (testing "closing the run cannot falsely settle its plan"
          (db/transact! connection
                      [[:db/add [:seon.turn/id run-id]
                        :seon.turn/closed-at now]])
          (is (false?
-              (:seon.cluster.work/settled?
+              (:seon.turn.work/settled?
                (work/plan-settlement @connection run-id)))))))))

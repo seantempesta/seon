@@ -82,7 +82,7 @@
       (finally (d/unlisten connection listener)))))
 
 (defn- create-agent! [instance agent-id]
-  (let [handle (:seon.cluster.loop/cluster instance)
+  (let [handle (:seon.turn.loop/cluster instance)
         connection (:seon.db/connection handle)]
     (schema/call-with-projection-state
      (:seon.sci.eval/projection-state handle)
@@ -95,7 +95,7 @@
                :seon.ns/name (symbol (str "my.agents.concurrency." agent-id))}))]
          (when (:seon.error/kind created)
            (throw (ex-info "Agent creation refused" created)))
-         (agent/arm! {:seon.cluster.loop/cluster handle
+         (agent/arm! {:seon.turn.loop/cluster handle
                       :seon.cluster.agent/routing
                       (:seon.cluster.agent/routing instance)
                       :seon.cluster.agent/id agent-id}))))))
@@ -108,11 +108,11 @@
          (fn [[instance agent-id]]
            (future
              (support/await-event! start "concurrent source submission release")
-             (let [handle (:seon.cluster.loop/cluster instance)
+             (let [handle (:seon.turn.loop/cluster instance)
                    connection (:seon.db/connection handle)
                    source (source-fn instance agent-id)
                    result (turn/virtual-turn!
-                           {:seon.cluster.loop/cluster handle
+                           {:seon.turn.loop/cluster handle
                             :seon.cluster.agent/routing
                             (:seon.cluster.agent/routing instance)
                             :seon.cluster.agent/id agent-id
@@ -182,11 +182,11 @@
                     :seon.sci.eval/projection-state
                     (:seon.sci.eval/projection-state ctx)
                     :seon.db.process/id cluster/boot-process-identity
-                    :seon.cluster.loop/stream-channel
+                    :seon.turn.loop/stream-channel
                     (async/chan (async/sliding-buffer 1))})]
        (swap! routing assoc :seon.cluster.agent/fault-channel faults)
        (try
-         (body {:seon.cluster.loop/cluster handle
+         (body {:seon.turn.loop/cluster handle
                 :seon.sci.eval/ctx ctx
                 :seon.cluster.agent/routing routing})
          (finally
@@ -196,8 +196,8 @@
            (flow/stop-work-launcher! launcher)
            (doseq [channel [faults (:seon.cluster.wake/channel handle)
                             (:seon.render/context-channel handle)
-                            (:seon.cluster.loop/completion handle)
-                            (:seon.cluster.loop/stream-channel handle)]]
+                            (:seon.turn.loop/completion handle)
+                            (:seon.turn.loop/stream-channel handle)]]
              (async/close! channel))))))))
 
 (deftest two-clusters-run-concurrent-agent-turns
@@ -231,7 +231,7 @@
                             subjects
                             (fn [instance id]
                               (pr-str (list 'str (str (:seon.cluster/name
-                                            (:seon.cluster.loop/cluster instance))
+                                            (:seon.turn.loop/cluster instance))
                                            "/" id "/" ordinal)))))]
                   (is (= 6 (count (::results wave))))
                   (doseq [result (::results wave)]

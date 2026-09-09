@@ -32,7 +32,7 @@
 
 (defn- custody-instance
   [cluster-name connection]
-  {:seon.cluster.loop/cluster
+  {:seon.turn.loop/cluster
    {:seon.env/environment
     (test-support/environment cluster-name connection)}})
 

@@ -42,14 +42,14 @@
                     [:seon.turn/id :seon.turn/id]
 
                     [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-                    [:seon.sci.eval/evaluation :seon.cluster.loop/evaluation]
-                    [:seon.cluster.loop/settlement-evaluation :seon.cluster.loop/evaluation]
+                    [:seon.sci.eval/evaluation :seon.turn.loop/evaluation]
+                    [:seon.turn.loop/settlement-evaluation :seon.turn.loop/evaluation]
                     [:seon.problems/form-problem {:optional true} :seon.problems/form-problem]
 
                     [:my.run/value {:optional true} :my.run/value]],
                    :record-evaluated-request
                    [:map
-                    [:seon.cluster.loop/cluster :seon.cluster.loop/cluster]
+                    [:seon.turn.loop/cluster :seon.turn.loop/cluster]
                     [:seon.db/db :seon.db/database-value]
                     [:seon.turn/id :seon.turn/id]
                     [:seon.turn/agent :seon.turn/agent]
@@ -57,9 +57,9 @@
                     [:seon.turn/reply :seon.turn/reply]
                     [:seon.turn/opened-at :seon.turn/opened-at]
                     [:seon.turn/closed-at :seon.turn/closed-at]
-                    [:seon.cluster.loop/evaluated-sources
+                    [:seon.turn.loop/evaluated-sources
                      [:vector
-                      [:and :seon.cluster.loop/evaluated-source
+                      [:and :seon.turn.loop/evaluated-source
                        [:map
                         [:seon.sci.eval/evaluation
                          [:map [:seon.cluster.eval/at :seon.cluster.eval/at]]]]]]]],
@@ -144,9 +144,9 @@
                     [:seon.turn/reply-size
                      {:optional true}
                      :seon.turn/reply-size]
-                    [:seon.cluster.work/situation
+                    [:seon.turn.work/situation
                      {:optional true}
-                     :seon.cluster.work/situation]
+                     :seon.turn.work/situation]
                     [:seon.turn/error
                      {:optional true}
                      :seon.turn/error]],
@@ -182,7 +182,7 @@
  :forms [:vector :seon.turn/form]
  :system-request
  [:map
-  [:seon.cluster.loop/cluster :seon.cluster.loop/cluster]
+  [:seon.turn.loop/cluster :seon.turn.loop/cluster]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.turn/write? {:optional true} :seon.turn/write?]]
  :system-result
@@ -196,7 +196,7 @@
   [:seon.cluster.agent/id :seon.cluster.agent/id]]
  :virtual-request
  [:map
-  [:seon.cluster.loop/cluster :seon.cluster.loop/cluster]
+  [:seon.turn.loop/cluster :seon.turn.loop/cluster]
   [:seon.cluster.agent/routing :seon.cluster.agent/routing]
   [:seon.cluster.agent/id :seon.cluster.agent/id]
   [:seon.cluster.reply/text {:optional true} :seon.cluster.reply/text]]}

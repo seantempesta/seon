@@ -224,8 +224,8 @@
                      [?declination :seon.cluster.message/to ?author]
                      [?declination :my.message/reason _]]
                    db evaluation-eid author-eid owner-eid)))]
-    {:seon.cluster.work/assignment? assignment?
-     :seon.cluster.work/declination? declination?}))
+    {:seon.turn.work/assignment? assignment?
+     :seon.turn.work/declination? declination?}))
 
 (defn form-settlement
   "One evaluation's exactly-one derived state at this database value.
@@ -236,11 +236,11 @@
   twin to join and no pair that can disagree."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.eval/id]
-                  :seon.cluster.work/form-settlement]}
+                  :seon.turn.work/form-settlement]}
   [db form-id]
   (let [evaluation (db/pull db '[*] [:seon.cluster.eval/id form-id])
         owner-id (form-owner db evaluation)
-        {:seon.cluster.work/keys [assignment? declination?]}
+        {:seon.turn.work/keys [assignment? declination?]}
         (assignment-facts db evaluation owner-id)
         started? (some? (:seon.cluster.eval/at evaluation))
         red? (and (terminal-receipt? evaluation) (red-receipt? evaluation))
@@ -265,8 +265,8 @@
              :seon.cluster.eval/ordinal
              (:seon.cluster.eval/ordinal evaluation)
              :seon.cluster.agent/id owner-id
-             :seon.cluster.work/form-state state
-             :seon.cluster.work/settled? settled?}
+             :seon.turn.work/form-state state
+             :seon.turn.work/settled? settled?}
       (:seon.problems/id evaluation)
       (assoc :seon.problems/id (:seon.problems/id evaluation)))))
 
@@ -274,7 +274,7 @@
   "Every form state and whether all forms of `run-id` are settled."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.turn/id]
-                  :seon.cluster.work/plan-settlement]}
+                  :seon.turn.work/plan-settlement]}
   [db run-id]
   (let [form-ids
         (db/q '[:find ?form-id ?ordinal
@@ -288,9 +288,9 @@
         forms (mapv (fn [[form-id _]] (form-settlement db form-id))
                     (sort-by second form-ids))]
     {:seon.turn/id run-id
-     :seon.cluster.work/forms forms
-     :seon.cluster.work/settled?
-     (every? :seon.cluster.work/settled? forms)}))
+     :seon.turn.work/forms forms
+     :seon.turn.work/settled?
+     (every? :seon.turn.work/settled? forms)}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The derivations
@@ -381,7 +381,7 @@
   derivation refilled when one was ANSWERED."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.agent/id]
-                  :seon.cluster.work/episode-runs]}
+                  :seon.turn.work/episode-runs]}
   [db agent-id]
   (or (db/q '[:find (count ?run) .
               :in $ ?agent-id ?since
@@ -480,11 +480,11 @@
   [db run agent-id]
   (let [run-id (:seon.turn/id run)]
     (if-let [ordinal (next-ordinal db run-id)]
-      {:seon.cluster.work/situation :resume
+      {:seon.turn.work/situation :resume
        :seon.turn/id run-id
        :seon.cluster.agent/id agent-id
        :seon.cluster.eval/ordinal ordinal}
-      {:seon.cluster.work/situation :close
+      {:seon.turn.work/situation :close
        :seon.turn/id run-id
        :seon.cluster.agent/id agent-id})))
 
@@ -492,11 +492,11 @@
   [db run agent-id]
   (let [run-id (:seon.turn/id run)]
     (if-let [ordinal (next-ordinal db run-id)]
-      {:seon.cluster.work/situation :resume
+      {:seon.turn.work/situation :resume
        :seon.turn/id run-id
        :seon.cluster.agent/id agent-id
        :seon.cluster.eval/ordinal ordinal}
-      {:seon.cluster.work/situation :generate
+      {:seon.turn.work/situation :generate
        :seon.turn/id run-id
        :seon.cluster.agent/id agent-id})))
 
@@ -516,8 +516,8 @@
   trigger simply derives no work — no consumer ever sees a decision to
   refuse."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.work/agent-request]
-                  [:maybe :seon.cluster.work/next]]}
+                       :seon.turn.work/agent-request]
+                  [:maybe :seon.turn.work/next]]}
   [db {:keys [:seon.cluster.agent/id]}]
   (let [agent-id id
         run (agent-run db agent-id)]
@@ -529,11 +529,11 @@
         (:seon.turn/plan-digest run)
         (fold-or-close db run agent-id)
 
-        (= :generate (:seon.cluster.work/situation run))
+        (= :generate (:seon.turn.work/situation run))
         (resume-or-generate db run agent-id)
 
-        (= :call (:seon.cluster.work/situation run))
-        {:seon.cluster.work/situation :call
+        (= :call (:seon.turn.work/situation run))
+        {:seon.turn.work/situation :call
          :seon.turn/id (:seon.turn/id run)
          :seon.cluster.agent/id agent-id}
 
@@ -547,7 +547,7 @@
       (let [wakes (openable-wakes db agent-id)]
         (when (seq wakes)
           (cond->
-           {:seon.cluster.work/situation :open
+           {:seon.turn.work/situation :open
             :seon.cluster.agent/id agent-id}
             (some :seon.cluster.message/id wakes)
             (assoc :seon.cluster.message/id
@@ -561,7 +561,7 @@
   because the rewake must never drift from the derivation it rewakes
   for."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.cluster.work/agent-request]
+                       :seon.turn.work/agent-request]
                   :boolean]}
   [db request]
   (some? (next-agent-work db request)))
@@ -625,9 +625,9 @@
   paid for twice), and a wake asserted DURING a turn has `:t` greater
   than that turn's and opens the next one.
 
-  TWO REQUEST KEYS, both declared. `:seon.cluster.work/answered?` `:any`
+  TWO REQUEST KEYS, both declared. `:seon.turn.work/answered?` `:any`
   includes answered wakes; absent means unanswered only.
-  `:seon.cluster.work/attributes` `:listened` binds EVERY listened
+  `:seon.turn.work/attributes` `:listened` binds EVERY listened
   attribute — what a context shows — while the default `:opening` binds
   only those that may open a turn. Binding the opening set in both modes
   is what made a schedule firing invisible to every derivation.
@@ -643,10 +643,10 @@
   reassertion moves its `:t` forward and re-opens a paid turn."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.cluster.agent/id
-                       :seon.cluster.work/wake-request]
+                       :seon.turn.work/wake-request]
                   [:vector :seon.wake/unanswered]]}
-  [db agent-id {answered? :seon.cluster.work/answered?
-                attributes :seon.cluster.work/attributes}]
+  [db agent-id {answered? :seon.turn.work/answered?
+                attributes :seon.turn.work/attributes}]
   (if-let [eid (agent-eid db agent-id)]
     (let [since (if (= :any answered?)
                   -1

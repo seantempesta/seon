@@ -158,8 +158,8 @@
           (is (some? (:seon.flow/fault-channel
                       (:seon.flow/error-fanout instance)))))
         (testing "the handle retains identity while AI settings stay live"
-          (let [handle (:seon.cluster.loop/cluster instance)]
-            (is (seon.schema/valid-candidate-value? :seon.cluster.loop/cluster
+          (let [handle (:seon.turn.loop/cluster instance)]
+            (is (seon.schema/valid-candidate-value? :seon.turn.loop/cluster
                                                     handle))
             (is (= "armed" (:seon.cluster/name handle)))
             (is (= "root" (:seon.config.error/escalate-to handle)))
@@ -202,8 +202,8 @@
                     [?run :seon.turn/id ?run-id]
                     [?run :seon.turn/closed-at ?closed-at]]
                   db (bootstrap/run-id "root")))))
-        (let [left-handle (:seon.cluster.loop/cluster left)
-              right-handle (:seon.cluster.loop/cluster right)
+        (let [left-handle (:seon.turn.loop/cluster left)
+              right-handle (:seon.turn.loop/cluster right)
               left-ctx (:seon.sci.eval/ctx left-handle)
               right-ctx (:seon.sci.eval/ctx right-handle)
               request
@@ -301,7 +301,7 @@
            (test-support/await-event! primed "boot arm prime")
            (db/transact!
             (:seon.db/connection
-             (:seon.cluster.loop/cluster request))
+             (:seon.turn.loop/cluster request))
             [{:seon.cluster.message/id "boot-window-message"
               :seon.cluster.message/to [:seon.cluster.agent/id "root"]
               :seon.cluster.message/content "answer during boot"
@@ -343,7 +343,7 @@
     "faulting"
     (fn [instance]
       (let [connection (:seon.boot/cluster-connection instance)
-            handle (:seon.cluster.loop/cluster instance)
+            handle (:seon.turn.loop/cluster instance)
             routing (:seon.cluster.agent/routing instance)
             entry (seon.cluster.agent/armed routing "root")
             graph (:seon.flow/graph entry)]
@@ -478,7 +478,7 @@
             (is (= ::first-cluster-proc-fault (:seon.error/kind fact)))
             (is (= :seon.cluster.agent/armer (:seon.error/proc fact)))
             (is (= (:seon.db.process/id
-                    (:seon.cluster.loop/cluster instance))
+                    (:seon.turn.loop/cluster instance))
                    (:seon.error/process fact))
                 "the first fault is durable with cluster provenance"))
           (finally

@@ -48,8 +48,8 @@
                [:map
                 [:seon.cluster.agent/id :seon.cluster.agent/id]
                 [:seon.turn/id :seon.turn/id]
-                [:seon.cluster.loop/evaluated-sources {:optional true}
-                 :seon.cluster.loop/evaluated-sources]
+                [:seon.turn.loop/evaluated-sources {:optional true}
+                 :seon.turn.loop/evaluated-sources]
                 [:seon.context.contribution/id :seon.context.contribution/id]],
                :comparison
                [:or
@@ -60,7 +60,7 @@
                 [:map
                  [:seon.context.comparison/status [:= :ready]]
                  [:seon.context.comparison/baseline-evaluations [:vector :seon.db/ref]]
-                 [:seon.cluster.loop/evaluated-sources :seon.cluster.loop/evaluated-sources]]
+                 [:seon.turn.loop/evaluated-sources :seon.turn.loop/evaluated-sources]]
                 [:map
                  [:seon.context.comparison/status [:= :ready]]
                  [:seon.context.comparison/baseline-evaluations

@@ -50,7 +50,7 @@
             run-id (bootstrap/run-id agent-id)
             run (db/pull @connection
                          '[:seon.turn/id
-                           :seon.cluster.work/situation
+                           :seon.turn.work/situation
                            :seon.turn/plan-digest
                            {:seon.cluster.eval/_run
                             [:seon.cluster.eval/ordinal
@@ -64,7 +64,7 @@
 
         (is (nil? (:seon.turn/plan-digest run))
             "a generated run has no frozen authored plan")
-        (is (= :generate (:seon.cluster.work/situation run)))
+        (is (= :generate (:seon.turn.work/situation run)))
         ;; ONE ENTITY PER (run, ordinal): the evaluations point AT the run,
         ;; and the run keeps no component mirror of that back-edge.
         (is (empty? (:seon.cluster.eval/_run run))
@@ -75,7 +75,7 @@
         (is (= (bootstrap/task-message)
                (get-in run [:seon.turn/trigger
                             :seon.cluster.message/content])))
-        (is (= {:seon.cluster.work/situation :generate
+        (is (= {:seon.turn.work/situation :generate
                 :seon.turn/id run-id
                 :seon.cluster.agent/id agent-id}
                (work/next-agent-work

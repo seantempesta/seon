@@ -2,8 +2,8 @@
                 :deferred-agent
                 [:map
                  [:seon.cluster.agent/id :seon.cluster.agent/id]
-                 [:seon.cluster.work/episode-runs
-                  :seon.cluster.work/episode-runs]
+                 [:seon.turn.work/episode-runs
+                  :seon.turn.work/episode-runs]
                  [:seon.problems/deferred-count [:int {:min 1}]]],
                 :error-signature
                 [:map

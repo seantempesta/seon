@@ -18,6 +18,16 @@ reload its callees or reapply instrumentation automatically.
 
 ## Problem
 
+2026-09-09, bounded turn-rename lane: default PID 77143's failed proc move
+left `seon.cluster.agent` unable to resolve the new `seon.turn/step` during
+development adoption. After the draft was stashed, MCP runtime status still
+refused `seon.cluster/readiness` output: its installed projection required
+`:seon.turn/episode-runs` while the reader returned the old work key.
+The namespace debug endpoint had returned HTTP 500. Fresh scratch adoption
+of the draft converged, so this is a live reload boundary; it is not limited
+to manual single-namespace REPL reload. Exact commits and source identities
+are recorded in the turn rename landing note. The owner controls recovery.
+
 `(require 'ns :reload)` reloads ONE namespace, not its dependencies. A live
 JVM can therefore end up with a NEW caller and an OLD callee, and the only
 symptom is a confusing failure deep inside the callee.

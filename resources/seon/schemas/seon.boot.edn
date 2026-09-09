@@ -68,9 +68,9 @@
              [:seon.boot/recovery-operations
               {:optional true}
               :seon.boot/recovery-operations]
-             [:seon.cluster.loop/cluster
+             [:seon.turn.loop/cluster
               {:optional true}
-              :seon.cluster.loop/cluster]
+              :seon.turn.loop/cluster]
              [:seon.flow/graph {:optional true} :seon.flow/graph]
              [:seon.flow/error-fanout
               {:optional true}

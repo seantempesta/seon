@@ -709,10 +709,10 @@
         candidate-count (admit/required-cap
                          (:seon.sci.admit/caps unit)
                          :seon.config.eval.result/max-nodes)
-        evaluated-sources (:seon.cluster.loop/evaluated-sources unit)]
+        evaluated-sources (:seon.turn.loop/evaluated-sources unit)]
     (if (some? evaluated-sources)
           (mapv
-           (fn [{form :seon.cluster.loop/admitted-form
+           (fn [{form :seon.turn.loop/admitted-form
                  evaluation :seon.sci.eval/evaluation
                  ordinal :seon.cluster.eval/ordinal}]
              (receipt-entry
@@ -760,7 +760,7 @@
   [unit]
   (let [db (:seon.db/db unit)
         agent-id (:seon.cluster.agent/id unit)
-        entries (if (or (some? (:seon.cluster.loop/evaluated-sources unit))
+        entries (if (or (some? (:seon.turn.loop/evaluated-sources unit))
                         (and db agent-id))
                   (candidate-history unit)
                   [])

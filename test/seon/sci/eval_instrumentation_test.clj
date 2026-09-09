@@ -27,7 +27,7 @@
                              :seon.boot/root root})]
         (try
           (let [connection (:seon.boot/cluster-connection instance)
-                handle (:seon.cluster.loop/cluster instance)]
+                handle (:seon.turn.loop/cluster instance)]
             (with-redefs
               [ai/complete
                (fn [request]

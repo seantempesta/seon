@@ -17,7 +17,7 @@
                   [:or :my.plan/component-view :seon.error/value]]}
   [cluster-name]
  (let [instance (get @seon.operator.runtime/running-instances cluster-name)
-      cluster (:seon.cluster.loop/cluster instance)
+      cluster (:seon.turn.loop/cluster instance)
       connection (:seon.db/connection cluster)
       process (:seon.db.process/id cluster)]
   (seon.schema/call-with-projection-state

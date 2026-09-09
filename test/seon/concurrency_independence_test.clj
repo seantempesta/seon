@@ -187,7 +187,7 @@
 
 (defn- pause-scenario-mailboxes!
   [instance specs]
-  (let [handle (:seon.cluster.loop/cluster instance)
+  (let [handle (:seon.turn.loop/cluster instance)
         routing (:seon.cluster.agent/routing instance)
         quiesced (async/promise-chan)]
     ;; The armer channel orders this request after the creation wake. Its
@@ -208,7 +208,7 @@
   [instance specs]
   (let [connection (:seon.boot/cluster-connection instance)
         database @connection
-        process (get-in instance [:seon.cluster.loop/cluster
+        process (get-in instance [:seon.turn.loop/cluster
                                   :seon.db.process/id])
         now (Date.)
         run-tx
@@ -239,7 +239,7 @@
 (defn- fold-scenario-runs!
   [instance specs]
   (let [connection (:seon.boot/cluster-connection instance)
-        handle (:seon.cluster.loop/cluster instance)
+        handle (:seon.turn.loop/cluster instance)
         process (:seon.db.process/id handle)
         work-items
         (mapv
@@ -248,7 +248,7 @@
                             @connection
                             {:seon.cluster.agent/id (::agent-id spec)
                              :seon.db.process/id process})]
-             (is (= :resume (:seon.cluster.work/situation work-item))
+             (is (= :resume (:seon.turn.work/situation work-item))
                  "a caller-planned run begins at the resume boundary")
              work-item))
          specs)
@@ -260,21 +260,21 @@
         (async/>!!
          completed
          (try
-           {:seon.cluster.loop/report
-            (loop/turn {:seon.cluster.loop/cluster handle
-                        :seon.cluster.work/next work-item}
+           {:seon.turn.loop/report
+            (loop/turn {:seon.turn.loop/cluster handle
+                        :seon.turn.work/next work-item}
                        (Date.))}
            (catch Throwable failure
-             {:seon.cluster.loop/failure failure})))))
+             {:seon.turn.loop/failure failure})))))
     (.countDown start)
     (dotimes [_ (count work-items)]
       (let [outcome
             (await-channel! completed "concurrent planned fold")
-            report (:seon.cluster.loop/report outcome)]
-        (is (nil? (:seon.cluster.loop/failure outcome))
-            (some-> (:seon.cluster.loop/failure outcome) Throwable->map pr-str))
-        (is (= :closed (:seon.cluster.loop/outcome report)))
-        (is (= form-count (:seon.cluster.loop/forms-run report)))))))
+            report (:seon.turn.loop/report outcome)]
+        (is (nil? (:seon.turn.loop/failure outcome))
+            (some-> (:seon.turn.loop/failure outcome) Throwable->map pr-str))
+        (is (= :closed (:seon.turn.loop/outcome report)))
+        (is (= form-count (:seon.turn.loop/forms-run report)))))))
 
 (defn- await-runs-closed
   [connection run-ids]
@@ -543,7 +543,7 @@
   (let [connection (:seon.boot/cluster-connection instance)
         specs (scenario-specs scenario agent-count (Date.))
         run-ids (mapv ::run-id specs)
-        process (get-in instance [:seon.cluster.loop/cluster
+        process (get-in instance [:seon.turn.loop/cluster
                                   :seon.db.process/id])
         started (System/nanoTime)]
     (create-scenario-agents! instance specs)

@@ -1450,7 +1450,7 @@
               (binding [db/*read-evidence-sink* observed]
                 (let [evaluated
                       (loop/preview-sources
-                       {:seon.cluster.loop/cluster (:seon.cluster.loop/cluster request)
+                       {:seon.turn.loop/cluster (:seon.turn.loop/cluster request)
                         :seon.db/db database
                         :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
                         :seon.cluster.agent/id agent-id
@@ -1471,7 +1471,7 @@
             evidence
             (into (db/read-evidence @observed {:seon.db/retain-read-results? true})
                   (mapcat #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
-                  (:seon.cluster.loop/evaluated-sources preview))
+                  (:seon.turn.loop/evaluated-sources preview))
             ;; ONE STORE OF THE EVALUATION. The invocation entry is the cache
             ;; keyed by code and input (ruling 71), so the evaluated forms and
             ;; their rendered bytes live there and nowhere else; the call entry
@@ -1778,7 +1778,7 @@
             :seon.sci.eval/time-limit-ms
             (:seon.config.eval/time-limit-ms handle)
             :seon.config/on-core-error (:seon.config/on-core-error handle)
-            :seon.cluster.loop/cluster handle
+            :seon.turn.loop/cluster handle
             :seon.cluster.agent/routing
             (:seon.cluster.agent/routing handle)
             :seon.render/retained-calls retained-calls
@@ -1811,7 +1811,7 @@
           (when-let [agent-id (:seon.cluster.agent/id debug-request)]
             (debug-prompt db connection agent-id caps
                           (assoc handle :seon.render/profile profile
-                                        :seon.cluster.loop/cluster handle))))
+                                        :seon.turn.loop/cluster handle))))
         program-identity
         (debug-program-identity db (:seon.sci.eval/ctx handle))
         page
@@ -1949,7 +1949,7 @@
 
 (defn- retained-interest
   [state]
-  (let [cache @(render/shared-cache (get-in state [:seon.cluster.loop/cluster :seon.sci.eval/ctx]))
+  (let [cache @(render/shared-cache (get-in state [:seon.turn.loop/cluster :seon.sci.eval/ctx]))
         calls (concat (vals (::calls cache))
                       (vals (::ai-calls cache)))
         interest (reduce (fn [interest retained]
@@ -2182,7 +2182,7 @@
   [service database registration-key]
   (let [projection (sci.kernel/context-projection (:seon.sci.eval/ctx service))
         connection (:seon.store/connection-object service)
-        handle (merge service (:seon.cluster.loop/cluster service)
+        handle (merge service (:seon.turn.loop/cluster service)
                       {:seon.db/connection connection
                        :seon.render.web/root-agent-id
                        (:seon.render.web/root-agent-id service
@@ -2223,7 +2223,7 @@
   (let [watched (watched-registration-keys
                  (:seon.render.web/registration state))
         cache (render/shared-cache
-               (get-in state [:seon.cluster.loop/cluster :seon.sci.eval/ctx]))]
+               (get-in state [:seon.turn.loop/cluster :seon.sci.eval/ctx]))]
     (swap! cache
            (fn [retained]
              (-> retained
@@ -2319,16 +2319,16 @@
   and a repair keyframe assembled from bytes already serialized by this proc."
   ([state]
    (render-pass state
-                @(-> state :seon.cluster.loop/cluster :seon.db/connection)
+                @(-> state :seon.turn.loop/cluster :seon.db/connection)
                 true false))
   ([state database derive-all?]
    (render-pass state database derive-all? false))
   ([state database derive-all? invalidate-calls?]
   (schema/call-with-projection
    (sci.kernel/context-projection
-    (get-in state [:seon.cluster.loop/cluster :seon.sci.eval/ctx]))
+    (get-in state [:seon.turn.loop/cluster :seon.sci.eval/ctx]))
    (fn []
-  (let [handle (:seon.cluster.loop/cluster state)
+  (let [handle (:seon.turn.loop/cluster state)
         cache (render/shared-cache (:seon.sci.eval/ctx handle))
         state (merge state (select-keys @cache [::calls ::ai-calls ::invocations ::packages]))
         registration (:seon.render.web/registration state)
@@ -2458,7 +2458,7 @@
 (defn- change-context
   "Run the requested ordinary turn operation on the calling thread."
   [request]
-  (let [cluster (:seon.cluster.loop/cluster request request)
+  (let [cluster (:seon.turn.loop/cluster request request)
         connection (:seon.db/connection cluster)
         action (:seon.render/context-action request)
         function (case action
@@ -2468,7 +2468,7 @@
         prepared (merge cluster request
                         {:seon.db/db @connection
                          :seon.db/connection connection
-                         :seon.cluster.loop/cluster cluster
+                         :seon.turn.loop/cluster cluster
                          :seon.cluster.agent/routing
                          (:seon.cluster.agent/routing cluster)})
         result (turn-function-result
@@ -2627,8 +2627,8 @@
    (let [ports {::interest (:seon.render.web/render-channel args)
                 ::runtime-eval
                 (:seon.render.web/runtime-eval-channel args)
-                ::stream (:seon.cluster.loop/stream-channel
-                          (:seon.cluster.loop/cluster args))
+                ::stream (:seon.turn.loop/stream-channel
+                          (:seon.turn.loop/cluster args))
                 ::pages (:seon.render.web/pages-channel args)
                 ::latest-packages (:seon.render.web/latest-packages args)
                 ::render-interest (:seon.render.web/interest args)}]
@@ -2643,8 +2643,8 @@
           ::flow/in-ports
           {::interest (:seon.render.web/render-channel args)
            ::runtime-eval (:seon.render.web/runtime-eval-channel args)
-           ::stream (:seon.cluster.loop/stream-channel
-                     (:seon.cluster.loop/cluster args))}
+           ::stream (:seon.turn.loop/stream-channel
+                     (:seon.turn.loop/cluster args))}
           ::flow/out-ports
           {::pages (:seon.render.web/pages-channel args)}
           ::streams {}
@@ -2677,7 +2677,7 @@
                  ::runtime-eval (invalidate-runtime-derived-state state)
                  state)
          connection (:seon.db/connection
-                     (:seon.cluster.loop/cluster state))
+                     (:seon.turn.loop/cluster state))
          floor (::coalesce-ms state 0)
          elapsed-ms (quot (- (System/nanoTime)
                              (long (::last-pass-nanos state)))
@@ -3251,7 +3251,7 @@
                  nil)
         result (if action
                  (render/acquire-context!
-                  (merge service (:seon.cluster.loop/cluster service)
+                  (merge service (:seon.turn.loop/cluster service)
                   {:seon.db/connection (:seon.store/connection-object service)
                    :seon.render/context-action action
                    :seon.cluster.agent/id (get-in request [:path-params :id])

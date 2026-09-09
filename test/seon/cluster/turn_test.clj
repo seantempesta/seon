@@ -126,7 +126,7 @@
         completion (async/promise-chan)
         cluster-handle (assoc cluster-handle
                               :seon.render/context-channel context-channel
-                              :seon.cluster.loop/stream-channel stream-channel)
+                              :seon.turn.loop/stream-channel stream-channel)
         graph
         (flow.core/create-flow
          {:procs
@@ -144,7 +144,7 @@
               :seon.render.web/latest-packages (atom {})
               :seon.render.web/completion completion
               :seon.render.web/root-agent-id "agent-a"
-              :seon.cluster.loop/cluster cluster-handle})}}
+              :seon.turn.loop/cluster cluster-handle})}}
           :conns []
           :io-exec
           (cluster/projection-executor
@@ -273,7 +273,7 @@
   ([_connection agent-id]
    {:seon.cluster.agent/id agent-id
     :seon.db.process/id process
-    :seon.cluster.work/now (Date.)}))
+    :seon.turn.work/now (Date.)}))
 
 (defn- agent-ids
   "Every agent in facts, oldest name first.
@@ -302,8 +302,8 @@
 
         (when-let [work (any-agent-work connection)]
           (when (< passes limit)
-            (cluster.loop/turn {:seon.cluster.loop/cluster cluster
-                                :seon.cluster.work/next work}
+            (cluster.loop/turn {:seon.turn.loop/cluster cluster
+                                :seon.turn.work/next work}
                                now)
             (recur (inc passes))))))))
 
@@ -319,9 +319,9 @@
           (recur (inc passes)
                  (conj reports
                        (cluster.loop/turn
-                        {:seon.cluster.loop/cluster cluster
-                         :seon.cluster.work/next work}
-                        (:seon.cluster.work/now request)))))))))
+                        {:seon.turn.loop/cluster cluster
+                         :seon.turn.work/next work}
+                        (:seon.turn.work/now request)))))))))
 
 (deftest a-prose-prefixed-contracted-defn-settles-and-doc-answers
   (with-cluster
@@ -353,7 +353,7 @@
                         [?receipt :seon.cluster.eval/output ?output]]
                       @connection)]
             (is (= [:open :call]
-                   (mapv :seon.cluster.work/situation reports)))
+                   (mapv :seon.turn.work/situation reports)))
             (is (= "[:=> [:cat [:sequential :map]] [:or :map]]"
                    (:seon.fn/spec row)))
             (is (= "Return the row with the greatest :example/amount, or {} for empty input."
@@ -373,9 +373,9 @@
           (recur (inc passes)
                  (conj reports
                        (cluster.loop/turn
-                        {:seon.cluster.loop/cluster cluster
-                         :seon.cluster.work/next work}
-                        (:seon.cluster.work/now request)))))))))
+                        {:seon.turn.loop/cluster cluster
+                         :seon.turn.work/next work}
+                        (:seon.turn.work/now request)))))))))
 
 (deftest function-install-reads-the-case-count-from-cluster-facts
   (with-cluster
@@ -399,7 +399,7 @@
                 cases (db/q '[:find [?n ...]
                               :where [_ :seon.test.accretion/case-count ?n]]
                             @connection)]
-            (is (= :closed (:seon.cluster.loop/outcome (last reports))))
+            (is (= :closed (:seon.turn.loop/outcome (last reports))))
             (is (string? (:seon.fn/spec installed)))
             (is (= [3] cases))))))))
 
@@ -421,7 +421,7 @@
                                     "(reduce + widgets)))")})]
           (let [reports (drive! cluster 10)]
             (is (= [:open :call]
-                   (mapv :seon.cluster.work/situation reports))
+                   (mapv :seon.turn.work/situation reports))
                 "open, model, then ONE fold — the whole plan over one ctx")
             (testing "the receipts carry what sci actually produced"
               (let [results (into {}
@@ -943,7 +943,7 @@
                            [?error :seon.error/id _]]
                          db)]
                 (is (= [:open :call]
-                       (mapv :seon.cluster.work/situation reports))
+                       (mapv :seon.turn.work/situation reports))
                     "the refusal closes in its terminal pass")
                 (is (= 1 (count receipts)))
                 (is (run/terminal? (first receipts)))
@@ -995,7 +995,7 @@
                   (if next-turn?
                     (do
                       (is (= [:open :call]
-                             (mapv :seon.cluster.work/situation next-reports)))
+                             (mapv :seon.turn.work/situation next-reports)))
                       (is (= 2 (count @calls)))
                       (is (str/includes?
                            (:seon.ai/prompt (second @calls))
@@ -1865,9 +1865,9 @@
              :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]})]))
         (let [report
               (cluster.loop/turn
-               {:seon.cluster.loop/cluster cluster
-                :seon.cluster.work/next
-                {:seon.cluster.work/situation :resume
+               {:seon.turn.loop/cluster cluster
+                :seon.turn.work/next
+                {:seon.turn.work/situation :resume
                  :seon.turn/id route-run
                  :seon.cluster.agent/id "agent-a"
                  :seon.cluster.eval/ordinal 0}}
@@ -1880,7 +1880,7 @@
                           [?receipt :seon.cluster.eval/run ?run]]
                         @connection route-run)
                    (sort-by :seon.cluster.eval/ordinal))]
-          (is (= 2 (:seon.cluster.loop/forms-run report))
+          (is (= 2 (:seon.turn.loop/forms-run report))
               "the batch evaluated the sibling after the red form")
           (is (string? (:seon.cluster.eval/error (first receipts)))
               "the red form settles as a flat error on its own eval")
@@ -1921,7 +1921,7 @@
               (is (empty? (work/unanswered-triggers @connection "agent-a"))))
             (testing "and the terminal resume closes without another pass"
               (is (= [:open :call]
-                     (mapv :seon.cluster.work/situation reports))))
+                     (mapv :seon.turn.work/situation reports))))
             (testing "every form got exactly one terminal receipt"
               (is (= 2 (count (db/q '[:find ?e :where
                                      [?e :seon.cluster.eval/ordinal _]]
@@ -2050,7 +2050,7 @@
                   @connection run-id)]
         (testing "the unreadable outcome is one form with one receipt"
           (is (= [:open :call]
-                 (vec (take 2 (mapv :seon.cluster.work/situation reports))))
+                 (vec (take 2 (mapv :seon.turn.work/situation reports))))
               "the batched turn closes the run in its own step after the
                single settlement transaction")
           (is (= 1
@@ -2141,7 +2141,7 @@
           (let [connection (:seon.db/connection cluster)
                 reports (drive! cluster 10)]
             (is (= [:open :call]
-                   (mapv :seon.cluster.work/situation reports))
+                   (mapv :seon.turn.work/situation reports))
                 "no separate close pass — the disposition closed it")
             (is (some? (db/q '[:find ?closed .
                               :where [_ :seon.turn/closed-at ?closed]]
@@ -2178,7 +2178,7 @@
                      :seon.cluster.eval/output "combined output\n"
                      :seon.program/row row}]
             (is (= [:open :call]
-                   (mapv :seon.cluster.work/situation
+                   (mapv :seon.turn.work/situation
                          (drive-agent! cluster "agent-a" 10))))
             (let [receipt
                   (db/q '[:find (pull ?receipt
@@ -2242,10 +2242,10 @@
           (let [connection (:seon.db/connection cluster)
                 reports (drive! cluster 12)]
             (is (= [:open :call]
-                   (mapv :seon.cluster.work/situation reports))
+                   (mapv :seon.turn.work/situation reports))
                 "three passes and then IDLE — no separate close pass")
             (is (= [:released :closed]
-                   (mapv :seon.cluster.loop/outcome reports)))
+                   (mapv :seon.turn.loop/outcome reports)))
             (is (nil? (work/next-agent-work @connection (request connection)))
                 "and nothing is derivable afterwards: no spin")
             (is (empty? (db/q '[:find ?e :where [?e :seon.error/kind _]]
@@ -2924,7 +2924,7 @@
                                   :seon.cluster.eval/result-edn
                                   (pr-str asked)}]
             (is (= [:open :call]
-                   (mapv :seon.cluster.work/situation
+                   (mapv :seon.turn.work/situation
                          (drive-agent! cluster "agent-a" 10))))
             (let [terminal-txs
                   (db/q '[:find [?tx ...]
@@ -3006,12 +3006,12 @@
             requests (atom [])]
         ;; pass 1: open + claim (the busy fence before the expensive part)
         (let [work (work/next-agent-work @connection (request connection))]
-          (is (= :open (:seon.cluster.work/situation work)))
-          (cluster.loop/turn {:seon.cluster.loop/cluster cluster
-                              :seon.cluster.work/next work}
+          (is (= :open (:seon.turn.work/situation work)))
+          (cluster.loop/turn {:seon.turn.loop/cluster cluster
+                              :seon.turn.work/next work}
                              (Date.)))
         (testing "the held run derives :call for its holder ONLY"
-          (is (= :call (:seon.cluster.work/situation
+          (is (= :call (:seon.turn.work/situation
                         (work/next-agent-work @connection (request connection)))))
           )
         ;; the rest of the interleaving, arbitrarily later — there is
@@ -3064,8 +3064,8 @@
       (fn [cluster]
         (let [connection (:seon.db/connection cluster)
               open-work (work/next-agent-work @connection (request connection))
-              _ (cluster.loop/turn {:seon.cluster.loop/cluster cluster
-                                    :seon.cluster.work/next open-work}
+              _ (cluster.loop/turn {:seon.turn.loop/cluster cluster
+                                    :seon.turn.work/next open-work}
                                    now)
               call-work (work/next-agent-work @connection (request connection))
               run-id (:seon.turn/id call-work)
@@ -3093,8 +3093,8 @@
                         (throw (ex-info "cut after intent" {:process-cut true}))
                         outcome)))]
                  (cluster.loop/turn
-                  {:seon.cluster.loop/cluster cluster
-                   :seon.cluster.work/next call-work}
+                  {:seon.turn.loop/cluster cluster
+                   :seon.turn.work/next call-work}
                   now))))
           (let [run-row (db/pull @connection
                                  [:seon.turn/reply
@@ -3117,8 +3117,8 @@
       (fn [cluster]
         (let [connection (:seon.db/connection cluster)
               open-work (work/next-agent-work @connection (request connection))
-              _ (cluster.loop/turn {:seon.cluster.loop/cluster cluster
-                                    :seon.cluster.work/next open-work}
+              _ (cluster.loop/turn {:seon.turn.loop/cluster cluster
+                                    :seon.turn.work/next open-work}
                                    now)
               call-work (work/next-agent-work @connection (request connection))
               run-id (:seon.turn/id call-work)
@@ -3138,8 +3138,8 @@
                                                    {:process-cut true}))
                                    result)))]
                  (cluster.loop/turn
-                  {:seon.cluster.loop/cluster cluster
-                   :seon.cluster.work/next call-work}
+                  {:seon.turn.loop/cluster cluster
+                   :seon.turn.work/next call-work}
                   now))))
           (is (= 2 @evaluations))
           (is (= [0 1 2] (unsettled-ordinals @connection run-id)))
@@ -3184,8 +3184,8 @@
               read-sources reply/sources
               evaluate sci.eval/evaluate]
           (cluster.loop/turn
-           {:seon.cluster.loop/cluster cluster
-            :seon.cluster.work/next
+           {:seon.turn.loop/cluster cluster
+            :seon.turn.work/next
             (work/next-agent-work @connection (request connection))}
            now)
           (let [call-work (work/next-agent-work @connection
@@ -3203,8 +3203,8 @@
                               (swap! eval-nanos + (- (System/nanoTime) started))
                               result))]
               (cluster.loop/turn
-               {:seon.cluster.loop/cluster cluster
-                :seon.cluster.work/next call-work}
+               {:seon.turn.loop/cluster cluster
+                :seon.turn.work/next call-work}
                now))
             (let [elapsed (- (System/nanoTime) (or @reply-arrived started))
                   bookkeeping-ms (/ (double (- elapsed @eval-nanos)) 1000000.0)
@@ -3397,8 +3397,8 @@
               report
               (with-redefs [bootstrap/next-entry (constantly nil)]
                 (cluster.loop/turn
-                 {:seon.cluster.loop/cluster cluster
-                  :seon.cluster.work/next generated}
+                 {:seon.turn.loop/cluster cluster
+                  :seon.turn.work/next generated}
                  now))]
           ;; A GENERATED RUN THAT HAS NOTHING LEFT TO GENERATE IS FINISHED.
           ;; The `:generate` -> `:call` edge is deleted: it was written by
@@ -3406,7 +3406,7 @@
           ;; and no production path reached it — `generated-run-tx`'s only
           ;; caller is `bootstrap/seed-tx`, whose run id always makes
           ;; `generate-turn`'s bootstrap? arm true.
-          (is (= :closed (:seon.cluster.loop/outcome report)))
+          (is (= :closed (:seon.turn.loop/outcome report)))
           (is (inst? (:seon.turn/closed-at
                       (db/pull @connection [:seon.turn/closed-at]
                                [:seon.turn/id run-id]))))
@@ -3466,17 +3466,17 @@
               report
               (with-redefs [bootstrap/next-entry (constantly failure)]
                 (cluster.loop/turn
-                 {:seon.cluster.loop/cluster cluster
-                  :seon.cluster.work/next generated}
+                 {:seon.turn.loop/cluster cluster
+                  :seon.turn.work/next generated}
                  now))
               run-state
               (db/pull @connection
-                       [:seon.cluster.work/situation
+                       [:seon.turn.work/situation
                         :seon.turn/closed-at
                         :seon.turn/error]
                        [:seon.turn/id run-id])]
-          (is (= :error (:seon.cluster.loop/outcome report)))
-          (is (not= :call (:seon.cluster.work/situation run-state)))
+          (is (= :error (:seon.turn.loop/outcome report)))
+          (is (not= :call (:seon.turn.work/situation run-state)))
           (is (some? (:seon.turn/closed-at run-state)))
           (is (= (:seon.error/message failure)
                  (:seon.turn/error run-state))))))))
@@ -3487,7 +3487,7 @@
       (let [connection (:seon.db/connection cluster)
             sequence-number (atom 0)
             cluster (assoc cluster :seon.config.error/escalate-to "root")
-            run-phases (schema/enum-members :seon.cluster.loop/phase)]
+            run-phases (schema/enum-members :seon.turn.loop/phase)]
         (db/transact! connection [(agent-row "root")])
         (test-support/assert-check!
          (tc/quick-check
@@ -3501,7 +3501,7 @@
                                     (name failed-phase))
                            :seon.error/message
                            (str "injected " (name failed-phase) " failure")
-                           :seon.error/data {:seon.cluster.loop/phase
+                           :seon.error/data {:seon.turn.loop/phase
                                              failed-phase}}]
               (db/transact!
                connection
@@ -3521,8 +3521,8 @@
                    :seon.cluster.eval/at now})))
               (let [settled
                     (cluster.loop/settle!
-                     (cond-> {:seon.cluster.loop/cluster cluster
-                              :seon.cluster.loop/now now
+                     (cond-> {:seon.turn.loop/cluster cluster
+                              :seon.turn.loop/now now
                               :seon.cluster.agent/id "agent-a"
                               :seon.turn/id run-id
                               :seon.error/value failure}
@@ -3615,13 +3615,13 @@
         (with-redefs [ai/complete
                       (recording-completer requests [{:seon.ai/text "unused"}])]
           (let [report (cluster.loop/turn
-                        {:seon.cluster.loop/cluster cluster
-                         :seon.cluster.work/next
-                         {:seon.cluster.work/situation :call
+                        {:seon.turn.loop/cluster cluster
+                         :seon.turn.work/next
+                         {:seon.turn.work/situation :call
                           :seon.turn/id "run-untriggered"
                           :seon.cluster.agent/id "agent-a"}}
                         (Date.))]
-            (is (= :error (:seon.cluster.loop/outcome report))
+            (is (= :error (:seon.turn.loop/outcome report))
                 "the turn ends as a value — the throw never escapes")))
         (is (empty? @requests) "no provider call without a prompt")
         (is (empty? (attempt-rows @connection)) "and no attempt row")
@@ -3641,9 +3641,9 @@
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
         (let [work (work/next-agent-work @connection (request connection))]
-          (is (= :open (:seon.cluster.work/situation work)))
-          (cluster.loop/turn {:seon.cluster.loop/cluster cluster
-                              :seon.cluster.work/next work}
+          (is (= :open (:seon.turn.work/situation work)))
+          (cluster.loop/turn {:seon.turn.loop/cluster cluster
+                              :seon.turn.work/next work}
                              (Date.)))
         (db/transact! connection
                       [{:seon.cluster.message/id "m-2"
@@ -3658,9 +3658,9 @@
                         {:seon.ai/text "(my.run/complete \"B settled\")"}])]
           (let [call-a (work/next-agent-work @connection
                                              (request connection))]
-            (is (= :call (:seon.cluster.work/situation call-a)))
-            (cluster.loop/turn {:seon.cluster.loop/cluster cluster
-                                :seon.cluster.work/next call-a}
+            (is (= :call (:seon.turn.work/situation call-a)))
+            (cluster.loop/turn {:seon.turn.loop/cluster cluster
+                                :seon.turn.work/next call-a}
                                (Date.)))
           (let [prompt-a (:seon.ai/prompt (first @requests))]
             (is (str/includes? prompt-a "count the widgets"))
@@ -3671,17 +3671,17 @@
                  construction from A's opening database value"))
           (let [open-b (work/next-agent-work @connection
                                              (request connection))]
-            (is (= :open (:seon.cluster.work/situation open-b)))
+            (is (= :open (:seon.turn.work/situation open-b)))
             (is (= "m-2" (:seon.cluster.message/id open-b))
                 "the next derived work is the run triggered by B")
-            (cluster.loop/turn {:seon.cluster.loop/cluster cluster
-                                :seon.cluster.work/next open-b}
+            (cluster.loop/turn {:seon.turn.loop/cluster cluster
+                                :seon.turn.work/next open-b}
                                (Date.)))
           (let [call-b (work/next-agent-work @connection
                                              (request connection))]
-            (is (= :call (:seon.cluster.work/situation call-b)))
-            (cluster.loop/turn {:seon.cluster.loop/cluster cluster
-                                :seon.cluster.work/next call-b}
+            (is (= :call (:seon.turn.work/situation call-b)))
+            (cluster.loop/turn {:seon.turn.loop/cluster cluster
+                                :seon.turn.work/next call-b}
                                (Date.)))
           (is (= 2 (count @requests)))
           (let [prompt-b (:seon.ai/prompt (second @requests))]
@@ -3741,7 +3741,7 @@
                           :seon.render.web/interest (atom :all)
                           :seon.render.web/completion completion
                           :seon.render.web/root-agent-id "root"
-                          :seon.cluster.loop/cluster cluster})}}
+                          :seon.turn.loop/cluster cluster})}}
                 :conns []})
         {:keys [report-chan error-chan]} (flow.core/start graph)]
     (async/go-loop [] (when (async/<! report-chan) (recur)))
@@ -3790,7 +3790,7 @@
   (with-cluster fake-evaluate
     (fn [cluster]
       (let [stream-channel (async/chan (async/sliding-buffer 1))
-            cluster (assoc cluster :seon.cluster.loop/stream-channel
+            cluster (assoc cluster :seon.turn.loop/stream-channel
                            stream-channel)
             connection (:seon.db/connection cluster)
             proc (render-proc-for cluster)
@@ -3801,7 +3801,7 @@
             (let [basis-before (:max-tx @connection)
                   reports (drive! cluster 10)]
               (is (= [:open :call]
-                     (mapv :seon.cluster.work/situation reports))
+                     (mapv :seon.turn.work/situation reports))
                   "an ordinary turn — a streamed call and a one-shot
                    call return the same completion value")
 
@@ -3887,7 +3887,7 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             stream-channel (async/chan (async/sliding-buffer 1))
-            cluster (assoc cluster :seon.cluster.loop/stream-channel
+            cluster (assoc cluster :seon.turn.loop/stream-channel
                            stream-channel)]
         ;; a second agent with a trigger of its own
         (db/transact! connection
@@ -4023,8 +4023,8 @@
                          outcome
                          (try
                            (cluster.loop/turn
-                            {:seon.cluster.loop/cluster cluster
-                             :seon.cluster.work/next work}
+                            {:seon.turn.loop/cluster cluster
+                             :seon.turn.work/next work}
                             (Date.))
                            (catch Throwable throwable throwable))))
                       "turn-projection-regression")]
@@ -4038,7 +4038,7 @@
             (let [report (deref outcome 0 ::never-delivered)]
               (is (not (instance? Throwable report))
                   (str "the turn threw on a bare thread: " (pr-str report)))
-              (is (= :open (:seon.cluster.work/situation report))
+              (is (= :open (:seon.turn.work/situation report))
                   "the pass ran the situation the work derived"))
             (is (zero? @derivations)
                 (str "the turn rebuilt the schema projection "

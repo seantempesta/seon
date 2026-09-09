@@ -17,8 +17,8 @@
                       [:seon.agent/settings {:optional true} :seon.agent/settings]],
                      :arm-request
                      [:map
-                      [:seon.cluster.loop/cluster
-                       :seon.cluster.loop/cluster]
+                      [:seon.turn.loop/cluster
+                       :seon.turn.loop/cluster]
                       [:seon.cluster.agent/id :seon.cluster.agent/id]
                       [:seon.cluster.agent/routing
                        :seon.cluster.agent/routing]],
@@ -28,14 +28,14 @@
                       [:seon.cluster.agent/eid :int]
                       [:seon.flow/graph :seon.flow/graph]
                       [:seon.cluster.wake/channel :seon.flow/channel]
-                      [:seon.cluster.loop/completion
+                      [:seon.turn.loop/completion
                        :seon.flow/channel]
                       [:seon.cluster.agent/turn-stopped
                        :seon.flow/channel]],
                      :blueprint-request
                      [:map
-                      [:seon.cluster.loop/cluster
-                       :seon.cluster.loop/cluster]
+                      [:seon.turn.loop/cluster
+                       :seon.turn.loop/cluster]
                       [:seon.cluster.agent/id :seon.cluster.agent/id]],
                      :count [:int {:min 0}],
                      :creation-request
@@ -83,8 +83,8 @@
                       seon.flow/atom-reference?],
                      :source-submission-request
                      [:map
-                      [:seon.cluster.loop/cluster
-                       :seon.cluster.loop/cluster]
+                      [:seon.turn.loop/cluster
+                       :seon.turn.loop/cluster]
                       [:seon.cluster.agent/routing
                        :seon.cluster.agent/routing]
                       [:seon.cluster.agent/id :seon.cluster.agent/id]

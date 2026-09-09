@@ -33,7 +33,7 @@
     (let [unit {:seon.render/value
                 {:seon.oversight/agents
                  [(merge {:seon.cluster.agent/id "observed"
-                          :seon.cluster.work/episode-runs 0}
+                          :seon.turn.work/episode-runs 0}
                          observations)]
                  :seon.oversight/plumbing
                  [(oversight/proc-ping :delayed nil)]}}
@@ -104,7 +104,7 @@
     (fn [instance]
       (let [db @(:seon.boot/cluster-connection instance)
             caps (:seon.sci.admit/caps
-                  (:seon.cluster.loop/cluster instance))
+                  (:seon.turn.loop/cluster instance))
             built (oversight/unit {:seon.db/db db
                                    :seon.sci.admit/caps caps})
             value (:seon.render/value built)
@@ -123,7 +123,7 @@
           (is (not-any? #(contains? % :seon.oversight/state)
                         (concat (:seon.oversight/agents value) plumbing))
               "the process-local story carries presence, not an enum")
-          (is (nat-int? (:seon.cluster.work/episode-runs root))
+          (is (nat-int? (:seon.turn.work/episode-runs root))
               "a new outside wake may already have reset the episode count")
           (doseq [occupancy (keep root [:seon.oversight/mailbox
                                        :seon.oversight/turn-buffer])]
@@ -155,10 +155,10 @@
                    {:seon.oversight/agents
                     [{:seon.cluster.agent/id "agent-b"
                       :seon.turn/id "run-3"
-                      :seon.cluster.work/episode-runs 3}
+                      :seon.turn.work/episode-runs 3}
                      {:seon.cluster.agent/id "agent-c"
                       :seon.oversight/turn-passes 0
-                      :seon.cluster.work/episode-runs 0}]}}))))
+                      :seon.turn.work/episode-runs 0}]}}))))
         (testing "the seeded block reaches the real root-page wire"
           (let [^HttpResponse response (fetch-root instance)
                 body (.body response)]

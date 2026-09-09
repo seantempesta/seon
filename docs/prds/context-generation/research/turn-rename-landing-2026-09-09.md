@@ -1230,3 +1230,106 @@ cold-write portion of 5.2 remain committed and green.
 All owned runner, adoption, probe and shutdown shells exited. The interrupted
 run root was removed after its coordinator and worker were confirmed absent;
 the log and exact snapshot identity above remain available.
+
+## Slice 6(a) — schema identities only (started 2026-09-09 09:53 UTC)
+
+Deadline 10:23 UTC. Entering HEAD `4584f8cd3`; inherited untracked `build/`,
+`workers/`, and `config/virtual-turns.edn` are excluded. The preceding draft
+`430e96c63` was read as quarry, never applied.
+
+The schema families move to `:seon.turn.loop/*` and `:seon.turn.work/*`.
+Keeping their existing suffixes and separate families preserves distinct
+contracts such as loop evaluation forms versus work settlement forms.
+Resource filenames follow their declared namespace. This sub-slice retains
+the Clojure namespace owners and the agent proc; no namespace merge is
+claimed. For 6(b), PRD §0c explicitly requires **one owner `seon.turn`** for
+work plus loop; §16's public controls already live there. A new
+`seon.turn.loop` Clojure namespace would not complete that ruled owner move.
+
+Dependency ledger: canonical schema population and resource placement are
+owned by `src/seon/schema/edn.clj:260`, `:303`, `:348`; the schema bridge is
+`src/seon/schema/datahike.clj:231`. Datahike executes `:db.fn/call` against
+the current transaction database at
+`reference-code/datahike/src/datahike/db/transaction.cljc:1152`.
+The canonical test fixture supplies the complete population and real SCI
+context; `test/seon/cluster/agent_test.clj` owns the actual graph regression.
+
+Inherited live probe: default PID 77143 remains alive. MCP JVM evaluation
+answers and its database still declares `:seon.cluster.work/situation`.
+MCP runtime status refuses `seon.cluster/readiness` output because the
+partially adopted schema expects `:seon.turn/episode-runs` while its reader
+returns the old key. This is the preceding adoption boundary, not a new
+schema-slice verdict. Default lifecycle remains untouched.
+
+Fixture corrections required by the full agent gate: real SCI now supplies
+shown text instead of the old source-pattern stand-in; generated wakes may
+coalesce, so the assertions count qualifying reply-bearing turns and require
+every original wake answered. The deleted trigger-fence regression is removed.
+Prompt refusal is explicitly injected at its boundary and tested against the
+agent settings component's turn bound. Missing config rows are supplied from
+the canonical compiler. The actual armer graph now receives the fixture's
+projection executor and error fanout, as production does; without those,
+created agents existed in facts but never armed. Every armer wait is bounded
+and teardown joins before temporary Vars are restored.
+
+A deliberate exception from the install gate is a core fault: the real Flow
+error channel carries it and the failed transform retains its backstop.
+The former test incorrectly required it to impersonate a settled evaluation;
+the revised regression asserts the live fault, the unfinished evaluation,
+and the active backstop. No production exception behavior changes here.
+
+Fresh scratch `turn-schema`, PID 552, published source
+`6aa12ddb-30ac-5801-ad78-ce01b470963a`, boots with no-provider true before
+the committed `turn_schema_fresh_probe_2026_09_09.clj` seeds Juniper's
+settings component and fixture. Immediate seed result: zero attempts and
+zero faults; later probe: four Juniper evaluations and zero attempts.
+Stored schema census contains `:seon.turn.work/situation` and no old
+loop/work namespace identities. Debug HTTP: **200 / 42,914 bytes /
+0.863878 seconds**. Health remains degraded with one errored evaluation;
+this is schema/HTTP evidence, not a clean-health or browser-paint claim.
+
+The first full isolated run measured **58 tests / 324 assertions**, with
+11 assertion failures confined to three stale counting tests. The separate
+platform gate passed **83 / 490**. A follow-up preparation caught a wrong
+arity in the new fixture's `seon.id/digest` call; it now supplies the
+declared length and parts, and clj-kondo reports zero errors. Final gates
+are recorded below. These are this lane's fixture errors, not foreign work.
+
+The owned scratch operator reported PID 552 terminated and flock free;
+its root was removed after the process table confirmed exit. The exact
+no-provider manifest is committed beside the seed probe as
+`turn_schema_no_provider_2026_09_09.edn`.
+
+**RESET NEEDED for the schema-identity commit.** The stored situation key
+and the registry identities change; this is not a migration of existing
+branches. The committed `turn_schema_identity_probe_2026_09_09.clj` compares
+the accepted old EDN to the new EDN after only namespace substitution:
+**31 loop declarations and 13 work declarations**, structurally identical.
+
+The final remaining counterexample was a fixture transaction refusal:
+`:seon.error/process` is stored as a string, but a new fixture row supplied
+a keyword. The subsequent `about` lookup and opening therefore also refused.
+The cap test needs only an about reference, so the unrelated fault row was
+removed and the about ref points at the existing message. Every prior wake
+then participates in the intended bound test. The next turn retains the
+oldest pending message as provenance and answers coalesced wakes together.
+Evidence: `tmp/turn-schema-cap-probe.log`; the maintained agent regression
+reproduces the desired behavior without that temporary diagnostic wrapper.
+
+Final harness correction: test namespaces load before worker contract arming
+(`src/seon/test/arm.clj:236`). A namespace-level captured evaluator therefore
+cannot prove the armed evaluation boundary. `with-connection` now acquires
+the current armed evaluator at execution time; both ordinary real evaluation
+and observation wrappers delegate through it. The final gate after this
+correction, not an earlier captured-function result, is the commit proof.
+
+Final current-bytes isolated gate completed at 10:21:45 UTC, before the
+10:23:16 deadline: **58 tests / 324 assertions, zero failures/errors**
+(`seon.cluster.loop-test`, `seon.cluster.work-test`,
+`seon.cluster.agent-test`). Separate `--platform`: **83 / 490, zero
+failures/errors**. Both used `SEON_TEST_WORKERS=1` and exited successfully.
+The successful runner roots removed themselves. Commit recording followed
+context compaction at 10:24 UTC; no implementation continued past the bound.
+This commit owns the schema identity replacement, all its readers, the
+canonical agent fixture corrections above, and these evidence artifacts.
+The production namespace move remains sub-slice (b).

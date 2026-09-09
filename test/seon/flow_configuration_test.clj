@@ -99,7 +99,7 @@
                   ;; production caller: the blueprint is pure data, but its
                   ;; declared request is the handle a running cluster owns.
                   (seon.cluster.agent/graph-definition
-                   {:seon.cluster.loop/cluster
+                   {:seon.turn.loop/cluster
                     (test-support/cluster-handle
                      {:seon.env/environment environment
                       :seon.db/connection connection

@@ -89,7 +89,7 @@
         cluster (assoc cluster
                        :seon.env/environment @test-environment
                        :seon.render/context-channel context-channel
-                       :seon.cluster.loop/stream-channel stream-channel)
+                       :seon.turn.loop/stream-channel stream-channel)
         graph
         (flow.core/create-flow
          {:procs
@@ -107,7 +107,7 @@
               :seon.render.web/interest (atom :all)
               :seon.render.web/completion completion
               :seon.render.web/root-agent-id "planner"
-              :seon.cluster.loop/cluster cluster})}}
+              :seon.turn.loop/cluster cluster})}}
           :conns []})
         {:keys [report-chan error-chan]} (flow.core/start graph)]
     (async/go-loop [] (when (async/<! report-chan) (recur)))
@@ -241,11 +241,11 @@
                               @connection
                               {:seon.cluster.agent/id agent-id
                                :seon.db.process/id process
-                               :seon.cluster.work/now at}))
+                               :seon.turn.work/now at}))
                            (agent-ids @connection))]
             (when work
-              (cluster.loop/turn {:seon.cluster.loop/cluster cluster
-                                  :seon.cluster.work/next work}
+              (cluster.loop/turn {:seon.turn.loop/cluster cluster
+                                  :seon.turn.work/next work}
                                  at)
               (recur (inc passes))))))
       (let [event
@@ -377,8 +377,8 @@
   [db run-id]
   (into {}
         (map (juxt :seon.cluster.eval/ordinal
-                   :seon.cluster.work/form-state))
-        (:seon.cluster.work/forms (work/plan-settlement db run-id))))
+                   :seon.turn.work/form-state))
+        (:seon.turn.work/forms (work/plan-settlement db run-id))))
 
 (defn- ambiguous-identities
   "Identity strings this database gives to more than one entity.
@@ -577,7 +577,7 @@
 
          (testing "the plan is NOT settled, and no agent's completion
                    can make it so"
-           (is (false? (:seon.cluster.work/settled?
+           (is (false? (:seon.turn.work/settled?
                         (work/plan-settlement db run-id))))
            (is (some? (db/q '[:find ?closed .
                              :in $ ?run-id
@@ -652,7 +652,7 @@
              "the unbound-var result is red at the one admission gate and
               routes like any other red form — no string matching, and no
               run completing on a value that references nothing")
-         (is (false? (:seon.cluster.work/settled?
+         (is (false? (:seon.turn.work/settled?
                       (work/plan-settlement db run-id)))))))))
 
 (deftest a-silent-owner-leaves-the-plan-unsettled-forever
@@ -690,7 +690,7 @@
                        [?m :seon.cluster.message/content ?content]]
                      db))
              "the planner said it was finished")
-         (is (false? (:seon.cluster.work/settled?
+         (is (false? (:seon.turn.work/settled?
                       (work/plan-settlement db run-id)))
              "and the facts contradict it — an unsettled routed problem
               keeps the plan open no matter what the reply says")

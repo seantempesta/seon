@@ -44,16 +44,16 @@
                        :seon.config.error/recurrence-limit 3
                        :seon.config.message/max-chain 8})
              request {:seon.cluster.agent/id agent-id}
-             step! #(loop/turn {:seon.cluster.loop/cluster cluster
-                                :seon.cluster.work/next %} now)]
+             step! #(loop/turn {:seon.turn.loop/cluster cluster
+                                :seon.turn.work/next %} now)]
          (is (nil? (:seon.config.ai/no-provider
                     (ai/agent-overlay @connection agent-id))))
          (is (nil? (:seon.config.ai/no-provider
                     (config/effective @connection cluster-name))))
-         (is (= :open (:seon.cluster.work/situation
+         (is (= :open (:seon.turn.work/situation
                         (work/next-agent-work @connection request))))
          (step! (work/next-agent-work @connection request))
-         (is (= :call (:seon.cluster.work/situation
+         (is (= :call (:seon.turn.work/situation
                         (work/next-agent-work @connection request))))
          (step! (work/next-agent-work @connection request))
          (is (= [:seon.ai/no-credential]
@@ -71,7 +71,7 @@
                          :seon.cluster.message/to [:seon.cluster.agent/id agent-id]
                          :seon.cluster.message/content "Configuration repaired; try again."
                          :seon.cluster.message/at now}])
-         (is (= :open (:seon.cluster.work/situation
+         (is (= :open (:seon.turn.work/situation
                         (work/next-agent-work @connection request)))))))))
 
 (deftest settings-select-a-real-virtual-turn-without-provider-attempts
@@ -115,9 +115,9 @@
                      :seon.config.error/recurrence-limit 3
                      :seon.config.message/max-chain 8})
            report (loop/turn
-                   {:seon.cluster.loop/cluster cluster
-                    :seon.cluster.work/next
-                    {:seon.cluster.work/situation :call
+                   {:seon.turn.loop/cluster cluster
+                    :seon.turn.work/next
+                    {:seon.turn.work/situation :call
                      :seon.cluster.agent/id agent-id
                      :seon.turn/id turn-id}} now)
            database @connection]

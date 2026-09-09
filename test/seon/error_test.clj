@@ -178,11 +178,11 @@
           {:seon.cluster.reply/unreadable "["
           :seon.error/kind :seon.cluster.reply/unreadable
            :seon.error/message "unreadable"}
-          {:seon.cluster.loop/phase-failed true
-          :seon.error/kind :seon.cluster.loop/phase-failed
+          {:seon.turn.loop/phase-failed true
+          :seon.error/kind :seon.turn.loop/phase-failed
            :seon.error/message "phase failed"}
-          {:seon.cluster.loop/lint-rejected true
-          :seon.error/kind :seon.cluster.loop/lint-rejected
+          {:seon.turn.loop/lint-rejected true
+          :seon.error/kind :seon.turn.loop/lint-rejected
            :seon.error/message "lint rejected"}
           {:seon.operator/collection-incomplete true
           :seon.error/kind :seon.operator/collection-incomplete
@@ -203,7 +203,7 @@
   same class, buildable without a store."
   []
   (let [connection (atom nil)
-        state {:seon.cluster.loop/cluster {:seon.db/connection connection}
+        state {:seon.turn.loop/cluster {:seon.db/connection connection}
                :seon.cluster.agent/turns 7}]
     (reset! connection state)
     state))
@@ -212,7 +212,7 @@
   "Shape 1 — a transform threw (`impl.clj:312-316`). The only shape
   carrying `:op` and `:msg`."
   [throwable]
-  {::flow/pid :seon.cluster.loop/loop
+  {::flow/pid :seon.turn.loop/loop
    ::flow/status :running
    ::flow/state (cyclic-state)
    ::flow/count 12
@@ -226,7 +226,7 @@
   "Shape 2 — anything else in the proc loop threw (`impl.clj:317-320`).
   No `:cid`, no `:msg`, no `:op`."
   [throwable]
-  {::flow/pid :seon.cluster.loop/loop
+  {::flow/pid :seon.turn.loop/loop
    ::flow/status :running
    ::flow/state (cyclic-state)
    ::flow/count 12
@@ -237,7 +237,7 @@
   no `:state`, no `:count`."
   [throwable]
   {::flow/ex throwable
-   ::flow/pid :seon.cluster.loop/loop
+   ::flow/pid :seon.turn.loop/loop
    ::flow/cid :wake
    ::flow/xform :some-xform})
 
@@ -476,11 +476,11 @@
         two (error/normalize (request (proc-loop-error throwable)))
         three (error/normalize (request (xform-error throwable)))]
     (testing "a transform throw carries pid, op and cid"
-      (is (= :seon.cluster.loop/loop (:seon.error/proc one)))
+      (is (= :seon.turn.loop/loop (:seon.error/proc one)))
       (is (= :step (:seon.error/op one)))
       (is (= :wake (:seon.error/cid one))))
     (testing "a proc-loop throw carries neither op nor cid — absence is the state"
-      (is (= :seon.cluster.loop/loop (:seon.error/proc two)))
+      (is (= :seon.turn.loop/loop (:seon.error/proc two)))
       (is (not (contains? two :seon.error/op)))
       (is (not (contains? two :seon.error/cid))))
     (testing "an xform throw carries cid but no op"

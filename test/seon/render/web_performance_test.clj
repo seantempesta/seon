@@ -23,7 +23,7 @@
                     :seon.config.eval/time-limit-ms 1000
                     :seon.config/on-core-error :panic
                     :seon.db.process/id "web-performance-test"}
-            state {:seon.cluster.loop/cluster handle
+            state {:seon.turn.loop/cluster handle
                    :seon.render.web/registration
                    (atom {"agent-a" 1 "agent-b" 1})
                    :seon.render.web/latest-packages (atom {})

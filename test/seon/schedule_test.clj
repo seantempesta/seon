@@ -71,7 +71,7 @@
    :seon.config.maintenance/min-usable-ratio 0.01
    :seon.config.maintenance/log-max-bytes 1024
    :seon.config.maintenance/log-retained-files 2
-   :seon.cluster.loop/cluster
+   :seon.turn.loop/cluster
    (test-support/cluster-handle
     {:seon.cluster/name "default"
      :seon.db.process/id "schedule-test-process"
@@ -159,7 +159,7 @@
                        :seon.fn/sym
                        :seon.schedule.fire/nominal-at
                        :seon.schedule.fire/observed-at)
-               (dissoc (execution-context) :seon.cluster.loop/cluster)))))))
+               (dissoc (execution-context) :seon.turn.loop/cluster)))))))
 
 (deftest each-firing-is-one-wake-that-opens-no-turn
   ;; THE CLASS: a recurrence definition is not an event. Claiming the
@@ -233,7 +233,7 @@
             nominal-at (instant "2025-04-05T12:34:00Z")
             fire-id (id/digest 12 [:seon.schedule.fire/id task-id nominal-at])
             request
-            (merge (dissoc (execution-context) :seon.cluster.loop/cluster)
+            (merge (dissoc (execution-context) :seon.turn.loop/cluster)
                    {:seon.schedule.task/id task-id
                     :seon.schedule.fire/id fire-id
                     :seon.cluster.agent/id "root"
@@ -312,7 +312,7 @@
                    environment)
            definition
            (agent/graph-definition
-            {:seon.cluster.loop/cluster handle
+            {:seon.turn.loop/cluster handle
              :seon.cluster.agent/id "root"})]
        (is (= #{::agent/mailbox ::agent/turn ::agent/schedule}
               (set (keys (:procs definition)))))))))

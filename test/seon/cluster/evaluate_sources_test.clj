@@ -65,7 +65,7 @@
                            :seon.sci.eval/ctx base
                            :seon.cluster.wake/channel channel
                            :seon.render/context-channel channel
-                           :seon.cluster.loop/completion channel
+                           :seon.turn.loop/completion channel
                            :seon.sci.admit/caps (config/result-caps defaults)
                            :seon.config.eval/time-limit-ms 2000
                            :seon.config/on-core-error :panic})
@@ -100,7 +100,7 @@
                         (db/transact! connection [{:seon.cluster.agent/id "later-agent"}]))
                       result))]
                  (loop/evaluate-sources
-                  {:seon.cluster.loop/cluster cluster
+                  {:seon.turn.loop/cluster cluster
                    :seon.db/db database
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
                    :seon.cluster.agent/id "preview-batch-agent"
@@ -117,7 +117,7 @@
            (is (string? (get-in (last outcomes) [:seon.sci.eval/evaluation :seon.cluster.eval/error])))
            (is (= (range 7) (map :seon.cluster.eval/ordinal outcomes)))
            (is (= [:seon.ns/name 'preview.batch-next]
-                  (get-in (nth outcomes 2) [:seon.cluster.loop/admitted-form :seon.cluster.eval/ns])))
+                  (get-in (nth outcomes 2) [:seon.turn.loop/admitted-form :seon.cluster.eval/ns])))
            (is (every? #(= (db/basis-t database)
                            (get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/read-basis-transaction])) outcomes))
            (is (seq (get-in (first outcomes) [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence])))
@@ -139,7 +139,7 @@
                                      {:seon.turn/id "active-during-add"
                                       :seon.turn/agent [:seon.cluster.agent/id "preview-batch-agent"]
                                       :seon.turn/opened-at closed-at})))))
-           (let [request {:seon.cluster.loop/cluster cluster
+           (let [request {:seon.turn.loop/cluster cluster
                           :seon.db/db database
                           :seon.turn/id "saved-preview"
                           :seon.turn/agent [:seon.cluster.agent/id "preview-batch-agent"]
@@ -147,7 +147,7 @@
                           :seon.turn/reply raw-source
                           :seon.turn/opened-at opened-at
                           :seon.turn/closed-at closed-at
-                          :seon.cluster.loop/evaluated-sources outcomes}
+                          :seon.turn.loop/evaluated-sources outcomes}
                  prepared (run/record-evaluated-tx request)
                  _refusal (is (:seon.error/kind
                                (db/transact! connection (:seon.db/tx-data prepared))))
