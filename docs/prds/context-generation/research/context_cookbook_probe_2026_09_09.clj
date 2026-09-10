@@ -48,18 +48,18 @@
     '(seon.db/q '[:find ?a (count ?e) :in $ [?a ...] :where [?e ?a _]] database [:example/order :example/customer :example/amount])]
    ["Root agents" "I should select all agents with q and shape each record with inner pull."
     '(seon.db/q '[:find [(pull ?a [:seon.agent/id {:seon.agent/plan [{:my.plan/current-step [:my.plan.item/title]}]}]) ...] :where [?a :seon.agent/id]] database)]
-   ["Orders" "I should read order ids, customers, and amounts before completing the query step."
+   ["Orders" "I should read order ids, customers, and amounts before completing the read step."
     '(seon.db/q '[:find ?id ?customer ?amount :where [?e :example/order ?id] [?e :example/customer ?customer] [?e :example/amount ?amount]] database)]
    ["Customer totals" "I should group by customer and sum amounts rather than add the rows myself."
     '(seon.db/q '[:find ?customer (sum ?amount) :where [?e :example/customer ?customer] [?e :example/amount ?amount]] database)]])
 
 (def writes
   [["Add a step" "I should upsert by the plan's identity; an identity-less nested map would silently replace the component."
-    '[{:my.plan/agent [:seon.agent/id "juniper"] :my.plan/steps [{:my.plan.item/id "juniper/verify" :my.plan.item/title "Verify the new total" :my.plan.item/done-when "The fresh sum includes the new order." :my.plan.item/position 6}]}]]
+    '[{:my.plan/agent [:seon.agent/id "juniper"] :my.plan/steps [{:my.plan.item/id "juniper/verify" :my.plan.item/title "Verify the new total" :my.plan.item/done-when "The fresh sum includes the new order." :my.plan.item/position 7}]}]]
    ["Complete a step" "I have seen the query result; with no clock function, I record completion as a ref to datomic.tx."
-    '[[:db/add [:my.plan.item/id "juniper/query"] :my.plan.item/completed-tx "datomic.tx"]]]
-   ["Make current" "I should make the aggregate step current after completing the query."
-    '[[:db/add [:my.plan/agent [:seon.agent/id "juniper"]] :my.plan/current-step [:my.plan.item/id "juniper/aggregate"]]]]
+    '[[:db/add [:my.plan.item/id "juniper/read"] :my.plan.item/completed-tx "datomic.tx"]]]
+   ["Make current" "I should make the define step current after completing the query."
+    '[[:db/add [:my.plan/agent [:seon.agent/id "juniper"]] :my.plan/current-step [:my.plan.item/id "juniper/define"]]]]
    ["Remove a step" "I should use retractEntity to remove the item and incoming refs; retracting only the component edge leaves an orphan."
     '[[:db.fn/retractEntity [:my.plan.item/id "juniper/verify"]]]]
    ["Send a message" "I should include an event identity when I transact a message to root."
@@ -71,7 +71,7 @@
    ["Declare a listen" "I should add an attribute pattern to my runtime listens."
     '[{:seon.runtime/agent [:seon.agent/id "juniper"] :seon.runtime/listens [{:seon.listen/attribute :example/amount}]}]]
    ["Transact a note" "I should save the verified query result as a note linked to its step."
-    '[{:my.note/id "juniper/orders-observed" :my.note/agent [:seon.agent/id "juniper"] :my.note/about [:my.plan.item/id "juniper/query"] :my.note/content "Read four orders; next compute customer totals."}]]])
+    '[{:my.note/id "juniper/orders-observed" :my.note/agent [:seon.agent/id "juniper"] :my.note/about [:my.plan.item/id "juniper/read"] :my.note/content "Read four orders; next compute customer totals."}]]])
 
 (defn- proposed-database [database]
   (let [attribute (fn [ident value-type & [properties]]
@@ -159,23 +159,23 @@
          ["Target messages, reverse pull" "I should read root's incoming messages through seon.message/_to."
           '(seon.db/pull database '[{:seon.message/_to [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]} {:seon.message/about [:seon.message/id]}]}] [:seon.agent/id "root"])]
          ["Completion instant" "I should derive the completion instant from its transaction ref."
-          '(seon.db/pull database '[:my.plan.item/id {:my.plan.item/completed-tx [:db/txInstant]}] [:my.plan.item/id "juniper/query"])]
+          '(seon.db/pull database '[:my.plan.item/id {:my.plan.item/completed-tx [:db/txInstant]}] [:my.plan.item/id "juniper/read"])]
          ["Removal verification" "I should verify the deleted item is absent, not merely detached from the plan."
           '(seon.db/pull database [:my.plan.item/id] [:my.plan.item/id "juniper/verify"])]
-         ["Plan membership after removal" "I should see the original six steps and the new current step after removing my probe item."
+         ["Plan membership after removal" "I should see the original seven steps and the new current step after removing my probe item."
           '(seon.db/pull database '[{:my.plan/current-step [:my.plan.item/id]} {:my.plan/steps [:my.plan.item/id :my.plan.item/position]}] [:my.plan/agent [:seon.agent/id "juniper"]])]
          ["Handled question" "I should verify the question carries the transaction that handled it."
           '(seon.db/pull database '[:seon.message/id {:seon.message/read-tx [:db/txInstant]}] [:seon.message/id "c00cb000"])]
          ["Settings preservation" "I should see my changed time limit alongside the untouched overrides."
           '(seon.db/pull database [:seon.config.eval/time-limit-ms :seon.config.ai/no-provider :seon.config.run/max-episode-runs] [:seon.config/agent [:seon.agent/id "juniper"]])]
-         ["Saved note" "I should see my saved note linked to the query step."
+         ["Saved note" "I should see my saved note linked to the read step."
           '(seon.db/pull database '[:my.note/id :my.note/content {:my.note/about [:my.plan.item/id]}] [:my.note/id "juniper/orders-observed"])]]
         results (mapv (fn [[title thought form]]
                         (let [output (pr-str ((eval (list 'fn ['database] form)) after))]
                           {:title title :thought thought :form (pr-str form)
                            :output output :bytes (byte-count output)})) forms)
         face (report-face (d/with initial [[:db/add [:my.plan/agent [:seon.agent/id "juniper"]]
-                                            :my.plan/current-step [:my.plan.item/id "juniper/aggregate"]]]))
+                                            :my.plan/current-step [:my.plan.item/id "juniper/define"]]]))
         path "docs/prds/context-generation/research/context_cookbook_proposed_reads_2026_09_09.edn"]
     (spit path (pr-str {:reads results :recursive-report face}))
     (spit "docs/prds/context-generation/research/context-cookbook-2026-09-09.md"

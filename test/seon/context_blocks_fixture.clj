@@ -31,19 +31,20 @@
    {:example/order "c1" :example/customer "Cy" :example/amount 40}])
 
 (def instruction
-  "Which customer has the largest total? Add an order of 40 for them and tell me the new total.")
+  "Find the customer with the largest order total with a contracted function and a test, add an order of 40 for them, and tell me the customer and both totals.")
 
 (def authored-plan
-  (let [steps [["query" "Query the orders" "I have read the order ids, customers, and amounts."]
-               ["aggregate" "Find the customer with the largest total" "A grouped sum query identifies the customer and their total."]
-               ["transact" "Add an order of 40 for that customer" "The transaction result identifies the new order."]
-               ["requery" "Read the customer's new total" "A fresh grouped sum query includes the new order."]
-               ["reply" "Tell root the customer and new total" "The sent message contains the customer and verified new total."]
-               ["done" "Finish the session" "All preceding plan items are complete."]]]
+  (let [steps [["read" "Read the orders" "A query over :example/order entities has returned their :example/order ids, :example/customer values, and :example/amount values."]
+               ["define" "Define `largest-customer` with a `:malli/schema` contract (rows → `{:customer :total}`)" "A query finds the :seon.fn row for largest-customer with :seon.fn/spec present."]
+               ["test" "Write a `deftest` over the fixture data and run it" "After (my.test/run), a query finds the :seon.test row's last result with a positive :seon.test/pass-count, zero :seon.test/fail-count, and zero :seon.test/error-count."]
+               ["save" "Run it and save the answer" "A query finds a :my.note entity linked to Juniper whose :my.note/content records the customer and original total returned by largest-customer."]
+               ["add" "Add an order of 40 for that customer" "A query finds the new :example/order entity with that :example/customer and :example/amount 40."]
+               ["again" "Run it again and record the new total" "A query finds the :my.note entity's :my.note/content carrying the customer and both totals, with the new total verified by calling largest-customer on freshly queried orders."]
+               ["report" "Report and finish" "A query finds the :seon.message from Juniper to root containing the customer and both verified totals; after (my.agent/done), session state shows the session closed."]]]
     {:db/id "juniper-plan"
      :my.plan/agent [:seon.agent/id "juniper"]
      :my.plan/objective instruction
-     :my.plan/current-step "fixture-juniper/query"
+     :my.plan/current-step "fixture-juniper/read"
      :my.plan/steps
      (mapv (fn [position [id title criterion]]
              (cond-> {:db/id (str "fixture-juniper/" id)
@@ -86,7 +87,7 @@
                            :seon.config/agent agent-eid
                            :seon.config.ai/no-provider true
                            :seon.config.eval/time-limit-ms 10000
-                           :seon.config.run/max-episode-runs 20}}
+                           :seon.config.run/max-episode-runs 30}}
                          {:seon.message/id (id/id (random-uuid) 8) :seon.message/from [:seon.agent/id "root"] :seon.message/to [:seon.agent/id "juniper"] :seon.message/content instruction :seon.message/inbox [:seon.agent/id "juniper"]}]))))]]))
   {:seon.test/orders (count orders)})
 

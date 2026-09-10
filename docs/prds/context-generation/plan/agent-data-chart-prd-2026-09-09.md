@@ -390,6 +390,8 @@ seon.agent/{id, namespace, plan comp, settings comp}; my.plan/{objective, steps*
 
 ## 17. The live-test scenario (owner, 2026-09-10) — every core capability once
 
+Status (2026-09-10): fixture implemented and reseeded on default; seven-step prompt and HTTP 200 verified; scoped gate 13 tests / 216 assertions and platform 84 tests / 505 assertions green. Provider remains disabled for the orchestrator's paid run. [Exact prompt and landing evidence](../research/live-scenario-landing-2026-09-10.md).
+
 Root's message: "Find the customer with the largest order total with a
 contracted function and a test, add an order of 40 for them, and tell me
 the customer and both totals." The plan, current first, each step

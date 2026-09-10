@@ -23,17 +23,17 @@
                               :seon.agent/plan (update fixture/authored-plan :my.plan/steps set)}])))
         plan-ref [:my.plan/agent [:seon.agent/id "juniper"]]
         before (d/pull seed '[:db/id {:my.plan/steps [:my.plan.item/id]}] plan-ref)
-        complete (d/with seed [[:db/add [:my.plan.item/id "juniper/query"]
+        complete (d/with seed [[:db/add [:my.plan.item/id "juniper/read"]
                                :my.plan.item/completed-tx "datomic.tx"]])
         add (d/with (:db-after complete)
                     [{:my.plan/agent [:seon.agent/id "juniper"]
                       :my.plan/steps [{:my.plan.item/id "orders/verify"
                                        :my.plan.item/title "Verify the new total"
                                        :my.plan.item/done-when "…"
-                                       :my.plan.item/position 6}]}])
+                                       :my.plan.item/position (long (count (:my.plan/steps fixture/authored-plan)))}]}])
         current (d/with (:db-after add)
                         [[:db/add plan-ref :my.plan/current-step
-                          [:my.plan.item/id "juniper/aggregate"]]])
+                          [:my.plan.item/id "juniper/define"]]])
         remove (d/with (:db-after current)
                        [[:db.fn/retractEntity [:my.plan.item/id "orders/verify"]]])
         after (d/pull (:db-after remove)
@@ -41,7 +41,7 @@
                         {:my.plan/current-step [:my.plan.item/id]}] plan-ref)
         shown (d/pull (:db-after complete)
                       '[{:my.plan.item/completed-tx [:db/txInstant]}]
-                      [:my.plan.item/id "juniper/query"])]
+                      [:my.plan.item/id "juniper/read"])]
     {:seon.test/before before
      :seon.test/after after
      :seon.test/added (d/pull (:db-after add)
@@ -61,12 +61,15 @@
   (support/with-database
    (fn [connection]
      (let [probe (plan-probe @connection)]
-       (is (= 6 (count (get-in probe [:seon.test/before :my.plan/steps]))))
-       (is (= 7 (count (get-in probe [:seon.test/added :my.plan/steps]))))
-       (is (= 6 (count (get-in probe [:seon.test/after :my.plan/steps]))))
+       (is (= (count (:my.plan/steps fixture/authored-plan))
+              (count (get-in probe [:seon.test/before :my.plan/steps]))))
+       (is (= (inc (count (:my.plan/steps fixture/authored-plan)))
+              (count (get-in probe [:seon.test/added :my.plan/steps]))))
+       (is (= (count (:my.plan/steps fixture/authored-plan))
+              (count (get-in probe [:seon.test/after :my.plan/steps]))))
        (is (apply = (map #(get-in probe [% :db/id])
                         [:seon.test/before :seon.test/added :seon.test/after])))
-       (is (= "juniper/aggregate"
+       (is (= "juniper/define"
               (get-in probe [:seon.test/after :my.plan/current-step :my.plan.item/id])))
        (is (nil? (:seon.test/removed probe)))
        (is (inst? (:seon.test/completed-instant probe)))

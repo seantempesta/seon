@@ -21,9 +21,9 @@
   (let [[add remove] ((resolve 'context-page-probe-2026-09-09/plan-examples))]
     [["Add a step" "I should update the existing component by db/id; an identity-less nested map silently replaces it." add]
      ["Complete a step" "I have seen the result; with no clock function I record completion through datomic.tx."
-      '(seon.db/transact! [[:db/add [:my.plan.item/id "juniper/query"] :my.plan.item/completed-tx "datomic.tx"]])]
-     ["Make current" "I should make the aggregate step current by the plan's owner identity."
-      '(seon.db/transact! [[:db/add [:my.plan/agent [:seon.agent/id "juniper"]] :my.plan/current-step [:my.plan.item/id "juniper/aggregate"]]])]
+      '(seon.db/transact! [[:db/add [:my.plan.item/id "juniper/read"] :my.plan.item/completed-tx "datomic.tx"]])]
+     ["Make current" "I should make the define step current by the plan's owner identity."
+      '(seon.db/transact! [[:db/add [:my.plan/agent [:seon.agent/id "juniper"]] :my.plan/current-step [:my.plan.item/id "juniper/define"]]])]
      ["Remove a step" "I should remove the child and incoming refs with retractEntity; retract alone removes only one fact." remove]
      ["Send a message" "I should set inbox as well as to so the new message wakes its recipient."
       '(seon.db/transact! [{:seon.message/id "c00cb001" :seon.message/to [:seon.agent/id "root"] :seon.message/inbox [:seon.agent/id "root"] :seon.message/from [:seon.agent/id "juniper"] :seon.message/content "Ada totals 115."}])]
@@ -42,8 +42,8 @@
       '(seon.db/transact! [{:seon.config/agent [:seon.agent/id "juniper"] :seon.config.eval/time-limit-ms 2500}])]
      ["Declare a listen" "I should add an attribute pattern to the runtime's listens."
       '(seon.db/transact! [{:seon.runtime/agent [:seon.agent/id "juniper"] :seon.runtime/listens [{:seon.listen/attribute :example/amount}]}])]
-     ["Transact a note" "I should save the observed total and link the note to the completed query step."
-      '(seon.db/transact! [{:my.note/id "juniper/orders-observed" :my.note/agent [:seon.agent/id "juniper"] :my.note/about [:my.plan.item/id "juniper/query"] :my.note/content "Ada totals 115 before the additional order."}])]]))
+     ["Transact a note" "I should save the observed total and link the note to the completed read step."
+      '(seon.db/transact! [{:my.note/id "juniper/orders-observed" :my.note/agent [:seon.agent/id "juniper"] :my.note/about [:my.plan.item/id "juniper/read"] :my.note/content "Ada totals 115 before the additional order."}])]]))
 
 (defn probe! "Execute the fixture reads and speculate writes without committing." [cluster-name]
   (let [connection (operator/connection cluster-name)

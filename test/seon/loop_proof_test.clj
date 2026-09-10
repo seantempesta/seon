@@ -96,7 +96,7 @@
              (fixture/install-running! handle routing)
              (await-settled!)
              (is (some? (agent/armed routing "juniper")))
-             (is (= 19 (turn/turns-left @connection "juniper")))
+             (is (= 29 (turn/turns-left @connection "juniper")))
              (is (seq (db/q '[:find ?turn :where [?agent :seon.agent/id "juniper"]
                               [?agent :seon.agent/runtime ?runtime]
                               [?runtime :seon.runtime/turns ?turn]
@@ -107,7 +107,7 @@
                                          :seon.message/inbox [:seon.agent/id "juniper"]
                                          :seon.message/content "Probe the running runtime component."}])
                (await-settled!)
-               (is (= 19 (turn/turns-left @connection "juniper")))
+               (is (= 29 (turn/turns-left @connection "juniper")))
                (is (some #(> (:t %) basis) (evaluation/of-agent @connection "juniper"))))
              (is (not (some? (async/poll! faults))) "the installer and both wakes are fault-free")
              (testing "a lost turn permit faults at the agent evaluation limit"
@@ -411,6 +411,22 @@
                                         (:seon.turn/forms refresh))))
                        "closing the creation turn changes the derived turn count"))))
              (fixture/install! handle routing)
+             (let [plan (:seon.agent/plan
+                         (db/pull @connection
+                                  '[{:seon.agent/plan
+                                     [:my.plan/objective
+                                      {:my.plan/current-step [:my.plan.item/id]}
+                                      {:my.plan/steps [:my.plan.item/id :my.plan.item/position
+                                                       {:my.plan.item/needs [:my.plan.item/id]}]}]}]
+                                  [:seon.agent/id "juniper"]))
+                   steps (sort-by :my.plan.item/position (:my.plan/steps plan))
+                   ids (mapv :my.plan.item/id steps)]
+               (is (= ["juniper/read" "juniper/define" "juniper/test" "juniper/save"
+                       "juniper/add" "juniper/again" "juniper/report"] ids))
+               (is (= fixture/instruction (:my.plan/objective plan)))
+               (is (= "juniper/read" (get-in plan [:my.plan/current-step :my.plan.item/id])))
+               (is (= (into [#{}] (map hash-set (butlast ids)))
+                      (mapv #(set (map :my.plan.item/id (:my.plan.item/needs %))) steps))))
              (testing "fresh opening and stable stored prompt"
                (let [first-id (turn/next-id @connection "loop-proof" "juniper")
                      opening (turn/system-turn request)
@@ -600,7 +616,7 @@
                    (is (= faults-before
                           (set (db/q '[:find [?e ...] :where [?e :seon.error/id]] @connection)))
                        "a no-provider reply closes without recording a refusal")
-                   (is (= 19 (turn/turns-left @connection "juniper")))
+                   (is (= 29 (turn/turns-left @connection "juniper")))
                    (println {:seon.test/stage :ordinary-wake
                              :seon.test/sources (mapv :seon.cluster.eval/source fresh)}))))
              (testing "root's generated query executes without caller aliases"

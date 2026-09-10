@@ -57,7 +57,7 @@
            (let [initial @connection
                  admitted (check! initial)]
              (is (seq (:seon.trial/expected-sources admitted)))
-             (is (= 20 (:seon.trial/turns-left admitted)))
+             (is (= 30 (:seon.trial/turns-left admitted)))
              ; A senderless inbox message must count; joining its sender would hide it.
              (let [report (db/transact! connection [{:seon.message/id "trial/pollution"
                                                      :seon.message/to [:seon.agent/id "juniper"]
@@ -80,14 +80,14 @@
        ";; 3. Use the result/e... symbol as an argument or with get-in.\n"
        ";; 4. Ask for doc or dir when unsure.\n"
        ";; 5. Query the orders to read ids, customers, and amounts.\n"
-       ";; 6. Each reply is a turn; my.agent/done ends the session; 20 turns remain.\n"
+       ";; 6. Each reply is a turn; my.agent/done ends the session; 30 turns remain.\n"
        ";; 7. No. Wait until the next turn and the result has been seen.\n"))
 
 (deftest trial-scores-actual-forms-and-fails-on-absence
   (support/with-database
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)
-           score #((resolve 'help-trial-2026-09-09/score) @connection ctx % 20)
+           score #((resolve 'help-trial-2026-09-09/score) @connection ctx % 30)
            query "(seon.db/q '[:find ?order :where [?order :example/order]])"
            good (score (str answers ";; I should read the orders.\n" query))]
        (is (= 12 (:seon.trial/passed good)) (pr-str good))
@@ -96,8 +96,8 @@
        (is (= 12 (:seon.trial/passed (score (str answers "(doc seon.db/q)")))))
        (doseq [[reply expected]
                [["" :right-function]
-                [(str answers query "\n(my.plan/complete! \"juniper/query\")") :no-premature-complete]
-                [(str answers query "\n(my.plan/complete! \"juniper/query\")") :argument-shapes]
+                [(str answers query "\n(my.plan/complete! \"juniper/read\")") :no-premature-complete]
+                [(str answers query "\n(my.plan/complete! \"juniper/read\")") :argument-shapes]
                 [(str answers query "\n(my.message/send {:to \"root\" :content \"hi\"})") :argument-shapes]
                 [(str answers "my.agents.juniper=> " query) :no-prompt-marker]
                 [(str answers query "\n(my.plan/invented!)") :syntax]
