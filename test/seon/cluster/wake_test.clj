@@ -127,6 +127,57 @@
 ;;; C2 — disjointness, computed on both sides
 ;;; ---------------------------------------------------------------------------
 
+(deftest runtime-listens-route-and-refresh-with-entity-and-value-constraints
+  (test-support/with-database
+   {::test-support/extra-schema
+    [{:db/ident :example/amount :db/valueType :db.type/long
+      :db/cardinality :db.cardinality/one}
+     {:db/ident :example/other :db/valueType :db.type/long
+      :db/cardinality :db.cardinality/one}]}
+   (fn [connection]
+     (is (not (:seon.error/kind
+               (db/transact! connection
+                             [{:seon.agent/id "agent-a"}
+                              {:db/id "runtime" :seon.runtime/agent [:seon.agent/id "agent-a"]}
+                              [:db/add [:seon.agent/id "agent-a"] :seon.agent/runtime "runtime"]
+                              {:seon.message/id "order-a" :seon.message/content "a"
+                               :seon.message/to [:seon.agent/id "agent-a"]}
+                              {:seon.message/id "order-b" :seon.message/content "b"
+                               :seon.message/to [:seon.agent/id "agent-a"]}]))))
+     (let [mailbox (async/chan (async/sliding-buffer 1))
+           {:keys [key faults armer render search]} (route-probe! connection mailbox)
+           write! (fn [tx]
+                    (let [result (db/transact! connection tx)]
+                      (is (nil? (:seon.error/kind result)) (pr-str result))
+                      result))]
+       (try
+         (write! [{:seon.runtime/agent [:seon.agent/id "agent-a"]
+                   :seon.runtime/listens [{:seon.listen/attribute :example/amount}]}])
+         (is (nil? (async/poll! mailbox)))
+         (write! [[:db/add [:seon.message/id "order-a"] :example/other 1]])
+         (is (nil? (async/poll! mailbox)))
+         (write! [[:db/add [:seon.message/id "order-a"] :example/amount 1]])
+         (is (= ::wake/wake (test-support/await-event! mailbox "authored amount listen")))
+         (let [listen (db/q '[:find ?listen . :where [_ :seon.runtime/listens ?listen]]
+                            @connection)]
+           (write! [[:db/add listen :seon.listen/entity [:seon.message/id "order-a"]]
+                    [:db/add listen :seon.listen/value 3]])
+           (write! [[:db/add [:seon.message/id "order-b"] :example/amount 3]])
+           (is (nil? (async/poll! mailbox)) "different entity")
+           (write! [[:db/add [:seon.message/id "order-a"] :example/amount 2]])
+           (is (nil? (async/poll! mailbox)) "different value")
+           (write! [[:db/add [:seon.message/id "order-a"] :example/amount 3]])
+           (is (= ::wake/wake (test-support/await-event! mailbox "constrained amount listen")))
+           (write! [[:db/retract [:seon.message/id "order-a"] :example/amount 3]])
+           (is (= ::wake/wake (test-support/await-event! mailbox "listen matches retraction")))
+           (write! [[:db.fn/retractEntity listen]])
+           (write! [[:db/add [:seon.message/id "order-a"] :example/amount 3]])
+           (is (nil? (async/poll! mailbox)) "removed listen no longer routes"))
+         (is (nil? (async/poll! faults)))
+         (finally
+           (wake/unlisten! {:seon.cluster.wake/connection connection :seon.cluster.wake/key key})
+           (doseq [channel [mailbox faults armer render search]] (async/close! channel))))))))
+
 (deftest a-turn-never-wakes-itself
   (with-connection
     (fn [connection]
@@ -149,14 +200,14 @@
             listened (wake/wake-attributes database)
             opening (wake/turn-opening-attributes database)
             inside (wake/inside-attributes database)]
-        (is (= #{:seon.message/to
+        (is (= #{:seon.message/inbox
                  :seon.effect/to
                  :seon.error/steward
                  :seon.schedule.fire/agent}
                listened)
             "the four families that wake an agent, derived from their
              own declarations")
-        (is (= #{:seon.message/to :seon.effect/to :seon.error/steward}
+        (is (= #{:seon.message/inbox :seon.effect/to :seon.error/steward}
                opening)
             "a schedule firing surfaces in the next context; it never
              pays for a model call by itself")
@@ -223,6 +274,8 @@
        ;; `an-unindexed-listened-attribute-is-refused-at-registration`.
        :db/index true}
       {:seon.schema/key ::notice
+       :seon.schema.admission/source :core
+       :seon.schema/form ":seon.db/ref"
        :seon.wake/listen true
        :seon.wake/opens-turn? true}]}
     (fn [connection]
@@ -257,6 +310,8 @@
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one}
       {:seon.schema/key ::unindexed-notice
+       :seon.schema.admission/source :core
+       :seon.schema/form ":seon.db/ref"
        :seon.wake/listen true
        :seon.wake/opens-turn? true}]}
     (fn [connection]
@@ -295,6 +350,7 @@
         {:seon.ns/name 'my.agents.agent-a
          :seon.ns/steward [:seon.agent/id "agent-a"]}
         {:seon.fn/sym "my.agents.agent-a/broken"
+         :seon.schema.admission/source :core
          :seon.fn/ns [:seon.ns/name 'my.agents.agent-a]}])
       (let [recipient (agent-eid connection)
             mailbox (async/chan (async/sliding-buffer 1))

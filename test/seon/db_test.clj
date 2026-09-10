@@ -958,7 +958,8 @@
   (test-support/with-database
    (fn [connection]
      (seed-diff-messages! connection)
-     (let [before (db/basis-t @connection)]
+     (let [before (db/basis-t @connection)
+           at (:db/txInstant (db/pull @connection [:db/txInstant] before))]
        (db/transact!
         connection
         [[:db/add [:seon.message/id "db-diff-m1"]
@@ -981,13 +982,13 @@
                     {:my.message/id "db-diff-m1"
                      :my.message/from "db-diff-alice"
                      :my.message/at
-                     #inst "2026-08-13T20:00:00.000-00:00"
+                     at
                      :my.message/content "hello"}
                     :seon.db.diff/after
                     {:my.message/id "db-diff-m1"
                      :my.message/from "db-diff-alice"
                      :my.message/at
-                     #inst "2026-08-13T20:00:00.000-00:00"
+                     at
                      :my.message/content "hello, edited"}}]
                   (:seon.db.diff/changed result)))
            (is (= result (eval (:seon.db.diff/requery-id result)))

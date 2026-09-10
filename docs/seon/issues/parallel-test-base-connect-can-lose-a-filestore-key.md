@@ -7,6 +7,14 @@ tags: [issue, test, datahike]
 
 # Parallel published-base acquisition can lose a filestore key
 
+Evidence-listens recurrence, 2026-09-09: three-worker owned-path gate
+`tmp/test-runs/run.KnfZkw`, base
+`e62e5f0737a960e14d69729106558439c3efa3ff2b084b12a34c7e2e56830ec0`,
+lost key `d34d9bab-c160-4e4f-8818-8788c5b942b8` while
+`seon.db-test/diff-no-change-is-empty` acquired its canonical fixture.
+Isolated confirmation passed with no detected worker-global drift. Later
+one-worker gates did not reproduce it; the deleting actor remains unknown.
+
 ## Loop-runtime recurrence — 2026-09-10 01:43 UTC
 
 The three-worker loop gate at `617e538f3` plus the loop paths lost published

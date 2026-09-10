@@ -19,6 +19,13 @@ timing assertion. See the transaction-feedback landing note for exact gates.
 
 ## Problem
 
+Evidence-listens re-observation, 2026-09-09: the three-worker owned-path
+gate measured 5,712,210,957 ns for ten wrapped queries versus 29,635,416 ns
+raw; a later one-worker gate measured 6,099,677,583 ns versus 29,331,375 ns.
+This is the same named regression, with no evidence sink bound; the new
+`query-index-patterns` path therefore does not execute. Both read-evidence
+and runtime-listen regressions passed. The timing assertion stays intact.
+
 `seon.db/q`'s `read-declarations` (`src/seon/db.clj:501`) is
 `(delay (or (schema/handed-projection) (schema/projection-from-database
 (schema-database database))))`. Whenever no projection is handed — the

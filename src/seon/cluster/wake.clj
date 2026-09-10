@@ -26,19 +26,18 @@
      channel DROPS rather than parks. Dropping is safe by construction:
      the channel is `(sliding-buffer 1)` and a wake means only \"look\".
 
-  Nothing else belongs inside it. No query, no derivation, no commit —
-  which also settles the API's own deadlock warning
+  Ordinary commits only match and deliver. Declaration changes rederive
+  the matcher from the report's database before dispatch; no callback
+  commits, which also settles the API's own deadlock warning
   (`api/specification.cljc:1076-1078`): N3 never transacts from a
   callback at all.
 
   THE ROUTED SET IS DECLARED, NOT LISTED. An attribute wakes an agent
   exactly when its schema row carries `:seon.wake/listen true`
   (`resources/seon/schemas/seon.wake.edn`), so which attributes wake an
-  agent is one Datalog query over facts the schema population already
-  installs, and adding a source is one schema property with no code
-  change. `wake-attributes` is that query; `route!` runs it ONCE at
-  registration and closes over the answer, because the handler may not
-  query (above).
+  agent is a Datalog query over installed schema facts, unioned with
+  the agent's runtime listen patterns. `route!` compiles this by attribute
+  at registration and when declarations change, outside datom dispatch.
 
   ROUTING HAS THREE TRAPS, all measured (probe A Q3, probe B Q10):
 
@@ -75,6 +74,9 @@
   next boot's injected wake re-derives everything from facts."
   (:require [clojure.core.async :as async]
             [datahike.api :as d]
+            [datahike.db.utils :as db.utils]
+            [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -333,6 +335,37 @@
                               ::route route})))
     outcome))
 
+(defn- wake-matchers
+  "Compile schema recipients and authored constraints by attribute once.
+  Constraint values use the same storage codec as their target attribute."
+  [database]
+  (let [projection (delay (schema/projection-from-database database))]
+    (reduce
+     (fn [matchers [agent pattern]]
+       (let [attribute (:seon.listen/attribute pattern)
+             entity (get-in pattern [:seon.listen/entity :db/id])
+             supplied (find pattern :seon.listen/value)
+             value (when supplied
+                     (let [logical (schema.datahike/decode-attribute-value-in
+                                    @projection :seon.listen/value (val supplied))]
+                       (if (db.utils/ref? database attribute)
+                         (db.utils/entid database logical)
+                         (nth (first (schema.datahike/encode-transaction-in
+                                      @projection [[:db/add 1 attribute logical]])) 3))))]
+         (update-in matchers [attribute ::matches] (fnil conj [])
+                    (fn [datom]
+                      (when (and (or (nil? entity) (= entity (nth datom 0)))
+                                 (or (nil? supplied) (= value (nth datom 2))))
+                        agent)))))
+     (into {} (map #(vector % {::schema? true})) (wake-attributes database))
+     (d/q '[:find ?agent (pull ?listen [:seon.listen/attribute
+                                      :seon.listen/entity :seon.listen/value])
+            :where [?agent :seon.agent/runtime ?runtime]
+            [?runtime :seon.runtime/agent ?agent]
+            [?runtime :seon.runtime/listens ?listen]
+            [?listen :seon.listen/attribute]]
+          database))))
+
 (defn route!
   "Register the ROUTING wake handler on a connection (F1 4).
   The per-agent successor of `listen!`'s one-channel delivery, under
@@ -340,15 +373,11 @@
   — every delivery is `offer!` and the whole handler is one
   try/catch).
 
-  THE SET IS DERIVED HERE AND RE-DERIVED WHEN THE DECLARATION CHANGES.
-  `wake-attributes` runs against the connection's current database value
-  at registration and the handler holds the answer; it re-runs on the
-  report's own `:db-after` exactly when a transaction asserts a
-  `:seon.wake/*` property on a schema row. The listener still never
-  queries on an ordinary commit — that is the critical-path rule — and a
-  development cluster, whose whole point is that schema rows change in
-  place, no longer routes by a frozen answer while every other consumer
-  re-derives.
+  Compile schema recipients and runtime listen patterns by attribute at
+  registration. Recompile from the report's `:db-after` when declarations,
+  listen rows or runtime ownership change. Ordinary commits pay one matcher
+  map lookup per datom, then test only that attribute's entity/value
+  constraints. They never query or derive a projection.
 
   REGISTRATION REFUSES AN UNUSABLE DECLARATION POPULATION
   (`declarations-refusal`): no listened attribute, no inside attribute,
@@ -356,9 +385,9 @@
   of those reads as health at four separate derivations, and one of them
   refills the turn bound on a paid loop.
 
-  DISPATCH IS THE SAME DERIVATION. Every listened attribute is a ref
-  whose VALUE is the recipient agent's entity id, so delivery is one
-  lookup in the routing map the supplied `channels` fn returns: `offer!`
+  Schema-declared attributes address the agent in the datom's value;
+  runtime patterns address their owning agent. Their recipient union uses
+  the routing map the supplied `channels` fn returns: `offer!`
   a payload-free wake into that agent's mailbox. No query, no
   derivation, no commit. A recipient with NO routing entry offers to the
   ARMER instead — the belt that arms an agent created and addressed in
@@ -392,7 +421,7 @@
            :seon.cluster.wake/fault-channel :seon.cluster.wake/key]}]
   (when-let [refusal (declarations-refusal (d/db connection))]
     (throw (ex-info (:seon.error/message refusal) refusal)))
-  (let [listened (volatile! (wake-attributes (d/db connection)))]
+  (let [matchers (volatile! (wake-matchers (d/db connection)))]
     (d/listen
      connection
      key
@@ -411,27 +440,25 @@
                  "The derived search index refused a transaction report."
                  {:seon.cluster.wake/key key
                   :seon.cluster.wake/route ::search}))))
-           ;; A DECLARATION CHANGE RE-DERIVES THE SET, HERE, ON THE REPORT'S
-           ;; OWN `:db-after`. The set used to be frozen at registration
-           ;; while `seon.turn` re-derived per call, so one live
-           ;; schema change left two answers to one question and an openable
-           ;; wake nothing would ever deliver — with no refusal and no fault
-           ;; (measured: verify-listened-attributes-2026-09-08 §1c). The
-           ;; handler's two prohibitions still hold: this neither throws nor
-           ;; parks, and the query runs only when a transaction actually
-           ;; asserts a `:seon.wake/*` property on a schema row, which is a
-           ;; schema publication and not an ordinary commit.
+           ;; Rebuild once before dispatch, including deletions and changes
+           ;; in the same transaction as a matching datom.
            (when (some (fn [datom]
-                         (= "seon.wake" (namespace (nth datom 1))))
+                         (let [attribute (nth datom 1)]
+                           (or (= "seon.wake" (namespace attribute))
+                               (= "seon.listen" (namespace attribute))
+                               (#{:seon.runtime/listens :seon.runtime/agent
+                                  :seon.agent/runtime :seon.schema/key :seon.schema/form}
+                                attribute))))
                        (:tx-data report))
-             (vreset! listened (wake-attributes (:db-after report))))
+             (vreset! matchers (wake-matchers (:db-after report))))
            (doseq [datom (:tx-data report)]
              (let [attribute (nth datom 1)]
                (when (and (not @render?)
                           (contains? published-interest attribute))
                  (vreset! render? true))
-               (when (contains? @listened attribute)
-                 (let [agent-eid (nth datom 2)]
+               (when-let [matcher (get @matchers attribute)]
+                 (doseq [agent-eid (into (if (::schema? matcher) #{(nth datom 2)} #{})
+                                        (keep #(% datom)) (::matches matcher))]
                    (if-let [channel (get (channels) agent-eid)]
                      (deliver! fault-channel key ::mailbox channel
                                #(fenced? agent-eid channel))

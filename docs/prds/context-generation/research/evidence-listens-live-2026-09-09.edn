@@ -1,0 +1,17 @@
+{:seon.probe/root "tmp/evidence-listens-root"
+ :seon.probe/cluster "evidence-listens"
+ :seon.probe/source-commit "6aa21d86-a5d1-53db-b854-d9d54444cc47"
+ :seon.probe/pid 17478
+ :seon.probe/agent "juniper"
+ :seon.probe/no-provider true
+ :seon.probe/before 6
+ :seon.probe/after 7
+ :seon.probe/after-unrelated 7
+ :seon.probe/wake-ms 63.936291
+ :seon.probe/amount-t 536871016
+ :seon.probe/latest-turn-t 536870997
+ :seon.probe/provider-attempts-before 1
+ :seon.probe/provider-attempts-after 1
+ :seon.probe/pre-fixture-attempt-agent "root"
+ :seon.probe/pre-fixture-attempt-id "c2c248982af0"
+ :seon.probe/pre-fixture-attempt-at #inst "2026-09-10T03:02:52Z"}

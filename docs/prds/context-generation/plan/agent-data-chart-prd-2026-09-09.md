@@ -175,9 +175,11 @@ my.agents.juniper=> (seon.db/pull '[{:seon.agent/runtime [{:seon.runtime/turns [
 ```
 
 A listen is an index pattern (attribute, optional entity, optional value)
-— the same shape read evidence stores. Roadmap step 8 will make the cluster's existing listener union them with the schema-declared listened
-attributes; the union is a map lookup per datom, computed outside the
-per-datom loop. Not a new mechanism.
+— the same shape read evidence stores. The existing cluster listener now
+unions them with schema-declared recipients, using one matcher-map lookup
+per datom. It compiles outside dispatch and recompiles when a listen or
+its ownership changes. This proves delivery to the agent's Flow graph;
+[turn eligibility still needs these patterns](../../../seon/issues/runtime-listens-do-not-yet-participate-in-turn-eligibility.md).
 
 HTML: state line (idle / turn open since …, woke on …), listens as chips.
 
@@ -362,7 +364,7 @@ Status: ✅ landed · ▶ running · ⏭ next · ◻ queued.
 | 5 | Addressable components: `:my.plan/agent`, `:seon.config/agent` identities; `expected-result` → `done-when` | yes (batch) | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
 | 6 | Messages `:seon.message/*`; the inbox as an edge `:seon.message/inbox` retracted when handled; `send` mints id and writes both facts | yes (batch) | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
 | 7 | Runtime component `:seon.agent/runtime` with the turns inside it; retire `plan-digest`, `supersedes`, `undisposed-at`, `background-results`, `error`; `:seon.eval/value` → `/shown`; `sent-body` gone; reasoning off | yes (batch) | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
-| 8 | Agent-declared listens union into the wake matcher | no | ◻ evidence lane |
+| 8 | Agent-declared listens union into the wake matcher | no | ✅ [delivery proof and turn-eligibility boundary](../research/evidence-listens-landing-2026-09-09.md) |
 | 9–12 | Block functions from the cookbook on the new shapes; `dir`/`doc` structure; `my.plan`/`my.note` as documented data | no | ◻ render lane (after 3–7) |
 | 13 | Root's cluster block (JVM, store, commit, fault signatures) | no | ◻ root lane |
 | 14 | Fixture on the new shapes; reseed; read the prompt; harness score | reseed | every landing; paid trial rerun after 1c |

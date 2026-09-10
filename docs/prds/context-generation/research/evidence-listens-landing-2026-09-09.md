@@ -1,6 +1,6 @@
 ---
 type: research
-status: working
+status: complete
 tags: [database, agent, runtime, test]
 ---
 
@@ -73,3 +73,74 @@ also passed the armed combined fast run: 20 tests / 118 assertions,
 zero failures/errors (read-evidence plus wake namespaces). It excludes
 collection/tuple input variables from added scalar bindings, preserving
 Datahike's original input binding semantics.
+
+## Runtime listens
+
+`wake-matchers` derives one attribute map containing schema-addressed
+recipients and runtime-owned entity/value constraints. The report handler
+looks up that map once per datom, checks only the relevant constraints,
+and unions recipients before the existing nonblocking delivery. Listen,
+ownership and schema edits rederive from `:db-after` before dispatch.
+The handler keeps its existing whole-callback catch and `offer!` delivery.
+Logical value constraints pass through the existing schema storage codec.
+
+The canonical regression proves initial registration followed by a new
+listen, unrelated attributes, entity/value edits, retraction matching and
+listen deletion. Existing saturation, closed-route and exception tests
+exercise the same delivery seam. Owned fixture repairs supply required
+schema/function provenance, expect the inbox edge, and derive the message
+diff timestamp from its creating transaction instead of a retired date.
+
+Live proof: fresh scratch cluster `evidence-listens`, root
+`tmp/evidence-listens-root`, PID 17478, source publication
+`6aa21d86-a5d1-53db-b854-d9d54444cc47`. Loaded the canonical Juniper
+fixture installer, then ran
+[the committed probe](evidence_listens_probe_2026_09_09.clj) through MCP JVM
+mode. It observes the actual Flow mailbox proc count, not a substitute
+channel. Amount changed at `536871016`; mailbox count **6 → 7 in
+63.936291 ms**. An actual customer-attribute change left it at **7**.
+[Exact measurements](evidence-listens-live-2026-09-09.edn).
+
+Juniper was configured no-provider. Scratch boot had already made one
+root provider attempt at `2026-09-10T03:02:52Z`, before fixture installation;
+this was not a no-provider boot. The final probe explicitly set the cluster
+and root no-provider too, and asserted total attempt count **1 → 1**.
+No provider attempt was created by any of the amount-listen probes.
+
+The live verification boundary is **wake delivery**, as assigned. The
+ordinary work derivation still considers schema-declared wakes only:
+Juniper's latest turn remained `536870997`. Recorded separately in
+[runtime listen turn eligibility](../../../seon/issues/runtime-listens-do-not-yet-participate-in-turn-eligibility.md).
+This commit does not claim custom listens open or refresh turns yet.
+
+Second seam platform gate: **84 tests / 505 assertions, zero failures or
+errors**, one worker. Final requested three-namespace gate: **60 tests /
+379 assertions, one failure, zero errors**. The sole failure is the already
+filed `ten-unhanded-queries-stay-within-twice-raw-query-cost`; its assertion
+is unchanged. The stale timestamp and wake fixture failures are fixed.
+All gates use HEAD plus owned paths; no all/full suite was run.
+
+The final focused correctness gate (`seon.read-evidence-test` and
+`seon.cluster.wake-test`, the same owned paths, one worker) passed
+**20 tests / 118 assertions, zero failures/errors**. The complete
+three-namespace failure is retained above, not replaced by this result.
+
+## Files and cleanup
+
+First commit `ed8fd02e3` owns `src/seon/db.clj`,
+`test/seon/read_evidence_test.clj`, the chart PRD, this note, and
+`docs/seon/issues/dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md`.
+
+Second commit owns `src/seon/cluster/wake.clj`,
+`test/seon/cluster/wake_test.clj`, `test/seon/db_test.clj`, the chart PRD,
+this note, the adjacent `evidence_listens_probe_2026_09_09.clj` and
+`evidence-listens-live-2026-09-09.edn`, plus these issue notes:
+
+- `docs/seon/issues/runtime-listens-do-not-yet-participate-in-turn-eligibility.md`
+- `docs/seon/issues/parallel-test-base-connect-can-lose-a-filestore-key.md`
+- `docs/seon/issues/seon-db-reads-rebuild-the-projection-per-call-when-none-is-handed.md`
+
+The scratch operator down completed with PID 17478 exited and its flock
+free. Owned disposable roots and probe logs were removed after confirming
+no live runner held them. All owned command sessions ended. Foreign edits,
+the other lane's processes and default were preserved; no reset is needed.
