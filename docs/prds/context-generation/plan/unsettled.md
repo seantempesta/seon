@@ -852,3 +852,22 @@ half-edit. Measured targets in the issue.
   behind trial-rerun's landing; repl-display on wrapping and the runtime
   block's HTML.
 
+## 2026-09-10 14:55 — first live provider run: one turn, then silence
+
+- Fixture carries the §17 seven-step scenario and the thirty-turn budget
+  (`e0389e1d4`); `seed!`/`install-running!` take a settings transform, and a
+  live run passes `#(dissoc % :seon.config.ai/no-provider)` (a removed key
+  is retracted explicitly — omission leaves the stored value).
+- Turn 1 on deepseek-flash: a thinking comment and a correct `q` over the
+  orders (3,219/138 tokens, 2.6 s); the model ALSO fabricated a `#:seon.repl`
+  response with invented rows, refused by the reader rule §18b. Then the
+  loop stopped: an accepted reply answers every wake and nothing rewakes
+  the agent, so results never "arrive in your NEXT turn". Blocker filed:
+  `the-loop-stops-after-one-accepted-reply.md`; lane loop-continue.
+- Root's page: cold 10–18 s because the walk expands every installed ref
+  attribute (138, both directions) and 734 schedule-fire + 734
+  maintenance-request rows reference root, each firing staling its read
+  evidence. Blocker filed; lane root-walk (high). Wrapping landed
+  (`6f339bc6e`, verified at 700 px, no overflow); runtime block HTML → lane
+  runtime-html.
+
