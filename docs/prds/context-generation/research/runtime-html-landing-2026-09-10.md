@@ -19,16 +19,22 @@ the Clojure, REPL, testing, and Datastar web UI skills. No subagents.
   immutable database value: `reference-code/datahike/src/datahike/pull_api.cljc:528–556`.
   Existing first-party idiom: the runtime pull and `history-run-selector`
   in `src/seon/render/transcript.clj`. No new stored timestamps or counts.
-- Message HTML belongs to `src/seon/cluster/message.clj:391`; it owns
+- Message HTML belongs to `src/seon/cluster/message.clj:382`; it owns
   sender/recipient/content and transaction-time display. Runtime composes
   this pair and uses `seon.render.route/path` for identity links.
 - Hiccup child sequences compose inline and text escapes by default:
   `src/seon/render/hiccup.clj`, `append-node!`, `append-escaped!`, `->string`.
   `src/seon/render/block.clj:61` owns the stable surrounding surface id.
+- Blob-backed replies use the supplied connection and existing verified
+  content read, `src/seon/blob.clj:346`; the test stores its reply through
+  `blob/put!` at line 293. This is the existing transport for durable bulky
+  replies, not a new summary or copied first-line attribute.
 - Java Date milliseconds provide duration arithmetic; SimpleDateFormat
   provides the server-local HTTP fallback. Each time element also carries
   its ISO datetime and Datastar `data-text` using browser-local
-  `toLocaleTimeString()`. Elapsed state duration is observed at render time.
+  `toLocaleTimeString()`. Elapsed state duration has a server-render-time
+  fallback and browser `Date.now()` minute expression, so mounting cached
+  HTML recalculates elapsed minutes without storing a duration or clock.
 - Git archaeology: `1d47ebb7f` improved only the runtime AI selector;
   `5af34fc38` left HTML as turn headers. This change keeps the AI function
   byte-for-byte unchanged and replaces only runtime HTML presentation.
@@ -66,8 +72,10 @@ as chips; and shows opened time, duration/open, trigger, evaluation count,
 and first reply line in a compact table. A missing runtime is an explicit
 diagnostic, never an empty healthy runtime. An absent historical trigger
 is labelled as unrecorded; only the newest turn may use the runtime's
-latest trigger. A separately stored reply is reported as such when the
-pulled entity has no inline reply.
+latest trigger. Separately stored replies are read through their pulled
+blob digest and the supplied connection, then show the same first line.
+A caller without that connection gets an explicit “Reply stored separately”
+message instead of a fabricated or empty reply.
 
 The generic numeric reference dump is OUTSIDE this pair:
 `src/seon/render/web.clj:1144–1155` collects ids;
@@ -115,6 +123,19 @@ source comparison against the snapshot basis: runtime AI function **1,073
 bytes**, unchanged, SHA-256
 `e3eaa22c308bcd1293b1cd0b8b4ee47ec8e99d28c330626800f6302153d6e940`.
 
+First implementation commit: `237c4c572`. Final review added blob-backed
+reply coverage and browser recalculation of cached elapsed time. The
+blob-capable fast run passed **10 tests / 67 assertions**. Final isolated
+gate: **10 tests / 71 assertions, zero failures or errors**; 38 seconds
+coordinator-and-tests, successful root `run.tGiDeU` removed. Its snapshot
+basis was `237c4c572100170c609a50ca73ddd792f8cb2d45` plus only this lane's paths.
+
+Final platform rerun: **84 tests / 505 assertions, zero failures or errors**;
+84 seconds coordinator-and-tests; successful root `run.Qt3a5w` removed.
+
+Kondo emitted only existing unused namespace/import/binding and shadowed
+binding warnings in the older transcript code; no new lint errors.
+
 Reproducible source-byte check:
 
 ```python
@@ -156,4 +177,60 @@ class RuntimeText(HTMLParser):
             print(text)
 RuntimeText().feed(open('tmp/runtime-html-after.html').read())
 PY
+```
+
+## Live default observation
+
+After the final functions were hot-reloaded by development adoption, GET
+returned **HTTP 200 in 1.696967 seconds**. The emitted runtime section has
+five table rows, no `#inst` literals and no numeric database-id display.
+The UUID and digest below are literal message content, retained through
+the message pair. Juniper had no authored listens at this observation;
+the canonical regression separately proves the chip with a real listen.
+
+Full runtime text (adjacent text-node whitespace normalized):
+
+```text
+Runtime
+Idle since 14:56:52 (5 min)
+Woke on
+Message from outside this cluster: The feed  failed with :seon.await/backstop-fired. Inspect error 9c931b6e-8128-4552-8290-abb5ca69e00d; the proc survived and no work was re-executed. Signature: b2bbe875e0db427eca8cd87f78ac785c480976a9d0c150d46ce9d44d045b259e.
+Outside this cluster → Agent juniper
+2026-09-10T20:56:48.362Z
+The feed  failed with :seon.await/backstop-fired. Inspect error 9c931b6e-8128-4552-8290-abb5ca69e00d; the proc survived and no work was re-executed. Signature: b2bbe875e0db427eca8cd87f78ac785c480976a9d0c150d46ce9d44d045b259e.
+This message has no agent sender to address a reply to.
+Listening: No listened attributes.
+Turns (5)
+Opened | Duration | Trigger | Evaluations | Reply
+14:56:50 | 2 s | Message from outside this cluster: The feed  failed with :seon.await/backstop-fired. Inspect error 9c931b6e-8128-4552-8290-abb5ca69e00d; the proc survived and no work was re-executed. Signature: b2bbe875e0db427eca8cd87f78ac785c480976a9d0c150d46ce9d44d045b259e. | 1 | ;; The orders are read: Ada has 60+55=115, Bea 100, Cy 40. Step juniper/read's done-when is met. I should mark it complete, then move to defining largest-customer.
+14:56:49 | 0 ms | No recorded trigger | 5 | (help)
+14:46:45 | 2 s | Message from root: Find the customer with the largest order total with a contracted function and a test, add an order of 40 for them, and tell me the customer and both totals. | 2 | ;; I should read the orders themselves before designing the query or function.
+14:46:45 | 0 ms | No recorded trigger | 2 | (seon.agent/effective-settings)
+14:46:44 | 0 ms | No recorded trigger | 9 | (help)
+```
+
+Two explicit `bin/seon init --dev default --changed
+src/seon/render/transcript.clj` attempts completed loaded definitions, SCI
+acquisition, and JVM instrumentation, then exited 1 with **“Source changed
+during development adoption; the next edit must converge it.”** The first
+also waited over 300 seconds behind other publication commands under the
+operator lifecycle lock. No holder was stopped or modified. These are
+hot-reloaded-Var and HTTP proofs, not a claim of sealed adoption. The last
+observed adopted marker was `6aa31517-2ccf-50a2-a61a-9f0a9261b8e2`, while
+current source was `6aa31aa0-c1f1-5101-abea-a9958c95a3c9`.
+
+The convergence observation uses the supported MCP JVM tool, wrapping this
+form in `pr-str` to avoid its known result-envelope problem:
+
+```clojure
+(let [instance (get @seon.operator.runtime/running-instances "default")
+      database @(:seon.boot/cluster-connection instance)
+      adopted (seon.db/q '[:find ?v .
+                          :where [?e :seon.cluster/name "default"]
+                          [?e :seon.source/commit-id ?v]] database)
+      current (:seon.source/commit-id
+               (seon.cluster.source/current (:seon.store/store instance)))]
+  {:seon.probe/adopted adopted
+   :seon.probe/current current
+   :seon.probe/converged? (and (some? adopted) (= adopted current))})
 ```

@@ -1138,7 +1138,7 @@
           (when-let [content (:seon.message/content trigger)]
             (str ": " (first (str/split-lines content)))))]))
 
-(defn- runtime-turn-table [turns latest-trigger]
+(defn- runtime-turn-table [turns latest-trigger connection]
   [:section {:class "seon-turn-history"}
    [:h3 (str "Turns (" (count turns) ")")]
    (if (seq turns)
@@ -1151,7 +1151,9 @@
                closed (get-in row [:seon.turn/closed-tx :db/txInstant])
                trigger (or (:seon.turn/trigger row)
                            (when (zero? index) latest-trigger))
-               reply (:seon.turn/reply row)]
+               reply (or (:seon.turn/reply row)
+                         (when (and connection (:seon.turn/reply-blob row))
+                           (blob/get connection (:seon.turn/reply-blob row))))]
            [:tr
             [:td (runtime-time opened)]
             [:td (if (:seon.turn/closed-tx row)
@@ -1207,7 +1209,10 @@
             (if open "Turn open" "Idle")
             (when since
               (list " since " (runtime-time since) " ("
-                    (runtime-duration since (java.util.Date.)) ")"))]
+                    [:span {:data-text (str "Math.max(0, Math.floor((Date.now() - "
+                                            (.getTime ^java.util.Date since)
+                                            ") / 60000)) + ' min'")}
+                     (runtime-duration since (java.util.Date.))] ")"))]
            (when trigger
              [:div {:class "seon-runtime-trigger"}
               [:p "Woke on " (or (runtime-message-link trigger) "a recorded fact")]
@@ -1219,4 +1224,4 @@
                 [:code {:style {:border "1px solid currentColor" :border-radius "1rem" :padding "0.1rem 0.5rem"}}
                  (str attribute)])
               [:span "No listened attributes."])]
-           (runtime-turn-table turns trigger)]))))
+           (runtime-turn-table turns trigger (:seon.db/connection unit))]))))

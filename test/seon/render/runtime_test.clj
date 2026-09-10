@@ -2,6 +2,7 @@
   "The runtime HTML pair over the canonical database population."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.blob :as blob]
             [seon.db :as db]
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
@@ -18,7 +19,8 @@
 (deftest runtime-html-is-human-readable-and-ai-bytes-stay-unchanged
   (support/with-database
     (fn [connection]
-      (let [written
+      (let [reply-digest (blob/put! connection "Older reply\nA separately stored continuation.")
+            written
             (db/transact!
              connection
              [{:db/id "agent" :seon.agent/id "runtime-reader"
@@ -34,7 +36,7 @@
                :seon.message/content "Which customer has the largest total?\nShow the calculation."}
               {:db/id "older" :seon.turn/id "private-older-id"
                :seon.turn/agent "agent" :seon.turn/opened-tx "datomic.tx"
-               :seon.turn/closed-tx "datomic.tx" :seon.turn/reply "Older reply"}
+               :seon.turn/closed-tx "datomic.tx" :seon.turn/reply-blob reply-digest}
               {:db/id "newer" :seon.turn/id "private-newer-id"
                :seon.turn/agent "agent" :seon.turn/opened-tx "datomic.tx"
                :seon.turn/trigger "message" :seon.turn/reply "Newest reply\nFull reply remains stored."}
@@ -48,7 +50,7 @@
                                    :seon.turn/opened-tx "datomic.tx"]])
             _ (is (:db-after opened) (pr-str opened))
             database @connection
-            unit {:seon.db/db database :seon.agent/id "runtime-reader"}
+            unit {:seon.db/db database :seon.db/connection connection :seon.agent/id "runtime-reader"}
             expected-ai
             (str ";; I should follow my runtime's owner ref before pulling its turns, trigger, and listens.\n"
                  (repl/source-text
@@ -84,6 +86,7 @@
         (is (< (.indexOf text "Newest reply") (.indexOf text "Older reply")))
         (is (str/includes? text "1Newest reply"))
         (is (not (str/includes? text "Full reply remains stored.")))
+        (is (not (str/includes? text "A separately stored continuation.")))
         (doseq [forbidden ["#inst" ":db/id" "private-older-id" "private-newer-id" "private-eval-id"]]
           (is (not (str/includes? html forbidden)) forbidden))
         (let [closed (db/transact! connection

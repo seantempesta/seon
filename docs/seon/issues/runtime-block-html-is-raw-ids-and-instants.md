@@ -40,3 +40,11 @@ Live verification also encountered the already-filed MCP degradation in
 unknown health/Flow with `Read timed out`; `(+ 1 1)` returned 2, but runtime
 pulls through `seon.operator/connection` timed out at 10 and 20 seconds.
 The HTTP debug page remained readable. No default restart was attempted.
+
+The runtime pair improvement landed in `237c4c572`; the remaining generic
+header dump still needs the render owner. During HTTP verification at
+21:00Z, Juniper's current trigger was itself a feed-backstop notification
+(`:seon.await/backstop-fired`, error `9c931b6e-8128-4552-8290-abb5ca69e00d`).
+The pair renders that stored message faithfully. This is follow-up evidence
+for the existing `scratch-debug-feed-and-turn-backstops-after-adoption.md`
+issue, not a runtime HTML failure or a claim about the backstop's cause.
