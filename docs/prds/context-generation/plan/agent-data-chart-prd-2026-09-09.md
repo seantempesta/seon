@@ -341,6 +341,7 @@ projection.
 | C2, wrapper forms | Haiku | vector + 3 lines | 8/8; clean reply |
 | paid, wrapper forms | deepseek-v4-flash | vector | 10/12; wrote the marker AND fabricated a `#:seon.repl` response → reader rule §18b |
 | C3, raw data forms | Haiku | vector, data-first | 8/8; correct pull/q/transact/get-in; wrote `(now)` (my bad example) and completed a step early (line trimmed) |
+| paid rerun, data-first prompt (2026-09-10) | deepseek-flash (V4.1), thinking off | live, one `(help)` | **12/12**; 2,533 in / 289 out tokens, $0.00055; reply chained comments + one `q` over `:example/*`; no marker, no fabricated response (`f183e1965`) |
 | plan operations, live help + raw plan block | Haiku | live (16:30) | complete/current/retitle via `my.plan` guesses; chained `sort-by`+`map` unprompted; could NOT add (no shape shown), could NOT remove (no verb, `retractEntity` untaught), did not know the id rule — the plan block must teach its writes by example and the id rule must be visible |
 
 ## 16. Roadmap — from here to there (status 2026-09-09 17:45)
@@ -368,7 +369,7 @@ Status: ✅ landed · ▶ running · ⏭ next · ◻ queued.
 | 8 | Agent-declared listens union into the wake matcher | no | ✅ [delivery proof and turn-eligibility boundary](../research/evidence-listens-landing-2026-09-09.md) |
 | 9–12 | Block functions from the cookbook on the new shapes; `dir`/`doc` structure; `my.plan`/`my.note` as documented data; contract refusals carry the doc map | no | ✅ cookbook + `d25a12eda` `4652cc0e7` |
 | 13 | Root's cluster block (JVM, store, commit, fault signatures) | no | ✅ `501b45570` — [gates, exact root prompt, scratch HTML and default adoption](../research/root-cluster-landing-2026-09-09.md) |
-| 14 | Fixture on the new shapes; reseed; read the prompt; harness score | reseed | every landing; paid trial rerun after 1c |
+| 14 | Fixture on the new shapes; reseed; read the prompt; harness score | reseed | LANDED `f183e1965`: paid rerun 12/12 on deepseek-flash; next: the §17 fixture (lane live-scenario) then the live provider run |
 
 Review points for the owner: after 1c (help and page on the current
 shapes), after 3–7 (raw writes in the history on a fresh fixture), after
