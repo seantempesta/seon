@@ -1281,3 +1281,21 @@ patterns (`db.clj:335-372`). The full item-by-item design is
 `agent-data-chart-prd-2026-09-09.md` r2; the Haiku trial on raw forms
 scored 8/8.
 
+### 18d. The REPL grammar, exactly (owner, 2026-09-09 18:25)
+
+An entry is the prompt, then everything the agent typed, then the
+response — as a REPL shows it. The comment is the agent's input, never
+the REPL's, so it follows the prompt:
+
+```
+my.agents.juniper=> ;; I should understand how this REPL works before I act.
+(help)
+The prompt shows your namespace my.agents.juniper and is drawn for you. …
+```
+
+Multi-line input continues under the prompt exactly as typed. A value
+with a declared AI pair (help, a plan, a message) prints its pair's
+output as the response, never wrapped in `#:seon.repl{:value …}`; values
+without a pair print through the value renderer inside the reply map.
+Rendered once at evaluation time into the stored shown text (§15).
+
