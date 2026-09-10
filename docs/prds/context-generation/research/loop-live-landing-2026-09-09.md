@@ -6,6 +6,129 @@ tags: [research, runtime, agent, test, wave/agent-context]
 
 # Live ordinary-turn verification — 2026-09-09
 
+## Resumption — runtime-component stall, 2026-09-10 01:22–01:50 UTC
+
+Read the replacement AGENTS.md and
+`docs/seon/issues/turn-under-the-runtime-component-never-settles-on-default.md`
+end to end. Re-read PRD §§3, 12, 14, the current roadmap, and the loop,
+armer, installer, and dependency stop boundary. The data batch is not the
+cause: both `open-for-agent` and `next-agent-work` correctly find the open
+runtime turn, and Juniper's settings correctly select no-provider.
+
+**Cause verified on both default and a fresh scratch boot:** Juniper had
+an open `:call` turn but no armed graph. Only root remained in routing.
+The shared live installer disarmed Juniper for cleanup, then wrote the
+opening without starting its ordinary graph again. More subtly,
+`disarm!` accepted the ready permit as completion even though Flow could
+already have selected another wake. That proc could write after cleanup
+and then stop. The old canonical proof explicitly armed before later
+wakes and had no live armer/cleanup sequence.
+
+Flow's `stop` sends control and closes report/error channels; it does not
+join the proc (`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:174`).
+Its stop transition runs after the active transform (`:209`, `:299`).
+That existing transition now owns disarm completion. An idle permit no
+longer proves stop. A queued proc must acknowledge stop or refuse teardown
+under its bound. This corrects the former 100-interleaving regression,
+which explicitly blessed cleanup before a queued proc had started.
+
+`seon.turn` now caps the existing permit/active-transform completion
+observer at the agent's evaluation time limit, retaining a smaller
+configured backstop. No timer, scheduler, or fault route was added.
+The shared `install-running!` owns the live installation sequence and
+leaves Juniper armed; the research wrapper and recurring loop proof call
+that same function. The controlled fixture installer remains available
+for tests that explicitly own a stopped graph.
+
+### Measurements and evidence
+
+Before the fix, fresh source publication
+`6aa20692-9b1e-5b41-83c3-d8e0b0b6acd4` reproduced the unarmed/open/zero-fault
+state. A new message with unchanged production rearmed it and settled in
+**713.563250 ms**. This independently falsifies the proposed runtime-ref,
+closed-tx, and provider-selection causes for the observed stall.
+
+The fixed fresh fork used publication
+`6aa20891-bbaf-538d-8d97-0e51e5ead95a`. The seeded message settled in
+**3,362 ms**, including eight stored opening evaluations; ordinary turn
+`fbcdc2f3d4bf` opened at `01:36:50.816Z` and closed at `01:36:50.943Z`
+(**127 ms**). A later message settled in **600.820375 ms**, stored one
+refreshed evaluation, and changed turns-left **20 → 19**, with zero new
+faults, evaluation errors, provider attempts, or unanswered wakes.
+
+A scratch-only withheld-permit probe created a real open turn and set
+its evaluation limit to **100 ms**. Its ordinary Flow error path committed
+fault `ebeac556-06f0-4f04-b621-7a7b751dde12`, naming turn `9da757155232`
+and the 100 ms bound; the durable fault was observed after **228.792375 ms**
+(including dispatch and commit). The probe restored the setting and permit.
+
+Default retained PID **83040** throughout. Adoption
+`6aa2096b-260c-52f2-a928-40ed64609fbf` loaded the new stop-acknowledgement
+behavior. Exactly one message was sent:
+`loop-live/runtime-default-2026-09-09`, at `01:38:26.441Z`. Turn
+`9bceed705a33` closed at `01:38:34.341Z`: **7,900 ms**, turns-left **19**,
+four stored evaluations, and **zero new core faults**. One evaluation is
+an independently recorded generated-runtime-pull error, described below.
+The original `9fc9bc9ef8ad` is also closed. Default was never stopped,
+reforked, restarted, or reseeded by this lane.
+
+Exact artifacts (bytes as committed):
+
+| Evidence | Bytes |
+|---|---:|
+| [Before](loop_live_runtime_before_2026_09_09.edn) | 325 |
+| [Unchanged-code rewake](loop_live_runtime_rewake_before_2026_09_09.edn) | 590 |
+| [Fixed message](loop_live_runtime_fixed_2026_09_09.edn) | 686 |
+| [Seeded message](loop_live_runtime_seeded_2026_09_09.edn) | 2072 |
+| [Fault deadline](loop_live_runtime_fault_bound_2026_09_09.edn) | 363 |
+| [Default message](loop_live_runtime_default_2026_09_09.edn) | 1260 |
+
+The probe script now understands inbox edges, runtime ownership, and
+closed-tx. `observe-message` reads an existing message without resending,
+uses transaction-reference pulls for times, and bounds its observations
+at the closing transaction. The default live tool call timed out while
+rendering the probe's failed no-evaluation-errors assertion; independent
+fact observation verified settlement. Its one old backstop fault was
+from `01:28:06.602Z`, before this lane's message, not a new regression.
+
+### Gates and boundaries
+
+The final isolated `SEON_TEST_WORKERS=1 bin/test --paths
+src/seon/turn.clj src/seon/cluster/agent.clj test/seon/loop_proof_test.clj
+test/seon/context_blocks_fixture.clj test/seon/cluster/agent_test.clj --
+seon.loop-proof-test` passed **4 tests / 137 assertions / 0 failures /
+0 errors** at HEAD `617e538f3` plus only these paths. The new runtime
+fixture and a real open-turn permit failure are recurring proofs.
+`bin/test --paths <the same paths> --platform` passed **84 / 505 / 0 / 0**.
+
+The earlier three-worker gate hit the existing
+[published-base connector defect](../../../seon/issues/parallel-test-base-connect-can-lose-a-filestore-key.md)
+before fixture assertions; isolated confirmation passed. A separate
+worktree/cache and one worker completed the gate. Concurrency inside the
+graph-acquisition regression remains real. The broader agent namespace
+and its HEAD-only baseline both report **20 / 112 / 10 failures / 3 errors**;
+the corrected 100-interleaving stop test passes. Existing failures remain
+in the [consumer issue](../../../seon/issues/turn-consumer-fixtures-read-retired-result-storage.md).
+
+Cookbook temporarily held two disjoint `turn.clj` renderer-metadata hunks.
+Implementation continued in a HEAD worktree until they landed at
+`617e538f3`, then only this lane's patch was applied. No protected render,
+REPL, help, or SCI files were edited. Its effective-settings read now
+observes runtime turns; the old loop proof's no-refresh/one-occurrence
+expectations were corrected while retaining the stored-prefix assertions.
+
+Two independent findings are recorded, not hidden by loop success:
+[generated runtime pull with nil identity](../../../seon/issues/runtime-block-generates-a-nil-agent-pull.md)
+on default (evaluation `9811cc17667f`), and
+[fixture schema re-admission after adoption](../../../seon/issues/fixture-schema-readmission-after-adoption-refuses-environment.md)
+on scratch. Their protected owners were not changed.
+
+The scratch root is downed and removed; both lane worktrees and retained
+failed lane gate roots are removed after their runners exit. All command
+sessions are reaped. No foreign session or root is operated.
+
+## Initial slice — before the runtime-component resumption
+
 Read AGENTS.md's verbatim §10 lane rules, the assigned issue end to end,
 and turn PRD §§3, 12, 14 end to end, together with §§13–15, the roadmap,
 and the turn loop. Skills: data-oriented-clojure, repl, clojure-testing,

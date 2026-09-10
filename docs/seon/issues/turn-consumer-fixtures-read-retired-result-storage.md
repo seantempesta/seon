@@ -7,6 +7,19 @@ tags: [issue, test, runtime, class/p3, wave/contract-gate]
 
 # Turn consumers retain obsolete fixture and observation contracts
 
+## Runtime-loop resumption baseline — 2026-09-10 01:46 UTC
+
+At `617e538f3`, the HEAD-only agent namespace and the loop repair overlay
+both report **20 tests / 112 assertions / 10 failures / 3 errors**.
+The repaired `disarm-waits-for-the-turn-proc-stop-transition` passes its
+100 controlled stop interleavings. The remaining failing names are the
+parallel-turn and wake-routing properties, routing-conservation wait,
+terminal wait, source-submission observation, park, disarm-backstop
+fixture, and episode-cap observations. The routing fixture again names
+missing process ref `[:seon.db.process/id "8111-1700000000000"]`.
+These failures are independent of the loop lifecycle repair. Both full
+fast invocations exited and their command sessions were reaped.
+
 ## Live-loop baseline — 2026-09-09 23:01 UTC
 
 HEAD-only `bin/test-fast --paths` at `51a98c973` reproduced 20 agent

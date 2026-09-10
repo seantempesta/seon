@@ -7,6 +7,18 @@ tags: [issue, test, datahike]
 
 # Parallel published-base acquisition can lose a filestore key
 
+## Loop-runtime recurrence — 2026-09-10 01:43 UTC
+
+The three-worker loop gate at `617e538f3` plus the loop paths lost published
+base `3688ade0a905f0ba729f2b9d0c7af7d025c71b197bb904bd1d9be9634c06fe57`
+key `de01176c-769f-40ec-a35e-df311c1c0a8e` while connecting the canonical
+fixture for `seon.loop-proof-test/running-fixture-settles-its-seeded-wake`.
+The same filestore migration/tiered sync/connector stack appeared. Its
+isolated confirmation passed with no prior worker-global drift. The lane
+used a separate worktree cache and one worker for its final gate; no
+foreign runner or store was operated. This repeats the observation and
+does not establish the deleting actor.
+
 ## Problem
 
 A three-worker path gate failed while connecting a canonical fixture base,

@@ -679,10 +679,11 @@
             completion (async/chan 1)
             turn-stopped (async/promise-chan)
             turn-backstop-state (atom nil)
+            settings (merge (config/effective @connection (:seon.cluster/name handle))
+                            (ai/agent-overlay @connection agent-id))
             turn-completion-backstop-ms
-            (:seon.config.agent/turn-completion-backstop-ms
-             (merge (config/effective @connection (:seon.cluster/name handle))
-                    (ai/agent-overlay @connection agent-id)))
+            (min (:seon.config.agent/turn-completion-backstop-ms settings)
+                 (:seon.config.eval/time-limit-ms settings))
             _ (async/>!! completion :seon.agent/ready)
             agent-handle (assoc handle
                                 :seon.sci.eval/agent-ctx
@@ -734,13 +735,11 @@
 
 (defn- await-turn-completion!
   [routing entry]
-  (let [completion (:seon.turn.loop/completion entry)
-        turn-stopped (:seon.agent/turn-stopped entry)
+  (let [turn-stopped (:seon.agent/turn-stopped entry)
         {connection :seon.db/connection
          process :seon.db.process/id}
         (:seon.turn.loop/cluster entry)]
-    (if-some [terminal (or (async/poll! completion)
-                           (async/poll! turn-stopped))]
+    (if-some [terminal (async/poll! turn-stopped)]
       terminal
       (let [agent-id (:seon.agent/id entry)
             database @connection
@@ -754,7 +753,7 @@
         (if active-backstop
           (let [failure-channel (:seon.agent/failure-channel active-backstop)
                 [value selected]
-                (async/alts!! [completion turn-stopped failure-channel]
+                (async/alts!! [turn-stopped failure-channel]
                               :priority true)]
             (if (= selected failure-channel)
               (do
@@ -763,17 +762,15 @@
               value))
           (let [backstop (async/timeout timeout-ms)
                 [value selected]
-                (async/alts!! [completion turn-stopped backstop]
+                (async/alts!! [turn-stopped backstop]
                               :priority true)]
-            (if (or (= selected completion)
-                    (= selected turn-stopped))
+            (if (= selected turn-stopped)
               value
               (let [failure
                     (let [diagnostic
                           (turn/turn-completion-error
                            agent-id run-id timeout-ms :seon.agent/disarm :seon.agent/turn-completed
-                           [:seon.turn.loop/completion
-                            :seon.agent/turn-stopped])]
+                           [:seon.agent/turn-stopped])]
                       (ex-info (:seon.error/message diagnostic) diagnostic))
                     fault
                     (cond->
@@ -793,12 +790,13 @@
 
 (defn disarm!
   "Orderly stop of one agent's graph, idempotent.
-  Arm publishes one completion permit before scheduling the turn proc.
-  An active transform holds it and republishes it from `finally`; an idle
-  graph leaves it ready. Request stop, consume that event under the declared
-  `:seon.config.agent/turn-completion-backstop-ms`, then drop the routing entry
-  before closing its channels. Thus disarm waits through a seconds-long active
-  model call, while an accepted-but-never-started proc cannot strand teardown.
+  Request stop and await the turn proc's stop acknowledgement before dropping
+  its routing entry or closing channels. An idle completion permit is not a
+  stop acknowledgement: Flow may already have selected the next wake. Only
+  the stop transition proves no later transform can write after cleanup.
+  The wait is bounded by the lesser of the evaluation time limit and the
+  construction-time completion backstop. A proc that never starts refuses
+  teardown loudly; it cannot report a successful stop while still queued.
   If the loud backstop fires, its diagnostic names the agent and open turn and
   the entry remains so disarm can be retried after the turn settles. Stop drops
   conn contents —

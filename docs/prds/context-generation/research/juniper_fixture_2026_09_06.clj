@@ -1,6 +1,5 @@
 (ns juniper-fixture-2026-09-06
-  (:require [clojure.core.async :as async]
-            [seon.cluster]
+  (:require [seon.cluster]
             [seon.cluster.agent]
             [seon.config]
             [seon.db]
@@ -22,27 +21,8 @@
     (seon.schema/call-with-projection-state
      (:seon.sci.eval/projection-state handle)
      (fn []
-       (seon.cluster/ensure-entity!
-        (:seon.db/connection handle) (:seon.db.process/id handle)
-        {:seon.agent/id "juniper" :seon.cluster/name cluster-name
-         :seon.ns/name 'my.agents.juniper})
-       ((resolve 'seon.context-blocks-fixture/install!)
-        handle (:seon.agent/routing instance)
-        (fn []
-       ; Wait for the live armer's existing barrier before the final cleanup.
-       (let [ack (async/promise-chan)
-             bound (:seon.config.agent/turn-completion-backstop-ms
-                    (seon.config/effective (seon.db/db (:seon.db/connection handle)) cluster-name))]
-         (try
-           (async/put! (:seon.cluster.wake/channel handle) {:seon.agent/quiesce ack})
-           (when-not (= :seon.agent/quiesced
-                        (first (async/alts!! [ack (async/timeout bound)])))
-             (throw (ex-info "Fixture armer barrier did not arrive" {:seon.cluster/name cluster-name})))
-           (finally (async/close! ack))))))
-       (select-keys
-        (seon.turn/system-turn {:seon.turn.loop/cluster handle
-                                :seon.agent/id "juniper" :seon.turn/write? true})
-        [:seon.turn/id :seon.error/kind :seon.error/message])))))
+       ((resolve 'seon.context-blocks-fixture/install-running!)
+        handle (:seon.agent/routing instance))))))
 
 (defn prompt
   "Acquire the exact provider prompt for Juniper in the selected live cluster."

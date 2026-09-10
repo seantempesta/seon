@@ -1,0 +1,1 @@
+{:seon.probe/elapsed-ms 228.792375, :seon.probe/evaluation-limit-ms 100, :seon.turn/id "9da757155232", :seon.probe/fault #:seon.error{:id "ebeac556-06f0-4f04-b621-7a7b751dde12", :kind :seon.agent/turn-completion-backstop, :message "Agent \"juniper\" run \"9da757155232\" did not publish turn completion within 100 ms.", :at #inst "2026-09-10T01:43:07.535-00:00"}}

@@ -2,6 +2,8 @@
   (:require [clojure.core.async :as async]
             [clojure.string :as str]
             [datahike.api :as d]
+            [seon.ai :as ai]
+            [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.config :as config]
             [seon.db :as db]
@@ -173,3 +175,38 @@
                 evaluations (db/q '[:find [?e ...] :in $ [?t ...]
                                      :where [?e :seon.cluster.eval/run ?t]] database turns)]
             (mapv #(vector :db.fn/retractEntity %) (concat evaluations turns))))]])))
+
+(defn install-running!
+  "Install the shared live scenario and leave its ordinary graph running."
+  [handle routing]
+  (let [connection (:seon.db/connection handle)
+        cluster-name (:seon.cluster/name handle)]
+    ;; Re-seeding deliberately erased the bootstrap turn; existing identity
+    ;; is stable, so only a first installation constructs the agent.
+    (when-not (:seon.agent/id
+               (db/pull @connection [:seon.agent/id] [:seon.agent/id "juniper"]))
+      (checked (cluster/ensure-entity!
+                connection (:seon.db.process/id handle)
+                {:seon.agent/id "juniper" :seon.cluster/name cluster-name
+                 :seon.ns/name 'my.agents.juniper})))
+    (install!
+     handle routing
+     (fn []
+       (let [ack (async/promise-chan)
+             settings (merge (config/effective @connection cluster-name)
+                             (ai/agent-overlay @connection "juniper"))
+             bound (min (:seon.config.eval/time-limit-ms settings)
+                        (:seon.config.agent/turn-completion-backstop-ms settings))]
+         (try
+           (async/put! (:seon.cluster.wake/channel handle) {:seon.agent/quiesce ack})
+           (when-not (= :seon.agent/quiesced
+                        (first (async/alts!! [ack (async/timeout bound)])))
+             (throw (ex-info "Fixture armer barrier did not arrive"
+                             {:seon.cluster/name cluster-name})))
+           (finally (async/close! ack))))))
+    (let [opening (checked (turn/system-turn {:seon.turn.loop/cluster handle
+                                              :seon.agent/id "juniper"
+                                              :seon.turn/write? true}))]
+      (agent/arm! {:seon.turn.loop/cluster handle :seon.agent/routing routing
+                   :seon.agent/id "juniper"})
+      (select-keys opening [:seon.turn/id :seon.error/kind :seon.error/message]))))

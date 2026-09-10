@@ -1,0 +1,1 @@
+#:seon.probe{:armed ("root"), :next {:seon.turn.work/situation :call, :seon.turn/id "fbcdc2f3d4bf", :seon.agent/id "juniper"}, :runtime #:seon.agent{:runtime #:seon.runtime{:turns [#:seon.turn{:id "7e77724dbe89", :closed-tx #:db{:id 536870971}} {:seon.turn/id "fbcdc2f3d4bf", :seon.turn.work/situation :call}]}}, :faults #{}}

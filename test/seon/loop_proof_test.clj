@@ -10,10 +10,12 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.context-blocks-fixture :as fixture]
             [seon.db :as db]
             [seon.eval :as evaluation]
+            [seon.env :as env]
             [seon.flow :as flow]
             [seon.render :as render]
             [seon.repl :as repl]
@@ -28,6 +30,123 @@
 
 (defn- stored-text [database]
   (str/join "\n\n" (map repl/render-ai (evaluation/of-agent database "juniper"))))
+
+(deftest running-fixture-settles-its-seeded-wake
+  (support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection
+                    :seon.boot/cluster-name "running-fixture"
+                    :seon.config/manifest
+                    {:seon.config.run/max-episode-runs :seon.config/absent}})
+     (db/transact! connection [{:seon.agent/id "root"
+                               :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
+     (cluster/ensure-cluster-entity! connection "running-fixture" cluster/boot-process-identity)
+     (let [ctx (support/fork-cluster-ctx connection)
+           environment (support/environment "running-fixture" connection)
+           routing (agent/routing)
+           faults (async/chan (async/sliding-buffer 16))
+           events (async/chan (async/sliding-buffer 1))]
+       (with-open [launcher (support/closeable
+                             (flow/start-work-launcher!
+                              {:seon.env/environment environment
+                               :seon.flow/configuration
+                               (select-keys (support/effective-config) flow/flow-workload-attributes)})
+                             flow/stop-work-launcher!)]
+         (let [handle (support/cluster-handle
+                       {:seon.env/environment environment
+                        :seon.db/connection connection :seon.cluster/name "running-fixture"
+                        :seon.sci.eval/ctx ctx :seon.flow/work-launcher @launcher
+                        :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
+                        :seon.db.process/id cluster/boot-process-identity})
+               _ (swap! routing assoc :seon.agent/fault-channel faults)
+               armer (flow/start-graph!
+                      {::flow/graph-definition
+                       {:procs {:seon.agent/armer
+                                {:proc (flow/var-process
+                                        #'agent/armer-step :io
+                                        (env/carry {:seon.turn.loop/cluster handle
+                                                    :seon.agent/routing routing} environment))}}
+                        :conns [] :io-exec (:seon.flow/executor handle)}
+                       ::flow/joins
+                       {::faults #(flow/join-error-fanout!
+                                  {::flow/started (::flow/started %)
+                                   ::flow/fault-channel faults ::flow/tag {}})}})
+               settled? #(and (seq (evaluation/of-agent @connection "juniper"))
+                               (nil? (turn/open-for-agent @connection [:seon.agent/id "juniper"]))
+                               (empty? (turn/unanswered-wakes @connection "juniper" {})))
+               await-settled! (fn []
+                                (let [deadline (async/timeout 10000)]
+                                  (loop []
+                                    (when-not (settled?)
+                                      (when (= deadline (second (async/alts!! [deadline events] :priority true)))
+                                        (throw (ex-info "Fixture wake did not settle within its evaluation limit"
+                                                        {:seon.probe/armed (keys (:seon.agent/armed @routing))
+                                                         :seon.probe/next (turn/next-agent-work @connection {:seon.agent/id "juniper"})})))
+                                      (recur)))))]
+           (d/listen connection ::running-fixture (fn [_] (async/offer! events true)))
+           (wake/route! {:seon.cluster.wake/connection connection
+                         :seon.cluster.wake/channels #(agent/channels routing)
+                         :seon.cluster.wake/fenced? #(agent/fenced-route? routing %1 %2)
+                         :seon.cluster.wake/armer-channel (:seon.cluster.wake/channel handle)
+                         :seon.cluster.wake/render-channel (:seon.render/context-channel handle)
+                         :seon.render.web/interest (atom :all)
+                         :seon.cluster.wake/fault-channel faults
+                         :seon.cluster.wake/key ::running-route})
+           (try
+             (fixture/install-running! handle routing)
+             (await-settled!)
+             (is (some? (agent/armed routing "juniper")))
+             (is (= 19 (turn/turns-left @connection "juniper")))
+             (is (seq (db/q '[:find ?turn :where [?agent :seon.agent/id "juniper"]
+                              [?agent :seon.agent/runtime ?runtime]
+                              [?runtime :seon.runtime/turns ?turn]
+                              [?turn :seon.turn/reply ""] [?turn :seon.turn/closed-tx]] @connection)))
+             (let [basis (db/basis-t @connection)]
+               (db/transact! connection [{:seon.message/id "running-fixture/wake"
+                                         :seon.message/to [:seon.agent/id "juniper"]
+                                         :seon.message/inbox [:seon.agent/id "juniper"]
+                                         :seon.message/content "Probe the running runtime component."}])
+               (await-settled!)
+               (is (= 19 (turn/turns-left @connection "juniper")))
+               (is (some #(> (:t %) basis) (evaluation/of-agent @connection "juniper"))))
+             (is (not (some? (async/poll! faults))) "the installer and both wakes are fault-free")
+             (testing "a lost turn permit faults at the agent evaluation limit"
+               (let [entry (agent/armed routing "juniper")
+                     completion (:seon.turn.loop/completion entry)
+                     settings (:db/id (:seon.agent/settings
+                                       (db/pull @connection '[{:seon.agent/settings [:db/id]}]
+                                                [:seon.agent/id "juniper"])))]
+                 (support/await-event! completion ::idle-permit)
+                 (db/transact! connection [[:db/add settings :seon.config.eval/time-limit-ms 100]])
+                 (is (nil? (:seon.error/kind
+                            (db/transact! connection
+                                          (turn/open-tx
+                                           {:seon.turn/id "running-fixture/withheld"
+                                            :seon.turn/agent [:seon.agent/id "juniper"]
+                                            :seon.turn/opened-tx "datomic.tx"
+                                            :seon.turn.work/situation :call})))))
+                 (try
+                   (let [start (System/nanoTime)]
+                     (async/offer! (:seon.cluster.wake/channel entry) :seon.agent/wake)
+                     (let [fault (support/await-event! faults ::evaluation-limit-fault)
+                           data (ex-data (::async.flow/ex fault))]
+                       (is (= :seon.agent/turn-completion-backstop (:seon.error/kind data)))
+                       (is (= "running-fixture/withheld" (:seon.turn/id data)))
+                       (is (= 100 (:seon.config.agent/turn-completion-backstop-ms data)))
+                       (is (< (/ (- (System/nanoTime) start) 1e6) 2000))))
+                   (finally
+                     (db/transact! connection [[:db/add settings :seon.config.eval/time-limit-ms 10000]])
+                     (async/offer! completion :seon.agent/ready)))))
+             (finally
+               (wake/unlisten! {:seon.cluster.wake/connection connection :seon.cluster.wake/key ::running-route})
+               (async.flow/stop (::flow/graph armer))
+               (support/await-event! (:seon.turn.loop/completion handle) ::armer-stopped)
+               (doseq [id (keys (:seon.agent/armed @routing))]
+                 (agent/disarm! {:seon.agent/routing routing :seon.agent/id id}))
+               (d/unlisten connection ::running-fixture)
+               (doseq [channel [events faults (:seon.cluster.wake/channel handle)
+                                (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
+                 (async/close! channel))))))))))
 
 (deftest concurrent-arms-share-one-graph
   (support/with-database
@@ -241,7 +360,11 @@
                    (is (seq saved))
                    (is (every? (comp seq :seon.cluster.eval/read-evidence)
                                (remove #(str/starts-with? (:seon.cluster.eval/source %) "(dir ") saved)))
-                   (is (nil? (:seon.turn/id refresh)) (pr-str (:seon.turn/forms refresh))))))
+                   (is (= ["(seon.agent/effective-settings)"]
+                          (mapv :seon.cluster.eval/source
+                                (remove #(= :unchanged (:seon.turn/status %))
+                                        (:seon.turn/forms refresh))))
+                       "closing the creation turn changes the derived turn count"))))
              (fixture/install! handle routing)
              (testing "fresh opening and stable stored prompt"
                (let [first-id (turn/next-id @connection "loop-proof" "juniper")
@@ -290,11 +413,14 @@
                            :seon.test/prompt
                            (bytes-evidence (:seon.cluster.prompt/text first-prompt))})
                  (let [basis (db/basis-t @connection)
-                       unchanged (turn/system-turn request)]
-                   (is (every? #(= :unchanged (:seon.turn/status %))
-                               (:seon.turn/forms unchanged)))
-                   (is (nil? (:seon.turn/id unchanged)))
-                   (is (= basis (db/basis-t @connection))))
+                       refreshed (turn/system-turn request)]
+                   (is (= ["(seon.agent/effective-settings)"]
+                          (mapv :seon.cluster.eval/source
+                                (remove #(= :unchanged (:seon.turn/status %))
+                                        (:seon.turn/forms refreshed))))
+                       "settings observe runtime turns; the other opening reads stay unchanged")
+                   (is (string? (:seon.turn/id refreshed)))
+                   (is (= (inc basis) (db/basis-t @connection))))
                  (testing "the first ordinary wake retains the seeded opening once"
                    (agent/arm! {:seon.turn.loop/cluster handle
                                 :seon.agent/routing routing :seon.agent/id "juniper"})
@@ -302,7 +428,8 @@
                    (agent/disarm! {:seon.agent/routing routing :seon.agent/id "juniper"})
                    (let [after (evaluation/of-agent @connection "juniper")
                          occurrences (frequencies (map :seon.cluster.eval/source after))]
-                     (doseq [entry saved]
+                     (doseq [entry (remove #(= "(seon.agent/effective-settings)"
+                                              (:seon.cluster.eval/source %)) saved)]
                        (is (= 1 (get occurrences (:seon.cluster.eval/source entry)))
                            (pr-str occurrences)))
                      (is (str/starts-with? (stored-text @connection) text))))
@@ -364,7 +491,7 @@
                                        (:seon.turn/forms system))]
                    (is (some #{"(my.message/inbox)"}
                              (map :seon.cluster.eval/source changed)))
-                   (is (= #{'(my.message/inbox)
+                   (is (= #{'(my.message/inbox) '(seon.agent/effective-settings)
                             '(seon.db/pull '[{:seon.message/_inbox
                                              [:seon.message/id :seon.message/content
                                               {:seon.message/from [:seon.agent/id]}]}]
@@ -416,7 +543,7 @@
                    (is (seq fresh))
                    (is (= 'seon.db/pull (first (read-string (:seon.cluster.eval/source (first fresh)))))
                        "changed read must precede the no-provider reply")
-                   (is (= #{'(my.message/inbox)
+                   (is (= #{'(my.message/inbox) '(seon.agent/effective-settings)
                              '(seon.db/pull '[{:seon.message/_inbox
                                               [:seon.message/id :seon.message/content
                                                {:seon.message/from [:seon.agent/id]}]}]

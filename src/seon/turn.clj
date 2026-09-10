@@ -4626,12 +4626,14 @@
         agent-id (:seon.agent/id state)
         database @connection
         run-id (open-for-agent database [:seon.agent/id agent-id])
+        settings (ai/agent-overlay database agent-id)
         timeout-ms
-        (or (:seon.config.agent/turn-completion-backstop-ms
-             (ai/agent-overlay database agent-id))
-            carried-timeout-ms
-            (:seon.config.agent/turn-completion-backstop-ms
-             (config/effective database cluster-name)))
+        (min (or (:seon.config.eval/time-limit-ms settings)
+                 (:seon.config.eval/time-limit-ms (:seon.turn.loop/cluster state)))
+             (or (:seon.config.agent/turn-completion-backstop-ms settings)
+                 carried-timeout-ms
+                 (:seon.config.agent/turn-completion-backstop-ms
+                  (config/effective database cluster-name))))
         [value selected]
         (async/alts!! [completion (async/timeout timeout-ms)] :priority true)]
     (if (= selected completion)
@@ -4726,11 +4728,12 @@
   core fault and rides this graph's error channel into the cluster's
   fault committer, tagged with the agent. The completion channel is an
   armed-ready permit: arm publishes it before Flow scheduling, an active
-  transform holds it under the construction-time completion backstop, and
+  transform holds it under the lesser of its evaluation limit and completion
+  backstop, and
   `finally` republishes it without an interruptible park. A successful pass
-  then cancels the bound; an escaped pass leaves it armed. Disarm consumes the
-  permit or joins that same active bound, so it waits for real active work
-  without depending on a proc that may never have started."
+  then cancels the bound; an escaped pass leaves it armed. Disarm awaits the
+  stop transition or joins that same active bound; a ready permit never
+  substitutes for proc exit."
   {:malli/schema [:function
                   [:=> [:cat] [:map]]
                   [:=> [:cat :map] :map]

@@ -804,42 +804,42 @@
                   :procs (select-keys (:procs definition) [:seon.agent/turn])
                   :conns [])))]
       (let [entry (arm-one! connection ctx routing agent-id)
-            completion (:seon.turn.loop/completion entry)
-            observed-completion
+            turn-stopped (:seon.agent/turn-stopped entry)
+            observed-stop
             (reify
               async.impl/ReadPort
               (take! [_ handler]
-                (let [result (async.impl/take! completion handler)]
+                (let [result (async.impl/take! turn-stopped handler)]
                   (async/put! take-result (some? result))
                   result))
 
               async.impl/WritePort
               (put! [_ value handler]
-                (async.impl/put! completion value handler))
+                (async.impl/put! turn-stopped value handler))
 
               async.impl/Channel
               (close! [_]
-                (async.impl/close! completion))
+                (async.impl/close! turn-stopped))
               (closed? [_]
-                (async.impl/closed? completion)))
+                (async.impl/closed? turn-stopped)))
             _ (swap! routing assoc-in
-                     [:seon.agent/armed agent-id :seon.turn.loop/completion]
-                     observed-completion)
+                     [:seon.agent/armed agent-id :seon.agent/turn-stopped]
+                     observed-stop)
             stopped
             (future
               (agent/disarm! {:seon.agent/id agent-id
                               :seon.agent/routing routing}))]
         (try
           {:seon.cluster.agent-test/runnable-count (count @tasks)
-           :seon.cluster.agent-test/completion-ready?
+           :seon.cluster.agent-test/stop-ready?
            (test-support/await-event!
-            take-result ::parked-turn-completion-ready)}
+            take-result ::parked-turn-stop)}
           (finally
             (doseq [^Runnable task @tasks]
               (.run task))
             (test-support/await-event! stopped ::withheld-turn-disarmed)))))))
 
-(deftest disarm-does-not-depend-on-the-turn-proc-starting
+(deftest disarm-waits-for-the-turn-proc-stop-transition
   (with-connection
     (fn [connection ctx]
       (let [routing (armory)
@@ -855,14 +855,14 @@
                       connection ctx routing original-definition %)
                     agent-ids)
               ready-count
-              (count (filter :seon.cluster.agent-test/completion-ready?
+              (count (filter :seon.cluster.agent-test/stop-ready?
                              results))]
           (is (every? #(= 1 (:seon.cluster.agent-test/runnable-count %))
                       results)
               "Flow accepted every turn runnable without starting it")
-          (is (= 100 ready-count)
-              (str "arming published parked completion in " ready-count
-                   "/100 controlled stop interleavings")))))))
+          (is (zero? ready-count)
+              (str "no queued proc acknowledged stop before running; observed " ready-count
+                   "/100 premature acknowledgements")))))))
 
 (deftest disarm-has-a-declared-loud-turn-completion-backstop
   (with-connection
