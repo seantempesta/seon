@@ -1,0 +1,609 @@
+--- a/src/seon/agent.clj
++++ b/src/seon/agent.clj
+@@ -73,19 +73,37 @@
+       result
+       (ai/agent-overlay (:db-after result) agent-id))))
+ 
++(defn effective-settings
++  "Read effective agent dials grouped by namespace, then remaining turns."
++  {:malli/schema
++   [:=> [:cat :seon.db/db :seon.agent/id]
++    [:or [:vector [:map-of :qualified-keyword :seon.schema/value]] :seon.error/value]]}
++  [database agent-id]
++  (let [cluster-name (db/q '[:find ?name . :where [_ :seon.config/cluster ?name]] database)
++        defaults (when (string? cluster-name) (config/effective database cluster-name))
++        overrides (ai/agent-overlay database agent-id)
++        attributes (ai/agent-setting-attributes database)
++        remaining (turn/turns-left database agent-id)
++        refusal (some #(when (:seon.error/kind %) %)
++                      [cluster-name defaults overrides attributes remaining])]
++    (cond
++      refusal refusal
++      (nil? defaults) {:seon.error/kind :seon.config/required-absent
++                      :seon.error/message "The cluster configuration is absent."}
++      :else
++      (let [effective (select-keys (ai/settings defaults overrides) attributes)
++            order {"seon.config.ai" 0 "seon.config.ai.retry" 1
++                   "seon.config.eval" 2 "seon.config.run" 3}]
++        (conj (mapv (fn [[_ entries]] (into (sorted-map) entries))
++                    (sort-by (fn [[group _]] [(get order group 4) group])
++                             (group-by (comp namespace key) effective)))
++              {:my.agent/turns-left remaining})))))
++
+ (defn render-settings-ai
+-  "Read my overrides and the remaining turns in this session."
++  "Read effective values in provider, retry, evaluation, and budget order."
+   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
+-  [unit]
+-  (str ";; I should pull my overrides; omitted settings inherit defaults, and turns left is derived rather than stored.\n"
+-       (repl/source-text
+-        (list 'seon.db/pull
+-              (list 'quote
+-                    '[{:seon.agent/settings
+-                       [:seon.config.ai/model :seon.config.ai/no-provider
+-                        :seon.config.eval/time-limit-ms
+-                        :seon.config.run/max-episode-runs]}])
+-              [:seon.agent/id (:seon.agent/id unit)]))))
++  [_unit]
++  ";; I should read effective settings; my overrides win over cluster defaults, and turns left is derived.\n(seon.agent/effective-settings)")
+ 
+ (defn render-settings-html
+   "Show every declared agent dial, its effective value, and where it comes from."
+--- a/src/seon/plan.clj
++++ b/src/seon/plan.clj
+@@ -1157,11 +1157,39 @@
+          (str "Update the current step:\n" (update-example view))]
+          older (conj (print/render-elision-ai older)))))))
+ 
++(defn- plan-write-examples
++  [agent-id]
++  (let [add
++        (list 'let
++              ['title "Verify customer totals"
++               'plan (list 'get
++                           (list 'seon.db/pull
++                                 (list 'quote '[{:seon.agent/plan
++                                                [:db/id {:my.plan/steps [:my.plan.item/position]}]}])
++                                 [:seon.agent/id agent-id])
++                           :seon.agent/plan)]
++              (list 'seon.db/transact!
++                    [{:db/id (list :db/id 'plan)
++                      :my.plan/steps
++                      [{:my.plan.item/id (list 'seon.id/id 'title 8)
++                        :my.plan.item/title 'title
++                        :my.plan.item/position
++                        '(inc (reduce max -1 (map :my.plan.item/position (:my.plan/steps plan))))}]}]))
++        remove '(seon.db/transact!
++                  [[:db.fn/retractEntity
++                    [:my.plan.item/id (seon.id/id "Verify customer totals" 8)]]])]
++    (str ";; I can add to an existing plan by its db/id; the step id is (seon.id/id title 8), so the same title names the same step.\n"
++         (str/join "\n" (map #(str ";; " %) (str/split-lines (repl/source-text add))))
++         "\n;; I remove the step with retractEntity; retracting the component edge alone leaves the child.\n"
++         (str/join "\n" (map #(str ";; " %) (str/split-lines (repl/source-text remove))))
++         "\n")))
++
+ (defn render-plan-ai
+   "Read my complete plan as the instructions for what to do next."
+   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
+   [unit]
+-  (str ";; I should pull the plan component; its set is shown in position order, and get with a default could hide a refusal.\n"
++  (str (plan-write-examples (:seon.agent/id unit))
++       ";; I should pull the plan component; its set is shown in position order, and get with a default could hide a refusal.\n"
+        (repl/source-text
+         (list 'seon.db/pull
+               (list 'quote
+--- a/src/seon/repl.clj
++++ b/src/seon/repl.clj
+@@ -1,24 +1,13 @@
+ (ns seon.repl
+   "The ONE generator of REPL bytes: one evaluation, as the session it was.
+ 
+-  An agent writes comments and forms. The REPL answers each form with one
+-  `#:seon.repl{…}` map the agent is never asked to write (PRD ruling 69,
+-  docs/prds/context-generation/plan/agent-record-and-repl-response-prd-2026-09-07.md
+-  §4). The page's AI column, the agent's history unit, and the provider
+-  prompt are the same pure function over the same evaluation, so their bytes
+-  are identical by construction rather than by three formatters agreeing.
+-
+-  The grammar, exactly:
+-
+-      ; the agent's comment, verbatim, above the prompt
+-      my.agents.juniper=> (+ 1 1)
+-      #:seon.repl{:value 2, :result result/e41, :ms 3}
+-
+-  Comments sit ABOVE the prompt so a prompt line holds exactly one form and
+-  HTML can label the comment separately. Key order is enforced by walking an
+-  ordered vector — never by printing a map, whose order is the reader's
+-  accident. Ruling 45 holds: nothing this emits is comment-shaped except the
+-  agent's own comment."
++  The prompt precedes everything the agent typed, including its comments.
++  Declared AI renderer output is the response itself; ordinary data uses the
++  reply map. Historical entries preserve the evaluation's saved shown text.
++
++      my.agents.juniper=> ;; I should check the sum.
++      (+ 1 1)
++      #:seon.repl{:value 2, :result result/e41, :ms 3}"
+   (:require [clojure.edn :as edn]
+             [clojure.main :as main]
+             [clojure.pprint :as pprint]
+@@ -149,42 +138,47 @@
+           response-order)))
+ 
+ (defn response
+-  "The one-line `#:seon.repl{…}` answer to one evaluated form.
++  "The saved declared-renderer response, or the reply map for ordinary data.
+ 
+   Returns nil when the evaluation has settled nothing — a running form has
+   not printed a result, and inventing an empty map would say it had."
+   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
+   [emission]
+-  (let [entries (response-entries emission)]
++  (if (:seon.eval/renderer emission)
++    (value-text emission)
++    (let [entries (response-entries emission)]
+     (when (seq entries)
+       (str "#:seon.repl{"
+            (str/join ", "
+                      (map (fn [[response-key text]]
+                             (str ":" (name response-key) " " text))
+                           entries))
+-           "}"))))
++           "}")))))
++
++(defn- input-text
++  [{prose :seon.cluster.eval/comment source :seon.cluster.eval/source
++    prompt-ns :seon.ns/name}]
++  (str (or prompt-ns 'user) "=> "
++       (when (seq prose) (str (str/trim-newline prose) "\n"))
++       source))
+ 
+ (defn text
+-  "The REPL bytes for ONE evaluation: comment, prompt line, response.
++  "The REPL bytes for one evaluation: prompt, agent input, response.
+ 
+   This is the single generator behind the debug page's AI column, the agent's
+   history unit, and the provider prompt. Anything that formats an evaluation
+   some other way is by definition a second grammar, and a second grammar is
+   what taught agents to echo results instead of writing forms."
+   {:malli/schema [:=> [:cat :seon.repl/emission] :string]}
+-  [{prose :seon.cluster.eval/comment
+-    source :seon.cluster.eval/source
+-    prompt-ns :seon.ns/name
+-    :as emission}]
++  [emission]
+   (let [answer (response emission)]
+-    (str (when (seq prose) (str (str/trim-newline prose) "\n"))
+-         (or prompt-ns 'user) "=> " source
++    (str (input-text emission)
+          (when answer (str "\n" answer)))))
+ 
+ ;;; ---------------------------------------------------------------------------
+ ;;; The evaluation entity's two projections
+ ;;;
+-;;; Both are the same bytes by construction: `/html` labels the comment and
++;;; Both share the prompt and complete input bytes; `/html` labels input and
+ ;;; the response, and `/ai` is the text the agent reads. Neither invents a
+ ;;; second grammar, because both call `text`/`response`.
+ ;;; ---------------------------------------------------------------------------
+@@ -200,11 +194,13 @@
+   (let [unit (if (map? (:seon.render/value unit))
+                (:seon.render/value unit)
+                unit)]
+-   (cond-> (select-keys unit [:seon.cluster.eval/id
++   (cond-> (select-keys unit [:seon.ns/name
++                             :seon.cluster.eval/id
+                              :seon.cluster.eval/source
+                              :seon.cluster.eval/comment
+                              :seon.cluster.eval/ordinal
+                              :seon.eval/value
++                             :seon.eval/renderer
+                              :seon.eval/missing
+                              :seon.eval/size
+                              :seon.cluster.eval/error
+@@ -244,23 +240,12 @@
+       (text emission))))
+ 
+ (defn render-html
+-  "`:seon.render/html` — the same evaluation, with the comment labeled.
+-
+-  The comment is its own element rather than a line of the prompt, which is
+-  the whole reason it is stored apart from the source it introduces."
++  "Render the prompt and complete agent input together, then its response."
+   {:malli/schema [:=> [:cat :seon.repl/entity-request] [:maybe :seon.render/hiccup]]}
+   [unit]
+   (let [emission (entity-emission unit)
+-        prose (:seon.cluster.eval/comment emission)
+         answer (response emission)]
+     (when (seq (:seon.cluster.eval/source emission))
+-      (into [:article {:class "seon-family-entry seon-eval-entry"}]
+-            (cond-> []
+-              (seq prose)
+-              (conj [:p {:class "seon-eval-comment"} prose])
+-              :always
+-              (conj [:pre [:code {:class "seon-eval-prompt"}
+-                           (str (or (:seon.ns/name emission) 'user) "=> "
+-                                (:seon.cluster.eval/source emission))]])
+-              answer
+-              (conj [:pre [:code {:class "seon-eval-response"} answer]]))))))
++      (cond-> [:article {:class "seon-family-entry seon-eval-entry"}
++               [:pre [:code {:class "seon-eval-prompt"} (input-text emission)]]]
++        answer (conj [:pre [:code {:class "seon-eval-response"} answer]])))))
+--- a/src/seon/render.clj
++++ b/src/seon/render.clj
+@@ -1035,6 +1035,7 @@
+             (if (:seon.error/kind rendered)
+               node
+               {:seon.print/face :seon.print/projected
++               :seon.render.call/selected-producer selected
+                :seon.render/output output
+                :seon.print/value rendered})
+             node)))
+--- a/src/seon/render/value.clj
++++ b/src/seon/render/value.clj
+@@ -442,7 +442,7 @@
+           id (node-id unit path)]
+       (if (:seon.error/kind id)
+         id
+-        {:seon.render.value/tree tree
++        (cond-> {:seon.render.value/tree tree
+          :seon.render.value/options options
+          :seon.render.value/truncated? truncated?
+          :seon.render.value/text (:seon.print/text emitted)
+@@ -453,7 +453,10 @@
+           (:seon.print/hiccup emitted)
+           (when truncated?
+             [:p {:class "seon-data-capped"}
+-             "elided — this value is larger than the configured window"]) ]}))))
++             "elided — this value is larger than the configured window"]) ]}
++          (:seon.render.call/selected-producer initial-tree)
++          (assoc :seon.render.call/selected-producer
++                 (:seon.render.call/selected-producer initial-tree)))))))
+ 
+ (defn render-ai-data
+   "Return the text sink result from one already prepared projection."
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -1875,15 +1875,19 @@
+ (defn- shown-result
+   [value request record]
+   (let [profile (render/request-profile request)
+-        shown (render.value/render-ai
++        projection (render.value/prepare
+                (assoc request
+                       :seon.render/value value
+                       :seon.render/profile profile
+                       :seon.render.call/id
+                       [:seon.cluster.eval/source
+-                       (:seon.cluster.eval/source request)]))]
++                       (:seon.cluster.eval/source request)]))
++        shown (if (:seon.error/kind projection) projection
++                  (render.value/render-ai-data projection))]
+     (cond-> {:seon.sci.admit/value value
+              :seon.eval/value (if (string? shown) shown (pr-str shown))}
++      (:seon.render.call/selected-producer projection)
++      (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
+       (:seon.error/kind value)
+       (assoc :seon.cluster.eval/error
+              (or (:seon.error/message value) (str (:seon.error/kind value))))
+@@ -1908,6 +1912,8 @@
+             ;; is what lets a reader ask `contains?` instead of guessing.
+             (contains? admitted :seon.sci.admit/value)
+             (assoc :seon.sci.admit/value (:seon.sci.admit/value admitted))
++            (:seon.eval/renderer admitted)
++            (assoc :seon.eval/renderer (:seon.eval/renderer admitted))
+             (:seon.eval/value admitted)
+             (assoc :seon.eval/value
+                    (:seon.eval/value admitted))
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -77,6 +77,8 @@
+                  (:seon.error/kind form-problem))]
+     (cond-> {:seon.turn/id id
+              :seon.cluster.eval/ordinal ordinal}
++      (:seon.eval/renderer settlement-evaluation)
++      (assoc :seon.eval/renderer (:seon.eval/renderer settlement-evaluation))
+       (:seon.eval/value settlement-evaluation)
+       (assoc :seon.eval/value
+              (:seon.eval/value settlement-evaluation))
+@@ -1397,6 +1399,7 @@
+ 
+ (def ^:private receipt-terminal-attributes
+   [:seon.eval/value
++   :seon.eval/renderer
+    :seon.eval/missing
+    :seon.eval/size
+    :seon.cluster.eval/error
+--- a/resources/seon/schemas/seon.eval.edn
++++ b/resources/seon/schemas/seon.eval.edn
+@@ -1,4 +1,5 @@
+ #:seon.eval{:value [:string {:description "Exact shown text produced once by the evaluation's value renderer under its render profile. It is an observation, not a serialization of the live object."}]
++            :renderer [:qualified-symbol {:description "The declared AI renderer that produced this evaluation’s saved shown text. History emits that text directly, without selecting or invoking the renderer again."}]
+             :entity
+             [:map {:seon.render/ai seon.repl/render-ai
+                    :seon.render/html seon.repl/render-html}
+@@ -16,6 +17,7 @@
+              [:seon.cluster.eval/read-basis-transaction {:optional true}
+               :seon.db/basis-t]
+              [:seon.eval/value {:optional true} :string]
++             [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+              [:seon.cluster.eval/output {:optional true} :string]
+              [:seon.cluster.eval/error {:optional true} :string]
+              [:seon.cluster.eval/interrupted-at {:optional true} :inst]],
+--- a/test/seon/repl_test.clj
++++ b/test/seon/repl_test.clj
+@@ -16,21 +16,21 @@
+     (is (= form (read-string source)))))
+ 
+ (deftest one-evaluation-emits-comment-prompt-and-response
+-  (testing "the comment sits above the prompt so the prompt holds one form"
++  (testing "the prompt precedes the entire agent input"
+     (let [emitted (repl/text
+                  {:seon.cluster.eval/comment
+-                  "; the agent's comment, verbatim, above the prompt"
++                  ";; I should check the sum."
+                   :seon.cluster.eval/source "(+ 1 1)"
+                   :seon.ns/name 'my.agents.juniper
+                   :seon.repl/handle (admit/result-handle "41")
+                   :seon.eval/value "2"
+                   :seon.eval/duration-ms 3})]
+-      (is (= (str "; the agent's comment, verbatim, above the prompt\n"
+-                  "my.agents.juniper=> (+ 1 1)\n"
++      (is (= (str "my.agents.juniper=> ;; I should check the sum.\n"
++                  "(+ 1 1)\n"
+                   "#:seon.repl{:value 2, :result result/e41, :ms 3}")
+              emitted))
+       (is (= 3 (count (str/split-lines emitted)))
+-          "comment, prompt, response — never a comment glued into the prompt")))
++          "prompt and comment, form, response")))
+   (testing "no comment means no blank line before the prompt"
+     (is (= (str "my.agents.juniper=> (+ 1 1)\n"
+                 "#:seon.repl{:value 2, :result result/e41, :ms 3}")
+--- a/test/seon/returned_error_test.clj
++++ b/test/seon/returned_error_test.clj
+@@ -30,7 +30,6 @@
+                     :seon.config/on-core-error :panic})
+            shown (:seon.eval/value result)
+            response (repl/response result)
+-           parsed (edn/read-string response)
+            diagnostic (:seon.sci.admit/value result)]
+        (println "RETURNED-ERROR"
+                 (pr-str {:shown shown :bytes (alength (.getBytes shown "UTF-8"))
+@@ -40,8 +39,8 @@
+        (is (= 42 (:seon.db/offending diagnostic)))
+        (is (str/starts-with? shown "Expected:") shown)
+        (is (< (alength (.getBytes shown "UTF-8")) 300) shown)
+-       (is (= shown (:seon.repl/error parsed)) response)
+-       (is (not (contains? parsed :seon.repl/value)) response)
++       (is (= shown response))
++       (is (= 'seon.db/render-rejection-ai (:seon.eval/renderer result)))
+        (is (= before (db/basis-t @connection)))
+        (is (= "Verify" (:my.plan.item/title
+                         (db/pull @connection [:my.plan.item/title]
+--- a/test/seon/help_test.clj
++++ b/test/seon/help_test.clj
+@@ -58,12 +58,13 @@
+            (is (string? (:seon.turn/id @committed)))
+            (is (= "(help)" (:seon.cluster.eval/source saved)))
+            (is (= ['help 'seon.db/pull 'seon.db/pull 'seon.db/pull
+-                   'seon.db/pull 'seon.db/pull 'dir]
++                   'seon.agent/effective-settings 'seon.db/pull 'dir]
+                   (mapv (comp first edn/read-string :seon.cluster.eval/source)
+                         (evaluation/of-agent @connection "help"))))
+            (let [entries (evaluation/of-agent @connection "help")
+                  empty-reads (subvec entries 2 6)]
+-             (is (= ["nil" "nil" "nil" "nil"] (mapv :seon.eval/value empty-reads)))
++             (is (= ["nil" "nil" "nil"] (mapv :seon.eval/value (mapv empty-reads [0 1 3]))))
++             (is (str/includes? (:seon.eval/value (nth empty-reads 2)) "turns-left"))
+              (is (every? #(seq (:seon.cluster.eval/read-evidence %)) empty-reads)))
+            (is (vector? lines) (pr-str lines))
+            (is (= 13 (count lines)))
+@@ -93,8 +94,8 @@
+              (is (nil? (:seon.turn/id again)) (pr-str again))
+              (is (every? #(= :unchanged (:seon.turn/status %)) (:seon.turn/forms again))))
+            (is (true? (db/read-evidence-current? @connection evidence)))
+-           (is (str/includes? shown ":ms"))
+-           (is (str/includes? shown "result/e"))
++           (is (= 'seon.bootstrap/render-help-ai (:seon.eval/renderer saved)))
++           (is (= (:seon.eval/value saved) (repl/response (repl/entity-emission saved))))
+            (db/transact! connection [{:seon.agent/id "unrelated"}])
+            (is (true? (db/read-evidence-current? @connection evidence)))
+            (is (= shown (repl/render-ai (first (evaluation/of-agent @connection "help")))))
+--- a/resources/seon/schemas/seon.cluster.eval.edn
++++ b/resources/seon/schemas/seon.cluster.eval.edn
+@@ -4,7 +4,7 @@
+                      {:min 1,
+                       :seon.db/no-history? true,
+                       :description
+-                      "The agent's own prose above this form, verbatim and stored apart from the source it introduces, so a prompt line holds exactly one form and HTML can label the comment separately."}],
++                      "The agent's own comment, stored verbatim. The REPL prompt precedes the comment and source as one agent input; the response follows both."}],
+                     :author
+                     [:enum
+                      {:description
+@@ -71,6 +71,7 @@
+                      [:seon.sci.eval/ending-ns
+                       {:optional true}
+                       :seon.sci.eval/ending-ns]
++                     [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+                      [:seon.eval/value
+                       {:optional true}
+                       :seon.eval/value]
+@@ -133,6 +134,7 @@
+                      [:seon.turn/id :seon.turn/id]
+                      [:seon.cluster.eval/ordinal
+                       :seon.cluster.eval/ordinal]
++                     [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+                      [:seon.eval/value
+                       {:optional true}
+                       :seon.eval/value]
+--- a/resources/seon/schemas/seon.repl.edn
++++ b/resources/seon/schemas/seon.repl.edn
+@@ -62,6 +62,7 @@
+              [:seon.ns/name {:optional true} :seon.ns/name]
+              [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]
+              [:seon.cluster.eval/ordinal {:optional true} :seon.cluster.eval/ordinal]
++             [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+              [:seon.eval/value {:optional true} :seon.eval/value]
+              [:seon.eval/missing {:optional true} :seon.eval/missing]
+              [:seon.eval/size {:optional true} :seon.eval/size]
+--- a/resources/seon/schemas/seon.sci.eval.edn
++++ b/resources/seon/schemas/seon.sci.eval.edn
+@@ -32,7 +32,8 @@
+                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                           :seon.schema.admission/reason "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation."
+                           :gen/elements [nil true 0 "" :k [] {} #{}]}]]
+-                 [:seon.eval/value
++                 [:seon.eval/renderer {:optional true} :seon.eval/renderer]
++             [:seon.eval/value
+                   {:optional true}
+                   :seon.eval/value]
+                  [:seon.eval/missing {:optional true} :seon.eval/missing]
+--- a/resources/seon/schemas/seon.render.value.edn
++++ b/resources/seon/schemas/seon.render.value.edn
+@@ -39,6 +39,7 @@
+                     :projection
+                     [:map
+                      [:seon.render.value/tree :seon.render.value/tree]
++                     [:seon.render.call/selected-producer {:optional true} :qualified-symbol]
+                      [:seon.render.value/truncated?
+                       :seon.render.value/truncated?]
+                      [:seon.render.value/text :seon.render.value/text]
+--- a/src/seon/bootstrap.clj
++++ b/src/seon/bootstrap.clj
+@@ -46,7 +46,7 @@
+           " and is drawn for you. Send only ;; thinking comments and forms.")
+      "Results are data: chain them with ->>, sort-by, filter, map, and get-in. Every function in the program is callable."
+      "Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
+-     "Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value."
++     "A declared AI renderer prints its output directly. Other results use #:seon.repl: :value (or :error) is data, :out is printed text, and :result names the live value."
+      "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
+      (str "When unsure, inspect data first: (dir " namespace-name
+           ") lists your namespace's public functions and schema declarations; (doc seon.db/q) returns its docstring and contract.")
+--- /dev/null
++++ b/test/seon/render/page_settings_test.clj
+@@ -0,0 +1,63 @@
++(ns seon.render.page-settings-test
++  (:require [clojure.string :as str]
++            [clojure.test :refer [deftest is]]
++            [seon.cluster.agent :as agent]
++            [seon.config :as config]
++            [seon.db :as db]
++            [seon.id :as id]
++            [seon.repl :as repl]
++            [seon.sci.eval :as evaluation]
++            [seon.test-support :as support]))
++
++(deftest effective-settings-and-authored-plan-examples-work-through-sci
++  (load-file "docs/prds/context-generation/research/context_page_probe_2026_09_09.clj")
++  (support/with-database
++   (fn [connection]
++     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "page-settings"})
++     (support/seed-cluster! connection "page-settings")
++     (doseq [transaction
++             [(agent/creation-tx {:seon.agent/id "juniper" :seon.ns/name 'my.agents.juniper
++                                  :seon.cluster/name "page-settings"})
++              [{:seon.config/agent [:seon.agent/id "juniper"]
++                :seon.config.eval/time-limit-ms 1234 :seon.config.ai/no-provider true}
++               {:my.plan/agent [:seon.agent/id "juniper"]
++                :my.plan/objective "Verify the examples"
++                :my.plan/steps [{:my.plan.item/id "existing" :my.plan.item/title "Existing step"
++                                 :my.plan.item/position 0}]}]]]
++       (let [result (db/transact! connection transaction)]
++         (assert (:db-after result) (pr-str result))))
++     (let [base (support/fork-cluster-ctx connection "page-settings")
++           ctx (:seon.sci.eval/ctx
++                (evaluation/fork-for-turn
++                 {:seon.sci.eval/ctx base :seon.db/db @connection
++                  :seon.db/connection connection :seon.agent/id "juniper"}))
++           request {:seon.sci.eval/ctx ctx :seon.agent/id "juniper"
++                    :seon.sci.admit/caps (config/result-caps (config/defaults))
++                    :seon.sci.eval/time-limit-ms 10000 :seon.config/on-core-error :panic}
++           evaluate (fn [source]
++                      (evaluation/evaluate (assoc request :seon.db/db @connection
++                                                 :seon.cluster.eval/source source)))
++           result (evaluate "(seon.agent/effective-settings)")
++           groups (:seon.sci.admit/value result)
++           values (apply merge groups)
++           examples ((resolve 'context-page-probe-2026-09-09/plan-examples))
++           step-id (id/id "Verify customer totals" 8)]
++       (is (not (:seon.cluster.eval/error result)) (:seon.eval/value result))
++       (is (= ["seon.config.ai" "seon.config.ai.retry" "seon.config.eval" "seon.config.run"]
++              (mapv (comp namespace ffirst) (take 4 groups))))
++       (is (= 1234 (:seon.config.eval/time-limit-ms values)))
++       (is (= (:seon.config.ai/model (config/effective @connection "page-settings"))
++              (:seon.config.ai/model values)))
++       (is (nat-int? (:my.agent/turns-left values)))
++       (is (not (str/includes? (:seon.eval/value result) "seon.render/ambiguous")))
++       (let [added (evaluate (repl/source-text (first examples)))
++             step (db/pull @connection [:my.plan.item/id :my.plan.item/title :my.plan.item/position]
++                           [:my.plan.item/id step-id])]
++         (is (not (:seon.cluster.eval/error added)) (:seon.eval/value added))
++         (is (= {:my.plan.item/id step-id :my.plan.item/title "Verify customer totals"
++                 :my.plan.item/position 1} step))
++         (is (= 8 (count step-id))))
++       (let [removed (evaluate (repl/source-text (second examples)))]
++         (is (not (:seon.cluster.eval/error removed)) (:seon.eval/value removed))
++         (is (nil? (db/pull @connection [:my.plan.item/id] [:my.plan.item/id step-id])))
++         (is (= 1 (db/q '[:find (count ?step) . :where [_ :my.plan/steps ?step]] @connection))))))))
+--- /dev/null
++++ b/test/seon/repl_grammar_test.clj
+@@ -0,0 +1,60 @@
++(ns seon.repl-grammar-test
++  (:require [clojure.core.async :as async]
++            [clojure.string :as str]
++            [clojure.test :refer [deftest is]]
++            [seon.bootstrap :as bootstrap]
++            [seon.cluster :as cluster]
++            [seon.cluster.agent :as agent]
++            [seon.config :as config]
++            [seon.db :as db]
++            [seon.eval :as evaluation]
++            [seon.repl :as repl]
++            [seon.test-support :as support]
++            [seon.turn :as turn]))
++
++(deftest prompt-precedes-exact-multiline-agent-input
++  (let [emission {:seon.ns/name 'my.agents.juniper
++                  :seon.cluster.eval/comment ";; I should inspect the rows.\n;; Then I can choose."
++                  :seon.cluster.eval/source "(->> rows\n     (map :total))"
++                  :seon.eval/value "[40 60]"}
++        expected "my.agents.juniper=> ;; I should inspect the rows.\n;; Then I can choose.\n(->> rows\n     (map :total))\n#:seon.repl{:value [40 60]}"
++        html (repl/render-html emission)]
++    (is (= expected (repl/text emission)))
++    (is (= 128
++           (alength (.getBytes (repl/text emission) "UTF-8"))))
++    (is (= (subs expected 0 (str/index-of expected "\n#:seon.repl"))
++           (get-in html [2 1 2])))))
++
++(deftest stored-help-keeps-its-renderer-and-bare-response
++  (support/with-database
++   (fn [connection]
++     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "grammar"})
++     (support/seed-cluster! connection "grammar")
++     (is (:db-after (db/transact! connection
++                     (agent/creation-tx {:seon.agent/id "juniper"
++                                         :seon.ns/name 'my.agents.juniper
++                                         :seon.cluster/name "grammar"}))))
++     (let [ctx (support/fork-cluster-ctx connection "grammar")
++           handle (support/cluster-handle
++                   {:seon.db/connection connection :seon.cluster/name "grammar"
++                    :seon.db.process/id cluster/boot-process-identity
++                    :seon.sci.eval/ctx ctx})]
++       (try
++         (let [opened (turn/system-turn {:seon.turn.loop/cluster handle
++                                         :seon.agent/id "juniper" :seon.turn/write? true})
++               saved (first (evaluation/of-agent @connection "juniper"))
++               expected-response (bootstrap/render-help-ai (bootstrap/help-value @connection "juniper"))
++               expected (str "my.agents.juniper=> ;; I should understand how this REPL works before I act.\n(help)\n"
++                             expected-response)]
++           (is (not (:seon.error/kind opened)) (pr-str opened))
++           (is (= "(help)" (:seon.cluster.eval/source saved)))
++           (is (= 'seon.bootstrap/render-help-ai (:seon.eval/renderer saved)))
++           (is (= expected-response (repl/response (repl/entity-emission saved))))
++           (is (= expected (repl/render-ai saved)))
++           (is (= 2559 (alength (.getBytes (repl/render-ai saved) "UTF-8"))))
++           (println "REPL-GRAMMAR-HELP-BYTES" (alength (.getBytes expected "UTF-8"))))
++         (finally
++           (doseq [channel [(:seon.cluster.wake/channel handle)
++                            (:seon.render/context-channel handle)
++                            (:seon.turn.loop/completion-channel handle)]]
++             (when channel (async/close! channel)))))))))

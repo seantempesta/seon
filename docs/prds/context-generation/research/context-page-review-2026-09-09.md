@@ -91,3 +91,109 @@ review, plus only this slice's named render/test paths. The last platform run
 used one worker; all runs capped `SEON_TEST_WORKERS` at three. The settings/plan
 patch still applies cleanly after that commit; the shared writer files remain
 untouched as assigned. RESET NEEDED includes `dbec8be7e`.
+
+## Settings and plan renderer patch
+
+[The coordinated patch](context_page_held_renderers_2026_09_09.patch) contains
+the settings reader/source, plan example comments, and the §18d grammar and
+storage changes described below, with their canonical regressions. Its base is
+`7e7c74f01`, including the landed data changes in `dbec8be7e`. It has not been
+applied to shared writer files, as the assignment requires. At integration,
+retain the data lane's rename of `:seon.eval/value` to `:seon.eval/shown`; the
+patch's added renderer provenance accompanies that same shown-text attribute.
+
+Settings derive effective cluster defaults plus agent overrides through the
+existing config/AI owners, group declared agent-setting attributes by namespace,
+and append `turns-left`. Provider, retry, evaluation, and budget come first;
+additional declared groups follow without disappearing. Missing configuration
+and underlying refusals remain error values.
+
+The plan comment teaches an add against the existing component's `db/id`,
+`(seon.id/id title 8)`, the next position, and `retractEntity` removal. The
+regression reads the exact comment forms and evaluates both through SCI,
+verifying id `ba37cf26`, the added item, removal, and the retained original item.
+The first fixture attempt lacked a correctly scoped agent context; replacing it
+with canonical creation and `fork-for-turn` made the fast check pass **1 test /
+14 assertions**. This was fixture setup, not an effective-settings refusal to hide.
+
+The isolated checkout began at `24adad072`; it contains the reviewed committed
+`dbec8be7e` delta plus this lane's help/render changes and held renderer patch.
+Gate snapshots explicitly include those source/schema/test paths and exclude all
+shared in-flight edits. No other lane's session was contacted or changed.
+
+The earlier scratch session exposed [feed and turn backstops](../../../seon/issues/scratch-debug-feed-and-turn-backstops-after-adoption.md).
+The recorded error facts preserve the observations; their cause is unverified.
+The final reseed uses a fresh scratch fork of publication
+`6aa1f976-68ad-5a95-94b6-b8386659213c`, which includes the landed component schema.
+
+## Prompt-first grammar — owner §18d
+
+Read turn PRD §18d from `dbe7e9173` in full before this correction. The prompt
+now precedes the agent's complete input: comment lines, then the form exactly as
+typed. HTML uses the same input text rather than printing the thought in a
+separate paragraph above the prompt. The fixed multiline regression is exactly
+**128 UTF-8 bytes**. A canonical system turn stores the real help evaluation;
+its first grammar entry was **2516 bytes**, including the **2432-byte** bare response.
+The returned invalid-write refusal's response is **131 bytes**, starting with
+`Expected:` and equal to its saved renderer output.
+
+The projection already knows which function it invoked. It carries that selected
+symbol into the evaluation's optional `:seon.eval/renderer` fact. History uses
+the saved shown text directly when that fact exists; it neither reselects nor
+invokes a renderer. Ordinary values retain the reply map. This records rendering
+provenance at its authority instead of trying to infer a prose shape from text
+after the result object is gone. The stored-attribute declaration is on the
+existing evaluation storage schema, alongside shown text.
+
+The first storage check correctly refused the undeclared renderer attribute;
+adding the member to the storage schema fixed it. The HTML check exposed a
+dropped explicitly supplied namespace; `entity-emission` now retains it. A
+later broad substring assertion was invalid because help itself teaches the
+reply-map spelling; exact entry equality and byte count are the regression.
+
+The shared `seon.repl`, evaluation/turn schemas and writers, and render owners
+now have foreign edits. The grammar implementation therefore remains in the
+isolated patch with the settings/plan hunks. No shared foreign file was edited.
+The earlier settings-only isolated gate was interrupted by TERM on the owner's
+new instruction; it supplies no gate verdict. The combined grammar gate replaces
+it. RESET NEEDED includes the renderer attribute and the data lane's schema batch.
+
+## Final capture and verification
+
+The whole-prompt read caught help's stale claim that every result uses a reply
+map. Correcting that line yields a **2475-byte** bare help response and a
+**2559-byte** exact help entry. The final [cookbook prompt](context_cookbook_final_prompt_2026_09_09.txt)
+is **8651 UTF-8 bytes**, read end to end: eight distinct opening evaluations,
+one help, effective settings with 20 turns left, one incoming message, six plan
+steps with `done-when`, and the add/remove examples before the plan read.
+[The capture](context_page_capture_2026_09_09.edn) retains shown text and renderer
+provenance. The [probe](context_page_probe_2026_09_09.clj) records it without
+calling a provider. Score: **`:unavailable`**, OpenRouter HTTP 402 from the
+owner's prior trial; no paid request or retry was made here.
+
+[Actual plan example reports](context_page_plan_examples_2026_09_09.edn): add
+**407 bytes**, remove **415 bytes**, id `ba37cf26`, position 6. The new parent
+identity appears as `[:my.plan/agent [:seon.agent/id "juniper"]]`. The fixture
+was reseeded after executing those writes.
+
+Combined isolated gate: **19 tests / 128 assertions**, zero failures/errors.
+After the help wording correction: **3 / 60**, zero failures/errors. Final
+platform gate: **83 / 490**, zero failures/errors, one worker. The complete
+scratch development adoption converged at
+`6aa1fd30-7141-5589-83d9-ee1fe20aff65` before the final reseed. Its incremental
+attempt had [refused missing function provenance](../../../seon/issues/incremental-publication-refuses-missing-function-provenance.md);
+complete publication supplied the live proof.
+
+The final native Chrome recheck was unavailable with `cgWindowNotFound`, twice,
+and an empty browser inventory. [Existing tool issue updated](../../../seon/issues/browser-ui-observation-has-no-accessible-window.md).
+Earlier screenshots prove the turn/settings page changes; the final grammar is
+verified by exact stored prompt and HTML regressions, not a new paint claim.
+
+[Verification record](context_page_verification_2026_09_09.edn) lists the exact
+snapshot paths, namespaces, counts, source commit, and prompt digest. The final
+32073-byte patch passed `git apply --cached --check` against an isolated index
+at `7e7c74f01`; no shared source was modified by that check. Scratch JVM 55448
+exited through `bin/seon --root … down`; the store lock was free and `lsof`
+reported no open files under this lane's root or worktree before deletion.
+Both were removed, with the shared `reference-code` target intact. All owned
+shells ended. Default was never stopped, restarted, or reforked.

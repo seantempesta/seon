@@ -6,6 +6,20 @@ tags: [agent-context, repl, render]
 
 # Context cookbook — executed 2026-09-09
 
+## Page review and §18d recapture
+
+Read §18d from `dbe7e9173` in full. The [recaptured complete prompt](context_cookbook_final_prompt_2026_09_09.txt)
+is **8651 UTF-8 bytes**, read end to end on the isolated `cookbook-page` cluster
+after adoption `6aa1fd30-7141-5589-83d9-ee1fe20aff65` and fixture reseeding.
+The prompt precedes each agent comment and multiline form. Help's response is
+**2475 bare bytes**, and its exact complete entry is **2559 bytes**. Effective
+settings are grouped by namespace, with 20 turns left. The plan teaches add/id
+and `retractEntity` removal; the exact examples executed with **407 / 415-byte**
+reports. [Capture, patch, and gate evidence](context-page-review-2026-09-09.md).
+Paid score: **`:unavailable`**; no retry after the owner's OpenRouter HTTP 402.
+The default-read and speculative-write results below remain dated observations
+at their stated bases. RESET NEEDED is batched with the data lane.
+
 Read end to end: AGENTS.md (its opening copies turn PRD §10), the data chart r2 including its roadmap, raw-data-forms-probe-2026-09-09.md, and turn PRD §18–§18c. The plan README and working edge ground this slice.
 
 Surface: MCP, cluster `default`, JVM mode, explicit `(seon.operator/connection "default")`; the connection and immutable read basis are supplied to bare reads. Basis 536871325. No database write was committed. Counts measure exact `pr-str` results, without a REPL envelope; they are not yet provider-prompt byte counts. The checked-in probe and EDN retain the complete forms and results.
@@ -161,7 +175,8 @@ The canonical Juniper installer reseeded `cookbook` under
 `6aa1ec2a-d4a3-5d36-8e11-e727d5577a2f`; its eight unique opening reads, four
 orders, one fixture message, twenty remaining turns, and absence of Juniper
 evaluation errors passed the harness preconditions. I read the
-[whole 7553-byte prompt](context_cookbook_final_prompt_2026_09_09.txt) end to end.
+then-current 7553-byte prompt end to end; the §18d recapture above replaces
+that prompt artifact.
 It stayed byte-for-byte equal after root's agents-read adoption. The earlier
 capture was 9757 bytes; this dated capture is 2204 bytes smaller, not a controlled
 model-quality comparison.

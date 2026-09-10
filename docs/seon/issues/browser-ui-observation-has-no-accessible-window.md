@@ -20,3 +20,10 @@ Reproduced by loop-proof on 2026-09-09: CUA `getState` reports zero browser
 surfaces; `getApp("com.google.Chrome")` returns `cgWindowNotFound` (-10005).
 The three controls were exercised by their actual curl POST routes. This
 does not establish browser repaint.
+
+Page-review recheck at 2026-09-09 18:44 reproduced the same result twice.
+Earlier in this lane Chrome's native surface supplied real screenshots and AX
+text for the scratch debug page, and the lane closed its own tab. After the
+owner's grammar correction, the service still listed Chrome as running but
+returned `cgWindowNotFound` and no browser surfaces. The final grammar has
+canonical HTML and saved-prompt evidence, without a new browser-paint claim.
