@@ -1,6 +1,6 @@
 ---
 type: research
-status: working
+status: complete
 tags: [agent, render, cluster]
 ---
 
@@ -138,3 +138,29 @@ preview proves loaded behavior, **not completed in-place adoption**.
 `logs/current-source-failure.log` reports “Publication did not finish
 within its declared bound.” No foreign file or process was changed to
 repair this boundary. The scratch root has been downed and deleted.
+
+### Final default adoption and observation
+
+Implementation commit: `501b45570`. The queued adoption subsequently
+completed normally: “development cluster converged.” A live MCP query
+verified **adopted = current = `6aa226e2-731d-55ef-9574-b1f1bf142fba`**,
+with the original **PID 23557** still running. The foreign lock was never
+operated or bypassed.
+
+After convergence, fetched and read
+`http://127.0.0.1:7994/ns/my.agents.root/debug?prompt=true` again (86,229
+served HTML bytes). Its cluster preview showed the matching commits,
+heap 3,476,016,688 / 17,179,869,184 bytes, 50 platform / 18 virtual
+threads, 56,615,938,382 store bytes, two agents, no open turns and no
+fault signatures. Evaluation time: 19,659 ms. The agent block showed:
+
+| Agent | Last closed turn ms | Session evaluations / ms | Provider tokens / USD | Retained storage bytes |
+|---|---:|---:|---|---:|
+| juniper | 152 | 11 / 621 | 0 / 0 | 5,842 |
+| root | 4,719 | 17 / 1,756 | 3,145 / unavailable (provider omitted cost) | 10,961 |
+
+The page had no missing-projection diagnostic. This establishes successful
+in-place development adoption and served debug content; the separately
+recorded browser-paint limitation remains. All owned command shells ended;
+the disposable root and failed owned test roots were deleted. Unrelated
+working-tree edits and untracked files were preserved.
