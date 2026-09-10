@@ -33,3 +33,5 @@ also follow runtime-owned turns. The canonical socket/SCI regression
 removes legacy edges and checks the opening, an empty closed turn, and a
 wake append. Exact gates and default adoption evidence are in
 `docs/prds/context-generation/research/page-runtime-read-landing-2026-09-09.md`.
+Resolved by `49869fd90`; default's adopted page shows 11 evaluations and 11
+responses, with three closed runtime turns preserved.

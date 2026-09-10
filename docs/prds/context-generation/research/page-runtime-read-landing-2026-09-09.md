@@ -1,6 +1,6 @@
 ---
 type: research
-status: active
+status: complete
 tags: [render, database, test]
 ---
 
@@ -131,3 +131,39 @@ python3 docs/prds/context-generation/research/page_runtime_read_probe_2026_09_09
 ```
 
 No default stop, refork, or restart is authorized or performed.
+
+## Final adoption and HTTP proof
+
+Implementation commit: `49869fd90`. Explicit command, exit 0:
+
+```sh
+bin/seon init --dev default --changed src/seon/render/web.clj src/seon/turn.clj test/seon/render/web_test.clj test/seon/render/page_review_test.clj test/seon/test_support.clj test/seon/turn_test.clj test/seon/loop_proof_test.clj
+```
+
+Development adoption completed schema/program reconciliation, loaded definitions,
+SCI acquisition, and JVM instrumentation. Supported JVM evaluation independently
+reported adopted and published commit ids both
+`6aa21434-2adf-57e7-96ae-20b164ab5de3`, `:converged true`, 11 evaluations,
+and three closed runtime turns. This is in-place development adoption.
+
+Curl after adoption: **HTTP 200, 63,691 UTF-8 bytes, 0.546574 seconds**.
+SHA-256: `59b801c048eae7282ad7b6dce1908326efc0b9c72e25e314636818127fdf2874`.
+The committed HTML parser observed exact text
+`Agent juniper · 11 evaluations · continuing`, 11 prompt entries and 11
+responses inside Context now. Would-be statuses in order:
+`[:unchanged :unchanged :unchanged :changed :changed :unchanged :unchanged :unchanged :changed]`.
+The would-be projection therefore compares with retained reads; no form is
+misclassified as a missing opening. The HTTP observation does not claim browser
+paint or layout verification.
+
+Default remained PID 83040, generation `1f682616-d27b-47e0-9d61-0ac02919a83d`,
+PREPL 60374 and HTTP 7994 throughout. No live message or provider request was
+sent for this proof; the wake append ran on the canonical fixture.
+The MCP health timeout remains the recorded out-of-scope observation.
+
+No foreign gate boundary occurred. All owned shells completed; successful
+gate roots were removed by the runner, the holderless failed root was removed,
+and page/probe/gate scratch files were deleted. The inherited three untracked
+paths remain untouched. Source lint reported existing unused/shadowed bindings
+and docstring warnings; no unresolved-name, syntax, privacy, or arity finding
+remains in the final changed files.

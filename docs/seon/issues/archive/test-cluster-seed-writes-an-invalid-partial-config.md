@@ -29,3 +29,5 @@ second config application is removed.
 The canonical page fixture constructs its cluster and real server under
 armed contracts. Gate results and the resolving commit are recorded in
 `docs/prds/context-generation/research/page-runtime-read-landing-2026-09-09.md`.
+Resolved by `49869fd90`: scoped gate 87 tests / 926 assertions and platform
+84 tests / 505 assertions, zero failures/errors.
