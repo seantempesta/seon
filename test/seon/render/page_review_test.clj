@@ -2,11 +2,12 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.db :as db]
+            [seon.eval :as evaluation]
             [seon.render.transcript :as transcript]
             [seon.render.web :as web]
             [seon.test-support :as support]))
 
-(deftest turn-headers-and-current-evaluations-have-one-place-each
+(deftest turn-headers-and-all-evaluations-have-one-place-each
   (support/with-database
    (fn [connection]
      (let [written
@@ -51,7 +52,7 @@
                       [:db/retract [:seon.turn/id "current"] :seon.turn/agent [:seon.agent/id "page"]]])))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
-           evaluations (#'web/current-turn-evaluations database "page")
+           evaluations (evaluation/of-agent database "page")
            turns (get-in (db/pull database '[{:seon.agent/runtime [{:seon.runtime/turns [*]}]}]
                                  [:seon.agent/id "page"])
                          [:seon.agent/runtime :seon.runtime/turns])
@@ -61,7 +62,7 @@
            html (#'web/debug-ai-html "page"
                   {:seon.render.debug/request {}
                    :seon.render.debug/evaluations evaluations})]
-       (is (= ["current-a" "current-b"] (mapv :seon.cluster.eval/id evaluations)))
+       (is (= ["old-eval" "current-a" "current-b"] (mapv :seon.cluster.eval/id evaluations)))
        (is (= "" (transcript/render-history-ai turns database)))
        (is (= "" (transcript/render-run-ai unit)))
        (let [linked (db/transact! connection
@@ -89,12 +90,13 @@
        (is (str/includes? html "Context now"))
        (is (str/includes? html "(+ 2 2)"))
        (is (str/includes? html "(+ 3 3)"))
-       (is (not (str/includes? html "(+ 1 1)")))
+       (is (str/includes? html "(+ 1 1)"))
        (is (not (str/includes? html "seon-value-"))
            "Evaluations use their declared pair, not repeated floor wrappers with one root id."))
      (is (:db-after (db/transact! connection
                      [{:seon.turn/id "empty" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx"}
                       {:seon.runtime/agent [:seon.agent/id "page"]
                        :seon.runtime/turns [[:seon.turn/id "empty"]]}])))
-     (is (= [] (#'web/current-turn-evaluations @connection "page")))
-     (is (:seon.error/kind (#'web/current-turn-evaluations @connection "absent"))))))
+     (is (= ["old-eval" "current-a" "current-b"]
+            (mapv :seon.cluster.eval/id (evaluation/of-agent @connection "page"))))
+     (is (:seon.error/kind (evaluation/of-agent @connection "absent"))))))

@@ -279,10 +279,13 @@
              (is (str/includes? html ":none"))
              (is (not (str/includes? html "items, depth"))))
            (let [basis (db/basis-t @connection)
-                 unchanged (turn/system-turn request)]
+                 unchanged (turn/system-turn (assoc request :seon.turn/write? false))]
              (is (seq (:seon.turn/forms unchanged)) (pr-str unchanged))
-             (is (every? #(= :unchanged (:seon.turn/status %))
-                         (:seon.turn/forms unchanged)))
+             (is (= #{'seon.agent/effective-settings 'seon.db/pull}
+                    (set (map (comp first edn/read-string :seon.cluster.eval/source)
+                              (filter #(= :changed (:seon.turn/status %))
+                                      (:seon.turn/forms unchanged)))))
+                 "the saved opening precedes its own runtime turn")
              (is (nil? (:seon.turn/id unchanged)))
              (is (= basis (db/basis-t @connection))))
            (turn/compact! {:seon.db/connection connection
@@ -300,10 +303,18 @@
                              :seon.agent/id id}))
            (checked-transact! connection
                          [{:seon.message/id "to-b" :seon.message/to [:seon.agent/id "b"] :seon.message/content "For B" :seon.message/inbox [:seon.agent/id "b"]}])
-           (let [other (turn/system-turn request)]
+           (let [other (turn/system-turn (assoc request :seon.turn/write? false))]
              (is (seq (:seon.turn/forms other)) (pr-str other))
-             (is (every? #(= :unchanged (:seon.turn/status %))
-                         (:seon.turn/forms other)))
+             (is (= #{'seon.agent/effective-settings 'seon.db/pull}
+                    (set (map (comp first edn/read-string :seon.cluster.eval/source)
+                              (filter #(= :changed (:seon.turn/status %))
+                                      (:seon.turn/forms other))))))
+             (is (= #{:unchanged}
+                    (set (map :seon.turn/status
+                              (filter #(= 'my.message/inbox
+                                          (first (edn/read-string (:seon.cluster.eval/source %))))
+                                      (:seon.turn/forms other)))))
+                 "a peer message does not refresh this agent's inbox")
              (is (nil? (:seon.turn/id other))))
            (checked-transact! connection
                          [{:seon.message/id "to-a" :seon.message/to [:seon.agent/id "a"] :seon.message/content "For A" :seon.message/inbox [:seon.agent/id "a"]}])
@@ -312,14 +323,14 @@
                  changed (filterv #(= :changed (:seon.turn/status %))
                                   (:seon.turn/forms preview))]
              (is (= basis (db/basis-t @connection)))
-             (is (= #{'seon.db/pull 'my.message/inbox}
+             (is (= #{'seon.db/pull 'my.message/inbox 'seon.agent/effective-settings}
                     (set (map (comp first edn/read-string :seon.cluster.eval/source) changed)))
                  (pr-str preview))
              (is (seq (:seon.turn/changes (first changed))))
              (is (string? (:seon.turn/text (first changed))))
              (let [stored (turn/system-turn request)]
                (is (string? (:seon.turn/id stored)) (pr-str stored))
-               (is (= 2 (count (db/q '[:find [?e ...] :in $ ?id
+               (is (= 4 (count (db/q '[:find [?e ...] :in $ ?id
                                       :where [?turn :seon.turn/id ?id]
                                       [?e :seon.cluster.eval/run ?turn]]
                                     @connection (:seon.turn/id stored))))))))

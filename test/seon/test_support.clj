@@ -624,7 +624,10 @@
 (defn seed-cluster!
   "Seed one complete cluster/config path for tests that create agents."
   [connection cluster-name]
-  (db/transact! connection [{:seon.config/cluster cluster-name}])
+  (let [configured (config/apply! {:seon.db/connection connection
+                                   :seon.boot/cluster-name cluster-name})]
+    (when (:seon.error/kind configured)
+      (throw (ex-info "The fixture cluster configuration was refused." configured))))
   (cluster/ensure-cluster-entity!
    connection cluster-name cluster/boot-process-identity)
   nil)

@@ -701,28 +701,10 @@
           :seon.render.value/root [:seon.agent/id agent-id]
           :seon.sci.admit/caps caps}))
 
-(defn- current-turn-evaluations
-  [database agent-id]
-  (let [evaluations (turn-function-result 'seon.eval/of-agent [database agent-id])
-        turns (when-not (:seon.error/kind evaluations)
-                (db/q '[:find ?turn ?opened ?turn-id :in $ ?id
-                        :where [?agent :seon.agent/id ?id]
-                               [?agent :seon.agent/runtime ?runtime]
-                               [?runtime :seon.runtime/turns ?turn]
-                               [?turn :seon.turn/id ?turn-id]
-                               [?turn :seon.turn/opened-tx ?opened]] database agent-id))]
-    (cond
-      (:seon.error/kind evaluations) evaluations
-      (:seon.error/kind turns) turns
-      :else
-      ;; A late commit can carry an older opening; transaction order is not turn order.
-      (let [current (ffirst (sort-by (juxt second last) #(compare %2 %1) turns))]
-        (filterv #(= current (get-in % [:seon.cluster.eval/run :db/id])) evaluations)))))
-
 (defn- debug-prompt
   [database connection agent-id caps render-context]
   (let [request (debug-turn-request database connection agent-id caps render-context)
-        evaluations (current-turn-evaluations database agent-id)
+        evaluations (turn-function-result 'seon.eval/of-agent [database agent-id])
         prospective (when-not (:seon.error/kind evaluations)
                       (turn-function-result 'seon.turn/system-turn
                                             [(assoc request :seon.turn/write? false)]))]

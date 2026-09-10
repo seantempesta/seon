@@ -7,6 +7,14 @@ tags: [issue, mcp, sci, wave/dev-mcp]
 
 # Repair development MCP error locations and status scope
 
+## Page runtime read observation — 2026-09-09
+
+Default PID 83040 was alive at PREPL 60374 and HTTP 7994. Supported
+`runtime_status` returned health and Flow unknown with `Read timed out`.
+The supported JVM query then returned 11 stored evaluations and three
+closed runtime turns in 3,053 ms; HTTP returned the debug page. No process
+lifecycle operation or replacement REPL transport was used.
+
 ## Live-loop observation — 2026-09-09
 
 Supported JVM evaluations during the loop diagnosis returned `Read timed

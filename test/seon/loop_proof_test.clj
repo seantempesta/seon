@@ -244,7 +244,18 @@
 (deftest virtual-loop-end-to-end
   (support/with-database
    (fn [connection]
-     (let [configured
+     (let [runtime-read
+           '(seon.db/pull
+             '[{:seon.agent/runtime
+                [{:seon.runtime/turns
+                  [:seon.turn/id {:seon.turn/opened-tx [:db/txInstant]}
+                   {:seon.turn/closed-tx [:db/txInstant]}]}
+                 {:seon.runtime/trigger [*]}
+                 {:seon.runtime/listens [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}]
+             [:seon.agent/id "juniper"])
+           turn-dependent? #(#{'(seon.agent/effective-settings) runtime-read}
+                              (read-string (:seon.cluster.eval/source %)))
+           configured
            (db/transact!
             connection
             [(:seon.config/desired-row
@@ -360,8 +371,8 @@
                    (is (seq saved))
                    (is (every? (comp seq :seon.cluster.eval/read-evidence)
                                (remove #(str/starts-with? (:seon.cluster.eval/source %) "(dir ") saved)))
-                   (is (= ["(seon.agent/effective-settings)"]
-                          (mapv :seon.cluster.eval/source
+                   (is (= ['(seon.agent/effective-settings) runtime-read]
+                          (mapv (comp read-string :seon.cluster.eval/source)
                                 (remove #(= :unchanged (:seon.turn/status %))
                                         (:seon.turn/forms refresh))))
                        "closing the creation turn changes the derived turn count"))))
@@ -388,7 +399,7 @@
                                            [?n :seon.ns/name ?name]
                                            [?s :seon.schema/ns ?n]
                                            [?s :seon.schema/key ?key]] @connection 'my.agents.juniper))))
-                 (is (str/starts-with? (:seon.cluster.eval/source (last saved)) "(seon.db/q"))
+                 (is (some #(= 'seon.db/q (first (read-string (:seon.cluster.eval/source %)))) saved))
                  (is (= [["Ada" 115] ["Bea" 100] ["Cy" 40]]
                         (sort (db/q '[:find ?customer (sum ?amount)
                                 :where [?order :example/customer ?customer]
@@ -414,11 +425,11 @@
                            (bytes-evidence (:seon.cluster.prompt/text first-prompt))})
                  (let [basis (db/basis-t @connection)
                        refreshed (turn/system-turn request)]
-                   (is (= ["(seon.agent/effective-settings)"]
-                          (mapv :seon.cluster.eval/source
+                   (is (= ['(seon.agent/effective-settings) runtime-read]
+                          (mapv (comp read-string :seon.cluster.eval/source)
                                 (remove #(= :unchanged (:seon.turn/status %))
                                         (:seon.turn/forms refreshed))))
-                       "settings observe runtime turns; the other opening reads stay unchanged")
+                       "settings and runtime observe turns; the other opening reads stay unchanged")
                    (is (string? (:seon.turn/id refreshed)))
                    (is (= (inc basis) (db/basis-t @connection))))
                  (testing "the first ordinary wake retains the seeded opening once"
@@ -428,8 +439,7 @@
                    (agent/disarm! {:seon.agent/routing routing :seon.agent/id "juniper"})
                    (let [after (evaluation/of-agent @connection "juniper")
                          occurrences (frequencies (map :seon.cluster.eval/source after))]
-                     (doseq [entry (remove #(= "(seon.agent/effective-settings)"
-                                              (:seon.cluster.eval/source %)) saved)]
+                     (doseq [entry (remove turn-dependent? saved)]
                        (is (= 1 (get occurrences (:seon.cluster.eval/source entry)))
                            (pr-str occurrences)))
                      (is (str/starts-with? (stored-text @connection) text))))
@@ -442,9 +452,11 @@
                    (is (= (mapv :seon.cluster.eval/source saved)
                           (mapv :seon.cluster.eval/source
                                 (evaluation/of-agent @connection "juniper"))))
-                   (is (= (mapv :seon.eval/shown saved)
+                   (is (= (mapv :seon.eval/shown (remove turn-dependent? saved))
                           (mapv :seon.eval/shown
-                                (evaluation/of-agent @connection "juniper"))))
+                                (remove turn-dependent?
+                                        (evaluation/of-agent @connection "juniper"))))
+                       "compaction rereads current runtime facts; other observations stay equal")
                    (is (= after (stored-text @connection))
                        "saved bytes remain exact within the new generation")
                    (is (= after (:seon.cluster.prompt/text (prompt))))
@@ -491,7 +503,7 @@
                                        (:seon.turn/forms system))]
                    (is (some #{"(my.message/inbox)"}
                              (map :seon.cluster.eval/source changed)))
-                   (is (= #{'(my.message/inbox) '(seon.agent/effective-settings)
+                   (is (= #{runtime-read '(my.message/inbox) '(seon.agent/effective-settings)
                             '(seon.db/pull '[{:seon.message/_inbox
                                              [:seon.message/id :seon.message/content
                                               {:seon.message/from [:seon.agent/id]}]}]
@@ -543,7 +555,7 @@
                    (is (seq fresh))
                    (is (= 'seon.db/pull (first (read-string (:seon.cluster.eval/source (first fresh)))))
                        "changed read must precede the no-provider reply")
-                   (is (= #{'(my.message/inbox) '(seon.agent/effective-settings)
+                   (is (= #{runtime-read '(my.message/inbox) '(seon.agent/effective-settings)
                              '(seon.db/pull '[{:seon.message/_inbox
                                               [:seon.message/id :seon.message/content
                                                {:seon.message/from [:seon.agent/id]}]}]

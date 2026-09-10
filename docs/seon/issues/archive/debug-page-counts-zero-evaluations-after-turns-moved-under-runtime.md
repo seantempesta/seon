@@ -23,4 +23,13 @@ the page reads a shape the writer no longer produces. Fix at
 add the page regression on the canonical fixture: seeded opening →
 "8 evaluations · continuing" and the entries in "Context now".
 
-Resolution, 2026-09-09: The evaluation and current-turn queries now follow agent/runtime/turns. Canonical regressions retract the old turn/agent edge and still retrieve the evaluations. A genuinely newer empty turn still has no evaluations; the separate no-provider settlement defect is not hidden by choosing an older turn.
+Partial resolution `fd8646edd`, 2026-09-09: The evaluation and current-turn
+queries follow agent/runtime/turns. This did not resolve the page: its
+newest-turn filter still hid the accumulated context after an empty turn.
+
+Follow-up, 2026-09-09: The page now consumes every ordered evaluation from
+`seon.eval/of-agent`. System-turn comparison and next-turn identity count
+also follow runtime-owned turns. The canonical socket/SCI regression
+removes legacy edges and checks the opening, an empty closed turn, and a
+wake append. Exact gates and default adoption evidence are in
+`docs/prds/context-generation/research/page-runtime-read-landing-2026-09-09.md`.

@@ -39,6 +39,7 @@
             [seon.config :as config]
             [seon.context :as seon.context]
             [seon.db :as db]
+            [seon.eval :as evaluation]
             [seon.flow :as flow]
             [seon.problems :as problems]
             [seon.render :as render]
@@ -47,12 +48,14 @@
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
             [seon.render.web :as web]
+            [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as sci.kernel]
             [seon.test-support :as support]
+            [seon.turn :as turn]
             [starfederation.datastar.clojure.api :as datastar])
   (:import [java.util.concurrent CompletableFuture CountDownLatch]
            [java.net BindException URI URLEncoder]
@@ -114,8 +117,6 @@
   (support/with-database
     (fn [connection]
       (let [_ (support/seed-cluster! connection "web-test")
-            _ (config/apply! {:seon.db/connection connection
-                              :seon.boot/cluster-name "web-test"})
             _ (db/transact! connection
                             (cluster.agent/creation-tx
                              {:seon.agent/id agent-id
@@ -621,6 +622,7 @@ handle))}}
                            [:seon.agent/id "unit-owner"])]
        (is (= [:seon.agent/id :seon.agent/plan
                :seon.agent/namespace :seon.agent/settings
+               :seon.agent/runtime
                :seon.message/inbound-content]
               (declared projection database entity))
            "declared attributes retain schema order before block grouping")
@@ -834,11 +836,13 @@ handle))}}
                          (try (read-patches! stream 1)
                               (finally (.close stream)))))]
         (open-run! connection "inspection-counts")
-        (db/transact! connection
+        (is (:db-after (db/transact! connection
                       [{:seon.cluster.eval/id "inspection-counts-e0"
+                        :seon.cluster.eval/at (java.util.Date. 0)
                         :seon.cluster.eval/run
                         [:seon.turn/id "inspection-counts"]
-                        :seon.cluster.eval/ordinal 0}])
+                        :seon.cluster.eval/ordinal 0
+                        :seon.cluster.eval/source "(+ 1 1)"}])))
         (inspect!)
         (is (= 200 (.statusCode (fetch server "/agent/root/debug?prompt=true"))))
         (let [before (durable-counts)
@@ -1571,10 +1575,10 @@ handle))}}
 
           ;; The frozen plan is the settled provider reply fact. Its
           ;; normal database wake is the stream terminal.
-          (db/transact! connection
+          (is (:db-after (db/transact! connection
                       [[:db/add [:seon.turn/id run-a]
                         :seon.turn/reply-size
-                        (apply str (repeat 64 "a"))]])
+                        64]])))
           (await-ping! context
                        #(zero? (:seon.render.web/streaming-agents %))
                        [:terminal-fact-cleared-partials])
@@ -2224,6 +2228,74 @@ handle))}}
             "every algorithm value render receives the handle's deadline and caps")
         (is (str/includes? body "Context now"))
         (is (str/includes? body "Would-be system turn"))
-        (is (str/includes? body "Run system turn"))
+        (is (str/includes? body "System turn"))
         (is (str/includes? body "Virtual turn"))
         (is (str/includes? body "Compact"))))))
+
+(deftest context-now-keeps-runtime-history-through-an-empty-turn-and-a-wake
+  (with-server
+    (fn [connection server _context]
+      (let [page-path "/ns/my.agents.root/debug?prompt=true"
+            check-page
+            (fn [entries]
+              (let [basis (db/basis-t @connection)
+                    response (fetch server page-path)
+                    body (.body response)
+                    start (str/index-of body "<h3>Context now</h3>")
+                    end (when start (str/index-of body "</section>" start))
+                    context (when end (subs body start end))
+                    rendered (mapv #(hiccup/->string (repl/render-html %)) entries)]
+                (is (= 200 (.statusCode response)))
+                (is (= basis (db/basis-t @connection)) "preview writes no facts")
+                (is (str/includes? body (str (count entries) " evaluations · continuing")))
+                (is (some? context))
+                (is (and context (str/includes? context (apply str rendered)))
+                    "Context now contains every saved entry in query order")
+                (is (str/includes? body ":unchanged"))
+                (is (not (str/includes? body "<strong>:none</strong>"))
+                    "the would-be system turn compares with runtime-owned reads")
+                body))
+            unlink-retired-edges
+            (fn []
+              (let [edges (db/q '[:find ?turn ?agent :where
+                                  [?agent :seon.agent/id "root"]
+                                  [?agent :seon.agent/runtime ?runtime]
+                                  [?runtime :seon.runtime/turns ?turn]
+                                  [?turn :seon.turn/agent ?agent]] @connection)]
+                (is (:db-after
+                     (db/transact! connection
+                       (mapv (fn [[turn agent]]
+                               [:db/retract turn :seon.turn/agent agent]) edges))))))]
+        (is (= 204 (.statusCode (post-form server "/agent/root/context"
+                                          "action=system-turn"))))
+        (unlink-retired-edges)
+        (let [opening (evaluation/of-agent @connection "root")]
+          (is (seq opening) "the real SCI system turn stored an opening")
+          (is (= "(help)" (:seon.cluster.eval/source (first opening))))
+          (is (every? :seon.eval/shown opening))
+          (check-page opening)
+          (is (:db-after
+               (db/transact! connection
+                 (conj (turn/open-tx {:seon.turn/id "empty-context-turn"
+                                      :seon.turn/agent [:seon.agent/id "root"]
+                                      :seon.turn/opened-tx "datomic.tx"})
+                       [:db/add [:seon.turn/id "empty-context-turn"]
+                        :seon.turn/closed-tx "datomic.tx"]))))
+          (unlink-retired-edges)
+          (check-page opening)
+          (is (:db-after
+               (db/transact! connection
+                 [{:seon.message/id "context-runtime-wake"
+                   :seon.message/to [:seon.agent/id "root"]
+                   :seon.message/inbox [:seon.agent/id "root"]
+                   :seon.message/content "Runtime history wake."}])))
+          (is (= 204 (.statusCode (post-form server "/agent/root/context"
+                                            "action=system-turn"))))
+          (unlink-retired-edges)
+          (let [continued (evaluation/of-agent @connection "root")]
+            (is (< (count opening) (count continued)))
+            (is (= opening (subvec continued 0 (count opening)))
+                "the wake appends without rewriting the opening")
+            (is (some #(str/includes? (:seon.eval/shown % "") "Runtime history wake.")
+                      (drop (count opening) continued)))
+            (check-page continued)))))))

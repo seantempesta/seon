@@ -460,7 +460,8 @@
              [::id branch-id agent-id
               (or (db/q '[:find (count ?turn) . :in $ ?agent-id
                           :where [?agent :seon.agent/id ?agent-id]
-                          [?turn :seon.turn/agent ?agent]]
+                          [?agent :seon.agent/runtime ?runtime]
+                          [?runtime :seon.runtime/turns ?turn]]
                         database agent-id) 0)]))
 
 (defn receipt-identity
@@ -1921,7 +1922,8 @@
                            {:seon.cluster.eval/read-evidence [*]}])
                     :in $ ?id
                     :where [?agent :seon.agent/id ?id]
-                    [?turn :seon.turn/agent ?agent]
+                    [?agent :seon.agent/runtime ?runtime]
+                    [?runtime :seon.runtime/turns ?turn]
                     [?turn :seon.turn/id _ ?t]
                     [?evaluation :seon.cluster.eval/run ?turn]
                     [?evaluation :seon.cluster.eval/ordinal ?ordinal]
