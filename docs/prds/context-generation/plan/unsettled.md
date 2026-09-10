@@ -754,3 +754,14 @@ half-edit. Measured targets in the issue.
   retired relationship and shows "0 evaluations" — `page-runtime-read`
   lane running on it; that is the last blocker before the owner's review.
 
+## 2026-09-09 20:30 — the page shows the opening: first review point
+
+- page-runtime-read `49869fd90`: the debug page reads turns from the
+  runtime component; header "11 evaluations · continuing", "Context now"
+  holds the entries in the prompt-first grammar, zero printer fallbacks.
+  Adopted on `default`; the owner's review URL is
+  http://127.0.0.1:7994/ns/my.agents.juniper/debug?prompt=true.
+- Next render pass (issue filed): plan comment padding, `:needs` as ids,
+  settings dials the agent cannot act on. Paid trial still blocked on
+  provider credits.
+
