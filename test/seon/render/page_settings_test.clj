@@ -5,6 +5,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.id :as id]
+            [seon.plan :as plan]
             [seon.repl :as repl]
             [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
@@ -55,9 +56,32 @@
                            [:my.plan.item/id step-id])]
          (is (not (:seon.cluster.eval/error added)) (:seon.eval/shown added))
          (is (= {:my.plan.item/id step-id :my.plan.item/title "Verify customer totals"
-                 :my.plan.item/position 1} step))
+                 :my.plan.item/position 6} step))
          (is (= 8 (count step-id))))
-       (let [removed (evaluate (repl/source-text (second examples)))]
+       (let [documentation (evaluate "(doc my.plan)")
+             text (:seon.ns/doc (:seon.sci.admit/value documentation))
+             source (plan/render-plan-ai {:seon.agent/id "juniper"})]
+         (is (string? text) (:seon.eval/shown documentation))
+         (is (str/includes? text ":my.plan/agent"))
+         (is (str/includes? text "datomic.tx"))
+         (is (= 1 (count (filter #(str/starts-with? % ";;") (str/split-lines source)))))
+         (is (not (str/includes? source "transact!"))))
+       (let [completed (evaluate (repl/source-text (second examples)))
+             row (db/pull @connection '[{:my.plan.item/completed-tx [:db/txInstant]}]
+                          [:my.plan.item/id step-id])]
+         (is (not (:seon.cluster.eval/error completed)) (:seon.eval/shown completed))
+         (is (inst? (get-in row [:my.plan.item/completed-tx :db/txInstant]))))
+       (is (not-any? #(find values %) [:seon.config.ai/api-key-variable
+                                      :seon.config.ai/endpoint
+                                      :seon.config.ai/chars-per-token-prior
+                                      :seon.config.ai.backup/model]))
+       (is (:db-after (db/transact! connection
+                       [{:seon.config/agent [:seon.agent/id "juniper"]
+                         :seon.config.agent/show-all-settings true}])))
+       (let [full (apply merge (:seon.sci.admit/value (evaluate "(seon.agent/effective-settings)")))]
+         (is (= "DEEPSEEK_API_KEY" (:seon.config.ai/api-key-variable full)))
+         (is (true? (:seon.config.agent/show-all-settings full))))
+       (let [removed (evaluate (repl/source-text (nth examples 2)))]
          (is (not (:seon.cluster.eval/error removed)) (:seon.eval/shown removed))
          (is (nil? (db/pull @connection [:my.plan.item/id] [:my.plan.item/id step-id])))
          (is (= 1 (db/q '[:find (count ?step) . :where [_ :my.plan/steps ?step]] @connection))))))))

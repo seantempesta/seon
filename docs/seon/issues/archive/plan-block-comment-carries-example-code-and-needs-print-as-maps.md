@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, plan, context, ugly-output]
 ---
@@ -33,3 +33,8 @@ evaluation sources (`(help)` appears there as well as in "Context now" and
 the would-be system turn), so the history shows three times on one page;
 the ruling (chart §14a) is turn headers only in that block.
 
+Resolved by the 2026-09-09 render pass: one plan comment, executable
+namespace-doc examples, ID-only dependency vectors, compact effective
+settings with an explicit full-settings dial, and header-only Turns HTML.
+The canonical SCI gate and fresh scratch prompt are recorded in
+[the landing note](../../../prds/context-generation/research/render-pass-landing-2026-09-09.md).

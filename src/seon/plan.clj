@@ -1157,52 +1157,11 @@
          (str "Update the current step:\n" (update-example view))]
          older (conj (print/render-elision-ai older)))))))
 
-(defn- plan-write-examples
-  [agent-id]
-  (let [add
-        (list 'let
-              ['title "Verify customer totals"
-               'plan (list 'get
-                           (list 'seon.db/pull
-                                 (list 'quote '[{:seon.agent/plan
-                                                [:db/id {:my.plan/steps [:my.plan.item/position]}]}])
-                                 [:seon.agent/id agent-id])
-                           :seon.agent/plan)]
-              (list 'seon.db/transact!
-                    [{:db/id (list :db/id 'plan)
-                      :my.plan/steps
-                      [{:my.plan.item/id (list 'seon.id/id 'title 8)
-                        :my.plan.item/title 'title
-                        :my.plan.item/position
-                        '(inc (reduce max -1 (map :my.plan.item/position (:my.plan/steps plan))))}]}]))
-        remove '(seon.db/transact!
-                  [[:db.fn/retractEntity
-                    [:my.plan.item/id (seon.id/id "Verify customer totals" 8)]]])]
-    (str ";; I can add to an existing plan by its db/id; the step id is (seon.id/id title 8), so the same title names the same step.\n"
-         (str/join "\n" (map #(str ";; " %) (str/split-lines (repl/source-text add))))
-         "\n;; I remove the step with retractEntity; retracting the component edge alone leaves the child.\n"
-         (str/join "\n" (map #(str ";; " %) (str/split-lines (repl/source-text remove))))
-         "\n")))
-
 (defn render-plan-ai
-  "Read my complete plan and teach the generated add/remove examples.
-
-  Add to the existing plan component with :my.plan.item/id (seon.id/id title 8),
-  :my.plan.item/title title and the next :my.plan.item/position. The same title
-  names the same step. For example:
-  (let [title \"Verify customer totals\"]
-    (seon.db/transact!
-      [{:my.plan/agent [:seon.agent/id \"juniper\"]
-        :my.plan/steps [{:my.plan.item/id (seon.id/id title 8)
-                         :my.plan.item/title title :my.plan.item/position 6}]}]))
-  Remove the entity and its incoming refs:
-  (seon.db/transact!
-    [[:db.fn/retractEntity
-      [:my.plan.item/id (seon.id/id \"Verify customer totals\" 8)]]])"
+  "Read my complete plan with one thinking comment; doc carries the write examples."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [unit]
-  (str (plan-write-examples (:seon.agent/id unit))
-       ";; I should pull the plan component; its set is shown in position order, and get with a default could hide a refusal.\n"
+  (str ";; My plan is my instructions; a step is done when it has :completed-tx. (doc my.plan) shows how to add, complete, and remove steps; ids are (seon.id/id title 8).\n"
        (repl/source-text
         (list 'seon.db/pull
               (list 'quote

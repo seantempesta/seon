@@ -32,6 +32,13 @@ lane did not edit it or operate another lane's session.
 
 ## Acceptance
 
+Render-pass re-observed both refusals at 2026-09-10 02:41 UTC after
+adopting `6aa21855-b670-50a8-b869-e9c9305e6149` on
+`tmp/render-pass-root`, cluster `render-pass`. Default was not reseeded
+or restarted. The bounded render verification continued on a fresh
+scratch fork of that publication; see
+[render-pass landing](../../prds/context-generation/research/render-pass-landing-2026-09-09.md).
+
 Seed the shared Juniper fixture, adopt in place, then re-admit its exact
 schema source through the same real graph. Verify successful evaluations
 and an environment satisfying the declared `advance-projection!` contract.

@@ -1,4 +1,7 @@
-#:seon.config.agent{:turn-completion-backstop-ms
+#:seon.config.agent{:show-all-settings
+                    [:boolean {:seon.config/per-agent true :seon.config/optional true
+                               :description "Show every effective agent setting in the settings read; absent or false shows model, no-provider, evaluation deadline, turn budget, and retry."}]
+                   :turn-completion-backstop-ms
                     [:int
                      {:min 1 :seon.config/per-agent true
                       :description

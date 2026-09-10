@@ -1149,10 +1149,12 @@
            qualified (when resolved
                        (let [{:keys [ns name]} (meta resolved)]
                          (symbol (str ns) (str name))))]
-       (list 'quote
-             (or (get documentation (str function-symbol))
-                 (get documentation (str qualified))
-                 (documentation-unavailable function-symbol)))))
+       (if-let [row (or (get documentation (str function-symbol))
+                        (get documentation (str qualified)))]
+         (list 'quote row)
+         `(or (seon.db/pull '[:seon.ns/name :seon.ns/doc]
+                            '~[:seon.ns/name function-symbol])
+              '~(documentation-unavailable function-symbol)))))
    {:ns (sci/create-ns 'clojure.repl)}))
 
 (defn- program-dir-var

@@ -94,12 +94,19 @@ Read (one form; done = has `:completed-tx`; blocked = a `needs` item is not done
 my.agents.juniper=> (->> (seon.db/pull '[{:seon.agent/plan [:my.plan/objective {:my.plan/current-step [:my.plan.item/id]} {:my.plan/steps [:my.plan.item/id :my.plan.item/title :my.plan.item/done-when :my.plan.item/position {:my.plan.item/completed-tx [:db/txInstant]} {:my.plan.item/needs [:my.plan.item/id]}]}]}] [:seon.agent/id "juniper"]) :seon.agent/plan)
 #:seon.repl{:value #:my.plan{:objective "Which customer has the largest total? …", :current-step #:my.plan.item{:id "juniper/query"},
   :steps [#:my.plan.item{:id "juniper/query", :title "Query the orders", :done-when "I have read the order ids, customers, and amounts.", :position 0}
-          #:my.plan.item{:id "juniper/aggregate", :title "Find the customer with the largest total", :done-when "…", :position 1, :needs [#:my.plan.item{:id "juniper/query"}]}
+          #:my.plan.item{:id "juniper/aggregate", :title "Find the customer with the largest total", :done-when "…", :position 1, :needs ["juniper/query"]}
           …]}}
 ```
 
 The value renderer sorts a component set by `:position` when every member
 carries one — a render rule, not a stored fact.
+
+The plan block has one thinking comment: "My plan is my instructions; a
+step is done when it has :completed-tx. (doc my.plan) shows how to add,
+complete, and remove steps; ids are (seon.id/id title 8)." The write
+examples live in the namespace docstring. ID-only `:my.plan.item/needs`
+pulls show a vector of ids; a pull requesting more dependency attributes
+keeps those attributes. The live result remains the pulled value.
 
 Writes, as data:
 
@@ -144,6 +151,12 @@ changed, so old and new both sit in the history. The turn loop reads
 effective settings at turn open, so a provider change is live next turn.
 
 HTML: override / effective columns per changed dial, grouped; turns left.
+
+The effective AI read shows model, no-provider, evaluation time limit,
+turn budget, retry dials, and turns left. Setting
+`:seon.config.agent/show-all-settings` to true includes the full declared
+agent settings; absence or false selects the compact view. HTML retains
+every declared dial.
 
 ## 4. Runtime — ONE component `:seon.agent/runtime` (owner: "the runtime state should all be one collection")
 
@@ -306,6 +319,18 @@ Detail on demand with the same `pull`/`q` against any agent's record.
 `:my.plan.item/completed-at` (→ `completed-tx`); `:my.plan.item/expected-result`
 (→ `done-when`). One batched reset.
 
+## 14a. Page and help rulings from the owner's review
+
+Restored from `7ec3a5bbc`, with the owner's 2026-09-09 render-pass ruling:
+every block is a form the agent could type, one thinking comment, and its
+response. No example code padded into thinking comments. `(help)` prints
+its declared lines bare; `(doc my.plan)` carries the plan write examples.
+Settings show effective values grouped by namespace, subject to §3's dial.
+The Turns concern shows only headers: opened, trigger, evaluation count,
+and whether a reply is recorded. Reply source stays in Context now; it is
+never repeated in the header. The history concern emits no duplicate AI
+projection.
+
 ## 14. Trials so far
 
 | trial | model | help | result |
@@ -329,7 +354,7 @@ Status: ✅ landed · ▶ running · ⏭ next · ◻ queued.
 | 1c | `(help)` as `#:seon.help{:lines}` with its own render pair (bare lines); turns concern HTML-only and "Context now" showing the turn | no | ✅ `9f9f432a8` `7e7c74f01` |
 | 1d | REPL grammar prompt-first (§18d); settings effective values grouped; plan writes by example | no | ✅ `617e538f3` `fd8646edd` |
 | 1f | The page reads turns from the runtime component ("Context now" shows the opening) | no | ✅ `49869fd90` |
-| 1g | Plan block comment padding; `:needs` as ids; settings dials the agent cannot act on | no | ◻ next render pass (issue filed) |
+| 1g | One plan comment, documented writes, dependency ids, actionable settings, and turn headers | no | ✅ [render pass](../research/render-pass-landing-2026-09-09.md) |
 | 1e | Incremental publication writes complete rows (validation caught it) | no | ✅ `1e778e880` |
 | 2 | Read evidence exact for `not`/`or` pattern clauses and `pull` in `:find` | no | ◻ evidence lane |
 | 3 | `(seon.id/id data [n])` as the one id entry; message ids random 8; plan item ids from title | no | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |

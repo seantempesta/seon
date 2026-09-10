@@ -23,7 +23,7 @@
        (is (:db-after written) (pr-str written)))
      (let [written
            (db/transact! connection
-             [{:seon.turn/id "current" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx" :seon.turn/reply "Current reply"}
+             [{:seon.turn/id "current" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx" :seon.turn/reply "(+ 2 2)\n(+ 3 3)" :seon.turn/reply-size 15}
               {:seon.cluster.eval/id "current-a"
                :seon.cluster.eval/at (java.util.Date. 1)
                :seon.cluster.eval/run [:seon.turn/id "current"]
@@ -76,10 +76,10 @@
          (is (:db-after linked))
          (is (str/includes? (transcript/render-runtime-ai runtime-unit) "[:seon.agent/id \"page\"]"))
          (is (:seon.error/kind (transcript/render-runtime-ai {:seon.db/db @connection})))
-         (is (str/includes? runtime-html "Current reply"))
+         (is (str/includes? runtime-html "Recorded"))
          (is (str/includes? runtime-html "Turns (3)"))
          (is (not (str/includes? runtime-html "(+ 2 2)"))))
-       (is (str/includes? headers "Current reply"))
+       (is (str/includes? headers "Recorded"))
        (is (str/includes? headers "Opened"))
        (is (str/includes? headers "Trigger"))
        (is (str/includes? headers "Evaluations"))

@@ -858,7 +858,7 @@
 (defn- turn-header
   [database turn-id]
   (let [row (db/pull database
-                     '[:seon.turn/id {:seon.turn/opened-tx [:db/id :db/txInstant]} :seon.turn/reply :seon.turn/reply-blob
+                     '[:seon.turn/id {:seon.turn/opened-tx [:db/id :db/txInstant]} :seon.turn/reply-size
                        {:seon.turn/trigger [:seon.message/id]}]
                      [:seon.turn/id turn-id])
         evaluations (db/q '[:find (count ?evaluation) . :in $ ?id
@@ -875,10 +875,7 @@
         [:dt "Evaluations"] [:dd (if (:seon.error/kind evaluations)
                                    (:seon.error/message evaluations)
                                    (str (or evaluations 0)))]
-        [:dt "Reply"] [:dd (or (:seon.turn/reply row)
-                               (when-let [digest (:seon.turn/reply-blob row)]
-                                 [:code (pr-str {:seon.turn/reply-blob digest})])
-                               "None")]]])))
+        [:dt "Reply"] [:dd (if (find row :seon.turn/reply-size) "Recorded" "None")]]])))
 
 (defn render-run-html
   "Show a turn's header; its evaluations belong in the prompt pane."

@@ -223,10 +223,15 @@
         value))))
 
 (defn- attribute-value
-  [unit attribute value]
+  [unit attribute value output]
   (let [database (:seon.db/db unit)
         properties (get-in database [:schema attribute])]
     (cond
+      (and (= :seon.render/ai output) (= :my.plan.item/needs attribute)
+           (counted? value) (coll? value) (every? #(and (map? %) (string? (:my.plan.item/id %))
+                                      (every? #{:db/id :my.plan.item/id} (keys %))) value))
+      (vec (sort (map :my.plan.item/id value)))
+
       (and (:db/isComponent properties)
            (= :db.cardinality/many (:db/cardinality properties))
            (counted? value) (coll? value) (seq value) (every? map? value))
@@ -342,7 +347,7 @@
                           ;; Lists are not associative: name their parent.
                           child-path (if (or map-value? set-value? (vector? value))
                                        (conj path key) path)
-                          node (value-node (if map-value? (attribute-value unit key child) child)
+                          node (value-node (if map-value? (attribute-value unit key child output) child)
                                            unit profile output (inc depth)
                                            child-path remaining)]
                       (recur (next entries)

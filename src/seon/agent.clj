@@ -73,7 +73,8 @@
       (ai/agent-overlay (:db-after result) agent-id))))
 
 (defn effective-settings
-  "Read effective agent dials grouped by namespace, then remaining turns."
+  "Read effective actionable settings and remaining turns.
+  Set :seon.config.agent/show-all-settings true to include every effective dial."
   {:malli/schema
    [:=> [:cat :seon.db/db :seon.agent/id]
     [:or [:vector [:map-of :qualified-keyword :seon.schema/value]] :seon.error/value]]}
@@ -90,7 +91,18 @@
       (nil? defaults) {:seon.error/kind :seon.config/required-absent
                       :seon.error/message "The cluster configuration is absent."}
       :else
-      (let [effective (select-keys (ai/settings defaults overrides) attributes)
+      (let [resolved (ai/settings defaults overrides)
+            effective (select-keys resolved
+                        (if (:seon.config.agent/show-all-settings resolved)
+                          attributes
+                          [:seon.config.ai/model :seon.config.ai/no-provider
+                           :seon.config.eval/time-limit-ms :seon.config.run/max-episode-runs
+                           :seon.config.ai.retry/base-delay-ms
+                           :seon.config.ai.retry/jitter-fraction
+                           :seon.config.ai.retry/maximum-delay-ms
+                           :seon.config.ai.retry/maximum-retries
+                           :seon.config.ai.retry/maximum-total-delay-ms
+                           :seon.config.ai.retry/multiplier]))
             order {"seon.config.ai" 0 "seon.config.ai.retry" 1
                    "seon.config.eval" 2 "seon.config.run" 3}]
         (conj (mapv (fn [[_ entries]] (into (sorted-map) entries))

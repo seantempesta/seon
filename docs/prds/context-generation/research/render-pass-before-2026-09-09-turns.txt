@@ -1,0 +1,73 @@
+Turns (3)
+Turn 404bfad994bc
+Opened
+#inst "2026-09-10T01:59:44.237-00:00"
+Trigger
+6950fb40
+Evaluations
+0
+Reply
+Turn 9fc9bc9ef8ad
+Opened
+#inst "2026-09-10T01:59:44.079-00:00"
+Trigger
+None
+Evaluations
+2
+Reply
+(seon.agent/effective-settings)
+(seon.db/pull
+  '[{:seon.agent/runtime
+     [{:seon.runtime/turns
+       [:seon.turn/id
+        {:seon.turn/opened-tx [:db/txInstant]}
+        {:seon.turn/closed-tx [:db/txInstant]}]}
+      {:seon.runtime/trigger [*]}
+      {:seon.runtime/listens [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}]
+  [:seon.agent/id "juniper"])
+Turn aa071259cfd8
+Opened
+#inst "2026-09-10T01:59:43.501-00:00"
+Trigger
+None
+Evaluations
+9
+Reply
+(help)
+(seon.db/pull
+  '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]
+  [:seon.agent/id "juniper"])
+(seon.db/pull
+  '[{:seon.agent/plan
+     [:my.plan/objective
+      {:my.plan/current-step [:my.plan.item/id]}
+      {:my.plan/steps
+       [:my.plan.item/id
+        :my.plan.item/title
+        :my.plan.item/done-when
+        :my.plan.item/position
+        {:my.plan.item/completed-tx [:db/txInstant]}
+        {:my.plan.item/needs [:my.plan.item/id]}
+        {:my.plan.item/steps ...}]}]}]
+  [:seon.agent/id "juniper"])
+(seon.db/pull
+  '[{:seon.message/_inbox
+     [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]}]
+  [:seon.agent/id "juniper"])
+(seon.agent/effective-settings)
+(seon.db/pull
+  '[{:my.note/_agent [:my.note/id :my.note/content {:my.note/about [:my.plan.item/id]}]}]
+  [:seon.agent/id "juniper"])
+(dir my.agents.juniper)
+(seon.db/q
+  '[:find ?attribute (count ?entity) :in $ [?attribute ...] :where [?entity ?attribute _]]
+  [:example/amount :example/customer :example/order])
+(seon.db/pull
+  '[{:seon.agent/runtime
+     [{:seon.runtime/turns
+       [:seon.turn/id
+        {:seon.turn/opened-tx [:db/txInstant]}
+        {:seon.turn/closed-tx [:db/txInstant]}]}
+      {:seon.runtime/trigger [*]}
+      {:seon.runtime/listens [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}]
+  [:seon.agent/id "juniper"])

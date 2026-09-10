@@ -8,19 +8,16 @@
             [seon.operator.runtime :as runtime]
             [seon.repl :as repl]
             [seon.schema :as schema]
-            [seon.sci.eval :as sci.eval])
-  (:import [java.io PushbackReader StringReader]))
+            [seon.sci.eval :as sci.eval]))
 
 (defn plan-examples
-  "Read only the two forms inside the plan's generated example comments."
+  "Read the add, complete, and remove forms from the namespace documentation."
   []
-  (let [comments ((resolve 'seon.plan/plan-write-examples) "juniper")
-        source (->> (str/split-lines comments)
-                    (remove #(str/starts-with? % ";; I "))
-                    (map #(subs % 3))
-                    (str/join "\n"))]
-    (with-open [reader (PushbackReader. (StringReader. source))]
-      [(read reader) (read reader)])))
+  (let [documentation (:doc (meta (find-ns 'my.plan)))]
+    (loop [offset 0 forms []]
+      (if-let [start (str/index-of documentation "(seon.db/transact!" offset)]
+        (recur (inc start) (conj forms (read-string (subs documentation start))))
+        forms))))
 
 (defn exercise-plan!
   "Execute the generated add/remove examples on the scratch fixture only."

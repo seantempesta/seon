@@ -27,3 +27,8 @@ text for the scratch debug page, and the lane closed its own tab. After the
 owner's grammar correction, the service still listed Chrome as running but
 returned `cgWindowNotFound` and no browser surfaces. The final grammar has
 canonical HTML and saved-prompt evidence, without a new browser-paint claim.
+
+Render-pass recheck at 2026-09-10 02:40 UTC: browser inventory was empty;
+native Chrome and Safari both returned `cgWindowNotFound` (-10005).
+The default debug URL returned HTTP 200 and was read as served HTML.
+This remains an observation boundary, not a browser-paint proof.

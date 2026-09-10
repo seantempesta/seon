@@ -1,0 +1,28 @@
+Turns (3)
+Turn 404bfad994bc
+Opened
+#inst "2026-09-10T01:59:44.237-00:00"
+Trigger
+6950fb40
+Evaluations
+0
+Reply
+Recorded
+Turn 9fc9bc9ef8ad
+Opened
+#inst "2026-09-10T01:59:44.079-00:00"
+Trigger
+None
+Evaluations
+2
+Reply
+Recorded
+Turn aa071259cfd8
+Opened
+#inst "2026-09-10T01:59:43.501-00:00"
+Trigger
+None
+Evaluations
+9
+Reply
+Recorded

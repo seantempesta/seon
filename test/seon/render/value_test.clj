@@ -116,6 +116,17 @@
                 (value/render-ai
                  (assoc (unit {:fixture/rows rows}) :seon.db/db @connection))))))))))
 
+(deftest plan-dependencies-show-ids-without-changing-the-pulled-value
+  (support/with-database
+   (fn [connection]
+     (let [raw {:my.plan.item/needs #{{:my.plan.item/id "b"} {:my.plan.item/id "a"}}}
+           shown (value/render-ai (assoc (unit raw) :seon.db/db @connection))]
+       (is (= {:my.plan.item/needs ["a" "b"]} (edn/read-string shown)))
+       (is (set? (:my.plan.item/needs raw)))
+       (let [detailed {:my.plan.item/needs #{{:my.plan.item/id "a" :my.plan.item/title "Keep detail"}}}]
+         (is (= detailed (edn/read-string (value/render-ai
+                                          (assoc (unit detailed) :seon.db/db @connection))))))))))
+
 (deftest declared-producers-still-have-absolute-precedence
   (support/with-database
    (fn [connection]
