@@ -1,5 +1,9 @@
 {:seon.page/base "617e538f3"
  :seon.page/source-commit #uuid "6aa20c40-dc3b-5683-b460-3c218e7a3ec1"
+ :seon.page/default-source-commit #uuid "6aa20d09-e3e2-5e36-b03c-e851fe974eb0"
+ :seon.page/default-http-bytes 53093
+ :seon.page/default-runtime-owner "juniper"
+ :seon.page/scratch-cleaned true
  :seon.page/prompt-bytes 9093 :seon.page/help-bytes 2470
  :seon.page/help-entry-bytes 2554 :seon.page/multiline-entry-bytes 128
  :seon.page/refusal-bytes 131 :seon.page/plan-example-bytes [407 415]

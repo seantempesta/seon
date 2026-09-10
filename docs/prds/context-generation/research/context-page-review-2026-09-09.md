@@ -283,3 +283,20 @@ Final selected-path gate: **5 tests / 104 assertions**, green. Final platform:
 **84 / 505**, green. All used `SEON_TEST_WORKERS=1`. The newly filed
 `runtime-block-generates-a-nil-agent-pull.md` is another lane's untracked note
 and was preserved; this slice fixes its reported renderer boundary.
+
+## Final default adoption and cleanup
+
+Code landed in `617e538f3` and `fd8646edd`. Default adopted source commit
+`6aa20d09-e3e2-5e36-b03c-e851fe974eb0`; an explicit-connection JVM read
+verified that marker. Calling the runtime AI pair with only its component
+and database emitted the lookup `[:seon.agent/id "juniper"]`.
+The default debug HTTP response was **53093 bytes**, with prompt-first input,
+both plan examples, Runtime and Context now, and no `▲` character.
+This verifies the served response; native browser paint remains unavailable.
+
+The scratch JVM was stopped through the operator in its creating worktree;
+the operator reported the store lock free and its roster readable. A final
+`lsof` found no scratch-root holders. The scratch root, worktree and this
+lane's holderless failed gate root were removed; the shared reference-code
+remains intact. Every command shell exited. No default lifecycle action or
+paid provider trial was performed. The paid score remains `:unavailable`.
