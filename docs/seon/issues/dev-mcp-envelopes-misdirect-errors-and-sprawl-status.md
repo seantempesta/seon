@@ -7,6 +7,14 @@ tags: [issue, mcp, sci, wave/dev-mcp]
 
 # Repair development MCP error locations and status scope
 
+## Trial rerun observation — 2026-09-10
+
+Default PID 23557 was alive at PREPL 49971 and HTTP 7994. Supported
+`runtime_status` returned health and Flow unknown with `Read timed out`
+after 30 seconds. A direct supported JVM evaluation of `(+ 1 2)` returned
+3 in 0 ms, and the configured AI target/request-body probe returned in
+10 ms. No replacement transport or default lifecycle operation was used.
+
 Evidence-listens probe, 2026-09-09: `bin/seon status` reported default
 PID 83040 alive; selected MCP runtime status returned health/flow `unknown`
 with `Read timed out` after 30 seconds. The next ordinary MCP JVM parser

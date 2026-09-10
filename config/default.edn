@@ -534,23 +534,22 @@
    :seon.ai.model/input-modalities #{:text}
    :seon.ai.model/thinking-dials #{:disabled :low :high :max}}
 
-  ; Current DeepSeek prices and announced peak/off-peak schedule retrieved
-  ; 2026-08-03: docs/prds/sci-execution-runtime/research/
-  ; model-registry-deepseek-pricing-2026-08-03.md.
+  ; Current DeepSeek prices and active peak/off-peak schedule retrieved
+  ; 2026-09-10: DeepSeek-V4.1-Flash official off-peak USD/Mtok.
+  ; Peak is 2x, weekdays 01:00–04:00 and 06:00–10:00 UTC.
+  ; The old daily-window refs cannot represent weekends; omit them here.
+  ; Source: https://api-docs.deepseek.com/quick_start/pricing/
+  ; Evidence: docs/prds/context-generation/research/trial-rerun-landing-2026-09-10.md.
   {:seon.ai.model/id "deepseek-flash"
    :seon.ai.model/provider [:seon.ai.model/provider-id "deepseek"]
    :seon.ai.model/context-window-tokens 1000000
    :seon.ai.model/max-output-tokens 384000
-   :seon.ai.model/input-usd-per-mtok 0.14
-   :seon.ai.model/cached-input-usd-per-mtok 0.0028
-   :seon.ai.model/output-usd-per-mtok 0.28
+   :seon.ai.model/input-usd-per-mtok 0.15
+   :seon.ai.model/cached-input-usd-per-mtok 0.003
+   :seon.ai.model/output-usd-per-mtok 0.6
    :seon.ai.model/input-modalities #{:text}
    :seon.ai.model/thinking-dials #{:disabled :low :high :max}
-   :seon.ai.model/deepseek-pricing-schedule-status :announced
-   :seon.ai.model/deepseek-off-peak-windows
-   #{[:seon.ai.model/deepseek-window-id "deepseek-off-peak-00-01"]
-     [:seon.ai.model/deepseek-window-id "deepseek-off-peak-04-06"]
-     [:seon.ai.model/deepseek-window-id "deepseek-off-peak-10-24"]}}
+   :seon.ai.model/deepseek-pricing-schedule-status :active}
 
   {:seon.ai.model/id "deepseek-v4-pro"
    :seon.ai.model/provider [:seon.ai.model/provider-id "deepseek"]

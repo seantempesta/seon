@@ -138,6 +138,25 @@
                 [:seon.ai/backup :seon.ai/api-key-variable]))
             "same-provider backups inherit an explicit primary credential")))))
 
+(deftest deepseek-flash-thinking-setting-survives-model-resolution
+  (test-support/with-database
+   (fn [connection]
+     (is (seq (db/pull @connection [:seon.ai.model/id]
+                      [:seon.ai.model/id "deepseek-flash"])))
+     (doseq [thinking [:disabled :high]]
+       (let [target (:seon.ai/primary
+                     (ai/targets @connection
+                                 (assoc @dials :seon.config.ai/model "deepseek-flash"
+                                        :seon.config.ai/thinking thinking)))
+             body (ai/request-body (assoc target :seon.ai/prompt "hello"))]
+         (is (= "deepseek-flash" (get body "model")))
+         (is (= thinking (:seon.ai/thinking target)))
+         (is (= {"type" (if (= :disabled thinking) "disabled" "enabled")}
+                (get body "thinking")))
+         (if (= :disabled thinking)
+           (is (not (contains? body "reasoning_effort")))
+           (is (= "high" (get body "reasoning_effort")))))))))
+
 (deftest thinking-is-one-config-fact-with-three-wire-states
   (testing "absence leaves the provider default untouched"
     (let [body (ai/request-body base)]

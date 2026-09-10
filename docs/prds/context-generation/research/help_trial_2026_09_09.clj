@@ -14,7 +14,11 @@
             [seon.operator.runtime :as runtime]
             [seon.render :as render]
             [seon.schema :as schema]
+            [seon.sci.eval :as sci-eval]
             [seon.turn :as turn]))
+
+; The same fixture owns the scenario in tests and the production JVM.
+(load-file "test/seon/context_blocks_fixture.clj")
 
 ; Load in default's JVM, then call (help-trial-2026-09-09/run!).
 ; prepare captures and checks one immutable database value.
@@ -134,6 +138,52 @@
     {:seon.trial/score-status :measured
      :seon.trial/score (score database ctx (:seon.ai/text completion "") turns-left)}))
 
+(defn preflight
+  "Refuse anything except the generated initial opening of the shared fixture.
+  Both this check and prompt acquisition consume the caller's immutable db."
+  [handle database]
+  (let [evaluations (checked (evaluation/of-agent database "juniper"))
+        sources (mapv :seon.cluster.eval/source evaluations)
+        namespace-name (sci-eval/agent-namespace database "juniper")
+        expected (when namespace-name
+                   (:seon.turn/forms
+                    (checked (#'turn/declared-sources handle database "juniper" namespace-name))))
+        expected-sources (mapv :seon.cluster.eval/source
+                               (#'turn/system-plan database expected {}))
+        live-turns-left (:my.agent/turns-left (checked (agent/settings database "juniper")))
+        shown-settings (some-> (some #(when (= ['(seon.agent/effective-settings)]
+                                               (read-forms (:seon.cluster.eval/source %))) %)
+                                     evaluations)
+                               :seon.eval/shown edn/read-string)
+        shown-turns-left (some :my.agent/turns-left shown-settings)
+        messages (checked
+                  (db/q '[:find (pull ?message [:seon.message/id :seon.message/content
+                                                {:seon.message/from [:seon.agent/id]}]) :where
+                          [?agent :seon.agent/id "juniper"]
+                          [?message :seon.message/inbox ?agent]] database))
+        orders (checked (db/q '[:find (pull ?order [:example/order :example/customer :example/amount])
+                               :where [?order :example/order]] database))]
+    (when-not (and (seq expected-sources)
+                   (= expected-sources sources)
+                   (= 1 (count (set (map #(get-in % [:seon.cluster.eval/run :db/id]) evaluations))))
+                   (every? #(= :system (:seon.cluster.eval/author %)) evaluations)
+                   (= (count sources) (count (distinct sources)))
+                   (zero? (turn/episode-runs database "juniper"))
+                   (nat-int? live-turns-left)
+                   (= live-turns-left shown-turns-left)
+                   (= 1 (count messages))
+                   (= @(resolve 'seon.context-blocks-fixture/instruction)
+                      (:seon.message/content (ffirst messages)))
+                   (= "root" (get-in (ffirst messages) [:seon.message/from :seon.agent/id]))
+                   (not-any? :seon.cluster.eval/error evaluations)
+                   (= (set @(resolve 'seon.context-blocks-fixture/orders)) (set (map first orders))))
+      (throw (ex-info "The selected cluster needs the ruled initial fixture; no model was called."
+                      {:seon.trial/sources sources :seon.trial/expected-sources expected-sources
+                       :seon.trial/messages messages})))
+    {:seon.trial/evaluations evaluations
+     :seon.trial/expected-sources expected-sources
+     :seon.trial/turns-left live-turns-left}))
+
 (defn prepare
   "Capture the selected cluster's prompt and rank configured models by cost."
   ([] (prepare "default"))
@@ -144,37 +194,9 @@
      (:seon.sci.eval/projection-state handle)
      (fn []
        (let [database (db/db (:seon.db/connection handle))
-             evaluations (evaluation/of-agent database "juniper")
-             sources (mapv :seon.cluster.eval/source evaluations)
-             shown-settings
-             (some-> (some #(when (or (= "(my.agent/settings)" (:seon.cluster.eval/source %))
-                                      (some #{:seon.agent/settings}
-                                            (tree-seq coll? seq (read-forms (:seon.cluster.eval/source %))))) %)
-                           evaluations)
-                     :seon.eval/value edn/read-string)
-             live-turns-left (:my.agent/turns-left (checked (agent/settings database "juniper")))
-             ; At the verified initial system turn the shown configured limit
-             ; equals the remaining budget. No turn count is invented in prose.
-             shown-turns-left (or (:my.agent/turns-left shown-settings)
-                                  (when (zero? (turn/episode-runs database "juniper"))
-                                    (get-in shown-settings [:seon.agent/settings
-                                                           :seon.config.run/max-episode-runs])))
-             messages (db/q '[:find [?id ...] :where
-                              [?agent :seon.agent/id "juniper"]
-                              [?message :seon.cluster.message/to ?agent]
-                              [?message :seon.cluster.message/id ?id]] database)]
-         (when-not (and (seq sources)
-                        (= 1 (count (set (map #(get-in % [:seon.cluster.eval/run :db/id]) evaluations))))
-                        (every? #(= :system (:seon.cluster.eval/author %)) evaluations)
-                        (= (count sources) (count (distinct sources)))
-                        (= "(help)" (first sources))
-                        (nat-int? shown-turns-left)
-                        (= live-turns-left shown-turns-left)
-                        (= #{"juniper/largest-customer"} (set messages))
-                        (not-any? :seon.cluster.eval/error evaluations)
-                        (= 4 (db/q '[:find (count ?order) . :where [?order :example/order]] database)))
-           (throw (ex-info "The selected cluster needs the ruled initial fixture; no model was called."
-                           {:seon.trial/sources sources :seon.trial/message-ids messages})))
+             initial (preflight handle database)
+             evaluations (:seon.trial/evaluations initial)
+             shown-turns-left (:seon.trial/turns-left initial)]
          (let [turn-id (:seon.turn/id
                         (db/pull database [:seon.turn/id]
                                  (get-in (last evaluations) [:seon.cluster.eval/run :db/id])))
@@ -213,6 +235,9 @@
                                              :seon.config.ai/max-tokens max-output
                                              :seon.config.ai/timeout-ms 120000))))]
              {:seon.cluster/name cluster-name
+              :seon.trial/prepared-at (str (java.time.Instant/now))
+              :seon.trial/basis-t (db/basis-t database)
+              :seon.trial/expected-sources (:seon.trial/expected-sources initial)
               :seon.trial/prompt prompt :seon.trial/questions questions
               :seon.trial/prompt-bytes (alength (.getBytes ^String prompt "UTF-8"))
               :seon.trial/request-bytes (alength (.getBytes ^String full-prompt "UTF-8"))
@@ -220,7 +245,7 @@
               :seon.trial/model model
               :seon.trial/candidates (mapv #(select-keys % [:seon.ai.model/id :seon.trial/estimated-usd]) candidates)
               :seon.trial/turns-left shown-turns-left
-              :seon.trial/live-turns-left live-turns-left
+              :seon.trial/live-turns-left shown-turns-left
               :seon.trial/help-code-sha256
               (schema/sha-256 [(.getBytes ^String (:seon.fn/source
                                                   (db/pull database [:seon.fn/source]
@@ -241,6 +266,10 @@
          completion (schema/call-with-projection-state
                      (:seon.sci.eval/projection-state handle)
                      #(ai/complete (:seon.trial/request prepared)))
+         ; Persist the first completion before scoring can fail.
+         _ (spit path (pr-str (assoc (dissoc prepared :seon.trial/request)
+                                     :seon.trial/completion
+                                     (dissoc completion :seon.ai.attempt/sent-body))))
          database (db/db (:seon.db/connection handle))
          usage (some-> (:seon.ai/usage completion) ai/normalize-usage)
          prompt-tokens (:seon.ai.usage/prompt-tokens usage)

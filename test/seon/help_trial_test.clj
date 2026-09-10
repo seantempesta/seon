@@ -1,9 +1,78 @@
 (ns seon.help-trial-test
   (:require [clojure.test :refer [deftest is]]
+            [clojure.core.async :as async]
+            [seon.cluster :as cluster]
+            [seon.cluster.agent :as agent]
+            [seon.config :as config]
+            [seon.context-blocks-fixture :as fixture]
+            [seon.db :as db]
+            [seon.flow :as flow]
+            [seon.turn :as turn]
             [seon.test-support :as support]))
 
 ; The committed trial is the executable subject, not a copied scoring model.
 (load-file "docs/prds/context-generation/research/help_trial_2026_09_09.clj")
+
+(deftest preflight-requires-the-generated-opening-and-unpolluted-fixture
+  (support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "trial"
+                    :seon.config/manifest {:seon.config.ai/no-provider true}})
+     (db/transact! connection [{:seon.agent/id "root"
+                               :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
+     (cluster/ensure-cluster-entity! connection "trial" cluster/boot-process-identity)
+     (let [ctx (support/fork-cluster-ctx connection)
+           environment (support/environment "trial" connection)
+           routing (agent/routing)]
+       (with-open [faults (support/closeable (async/chan (async/sliding-buffer 16)) async/close!)
+                   launcher (support/closeable
+                             (flow/start-work-launcher!
+                              {:seon.env/environment environment
+                               :seon.flow/configuration
+                               (select-keys (support/effective-config) flow/flow-workload-attributes)})
+                             flow/stop-work-launcher!)
+                   handle-resource
+                   (support/closeable
+                    (support/cluster-handle
+                     {:seon.env/environment environment :seon.db/connection connection
+                      :seon.cluster/name "trial" :seon.sci.eval/ctx ctx
+                      :seon.flow/work-launcher @launcher
+                      :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
+                      :seon.db.process/id cluster/boot-process-identity})
+                    (fn [handle]
+                      (agent/disarm! {:seon.agent/routing routing :seon.agent/id "juniper"})
+                      (doseq [channel-key [:seon.cluster.wake/channel :seon.render/context-channel
+                                   :seon.turn.loop/completion]]
+                        (async/close! (get handle channel-key)))))]
+         (let [handle @handle-resource
+               check! #((resolve 'help-trial-2026-09-09/preflight) handle %)]
+           (swap! routing assoc :seon.agent/fault-channel @faults)
+           (cluster/ensure-entity! connection cluster/boot-process-identity
+                                   {:seon.agent/id "juniper" :seon.cluster/name "trial"
+                                    :seon.ns/name 'my.agents.juniper})
+           (fixture/install! handle routing)
+           (is (string? (:seon.turn/id (turn/system-turn
+                                       {:seon.turn.loop/cluster handle :seon.agent/id "juniper"
+                                        :seon.turn/write? true}))))
+           (let [initial @connection
+                 admitted (check! initial)]
+             (is (seq (:seon.trial/expected-sources admitted)))
+             (is (= 20 (:seon.trial/turns-left admitted)))
+             ; A senderless inbox message must count; joining its sender would hide it.
+             (let [report (db/transact! connection [{:seon.message/id "trial/pollution"
+                                                     :seon.message/to [:seon.agent/id "juniper"]
+                                                     :seon.message/content "Extra instruction"
+                                                     :seon.message/inbox [:seon.agent/id "juniper"]}])]
+               (is (nil? (:seon.error/kind report)) (pr-str report)))
+             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"initial fixture" (check! @connection)))
+             (is (= admitted (check! initial)) "an advancing connection cannot change the checked value")
+             (db/transact! connection [[:db.fn/retractEntity [:seon.message/id "trial/pollution"]]
+                                      [:db/add [:example/order "a1"] :example/amount 61]])
+             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"initial fixture" (check! @connection)))
+             (db/transact! connection [[:db/add [:example/order "a1"] :example/amount 60]
+                                      [:db/add (:db/id (first (:seon.trial/evaluations admitted)))
+                                       :seon.cluster.eval/source "(+ 1 2)"]])
+             (is (thrown-with-msg? clojure.lang.ExceptionInfo #"initial fixture" (check! @connection))))))))))
 
 (def answers
   (str ";; 1. Write thinking comments before each form.\n"
