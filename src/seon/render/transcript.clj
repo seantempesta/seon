@@ -814,21 +814,11 @@
     :seon.error/diagnostic-evidence identities}))
 
 (defn render-run-ai
-  "Render a bounded run's stored forms and evaluation results."
+  "The prompt owns evaluation text; a turn concern emits no AI text."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :string :seon.error/value]]}
-  [unit]
-  (let [{run-id ::selected-run-id agent-id ::selected-agent-id
-         identity-error ::selected-run-error
-         :as identities}
-        (selected-run-identities unit)]
-    (cond
-      identity-error identity-error
-      (and (:seon.db/db unit) run-id agent-id)
-      (let [unit (assoc (assoc unit :seon.agent/id agent-id)
-                        ::selected-run-id run-id)]
-        (render-ai unit))
-      :else (missing-selected-run unit identities))))
+  [_unit]
+  "")
 
 (defn message-form
   "Return the ordinary message read form for one message entity."
@@ -903,8 +893,33 @@
                  (sort-by entry-order
                           (into entries (reasoning-attempts unit))))))
 
+(defn- turn-header
+  [database turn-id]
+  (let [row (db/pull database
+                     '[:seon.turn/id :seon.turn/opened-at :seon.turn/reply :seon.turn/reply-blob
+                       {:seon.turn/trigger [:seon.cluster.message/id]}]
+                     [:seon.turn/id turn-id])
+        evaluations (db/q '[:find (count ?evaluation) . :in $ ?id
+                            :where [?turn :seon.turn/id ?id]
+                                   [?evaluation :seon.cluster.eval/run ?turn]]
+                          database turn-id)]
+    (if (:seon.error/kind row)
+      [:p (:seon.error/message row)]
+      [:article {:class "seon-turn-header"}
+       [:h3 (str "Turn " turn-id)]
+       [:dl
+        [:dt "Opened"] [:dd (pr-str (:seon.turn/opened-at row))]
+        [:dt "Trigger"] [:dd (or (get-in row [:seon.turn/trigger :seon.cluster.message/id]) "None")]
+        [:dt "Evaluations"] [:dd (if (:seon.error/kind evaluations)
+                                   (:seon.error/message evaluations)
+                                   (str (or evaluations 0)))]
+        [:dt "Reply"] [:dd (or (:seon.turn/reply row)
+                               (when-let [digest (:seon.turn/reply-blob row)]
+                                 [:code (pr-str {:seon.turn/reply-blob digest})])
+                               "None")]]])))
+
 (defn render-run-html
-  "Render a bounded run's stored forms and evaluation results as Hiccup."
+  "Show a turn's header; its evaluations belong in the prompt pane."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.render/hiccup :seon.error/value]]}
   [unit]
@@ -915,11 +930,7 @@
     (cond
       identity-error identity-error
       (and (:seon.db/db unit) run-id agent-id)
-      (let [unit (assoc (assoc unit :seon.agent/id agent-id)
-                        ::selected-run-id run-id)]
-        [:section {:class "seon-run-transcript"}
-         (turn/render-html unit)
-         (render-html unit)])
+      (turn-header (:seon.db/db unit) run-id)
       :else (missing-selected-run unit identities))))
 
 (defn render-session-ai
@@ -1068,97 +1079,21 @@
           ["No run of mine is recorded yet; this is my first episode."])
          older (conj (print/render-elision-ai older)))))))
 
-(defn- runs-agent-id
-  "The agent these runs belong to, read from the runs themselves."
-  [database runs]
-  (or (some :seon.agent/id
-            (keep :seon.turn/agent runs))
-      (when-let [eid (some #(get-in % [:seon.turn/agent :db/id]) runs)]
-        (let [found (db/q '[:find ?id .
-                            :in $ ?agent
-                            :where [?agent :seon.agent/id ?id]]
-                          database eid)]
-          (when-not (:seon.error/kind found) found)))))
-
 (defn render-history-ai
-  "Render saved evaluations directly; history is never a generated read form."
+  "The prompt is this concern's AI projection, so emit no duplicate text."
   {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
                   [:or :string :seon.error/value]]}
-  [runs database]
-  (let [rows (if (and (sequential? runs) (every? map? runs)) (vec runs) [])
-        agent-id (runs-agent-id database rows)]
-    (if agent-id
-      (format-history-ai (agent-history {:seon.db/db database
-                                        :seon.agent/id agent-id}))
-      "")))
+  [_turns _database]
+  "")
 
 (defn render-history-html
-  "`:seon.render/html` — one transcript per run, newest first.
-
-  BOTH PROJECTIONS COME FROM ONE DERIVATION. This renders exactly what
-  [[agent-history]] returned, so the page and the agent's context cannot
-  disagree; the per-run `render-run-html` path was measured at more than ten
-  seconds for three runs, because each call re-counts the agent's whole
-  history, and it is not on this path.
-
-  A closed run's results are labeled historical, because a reader must not
-  mistake a stored value for a value the agent just produced."
+  "Show all turn headers, newest first, without repeating evaluations."
   {:malli/schema [:=> [:cat :seon.schema/value :seon.db/database-value]
                   :seon.render/hiccup]}
-  [runs database]
-  (let [rows (if (and (sequential? runs) (every? map? runs)) (vec runs) [])
-        agent-id (runs-agent-id database rows)
-        derived (when agent-id
-                  (agent-history {:seon.db/db database
-                                  :seon.agent/id agent-id}))]
-    (cond
-      (nil? agent-id)
-      [:section {:class "seon-family-entry seon-run-history"}
-       [:h2 "History (0 runs)"]
-       [:p {:class "seon-run-history-empty"}
-        "No run of this agent is recorded yet."]]
-
-      (:seon.error/kind derived)
-      [:section {:class "seon-family-entry seon-run-history"}
-       [:h2 "History"]
-       [:p {:class "seon-run-history-unavailable"}
-        (:seon.error/message derived)]]
-
-      :else
-      (let [shown (:seon.render.transcript/runs derived)
-            older (:seon.render.transcript/older-runs derived)
-            total (or (:seon.render.data/total older) (count shown))]
-        (cond->
-         (into [:section {:class "seon-family-entry seon-run-history"}
-                [:h2 (str "History (" total " run"
-                          (when (not= 1 total) "s") ")")]]
-               (map
-                (fn [run]
-                  (let [closed? (some? (:seon.turn/closed-at run))
-                        entries (:seon.render.transcript/entries run)]
-                    (cond->
-                     [:article {:class "seon-run-history-entry"}
-                      [:p {:class "seon-kicker"}
-                       (if closed?
-                         "Historical run — its results are stored, not fresh"
-                         "Open run")]
-                      [:h3 [:code (:seon.turn/id run)]]
-                      [:p {:class "seon-run-history-window"}
-                       (run-heading run)]]
-                      (:seon.turn/error run)
-                      (conj [:p {:class "seon-run-history-error"}
-                             (str "It did not run: "
-                                  (:seon.turn/error run))])
-                      (seq entries)
-                      (conj [:pre {:class "seon-run-history-transcript"}
-                             [:code
-                              (str/join
-                               "\n"
-                               (map :seon.render.history/bytes entries))]])
-                      (empty? entries)
-                      (conj [:p {:class "seon-run-history-empty"}
-                             "This run evaluated no form."]))))
-                shown))
-          older
-          (conj [:p {:class "seon-run-history-elision"}
-                 (print/render-elision-ai older)]))))))
+  [turns database]
+  (let [rows (if (and (coll? turns) (every? map? turns)) turns [])
+        ordered (sort-by (juxt :seon.turn/opened-at :seon.turn/id)
+                         #(compare %2 %1) rows)]
+    (into [:section {:class "seon-turn-history"}
+           [:h2 (str "Turns (" (count rows) ")")]]
+          (map #(turn-header database (:seon.turn/id %)) ordered))))

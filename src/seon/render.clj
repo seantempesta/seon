@@ -1006,11 +1006,16 @@
         selected (when-not (or (contains? rendering selected)
                                (and (= output :seon.render/ai)
                                     selected
-                                    (not (:seon.error/kind selected))
-                                    (source-producer?
-                                     projection selected
-                                     [(producer-argument
-                                       (assoc request :seon.render/value value))])))
+                                    (or (not (:seon.error/kind selected))
+                                        (= ::ambiguous (:seon.error/kind selected)))
+                                    (some
+                                     #(source-producer?
+                                       projection %
+                                       [(producer-argument
+                                         (assoc request :seon.render/value value))])
+                                     (if (= ::ambiguous (:seon.error/kind selected))
+                                       (get-in selected [:seon.error/data :seon.render/candidates])
+                                       [selected]))))
                    selected)]
     (cond
       (:seon.error/kind selected) (bounded-error-node request selected)

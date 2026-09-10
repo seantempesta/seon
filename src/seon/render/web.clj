@@ -701,10 +701,27 @@
           :seon.render.value/root [:seon.agent/id agent-id]
           :seon.sci.admit/caps caps}))
 
+(defn- current-turn-evaluations
+  [database agent-id]
+  (let [evaluations (turn-function-result 'seon.eval/of-agent [database agent-id])
+        turns (when-not (:seon.error/kind evaluations)
+                (db/q '[:find ?turn ?opened ?turn-id :in $ ?id
+                        :where [?agent :seon.agent/id ?id]
+                               [?turn :seon.turn/agent ?agent]
+                               [?turn :seon.turn/id ?turn-id]
+                               [?turn :seon.turn/opened-at ?opened]] database agent-id))]
+    (cond
+      (:seon.error/kind evaluations) evaluations
+      (:seon.error/kind turns) turns
+      :else
+      ;; A late commit can carry an older opening; transaction order is not turn order.
+      (let [current (ffirst (sort-by (juxt second last) #(compare %2 %1) turns))]
+        (filterv #(= current (get-in % [:seon.cluster.eval/run :db/id])) evaluations)))))
+
 (defn- debug-prompt
   [database connection agent-id caps render-context]
   (let [request (debug-turn-request database connection agent-id caps render-context)
-        evaluations (turn-function-result 'seon.eval/of-agent [database agent-id])
+        evaluations (current-turn-evaluations database agent-id)
         prospective (when-not (:seon.error/kind evaluations)
                       (turn-function-result 'seon.turn/system-turn
                                             [(assoc request :seon.turn/write? false)]))]
@@ -770,14 +787,14 @@
          [:span (str " · " (count evaluations) " evaluations · "
                      (if (empty? evaluations) "fresh" "continuing"))])]
       [:div {:class "seon-debug-context-actions"}
-       (system-action-form agent-id "system-turn" "Run system turn")
+       (system-action-form agent-id "system-turn" "System turn")
        (system-action-form agent-id "virtual-turn" "Virtual turn")
        (system-action-form agent-id "compact" "Compact")]
       (when-not (:seon.error/kind evaluations)
        [:section {:class "seon-debug-prompt-pane"}
        [:h3 "Context now"]
        (into [:div {:class "seon-debug-evaluations"}]
-             (map #(algorithm-value-html request %) evaluations))])
+             (map #(turn-function-result 'seon.repl/render-html [%]) evaluations))])
       (when prospective
        [:section {:class "seon-debug-prompt-pane"}
        [:h3 "Would-be system turn"]

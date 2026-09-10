@@ -53,3 +53,41 @@ plus these paths. Its first settings probe saw a newly loaded function without
 its program row, so its zero-argument call correctly refused; scratch development
 adoption must finish before the final reseed and capture. This is not a prompt
 pass or a reason to operate default.
+
+## Turns and returned data
+
+Turn concern pairs now emit no AI text and render HTML headers only: opening,
+trigger, evaluation count, and reply. A blob-backed reply shows its stored ref
+instead of claiming no reply. The prompt pane renders each current evaluation
+through `seon.repl/render-html`, without repeated floor wrappers sharing one id.
+
+The browser falsified the first current-turn selector: at the observed scratch
+basis, turn `2b4e991b596f` opened at 00:09:43 and committed at 536871024 with
+eight evaluations, while `93959e14d8d4` opened at 00:09:42 and committed later,
+at 536871026, with none. Commit order selected the wrong turn. The selector now
+orders by `opened-at`; the canonical regression deliberately commits an older
+opening later and also verifies an actually newer empty turn. Aggregate count
+returns nil for zero matching evaluations; the known turn's header shows `0`.
+
+The full prompt also exposed schema selection inside a returned settings vector:
+the provider map matched both the settings source renderer and missing-model
+prose. [The direct-map collision was separately reproduced](context_page_render_collision_2026_09_09.edn).
+AI selection now applies to the returned entity and flat errors; nested data
+retains its shape. An input accepted by a source-generating block stays data even
+when it also matches a prose candidate. The regression covers the vector and
+the direct provider map, alongside nested pull preservation and returned errors.
+
+Native Chrome is available even though the browser connector inventory is empty.
+On the scratch debug page, its accessibility tree and screenshot showed
+`Turns (4)`, the latest two-evaluation turn's headers, a blank concern AI side,
+and `Context now` containing the two actual evaluations. The first screenshot
+also exposed an absent generated CSS asset in the throwaway checkout;
+`bin/css` built it in 89 ms. No default tab was changed; the probe uses a new tab.
+
+Final combined fast gate: **29 tests / 205 assertions**. Isolated gate:
+**29 / 209**. Platform: **83 / 490**, all green. These isolated gates use
+HEAD `dbec8be7e`, which landed the data lane's plan/component slice during this
+review, plus only this slice's named render/test paths. The last platform run
+used one worker; all runs capped `SEON_TEST_WORKERS` at three. The settings/plan
+patch still applies cleanly after that commit; the shared writer files remain
+untouched as assigned. RESET NEEDED includes `dbec8be7e`.

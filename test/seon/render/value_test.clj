@@ -59,6 +59,19 @@
     (is (str/includes? (hiccup/->string (value/render-html (unit raw)))
                        "seon-print-map"))))
 
+(deftest settings-remain-data-when-block-and-problem-renderers-match
+  (support/with-database
+   (fn [connection]
+     (let [groups [{:seon.config.ai/model "deepseek/deepseek-v4-flash-20260731"
+                    :seon.config.ai/no-provider true}
+                   {:seon.config.ai.retry/maximum-retries 2}
+                   {:my.agent/turns-left 20}]
+           request (render-request connection groups)]
+       (doseq [raw [groups (first groups)]]
+         (let [shown (value/render-ai (assoc request :seon.render/value raw))]
+           (is (= raw (edn/read-string shown)))
+           (is (not (str/includes? shown "seon.render/ambiguous")))))))))
+
 (deftest collection-cardinality-never-changes-values-into-text-tables
   (doseq [n [0 1 2 3]
           choice [:derived true false]]
