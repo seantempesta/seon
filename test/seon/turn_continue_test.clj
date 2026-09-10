@@ -22,6 +22,9 @@
                  :seon.error/message "Fixture provider refused the request."}]
     (doseq [[scenario replies limit expected disposition]
             [[:read-then-done [read-source done] 3 2 :wait]
+             [:prose-then-done ["I will inspect the orders next." done] 3 2 :wait]
+             [:empty-then-done ["" done] 3 2 :wait]
+             [:comments-then-done [";; I will inspect the orders next." done] 3 2 :wait]
              [:done [done] 3 1 :wait]
              [:completed ["(seon.run/complete \"Verified.\")"] 3 1 :completed]
              [:refusal [refusal] 3 1 nil]
@@ -136,6 +139,33 @@
                        (is (seq (:seon.cluster.eval/read-evidence entry)))
                        (is (and (string? next-prompt)
                                 (str/includes? next-prompt (repl/render-ai entry))))))
+                   (when (#{:prose-then-done :empty-then-done :comments-then-done} scenario)
+                     (let [source (if (empty? (first replies)) "\n" (first replies))
+                           entries (filterv #(= source
+                                                 (:seon.cluster.eval/source %))
+                                            (evaluation/of-agent @connection "juniper"))
+                           entry (first entries)
+                           next-prompt (:seon.ai/prompt (second @requests))
+                           message (if (= scenario :empty-then-done)
+                                     "The reply carried no Clojure forms."
+                                     (str "The reply carried no Clojure forms — its whole text read as "
+                                          "prose. Prose runs nothing and settles nothing; write the "
+                                          "Clojure you want evaluated."))]
+                       (is (= 1 (count entries)))
+                       (is (= message (:seon.cluster.eval/error entry)))
+                       (is (str/includes? (:seon.eval/shown entry)
+                                          ":seon.cluster.reply/no-forms"))
+                       (is (str/includes? (repl/render-ai entry) ":error"))
+                       (is (and (string? next-prompt)
+                                (str/includes? next-prompt (repl/render-ai entry))
+                                (str/includes? next-prompt message)))
+                       (println "READER-NO-FORMS" scenario
+                                (pr-str (select-keys entry [:seon.cluster.eval/source :seon.cluster.eval/error]))
+                                "next-prompt-contains-error" (str/includes? next-prompt (repl/render-ai entry))))
+                     (is (empty? (db/q '[:find ?e :where [?e :seon.error/id]] @connection)))
+                     (is (empty? (db/q '[:find ?message :where
+                                        [?root :seon.agent/id "root"]
+                                        [?message :seon.message/to ?root]] @connection))))
                    (is (nil? (async/poll! @faults)))
                    (println {:seon.test/scenario scenario :seon.test/provider-attempts (count @requests)
                              :seon.test/turns-left (turn/turns-left @connection "juniper")})))))))))))

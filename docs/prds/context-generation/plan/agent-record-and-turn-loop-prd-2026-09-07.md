@@ -1274,11 +1274,24 @@ help wording fixes that; the mechanism does:
 
 - The reader accepts `;;` comments and forms. A leading `<ns>=>` marker is
   stripped from a line and the form behind it is kept.
+- Markdown fence delimiter lines (backticks, with or without a language
+  tag) are ignored like whitespace between forms. Forms inside and outside
+  fences use the same reply grammar; fence-looking text inside a Clojure
+  string remains literal data.
 - A `#:seon.repl{…}` map in a reply is never evaluated. It is a fabricated
   response, returned to the agent as `:error` data — "You wrote a response.
   Only the REPL writes responses; send forms and wait." — and the forms
   before it still evaluate. The mistake is visible on the next turn like
   any other.
+- A reply that still contains no forms is the agent's mistake. Its original
+  text becomes one evaluation carrying the flat error
+  `:seon.cluster.reply/no-forms` and the existing reader message, through
+  the same reader-error evaluation path as a fabricated response. The turn
+  closes as an accepted reply with that one error evaluation, visible as
+  `:error` in the next prompt, and the session continues under its ordinary
+  bound. It creates no core fault, fault-committer row, or message to root.
+  An intentionally empty provider-disabled virtual wake retains its
+  existing zero-evaluation behavior. (Owner amendment, 2026-09-10.)
 - OPEN (owner): the prompt today ends with a bare `<ns>=>`, which invites
   the continuation. Whether the turn boundary should be the provider's
   message boundary instead of an in-text prompt is a design decision.

@@ -1,72 +1,24 @@
 (ns seon.cluster.reply
-  "A model reply is text; a plan is ordered form sources. This reads one
-  into the other.
+  "Split a model reply into ordered source forms through seon.sci.reader.
 
-  SCI's reader owns form boundaries through `seon.sci.reader`. The deleted
-  parser (`src-old/seon/repl/parse.cljc`) remains historical evidence.
-  The current contract preserves these properties:
+  The shared reader owns Clojure boundaries, Markdown delimiter lines,
+  reader refusals, and namespace attribution. This namespace distinguishes
+  code events from prose and strips leading REPL prompt markers. Structured
+  forms remain code; a bare symbol remains code when it occupies its own
+  line in a reply that also contains structure.
 
-  - `#=` is REFUSED (`EvalReader not allowed when *read-eval* is
-    false`) and an unknown tag is refused by name. The D7 scar cannot
-    recur here. **Nothing in N3 calls `clojure.core/read-string` or
-    `read` on model text** — that is the rule, and this namespace is
-    the only reader of model text there is;
-  - unbalanced input is an ordinary refusal carrying a position, not a
-    hang;
-  - source fidelity is exact, and a leading comment attaches to the
-    form it precedes. That is wanted: the stored source is what the
-    agent wrote;
-  - Markdown delimiter lines are whitespace between reader forms.
-    SCI consumes each whole form, so fence-looking lines within strings
-    remain literal data. There is no separate fenced-region grammar.
+  Preceding prose and comments become the next form's comment fact.
+  Trailing prose stays only in the durable turn reply. Code source strings keep
+  their exact authored bytes; the evaluator reads them in its armed SCI
+  context before execution.
 
-  PROSE BECOMES SOURCE COMMENTS, never forms. Every English word can
-  read as a symbol, so successful reading alone cannot distinguish
-  prose from code. Structured top-level forms (lists, vectors, maps and
-  sets) remain plan forms; a bare symbol remains a form only when it
-  occupies its own source line in a reply that also has structure.
-  Everything else is coalesced back into its original prose span,
-  prefixed with the agent-facing single-`;` comment grammar, and
-  attached to THE FORM IT PRECEDES. Prose that follows the last form
-  belongs to no form: a comment renders above the prompt, so attaching
-  it to the form it followed inverted the agent's own authorship order
-  in its rendered session. It stays in the durable reply text
-  (`:seon.turn/reply`) and nowhere else.
+  A reply containing no forms returns a flat ::no-forms value. The turn
+  owner stores one error evaluation through SCI's
+  reader-error path, closes the accepted reply, and continues the session.
+  It is the author's mistake, never a core fault or an owner notification.
 
-  EVERY PLAN SOURCE CARRIES A READER EVENT, and that is the invariant
-  this namespace exists to keep. A comment-only plan source has no
-  event, so nothing evaluates it and nothing settles a receipt for it:
-  the run recorded a `:seon.cluster.eval` row and closed with that
-  row unsettled, silently, detectable only by counting forms against
-  receipts. The 2026-08-08 arc drive read 105 forms / 102 receipts, and
-  all three gaps were comment-only sources produced by deepseek-v4-flash
-  chat-template control markup (`<assistant1>`,
-  `<｜｜DSML｜｜AgentThoughts>…`) arriving verbatim in the completion's
-  `content` field. A prose span therefore never becomes a plan source of
-  its own; a reply with no forms at all is a LOUD `::no-forms` refusal
-  carrying its text, not a row that settles nothing
-  (`docs/seon/issues/a-runs-last-form-can-close-without-a-receipt.md`).
-
-  SOURCES, NOT FORMS. The return is a vector of plan forms, each one a
-  SOURCE STRING plus the namespace it was written under. The evaluator
-  parses each source inside its own armed context, so the reply is read
-  once for splitting and once for evaluation — never handed across as
-  parsed data that a second reader would have to trust.
-
-  ONE READER, AND IT IS NOT THIS NAMESPACE'S. Reading belongs to
-  `seon.sci.reader`; this namespace only decides which read events are
-  code and which are prose. That is why the parse-time
-  namespace-in-effect (`:seon.sci.reader/ns`) arrives with the span
-  instead of being re-derived by a second inheritance rule of our own —
-  the rule that a previous revision of the generate-code plan invented
-  and that contradicted the runtime.
-
-  Errors are flat values, never throws: a reply the loop cannot split
-  closes the run with a steering message the agent sees next wake.
-
-  Crash walk: pure. A kill loses a vector of strings that had not been
-  committed; the plan is not durable until N2's `plan-tx` commits it,
-  and re-deriving it from the same text is deterministic."
+  Splitting is pure. The turn stores the reply and its ordered sources
+  before evaluating them."
   (:require [clojure.string :as str]
             [seon.schema.edn :as schema.edn]
             [seon.sci.reader :as reader]))
@@ -364,11 +316,9 @@
   - `::no-forms` — the reply carried no code: it was empty, or its
     whole text read as prose. Prose that PRECEDES a form becomes that
     form's own `:seon.cluster.eval/comment` fact; prose after the last
-    form is kept only by the durable reply text, because a comment
-    renders above the prompt and would otherwise read as if it had been
-    written before the form it followed. Prose ALONE is a refusal, because a
-    plan source with no reader event settles no receipt and would close
-    the run with an unsettled form.
+    form is kept only by the durable reply text. Prose alone returns its
+    flat error; the turn owner stores one evaluation through the ordinary
+    reader-error path so the agent sees the mistake in its next prompt.
 
   THE ONE-ARGUMENT ARITY SUPPLIES `user` DELIBERATELY, because that is
   already the reader's own starting namespace when none is handed to it

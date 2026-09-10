@@ -148,3 +148,93 @@ First-slice files: `src/seon/sci/reader.cljc`, `src/seon/cluster/reply.clj`,
 `test/seon/loop_proof_test.clj`, `test/seon/reader_fences.edn`, this note,
 and the fenced-replies issue. The no-forms source and test edits are excluded
 from this gate and commit. No foreign source breakage blocked this snapshot.
+
+## Second slice: no-forms is an evaluation error
+
+Fence commit: `35f0ab749`. The second slice changes only reply preparation
+and its evaluation handoff in `seon.turn`, with documentation in
+`seon.cluster.reply` and PRD §18b. A no-forms reply freezes one source and
+hands its flat error to the existing `:seon.sci.eval/event` input. SCI's
+ordinary reader-error handler produces and stores the evaluation outcome;
+the turn closes as accepted and self-continuation remains bounded. There is
+no new error renderer, transaction family, or evaluation implementation.
+
+No-forms has no program form to attribute, so this path does not call the
+program-owner notification derivation. The error belongs only in the
+author's history. The ordinary provider-disabled empty virtual wake still
+has zero evaluations. A real empty provider reply stores the exact empty
+string on the turn and uses `"\n"` as its evaluation source to satisfy the
+existing nonempty source contract; its error data retains the original text.
+No schema change or reset is needed.
+
+Canonical proc regression: prose-only, empty, and comment-only replies each
+close with one error evaluation, appear as `:error` in the next captured
+provider prompt, and continue to `(my.agent/done)`. Each scenario makes two
+provider-boundary calls, leaves one of three turns available, and records
+zero `:seon.error/id` entities, zero messages to root, and zero values on
+the fault channel. Only the external provider completion is replaced; the
+database, armed SCI, proc, attempt writer, and next-prompt construction are real.
+
+Exact diagnostic bytes:
+
+```text
+The reply carried no Clojure forms — its whole text read as prose. Prose runs nothing and settles nothing; write the Clojure you want evaluated.
+```
+
+Empty-reply diagnostic:
+
+```text
+The reply carried no Clojure forms.
+```
+
+Fast verification: reader/reply/grammar/continuation, 46 tests / 463
+assertions, zero failures or errors; after the empty/comment-only and
+notification refinements, continuation 1 test / 122 assertions, zero failures
+or errors. Final isolated and platform results follow.
+
+One hook publication (`28db4d21-edd8-46d4-8e2a-857e931c4bb7`) returned
+exit 124, with `Publication did not finish within its declared bound.`
+The later publication and convergence observations, rather than this timed-out
+attempt, determine the final live boundary.
+
+The subsequent hook publication `472f8064-a941-452b-a6bd-2c29681f4fbc`
+reported convergence. MCP independently observed adopted and current source
+both `6aa32603-0faa-534c-85fe-6bf98a856a30`. This is in-place development
+adoption on the existing default PID, not a new fork or restart. The live
+checks remain read-only JVM probes; stored no-forms history and next-provider
+prompt behavior are proven on the canonical proc harness, not by operating
+default's agents. No browser-paint claim is made for this reader-only lane.
+
+Second isolated gate `run.GEy1kU`: **50 tests / 670 assertions, zero failures
+or errors**, 137 seconds coordinator/test time, including reader, reply,
+REPL grammar, loop proof, and continuation. Its successful root was removed
+by the runner. A subsequent namespace-docstring wording correction only
+clarifies the empty-source exception; the platform gate includes those bytes.
+
+Platform gate `run.GXwPOq`: **84 tests / 505 assertions, zero failures or
+errors**, 60 seconds coordinator/test time:
+
+```sh
+bin/test --paths src/seon/cluster/reply.clj src/seon/turn.clj test/seon/turn_continue_test.clj docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md docs/prds/context-generation/research/reader-fences-landing-2026-09-10.md --platform
+```
+
+Final adoption, including the docstring correction: both live commit IDs
+equal **`6aa3269c-7239-5519-80e7-7e62547e7175`**. The loaded reply path
+also re-read the three stored replies into their one expected form each.
+No reset is needed. The initial MCP health timeout is not claimed repaired.
+
+Second-slice files: `src/seon/turn.clj` (reply preparation and error-event
+handoff only), `src/seon/cluster/reply.clj` (documentation),
+`test/seon/turn_continue_test.clj`, PRD §18b, this note, and the issue moved
+to [its resolved archive path](../../../seon/issues/archive/fenced-replies-read-as-prose-and-no-forms-is-a-core-fault.md).
+The resolution commit is the commit archiving that issue; its exact SHA is
+derived by the `git log` command recorded there. The issue index is left to
+the orchestrator, as required for this lane.
+
+Cleanup: all eight owned fast/gate roots are absent. The first failed gate
+root was deleted only after its missing-file evidence was recorded, the
+rerun passed, and a process-table check found no holder. All eight lane log
+files were removed after recording their evidence here. Every owned shell
+has exited. No scratch cluster or worktree was created; foreign `build/`,
+`workers/`, and `config/virtual-turns.edn` were preserved. No `--all` or
+`--full` gate was run.

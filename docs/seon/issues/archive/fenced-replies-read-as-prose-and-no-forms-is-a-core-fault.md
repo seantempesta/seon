@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, sci, agent, runtime]
 created: 2026-09-10
@@ -8,7 +8,7 @@ created: 2026-09-10
 
 # A fenced reply is read as prose, and "no forms" is a core fault instead of the agent's error
 
-## Observed (live run 2, default, 2026-09-10 21:22–21:27; landing `live-run-2-landing-2026-09-10.md`)
+## Evidence (live run 2, default, 2026-09-10 21:22–21:27; landing `live-run-2-landing-2026-09-10.md`)
 
 Three replies from deepseek-flash wrapped their forms in a Markdown fence:
 
@@ -29,7 +29,7 @@ ROOT ("Core fault :seon.cluster.reply/no-forms reached 3 occurrences …
 further occurrences … will not message you"). The agent never saw the
 refusal in its own context and lost three of thirty turns.
 
-## Why it is wrong
+## Problem
 
 - AGENTS.md §2.4: an agent mistake becomes a flat `:seon.error` value the
   AGENT sees; core faults are the platform's. A reply with no forms is the
@@ -41,7 +41,7 @@ refusal in its own context and lost three of thirty turns.
   delimiters themselves are ignored like whitespace. This is general, not
   tuned to one outcome.
 
-## Wanted
+## Acceptance
 
 Reader-fences verification, 2026-09-10: the current live JVM splits all
 three stored replies into their one expected form through `planned-sources`.
@@ -64,3 +64,32 @@ same scoped gate and preserves the evidence in its landing note.
 - Regression on the canonical harness: a fenced reply evaluates its forms;
   a prose-only reply yields one `:error` evaluation visible in the next
   prompt and no `:seon.error` fault row.
+
+## Owner
+
+`seon.sci.reader` owns fence grammar, `seon.cluster.reply` owns source
+selection, and `seon.turn` hands no-forms diagnostics to the existing SCI
+reader-error evaluation path and accepts the settled reply.
+
+## Resolution — 2026-09-10
+
+Fence grammar landed in `35f0ab749`. No-forms handling lands in the commit
+archiving this note, titled **Store no-forms replies as accepted error
+evaluations**. Its exact identity is derived with:
+
+```sh
+git log -1 --format=%H -- docs/seon/issues/archive/fenced-replies-read-as-prose-and-no-forms-is-a-core-fault.md
+```
+
+Canonical ordinary-proc regressions evaluate all three exact stored fenced
+replies, one evaluation each. Prose-only, empty, and comment-only provider
+replies each store one error evaluation visible in the next actual provider
+prompt, then continue to done. They create zero fault entities, root messages,
+or fault-channel values. Final scoped gate: 50 tests / 670 assertions;
+platform: 84 / 505; both zero failures and errors.
+
+Default adopted the final source in place at
+`6aa3269c-7239-5519-80e7-7e62547e7175`, independently verified equal to
+current-src. No default lifecycle or agent operation was used. Exact reply
+bytes, outcomes, and the earlier fixture/publication boundaries are in the
+[reader-fences landing note](../../../prds/context-generation/research/reader-fences-landing-2026-09-10.md).

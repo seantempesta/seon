@@ -3936,7 +3936,15 @@
                            (empty? reply-text))
                     []
                     (planned-sources reply-text namespace-name max-source))
-                  sources (if (vector? prepared) prepared [])
+                  no-forms? (= ::reply/no-forms (:seon.error/kind prepared))
+                  sources (cond
+                            (vector? prepared) prepared
+                            ; Evaluation source is nonempty by contract. An empty
+                            ; reply uses whitespace; the turn retains its exact bytes.
+                            no-forms? [{:seon.cluster.eval/source
+                                        (if (empty? reply-text) "\n" reply-text)
+                                        :seon.ns/name namespace-name}]
+                            :else [])
                   staged-reply (stage-reply! connection reply-text)
                   plan-request
                   (merge (dissoc staged-reply :seon.blob/staged-writes)
@@ -3957,16 +3965,21 @@
                    #(db/transact! connection {:tx-data intent-tx}))]
               (cond
                 (:seon.error/kind outcome) (fail! outcome)
-                (:seon.error/kind prepared) (fail! prepared)
+                (and (:seon.error/kind prepared) (not no-forms?)) (fail! prepared)
                 (empty? sources) (report :released 0)
                 :else
                 (resume-turn
-                 {:seon.turn.loop/cluster cluster
-                  :seon.turn.loop/work (assoc work
-                                :seon.turn.work/situation :resume
-                                :seon.cluster.eval/ordinal 0)
-                  :seon.turn.loop/now now
-                  :seon.turn.loop/report report}))))
+                 (cond-> {:seon.turn.loop/cluster cluster
+                          :seon.turn.loop/work
+                          (assoc work :seon.turn.work/situation :resume
+                                      :seon.cluster.eval/ordinal 0)
+                          :seon.turn.loop/now now
+                          :seon.turn.loop/report report}
+                   no-forms?
+                   ; The ordinary evaluator handles this exactly like the
+                   ; reader's fabricated-response event. No fault is submitted.
+                   (assoc :seon.sci.eval/event
+                          {:seon.sci.reader/error prepared}))))))
           ;; THE PROMPT REQUEST NAMES THE HELD RUN — `prompt` derives
           ;; the trigger from the run's own creating transaction
           ;; (`message/trigger`), never a re-asked queue: the recorded
@@ -4282,7 +4295,8 @@
 
 (defn- resume-turn
   "Evaluate an intent-frozen turn in memory, then settle the whole batch once."
-  [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report}]
+  [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now
+    report :seon.turn.loop/report reader-event :seon.sci.eval/event}]
   (let [connection (:seon.db/connection cluster)
         agent-id (:seon.agent/id work)
         run-id (:seon.turn/id work)
@@ -4328,7 +4342,10 @@
                                       (<= first-ordinal
                                           (:seon.cluster.eval/ordinal
                                            evaluation))))
-                            (map fold-source))
+                            (map (fn [evaluation]
+                                   (cond-> (fold-source evaluation)
+                                     reader-event
+                                     (assoc :seon.sci.eval/event reader-event)))))
                       evaluations)}))
             defining
             (into []
@@ -4383,12 +4400,15 @@
                 (mapv
                  (fn [{ordinal :seon.cluster.eval/ordinal evaluation :seon.sci.eval/evaluation}]
                    (let [problem
-                         (phase
-                          #((requiring-resolve 'seon.problems/form-problem)
-                            database
-                            {:seon.turn/id run-id
-                             :seon.cluster.eval/ordinal ordinal
-                             :seon.sci.eval/evaluation evaluation}))]
+                         ; A reply with no form has no program owner to notify.
+                         ; Its reader error belongs only in the author's history.
+                         (when-not reader-event
+                           (phase
+                            #((requiring-resolve 'seon.problems/form-problem)
+                              database
+                              {:seon.turn/id run-id
+                               :seon.cluster.eval/ordinal ordinal
+                               :seon.sci.eval/evaluation evaluation})))]
                      (cond->
                       {:seon.turn.loop/cluster cluster
                        :seon.turn.loop/now now
