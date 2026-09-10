@@ -358,6 +358,7 @@ Status: ✅ landed · ▶ running · ⏭ next · ◻ queued.
 | 1f | The page reads turns from the runtime component ("Context now" shows the opening) | no | ✅ `49869fd90` |
 | 1g | One plan comment, documented writes, dependency ids, actionable settings, and turn headers | no | ✅ [render pass](../research/render-pass-landing-2026-09-09.md) |
 | 1e | Incremental publication writes complete rows (validation caught it) | no | ✅ `1e778e880` |
+| 1i | Schema declaration after in-place adoption (environment record identity preserved across adoption) | no | ✅ `4552f52ff` `4a21c59b7` |
 | 2 | Read evidence exact for `not`/`or` pattern clauses and `pull` in `:find` | no | ✅ [evidence landing](../research/evidence-listens-landing-2026-09-09.md) |
 | 3 | `(seon.id/id data [n])` as the one id entry; message ids random 8; plan item ids from title | no | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
 | 4 | Time is the transaction: NEW `completed-tx`, `read-tx` refs; DELETE `completed-at`, message `at`, `ordinal` | yes | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |

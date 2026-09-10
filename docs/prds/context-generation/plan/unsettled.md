@@ -801,3 +801,15 @@ half-edit. Measured targets in the issue.
   fallbacks, zero bare db ids, zero nil reads, zero faults since boot;
   `dir`/`doc` structured; trigger fields named. This is the review page.
 
+## 2026-09-09 21:45 — the roadmap's feature rows are all landed
+
+- schema-redeclare `4552f52ff` (source adoption preserved the environment
+  record's identity, so a later declaration no longer holds a stale one),
+  `4a21c59b7` (re-declaration proven on `default` without a restart).
+- root-cluster `501b45570`: root's derived cluster status block (JVM,
+  store, commit, fault signatures, agents, open turns) and per-agent
+  accounting (last-turn latency, evaluations, tokens/cost, storage).
+- Chart §16: every row landed except 14, the harness rerun, blocked on
+  provider credits. Next design step: the first real provider turn on the
+  orders scenario, cheapest model, once credits exist.
+
