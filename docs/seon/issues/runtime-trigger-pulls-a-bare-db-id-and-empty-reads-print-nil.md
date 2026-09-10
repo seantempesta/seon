@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, context, runtime, notes]
 ---
@@ -15,3 +15,7 @@ The empty notes reverse pull prints `nil` where the inbox convention shows
 `[]`; the comment says "an empty read", so the projection should show an
 empty collection. Both are one-line selector/projection changes in the
 block render functions.
+
+Resolved by context-nits slice 1; both generated reads execute through
+real SCI on the canonical database fixture, including the first added
+note. See [landing evidence](../../prds/context-generation/research/context-nits-landing-2026-09-09.md).

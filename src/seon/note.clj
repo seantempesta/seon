@@ -65,11 +65,11 @@
   (if (map? notes)
     (str ";; I should read my saved notes; an empty read will observe the first note I add.\n"
          (repl/source-text
-          (list 'seon.db/pull
+          (list 'get (list 'seon.db/pull
                 (list 'quote '[{:my.note/_agent
                                [:my.note/id :my.note/content
                                 {:my.note/about [:my.plan.item/id]}]}])
-                [:seon.agent/id (:seon.agent/id notes)])))
+                [:seon.agent/id (:seon.agent/id notes)]) :my.note/_agent [])))
     (if (seq notes)
     (str "Current notes (" (count notes) "):\n"
          (str/join "\n" (map #(str "- " (note-line %)) notes)))

@@ -1,0 +1,24 @@
+:runtime: source 516 UTF-8 bytes; shown 144 UTF-8 bytes
+;; I should follow my runtime's owner ref before pulling its turns, trigger, and listens.
+(seon.db/pull
+  '[{:seon.agent/runtime
+     [{:seon.runtime/turns
+       [:seon.turn/id
+        {:seon.turn/opened-tx [:db/txInstant]}
+        {:seon.turn/closed-tx [:db/txInstant]}]}
+      {:seon.runtime/trigger
+       [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]}
+      {:seon.runtime/listens [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}]
+  [:seon.agent/id "juniper"])
+#:seon.agent{:runtime #:seon.runtime{:trigger #:seon.message{:content "Read the orders.",
+      :from #:seon.agent{:id "root"}, :id "trigger"}}}
+
+:notes: source 250 UTF-8 bytes; shown 2 UTF-8 bytes
+;; I should read my saved notes; an empty read will observe the first note I add.
+(get
+  (seon.db/pull
+    '[{:my.note/_agent [:my.note/id :my.note/content {:my.note/about [:my.plan.item/id]}]}]
+    [:seon.agent/id "juniper"])
+  :my.note/_agent
+  [])
+[]

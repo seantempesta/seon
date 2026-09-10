@@ -250,7 +250,9 @@
                 [{:seon.runtime/turns
                   [:seon.turn/id {:seon.turn/opened-tx [:db/txInstant]}
                    {:seon.turn/closed-tx [:db/txInstant]}]}
-                 {:seon.runtime/trigger [*]}
+                 {:seon.runtime/trigger
+                  [:seon.message/id :seon.message/content
+                   {:seon.message/from [:seon.agent/id]}]}
                  {:seon.runtime/listens [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}]
              [:seon.agent/id "juniper"])
            turn-dependent? #(#{'(seon.agent/effective-settings) runtime-read}

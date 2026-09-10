@@ -7,6 +7,11 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+Context-nits, 2026-09-09: initial MCP status selected default PID 83040,
+PREPL 60374, but health and Flow returned unknown with `Read timed out`.
+JVM evaluation returned 3 from `(+ 1 2)` in 0 ms, and the runtime/notes
+pull returned in 1128 ms. No cause or Flow health is inferred.
+
 Data lane, 2026-09-09: MCP status selected default PID 92059, PREPL 53086,
 but health and Flow returned `unknown` with `Read timed out`. A subsequent
 JVM `(+ 1 1)` returned 2 in 1 ms; the immutable plan/schema query returned
