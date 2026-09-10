@@ -15,9 +15,12 @@
             [datahike.db.interface :as dbi]
             [datahike.db.utils :as db.utils]
             [datahike.query :as query]
+            [datahike.pull-api :as pull-api]
             [datahike.schema :as datahike.schema]
             [datahike.store :as datahike.store]
             [datalog.parser.impl.proto :as parser]
+            [datalog.parser.impl :as parser.impl]
+            [datalog.parser.type :as parser.type]
             [clojure.test.check.generators :as gen]
             [seon.ai.tokens :as tokens]
             [seon.env :as env]
@@ -26,8 +29,8 @@
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.form :as schema.form])
   (:import [datahike.db AsOfDB DB]
-           [datalog.parser.type BindScalar Constant FindColl FindRel FindScalar
-            FindTuple Pattern Pull Variable]))
+           [datalog.parser.type And BindScalar Constant FindColl FindRel FindScalar
+            FindTuple Not Or Pattern Pull Variable]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Ambient custody and optional read evidence
@@ -333,9 +336,13 @@
             nil
             (throw cause)))))))
 
+(declare pull-index-patterns)
+
 (defn- query-index-patterns
-  "Retain scalar input and constant constraints from parsed datom patterns.
-  Other query constructs retain their general dependency evidence."
+  "Retain pattern dependencies through conjunction, negation and disjunction.
+  Nested clauses bind against their enclosing positive patterns, including
+  entities negation excludes. Datahike resolves those bindings; this walker
+  never implements joins. Unsupported clauses keep general evidence."
   [request source-position]
   (let [parsed (query/memoized-parse-query (:query request))
         bindings (into {}
@@ -346,31 +353,98 @@
                        (map vector (:qin parsed) (:args request)))
         source (get-in parsed [:qin source-position :variable :symbol])
         database (nth (:args request) source-position)
-        value-of (fn [argument]
+        value-of (fn [bound argument]
                    (cond
                      (instance? Constant argument) [:bound (:value argument)]
-                     (instance? Variable argument) (find bindings (:symbol argument))))]
-    (when (and (every? #(instance? Pattern %) (:qwhere parsed))
-               (not-any? #(instance? Pull %) (parser/find-elements (:qfind parsed))))
-      (into []
-            (comp
-             (filter #(= source (or (get-in % [:source :symbol]) '$)))
-             (map
-              (fn [clause]
+                     (instance? Variable argument) (find bound (:symbol argument))))
+        source-of (fn [clause inherited]
+                    (or (get-in clause [:source :symbol]) inherited))]
+    (letfn [(supported? [clause]
+              (or (instance? Pattern clause)
+                  (and (or (instance? Not clause) (instance? Or clause)
+                           (instance? And clause))
+                       (every? supported? (:clauses clause)))))
+            (resolve-bindings [clauses bound]
+              (let [variables (into [] (comp (map :symbol) (distinct))
+                                    (parser.type/collect-vars clauses))
+                    extra (apply dissoc bound
+                                 (map :symbol (parser.type/collect-vars (:qin parsed))))]
+                (if (empty? variables)
+                  [bound]
+                  (mapv #(merge bound (zipmap variables %))
+                        (d/q (assoc (dissoc request :limit :offset :order-by) :query
+                                    {:find variables
+                                     :in (into (mapv parser.impl/get-source (:qin parsed))
+                                               (keys extra))
+                                     :where (mapv parser.impl/get-source clauses)}
+                                    :args (into (:args request) (vals extra))))))))
+            (pattern [clause bound inherited]
+              (when (= source (source-of clause inherited))
                 (let [[e a v] (:pattern clause)
-                      entity (value-of e)
-                      attribute (second (value-of a))
-                      value (value-of v)
+                      entity (value-of bound e)
+                      attribute (second (value-of bound a))
+                      value (value-of bound v)
                       resolved-entity (when entity (db.utils/entid database (second entity)))
                       resolved-value (when value
                                        (if (and attribute (db.utils/ref? database attribute))
                                          (db.utils/entid database (second value))
                                          (second value)))]
-                  (cond-> {}
+                  [(cond-> {}
                     resolved-entity (assoc :seon.db/pattern-entity resolved-entity)
                     (keyword? attribute) (assoc :seon.db/pattern-attribute attribute)
-                    (some? resolved-value) (assoc :seon.db/pattern-value resolved-value))))))
-            (:qwhere parsed)))))
+                    (some? resolved-value) (assoc :seon.db/pattern-value resolved-value))])))
+            (scope-patterns [clauses bound inherited]
+              (let [positive (filterv #(instance? Pattern %) clauses)
+                    candidates
+                    (delay
+                      (resolve-bindings
+                       (mapv (fn [clause]
+                               (let [raw (parser.impl/get-source clause)]
+                                 (parser.impl/with-source
+                                  clause
+                                  (into [(source-of clause inherited)]
+                                        (if (get-in clause [:source :symbol])
+                                          (rest raw) raw)))))
+                             positive)
+                       bound))]
+                (mapcat
+                 (fn [clause]
+                   (if (instance? Pattern clause)
+                     (pattern clause bound inherited)
+                     (mapcat
+                      (fn [candidate]
+                        (let [joined (cond
+                                       (instance? Not clause) (:vars clause)
+                                       (instance? Or clause)
+                                       (concat (get-in clause [:rule-vars :required])
+                                               (get-in clause [:rule-vars :free]))
+                                       :else (map parser.type/->Variable (keys candidate)))
+                              scoped (merge bindings
+                                            (select-keys candidate (map :symbol joined)))
+                              inherited (source-of clause inherited)]
+                          (if (instance? Or clause)
+                            (mapcat #(scope-patterns [%] scoped inherited) (:clauses clause))
+                            (scope-patterns (:clauses clause) scoped inherited))))
+                      @candidates)))
+                 clauses)))]
+      (when (every? supported? (:qwhere parsed))
+        (let [pulls (filterv #(and (instance? Pull %)
+                                  (= source (source-of % '$)))
+                            (parser/find-elements (:qfind parsed)))
+              pull-groups
+              (when (seq pulls)
+                (let [bound-rows (resolve-bindings (:qwhere parsed) bindings)]
+                  (for [element pulls
+                        :let [selector (second (value-of bindings (:pattern element)))]]
+                    (when (sequential? selector)
+                      (pull-index-patterns
+                       database [selector (mapv #(get % (get-in element [:variable :symbol]))
+                                                 bound-rows)]
+                       :pull-many (pull-api/compile-pull-plan database selector))))))]
+          (when-not (some nil? pull-groups)
+            (into [] (distinct)
+                  (concat (scope-patterns (:qwhere parsed) bindings '$)
+                          (mapcat identity pull-groups)))))))))
 
 (defn- pull-index-patterns
   "Bind finite explicit pull dependencies to their selected entities.
@@ -675,7 +749,8 @@
         [index components]
         (cond
           entity [:eavt (cond-> [entity] attribute (conj attribute))]
-          (and attribute value) [:avet [attribute (val value)]]
+          (and attribute value (db.utils/indexing? changes attribute))
+          [:avet [attribute (val value)]]
           attribute [:aevt [attribute]]
           :else [:eavt []])]
     (some #(when (or (nil? value) (= (val value) (:v %))) %)

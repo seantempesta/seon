@@ -47,13 +47,13 @@ in the read-evidence / wake / evaluation-point map
    `[]` teaches the form and establishes read evidence, so a later change
    re-emits exactly that block (§14). No block appears for the first time
    mid-history.
-6. **Exact evidence needs pattern-only queries.** `q` gets exact evidence
-   only when every `:where` clause is a pattern and `:find` has no `pull`
-   (`db.clj:335-372`); `pull` is exact for explicit finite selectors
-   (`db.clj:374-423`); `[*]`, recursion and `not`/`or` fall back to
-   attribute-level evidence (correct, coarse). Required platform work:
-   patterns inside `not`/`or` count as patterns; a `pull` in `:find` adds
-   its pull patterns. Until then generated queries are pattern-only.
+6. **Exact evidence follows parsed patterns.** `seon.db/query-index-patterns`
+   retains patterns inside `not`, `not-join`, `or`, `or-join` and `and`.
+   Nested scopes bind from enclosing positive patterns, including entities
+   excluded by negation. A `pull` in `:find` contributes the existing
+   finite pull plan's patterns for each bound entity. Wildcards, recursion,
+   predicates and rules retain general dependency evidence. See the
+   [evidence landing](../research/evidence-listens-landing-2026-09-09.md).
 7. **Schema feedback at every seam** (§9 below).
 8. **Steps order.** Cardinality-many is a set (hash order: 0,2,1,4,3,5 on
    `default`); `:my.plan.item/position` stays stored and the read sorts.
@@ -202,8 +202,8 @@ my.agents.juniper=> (seon.db/q '[:find [(pull ?m [:seon.message/id :seon.message
 Transacting a map with `:to` IS sending: `:to` is the listened attribute.
 `(my.message/send {…})` remains as the form that mints the id and writes
 both facts; `(doc my.message/send)` shows the two entries above. The
-inbox query needs the `not`-clause evidence fix (§0.6) to be exact;
-until then it is attribute-exact.
+inbox query retains scoped index evidence through its `not` clause and
+finite pull-in-find (§0.6).
 
 HTML: a thread; replies under what they answer; unhandled marked.
 
@@ -356,7 +356,7 @@ Status: ✅ landed · ▶ running · ⏭ next · ◻ queued.
 | 1f | The page reads turns from the runtime component ("Context now" shows the opening) | no | ✅ `49869fd90` |
 | 1g | One plan comment, documented writes, dependency ids, actionable settings, and turn headers | no | ✅ [render pass](../research/render-pass-landing-2026-09-09.md) |
 | 1e | Incremental publication writes complete rows (validation caught it) | no | ✅ `1e778e880` |
-| 2 | Read evidence exact for `not`/`or` pattern clauses and `pull` in `:find` | no | ◻ evidence lane |
+| 2 | Read evidence exact for `not`/`or` pattern clauses and `pull` in `:find` | no | ✅ [evidence landing](../research/evidence-listens-landing-2026-09-09.md) |
 | 3 | `(seon.id/id data [n])` as the one id entry; message ids random 8; plan item ids from title | no | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
 | 4 | Time is the transaction: NEW `completed-tx`, `read-tx` refs; DELETE `completed-at`, message `at`, `ordinal` | yes | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
 | 5 | Addressable components: `:my.plan/agent`, `:seon.config/agent` identities; `expected-result` → `done-when` | yes (batch) | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |

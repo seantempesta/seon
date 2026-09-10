@@ -7,6 +7,11 @@ tags: [issue, mcp, sci, wave/dev-mcp]
 
 # Repair development MCP error locations and status scope
 
+Evidence-listens probe, 2026-09-09: `bin/seon status` reported default
+PID 83040 alive; selected MCP runtime status returned health/flow `unknown`
+with `Read timed out` after 30 seconds. The next ordinary MCP JVM parser
+probe succeeded in 1 ms. No alternate transport or default restart was used.
+
 ## Page runtime read observation — 2026-09-09
 
 Default PID 83040 was alive at PREPL 60374 and HTTP 7994. Supported
