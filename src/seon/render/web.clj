@@ -1154,6 +1154,25 @@
               :else []))]
     (into [] (distinct) (ids value))))
 
+(defn- referenced-identities
+  "Resolve referenced entities through the installed identity attributes."
+  [database value]
+  (let [attributes (filterv #(not= :db/id %) (db/identity-attributes database))]
+    (letfn [(identities [eid visited]
+              (when-not (visited eid)
+                (let [entity (db/pull database attributes eid)]
+                  (mapcat
+                   (fn [attribute]
+                     (when-let [[_ identity-value] (find entity attribute)]
+                       (if-let [ref-id (and (map? identity-value)
+                                           (:db/id identity-value))]
+                         (when-let [[_ label] (first (identities ref-id (conj visited eid)))]
+                           [[[attribute ref-id] label]])
+                         [[[attribute identity-value] identity-value]])))
+                   attributes))))]
+      (into [] (comp (mapcat #(identities % #{})) (distinct))
+            (referenced-entity-ids value)))))
+
 (defn- connected-value
   "One unit's value with its acquired referenced entities in place.
 
@@ -1191,10 +1210,6 @@
      {:seon.render.call/producer selected
       :seon.render.call/output preview
       :seon.render.call/entry entry})))
-
-(def ^:private inline-reference-links
-  "Reference links shown inline before one unit collapses them into disclosure."
-  8)
 
 (defn- applicable-renderers-html
   "The selected render functions for one unit and their compatible alternatives."
@@ -1288,7 +1303,8 @@
         metadata (block-metadata projection (:seon.db/db render-request)
                                  value attribute producer)
         description (:seon.render.web/block-description metadata)
-        references (when present? (referenced-entity-ids value))]
+        references (when present?
+                     (referenced-identities (:seon.db/db render-request) value))]
     [:article {:class "seon-debug-found-value seon-debug-attribute-unit"
                :data-seon-unit (str attribute)}
      [:header {:class "seon-debug-value-header"}
@@ -1300,17 +1316,14 @@
        (when description
          [:p {:class "seon-debug-description"} description])]
       (when (seq references)
-        (let [links (into [:span]
-                          (interpose " "
-                                     (map #(debug-subject-link
-                                            debug-request % %)
-                                          references)))]
-          (if (<= (count references) inline-reference-links)
-            [:div {:class "seon-debug-stored-value"}
-             [:span "Referenced entities "] links]
-            [:details {:class "seon-debug-stored-value"}
-             [:summary (str (count references) " referenced entities")]
-             links])))]
+        (into [:div {:class "seon-debug-stored-value"}]
+              (interpose " "
+                         (map (fn [[subject identity-value]]
+                                (assoc (debug-subject-link
+                                        debug-request subject
+                                        identity-value)
+                                       2 [:code (str identity-value)]))
+                              references))))]
      [:div {:class "seon-debug-projection-grid seon-debug-selected-previews"}
       [:section {:class "seon-debug-projection-column"}
        [:h4 "AI"]

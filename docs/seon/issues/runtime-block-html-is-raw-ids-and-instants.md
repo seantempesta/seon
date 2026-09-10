@@ -60,3 +60,18 @@ changed during adoption. Adopted marker remained
 convergence when publication settles. Full rendered text and exact
 verification boundary are in
 `docs/prds/context-generation/research/runtime-html-landing-2026-09-10.md`.
+
+Debug-refs follow-up, 2026-09-10: the generic header now resolves installed
+identity attributes through `seon.db/identity-attributes`, excludes `:db/id`,
+and links identity values to their debug subjects. Identity-less references
+emit nothing; the count/disclosure dump is deleted. Canonical-fixture and
+live verification are recorded in
+`docs/prds/context-generation/research/debug-refs-landing-2026-09-10.md`.
+
+Header acceptance is verified: final fast gate 10/66, isolated web gate
+68/459, platform 84/505, all green; the final HTTP capture has no numeric
+database-id text in any generic header. Reference-valued component identities
+display the referenced identity and still link to the component. Complete
+source adoption remains unsealed: the final attempt reloaded/instrumented
+the renderer, then refused because source changed during adoption. The
+landing note records both source markers and the concurrent-edit boundary.

@@ -9,6 +9,7 @@
             [seon.render :as render]
             [seon.render.walk :as walk]
             [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as support]))
 
 (deftest saved-history-preserves-shown-text-with-numeric-lookups
@@ -254,3 +255,75 @@
               {:seon.render/selection {:seon.render.selection/selected refusal}})]
     (is (str/includes? (pr-str html) "The render profile is unavailable."))
     (is (not (str/includes? (pr-str html) "No render function produced")))))
+
+(deftest block-reference-headers-link-identities-and-omit-unidentified-entities
+  (support/with-database
+   {::support/extra-schema
+    [{:seon.schema/key ::identity-alias
+      :seon.schema.admission/source :core
+      :seon.schema/form ":seon.agent/id"}]}
+   (fn [connection]
+     (let [installed (db/transact!
+                      connection
+                      [(schema.datahike/malli->datahike-attr-in
+                        (schema/projection-from-database @connection)
+                        ::identity-alias)])
+           _ (is (:db-after installed) (pr-str installed))
+           written (db/transact! connection
+                                 [{:seon.agent/id "reference-agent"}
+                                  {::identity-alias "aliased-reference"}
+                                  {:db/id "plan"
+                                   :my.plan/agent [:seon.agent/id "reference-agent"]}
+                                  {:db/id "unidentified"
+                                   :my.plan/objective "No identity"}])
+           _ (is (:db-after written) (pr-str written))
+           database @connection
+           projection (schema/projection-from-database database)
+           agent-ref (db/pull database '[:db/id] [:seon.agent/id "reference-agent"])
+           alias-ref (db/pull database '[:db/id] [::identity-alias "aliased-reference"])
+           unidentified {:db/id (get-in written [:tempids "unidentified"])}
+           plan-ref {:db/id (get-in written [:tempids "plan"])}
+           effective (config/defaults)
+           request {:seon.db/db database
+                    :seon.db/connection connection
+                    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                    :seon.sci.admit/caps (config/result-caps effective)
+                    :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
+                    :seon.config/on-core-error :panic
+                    :seon.render/profile (render/agent-render-profile effective)
+                    :seon.render/captured-calls (atom {})
+                    :seon.render/captured-invocations (atom {})}
+           debug-request {:seon.render.debug/subject [:seon.agent/id "reference-agent"]
+                          :seon.render.debug/viewer-namespace 'my.agents.reference-agent}]
+       (is (integer? (:db/id agent-ref)))
+       (is (integer? (:db/id unidentified)))
+       (is (= [[[::identity-alias "aliased-reference"] "aliased-reference"]]
+              (#'web/referenced-identities database [alias-ref])))
+       (is (= [[[:my.plan/agent (:db/id agent-ref)] "reference-agent"]]
+              (#'web/referenced-identities database plan-ref)))
+       (is (= plan-ref
+              (db/pull database '[:db/id] [:my.plan/agent (:db/id agent-ref)])))
+       (doseq [[references expected] [[[agent-ref unidentified agent-ref] ["reference-agent"]]
+                                    [[agent-ref plan-ref] ["reference-agent" "reference-agent"]]
+                                    [[unidentified] []]]]
+         (let [html (#'web/debug-found-value
+                     projection request debug-request ::references references true
+                     {} nil nil)
+               header (nth html 2)
+               nodes (tree-seq coll? seq header)
+               links (filter #(and (vector? %) (= :a (first %))) nodes)
+               text (str/join " " (filter string? (tree-seq sequential? seq header)))]
+           (is (= expected (mapv #(second (nth % 2)) links)))
+           (is (not (str/includes? text (str (:db/id agent-ref)))))
+           (is (not (str/includes? text (str (:db/id unidentified)))))
+           (is (not (str/includes? text ":db/id")))
+           (is (not (str/includes? text "referenced entities")))
+           (when-let [link (first links)]
+             (let [parameters (#'web/query-params
+                               {:query-string (.getRawQuery
+                                               (java.net.URI. (:href (second link))))})]
+               (is (= (pr-str [:seon.agent/id "reference-agent"])
+                      (get parameters "subject")))))
+           (when (empty? expected)
+             (is (not-any? #(and (map? %)
+                                (= "seon-debug-stored-value" (:class %))) nodes)))))))))

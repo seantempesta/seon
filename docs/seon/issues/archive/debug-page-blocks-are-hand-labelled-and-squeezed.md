@@ -48,7 +48,6 @@ never a `case`. Nothing on this page may be a hand-maintained list.
 - A missing target function renders ONE line naming it.
 - Proof: screenshot before/after in the landing note; the owner reads it.
 
-
 ## Resolution, 2026-09-08
 
 The later owner ruling supersedes the scalar grouping above: EVERY declared
@@ -63,3 +62,12 @@ columns at 1,600 px viewport width.
 
 Screenshots and remaining performance limitations are in
 [the landing note](../../prds/context-generation/research/page-feed-landing-2026-09-08.md).
+
+## Reference-header follow-up, 2026-09-10
+
+The generic block header now links installed identity values and omits
+identity-less entities. It no longer prints a numeric entity-id dump or
+reference count. Schema-derived titles and the existing preview layout are
+preserved. See
+`docs/prds/context-generation/research/debug-refs-landing-2026-09-10.md`
+for the canonical-fixture regression and live verification boundary.
