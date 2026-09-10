@@ -9,6 +9,8 @@
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
             [seon.db :as db]
+            [seon.fn :as fn]
+            [seon.program :as program]
             [seon.schema]
             [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
@@ -289,6 +291,72 @@
                          current-db))))
         (is (= #{commit-a} (d/parent-commit-ids current-db)))
         (is (empty? (scratch-branches opened)))))))
+
+(deftest incremental-first-party-publication-retains-complete-scalar-rows
+  (let [root (io/file "tmp/publication-provenance" (str (random-uuid)))
+        file (io/file root "id.clj")
+        manifest @test-support/source-manifest
+        original (slurp (io/resource "seon/id.clj"))
+        revised (-> original
+                    (str/replace "One identity entry:" "The identity entry:")
+                    (str/replace "SHA-256 of (pr-str data), truncated"
+                                 "SHA-256 of (pr-str data), shortened"))
+        artifact #(fn/build-artifact
+                   {:seon.fn.file/path (.getCanonicalPath file)
+                    :seon.fn.file/first-party-functions
+                    (fn/manifest-function-symbols manifest)})]
+    (.mkdirs root)
+    (try
+      (spit file original)
+      (let [before (artifact)
+            _ (spit file revised)
+            after (artifact)
+            plan (fn/plan-file-change
+                  {:seon.fn.change/status :modified
+                   :seon.fn.change/current-artifact before
+                   :seon.fn.change/desired-artifact after})
+            rows (:seon.fn.change/rows plan)]
+        (is (not= original revised))
+        (is (= :incremental-upsert (:seon.fn.change/action plan)))
+        (is (= #{[:seon.ns/name 'seon.id] [:seon.fn/sym "seon.id/id"]}
+               (set (map program/row-identity rows))))
+        (is (every? #(= :core (:seon.schema.admission/source %)) rows))
+        (test-support/with-database
+          (fn [connection]
+            (let [sparse [{:seon.fn/sym "seon.id/id" :seon.fn/doc "incomplete"}]
+                  refused (db/transact! connection sparse)
+                  report (db/transact! connection rows)]
+              (is (= :seon.db/invalid-write (:seon.error/kind refused))
+                  "the canonical fixture has authored entity validation armed")
+              (is (some? (:db-after report)) (pr-str report)))))
+        (with-store
+          (fn [opened]
+            (let [published (publish opened digest-a 'seon.cluster/populate-source!
+                                     {:seon.fn/manifest manifest})
+                  database-before (source/database opened (:seon.source/commit-id published))
+                  selector [:seon.ns/aliases :seon.ns/imports :seon.ns/refers
+                            :seon.fn/arities :seon.fn/ast]
+                  identities [[:seon.ns/name 'seon.id] [:seon.fn/sym "seon.id/id"]]
+                  components #(mapv (fn [program-identity]
+                                      (db/pull % selector program-identity)) identities)
+                  published-after (upsert opened (:seon.source/commit-id published)
+                                          digest-b rows)
+                  database-after (source/database opened (:seon.source/commit-id published-after))]
+              (is (seq (:seon.ns/aliases (first (components database-before)))))
+              (is (seq (:seon.fn/arities (second (components database-before)))))
+              (is (= (:seon.source/commit-id published-after)
+                     (:seon.source/commit-id (source/current opened))))
+              (is (not= (:seon.source/commit-id published)
+                        (:seon.source/commit-id published-after)))
+              (is (= (components database-before) (components database-after))
+                  "scalar publication preserves existing component identities")
+              (doseq [row rows]
+                (let [stored (db/pull database-after '[*] (program/row-identity row))]
+                  (is (= :core (:seon.schema.admission/source stored)))
+                  (is (= (or (:seon.fn/source row) (:seon.ns/source row))
+                         (or (:seon.fn/source stored) (:seon.ns/source stored))))))))))
+      (finally
+        (test-support/delete-recursively! root)))))
 
 (deftest incremental-upsert-derives-scalar-safety-from-the-installed-schema
   (with-store

@@ -1369,18 +1369,16 @@
         (into (set (keys current)) (keys desired))))
 
 (defn- scalar-upsert-rows
-  [current-rows desired]
+  [current-rows desired unsafe-attributes]
   (into
    []
    (keep
     (fn [desired-row]
-      (let [[identity-attribute identity-value :as program-identity]
-            (program/row-identity desired-row)
+      (let [program-identity (program/row-identity desired-row)
             current-row (get current-rows program-identity)
             changed (changed-row-attributes current-row desired-row)]
         (when (seq changed)
-          (assoc (select-keys desired-row changed)
-                 identity-attribute identity-value)))))
+          (apply dissoc desired-row unsafe-attributes)))))
    (:seon.fn.file/rows desired)))
 
 (defn- full-rebuild
@@ -1488,11 +1486,11 @@
        ;; The artifact is the complete analyzed file projection used to plan
        ;; the next edit. It must not be confused with the transaction delta.
        :seon.fn.change/artifact desired
-       ;; Publish the exact scalar delta, not the whole analyzed row. Replaying
-       ;; an unchanged namespace row would recreate anonymous component
-       ;; children even though the planner had proved those fields unchanged.
+       ;; Changed rows retain their scalar declaration, including required
+       ;; admission provenance and namespace refs. Omit unchanged components
+       ;; and many-valued attributes so publication cannot recreate children.
        :seon.fn.change/rows
-       (scalar-upsert-rows current-rows desired)
+       (scalar-upsert-rows current-rows desired unsafe-attributes)
        :seon.fn.change/identities (:seon.fn.file/identities desired)})))
 
 (defn rows
