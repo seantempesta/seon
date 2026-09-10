@@ -7,6 +7,9 @@ created: 2026-09-10
 
 # Session continuation — loop-continue
 
+Implementation: `57f1a8c23`. Assigned issue resolved and archived in
+`49aa05e88`; the separate query finding is `25de70550`.
+
 ## Grounding and dependency ledger
 
 Read AGENTS.md, the assigned issue, the turn PRD sections 14, 16 and 18,
@@ -158,9 +161,14 @@ Each case asserted the outside-wake transaction remained unchanged.
 - `test/seon/turn_continue_test.clj` (the existing loop proof is unchanged)
 - `docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md`
   (section 14 only)
-- This landing note and the assigned issue.
+- `docs/prds/context-generation/research/loop-continue-landing-2026-09-10.md`
+- `docs/seon/issues/archive/the-loop-stops-after-one-accepted-reply.md`
+  (resolved and moved from `docs/seon/issues/the-loop-stops-after-one-accepted-reply.md`).
 - `docs/seon/issues/bound-transaction-input-selects-an-older-turn.md`
   (out-of-scope query defect, evidence and reproducible form only).
 
 Protected fixture edits and other lanes' render/schedule edits were
 preserved. Gates select HEAD plus owned paths only.
+All owned command sessions exited. The runner removed every owned test
+snapshot/root; the lane removed its nine scratch logs after recording the
+evidence above. No scratch cluster was created.
