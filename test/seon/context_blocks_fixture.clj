@@ -63,8 +63,13 @@
   result)
 
 (defn seed!
-  "Replace only Juniper's disposable scenario facts after its graph is idle."
-  [connection]
+  "Replace only Juniper's disposable scenario facts after its graph is idle.
+
+  `settings-fn` transforms the seeded settings component: the default keeps
+  provider calls disabled; a live provider run passes
+  `#(dissoc % :seon.config.ai/no-provider)`."
+  ([connection] (seed! connection identity))
+  ([connection settings-fn]
   (checked
    (db/transact!
     connection
@@ -77,19 +82,27 @@
                                            [?e :seon.message/from ?a])] database agent-eid)
               faults (db/q '[:find [?e ...] :in $ ?a :where [?e :seon.error/agent ?a]] database agent-eid)
               old-orders (db/q '[:find [?e ...] :where [?e :example/order]] database)
-              settings (db/q '[:find ?s . :in $ ?a :where [?a :seon.agent/settings ?s]] database agent-eid)]
+              settings (db/q '[:find ?s . :in $ ?a :where [?a :seon.agent/settings ?s]] database agent-eid)
+              seeded-settings (settings-fn
+                               {:db/id (or settings "juniper-settings")
+                                :seon.config/agent agent-eid
+                                :seon.config.ai/no-provider true
+                                :seon.config.eval/time-limit-ms 10000
+                                :seon.config.run/max-episode-runs 30})]
           (into (mapv #(vector :db.fn/retractEntity %) (concat messages faults old-orders (when old-plan [old-plan])))
                 (concat orders
+                        ;; Omitting a key leaves an existing value unchanged, so a
+                        ;; setting the transform removed is retracted explicitly.
+                        (when settings
+                          (for [[attribute value] (db/pull database '[*] settings)
+                                :when (and (not= :db/id attribute)
+                                           (not (contains? seeded-settings attribute)))]
+                            [:db/retract settings attribute value]))
                         [{:db/id agent-eid
                           :seon.agent/plan (assoc (update authored-plan :my.plan/steps set) :my.plan/agent agent-eid)
-                          :seon.agent/settings
-                          {:db/id (or settings "juniper-settings")
-                           :seon.config/agent agent-eid
-                           :seon.config.ai/no-provider true
-                           :seon.config.eval/time-limit-ms 10000
-                           :seon.config.run/max-episode-runs 30}}
+                          :seon.agent/settings seeded-settings}
                          {:seon.message/id (id/id (random-uuid) 8) :seon.message/from [:seon.agent/id "root"] :seon.message/to [:seon.agent/id "juniper"] :seon.message/content instruction :seon.message/inbox [:seon.agent/id "juniper"]}]))))]]))
-  {:seon.test/orders (count orders)})
+  {:seon.test/orders (count orders)}))
 
 (defn submit!
   "Submit one fixture reply and observe its terminal fact under the config bound."
@@ -141,7 +154,8 @@
 (defn install!
   "Admit schema through the actual agent graph, then replace the scenario."
   ([handle routing] (install! handle routing (fn [] nil)))
-  ([handle routing before-clear]
+  ([handle routing before-clear] (install! handle routing before-clear identity))
+  ([handle routing before-clear settings-fn]
   (let [connection (:seon.db/connection handle)
         request {:seon.turn.loop/cluster handle
                  :seon.agent/routing routing :seon.agent/id "juniper"}]
@@ -155,7 +169,7 @@
         (when (seq errors)
           (throw (ex-info (str "Juniper schema declaration failed: " (pr-str errors)) {:seon.test/errors errors}))))
       (agent/disarm! request)
-      (seed! connection)
+      (seed! connection settings-fn)
       (finally (agent/disarm! request)))
     (before-clear)
     (agent/disarm! request)
@@ -178,8 +192,12 @@
             (mapv #(vector :db.fn/retractEntity %) (concat evaluations turns))))]])))
 
 (defn install-running!
-  "Install the shared live scenario and leave its ordinary graph running."
-  [handle routing]
+  "Install the shared live scenario and leave its ordinary graph running.
+
+  `settings-fn` reaches `seed!`; the two-argument form keeps provider calls
+  disabled."
+  ([handle routing] (install-running! handle routing identity))
+  ([handle routing settings-fn]
   (let [connection (:seon.db/connection handle)
         cluster-name (:seon.cluster/name handle)]
     ;; Re-seeding deliberately erased the bootstrap turn; existing identity
@@ -204,10 +222,11 @@
                         (first (async/alts!! [ack (async/timeout bound)])))
              (throw (ex-info "Fixture armer barrier did not arrive"
                              {:seon.cluster/name cluster-name})))
-           (finally (async/close! ack))))))
+           (finally (async/close! ack)))))
+     settings-fn)
     (let [opening (checked (turn/system-turn {:seon.turn.loop/cluster handle
                                               :seon.agent/id "juniper"
                                               :seon.turn/write? true}))]
       (agent/arm! {:seon.turn.loop/cluster handle :seon.agent/routing routing
                    :seon.agent/id "juniper"})
-      (select-keys opening [:seon.turn/id :seon.error/kind :seon.error/message]))))
+      (select-keys opening [:seon.turn/id :seon.error/kind :seon.error/message])))))

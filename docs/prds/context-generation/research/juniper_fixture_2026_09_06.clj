@@ -14,15 +14,19 @@
 (load-file "test/seon/context_blocks_fixture.clj")
 
 (defn install!
-  "Install the ruled order scenario in the explicitly selected cluster."
-  [cluster-name]
-  (let [instance (get @seon.operator.runtime/running-instances cluster-name)
-        handle (:seon.turn.loop/cluster instance)]
-    (seon.schema/call-with-projection-state
-     (:seon.sci.eval/projection-state handle)
-     (fn []
-       ((resolve 'seon.context-blocks-fixture/install-running!)
-        handle (:seon.agent/routing instance))))))
+  "Install the ruled order scenario in the explicitly selected cluster.
+
+  The one-argument form keeps provider calls disabled (virtual turns). A
+  live provider run passes `#(dissoc % :seon.config.ai/no-provider)`."
+  ([cluster-name] (install! cluster-name identity))
+  ([cluster-name settings-fn]
+   (let [instance (get @seon.operator.runtime/running-instances cluster-name)
+         handle (:seon.turn.loop/cluster instance)]
+     (seon.schema/call-with-projection-state
+      (:seon.sci.eval/projection-state handle)
+      (fn []
+        ((resolve 'seon.context-blocks-fixture/install-running!)
+         handle (:seon.agent/routing instance) settings-fn))))))
 
 (defn prompt
   "Acquire the exact provider prompt for Juniper in the selected live cluster."
