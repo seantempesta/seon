@@ -27,3 +27,9 @@ live in `(doc my.plan)` as the simplest forms (identity upsert; one
 projects to ids. Settings: the effective block drops dials the agent
 cannot act on (`api-key-variable`, `chars-per-token-prior`, `endpoint`,
 backup model) unless a settings dial asks for the full set.
+
+Also on the same page (20:30): the "Turns (3)" concern block still prints
+evaluation sources (`(help)` appears there as well as in "Context now" and
+the would-be system turn), so the history shows three times on one page;
+the ruling (chart §14a) is turn headers only in that block.
+
