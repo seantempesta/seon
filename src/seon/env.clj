@@ -34,15 +34,20 @@
 
 (defrecord Environment [])
 
+(defonce ^:private empty-environment
+  ;; Reloading defrecord emits a new JVM class. Keep construction and type
+  ;; checks on the same immutable record as environments already in flight.
+  (map->Environment {}))
+
 (defn environment?
   "True for an environment value built by this namespace."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
-  (instance? Environment value))
+  (instance? (class empty-environment) value))
 
 (schema/register-core-predicate! 'seon.env/environment? environment?)
 
-(defmethod print-method Environment
+(defmethod print-method (class empty-environment)
   [environment ^java.io.Writer writer]
   ;; A connection, a projection, and a work launcher each print as a wall of
   ;; bytes. Diagnosis wants the cluster and which members stand, so that is
@@ -57,13 +62,12 @@
 
 (def environment-generator
   (gen/fmap (fn [cluster-name]
-              (map->Environment {:seon.boot/cluster-name cluster-name}))
+              (assoc empty-environment :seon.boot/cluster-name cluster-name))
             (gen/not-empty gen/string-alphanumeric)))
 
 (def environment-state-generator
   (gen/fmap (fn [cluster-name]
-              (atom (map->Environment
-                     {:seon.boot/cluster-name cluster-name})))
+              (atom (assoc empty-environment :seon.boot/cluster-name cluster-name)))
             (gen/not-empty gen/string-alphanumeric)))
 
 (defn environment-state?
@@ -99,7 +103,7 @@
   (reset! state environment))
 
 (defn advance-projection!
-  "Replace the environment's projection at a non-older database basis."
+  "Advance the environment's projection at a non-older database basis."
   {:malli/schema
    [:=> [:cat :seon.sci.eval/projection-state :seon.db/basis-t
          :seon.schema/projection]
@@ -110,10 +114,9 @@
            (if (<= (long (or (:seon.db/basis-t environment)
                              Long/MIN_VALUE))
                    basis-t)
-             (map->Environment
-              (assoc environment
-                     :seon.db/basis-t basis-t
-                     :seon.schema/projection projection))
+             (assoc environment
+                    :seon.db/basis-t basis-t
+                    :seon.schema/projection projection)
              environment)))
   @state)
 
@@ -210,7 +213,7 @@
      ;; are validated by the one declared `:seon.env/environment` contract
      ;; wherever an environment is accepted; construction does not compile a
      ;; second validator, and it cannot: the member predicates resolve
-     ;; through a cluster's corpus projection, which the store layer has not
+     ;; through a cluster's program projection, which the store layer has not
      ;; necessarily reached when the earliest environment is built.
      (some (fn [{member :seon.env/member
                  optional? :seon.env/optional?
@@ -220,7 +223,7 @@
                         (or (not optional?) (and boot? boot-required?)))
                (absent-member-error row supplied)))
            (members))
-     (map->Environment supplied))))
+     (into empty-environment supplied))))
 
 (defn environment
   "Build one environment from its supplied members, or refuse as a value.

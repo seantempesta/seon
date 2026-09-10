@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, schema, adoption, dev-cluster, fixture, class/p1]
 ---
@@ -32,3 +32,19 @@ dev loop must let an agent (or a fixture) declare or re-declare a
 schema family on an adopted JVM exactly as on a fresh boot.
 
 Recovery used: thirteenth refork of `default`.
+
+## Root cause verified — 2026-09-09
+
+The isolated `schema-redeclare` JVM reproduced both exact errors after a
+documentation-only edit in `seon.env` and in-place adoption. Reloading
+`defrecord Environment` emits a new JVM class; older agent environments fail
+the new `instance?` check. All three attribute evaluations fail to advance
+their projection, so the later entity evaluation cannot resolve them.
+The declaration order is already correct. Re-arming constructs a current
+record and removes the failure, independently confirming the lifetime seam.
+
+`seon.env` now retains one immutable empty Environment record across reloads
+and derives construction, type checks, and printing from that record.
+The canonical seeded adoption regression also declares a new schema family
+after adoption. Full evidence and verification boundaries live in the
+[landing note](../../prds/context-generation/research/schema-redeclare-landing-2026-09-09.md).
