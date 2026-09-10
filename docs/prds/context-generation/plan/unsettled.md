@@ -736,3 +736,21 @@ half-edit. Measured targets in the issue.
   converges on `default` again.
 - Paid trial still blocked on provider credits (OpenRouter 402).
 
+## 2026-09-09 20:05 — the opening on the new shapes, read from the record
+
+- All lanes landed and ended: cookbook `617e538f3` `fd8646edd` (prompt-
+  first grammar, bare declared responses, effective settings, plan
+  examples, runtime queries); loop-live `2b6913f4b`; publication-
+  provenance `1e778e880`; data-lane `ae0e54841`. Tree clean.
+- Read Juniper's stored opening directly from the record: grammar is
+  right (prompt, then the comment, the form, the response); help prints
+  bare lines and leads with the namespace/comments-and-forms/chain-data
+  rules; identity, plan (`done-when`, `completed-tx`, position order),
+  inbox as the reverse pull on the edge, effective settings grouped with
+  `turns-left`. A wake settled and the inbox edge was retracted.
+- Defects read: the plan comment carries fifteen lines of example code
+  (padding); `:needs` prints as a set of maps; settings dials the agent
+  cannot act on (filed). The PAGE still reads evaluations through the
+  retired relationship and shows "0 evaluations" — `page-runtime-read`
+  lane running on it; that is the last blocker before the owner's review.
+
