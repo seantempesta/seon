@@ -1,9 +1,10 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
-tags: [render, walk, schedule, performance, class/p1]
+tags: [issue, render, performance, agent, class/p1]
 created: 2026-09-10
+resolved: 2026-09-10
 ---
 
 # Root's page walks every installed ref attribute, and schedule fires keep it cold
@@ -36,6 +37,11 @@ called from `seon.render.web/refresh-root` at `web.clj:2003`).
 
 ## Wanted
 
+Lane observation, 2026-09-10: the initial MCP runtime-status request timed
+out and reported unknown health. A bounded JVM evaluation on the same
+default process then succeeded (425 ms); diagnosis continues through that
+working MCP evaluation surface. No default restart or refork was performed.
+
 - The walk follows declared concerns (the schema's render pairs and
   component/derived-query declarations), never "every ref attribute";
   width caps are not a substitute for not walking.
@@ -43,3 +49,26 @@ called from `seon.render.web/refresh-root` at `web.clj:2003`).
   rows pointing at an agent, or are not concerns of the agent page.
 - Root's page warm ≤ 0.3 s and cold ≤ 1 s, measured with the same sampler,
   through several schedule firings.
+
+## Resolution
+
+`d6d399561f8821e0c384716ff68672c51d0324fb` derives acquisition from each
+entity's schema-declared concerns and components, retaining namespace
+requires. It deletes every-ref expansion; schedule fires and maintenance
+requests are operational facts, not declared agent concerns. The existing
+shared cache and read-evidence mechanism remain in place.
+
+Default cold root: 7.555628 → 0.748105 seconds; distinct pulled entities:
+2,276 → 132 despite the concurrent trial growing root's turns from 14 to
+120. At the identical original database basis the acquisition shrinks from
+2,278 to 23 members, with identical HTML text in identical order. Two actual
+firings preserve all 149 saved root/Juniper cache outputs and current evidence.
+Fast 27/158, scoped 27/162, platform 84/505 tests/assertions are green.
+
+This resolves the traversal and operational-invalidation defect. The strict
+0.3-second warm target is not universal: median 0.1260845 seconds, maximum
+0.378654 seconds in the six-round sampler. The remaining read-evidence
+replay observation is tracked in
+[the follow-up](../root-page-warm-read-evidence-replay-exceeds-300ms.md).
+Full measurements and the successful in-place default adoption are in
+[the landing note](../../../prds/context-generation/research/root-walk-landing-2026-09-10.md).
