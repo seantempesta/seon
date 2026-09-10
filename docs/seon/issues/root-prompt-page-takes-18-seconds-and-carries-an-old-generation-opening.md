@@ -30,3 +30,15 @@ order; (2) root's opening regenerates through the current generator
 carries the cluster block and prints as agent source; (3) no generic
 printer fallbacks on root's page. Proof: root `?prompt=true` < 1 s warm;
 root's opening bytes recorded.
+
+## Compaction on `default` at 21:58
+
+`POST compact` 0.26 s; `POST system-turn` **13.9 s**; `?prompt=true`
+afterwards **20.1 s**. The regenerated opening is the current
+generator's (no printed-data forms, the cluster block present, 11
+evaluations) and fallbacks dropped to two. So the cost is in generating
+root's opening itself, most likely the cluster status derivation or the
+per-agent accounting (store footprint scan, attempt/blob accounting) —
+one of root's read forms takes ~14 s to evaluate, and the prompt page
+re-runs the comparison against it.
+
