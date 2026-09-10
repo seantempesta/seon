@@ -871,3 +871,21 @@ half-edit. Measured targets in the issue.
   (`6f339bc6e`, verified at 700 px, no overflow); runtime block HTML → lane
   runtime-html.
 
+## 2026-09-10 15:25 — root's page from declared concerns; runtime HTML
+
+- root-walk `d6d399561`: the walk acquires each entity's DECLARED concerns
+  instead of every installed ref attribute. Root's neighbourhood 2,278
+  members → 23 at a fixed basis with byte-identical page text; cold `GET /`
+  7.6–11.3 s → 0.95 s, warm 0.07 s (juniper 0.10 s). Schedule-fire rows
+  still accumulate (737); the lane's schedule slice is landing.
+- runtime-html `237c4c572`/`881c720f4`: the runtime block reads "Idle since
+  14:46:48 (9 min) · Woke on Message from root: …", listens as chips, turns
+  as a newest-first table; zero `#inst`/`:db/id` literals in the pair. The
+  generic "N referenced entities" id dump is the debug block header in
+  `web.clj:1144–1155,1294–1313` — handed to the render owner next.
+- Live run, turn 2 (woken by a misrouted feed fault, issue
+  `debug-feed-backstop-fault-wakes-the-viewed-agent.md`): the model summed
+  the orders correctly (Ada 115), judged the read step done, and inspected
+  `(dir my.plan)` before completing it — the taught behaviour. Waiting on
+  loop-continue for the self-continuing session, then the full §17 rerun.
+
