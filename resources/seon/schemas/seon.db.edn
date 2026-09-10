@@ -1,5 +1,11 @@
 #:seon.db{:attributes :boolean,
-          :lookup-ref-value [:or :string :uuid :keyword :symbol :int],
+          :lookup-ref-value
+          [:or :string :uuid :keyword :symbol :int
+           [:schema {:registry
+                     {:seon.db/lookup-value
+                      [:or :string :uuid :keyword :symbol :int
+                       [:tuple :keyword [:ref :seon.db/lookup-value]]]}}
+            [:tuple :keyword :seon.db/lookup-value]]],
           :ref [:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]],
           :component :boolean,
           ;; One component's OWN entity map, as Datahike's transaction-data

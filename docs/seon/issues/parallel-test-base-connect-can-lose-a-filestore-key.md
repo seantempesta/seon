@@ -56,3 +56,14 @@ raised `NoSuchFileException` in
 passed and reported no worker-global drift. Log:
 `tmp/context-blocks/gate-slice4.log`. The actor remains unestablished;
 no other lane's process or files were operated.
+
+## Recurrence in the data lane — 2026-09-09
+
+Three-worker path gate `tmp/test-runs/run.AzsyoH`, published base
+`e9d919732fc91fcf5dbbac584c66e9996f417a193cc04df5a434a825f2bd98cf`, lost key
+`8f0704c2-a60b-4252-b600-0d8b69af6244`. Pool worker 2 exited before completing
+`my.plan-test/a-changed-title-is-an-ordinary-fact-update`; isolated confirmation
+passed. The source regression also had an independently reproducible SCI
+fixture defect, corrected by acquiring the agent context through
+`fork-for-turn`. Subsequent data-lane gates run serially with one worker.
+The deleting actor is still unestablished.

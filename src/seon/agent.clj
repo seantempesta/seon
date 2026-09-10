@@ -52,7 +52,7 @@
               (throw (ex-info (:seon.error/message attributes) attributes)))
           admitted (select-keys overrides attributes)]
       (if (seq admitted)
-        [(assoc admitted :db/id component)
+        [(assoc admitted :db/id component :seon.config/agent (:db/id agent))
          [:db/add (:db/id agent) :seon.agent/settings component]]
         []))))
 

@@ -22,7 +22,8 @@ the chart's older map-arity id example, singular runtime turn, and `to` wake.
   Existing first-party seams: `seon.plan/add-step-call`, message delivery,
   and `seon.turn/open-call`.
 - Canonical fixture: `seon.test-support/with-database`; armed fast loop and
-  isolated path-only gate. `SEON_TEST_WORKERS=3` for every gate.
+  isolated path-only gate. `SEON_TEST_WORKERS` capped at 3; final gates use 1 after the
+  parallel-base loss was observed.
 
 ## Initial live evidence
 
@@ -46,5 +47,17 @@ Exact check: `(seon.id/id 'abc)` = `"ba7816bf8f01"`; length 8 = `"ba7816bf"`.
 The independently progressing plan changes are not part of that identity
 commit or its platform snapshot.
 
+Identity platform: 83 tests / 490 assertions, zero failures/errors.
+Plan fast iteration: 21 tests / 125 assertions, zero failures/errors.
+The first isolated plan gate hit the recorded parallel-base filestore-key
+loss; its isolated title-update confirmation passed. The separate shown-text
+test used a base SCI context without agent call preparation. It now acquires
+the agent context through the same `fork-for-turn` owner as production.
+Final scoped and platform results follow below.
+
 RESET NEEDED once when the complete schema batch lands; the owner
 reforks default once. This lane uses `tmp/data-lane-root` for live proof.
+
+Plan/component slice: scoped gate 22 tests / 134 assertions; platform 83
+tests / 490 assertions, all green. The shown-text fixture now refuses
+failed setup loudly and seeds its cluster through the canonical owner.

@@ -137,8 +137,11 @@
       [[:seon.ns/name 'my.message]
        [:seon.ns/name 'my.turn]
        [:seon.ns/name 'seon.db]]}
-     {:seon.agent/id agent-id
-      :seon.agent/namespace namespace-tempid}
+     {:db/id (str "agent:" agent-id)
+      :seon.agent/id agent-id
+      :seon.agent/namespace namespace-tempid
+      :seon.agent/plan {:my.plan/agent (str "agent:" agent-id)}
+      :seon.agent/settings {:seon.config/agent (str "agent:" agent-id)}}
      [:db.fn/call #'steward-call agent-id namespace-name]]))
 
 (defn situation-form

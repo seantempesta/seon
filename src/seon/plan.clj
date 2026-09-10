@@ -11,7 +11,7 @@
   a set. `:my.plan/current-step` is an ordinary ref — currentness neither owns
   nor copies a step.
 
-  Completion is the presence of `:my.plan.item/completed-at`; ready, blocked,
+  Completion is the presence of `:my.plan.item/completed-tx`; ready, blocked,
   parent, depth, and state are queries over current facts, never stored."
   (:require [clojure.string :as str]
             [seon.db :as db]
@@ -49,24 +49,24 @@
      (not-join [?step] [?step :my.plan.item/steps _])]
     [(open-work ?step)
      [?step :my.plan.item/id]
-     (not-join [?step] [?step :my.plan.item/completed-at _])
+     (not-join [?step] [?step :my.plan.item/completed-tx _])
      (leaf ?step)]
     [(open-work ?step)
      (descendant ?step ?leaf)
      [?leaf :my.plan.item/id]
-     (not-join [?leaf] [?leaf :my.plan.item/completed-at _])
+     (not-join [?leaf] [?leaf :my.plan.item/completed-tx _])
      (leaf ?leaf)]
     [(blocked ?step)
      [?step :my.plan.item/needs ?dependency]
      (open-work ?dependency)]
     [(ready ?step)
      [?step :my.plan.item/id]
-     (not-join [?step] [?step :my.plan.item/completed-at _])
+     (not-join [?step] [?step :my.plan.item/completed-tx _])
      (leaf ?step)
      (not (blocked ?step))]
     [(ready ?step)
      [?step :my.plan.item/id]
-     (not-join [?step] [?step :my.plan.item/completed-at _])
+     (not-join [?step] [?step :my.plan.item/completed-tx _])
      (not (leaf ?step))
      (not (open-work ?step))
      (not (blocked ?step))]])
@@ -78,8 +78,8 @@
     :my.plan.item/position
     :my.plan.item/title
     :my.plan.item/description
-    :my.plan.item/expected-result
-    :my.plan.item/completed-at
+    :my.plan.item/done-when
+    {:my.plan.item/completed-tx [:db/txInstant]}
     :my.plan.item/about
     {:my.plan.item/needs [:my.plan.item/id]}
     {:my.plan.item/steps 8}])
@@ -180,7 +180,7 @@
     [?agent :seon.agent/id ?agent-id]
     (owned ?agent ?step)
     [?step :my.plan.item/id ?id]
-    (not-join [?step] [?step :my.plan.item/completed-at _])
+    (not-join [?step] [?step :my.plan.item/completed-tx _])
     (blocked ?step)])
 
 (defn- owned-ids
@@ -204,7 +204,7 @@
   [step current-id ready-ids blocked-ids]
   (let [id (:my.plan.item/id step)]
     (cond
-      (:my.plan.item/completed-at step) :completed
+      (:my.plan.item/completed-tx step) :completed
       (= current-id id) :current
       (contains? blocked-ids id) :blocked
       (contains? ready-ids id) :ready
@@ -243,9 +243,9 @@
   [_database _agent-id steps]
   {:my.plan/recent-completions
    (vec (sort-by (fn [step]
-                   [(- (.getTime ^java.util.Date (:my.plan.item/completed-at step)))
+                   [(- (.getTime ^java.util.Date (get-in step [:my.plan.item/completed-tx :db/txInstant])))
                     (:my.plan.item/id step)])
-                 (filter :my.plan.item/completed-at steps)))})
+                 (filter :my.plan.item/completed-tx steps)))})
 
 ;;; ---------------------------------------------------------------------------
 ;;; Current reads
@@ -347,12 +347,11 @@
   [step]
   (if (error-value? step)
     step
-    (cond-> (assoc (select-keys step [:my.plan.item/id :my.plan.item/title
-                                     :my.plan.item/completed-at :my.plan.item/about
+    (assoc (select-keys step [:my.plan.item/id :my.plan.item/title
+                                     :my.plan.item/done-when
+                                     :my.plan.item/completed-tx :my.plan.item/about
                                      :my.plan/state])
-                   :my.plan/needs (vec (:my.plan/needs step)))
-      (:my.plan.item/expected-result step)
-      (assoc :my.plan/done-when (:my.plan.item/expected-result step)))))
+           :my.plan/needs (vec (:my.plan/needs step)))))
 
 (defn current
   "Read your current step; an empty map means none is selected."
@@ -493,7 +492,8 @@
                                (next-position database owner attribute)
                                0))
                  (seq needs) (assoc :my.plan.item/needs needs))]
-      (cond-> [step [:db/add owner attribute tempid]]
+      (cond-> [step [:db/add owner attribute tempid]
+               [:db/add plan-entity :my.plan/agent agent-entity]]
         (= plan-entity "new-agent-plan")
         (conj [:db/add agent-entity :seon.agent/plan plan-entity])
         (:my.plan/current? request)
@@ -521,12 +521,11 @@
                 :seon.agent/id agent-id}))
     (if (db/q '[:find ?completed-at .
                 :in $ ?step
-                :where [?step :my.plan.item/completed-at ?completed-at]]
+                :where [?step :my.plan.item/completed-tx ?completed-at]]
               database step)
       []
       (cond->
-       [[:db/add step :my.plan.item/completed-at
-         (:my.plan.item/completed-at request)]]
+       [[:db/add step :my.plan.item/completed-tx "datomic.tx"]]
         (= step (db/q '[:find ?current .
                         :in $ ?agent
                         :where [?agent :my.plan/current-step ?current]]
@@ -549,10 +548,8 @@
   [step connection agent-id]
   (let [step (cond-> step
                (not (:my.plan.item/id step))
-               (assoc :my.plan.item/id (id/digest 12 [agent-id (:my.plan.item/title step)]))
-               (:my.plan/done-when step)
-               (assoc :my.plan.item/expected-result (:my.plan/done-when step)))
-        request (assoc (dissoc step :my.plan/done-when) :seon.agent/id agent-id)
+               (assoc :my.plan.item/id (id/id (:my.plan.item/title step))))
+        request (assoc step :seon.agent/id agent-id)
         result (transact-plan! connection agent-id
                                [[:db.fn/call #'add-step-call request]])]
     (if (error-value? result)
@@ -562,15 +559,13 @@
 (defn complete!
   "Complete one owned step and clear it when it is this agent's current step."
   {:malli/schema
-   [:=> [:cat :my.plan.item/id :my.plan.item/completed-at
-         :seon.db/connection :seon.agent/id]
+   [:=> [:cat :my.plan.item/id :seon.db/connection :seon.agent/id]
     [:or :my.plan/step-summary :seon.error/value]]}
-  [item-id completed-at connection agent-id]
+  [item-id connection agent-id]
   (let [result
         (transact-plan! connection agent-id
                         [[:db.fn/call #'complete-step-call
                           {:my.plan.item/id item-id
-                           :my.plan.item/completed-at completed-at
                            :seon.agent/id agent-id}]])]
     (if (error-value? result)
       result
@@ -584,7 +579,7 @@
       (refuse! :my.plan/not-owned "Select a step owned by this agent."
                {:my.plan.item/id item-id :seon.agent/id agent-id}))
     (when (db/q '[:find ?completed . :in $ ?step
-                  :where [?step :my.plan.item/completed-at ?completed]]
+                  :where [?step :my.plan.item/completed-tx ?completed]]
                 database step)
       (refuse! :my.plan/unusable-current-step "Select an open step."
                {:my.plan.item/id item-id}))
@@ -609,10 +604,9 @@
     (when-not (and step (contains? (owned-ids database agent-id) item-id))
       (refuse! :my.plan/not-owned "Update a step owned by this agent."
                {:my.plan.item/id item-id :seon.agent/id agent-id}))
-    (let [attributes (cond-> (select-keys changes [:my.plan.item/title
-                                                  :my.plan.item/description])
-                       (:my.plan/done-when changes)
-                       (assoc :my.plan.item/expected-result (:my.plan/done-when changes)))]
+    (let [attributes (select-keys changes [:my.plan.item/title
+                                          :my.plan.item/description
+                                          :my.plan.item/done-when])]
       (if (seq attributes) [(assoc attributes :db/id step)] []))))
 
 (defn update!
@@ -712,8 +706,8 @@
                                    database id attribute))
                     [:db/retract [:my.plan.item/id id] attribute])))
           [:my.plan.item/description
-           :my.plan.item/expected-result
-           :my.plan.item/completed-at
+           :my.plan.item/done-when
+           :my.plan.item/completed-tx
            :my.plan.item/about])))
 
 (defn- document-reference-id
@@ -728,8 +722,8 @@
     :my.plan.item/position
     :my.plan.item/title
     :my.plan.item/description
-    :my.plan.item/expected-result
-    :my.plan.item/completed-at
+    :my.plan.item/done-when
+    :my.plan.item/completed-tx
     :my.plan.item/about
     {:my.plan.item/needs [:my.plan.item/id]}
     {:my.plan.item/steps [:my.plan.item/id]}])
@@ -764,8 +758,8 @@
                   (comparable (:my.plan.item/position row)
                               (:my.plan.item/title row)
                               (:my.plan.item/description row)
-                              (:my.plan.item/expected-result row)
-                              (:my.plan.item/completed-at row)
+                              (:my.plan.item/done-when row)
+                              (:my.plan.item/completed-tx row)
                               (:my.plan.item/about row)
                               (get parents (:my.plan.item/id row))
                               (into #{} (map :my.plan.item/id)
@@ -777,8 +771,8 @@
   (comparable (:my.plan.item/position entry)
               (:my.plan.item/title entry)
               (:my.plan.item/description entry)
-              (:my.plan.item/expected-result entry)
-              (:my.plan.item/completed-at entry)
+              (:my.plan.item/done-when entry)
+              (:my.plan.item/completed-tx entry)
               (:my.plan.item/about entry)
               (:my.plan/parent-id entry)
               (set (get needs-by-id (:my.plan.item/id entry)))))
@@ -841,7 +835,7 @@
             _ (when current
                 (let [entry (some #(when (= current (:my.plan.item/id %)) %)
                                   entries)]
-                  (when (or (nil? entry) (:my.plan.item/completed-at entry))
+                  (when (or (nil? entry) (:my.plan.item/completed-tx entry))
                     (refuse! :my.plan/unusable-current-step
                              (str "Current step " (pr-str current)
                                   " is not an open step of this plan.")
@@ -879,7 +873,7 @@
                           (filter #(contains? existing (:my.plan.item/id %))
                                   entries))
             agent-map
-            (cond-> {:db/id plan-entity}
+            (cond-> {:db/id plan-entity :my.plan/agent agent-entity}
               objective (assoc :my.plan/objective objective)
               (seq (get children nil))
               (assoc :my.plan/steps (set (get children nil)))
@@ -1012,7 +1006,7 @@
        (needs-text step)
        (when-let [description (:my.plan.item/description step)]
          (str "\n" (str/join (repeat (count number) " ")) "   " description))
-       (when-let [expected (:my.plan.item/expected-result step)]
+       (when-let [expected (:my.plan.item/done-when step)]
          (str "\n" (str/join (repeat (count number) " "))
               "   Done when: " expected))))
 
@@ -1050,7 +1044,7 @@
            (remove nil?)
            [(when-let [description (:my.plan.item/description step)]
               [:p {:style {:color "var(--color-text-200)"}} description])
-            (when-let [expected (:my.plan.item/expected-result step)]
+            (when-let [expected (:my.plan.item/done-when step)]
               [:p {:class "my-plan-expected"}
                [:strong "Done when: "] expected])
             (when-let [parent (:my.plan/parent step)]
@@ -1176,8 +1170,8 @@
                         {:my.plan/current-step [:my.plan.item/id]}
                         {:my.plan/steps
                          [:my.plan.item/id :my.plan.item/title
-                          :my.plan.item/expected-result :my.plan.item/position
-                          :my.plan.item/completed-at
+                          :my.plan.item/done-when :my.plan.item/position
+                          {:my.plan.item/completed-tx [:db/txInstant]}
                           {:my.plan.item/needs [:my.plan.item/id]}
                           {:my.plan.item/steps ...}]}]}])
               [:seon.agent/id (:seon.agent/id unit)]))))
@@ -1201,7 +1195,7 @@
     (if (error-value? view)
       view
       (let [steps (:my.plan/steps view)
-            done (count (filter :my.plan.item/completed-at steps))]
+            done (count (filter :my.plan.item/completed-tx steps))]
         [:section {:class "seon-family-entry my-plan"}
          [:header [:p {:class "seon-kicker"} "Plan"]
           [:h3 (get view :my.plan/objective "No objective set")]]

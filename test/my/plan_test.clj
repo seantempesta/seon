@@ -130,7 +130,7 @@
             :my.plan.item/needs #{[:my.plan.item/id "prepare"]}})
       (is (= ["prepare"] (ids (:my.plan/ready (plan-of connection)))))
       (is (= ["verify"] (ids (:my.plan/blocked (plan-of connection)))))
-      (plan/complete! "prepare" (at 0) connection "alice")
+      (plan/complete! "prepare" connection "alice")
       (let [current (plan-of connection)]
         (is (= ["verify"] (ids (:my.plan/ready current))))
         (is (= [] (:my.plan/blocked current)))
@@ -140,8 +140,7 @@
   (with-plan
     (fn [connection]
       (is (= {} (plan/current @connection "alice")))
-      (is (= ";; I should follow my plan and verify the current step's completion criterion.\n(my.plan/items)"
-             (plan/render-plan-ai (plan-of connection))))
+      (is (str/includes? (plan/render-plan-ai (plan-of connection)) "(seon.db/pull"))
       (let [prepare (add connection "prepare" "Prepare")
             verify (add connection "verify" "Verify"
                         {:my.plan.item/needs #{[:my.plan.item/id "prepare"]}})]
@@ -153,8 +152,10 @@
                (:seon.error/kind (plan/start! "prepare" connection "bob"))))
         (is (= (assoc prepare :my.plan/state :current) (plan/start! "prepare" connection "alice")))
         (is (= (assoc prepare :my.plan/state :current) (plan/current @connection "alice")))
-        (is (= (assoc prepare :my.plan.item/completed-at (at 0) :my.plan/state :completed)
-               (plan/complete! "prepare" (at 0) connection "alice")))
+        (let [completed (plan/complete! "prepare" connection "alice")]
+          (is (= (assoc prepare :my.plan/state :completed)
+                 (dissoc completed :my.plan.item/completed-tx)))
+          (is (inst? (get-in completed [:my.plan.item/completed-tx :db/txInstant]))))
         (is (= {} (plan/current @connection "alice")))
         (is (= :my.plan/unusable-current-step
                (:seon.error/kind (plan/start! "prepare" connection "alice"))))
@@ -190,7 +191,7 @@
              (:my.plan/current-step (plan-of connection))))
       (is (= :current
              (:my.plan/state (first (:my.plan/steps (plan-of connection))))))
-      (plan/complete! "ship" (at 0) connection "alice")
+      (plan/complete! "ship" connection "alice")
       (let [current (plan-of connection)]
         (is (not (contains? current :my.plan/current-step))
             "completion clears the selected focus")
@@ -239,8 +240,7 @@
   (with-plan
     (fn [connection]
       (add connection "ship" "Ship the plan unit")
-      (is (= ";; I should follow my plan and verify the current step's completion criterion.\n(my.plan/items)"
-             (plan/render-plan-ai (plan-of connection)))
+      (is (str/includes? (plan/render-plan-ai (plan-of connection)) "(seon.db/pull")
           "the AI projection emits source the agent can run itself"))))
 
 (deftest no-numeric-entity-reference-reaches-either-projection
@@ -436,7 +436,7 @@
         :my.plan.item/id "juniper/inspect-identity-messages"
         :my.plan.item/position 0
         :my.plan.item/title "Inspect identity and messages"
-        :my.plan.item/completed-at #inst "2026-09-07T01:30:00Z"}
+        :my.plan.item/completed-tx "datomic.tx"}
        {:db/id "step-render-plan"
         :my.plan.item/id "juniper/render-plan"
         :my.plan.item/position 1
@@ -480,7 +480,7 @@
         (is (= "Improve Juniper context inspection" (:my.plan/objective current)))
         (is (= "juniper/render-plan"
                (get-in current [:my.plan/current-step :my.plan.item/id])))
-        (is (str/includes? ai "(my.plan/items)"))
+        (is (str/includes? ai "(seon.db/pull"))
         (is (str/includes? printed "1 of 4 steps completed"))
         (is (str/includes? printed "Current step: "))
         (is (not (str/includes? printed ":open nil"))

@@ -38,6 +38,7 @@
                ["reply" "Tell root the customer and new total" "The sent message contains the customer and verified new total."]
                ["done" "Finish the session" "All preceding plan items are complete."]]]
     {:db/id "juniper-plan"
+     :my.plan/agent [:seon.agent/id "juniper"]
      :my.plan/objective instruction
      :my.plan/current-step "fixture-juniper/query"
      :my.plan/steps
@@ -45,7 +46,7 @@
              (cond-> {:db/id (str "fixture-juniper/" id)
                       :my.plan.item/id (str "juniper/" id)
                       :my.plan.item/title title
-                      :my.plan.item/expected-result criterion
+                      :my.plan.item/done-when criterion
                       :my.plan.item/position position}
                (pos? position)
                (assoc :my.plan.item/needs
@@ -79,6 +80,7 @@
                           :seon.agent/plan (update authored-plan :my.plan/steps set)
                           :seon.agent/settings
                           {:db/id (or settings "juniper-settings")
+                           :seon.config/agent agent-eid
                            :seon.config.ai/no-provider true
                            :seon.config.eval/time-limit-ms 10000
                            :seon.config.run/max-episode-runs 20}}

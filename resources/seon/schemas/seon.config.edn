@@ -1,10 +1,14 @@
-#:seon.config{:dial :boolean,
+#:seon.config{:agent [:and {:seon.db/identity true
+                           :description "The agent owning this addressable settings component."} :seon.db/ref],
+              :settings [:map {:seon.db/attributes true}
+                         [:seon.config/agent :seon.config/agent]],
+              :dial :boolean,
               :optional :boolean,
               :per-agent :boolean,
               :applied-manifest-digest [:re "^[0-9a-f]{64}$"],
               :apply-request
               [:map
-               [:seon.db/connection :any]
+               [:seon.db/connection :seon.db/connection]
                [:seon.config/manifest
                 {:optional true}
                 :seon.config/manifest]

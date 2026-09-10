@@ -70,7 +70,7 @@
   {:seon.fn/doc-order 2
    :malli/schema [:=> [:cat :my.plan/complete-request] [:or :my.plan/step-summary :seon.error/value]]}
   [request]
-  (plan/complete! (:my.plan.item/id request) (get request :my.plan.item/completed-at (java.util.Date.)) (:seon.db/connection request) (:seon.agent/id request)))
+  (plan/complete! (:my.plan.item/id request) (:seon.db/connection request) (:seon.agent/id request)))
 
 (defn current!
   "Select the named open item as current and return it."

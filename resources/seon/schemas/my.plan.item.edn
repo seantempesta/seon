@@ -32,12 +32,12 @@
                  "Ordered function, namespace, and schema tokens this step's work concerns."}
                 [:vector :my.plan.item/about-token]
                 [:= []]],
-               :completed-at
+               :completed-tx
                [:and
                 {:description
-                 "The completion instant; absence means the step remains open."}
-                :inst],
-               :expected-result
+                 "The transaction completing this step; its db/txInstant is the completion time. Absence means open."}
+                :seon.db/ref],
+               :done-when
                [:string
                 {:min 1,
                  :description
@@ -70,26 +70,25 @@
                 [:my.plan.item/needs {:optional true} :my.plan.item/needs]
                 [:my.plan.item/steps {:optional true} :my.plan.item/steps]
                 [:my.plan.item/about {:optional true} :my.plan.item/about]
-                [:my.plan.item/completed-at
+                [:my.plan.item/completed-tx
                  {:optional true}
-                 :my.plan.item/completed-at]
-                [:my.plan.item/expected-result
+                 :my.plan.item/completed-tx]
+                [:my.plan.item/done-when
                  {:optional true}
-                 :my.plan.item/expected-result]],
+                 :my.plan.item/done-when]],
                :add-request
                [:map
                 {:description
                  "One step to add to an agent's plan, at the root or nested under a named parent step."}
                 [:my.plan.item/id {:optional true} :my.plan.item/id]
-                [:my.plan/done-when {:optional true} :my.plan/done-when]
                 [:my.plan.item/title :my.plan.item/title]
                 [:my.plan.item/description
                  {:optional true}
                  :my.plan.item/description]
                 [:my.plan.item/needs {:optional true} :my.plan.item/needs]
                 [:my.plan.item/about {:optional true} :my.plan.item/about]
-                [:my.plan.item/expected-result
+                [:my.plan.item/done-when
                  {:optional true}
-                 :my.plan.item/expected-result]
+                 :my.plan.item/done-when]
                 [:my.plan/parent-step {:optional true} :my.plan/parent-step]
                 [:my.plan/current? {:optional true} :my.plan/current?]]}

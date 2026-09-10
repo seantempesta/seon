@@ -1,9 +1,12 @@
-#:my.plan{:objective :string
-          :done-when :string
+#:my.plan{:agent [:and {:seon.db/identity true
+                       :description "The agent owning this addressable plan component."} :seon.db/ref]
+          :completion [:map [:db/txInstant :inst]]
+          :objective :string
           :entity
           [:map {:seon.db/attributes true
                  :seon.render/ai seon.plan/render-plan-ai
                  :seon.render/html seon.plan/render-plan-html}
+           [:my.plan/agent :my.plan/agent]
            [:my.plan/objective {:optional true} :my.plan/objective]
            [:my.plan/steps {:optional true} :my.plan/steps]
            [:my.plan/current-step {:optional true} :my.plan/current-step]]
@@ -11,22 +14,20 @@
           [:map
            [:my.plan.item/id {:optional true} :my.plan.item/id]
            [:my.plan.item/title {:optional true} :my.plan.item/title]
-           [:my.plan.item/expected-result {:optional true} :my.plan.item/expected-result]
-           [:my.plan.item/completed-at {:optional true} :my.plan.item/completed-at]
+           [:my.plan.item/done-when {:optional true} :my.plan.item/done-when]
+           [:my.plan.item/completed-tx {:optional true} :my.plan/completion]
            [:my.plan.item/about {:optional true} :my.plan.item/about]
            [:my.plan/needs {:optional true} :my.plan/needs]
-           [:my.plan/state {:optional true} :my.plan/state]
-           [:my.plan/done-when {:optional true} :my.plan/done-when]]
+           [:my.plan/state {:optional true} :my.plan/state]]
           :step-summary
           [:map
            [:my.plan.item/id :my.plan.item/id]
            [:my.plan.item/title :my.plan.item/title]
-           [:my.plan.item/expected-result {:optional true} :my.plan.item/expected-result]
-           [:my.plan.item/completed-at {:optional true} :my.plan.item/completed-at]
+           [:my.plan.item/done-when {:optional true} :my.plan.item/done-when]
+           [:my.plan.item/completed-tx {:optional true} :my.plan/completion]
            [:my.plan.item/about {:optional true} :my.plan.item/about]
            [:my.plan/needs {:optional true} :my.plan/needs]
-           [:my.plan/state {:optional true} :my.plan/state]
-           [:my.plan/done-when {:optional true} :my.plan/done-when]]
+           [:my.plan/state {:optional true} :my.plan/state]]
           :steps
           [:set
            {:seon.db/component true,
@@ -89,12 +90,12 @@
            [:my.plan.item/description
             {:optional true}
             :my.plan.item/description]
-           [:my.plan.item/expected-result
+           [:my.plan.item/done-when
             {:optional true}
-            :my.plan.item/expected-result]
-           [:my.plan.item/completed-at
+            :my.plan.item/done-when]
+           [:my.plan.item/completed-tx
             {:optional true}
-            :my.plan.item/completed-at]
+            :my.plan/completion]
            [:my.plan.item/about {:optional true} :my.plan.item/about]
            [:my.plan/needs {:optional true} :my.plan/needs]
            [:my.plan/parent {:optional true} :my.plan/parent]
@@ -117,12 +118,12 @@
               [:my.plan.item/description
                {:optional true}
                :my.plan.item/description]
-              [:my.plan.item/expected-result
+              [:my.plan.item/done-when
                {:optional true}
-               :my.plan.item/expected-result]
-              [:my.plan.item/completed-at
+               :my.plan.item/done-when]
+              [:my.plan.item/completed-tx
                {:optional true}
-               :my.plan.item/completed-at]
+               :my.plan.item/completed-tx]
               [:my.plan.item/needs {:optional true} :my.plan.item/needs]
               [:my.plan.item/about {:optional true} :my.plan.item/about]
               [:my.plan.item/steps
@@ -232,17 +233,17 @@
           :subject-not-found-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a plan subject that does not exist"} [:my.plan/subject-not-found :my.plan/subject-not-found] [:seon.error/message :seon.error/message]],
           :unusable-current-step [:= true],
           :unusable-current-step-error [:map {:seon.error/class true, :seon.render/ai seon.error/render-ai, :seon.render/html seon.error/render-html, :error/message "must mark a current step that is not an open step of this plan"} [:my.plan/unusable-current-step :my.plan/unusable-current-step] [:seon.error/message :seon.error/message]]
- :add-request [:map [:my.plan.item/id {:optional true} :my.plan.item/id] [:my.plan/done-when {:optional true} :my.plan/done-when] [:my.plan.item/title :my.plan.item/title] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
- :complete-request [:map [:my.plan.item/id :my.plan.item/id] [:my.plan.item/completed-at {:optional true} :my.plan.item/completed-at] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
+ :add-request [:map [:my.plan.item/id {:optional true} :my.plan.item/id] [:my.plan.item/done-when {:optional true} :my.plan.item/done-when] [:my.plan.item/title :my.plan.item/title] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
+ :complete-request [:map [:my.plan.item/id :my.plan.item/id] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
  :current-request [:map [:my.plan.item/id :my.plan.item/id] [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
  :update-fields [:map [:my.plan.item/id :my.plan.item/id]
                  [:my.plan.item/title {:optional true} :my.plan.item/title]
                  [:my.plan.item/description {:optional true} :my.plan.item/description]
-                 [:my.plan/done-when {:optional true} :my.plan/done-when]]
+                 [:my.plan.item/done-when {:optional true} :my.plan.item/done-when]]
  :update-request [:map [:my.plan.item/id :my.plan.item/id]
                   [:my.plan.item/title {:optional true} :my.plan.item/title]
                   [:my.plan.item/description {:optional true} :my.plan.item/description]
-                  [:my.plan/done-when {:optional true} :my.plan/done-when]
+                  [:my.plan.item/done-when {:optional true} :my.plan.item/done-when]
                   [:seon.db/connection :seon.db/connection]
                   [:seon.agent/id :seon.agent/id]]
 }

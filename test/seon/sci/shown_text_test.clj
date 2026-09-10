@@ -1,6 +1,7 @@
 (ns seon.sci.shown-text-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.cluster.agent :as agent]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
@@ -8,28 +9,40 @@
             [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
 
+(defn- checked-transact! [connection transaction]
+  (let [result (db/transact! connection transaction)]
+    (when (:seon.error/kind result)
+      (throw (ex-info (pr-str result) result)))
+    result))
+
 (deftest a-plan-item-result-shows-data-instead-of-its-block-render-source
   (support/with-database
    (fn [connection]
      (config/apply! {:seon.db/connection connection
                      :seon.boot/cluster-name "shown-text"})
-     (db/transact!
+     (support/seed-cluster! connection "shown-text")
+     (checked-transact! connection
+                        (agent/creation-tx {:seon.agent/id "juniper"
+                                            :seon.ns/name 'my.agents.juniper
+                                            :seon.cluster/name "shown-text"}))
+     (checked-transact!
       connection
-      [{:seon.cluster/name "shown-text"}
-       {:seon.agent/id "juniper"
-        :seon.agent/namespace {:seon.ns/name 'my.agents.juniper}
-        :seon.agent/plan
-        {:my.plan/objective "Keep generated source out of values"
+      [{:my.plan/agent [:seon.agent/id "juniper"]
+         :my.plan/objective "Keep generated source out of values"
          :my.plan/current-step "current-item"
          :my.plan/steps
          #{{:db/id "current-item"
             :my.plan.item/id "juniper/render-plan"
             :my.plan.item/title "Render this plan clearly"
-            :my.plan.item/expected-result "The item is shown as data."}
+            :my.plan.item/done-when "The item is shown as data."}
            {:my.plan.item/id "juniper/verify"
             :my.plan.item/title "Verify dependencies"
-            :my.plan.item/needs #{"current-item"}}}}}])
-     (let [ctx (support/fork-cluster-ctx connection)
+            :my.plan.item/needs #{"current-item"}}}}])
+     (let [base (support/fork-cluster-ctx connection "shown-text")
+           ctx (:seon.sci.eval/ctx
+                (evaluation/fork-for-turn
+                 {:seon.sci.eval/ctx base :seon.db/db @connection
+                  :seon.db/connection connection :seon.agent/id "juniper"}))
            request {:seon.cluster.eval/source "[(my.plan/current) (my.plan/blocked) (my.message/inbox) (my.agent/settings)]"
                     :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
                     :seon.agent/id "juniper"
