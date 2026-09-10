@@ -183,7 +183,6 @@
       (if (#{:seon.render/ai :seon.render/html} output)
         output
         :seon.render/html)
-      :seon.render.debug/prompt? (= "true" (get query "prompt"))
       :seon.render.debug/details? (= "true" (get query "details"))
       :seon.render.data/limit
       (positive-query-long (get query "limit")
@@ -219,7 +218,6 @@
     :viewer (str (:seon.render.debug/viewer-namespace debug-request))
     :subject (pr-str (:seon.render.debug/subject debug-request))
     :output (pr-str (:seon.render/output debug-request))
-    :prompt (str (boolean (:seon.render.debug/prompt? debug-request)))
     :details (str (boolean (:seon.render.debug/details? debug-request)))
     :limit (str (:seon.render.data/limit debug-request))
     :maxRefAttributes
@@ -777,11 +775,17 @@
        [:section {:class "seon-debug-prompt-pane"}
        [:h3 "Context now"]
        (into [:div {:class "seon-debug-evaluations"}]
-             (map #(turn-function-result 'seon.repl/render-html [%]) evaluations))])
+             (map #(turn-function-result 'seon.repl/render-html
+                                         [(assoc request :seon.render/value %)]) evaluations))])
+      [:details {:class "seon-debug-provider-prompt"}
+       [:summary "Provider prompt comparison"]
+       (when-not (:seon.error/kind evaluations)
+         [:pre {:class "seon-debug-source"}
+          (str/join "\n\n" (map #(turn-function-result 'seon.repl/render-ai [%]) evaluations))])
       (when prospective
        [:section {:class "seon-debug-prompt-pane"}
        [:h3 "Would-be system turn"]
-       (system-turn-html request prospective)])])))
+       (system-turn-html request prospective)])]])))
 
 (defn- debug-value-html
   [value]
@@ -1807,11 +1811,10 @@
         prompt-id (str "debug-ai-"
                        (or (:seon.agent/id debug-request) "inspection"))
         prompt-result
-        (when (:seon.render.debug/prompt? debug-request)
-          (when-let [agent-id (:seon.agent/id debug-request)]
+        (when-let [agent-id (:seon.agent/id debug-request)]
             (debug-prompt db connection agent-id caps
                           (assoc handle :seon.render/profile profile
-                                        :seon.turn.loop/cluster handle))))
+                                        :seon.turn.loop/cluster handle)))
         program-identity
         (debug-program-identity db (:seon.sci.eval/ctx handle))
         page
@@ -3062,17 +3065,11 @@
         rendered-page (current-page render-context db [::debug-tab debug-request])
         feed-id (or agent-id (str viewer-namespace))
         prompt-section
-        (if (and agent-id (:seon.render.debug/prompt? debug-request))
+        (when agent-id
           [:section {:class "seon-debug-prompt-detail"}
            [:h2 "Agent context"]
            [:section {:class "seon-debug-pane seon-debug-pane-ai"}
-            (hiccup/raw (get rendered-page (str "debug-ai-" agent-id)))]]
-          (when agent-id
-            [:a {:class "seon-debug-prompt-link"
-                 :href (debug-page-url
-                        debug-request
-                        {:seon.render.debug/prompt? true})}
-             "Inspect context algorithm"]))
+            (hiccup/raw (get rendered-page (str "debug-ai-" agent-id)))]])
         page
         [[:section {:class "seon-debug"
                     :data-signals__ifmissing
@@ -3086,8 +3083,8 @@
            [:div [:span "output"]
             [:code (pr-str (:seon.render/output debug-request))]]]
           [:div {:class "seon-debug-grid"}
-           (debug-experiment-html rendered-page)
-           prompt-section]]]]
+           prompt-section
+           (debug-experiment-html rendered-page)]]]]
     {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body

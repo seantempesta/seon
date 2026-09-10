@@ -18,17 +18,21 @@
            (db/transact!
             connection
             [{:seon.ns/name 'my.agents.history-probe}
-             {:seon.agent/id "history-probe"
+             {:db/id "history-agent" :seon.agent/id "history-probe"
               :seon.agent/namespace [:seon.ns/name 'my.agents.history-probe]
-              :seon.agent/plan {:my.plan/objective "An anonymous component"}}
-             {:seon.turn/id "history-probe-turn" :seon.turn/agent [:seon.agent/id "history-probe"] :seon.turn/opened-tx "datomic.tx"}
+              :seon.agent/runtime {:seon.runtime/agent "history-agent"
+                                   :seon.runtime/turns ["history-turn"]}
+              :seon.agent/plan {:my.plan/agent "history-agent"
+                                :my.plan/objective "An addressable component"}}
+             {:db/id "history-turn" :seon.turn/id "history-probe-turn" :seon.turn/agent [:seon.agent/id "history-probe"] :seon.turn/opened-tx "datomic.tx"}
              {:seon.cluster.eval/id "history-probe-evaluation"
+              :seon.cluster.eval/at (java.util.Date.)
               :seon.cluster.eval/run [:seon.turn/id "history-probe-turn"]
               :seon.cluster.eval/ordinal 0
               :seon.cluster.eval/ns [:seon.ns/name 'my.agents.history-probe]
               :seon.cluster.eval/source "(my.plan/plan {})"
               :seon.eval/shown "The component's shown text."}])
-           _ (is (nil? (:seon.error/kind written)))
+           _ (is (:db-after written) (pr-str written))
            database @connection
            agent-row (db/pull database '[:db/id {:seon.agent/plan [:db/id]}]
                           [:seon.agent/id "history-probe"])
@@ -59,8 +63,9 @@
 (deftest blocks-use-the-values-schema-documentation
   (support/with-database
     {::support/extra-schema
-     [{:seon.schema/key ::title :seon.schema/form ":string"}
+     [{:seon.schema/key ::title :seon.schema.admission/source :core :seon.schema/form ":string"}
       {:seon.schema/key ::notebook
+       :seon.schema.admission/source :core
        :seon.schema/form
        (pr-str [:map {:seon.db/attributes true
                       :title "Notebook"
@@ -96,9 +101,10 @@
 (deftest every-declared-attribute-has-an-ordered-pair-even-when-absent
   (support/with-database
    {::support/extra-schema
-    [{:seon.schema/key ::name :seon.schema/form ":string"}
-     {:seon.schema/key ::notes :seon.schema/form ":string"}
+    [{:seon.schema/key ::name :seon.schema.admission/source :core :seon.schema/form ":string"}
+     {:seon.schema/key ::notes :seon.schema.admission/source :core :seon.schema/form ":string"}
      {:seon.schema/key ::record
+      :seon.schema.admission/source :core
       :seon.schema/form
       (pr-str [:map {:seon.db/attributes true}
                [::name ::name]
@@ -127,6 +133,7 @@
      {:db/ident ::right :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
      {:db/ident ::hidden :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
      {:seon.schema/key ::declared-concerns
+      :seon.schema.admission/source :core
       :seon.schema/form
       (pr-str [:map {:seon.db/attributes true
                      :seon.render/units [::_left ::_right]}
@@ -235,7 +242,7 @@
                                 (:data-seon-unit (second %))))
                        (tree-seq coll? seq html))]
        (is (= [":seon.agent/agent" ":seon.agent/plan"
-               ":seon.agent/settings"] units))
+               ":seon.agent/settings" ":seon.agent/runtime"] units))
        (is (str/includes? (pr-str html) "seon.cluster.agent/render-identity-ai"))
        (is (str/includes? (pr-str html) "seon.cluster.agent/render-identity-html"))))))
 

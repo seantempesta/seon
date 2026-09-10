@@ -435,8 +435,9 @@
                                  :seon.print/length nil
                                  :seon.print/level nil
                                  :seon.print/table? false)
-                    (= :single-line
-                       (:seon.render.profile/composition profile))
+                    (or (= output :seon.render/ai)
+                        (= :single-line
+                           (:seon.render.profile/composition profile)))
                     (assoc :seon.print/width 0))
           emitted (print/emit-both tree options)
           truncated? (boolean

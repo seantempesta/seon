@@ -7,6 +7,20 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+REPL display, 2026-09-10: initial MCP status selected default PID 23557,
+PREPL 49971, and returned health/Flow unknown with `Read timed out`.
+The subsequent JVM `(+ 1 2)` returned 3 in 1 ms; the direct value-renderer
+probe returned in 1041 ms. No cause or Flow health is inferred. Default
+was not restarted, reforked, or stopped.
+
+The display lane's later hook publication `52e6bf93-61eb-4bf9-9d5a-9d5271651f27`
+returned operator exit 124; `logs/current-source-failure.log` said
+`Publication did not finish within its declared bound.` Explicit adoptions
+also reached instrumentation but refused when source changed during the
+operation. These are observed publication boundaries, not a diagnosis of
+the initial status timeout. The live pages and direct JVM probes continued
+to answer; final adoption evidence is in the display landing note.
+
 Context-nits, 2026-09-09: initial MCP status selected default PID 83040,
 PREPL 60374, but health and Flow returned unknown with `Read timed out`.
 JVM evaluation returned 3 from `(+ 1 2)` in 0 ms, and the runtime/notes

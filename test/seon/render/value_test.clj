@@ -72,6 +72,16 @@
            (is (= raw (edn/read-string shown)))
            (is (not (str/includes? shown "seon.render/ambiguous")))))))))
 
+(deftest ai-values-never-wrap-at-a-display-width
+  (let [raw [{:example/title (apply str (repeat 180 "x"))
+              :example/count 2 :example/nested {:example/value [1 2 3]}}]
+        request (assoc (unit raw) :seon.print/options {:seon.print/width 10})
+        shown (value/render-ai request)]
+    (is (= raw (edn/read-string shown)))
+    (is (not (str/includes? shown "\n")))
+    (is (str/includes? (hiccup/->string (value/render-html request))
+                       (apply str (repeat 180 "x"))))))
+
 (deftest collection-cardinality-never-changes-values-into-text-tables
   (doseq [n [0 1 2 3]
           choice [:derived true false]]
@@ -231,11 +241,11 @@
 
 (deftest profile-fit-supersedes-legacy-print-cuts-with-values
   (is (= "(1 2 3)" (value/render-ai (unit '(1 2 3)))))
-  (is (str/includes?
+  (is (not (str/includes?
        (value/render-ai
         (assoc (unit (vec (range 20)))
                :seon.print/options {:seon.print/width 20}))
-       "\n")))
+       "\n"))))
 
 (deftest rendering-live-values-does-not-apply-a-storage-bound
   (let [raw (vec (range 100))

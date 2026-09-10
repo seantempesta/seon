@@ -12,6 +12,7 @@
             [clojure.main :as main]
             [clojure.pprint :as pprint]
             [clojure.string :as str]
+            [seon.render.value :as value]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
 
@@ -237,13 +238,58 @@
     (when (seq (:seon.cluster.eval/source emission))
       (text emission))))
 
+(defn- pretty-response
+  "Format readable saved data for humans; non-readable shown text stays exact."
+  [answer]
+  (try
+    (binding [*print-length* nil *print-level* nil *print-meta* false]
+      (pprint/write (edn/read-string answer) :stream nil :right-margin 100))
+    (catch Throwable _ answer)))
+
+(defn- live-response
+  [unit emission]
+  (let [routing (:seon.agent/routing unit)
+        agent-id (:seon.agent/id unit)
+        ctx (or (get-in (when (and routing agent-id)
+                         ((requiring-resolve 'seon.cluster.agent/armed) routing agent-id))
+                       [:seon.turn.loop/cluster :seon.sci.eval/agent-ctx])
+                (:seon.sci.eval/agent-ctx unit))
+        objects (some-> (:seon.sci.eval/result-objects ctx) deref)]
+    (when-let [entry (find objects (:seon.cluster.eval/id emission))]
+      (value/prepare
+       (cond-> (assoc unit :seon.render/value (val entry)
+                           :seon.render.value/root [:seon.cluster.eval/id (:seon.cluster.eval/id emission)])
+         (not (:seon.eval/renderer emission))
+         (assoc-in [:seon.render.value/options :seon.render.value/structural?] true))
+       :seon.render/html))))
+
 (defn render-html
   "Render the prompt and complete agent input together, then its response."
   {:malli/schema [:=> [:cat :seon.repl/entity-request] [:maybe :seon.render/hiccup]]}
   [unit]
   (let [emission (entity-emission unit)
-        answer (response emission)]
+        answer (response emission)
+        live (when answer (live-response unit emission))
+        producer (:seon.render.call/selected-producer live)
+        content (cond
+                  (:seon.error/kind live) [:pre (pr-str live)]
+                  producer (value/render-html-data live)
+                  live [:pre [:code {:class "seon-eval-response"}
+                              (pretty-response
+                               (response (assoc emission :seon.eval/shown
+                                                         (:seon.render.value/text live))))]]
+                  (and answer (:seon.eval/renderer emission))
+                  (into [:ul {:class "seon-eval-lines"}]
+                        (map #(vector :li %) (str/split-lines answer)))
+                  answer [:pre [:code {:class "seon-eval-response"}
+                                (pretty-response answer)]])]
     (when (seq (:seon.cluster.eval/source emission))
       (cond-> [:article {:class "seon-family-entry seon-eval-entry"}
                [:pre [:code {:class "seon-eval-prompt"} (input-text emission)]]]
-        answer (conj [:pre [:code {:class "seon-eval-response"} answer]])))))
+        answer (conj [:small {:class "seon-eval-renderer"}
+                      (str "AI: " (or (:seon.eval/renderer emission)
+                                       'seon.render.value/render-ai)
+                           " · HTML: " (or producer (when live 'seon.render.value/render-html)
+                                             'seon.repl/render-html)
+                           (when-not live " · saved text; live value unavailable"))]
+                     content)))))

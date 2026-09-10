@@ -1299,3 +1299,15 @@ output as the response, never wrapped in `#:seon.repl{:value …}`; values
 without a pair print through the value renderer inside the reply map.
 Rendered once at evaluation time into the stored shown text (§15).
 
+Owner refinement, 2026-09-10: the AI value projection introduces no
+display-width line breaks inside data. Renderer-authored meaningful lines
+remain (help, for example), and authored multiline source stays exact.
+HTML formats readable data at 100 columns and renders help as a list. Each
+entry identifies its response renderer. Every debug text surface uses
+`white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal` so
+long lines flow within the container without horizontal scrolling; this is
+a browser display rule and never rewrites stored shown text.
+
+Context now is always the primary debug view. Provider prompt comparison
+is always present in a collapsed details section; the `prompt` query flag
+is retired. This supersedes §14 and §16's flag-controlled display.

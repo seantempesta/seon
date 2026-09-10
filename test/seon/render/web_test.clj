@@ -575,7 +575,6 @@ handle))}}
   (let [request {:seon.render.debug/viewer-namespace 'my.viewer
                  :seon.render.debug/subject [:my/id "before"]
                  :seon.render/output :seon.render/ai
-                 :seon.render.debug/prompt? true
                  :seon.render.data/limit 17
                  :seon.render.data/max-ref-attributes 19
                  :seon.render.data/max-result-weight 23
@@ -599,7 +598,7 @@ handle))}}
       (is (str/starts-with? link-href "/ns/my.viewer/debug?")
           "navigation keeps the viewing namespace")
       (is (every? #(str/includes? link-href %)
-                  ["output=:seon.render/ai" "prompt=true" "limit=17"
+                  ["output=:seon.render/ai" "limit=17"
                    "maxRefAttributes=19" "maxResultWeight=23"
                    "maxWork=29"])
           "navigation preserves output and bounds and resets the value cursor")
@@ -2244,13 +2243,25 @@ handle))}}
                     start (str/index-of body "<h3>Context now</h3>")
                     end (when start (str/index-of body "</section>" start))
                     context (when end (subs body start end))
-                    rendered (mapv #(hiccup/->string (repl/render-html %)) entries)]
+                    inputs (mapv #(-> (repl/render-html %) (nth 2) hiccup/->string) entries)
+                    positions (reduce (fn [found input]
+                                        (conj found
+                                              (when context
+                                                (str/index-of context input
+                                                              (if-let [previous (peek found)]
+                                                                (inc previous) 0)))))
+                                      [] inputs)]
                 (is (= 200 (.statusCode response)))
                 (is (= basis (db/basis-t @connection)) "preview writes no facts")
                 (is (str/includes? body (str (count entries) " evaluations · continuing")))
                 (is (some? context))
-                (is (and context (str/includes? context (apply str rendered)))
-                    "Context now contains every saved entry in query order")
+                (is (and (every? some? positions) (apply <= positions))
+                    "Context now contains every saved input in query order")
+                (is (str/includes? body
+                                   (hiccup/->string
+                                    [:pre {:class "seon-debug-source"}
+                                     (str/join "\n\n" (map repl/render-ai entries))]))
+                    "The collapsed comparison preserves the exact saved AI entries")
                 (is (str/includes? body ":unchanged"))
                 (is (not (str/includes? body "<strong>:none</strong>"))
                     "the would-be system turn compares with runtime-owned reads")

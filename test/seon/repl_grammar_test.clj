@@ -10,6 +10,10 @@
             [seon.eval :as evaluation]
             [seon.repl :as repl]
             [seon.render.transcript :as transcript]
+            [seon.render.hiccup :as hiccup]
+            [seon.render :as render]
+            [seon.sci.eval :as sci.eval]
+            [seon.sci.admit :as admit]
             [seon.test-support :as support]
             [seon.turn :as turn]))
 
@@ -52,6 +56,26 @@
            (is (= 'seon.bootstrap/render-help-ai (:seon.eval/renderer saved)))
            (is (= expected-response (repl/response (repl/entity-emission saved))))
            (is (= expected (repl/render-ai saved)))
+           (let [agent-ctx (:seon.sci.eval/ctx
+                            (sci.eval/fork-for-turn
+                             {:seon.sci.eval/ctx ctx :seon.db/db @connection
+                              :seon.agent/id "juniper"}))
+                 instructions (bootstrap/help-value @connection "juniper")]
+             (sci.eval/bind-result! agent-ctx
+                                   (admit/result-handle (:seon.cluster.eval/id saved))
+                                   instructions)
+             (let [html (hiccup/->string
+                         (repl/render-html
+                          (assoc handle :seon.render/value saved
+                                        :seon.db/db @connection
+                                        :seon.sci.eval/time-limit-ms 10000
+                                        :seon.sci.eval/agent-ctx agent-ctx
+                                        :seon.render/profile (render/agent-render-profile (config/defaults)))))]
+               (is (str/includes? html "<ul class=\"seon-help\">"))
+               (is (= (count (:seon.help/lines instructions))
+                      (count (re-seq #"<li>" html))))
+               (is (str/includes? html "seon.bootstrap/render-help-html"))
+               (is (not (str/includes? html "live value unavailable")))))
            (is (= expected
                   (:seon.render.history/bytes
                    (first (transcript/history-entries

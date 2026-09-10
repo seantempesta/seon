@@ -54,11 +54,9 @@
                                :where [?cost :seon.render.cost/estimated-tokens _ ?tx]
                                       [(> ?tx ?basis)]]
                              @connection (db/basis-t (:seon.db/db request)))]
-             (is (< 1 (count costs)) "the cold context records multiple render costs")
-             (is (= 1 (count (set (map second costs))))
-                 "all costs cross the writer in one transaction"))
+             (is (empty? costs) "saved history writes no new render costs"))
            (is (identical? (render/shared-cache ctx) (render/shared-cache ctx)))
-           (is (seq (:seon.render.web/ai-calls @(render/shared-cache ctx))))
+           (is (nil? (:seon.render.web/ai-calls @(render/shared-cache ctx))))
            (is (seq (:seon.render.web/calls @(render/shared-cache ctx))))))))))
 
 (deftest adoption-invalidates-pages-with-an-unchanged-sci-snapshot
@@ -77,17 +75,18 @@
            (is (= 200 (.statusCode before)))
            (is (pos? initial) "the real SCI renderer ran")
            (is (= initial @calls) "the unchanged page reuses its calls")
-           (db/transact! connection
-                         [{:seon.cluster/name "web-test"
-                           :seon.source/commit-id
-                           #uuid "f54229d7-54eb-472d-9ae8-917a0f97af71"}])
+           (let [report (db/transact! connection
+                          [[:db/add [:seon.cluster/name "web-test"]
+                            :seon.source/commit-id
+                            #uuid "f54229d7-54eb-472d-9ae8-917a0f97af71"]])]
+             (is (:db-after report) (pr-str report)))
            (let [after (#'web-test/fetch server "/agent/root/debug")]
              (is (identical? snapshot @(:seon.sci.kernel/program-snapshot ctx)))
              (is (= 200 (.statusCode after)))
              (is (< initial @calls)
                  "adoption invalidates even without a proc wake or SCI snapshot replacement"))))))))
 
-(deftest the-context-algorithm-runs-only-when-requested
+(deftest the-context-algorithm-is-primary-with-a-collapsed-comparison
   (#'web-test/with-server
    (fn [_connection server _context]
      (let [derive @#'web/debug-prompt
@@ -97,9 +96,13 @@
          (fn []
            (let [ordinary (#'web-test/fetch server "/agent/root/debug")]
              (is (= 200 (.statusCode ordinary)))
-             (is (zero? @calls))
-             (is (str/includes? (.body ordinary) "Inspect context algorithm"))
-             (is (not (str/includes? (.body ordinary) "Context now"))))
+             (is (pos? @calls))
+             (is (not (str/includes? (.body ordinary) "prompt=")))
+             (is (str/includes? (.body ordinary) "Context now"))
+             (is (< (str/index-of (.body ordinary) "Context now")
+                    (str/index-of (.body ordinary) "Entity attributes and connections")))
+             (is (str/includes? (.body ordinary)
+                                "<details class=\"seon-debug-provider-prompt\"><summary>Provider prompt comparison</summary>")))
            (let [explicit (#'web-test/fetch server "/agent/root/debug?prompt=true")]
              (is (= 200 (.statusCode explicit)))
              (is (pos? @calls))
@@ -114,8 +117,7 @@
            calls (atom 0)]
        (with-redefs [kernel/invoke
                      (fn [request]
-                       (when (#{"seon.cluster.agent/render-identity-ai"
-                                "seon.cluster.agent/render-identity-html"}
+                       (when (#{"seon.cluster.agent/render-identity-html"}
                               (str (:seon.fn/sym request)))
                          (swap! calls inc))
                        (invoke request))]

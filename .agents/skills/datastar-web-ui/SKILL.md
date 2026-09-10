@@ -41,7 +41,7 @@ There is no separate teaching-prose mechanism.
 The evaluation schema declares `seon.repl/render-ai` and
 `seon.repl/render-html`; the walk renders evaluations in order
 through that pair. The current entry points are
-`src/seon/repl.clj:315` and `:323`; `text` at `:246`
+`src/seon/repl.clj:233` and `:266`; `text` at `:166`
 owns the REPL grammar. Do not mistake these existing entry points
 for proof that §15 storage has landed.
 
@@ -63,9 +63,12 @@ read form's latest evaluation, including agent-written reads.
 Writes and effects never rerun. Passive browser render work cannot
 append evaluations.
 
-The debug invocation cache holds previews in memory.
-`?prompt=true` projects stored history plus the would-be system
-turn without writing. Compaction wipes evaluations and regenerates
+The debug invocation cache holds previews in memory. Context now is always
+primary; the collapsed Provider prompt comparison contains stored history
+and the would-be system turn without writing (`src/seon/render/web.clj`,
+`debug-ai-html` and `debug-response`). Debug text wraps in CSS; AI bytes do
+not acquire display-width breaks (`src/seon/render/value.clj`, `prepare`).
+Compaction wipes evaluations and regenerates
 the opening. Do not preserve manual Add/remove/curation controls
 as a second context mechanism.
 

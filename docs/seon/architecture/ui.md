@@ -62,9 +62,10 @@ evidence changed. The since-query algorithm covers every distinct read
 form, generated or agent-written; it never repeats writes or effects.
 Passive page rendering does not append history.
 
-The debug invocation cache holds previews in memory. An explicit
-`?prompt=true` request previews stored evaluations plus the would-be
-system turn without writing. Compaction wipes the agent's evaluations;
+The debug invocation cache holds previews in memory. Context now is always
+the primary view. A collapsed Provider prompt comparison shows stored AI
+bytes plus the would-be system turn without writing; no query flag selects
+it. Compaction wipes the agent's evaluations;
 the next system turn regenerates the opening. There is no manual
 Add/remove/revision/proof/adoption path for editing context.
 
