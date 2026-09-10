@@ -5,7 +5,7 @@
   [:seon.turn/id :seon.turn/id]
   [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
   [:seon.cluster.eval/source :seon.cluster.eval/source]
-  [:seon.eval/value :seon.eval/value]
+  [:seon.eval/shown :seon.eval/shown]
   [:seon.eval.drive/value :seon.eval.drive/value]
   [:seon.cluster.eval/error :seon.cluster.eval/error]
   [:seon.error/kind :seon.error/kind]

@@ -144,7 +144,7 @@
             :in $ ?run-id
             :where
             [?run :seon.turn/id ?run-id]
-            [?run :seon.turn/closed-at ?closed-at]]
+            [?run :seon.turn/closed-tx ?closed-at]]
           db (bootstrap/run-id agent-id)))))
 
 (defn- write-source!
@@ -1467,7 +1467,7 @@
                  (pr-str claim)))
         (try
           (db/transact! (:seon.boot/cluster-connection instance)
-                        [{:seon.cluster.message/id "history-refork-destroys"}])
+                        [{:seon.message/id "history-refork-destroys"}])
           (let [result (operator/refork!
                         {:seon.operator/repository-root repository-root
                          :seon.operator/managed-root managed-root
@@ -1486,7 +1486,7 @@
                 (is (nil?
                      (db/q '[:find ?message .
                              :where
-                             [?message :seon.cluster.message/id
+                             [?message :seon.message/id
                               "history-refork-destroys"]]
                            @(:seon.boot/cluster-connection replacement)))
                     "the destroyed branch's data must not survive")
@@ -1649,9 +1649,9 @@
           (let [database @connection
                 run (db/pull database
                              '[:seon.turn/id
-                               :seon.turn/closed-at
+                               :seon.turn/closed-tx
                                {:seon.turn/trigger
-                                [:seon.cluster.message/id]}]
+                                [:seon.message/id]}]
                              [:seon.turn/id run-id])
                 ordinals
                 (db/q {:query
@@ -1669,19 +1669,19 @@
                               :where [_ :seon.error/kind ?kind]]
                             database))]
             (is (= run-id (:seon.turn/id run)))
-            (is (nil? (:seon.turn/closed-at run)))
-            (is (= (bootstrap/task-message-id "root")
+            (is (nil? (:seon.turn/closed-tx run)))
+            (is (= (bootstrap/task-message-id database "root")
                    (get-in run [:seon.turn/trigger
-                                :seon.cluster.message/id])))
+                                :seon.message/id])))
             (is (= [0 1] (vec (take 2 (sort ordinals)))))
             (is (= [run-id]
                    (db/q '[:find [?run-id ...]
                            :in $ ?trigger-id
                            :where
-                           [?trigger :seon.cluster.message/id ?trigger-id]
+                           [?trigger :seon.message/id ?trigger-id]
                            [?run :seon.turn/trigger ?trigger]
                            [?run :seon.turn/id ?run-id]]
-                         database (bootstrap/task-message-id "root"))))
+                         database (bootstrap/task-message-id database "root"))))
             (is (not (contains? error-kinds
                                 :seon.bootstrap/prefix-drift)))
             (is (not (contains? error-kinds
@@ -1725,16 +1725,9 @@
         ;; 2026-08-08: `945f3226` closed by recovery with no marker
         ;; anywhere durable, so the honesty claim died with its JVM)
         (db/transact! connection
-                    [{:seon.turn/id "run-clean"
-                      :seon.turn/agent [:seon.agent/id "bob"]
-                      :seon.turn/opened-at now
-                      :seon.turn/closed-at now}])
+                    [{:seon.turn/id "run-clean" :seon.turn/agent [:seon.agent/id "bob"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}])
         (db/transact! connection
-                    [{:seon.turn/id "run-crashed"
-                      :seon.turn/agent [:seon.agent/id "alice"]
-                      :seon.turn/opened-at now
-
-                      :seon.turn/plan-digest (apply str (repeat 64 "a"))}
+                    [{:seon.turn/id "run-crashed" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/opened-tx "datomic.tx"}
                      {:seon.agent/id "alice"
                       }
                      ;; dangling = started with no terminal fact —
@@ -1761,13 +1754,13 @@
           (testing "and the run is CLOSED with its plan intact —
                     recovery ends custody and no plan form can execute"
             (is (some? (db/q (quote [:find ?c . :where
-                                    [_ :seon.turn/closed-at ?c]])
+                                    [_ :seon.turn/closed-tx ?c]])
                             @connection)))
             (is (some? (db/q (quote [:find ?d . :where
-                                    [_ :seon.turn/plan-digest ?d]])
+                                    [_ :seon.turn/reply-size ?d]])
                             @connection))))
           (testing "boot closes the interrupted turn and preserves the clean turn"
-            (is (inst? (:seon.turn/closed-at
+            (is (inst? (:seon.turn/closed-tx
                         (db/pull @connection '[*]
                                  [:seon.turn/id "run-crashed"]))))
             (is (str/includes?

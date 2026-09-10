@@ -1,32 +1,13 @@
-#:seon.problems{:author :seon.agent/id,
-                :deferred-agent
-                [:map
-                 [:seon.agent/id :seon.agent/id]
-                 [:seon.turn.work/episode-runs
-                  :seon.turn.work/episode-runs]
-                 [:seon.problems/deferred-count [:int {:min 1}]]],
-                :error-signature
-                [:map
-                 [:seon.error/signature :seon.error/signature]
-                 [:seon.error/kind :seon.error/kind]
-                 [:seon.problems/occurrences
-                  :seon.problems/occurrences]
-                 [:seon.error/fact :seon.error/fact]],
-                :errored-receipt
+#:seon.problems{:errored-receipt
                 [:map
                  [:seon.cluster.eval/id :seon.cluster.eval/id]
                  [:seon.turn/id :seon.turn/id]
                  [:seon.cluster.eval/ordinal
                   :seon.cluster.eval/ordinal]
-                 [:seon.cluster.eval/source
-                  :seon.cluster.eval/source]
+                 [:seon.cluster.eval/source :seon.cluster.eval/source]
                  [:seon.error/kind :seon.error/kind]
                  [:seon.cluster.eval/error :seon.cluster.eval/error]],
-                :failed-run
-                [:map
-                 [:seon.turn/id :seon.turn/id]
-                 [:seon.agent/id :seon.agent/id]
-                 [:seon.turn/error :seon.turn/error]],
+                :id [:string {:min 1, :seon.db/identity true}],
                 :form-problem
                 [:map
                  [:seon.problems/id :seon.problems/id]
@@ -34,12 +15,54 @@
                  [:seon.turn/id :seon.turn/id]
                  [:seon.cluster.eval/ordinal
                   :seon.cluster.eval/ordinal]
-                 [:seon.cluster.eval/source
-                  :seon.cluster.eval/source]
+                 [:seon.cluster.eval/source :seon.cluster.eval/source]
                  [:seon.agent/id :seon.agent/id]
                  [:seon.problems/author :seon.agent/id]
                  [:seon.error/kind :seon.error/kind]
                  [:seon.cluster.eval/error :seon.cluster.eval/error]],
+                :evaluation-failed-error
+                [:map
+                 {:seon.error/class true,
+                  :seon.render/ai seon.error/render-ai,
+                  :seon.render/html seon.error/render-html,
+                  :error/message
+                  "must mark a routed form whose evaluation failed"}
+                 [:seon.problems/evaluation-failed
+                  :seon.problems/evaluation-failed]
+                 [:seon.error/message :seon.error/message]],
+                :unowned-namespace
+                [:map [:seon.ns/name :seon.ns/name]],
+                :unbound-var-error
+                [:map
+                 {:seon.error/class true,
+                  :seon.render/ai seon.error/render-ai,
+                  :seon.render/html seon.error/render-html,
+                  :error/message
+                  "must identify the unbound var referenced by a failed form"}
+                 [:seon.problems/unbound-var
+                  :seon.problems/unbound-var]
+                 [:seon.error/message :seon.error/message]],
+                :evaluation-failed [:= true],
+                :missing-model
+                [:map
+                 #:seon.render{:ai seon.problems/missing-model-ai,
+                               :html seon.problems/missing-model-html}
+                 [:seon.config.ai/model :seon.config.ai/model]],
+                :failed-run
+                [:map
+                 [:seon.turn/id :seon.turn/id]
+                 [:seon.agent/id :seon.agent/id]],
+                :stale-var
+                [:map
+                 #:seon.render{:ai seon.problems/stale-var-ai,
+                               :html seon.problems/stale-var-html}
+                 [:seon.fn/sym :seon.fn/sym]],
+                :deferred-agent
+                [:map
+                 [:seon.agent/id :seon.agent/id]
+                 [:seon.turn.work/episode-runs
+                  :seon.turn.work/episode-runs]
+                 [:seon.problems/deferred-count [:int {:min 1}]]],
                 :form-problem-request
                 [:map
                  [:seon.turn/id :seon.turn/id]
@@ -47,8 +70,8 @@
                   :seon.cluster.eval/ordinal]
                  [:seon.sci.eval/evaluation
                   :seon.sci.eval/evaluation]],
-                :id [:string {:min 1, :seon.db/identity true}],
-                :occurrences [:int {:min 1}],
+                :request [:map],
+                :unbound-var :seon.fn/sym,
                 :problems
                 [:map
                  #:seon.render{:ai seon.problems/ai-prose,
@@ -56,7 +79,6 @@
                  [:seon.problems/error-signatures
                   {:optional true}
                   [:vector :seon.problems/error-signature]]
-
                  [:seon.problems/failed-runs
                   {:optional true}
                   [:vector :seon.problems/failed-run]]
@@ -75,22 +97,12 @@
                  [:seon.problems/missing-models
                   {:optional true}
                   [:vector :seon.problems/missing-model]]],
-                :request
+                :error-signature
                 [:map
-                 ],
-                :unowned-namespace
-                [:map [:seon.ns/name :seon.ns/name]],
-                :stale-var
-                [:map
-                 #:seon.render{:ai seon.problems/stale-var-ai,
-                               :html seon.problems/stale-var-html}
-                 [:seon.fn/sym :seon.fn/sym]],
-                :missing-model
-                [:map
-                 #:seon.render{:ai seon.problems/missing-model-ai,
-                               :html seon.problems/missing-model-html}
-                 [:seon.config.ai/model :seon.config.ai/model]],
-                :unbound-var :seon.fn/sym
-                :unbound-var-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the unbound var referenced by a failed form"} [:seon.problems/unbound-var :seon.problems/unbound-var] [:seon.error/message :seon.error/message]]
-                :evaluation-failed [:= true]
-                :evaluation-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a routed form whose evaluation failed"} [:seon.problems/evaluation-failed :seon.problems/evaluation-failed] [:seon.error/message :seon.error/message]]}
+                 [:seon.error/signature :seon.error/signature]
+                 [:seon.error/kind :seon.error/kind]
+                 [:seon.problems/occurrences
+                  :seon.problems/occurrences]
+                 [:seon.error/fact :seon.error/fact]],
+                :occurrences [:int {:min 1}],
+                :author :seon.agent/id}

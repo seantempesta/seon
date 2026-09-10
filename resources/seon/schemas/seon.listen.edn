@@ -1,0 +1,8 @@
+#:seon.listen{:attribute [:qualified-keyword {:description "The indexed attribute this pattern listens to."}]
+              :entity [:and {:description "Optional entity constraint; absent matches any entity."} :seon.db/ref]
+              :value [:or {:description "Optional logical datom value constraint, encoded by the schema bridge's ordinary EDN union codec."}
+                      :seon.schema/value [:= []]]
+              :pattern [:map {:seon.db/attributes true}
+                        [:seon.listen/attribute :seon.listen/attribute]
+                        [:seon.listen/entity {:optional true} :seon.listen/entity]
+                        [:seon.listen/value {:optional true} :seon.listen/value]]}

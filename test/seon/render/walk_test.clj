@@ -37,9 +37,7 @@
    [{:seon.ns/name agent-namespace}
     {:seon.agent/id agent-id
      :seon.agent/namespace [:seon.ns/name agent-namespace]}
-    {:seon.turn/id "render-walk-run"
-     :seon.turn/agent [:seon.agent/id agent-id]
-     :seon.turn/opened-at (at 0)}
+    {:seon.turn/id "render-walk-run" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
     {:seon.cluster.eval/id "render-walk-eval"
      :seon.cluster.eval/run [:seon.turn/id "render-walk-run"]
      :seon.cluster.eval/ordinal 0

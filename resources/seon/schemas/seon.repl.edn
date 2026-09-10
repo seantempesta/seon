@@ -1,91 +1,10 @@
-#:seon.repl{:entity-request
-            [:or :seon.render/unit :seon.eval/entity
-             [:map [:seon.render/value :seon.eval/entity]]],
-            :value
-            [:string
-             {:description
-              "The exact shown text from evaluation-time rendering. Historical responses preserve these bytes without decoding an object or applying another profile."}],
-            :error
-            [:string
-             {:description
-              "Saved shown text for a returned flat error, or Clojure's concise throwable text from recorded ex-triage data. Exactly one of :seon.repl/value and :seon.repl/error is present."}],
-            :result
-            [:string
-             {:min 1,
-              :description
-              "The bound handle for this evaluation's value as text, result/e<entity-id>, so a later turn in the same agent's session can reach the value it already produced. Present exactly when :seon.repl/handle is."}],
-            :handle
-            [:qualified-symbol
-             {:description
-              "The symbol bound directly to the evaluation's actual result in its agent's live SCI context. Stored shown text names the historical handle; restarting loses the object, and a preview without an evaluation identity has no handle."}],
-            :out
-            [:string
-             {:description
-              "Everything one evaluation printed to its output, exactly as it printed it, separate from its result."}],
-            :ns
-            [:string
-             {:min 1,
-              :description
-              "The namespace one evaluation left in effect, present only when the form changed it — the next prompt line already says which namespace it is in."}],
-            :note
-            [:string
-             {:description
-              "The one-sentence note every top-level def earns (owner, 2026-09-08): the var lives only in the agent's SCI context and is never persisted; functions, schemas, tests, and transacted data are what persist."}],
+#:seon.repl{:comment [:string {:min 1}],
+            :subject :seon.render.walk/lookup,
             :interrupted
             [:string
              {:min 1,
               :description
               "The instant boot cut one evaluation, as the readable #inst the one print grammar renders every other instant as. Present exactly when the evaluation carries :seon.cluster.eval/interrupted-at, so an evaluation that was interrupted never reads in the agent's own history like one that is still running."}],
-            :ms
-            [:string
-             {:description
-              "The wall-clock milliseconds one evaluation took, as seon.eval/duration-ms recorded it."}],
-            :response
-            [:map
-             {:description
-              "The REPL's one answer to one evaluated form, emitted in exactly this key order by seon.repl/response. The agent is never asked to write one; every key is absent when the evaluation has nothing to say for it."}
-             [:seon.repl/value {:optional true} :seon.repl/value]
-             [:seon.repl/error {:optional true} :seon.repl/error]
-             [:seon.repl/interrupted {:optional true} :seon.repl/interrupted]
-             [:seon.repl/result {:optional true} :seon.repl/result]
-             [:seon.repl/out {:optional true} :seon.repl/out]
-             [:seon.repl/ns {:optional true} :seon.repl/ns]
-             [:seon.repl/ms {:optional true} :seon.repl/ms]
-             [:seon.repl/note {:optional true} :seon.repl/note]],
-            :emission
-            [:map
-             {:description
-              "One evaluation as seon.repl/text renders it: the agent's comment and the fixed source it wrote, the namespace the prompt line names, and whatever terminal facts the evaluation has settled. The stored evaluation entity satisfies this directly; a caller that already bounded the value supplies its printed text as :seon.repl/value instead of the stored :seon.eval/value. The source is OPTIONAL so that a unit which is not an evaluation at all refuses through seon.repl/render-ai's own guard instead of raising a contract violation that takes the whole page derivation with it (law 2.4)."}
-             [:seon.cluster.eval/source {:optional true}
-              :seon.cluster.eval/source]
-             [:seon.cluster.eval/id {:optional true} :seon.cluster.eval/id]
-             [:seon.ns/name {:optional true} :seon.ns/name]
-             [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]
-             [:seon.cluster.eval/ordinal {:optional true} :seon.cluster.eval/ordinal]
-             [:seon.eval/value {:optional true} :seon.eval/value]
-             [:seon.eval/missing {:optional true} :seon.eval/missing]
-             [:seon.eval/size {:optional true} :seon.eval/size]
-             [:seon.cluster.eval/error {:optional true} :seon.cluster.eval/error]
-             [:seon.cluster.eval/interrupted-at {:optional true}
-              :seon.cluster.eval/interrupted-at]
-             [:seon.cluster.eval/triage-edn {:optional true} :seon.cluster.eval/triage-edn]
-             [:seon.cluster.eval/output {:optional true} :seon.cluster.eval/output]
-             [:seon.sci.eval/ending-ns {:optional true} :seon.sci.eval/ending-ns]
-             [:seon.eval/duration-ms {:optional true} :seon.eval/duration-ms]
-             [:seon.repl/value {:optional true} :seon.repl/value]
-             [:seon.print/length {:optional true} :seon.print/length]
-             [:seon.print/level {:optional true} :seon.print/level]
-             [:seon.print/options {:optional true} :seon.print/options]
-             [:seon.repl/handle {:optional true} :seon.repl/handle]],
-:comment [:string {:min 1}],
-            :expression
-            [:or
-             :qualified-symbol
-             [:fn
-              {:error/message "must be a Clojure list form"
-               :gen/schema [:enum (help) (dir (quote clojure.core))]}
-              clojure.core/seq?]],
-            :form :seon.repl/expression,
             :entry
             [:map
              [:seon.repl/comment {:optional true} :seon.repl/comment]
@@ -94,21 +13,36 @@
              [:seon.repl/subject
               {:optional true}
               :seon.render.walk/lookup]],
-            :entries [:vector {:min 1} :seon.repl/entry],
-            :key :seon.schema/value,
-            :subject :seon.render.walk/lookup,
-            :candidate
-            [:map
-             [:seon.repl/key :seon.repl/key]
-             [:seon.repl/subject :seon.repl/subject]
-             [:seon.repl/entry :seon.repl/entry]],
+            :note
+            [:string
+             {:description
+              "The one-sentence note every top-level def earns (owner, 2026-09-08): the var lives only in the agent's SCI context and is never persisted; functions, schemas, tests, and transacted data are what persist."}],
+            :error
+            [:string
+             {:description
+              "Saved shown text for a returned flat error, or Clojure's concise throwable text from recorded ex-triage data. Exactly one of :seon.repl/value and :seon.repl/error is present."}],
             :settled
             [:map
              [:seon.repl/key :seon.repl/key]
-             [:seon.eval/value {:optional true} :seon.eval/value]
+             [:seon.eval/shown {:optional true} :seon.eval/shown]
              [:seon.cluster.eval/output {:optional true} :string]
              [:seon.cluster.eval/error {:optional true} :string]
-             [:seon.sci.admit/print-node {:optional true} :seon.schema/value]],
+             [:seon.sci.admit/print-node
+              {:optional true}
+              :seon.schema/value]],
+            :value
+            [:string
+             {:description
+              "The exact shown text from evaluation-time rendering. Historical responses preserve these bytes without decoding an object or applying another profile."}],
+            :out
+            [:string
+             {:description
+              "Everything one evaluation printed to its output, exactly as it printed it, separate from its result."}],
+            :entity-request
+            [:or
+             :seon.render/unit
+             :seon.eval/entity
+             [:map [:seon.render/value :seon.eval/entity]]],
             :pull-result
             [:map
              [:seon.repl/root-key :seon.repl/key]
@@ -117,6 +51,94 @@
              [:seon.print/identity-attributes
               :seon.print/identity-attributes]],
             :episode [:vector :seon.repl/entry],
-            :root-key :seon.repl/key,
+            :result
+            [:string
+             {:min 1,
+              :description
+              "The bound handle for this evaluation's value as text, result/e<entity-id>, so a later turn in the same agent's session can reach the value it already produced. Present exactly when :seon.repl/handle is."}],
+            :candidate
+            [:map
+             [:seon.repl/key :seon.repl/key]
+             [:seon.repl/subject :seon.repl/subject]
+             [:seon.repl/entry :seon.repl/entry]],
+            :entries [:vector {:min 1} :seon.repl/entry],
+            :emission
+            [:map
+             {:description
+              "One evaluation as seon.repl/text renders it: the agent's comment and the fixed source it wrote, the namespace the prompt line names, and whatever terminal facts the evaluation has settled. The stored evaluation entity satisfies this directly; a caller that already bounded the value supplies its printed text as :seon.repl/value instead of the stored :seon.eval/shown. The source is OPTIONAL so that a unit which is not an evaluation at all refuses through seon.repl/render-ai's own guard instead of raising a contract violation that takes the whole page derivation with it (law 2.4)."}
+             [:seon.cluster.eval/source
+              {:optional true}
+              :seon.cluster.eval/source]
+             [:seon.cluster.eval/id
+              {:optional true}
+              :seon.cluster.eval/id]
+             [:seon.ns/name {:optional true} :seon.ns/name]
+             [:seon.cluster.eval/comment
+              {:optional true}
+              :seon.cluster.eval/comment]
+             [:seon.cluster.eval/ordinal
+              {:optional true}
+              :seon.cluster.eval/ordinal]
+             [:seon.eval/shown {:optional true} :seon.eval/shown]
+             [:seon.cluster.eval/error
+              {:optional true}
+              :seon.cluster.eval/error]
+             [:seon.cluster.eval/interrupted-at
+              {:optional true}
+              :seon.cluster.eval/interrupted-at]
+             [:seon.cluster.eval/triage-edn
+              {:optional true}
+              :seon.cluster.eval/triage-edn]
+             [:seon.cluster.eval/output
+              {:optional true}
+              :seon.cluster.eval/output]
+             [:seon.sci.eval/ending-ns
+              {:optional true}
+              :seon.sci.eval/ending-ns]
+             [:seon.eval/duration-ms
+              {:optional true}
+              :seon.eval/duration-ms]
+             [:seon.repl/value {:optional true} :seon.repl/value]
+             [:seon.print/length {:optional true} :seon.print/length]
+             [:seon.print/level {:optional true} :seon.print/level]
+             [:seon.print/options {:optional true} :seon.print/options]
+             [:seon.repl/handle {:optional true} :seon.repl/handle]],
+            :response
+            [:map
+             {:description
+              "The REPL's one answer to one evaluated form, emitted in exactly this key order by seon.repl/response. The agent is never asked to write one; every key is absent when the evaluation has nothing to say for it."}
+             [:seon.repl/value {:optional true} :seon.repl/value]
+             [:seon.repl/error {:optional true} :seon.repl/error]
+             [:seon.repl/interrupted
+              {:optional true}
+              :seon.repl/interrupted]
+             [:seon.repl/result {:optional true} :seon.repl/result]
+             [:seon.repl/out {:optional true} :seon.repl/out]
+             [:seon.repl/ns {:optional true} :seon.repl/ns]
+             [:seon.repl/ms {:optional true} :seon.repl/ms]
+             [:seon.repl/note {:optional true} :seon.repl/note]],
             :candidates [:vector :seon.repl/candidate],
-            :settled-entries [:vector :seon.repl/settled]}
+            :ns
+            [:string
+             {:min 1,
+              :description
+              "The namespace one evaluation left in effect, present only when the form changed it — the next prompt line already says which namespace it is in."}],
+            :form :seon.repl/expression,
+            :root-key :seon.repl/key,
+            :ms
+            [:string
+             {:description
+              "The wall-clock milliseconds one evaluation took, as seon.eval/duration-ms recorded it."}],
+            :expression
+            [:or
+             :qualified-symbol
+             [:fn
+              {:error/message "must be a Clojure list form",
+               :gen/schema [:enum (help) (dir 'clojure.core)]}
+              clojure.core/seq?]],
+            :settled-entries [:vector :seon.repl/settled],
+            :key :seon.schema/value,
+            :handle
+            [:qualified-symbol
+             {:description
+              "The symbol bound directly to the evaluation's actual result in its agent's live SCI context. Stored shown text names the historical handle; restarting loses the object, and a preview without an evaluation identity has no handle."}]}

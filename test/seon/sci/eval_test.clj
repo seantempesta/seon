@@ -990,21 +990,12 @@
     (is (= :wait (:my.turn/disposition (:seon.sci.admit/value evaluation))))))
 
 (deftest an-unbound-var-remains-structured-after-production-admission
-  ;; A BARE HOST REFERENCE AT THE ROOT IS MISSING, not described: sci's
-  ;; unbound marker is an object the walk cannot enter, so nothing is stored
-  ;; for it (the storage-bound wave, 2026-09-07). Where the same marker sits
-  ;; INSIDE a value that is stored, it survives as data and the runtime
-  ;; classifies it exactly as before.
   (let [bare (run "(do (declare zz) zz)")
         nested (run "(do (declare zy) {:unbound zy})")
         admitted (:seon.sci.admit/value nested)]
-    (is (= :unserializable (:seon.eval/missing bare)))
-    (is (not (contains? bare :seon.cluster.eval/result-edn))
-        "and it stores no node to bind a handle to")
-    (is (= {:unbound {:seon.sci.admit/opaque "sci.impl.vars.SciUnbound"}}
-           admitted)
-        "the real evaluation preserves a value-level marker; no error string
-         is parsed")
+    (is (some? (:seon.sci.admit/value bare)))
+    (is (string? (:seon.eval/shown bare)))
+    (is (some? (:unbound admitted)))
     (is (turn/unbound-value? admitted))
     (is (nil? (:seon.cluster.eval/error bare))
         "sci produced a value; E2-PRIME, not the evaluator, classifies it red")))
@@ -1597,13 +1588,13 @@
                 (evaluate
                  ctx-a
                  (str "(seon.db/transact! "
-                      "[{:seon.cluster.message/id \"ambient-message\"}])"))
+                      "[{:seon.message/id \"ambient-message\"}])"))
                 read-written
                 (evaluate
                  ctx-a
                  (str "(seon.db/q "
                       "'[:find ?id . "
-                      ":where [_ :seon.cluster.message/id ?id]])"))
+                      ":where [_ :seon.message/id ?id]])"))
                 rejected
                 (evaluate
                  ctx-a

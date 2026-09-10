@@ -15,10 +15,7 @@
                 [{:seon.cluster/name "read-evidence"}
                  {:seon.agent/id "juniper"}
                  {:seon.agent/id "root"}
-                 {:seon.cluster.message/id "opening"
-                  :seon.cluster.message/to [:seon.agent/id "juniper"]
-                  :seon.cluster.message/at (java.util.Date. 0)
-                  :seon.cluster.message/content "Opening message"}]))))
+                 {:seon.message/id "opening" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "Opening message" :seon.message/inbox [:seon.agent/id "juniper"]}]))))
      (let [ctx (test-support/fork-cluster-ctx connection)
            captured (atom [])
            evaluation
@@ -45,7 +42,7 @@
        (is (= "Opening message"
               (get-in evaluation [:seon.sci.admit/value 0 :my.message/content]))
            (pr-str evaluation))
-       (is (some #(= {:seon.db/pattern-attribute :seon.cluster.message/to
+       (is (some #(= {:seon.db/pattern-attribute :seon.message/to
                       :seon.db/pattern-value juniper} %)
                  patterns)
            (pr-str evidence))
@@ -53,16 +50,13 @@
        (is (not (:seon.error/kind
                  (db/transact!
                   connection
-                  [{:seon.cluster.message/id "next"
-                    :seon.cluster.message/to [:seon.agent/id recipient]
-                    :seon.cluster.message/at (java.util.Date. 1)
-                    :seon.cluster.message/content "Next message"}]))))
+                  [{:seon.message/id "next" :seon.message/to [:seon.agent/id recipient] :seon.message/content "Next message" :seon.message/inbox [:seon.agent/id recipient]}]))))
        ;; Remove replay inputs as data: these assertions must be decided by
        ;; retained index evidence, without re-executing the inbox.
        (let [changes (db/read-evidence-changes @connection evidence basis)]
          (if (= recipient "root")
            (is (empty? changes) (pr-str changes))
-           (is (some #(and (= :seon.cluster.message/to (:a %))
+           (is (some #(and (= :seon.message/to (:a %))
                            (= juniper (:v %))) changes)
                (pr-str changes))))
        (db/read-evidence-current?

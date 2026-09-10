@@ -95,7 +95,6 @@
   [unit]
   (let [attempt (into (sorted-map-by #(compare (str %1) (str %2)))
                       (dissoc (:seon.render/value unit unit)
-                              :seon.ai.attempt/sent-body
                               :seon.ai.attempt/reasoning
                               :seon.ai.attempt/reasoning-blob
                               :seon.ai.attempt/reasoning-size))]
@@ -1003,16 +1002,15 @@
           (some-> (:seon.ai/usage observation)
                   normalize-usage
                   :seon.ai.usage/completion-tokens)]
-      [(cond->
-         {:seon.ai.model/id (:seon.ai.model/id observation)
-          :seon.ai.model/last-used-at
-          (:seon.ai.model/last-used-at observation)}
-         (some? latency-ms)
-         (assoc :seon.ai.model/last-latency-ms latency-ms)
-
-         (and (pos? (or latency-ms 0)) (some? completion-tokens))
-         (assoc :seon.ai.model/last-tokens-per-second
-                (/ (* 1000.0 completion-tokens) latency-ms)))])
+      (cond-> [[:db/add [:seon.ai.model/id (:seon.ai.model/id observation)]
+                 :seon.ai.model/last-used-at (:seon.ai.model/last-used-at observation)]]
+        (some? latency-ms)
+        (conj [:db/add [:seon.ai.model/id (:seon.ai.model/id observation)]
+               :seon.ai.model/last-latency-ms latency-ms])
+        (and (pos? (or latency-ms 0)) (some? completion-tokens))
+        (conj [:db/add [:seon.ai.model/id (:seon.ai.model/id observation)]
+               :seon.ai.model/last-tokens-per-second
+               (/ (* 1000.0 completion-tokens) latency-ms)])))
     []))
 
 (defn credential
@@ -1302,7 +1300,7 @@
            ;; Serialize once. This exact string is both what the JDK posts and
            ;; what the attempt records, so observability cannot rebuild a body
            ;; that differs from the transmitted bytes.
-           :seon.ai.attempt/sent-body (json/write-str body)}
+           :seon.ai.http/body (json/write-str body)}
     (:seon.ai/sink request)
     (assoc :seon.ai/sink (:seon.ai/sink request))))
 
@@ -1325,7 +1323,7 @@
 (defn- send-request
   "Send one ordinary request map through the JDK HTTP leaf."
   [{:keys [:seon.ai/endpoint :seon.ai/timeout-ms
-           :seon.ai.http/headers :seon.ai.attempt/sent-body]
+           :seon.ai.http/headers :seon.ai.http/body]
     stream? :seon.ai/stream?
     sink :seon.ai/sink}]
   (let [;; THE one deadline, and it is the HTTP client's own: a request
@@ -1337,7 +1335,7 @@
                          (.header request-builder name value))
                        builder
                        headers)
-            (.POST (HttpRequest$BodyPublishers/ofString sent-body))
+            (.POST (HttpRequest$BodyPublishers/ofString body))
             (.build))]
     (try
       ;; ONE attempt. Synchronous send on the calling thread — the
@@ -1487,8 +1485,6 @@
             request-data (http-request-data request key body)
             result (send-request request-data)]
         (assoc result
-               :seon.ai.attempt/sent-body
-               (:seon.ai.attempt/sent-body request-data)
                :seon.ai.model/last-latency-ms
                (long (/ (- (System/nanoTime) started) 1000000))))
 

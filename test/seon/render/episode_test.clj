@@ -12,14 +12,12 @@
                (db/transact!
                 connection
                 [{:seon.agent/id "episode-agent"}
-                 {:seon.turn/id "episode-turn"
-                  :seon.turn/agent [:seon.agent/id "episode-agent"]
-                  :seon.turn/opened-at (java.util.Date. 0)}
+                 {:seon.turn/id "episode-turn" :seon.turn/agent [:seon.agent/id "episode-agent"] :seon.turn/opened-tx "datomic.tx"}
                  {:seon.cluster.eval/id "episode-evaluation"
                   :seon.cluster.eval/run [:seon.turn/id "episode-turn"]
                   :seon.cluster.eval/ordinal 0
                   :seon.cluster.eval/source "(help)"
-                  :seon.eval/value "#object[clojure.lang.Atom 0x1 {:status :ready}]"
+                  :seon.eval/shown "#object[clojure.lang.Atom 0x1 {:status :ready}]"
                   :seon.cluster.eval/output "observed\n"}]))))
      (let [stored (first (evaluation/of-agent @connection "episode-agent"))
            candidate {:seon.repl/key :root

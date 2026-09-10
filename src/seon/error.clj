@@ -363,7 +363,7 @@
   "One admission under a declared bound, plus the marker when it kept nothing.
 
   A FAULT MAY NEVER FAIL TO BE RECORDED. An admission that answers with
-  `:seon.eval/missing` carries no print node and no bytes, and reading that
+  `:seon.sci.admit/reason` carries no print node and no bytes, and reading that
   absence as content crashed the fault committer itself (observed live,
   2026-09-07: `String.getBytes` on a null `result-edn`). The marker is a
   handful of bytes and always admits, so the durable fact says why instead of
@@ -478,8 +478,6 @@
                            (bounded-text message-value field-caps)
                            :seon.error/data-edn
                            (:seon.sci.admit/edn evidence))
-              (::marker evidence)
-              (merge (::marker evidence))
               expected
               (assoc :seon.instrument/expected
                      (bounded-text expected field-caps))
@@ -527,7 +525,7 @@
         ;; substitute's, and the marker's own reason is what says why.
         marker (::marker admitted)
         data-size (if marker
-                    (:seon.eval/size marker)
+                    (:seon.sci.admit/bytes marker)
                     (utf8-size full-edn))
         base-fact
         (cond-> {:seon.error/id id
@@ -569,7 +567,6 @@
                     ;; also answered with the marker, so both sides were the
                     ;; same handful of bytes (F1, 2026-09-07).
                     (boolean (or marker
-                                 (:seon.eval/missing fact)
                                  (not= full-edn
                                        (:seon.error/data-edn fact)))))]
     {:seon.error/fact fact
@@ -1002,17 +999,11 @@
   its ABSENCE on an ordinary user message is what makes the storm fence
   computable without a flag."
   [fact recipient reason notification]
-  {:seon.cluster.message/id
-   (id/digest 12 [::notification (:seon.error/id fact) recipient reason])
-   :seon.cluster.message/to [:seon.agent/id recipient]
-   :seon.cluster.message/content
-   (ai-prose
+  {:seon.message/id (id/id (random-uuid) 8) :seon.message/to [:seon.agent/id recipient] :seon.message/content (ai-prose
     (notice (merge {:seon.error/fact fact
                     :seon.error/reason reason
                     :seon.agent/id recipient}
-                   notification)))
-   :seon.cluster.message/at (:seon.error/at fact)
-   :seon.cluster.message/about (fact-tempid (:seon.error/id fact))})
+                   notification))) :seon.message/about (fact-tempid (:seon.error/id fact)) :seon.message/inbox [:seon.agent/id recipient]})
 
 (defn steward-call
   "Route one fault to the steward of the failing function's namespace.
@@ -1058,7 +1049,7 @@
   never both ways — and it is why the whole escalation rule is testable
   against an in-memory database value with no cluster at all.
 
-  DELIVERY IS THE EXISTING WAKE. `:seon.cluster.message/to` is the wake
+  DELIVERY IS THE EXISTING WAKE. `:seon.message/to` is the wake
   attribute, so committing an explanation message wakes that agent's
   loop by construction: no notification queue, no acknowledgement flag,
   no second channel.
@@ -1098,7 +1089,7 @@
   cluster: one injected throw in the loop's transform produced six
   faults in 1.5 s, because committing the explanation message is a
   commit, a commit wakes the loop through
-  `:seon.cluster.message/to`, and the woken loop hit the same broken
+  `:seon.message/to`, and the woken loop hit the same broken
   code. Delivery being the wake attribute is exactly what makes error
   delivery free — and exactly what makes an unbounded error path a
   self-feeding fire. A fault now ALSO routes to the steward of the

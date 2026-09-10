@@ -1,0 +1,92 @@
+;; I should understand how this REPL works before I act.
+my.agents.juniper=> (help)
+#:seon.repl{:value The prompt shows your namespace my.agents.juniper and is drawn for you. Send only ;; thinking comments and forms.
+Results are data: chain them with ->>, sort-by, filter, map, and get-in. Every function in the program is callable.
+Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work.
+Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value.
+result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys.
+When unsure, inspect data first: (dir my.agents.juniper) lists your namespace's public functions and schema declarations; (doc seon.db/q) returns its docstring and contract.
+Your plan is your instructions. Read its current step and completion criterion before acting; mark it complete only after seeing the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it.
+Read incoming messages with a reverse-ref pull on your agent. (my.message/send {:my.message/to "root" :my.message/content "..."}) sends; sending does not end your turn. Remove an entity and its incoming refs with (seon.db/transact! [[:db.fn/retractEntity lookup-ref]]); retract removes only the named fact.
+Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.message/_inbox; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied.
+A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours.
+A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value "datomic.tx" names this write, for example (seon.db/transact! [{:my.note/id "observation" :my.note/agent [:seon.agent/id "juniper"] :my.note/content "Verified" :my.note/about "datomic.tx"}]); pull :db/txInstant through that ref.
+Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) ends your session early.
+Tools: my.agent, my.background, my.edit, my.fs, my.message, my.note, my.plan, my.shell, my.test, my.turn, my.web. Inspect one with dir., :result result/eb6fef37c5252, :ms 508}
+
+;; I should know my identity, namespace, and its steward.
+my.agents.juniper=> (seon.db/pull
+  '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]
+  [:seon.agent/id "juniper"])
+#:seon.repl{:value #:seon.agent{:id "juniper", :namespace #:seon.ns{:name my.agents.juniper,
+    :steward #:seon.agent{:id "juniper"}}}, :result result/eae9b233ee5c4, :ms 8}
+
+;; I should pull the plan component; its set is shown in position order, and get with a default could hide a refusal.
+my.agents.juniper=> (seon.db/pull
+  '[{:seon.agent/plan
+     [:my.plan/objective
+      {:my.plan/current-step [:my.plan.item/id]}
+      {:my.plan/steps
+       [:my.plan.item/id
+        :my.plan.item/title
+        :my.plan.item/done-when
+        :my.plan.item/position
+        {:my.plan.item/completed-tx [:db/txInstant]}
+        {:my.plan.item/needs [:my.plan.item/id]}
+        {:my.plan.item/steps ...}]}]}]
+  [:seon.agent/id "juniper"])
+#:seon.repl{:value #:seon.agent{:plan #:my.plan{:current-step #:my.plan.item{:id "juniper/query"},
+    :objective "Which customer has the largest total? Add an order of 40 for them and tell me the new total.",
+    :steps [#:my.plan.item{:done-when "I have read the order ids, customers, and amounts.",
+        :id "juniper/query", :position 0, :title "Query the orders"} #:my.plan.item{:done-when
+        "A grouped sum query identifies the customer and their total.", :id
+        "juniper/aggregate", :needs #{#:my.plan.item{:id "juniper/query"}},
+        :position 1, :title "Find the customer with the largest total"} #:my.plan.item{:done-when
+        "The transaction result identifies the new order.", :id "juniper/transact",
+        :needs #{#:my.plan.item{:id "juniper/aggregate"}}, :position 2, :title
+        "Add an order of 40 for that customer"} #:my.plan.item{:done-when
+        "A fresh grouped sum query includes the new order.", :id "juniper/requery",
+        :needs #{#:my.plan.item{:id "juniper/transact"}}, :position 3, :title
+        "Read the customer's new total"} #:my.plan.item{:done-when "The sent message contains the customer and verified new total.",
+        :id "juniper/reply", :needs #{#:my.plan.item{:id "juniper/requery"}},
+        :position 4, :title "Tell root the customer and new total"} #:my.plan.item{:done-when
+        "All preceding plan items are complete.", :id "juniper/done", :needs
+        #{#:my.plan.item{:id "juniper/reply"}}, :position 5, :title "Finish the session"}]}}, :result result/e322d220708ff, :ms 8}
+
+;; I should follow incoming messages with a reverse-ref pull on myself.
+my.agents.juniper=> (seon.db/pull
+  '[{:seon.message/_inbox
+     [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]}]
+  [:seon.agent/id "juniper"])
+#:seon.repl{:value #:seon.message{:_inbox [#:seon.message{:content "Which customer has the largest total? Add an order of 40 for them and tell me the new total.",
+      :from #:seon.agent{:id "root"}, :id "eba74bc4"}]}, :result result/e6a72c648078d, :ms 8}
+
+;; I should pull my overrides; omitted settings inherit defaults, and turns left is derived rather than stored.
+my.agents.juniper=> (seon.db/pull
+  '[{:seon.agent/settings
+     [:seon.config.ai/model
+      :seon.config.ai/no-provider
+      :seon.config.eval/time-limit-ms
+      :seon.config.run/max-episode-runs]}]
+  [:seon.agent/id "juniper"])
+#:seon.repl{:value #:seon.agent{:settings {:seon.config.ai/no-provider true, :seon.config.eval/time-limit-ms
+    10000, :seon.config.run/max-episode-runs 20}}, :result result/e55b1b58fb642, :ms 8}
+
+;; I should read my saved notes; an empty read will observe the first note I add.
+my.agents.juniper=> (seon.db/pull
+  '[{:my.note/_agent [:my.note/id :my.note/content {:my.note/about [:my.plan.item/id]}]}]
+  [:seon.agent/id "juniper"])
+#:seon.repl{:value nil, :result result/e987ede3a5d54, :ms 7}
+
+;; I should inspect what I have defined and which schemas I declared.
+my.agents.juniper=> (dir my.agents.juniper)
+#:seon.repl{:value [#:seon.schema{:form ":int", :key :example/amount} #:seon.schema{:form ":string",
+    :key :example/customer} #:seon.schema{:form "[:string #:seon.db{:identity true}]",
+    :key :example/order} #:seon.schema{:form "[:map #:seon.db{:attributes true} [:example/order :example/order] [:example/amount :example/amount] [:example/customer :example/customer]]",
+    :key :example/order-row}], :result result/ef7c4d2b549b6, :ms 9}
+
+;; I should count the facts under my declared attributes.
+my.agents.juniper=> (seon.db/q
+  '[:find ?attribute (count ?entity) :in $ [?attribute ...] :where [?entity ?attribute _]]
+  [:example/amount :example/customer :example/order])
+#:seon.repl{:value [[:example/amount 4] [:example/customer 4] [:example/order 4]], :result result/e907f2667bf09, :ms 71}

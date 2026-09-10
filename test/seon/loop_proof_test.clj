@@ -102,9 +102,7 @@
                     (db/transact! connection [{:seon.agent/id "root"}]))))
          (is (nil? (:seon.error/kind
                     (db/transact! connection
-                                  (turn/open-tx {:seon.turn/id "refusal-proof"
-                                                 :seon.turn/agent [:seon.agent/id "root"]
-                                                 :seon.turn/opened-at (java.util.Date.)})))))
+                                  (turn/open-tx {:seon.turn/id "refusal-proof" :seon.turn/agent [:seon.agent/id "root"] :seon.turn/opened-tx "datomic.tx"})))))
          (let [failure (ai/complete target)
                _ (is (= :seon.ai/no-credential (:seon.error/kind failure)))
                result (turn/settle! {:seon.turn.loop/cluster handle
@@ -113,8 +111,8 @@
                                      :seon.turn/id "refusal-proof"
                                      :seon.error/value failure})]
            (is (some? (:db-after (:seon.turn.loop/outcome result))) (pr-str result))
-           (is (some? (:seon.turn/closed-at
-                       (db/pull @connection [:seon.turn/closed-at]
+           (is (some? (:seon.turn/closed-tx
+                       (db/pull @connection [:seon.turn/closed-tx]
                                 [:seon.turn/id "refusal-proof"]))))
            (is (= #{[:seon.ai/no-credential]}
                   (db/q '[:find ?kind :where [?e :seon.error/id]
@@ -188,8 +186,8 @@
                                       :seon.cluster.reply/text source))
                        id (:seon.turn/id result)
                        closed? #(and id
-                                     (:seon.turn/closed-at
-                                      (db/pull @connection [:seon.turn/closed-at]
+                                     (:seon.turn/closed-tx
+                                      (db/pull @connection [:seon.turn/closed-tx]
                                                [:seon.turn/id id])))]
                    (is (string? id) (pr-str result))
                    (when (and id (not (closed?)))
@@ -202,7 +200,7 @@
                                  (mapv #(select-keys % [:seon.cluster.eval/source
                                                        :seon.cluster.eval/error
                                                        :seon.cluster.eval/ordinal
-                                                       :seon.eval/value])
+                                                       :seon.eval/shown])
                                        (filter #(= (:db/id turn-row)
                                                    (get-in % [:seon.cluster.eval/run :db/id]))
                                                (evaluation/of-agent @connection "juniper")))}))
@@ -226,8 +224,8 @@
                               {:seon.agent/id "juniper" :seon.cluster/name "loop-proof"
                                :seon.ns/name 'my.agents.juniper})
                      bootstrap-id (:seon.turn/id created)
-                     closed? #(some? (:seon.turn/closed-at
-                                      (db/pull @connection [:seon.turn/closed-at]
+                     closed? #(some? (:seon.turn/closed-tx
+                                      (db/pull @connection [:seon.turn/closed-tx]
                                                [:seon.turn/id bootstrap-id])))]
                  (is (string? bootstrap-id) (pr-str created))
                  (agent/arm! {:seon.turn.loop/cluster handle
@@ -275,9 +273,9 @@
                  (is (= [fixture/instruction]
                         (db/q '[:find [?content ...] :where
                                 [?agent :seon.agent/id "juniper"]
-                                [?message :seon.cluster.message/to ?agent]
-                                [?message :seon.cluster.message/content ?content]] @connection)))
-                 (is (every? :seon.eval/value saved))
+                                [?message :seon.message/to ?agent]
+                                [?message :seon.message/content ?content]] @connection)))
+                 (is (every? :seon.eval/shown saved))
                  (is (not-any? :seon.cluster.eval/error saved))
                  (is (= 1 (count (set (map :seon.cluster.eval/run saved)))))
                  (is (= text (stored-text @connection)))
@@ -317,8 +315,8 @@
                    (is (= (mapv :seon.cluster.eval/source saved)
                           (mapv :seon.cluster.eval/source
                                 (evaluation/of-agent @connection "juniper"))))
-                   (is (= (mapv :seon.eval/value saved)
-                          (mapv :seon.eval/value
+                   (is (= (mapv :seon.eval/shown saved)
+                          (mapv :seon.eval/shown
                                 (evaluation/of-agent @connection "juniper"))))
                    (is (= after (stored-text @connection))
                        "saved bytes remain exact within the new generation")
@@ -337,7 +335,7 @@
                      agent-ctx (get-in (agent/armed routing "juniper")
                                        [:seon.turn.loop/cluster :seon.sci.eval/agent-ctx])]
                  (is (= 3 (count saved)))
-                 (is (= ["2" "4" "6"] (mapv :seon.eval/value saved)))
+                 (is (= ["2" "4" "6"] (mapv :seon.eval/shown saved)))
                  (doseq [[entry expected] (map vector saved [2 4 6])]
                    (let [handle-symbol (:seon.repl/handle (repl/entity-emission entry))]
                      (is (= expected (some-> (sci/resolve agent-ctx handle-symbol) deref)))
@@ -357,10 +355,7 @@
                (let [prefix (stored-text @connection)
                      message (db/transact!
                               connection
-                              [{:seon.cluster.message/id "proof-wake"
-                                :seon.cluster.message/to [:seon.agent/id "juniper"]
-                                :seon.cluster.message/content "Read the changed message."
-                                :seon.cluster.message/at (java.util.Date. 0)}])
+                              [{:seon.message/id "proof-wake" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "Read the changed message." :seon.message/inbox [:seon.agent/id "juniper"]}])
                      wake-t (db/basis-t (:db-after message))
                      pending (turn/unanswered-wakes @connection "juniper" {})]
                  (is (seq pending))
@@ -369,8 +364,12 @@
                                        (:seon.turn/forms system))]
                    (is (some #{"(my.message/inbox)"}
                              (map :seon.cluster.eval/source changed)))
-                   (is (every? #{"(my.message/inbox)" "(my.agent/settings)"}
-                               (map :seon.cluster.eval/source changed)))
+                   (is (= #{'(my.message/inbox)
+                            '(seon.db/pull '[{:seon.message/_inbox
+                                             [:seon.message/id :seon.message/content
+                                              {:seon.message/from [:seon.agent/id]}]}]
+                                           [:seon.agent/id "juniper"])}
+                          (set (map (comp read-string :seon.cluster.eval/source) changed))))
                    (is (str/starts-with? (stored-text @connection) prefix))
                    (is (= (stored-text @connection)
                           (:seon.cluster.prompt/text (prompt))))
@@ -395,10 +394,7 @@
                      faults-before (set (db/q '[:find [?e ...] :where [?e :seon.error/id]] @connection))
                      written (db/transact!
                               connection
-                              [{:seon.cluster.message/id "proof-wake-2"
-                                :seon.cluster.message/to [:seon.agent/id "juniper"]
-                                :seon.cluster.message/content "A second changed message."
-                                :seon.cluster.message/at (java.util.Date. 1)}])
+                              [{:seon.message/id "proof-wake-2" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "A second changed message." :seon.message/inbox [:seon.agent/id "juniper"]}])
                      wake-t (db/basis-t (:db-after written))
                      closed? #(seq (db/q '[:find ?turn :in $ ?since
                                            :where [?agent :seon.agent/id "juniper"]
@@ -406,7 +402,7 @@
                                            [?turn :seon.turn/id _ ?t]
                                            [(>= ?t ?since)]
                                            [?turn :seon.turn/reply ""]
-                                           [?turn :seon.turn/closed-at]]
+                                           [?turn :seon.turn/closed-tx]]
                                          @connection wake-t))]
                  (agent/arm! {:seon.turn.loop/cluster handle
                               :seon.agent/routing routing
@@ -418,9 +414,14 @@
                  (let [fresh (filter #(>= (:t %) wake-t)
                                      (evaluation/of-agent @connection "juniper"))]
                    (is (seq fresh))
-                   (is (= "(my.message/inbox)" (:seon.cluster.eval/source (first fresh)))
+                   (is (= 'seon.db/pull (first (read-string (:seon.cluster.eval/source (first fresh)))))
                        "changed read must precede the no-provider reply")
-                   (is (= ["(my.message/inbox)"] (mapv :seon.cluster.eval/source fresh))
+                   (is (= #{'(my.message/inbox)
+                             '(seon.db/pull '[{:seon.message/_inbox
+                                              [:seon.message/id :seon.message/content
+                                               {:seon.message/from [:seon.agent/id]}]}]
+                                            [:seon.agent/id "juniper"])}
+                          (set (map (comp read-string :seon.cluster.eval/source) fresh)))
                        "no-provider turns do not invent placeholder forms")
                    (is (empty? (turn/unanswered-wakes @connection "juniper" {})))
                    (is (= faults-before
@@ -432,7 +433,7 @@
              (testing "root's generated query executes without caller aliases"
                (let [transaction (bootstrap/supervision-tx
                                   @connection cluster/boot-process-identity
-                                  (java.util.Date.) "other")
+                                  "other")
                      query-source (some #(when (and (map? %)
                                                     (str/includes?
                                                      (:seon.cluster.eval/source % "")
@@ -462,20 +463,14 @@
                   connection
                   (turn/system-run-tx
                    @connection
-                   {:seon.agent/id "other"
-                    :seon.turn/id id
-                    :seon.turn/opened-at (java.util.Date. 0)
-                    :seon.turn/starting-ns [:seon.ns/name 'my.agents.other]
-                    :seon.turn/reply source
-                    :seon.turn/plan-digest (turn/plan-digest sources)
-                    :seon.turn/sources sources}))
+                   {:seon.agent/id "other" :seon.turn/id id :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.other] :seon.turn/reply source :seon.turn/sources sources}))
                  (is (= 1 (:seon.boot/recovered-runs (#'cluster/recover-runs! connection))))
                  (let [saved (evaluation/of-agent @connection "other")
                        basis (db/basis-t @connection)]
                    (is (= 1 (count saved)))
                    (is (every? :seon.cluster.eval/interrupted-at saved))
-                   (is (some? (:seon.turn/closed-at
-                               (db/pull @connection [:seon.turn/closed-at] [:seon.turn/id id]))))
+                   (is (some? (:seon.turn/closed-tx
+                               (db/pull @connection [:seon.turn/closed-tx] [:seon.turn/id id]))))
                    (is (nil? (turn/next-agent-work @connection {:seon.agent/id "other"})))
                    (is (nil? (db/q '[:find ?e . :where
                                      [?e :seon.agent/id "must-not-execute"]] @connection)))
@@ -484,10 +479,7 @@
              (testing "a system-only turn without the wake's results answers nothing"
                (db/transact!
                 connection
-                [{:seon.cluster.message/id "unobserved-wake"
-                  :seon.cluster.message/to [:seon.agent/id "unobserved"]
-                  :seon.cluster.message/content "This agent has no inbox read."
-                  :seon.cluster.message/at (java.util.Date. 2)}])
+                [{:seon.message/id "unobserved-wake" :seon.message/to [:seon.agent/id "unobserved"] :seon.message/content "This agent has no inbox read." :seon.message/inbox [:seon.agent/id "unobserved"]}])
                (let [pending (turn/unanswered-wakes @connection "unobserved" {})
                      system (turn/system-turn
                              (assoc request :seon.agent/id "unobserved"))]
@@ -513,21 +505,21 @@
                    (is (= 2 (count saved)))
                    (is (str/starts-with? (:seon.cluster.eval/source (first saved)) "(seon.db/q"))
                    (is (nil? (:seon.cluster.eval/error (first saved))))
-                   (is (seq (:seon.eval/value (first saved))))
+                   (is (seq (:seon.eval/shown (first saved))))
                    (is (seq (:seon.cluster.eval/read-evidence (first saved))))
                    (is (str/includes? (:seon.cluster.eval/error (second saved))
                                       "You wrote a response. Only the REPL writes responses; send forms and wait."))
                    (is (str/starts-with? (:seon.cluster.eval/source (second saved)) "#:seon.repl"))))
                (submit "(seon.db/q '[:find ?customer (sum ?amount) :where [?order :example/customer ?customer] [?order :example/amount ?amount]])")
-               (is (str/includes? (:seon.eval/value (last (evaluation/of-agent @connection "juniper"))) "115"))
+               (is (str/includes? (:seon.eval/shown (last (evaluation/of-agent @connection "juniper"))) "115"))
                (submit "(seon.db/transact! [{:example/order \"a3\" :example/customer \"Ada\" :example/amount 40}])")
                (submit "(seon.db/q '[:find (sum ?amount) . :where [?order :example/customer \"Ada\"] [?order :example/amount ?amount]])")
-               (is (= "155" (:seon.eval/value (last (evaluation/of-agent @connection "juniper")))))
+               (is (= "155" (:seon.eval/shown (last (evaluation/of-agent @connection "juniper")))))
                (submit "(my.message/send {:my.message/to \"root\" :my.message/content \"Ada had the largest total, 115. I added an order of 40 and verified the new total is 155.\"})")
                (is (= 1 (db/q '[:find (count ?message) . :where
                                 [?agent :seon.agent/id "juniper"]
-                                [?message :seon.cluster.message/from ?agent]
-                                [?message :seon.cluster.message/content ?content]
+                                [?message :seon.message/from ?agent]
+                                [?message :seon.message/content ?content]
                                 [(clojure.string/includes? ?content "155")]] @connection)))
                (submit "(clojure.test/deftest order-total (clojure.test/is (= 155 (seon.db/q '[:find (sum ?amount) . :where [?order :example/customer \"Ada\"] [?order :example/amount ?amount]]))))")
                (submit "(my.test/run)")

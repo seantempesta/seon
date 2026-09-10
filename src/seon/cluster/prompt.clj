@@ -199,12 +199,6 @@
   (validate-request! request)
   (let [run-id (:seon.turn/id request)
         agent-id (:seon.agent/id request)
-        run (db/pull database [:seon.turn/background-results]
-                     [:seon.turn/id run-id])
-        _ (or (message/trigger database run-id)
-              (seq (:seon.turn/background-results run))
-              (refuse! ::no-trigger
-                       "Prompt request's held run has no trigger or background result."))
         settings (effective-ai-settings database agent-id)]
     (if (:seon.error/kind settings)
       settings

@@ -302,10 +302,7 @@ handle))}}
   "Open a minimal run row for one renderer presence-gate test."
   [connection run-id]
   (db/transact! connection
-              [{:seon.turn/id run-id
-                :seon.turn/agent
-                [:seon.agent/id agent-id]
-                :seon.turn/opened-at (java.util.Date.)}]))
+              [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}]))
 
 (defn- client [] (.build (HttpClient/newBuilder)))
 
@@ -624,7 +621,7 @@ handle))}}
                            [:seon.agent/id "unit-owner"])]
        (is (= [:seon.agent/id :seon.agent/plan
                :seon.agent/namespace :seon.agent/settings
-               :seon.cluster.message/inbound-content]
+               :seon.message/inbound-content]
               (declared projection database entity))
            "declared attributes retain schema order before block grouping")
        (is (= [] (declared projection database "ordinary value")))))))
@@ -1066,8 +1063,8 @@ handle))}}
                     "the initial comparison executes its applicable render functions")
                 (db/transact!
                  connection
-                 [{:seon.cluster.message/id "debug-cache-unrelated"
-                   :seon.cluster.message/content
+                 [{:seon.message/id "debug-cache-unrelated"
+                   :seon.message/content
                    "does not affect the inspected namespace"}])
                 (await-ping!
                  context
@@ -1542,10 +1539,7 @@ handle))}}
         (open-run! connection run-a)
         (db/transact! connection
                     [{:seon.agent/id "agent-b"}
-                     {:seon.turn/id run-b
-                      :seon.turn/agent
-                      [:seon.agent/id "agent-b"]
-                      :seon.turn/opened-at (java.util.Date.)}])
+                     {:seon.turn/id run-b :seon.turn/agent [:seon.agent/id "agent-b"] :seon.turn/opened-tx "datomic.tx"}])
         (let [tab (open-feed server (str "/feed/" agent-id))]
         (try
           (is (not (str/includes? (read-complete-paint! tab connection)
@@ -1579,7 +1573,7 @@ handle))}}
           ;; normal database wake is the stream terminal.
           (db/transact! connection
                       [[:db/add [:seon.turn/id run-a]
-                        :seon.turn/plan-digest
+                        :seon.turn/reply-size
                         (apply str (repeat 64 "a"))]])
           (await-ping! context
                        #(zero? (:seon.render.web/streaming-agents %))
@@ -1927,8 +1921,8 @@ handle))}}
         (is (= #{[agent-id "wire-echo-2026072903"]}
                (db/q '[:find ?id ?content
                        :in $ ?content
-                       :where [?message :seon.cluster.message/content ?content]
-                       [?message :seon.cluster.message/to ?agent]
+                       :where [?message :seon.message/content ?content]
+                       [?message :seon.message/to ?agent]
                        [?agent :seon.agent/id ?id]]
                      @connection "wire-echo-2026072903")))))))
 
@@ -1998,7 +1992,7 @@ handle))}}
                     :seon.ns/name 'my.agents.root}))
       (let [service (service-request connection {})
             inbound {:seon.agent/id agent-id
-                     :seon.cluster.message/inbound-content "accepted"}]
+                     :seon.message/inbound-content "accepted"}]
         (doseq [[result expected-status]
                 [[{:seon.error/kind :seon.db/rejected
                    :seon.error/message "dependency refusal"}
@@ -2039,7 +2033,7 @@ handle))}}
         (is (empty?
              (db/q '[:find [?message ...]
                     :where
-                    [?message :seon.cluster.message/content "forged"]]
+                    [?message :seon.message/content "forged"]]
                   @connection)))
         (is (= 403
                (.statusCode

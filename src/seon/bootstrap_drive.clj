@@ -110,7 +110,7 @@
   (->> (db/q '[:find ?run-id ?opened-tx
               :in $ ?message-id
               :where
-              [?message :seon.cluster.message/id ?message-id]
+              [?message :seon.message/id ?message-id]
               [?run :seon.turn/trigger ?message]
               [?run :seon.turn/id ?run-id ?opened-tx]]
             db message-id)
@@ -129,7 +129,7 @@
                 [?run :seon.turn/id ?run-id]
                 [?receipt :seon.cluster.eval/run ?run]
                 [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                [?receipt :seon.eval/value _ ?tx]]
+                [?receipt :seon.eval/shown _ ?tx]]
               db run-ids namespace-name)
          (sort-by (juxt #(nth % 2) #(nth % 3) first))
          (mapv (fn [[sym spec run-id ordinal]]
@@ -215,8 +215,8 @@
           :where
           [?from :seon.agent/id ?from-id]
           [?to :seon.agent/id ?to-id]
-          [?message :seon.cluster.message/from ?from]
-          [?message :seon.cluster.message/to ?to]]
+          [?message :seon.message/from ?from]
+          [?message :seon.message/to ?to]]
         db from-id to-id)))
 
 (defn- grade-o4
@@ -227,9 +227,9 @@
                :where
                [?from :seon.agent/id ?from-id]
                [?to :seon.agent/id ?to-id]
-               [?message :seon.cluster.message/from ?from]
-               [?message :seon.cluster.message/to ?to]
-               [?message :seon.cluster.message/id ?message-id]]
+               [?message :seon.message/from ?from]
+               [?message :seon.message/to ?to]
+               [?message :seon.message/id ?message-id]]
              db agent-id peer-id)
         peer-run-ids (into [] (mapcat #(objective-run-ids db %))
                            peer-message-ids)

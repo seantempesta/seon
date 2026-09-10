@@ -483,12 +483,12 @@
   that would render as though the value were nothing."
   {:malli/schema [:=> [:cat :map] :seon.render.value/artifact]}
   [admitted]
-  (if (:seon.eval/missing admitted)
+  (if (:seon.sci.admit/reason admitted)
     (cond-> {:seon.sci.admit/print-node
              (:seon.sci.admit/print-node
               (admit/admit-value
                {:seon.sci.admit/value
-                (select-keys admitted [:seon.eval/missing :seon.eval/size])
+                (select-keys admitted [:seon.sci.admit/reason :seon.sci.admit/bytes])
                 :seon.sci.admit/interrupt-fn (fn [])
                 :seon.sci.admit/caps {}
                 :seon.sci.admit/unbounded? true

@@ -334,14 +334,14 @@
       (:seon.error/kind caps)
       {:seon.dev.mcp/value caps :seon.dev.mcp/windowed? false}
 
-      (and (:seon.sci.admit/record value) (string? (:seon.eval/value value)))
+      (and (:seon.sci.admit/record value) (string? (:seon.eval/shown value)))
       {:seon.dev.mcp/value
        (assoc (select-keys value [:seon.cluster.eval/ns
                                  :seon.sci.eval/ending-ns
                                  :seon.sci.admit/record
                                  :seon.cluster.eval/error
                                  :seon.cluster.eval/output])
-              :seon.dev.mcp/text (:seon.eval/value value))
+              :seon.dev.mcp/text (:seon.eval/shown value))
        :seon.dev.mcp/windowed? false}
 
       :else
@@ -2081,7 +2081,7 @@
         open-runs (db/q '[:find [?run-id ...]
                          :where
                          [?run :seon.turn/id ?run-id]
-                         (not [?run :seon.turn/closed-at _])]
+                         (not [?run :seon.turn/closed-tx _])]
                        db)
         ;; the decision moved INSIDE the transaction (custody revision,
         ;; Revision 4): `recover-call` reads each run's receipts at
@@ -2219,11 +2219,7 @@
     (into (cluster.agent/creation-tx request)
           (bootstrap/seed-tx
            db
-           {:seon.agent/id agent-id
-            :seon.cluster/name (:seon.cluster/name request)
-            :seon.ns/name namespace-name
-            :seon.db.process/id process
-            :seon.turn/opened-at now}))))
+           {:seon.agent/id agent-id :seon.cluster/name (:seon.cluster/name request) :seon.ns/name namespace-name :seon.db.process/id process :seon.turn/opened-tx "datomic.tx"}))))
 
 (defn ensure-entity!
   "Create one absent agent atomically and return its durable useful identity.
@@ -2387,7 +2383,7 @@
          :where
          [?agent :seon.agent/id ?agent-id]
          [?run :seon.turn/agent ?agent]
-         (not [?run :seon.turn/closed-at])
+         (not [?run :seon.turn/closed-tx])
          [?run :seon.turn/id ?id]]
        db agent-id))
 

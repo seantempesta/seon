@@ -1,4 +1,6 @@
-#:seon.sci.admit{:edn :string
+#:seon.sci.admit{:reason [:enum {:description "Why bounded external evidence could not be encoded; never an evaluation outcome."} :over-bound :unserializable :lost]
+ :bytes [:int {:min 0 :description "UTF-8 bytes reached while encoding bounded external evidence."}]
+:edn :string
                  :admitted
                  [:or
                   [:map
@@ -14,8 +16,8 @@
                  [:map
                   {:description
                    "The whole answer for a value admission stored nothing for: the reason, and the bytes reached when the storage bound is the reason. No print node, no value, no result EDN — a missing value ablates its handle rather than storing a window of itself."}
-                  [:seon.eval/missing :seon.eval/missing]
-                  [:seon.eval/size {:optional true} :seon.eval/size]
+                  [:seon.sci.admit/reason :seon.sci.admit/reason]
+                  [:seon.sci.admit/bytes {:optional true} :seon.sci.admit/bytes]
                   [:seon.sci.admit/record
                    {:optional true}
                    :seon.sci.admit/record]],

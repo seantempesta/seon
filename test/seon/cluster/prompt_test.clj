@@ -42,16 +42,7 @@
                       :seon.cluster.reply/text source
                       :seon.sci.admit/caps caps})
             prepared (turn/record-evaluated-tx
-                       {:seon.turn.loop/cluster handle
-                        :seon.db/db @connection
-                        :seon.turn/id run-id
-                        :seon.turn/agent [:seon.agent/id "walker"]
-                        :seon.turn/starting-ns [:seon.ns/name 'my.agents.walker]
-                        :seon.turn/reply source
-                        :seon.turn/opened-at (:seon.turn/opened-at preview)
-                        :seon.turn/closed-at (:seon.turn/closed-at preview)
-                        :seon.turn.loop/evaluated-sources
-                        (:seon.turn.loop/evaluated-sources preview)})]
+                       {:seon.turn.loop/cluster handle :seon.db/db @connection :seon.turn/id run-id :seon.turn/agent [:seon.agent/id "walker"] :seon.turn/starting-ns [:seon.ns/name 'my.agents.walker] :seon.turn/reply source :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources (:seon.turn.loop/evaluated-sources preview)})]
         (let [result (blob/with-publication!
                       connection (:seon.blob/staged-writes prepared)
                       #(db/transact! connection (:seon.db/tx-data prepared)))]
@@ -76,21 +67,12 @@
                     :seon.cluster/name "prompt-walk"
                     :seon.ns/name 'my.agents.walker}))
       (db/transact! connection
-                  [{:seon.cluster.message/id "walk-message"
-                    :seon.cluster.message/to
-                    [:seon.agent/id "walker"]
-                    :seon.cluster.message/content "inspect this walk"
-                    :seon.cluster.message/at (Date. 1700000000000)}])
+                  [{:seon.message/id "walk-message" :seon.message/to [:seon.agent/id "walker"] :seon.message/content "inspect this walk" :seon.message/inbox [:seon.agent/id "walker"]}])
       (let [ctx (support/fork-cluster-ctx connection)]
         (record-evaluation! connection ctx "opening-history"
-                            "(seon.db/pull [:seon.cluster.message/content] [:seon.cluster.message/id \"walk-message\"])")
+                            "(seon.db/pull [:seon.message/content] [:seon.message/id \"walk-message\"])")
       (db/transact! connection
-                  [{:seon.turn/id "walk-run"
-                    :seon.turn/agent
-                    [:seon.agent/id "walker"]
-                    :seon.turn/trigger
-                    [:seon.cluster.message/id "walk-message"]
-                    :seon.turn/opened-at (Date. 1700000001000)}])
+                  [{:seon.turn/id "walk-run" :seon.turn/agent [:seon.agent/id "walker"] :seon.turn/trigger [:seon.message/id "walk-message"] :seon.turn/opened-tx "datomic.tx"}])
         (body connection ctx)))))
 
 (defn- request
@@ -127,10 +109,7 @@
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection (request connection ctx)))]
        (db/transact! connection
-                     [{:seon.cluster.message/id "later"
-                       :seon.cluster.message/to [:seon.agent/id "walker"]
-                       :seon.cluster.message/content "not evaluated yet"
-                       :seon.cluster.message/at (Date. 1700000002000)}])
+                     [{:seon.message/id "later" :seon.message/to [:seon.agent/id "walker"] :seon.message/content "not evaluated yet" :seon.message/inbox [:seon.agent/id "walker"]}])
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt @connection (request connection ctx)))]
          (is (= before after) "a stored observation changes only through a later evaluation")
@@ -154,8 +133,7 @@
    (fn [connection ctx]
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt @connection (request connection ctx)))]
-       (db/transact! connection [{:seon.turn/id "walk-run"
-                                 :seon.turn/closed-at (Date.)}])
+       (db/transact! connection [{:seon.turn/id "walk-run" :seon.turn/closed-tx "datomic.tx"}])
        (record-evaluation! connection ctx "second-history" "(str \"SECOND-EVALUATION\")")
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt @connection (request connection ctx)))]
@@ -188,10 +166,7 @@
                     :seon.cluster/name "no-trigger"
                     :seon.ns/name 'my.agents.walker}))
       (db/transact! connection
-                  [{:seon.turn/id "walk-run"
-                    :seon.turn/agent
-                    [:seon.agent/id "walker"]
-                    :seon.turn/opened-at (Date.)}])
+                  [{:seon.turn/id "walk-run" :seon.turn/agent [:seon.agent/id "walker"] :seon.turn/opened-tx "datomic.tx"}])
       (testing "the custody invariant remains independent of presentation"
         (is (= :seon.cluster.prompt/no-trigger
                (:seon.cluster.prompt/rule
@@ -247,9 +222,7 @@
   on the run's capture, and the provider's own count on the attempt."
   [model ordinal characters provider-tokens]
   (let [run-id (str "usage-run-" ordinal)]
-    [{:seon.turn/id run-id
-      :seon.turn/agent [:seon.agent/id "walker"]
-      :seon.turn/opened-at (Date. (+ 1700000100000 (* 1000 ordinal)))}
+    [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "walker"] :seon.turn/opened-tx "datomic.tx"}
      {:seon.context.capture/id (str run-id "-context-1")
       :seon.context.capture/run [:seon.turn/id run-id]
       :seon.context.capture/basis-t 1

@@ -56,10 +56,7 @@
   "Commit one trigger message for the agent."
   [connection]
   (db/transact! connection
-              [{:seon.cluster.message/id message-id
-                :seon.cluster.message/to [:seon.agent/id agent-id]
-                :seon.cluster.message/content "do the thing"
-                :seon.cluster.message/at now}]))
+              [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "do the thing" :seon.message/inbox [:seon.agent/id agent-id]}]))
 
 (defn- model-attempt
   "The row that makes a turn an ANSWERING turn.
@@ -83,15 +80,12 @@
   (db/transact!
    connection
    (cond-> {:tx-data
-            (cond-> [(cond-> {:seon.turn/id run-id
-                              :seon.turn/agent
-                              [:seon.agent/id agent-id]
-                              :seon.turn/opened-at now}
+            (cond-> [(cond-> {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
                        triggered?
                        (assoc :seon.turn/trigger
-                              [:seon.cluster.message/id message-id])
+                              [:seon.message/id message-id])
                        true (assoc :seon.turn.work/situation :call)
-                       planned? (assoc :seon.turn/plan-digest digest))
+                       planned? (assoc :seon.turn/reply-size (long (count digest))))
                      {:seon.agent/id agent-id
                       }
                      (model-attempt run-id now)]
@@ -114,12 +108,12 @@
                  :seon.cluster.eval/ordinal ordinal
                  :seon.cluster.eval/at now
                  ;; the result's presence IS the terminal state
-                 :seon.eval/value shown-text}])))
+                 :seon.eval/shown shown-text}])))
 
 (defn- close-run! [connection]
   (db/transact! connection
               [[:db/add [:seon.turn/id run-id]
-                :seon.turn/closed-at now]
+                :seon.turn/closed-tx "datomic.tx"]
                ]))
 
 (defn- configure-cap!
@@ -131,10 +125,7 @@
 (defn- add-outside-trigger!
   [connection id at]
   (db/transact! connection
-              [{:seon.cluster.message/id id
-                :seon.cluster.message/to [:seon.agent/id agent-id]
-                :seon.cluster.message/content id
-                :seon.cluster.message/at at}]))
+              [{:seon.message/id id :seon.message/to [:seon.agent/id agent-id] :seon.message/content id :seon.message/inbox [:seon.agent/id agent-id]}]))
 
 (defn- closed-run!
   "Commit one complete turn, with each supplied value as a receipt result."
@@ -142,13 +133,7 @@
   (db/transact!
    connection
    {:tx-data
-    (into [{:seon.turn/id id
-            :seon.turn/agent [:seon.agent/id agent-id]
-            :seon.turn/trigger
-            [:seon.cluster.message/id trigger-id]
-            :seon.turn/opened-at at
-
-            :seon.turn/plan-digest digest}
+    (into [{:seon.turn/id id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id trigger-id] :seon.turn/opened-tx "datomic.tx"}
            {:seon.agent/id agent-id
             }
            (model-attempt id at)]
@@ -173,11 +158,11 @@
         :seon.cluster.eval/run [:seon.turn/id id]
         :seon.cluster.eval/ordinal ordinal
         :seon.cluster.eval/at at
-        :seon.eval/value (pr-str value)})
+        :seon.eval/shown (pr-str value)})
      result-values)))
   (db/transact! connection
               [[:db/add [:seon.turn/id id]
-                :seon.turn/closed-at at]
+                :seon.turn/closed-tx at]
                ]))
 
 (def ^:private request
@@ -201,7 +186,7 @@
     ::build (fn [connection] (add-trigger! connection))
     ::expect {:seon.turn.work/situation :open
               :seon.agent/id agent-id
-              :seon.cluster.message/id message-id}}
+              :seon.message/id message-id}}
 
    {::label "claimed here, unplanned — the ONE paid call, not yet made"
     ::build (fn [connection]
@@ -265,14 +250,10 @@
                                      :triggered? true})
               (close-run! connection)
               (db/transact! connection
-                          [{:seon.cluster.message/id "message-2"
-                            :seon.cluster.message/to
-                            [:seon.agent/id agent-id]
-                            :seon.cluster.message/content "again"
-                            :seon.cluster.message/at now}]))
+                          [{:seon.message/id "message-2" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "again" :seon.message/inbox [:seon.agent/id agent-id]}]))
     ::expect {:seon.turn.work/situation :open
               :seon.agent/id agent-id
-              :seon.cluster.message/id "message-2"}}
+              :seon.message/id "message-2"}}
 
    {::label "a held run outranks a waiting trigger — finishing what is
              started is what makes the busy fence mean anything"
@@ -281,11 +262,7 @@
               (open-run! connection {:planned? true
                                      :triggered? true})
               (db/transact! connection
-                          [{:seon.cluster.message/id "message-2"
-                            :seon.cluster.message/to
-                            [:seon.agent/id agent-id]
-                            :seon.cluster.message/content "again"
-                            :seon.cluster.message/at now}]))
+                          [{:seon.message/id "message-2" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "again" :seon.message/inbox [:seon.agent/id agent-id]}]))
     ::expect {:seon.turn.work/situation :resume
               :seon.turn/id run-id
               :seon.agent/id agent-id
@@ -395,7 +372,7 @@
                   [?run :seon.turn/id ?run-id]
                   [?evaluation :seon.cluster.eval/run ?run]
                   [?evaluation :seon.cluster.eval/ordinal 0]
-                  (or [?evaluation :seon.eval/value _]
+                  (or [?evaluation :seon.eval/shown _]
                       [?evaluation :seon.cluster.eval/error _]
                       [?evaluation :seon.cluster.eval/interrupted-at _])]
                 @connection run-id))))))
@@ -422,7 +399,7 @@
             (let [next-trigger (turn/next-agent-work @connection request)]
               (is (= {:seon.turn.work/situation :open
                       :seon.agent/id agent-id
-                      :seon.cluster.message/id "concurrent-message"}
+                      :seon.message/id "concurrent-message"}
                      next-trigger)
                   "only a new outside trigger starts another turn")
               (is (seon.schema/valid-candidate-value?
@@ -516,7 +493,7 @@
       (add-trigger! connection)
       (testing "a wake newer than every turn is unanswered"
         (is (= [message-id]
-               (mapv :seon.cluster.message/id
+               (mapv :seon.message/id
                      (turn/unanswered-triggers (db/db connection) agent-id))))
         (is (= 0 (turn/latest-answering-turn-t (db/db connection) agent-id))
             "no turn, no basis"))
@@ -539,13 +516,9 @@
         (is (empty? (turn/unanswered-triggers (db/db connection) agent-id))
             "the first wake stays answered")
         (db/transact! connection
-                    [{:seon.cluster.message/id "message-3"
-                      :seon.cluster.message/to
-                      [:seon.agent/id agent-id]
-                      :seon.cluster.message/content "third"
-                      :seon.cluster.message/at now}])
+                    [{:seon.message/id "message-3" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "third" :seon.message/inbox [:seon.agent/id agent-id]}])
         (is (= ["message-3"]
-               (mapv :seon.cluster.message/id
+               (mapv :seon.message/id
                      (turn/unanswered-triggers (db/db connection) agent-id))))))))
 
 (deftest only-a-turn-whose-reply-came-from-a-model-attempt-answers
@@ -568,14 +541,9 @@
       (testing "a turn with no attempts — a source submission — answers nothing"
         (db/transact!
          connection
-         [{:seon.turn/id "source-run"
-           :seon.turn/agent [:seon.agent/id agent-id]
-           :seon.turn/opened-at now
-           ;; a source submission stores the submitted text as the reply
-           :seon.turn/reply "(+ 1 1)"
-           :seon.turn/closed-at now}])
+         [{:seon.turn/id "source-run" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/reply "(+ 1 1)" :seon.turn/closed-tx "datomic.tx"}])
         (is (= [message-id]
-               (mapv :seon.cluster.message/id
+               (mapv :seon.message/id
                      (turn/unanswered-triggers (db/db connection) agent-id)))
             "the message it had nothing to do with is still unanswered")
         (is (zero? (turn/latest-answering-turn-t (db/db connection)
@@ -587,14 +555,11 @@
            :seon.error/kind :seon.ai/no-credential
            :seon.error/message "no credential"
            :seon.error/at now}
-          {:seon.turn/id "failed-run"
-           :seon.turn/agent [:seon.agent/id agent-id]
-           :seon.turn/opened-at now
-           :seon.turn/closed-at now}
+          {:seon.turn/id "failed-run" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
           (assoc (model-attempt "failed-run" now)
                  :seon.ai.attempt/error [:seon.error/id "provider-failure"])])
         (is (= [message-id]
-               (mapv :seon.cluster.message/id
+               (mapv :seon.message/id
                      (turn/unanswered-triggers (db/db connection) agent-id)))
             "the wake was never shown to a model")
         (is (zero? (turn/latest-answering-turn-t (db/db connection)
@@ -618,14 +583,8 @@
       (configure-cap! connection 100)
       (db/transact!
        connection
-       [{:seon.cluster.message/id "pair-a"
-         :seon.cluster.message/to [:seon.agent/id agent-id]
-         :seon.cluster.message/content "a"
-         :seon.cluster.message/at now}
-        {:seon.cluster.message/id "pair-b"
-         :seon.cluster.message/to [:seon.agent/id agent-id]
-         :seon.cluster.message/content "b"
-         :seon.cluster.message/at now}])
+       [{:seon.message/id "pair-a" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "a" :seon.message/inbox [:seon.agent/id agent-id]}
+        {:seon.message/id "pair-b" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "b" :seon.message/inbox [:seon.agent/id agent-id]}])
       (let [wakes (turn/unanswered-wakes (db/db connection) agent-id {})]
         (is (= 2 (count wakes)) "both are unanswered")
         (is (apply = (map :seon.wake/t wakes))
@@ -656,18 +615,15 @@
       (open-run! connection {})
       (db/transact!
        connection
-       [{:seon.cluster.message/id "mid-turn"
-         :seon.cluster.message/to [:seon.agent/id agent-id]
-         :seon.cluster.message/content "arrived while the turn was open"
-         :seon.cluster.message/at (Date. 1700000000002)}])
+       [{:seon.message/id "mid-turn" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "arrived while the turn was open" :seon.message/inbox [:seon.agent/id agent-id]}])
       (is (= ["mid-turn"]
-             (mapv :seon.cluster.message/id
+             (mapv :seon.message/id
                    (turn/unanswered-triggers (db/db connection) agent-id)))
           "it is newer than the open turn's own transaction")
       (close-run! connection)
       (is (= {:seon.turn.work/situation :open
               :seon.agent/id agent-id
-              :seon.cluster.message/id "mid-turn"}
+              :seon.message/id "mid-turn"}
              (turn/next-agent-work (db/db connection)
                                    {:seon.agent/id agent-id
                                     :seon.db.process/id process}))
@@ -691,11 +647,7 @@
       ;; INSIDE wake by its own declaration, unanswered by `:t`
       (db/transact!
        connection
-       [{:seon.cluster.message/id "self-1"
-         :seon.cluster.message/to [:seon.agent/id agent-id]
-         :seon.cluster.message/from [:seon.agent/id agent-id]
-         :seon.cluster.message/content "keep going"
-         :seon.cluster.message/at (Date. 1700000000002)}])
+       [{:seon.message/id "self-1" :seon.message/to [:seon.agent/id agent-id] :seon.message/from [:seon.agent/id agent-id] :seon.message/content "keep going" :seon.message/inbox [:seon.agent/id agent-id]}])
       (let [database (db/db connection)]
         (is (= 2 (turn/episode-runs database agent-id))
             "the inside wake did not refill the bound")
@@ -705,7 +657,7 @@
             "AT the cap an inside wake opens nothing — this is what stops
              a fault about an agent's own code looping forever")
         (is (= ["self-1"]
-               (mapv :seon.cluster.message/id
+               (mapv :seon.message/id
                      (turn/deferred-triggers database agent-id)))
             "it is deferred, and the deferral is a derivation with
              nothing stored"))
@@ -717,10 +669,7 @@
       (is (nil? (turn/next-agent-work @connection request)))
       (db/transact!
        connection
-       [{:seon.cluster.message/id "human-2"
-         :seon.cluster.message/to [:seon.agent/id agent-id]
-         :seon.cluster.message/content "new instruction"
-         :seon.cluster.message/at (Date. 1700000000003)}])
+       [{:seon.message/id "human-2" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "new instruction" :seon.message/inbox [:seon.agent/id agent-id]}])
       (let [database (db/db connection)]
         (is (zero? (turn/episode-runs database agent-id))
             "an outside wake ARRIVING is the reset; there is no reset code")
@@ -736,11 +685,8 @@
       (doseq [[id at] [["m-2" (Date. 2000)] ["m-1" (Date. 1000)]
                        ["m-3" (Date. 3000)]]]
         (db/transact! connection
-                    [{:seon.cluster.message/id id
-                      :seon.cluster.message/to [:seon.agent/id agent-id]
-                      :seon.cluster.message/content id
-                      :seon.cluster.message/at at}]))
+                    [{:seon.message/id id :seon.message/to [:seon.agent/id agent-id] :seon.message/content id :seon.message/inbox [:seon.agent/id agent-id]}]))
       (is (= ["m-1" "m-2" "m-3"]
-             (mapv :seon.cluster.message/id
+             (mapv :seon.message/id
                    (turn/unanswered-triggers (db/db connection) agent-id)))
           "commit order is not arrival order; the fact carries the time"))))

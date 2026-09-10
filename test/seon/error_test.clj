@@ -417,12 +417,12 @@
     (is (str/includes? content large)
         "the original diagnostic string remains available for blob retrieval")
     ;; A FIELD OVER THE FAULT'S OWN DECLARED BYTE BOUND IS MARKED, never
-    ;; silently kept: the same `:seon.eval/missing` data every other surface
+    ;; silently kept: the same `:seon.sci.admit/reason` data every other surface
     ;; reports an absent value with, and the whole field stays reachable in
     ;; the evidence content beside it.
-    (is (str/includes? (:seon.error/message fact) ":missing :over-bound"))
-    (is (str/includes? (:seon.instrument/expected fact) ":missing :over-bound"))
-    (is (str/includes? (:seon.instrument/args fact) ":missing :over-bound"))
+    (is (str/includes? (:seon.error/message fact) ":reason :over-bound"))
+    (is (str/includes? (:seon.instrument/expected fact) ":reason :over-bound"))
+    (is (str/includes? (:seon.instrument/args fact) ":reason :over-bound"))
     (is (true? (:seon.error/capped? fact))
         "a fact whose evidence was replaced says so")
     (is (every? #(some? (get fact %))
@@ -756,9 +756,9 @@
   [body]
   (test-support/with-database
     (fn [connection]
-      (test-support/seed-cluster! connection "error-test")
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name "error-test"})
+      (test-support/seed-cluster! connection "error-test")
       (db/transact! connection [{:seon.agent/id "root"}
                               {:seon.agent/id "agent-3"}])
       (body connection))))
@@ -789,8 +789,8 @@
       (map second
            (db/q '[:find ?message ?to
                   :where
-                  [?message :seon.cluster.message/about _]
-                  [?message :seon.cluster.message/to ?agent]
+                  [?message :seon.message/about _]
+                  [?message :seon.message/to ?agent]
                   [?agent :seon.agent/id ?to]]
                 db)))]))
 
@@ -888,7 +888,7 @@
             "two ordinary escalations, one final message at the limit, then
              silence")))))
 
-(deftest a-message-id-is-derived-so-delivery-is-idempotent
+(deftest a-prepared-message-keeps-its-id-when-the-transaction-repeats
   (with-db
     (fn [connection]
       (let [source (transform-error (ex-info "boom" {}))
@@ -902,7 +902,7 @@
         (let [db @connection]
           (is (= 1 (count (db/q '[:find ?e :where [?e :seon.error/id _]] db))))
           (is (= 1 (count (db/q '[:find ?m :where
-                                 [?m :seon.cluster.message/about _]]
+                                 [?m :seon.message/about _]]
                                db))))))))) 
 
 (deftest the-message-points-at-the-fact-it-explains
@@ -912,7 +912,7 @@
       (let [db @connection
             about (db/q '[:find ?id .
                          :where
-                         [?message :seon.cluster.message/about ?error]
+                         [?message :seon.message/about ?error]
                          [?error :seon.error/id ?id]]
                        db)]
         (is (some? about)

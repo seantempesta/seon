@@ -75,19 +75,10 @@
      (db/transact!
       connection
       [{:seon.agent/id "temporal-root-agent"}
-       {:seon.cluster.message/id "temporal-root-message"
-        :seon.cluster.message/to
-        [:seon.agent/id "temporal-root-agent"]
-        :seon.cluster.message/at (java.util.Date. 1786400000000)
-        :seon.cluster.message/content "The opening message."}])
+       {:seon.message/id "temporal-root-message" :seon.message/to [:seon.agent/id "temporal-root-agent"] :seon.message/content "The opening message." :seon.message/inbox [:seon.agent/id "temporal-root-agent"]}])
      (db/transact!
       connection
-      [{:seon.turn/id "temporal-root-run"
-        :seon.turn/agent
-        [:seon.agent/id "temporal-root-agent"]
-        :seon.turn/trigger
-        [:seon.cluster.message/id "temporal-root-message"]
-        :seon.turn/opened-at (java.util.Date. 1786400000001)}
+      [{:seon.turn/id "temporal-root-run" :seon.turn/agent [:seon.agent/id "temporal-root-agent"] :seon.turn/trigger [:seon.message/id "temporal-root-message"] :seon.turn/opened-tx "datomic.tx"}
        {:seon.agent/id "temporal-root-agent"
         }])
      (let [current @connection
@@ -104,7 +95,7 @@
              :seon.sci.admit/caps caps})
            messages (get-in acquisition
                             [:seon.render.walk/root
-                             :seon.cluster.message/_to])
+                             :seon.message/_inbox])
            history
            (walk/history
             {:seon.db/db temporal
@@ -122,14 +113,14 @@
            "current and as-of values derive one complete selector")
        (is (not= [:db/id] temporal-selector))
        (is (= ["The opening message."]
-              (mapv :seon.cluster.message/content messages))
+              (mapv :seon.message/content messages))
            "the as-of root retains the reverse message graph")
        ;; THE SUBJECT IS A FACT. History used to name the acquired message
        ;; by the form its retired `:seon.render/form` producer emitted; it
        ;; now names the entity itself, and the bytes are that message's own
        ;; `:seon.render/ai` render rather than a second prompt line built
        ;; around a `pr-str`'d form.
-       (is (some #(= [:seon.cluster.message/id "temporal-root-message"]
+       (is (some #(= [:seon.message/id "temporal-root-message"]
                      (:seon.render.history/subject %))
                  history)
            "history renders the acquired message as its identified value")))))
@@ -140,11 +131,7 @@
      (db/transact!
       connection
       [{:seon.agent/id "historical-walk-agent"}
-       {:seon.cluster.message/id "historical-walk-message"
-        :seon.cluster.message/to
-        [:seon.agent/id "historical-walk-agent"]
-        :seon.cluster.message/at (java.util.Date. 1786400000000)
-        :seon.cluster.message/content "A historical walk must terminate."}])
+       {:seon.message/id "historical-walk-message" :seon.message/to [:seon.agent/id "historical-walk-agent"] :seon.message/content "A historical walk must terminate." :seon.message/inbox [:seon.agent/id "historical-walk-agent"]}])
      (let [current @connection
            render-request {:seon.db/db current
                     :seon.agent/id "historical-walk-agent"

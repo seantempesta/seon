@@ -77,7 +77,7 @@
              :in $ ?run-id
              :where
              [?run :seon.turn/id ?run-id]
-             [?run :seon.turn/closed-at ?closed-at]]
+             [?run :seon.turn/closed-tx ?closed-at]]
            database (bootstrap/run-id "root")))))
 
 (defn- with-cluster
@@ -216,15 +216,7 @@
          (fn [spec]
            (turn/system-run-tx
             database
-            {:seon.agent/id (::agent-id spec)
-             :seon.turn/id (::run-id spec)
-             :seon.db.process/id process
-             :seon.turn/opened-at now
-             :seon.turn/starting-ns
-             [:seon.ns/name (::namespace spec)]
-             :seon.turn/plan-digest
-             (digest-value (::sources spec))
-             :seon.turn/sources (::sources spec)}))
+            {:seon.agent/id (::agent-id spec) :seon.turn/id (::run-id spec) :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name (::namespace spec)] :seon.turn/sources (::sources spec)}))
          specs)
         result
         (db/transact!
@@ -286,7 +278,7 @@
                    :in $ [?run-id ...]
                    :where
                    [?run :seon.turn/id ?run-id]
-                   [?run :seon.turn/closed-at _]]
+                   [?run :seon.turn/closed-tx _]]
                  database run-ids)]
        (when (= (set run-ids) (set closed))
          closed)))))
@@ -352,10 +344,10 @@
   [database specs]
   (doseq [spec specs]
     (let [turn (db/pull database
-                        [:seon.turn/id :seon.turn/closed-at]
+                        [:seon.turn/id :seon.turn/closed-tx]
                         [:seon.turn/id (::run-id spec)])]
       (is (= (::run-id spec) (:seon.turn/id turn)))
-      (is (inst? (:seon.turn/closed-at turn))))))
+      (is (inst? (:seon.turn/closed-tx turn))))))
 
 (defn- assert-concurrent-progress!
   [database specs]
@@ -365,7 +357,7 @@
                 :in $ [?run-id ...]
                 :where
                 [?run :seon.turn/id ?run-id]
-                [?run :seon.turn/closed-at _ ?close-tx]
+                [?run :seon.turn/closed-tx _ ?close-tx]
                 [?receipt :seon.cluster.eval/run ?run]
                 [?receipt :seon.cluster.eval/result-edn _ ?receipt-tx]]
               database run-ids)
@@ -428,10 +420,10 @@
     (db/q '[:find ?message-id ?from-id ?to-id
             :in $ [?message-id ...]
             :where
-            [?message :seon.cluster.message/id ?message-id]
-            [?message :seon.cluster.message/from ?from]
+            [?message :seon.message/id ?message-id]
+            [?message :seon.message/from ?from]
             [?from :seon.agent/id ?from-id]
-            [?message :seon.cluster.message/to ?to]
+            [?message :seon.message/to ?to]
             [?to :seon.agent/id ?to-id]]
           database message-ids)))
 
@@ -450,7 +442,7 @@
     (doseq [spec specs]
       (is (= #{(::incoming-message-id spec)}
              (into #{}
-                   (map :seon.cluster.message/id)
+                   (map :seon.message/id)
                    (turn/unanswered-triggers database (::agent-id spec))))
           "the paused mailbox leaves exactly the declared incoming ring message"))))
 
@@ -462,9 +454,9 @@
            :where
            [?agent :seon.agent/id ?agent-id]
            (or-join [?message ?agent]
-                    [?message :seon.cluster.message/to ?agent]
-                    [?message :seon.cluster.message/from ?agent])
-           [?message :seon.cluster.message/id ?message-id]]
+                    [?message :seon.message/to ?agent]
+                    [?message :seon.message/from ?agent])
+           [?message :seon.message/id ?message-id]]
          database agent-id)))
 
 (defn- render-transcript

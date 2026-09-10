@@ -80,7 +80,7 @@
          :where
          [?agent :seon.agent/id ?agent-id]
          [?run :seon.turn/agent ?agent]
-         (not [?run :seon.turn/closed-at])
+         (not [?run :seon.turn/closed-tx])
          [?run :seon.turn/id ?run-id]]
        db agent-id))
 

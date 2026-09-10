@@ -106,7 +106,7 @@
                 {:seon.render.transcript/kind :message
                  :seon.render.transcript/id "message"
                  :seon.render.transcript/entity
-                 {:db/id 1 :seon.cluster.message/content "hello"}})
+                 {:db/id 1 :seon.message/content "hello"}})
          ;; ONE ENTITY PER (run, ordinal): a frozen form with no terminal
          ;; fact is an ORDINARY evaluation that has not settled, not a
          ;; second entry kind. `repl/text` gives it a prompt and no
@@ -158,9 +158,7 @@
       (db/transact!
        connection
        [{:seon.agent/id agent-id}
-        {:seon.turn/id "terminal-values"
-         :seon.turn/agent [:seon.agent/id agent-id]
-         :seon.turn/opened-at (java.util.Date. 0)}
+        {:seon.turn/id "terminal-values" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
         {:seon.cluster.eval/id "terminal-result"
          :seon.cluster.eval/run [:seon.turn/id "terminal-values"]
          :seon.cluster.eval/ordinal 0
@@ -334,20 +332,9 @@
      :seon.agent/namespace [:seon.ns/name 'my.agents.transcript]}
     {:seon.agent/id peer-id}
     {:seon.problems/id "problem-transcript"}
-    {:seon.cluster.message/id "outside-0"
-     :seon.cluster.message/to [:seon.agent/id agent-id]
-     :seon.cluster.message/content "Start with the failed deployment."
-     :my.message/reason "An external observation, not this agent's decline."
-     :seon.cluster.message/at (at 0)}
-    {:seon.cluster.message/id "peer-1"
-     :seon.cluster.message/from [:seon.agent/id peer-id]
-     :seon.cluster.message/to [:seon.agent/id agent-id]
-     :seon.cluster.message/about [:seon.problems/id "problem-transcript"]
-     :seon.cluster.message/content "Repair the owning namespace."
-     :seon.cluster.message/at (at 1000)}
-    {:seon.turn/id "run-result"
-     :seon.turn/agent [:seon.agent/id agent-id]
-     :seon.turn/opened-at (at 1500)}
+    {:seon.message/id "outside-0" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Start with the failed deployment." :my.message/reason "An external observation, not this agent's decline." :seon.message/inbox [:seon.agent/id agent-id]}
+    {:seon.message/id "peer-1" :seon.message/from [:seon.agent/id peer-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "Repair the owning namespace." :seon.message/inbox [:seon.agent/id agent-id]}
+    {:seon.turn/id "run-result" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
     {:seon.cluster.eval/id "eval-result"
      :seon.cluster.eval/run [:seon.turn/id "run-result"]
      :seon.cluster.eval/ordinal 0
@@ -363,14 +350,8 @@
      :seon.cluster.eval/result-edn
      "#:seon.print{:face :seon.print/number, :value 42}"
      :seon.cluster.eval/source "(do (println \"side effect\") (+ 20 22))"}
-    {:seon.cluster.message/id "send-2"
-     :seon.cluster.message/from [:seon.agent/id agent-id]
-     :seon.cluster.message/to [:seon.agent/id peer-id]
-     :seon.cluster.message/content "Check the repaired namespace."
-     :seon.cluster.message/at (at 3000)}
-    {:seon.turn/id "run-wait"
-     :seon.turn/agent [:seon.agent/id agent-id]
-     :seon.turn/opened-at (at 3250)}
+    {:seon.message/id "send-2" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/content "Check the repaired namespace." :seon.message/inbox [:seon.agent/id peer-id]}
+    {:seon.turn/id "run-wait" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
     {:seon.cluster.eval/id "eval-wait"
      :seon.cluster.eval/run [:seon.turn/id "run-wait"]
      :seon.cluster.eval/ordinal 0
@@ -378,16 +359,8 @@
      :seon.cluster.eval/result-edn
      "{:my.turn/disposition :wait :my.turn/note \"waiting for the peer review\"}"
      :seon.cluster.eval/source "(seon.run/wait \"waiting for the peer review\")"}
-    {:seon.cluster.message/id "decline-3"
-     :seon.cluster.message/from [:seon.agent/id agent-id]
-     :seon.cluster.message/to [:seon.agent/id peer-id]
-     :seon.cluster.message/about [:seon.problems/id "problem-transcript"]
-     :seon.cluster.message/content "I cannot make the requested edit."
-     :my.message/reason "The namespace is owned by another agent."
-     :seon.cluster.message/at (at 4000)}
-    {:seon.turn/id "run-error"
-     :seon.turn/agent [:seon.agent/id agent-id]
-     :seon.turn/opened-at (at 4250)}
+    {:seon.message/id "decline-3" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about [:seon.problems/id "problem-transcript"] :seon.message/content "I cannot make the requested edit." :my.message/reason "The namespace is owned by another agent." :seon.message/inbox [:seon.agent/id peer-id]}
+    {:seon.turn/id "run-error" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
     {:seon.cluster.eval/id "eval-error"
      :seon.cluster.eval/run [:seon.turn/id "run-error"]
      :seon.cluster.eval/ordinal 0
@@ -400,11 +373,7 @@
      :seon.problems/id "problem-eval-error"
      :seon.cluster.eval/interrupted-at (at 4501)
      :seon.cluster.eval/source "(missing.function/call)"}
-    {:seon.cluster.message/id "self-4"
-     :seon.cluster.message/from [:seon.agent/id agent-id]
-     :seon.cluster.message/to [:seon.agent/id agent-id]
-     :seon.cluster.message/content "A self-addressed continuity note."
-     :seon.cluster.message/at (at 5000)}]))
+    {:seon.message/id "self-4" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id agent-id] :seon.message/content "A self-addressed continuity note." :seon.message/inbox [:seon.agent/id agent-id]}]))
 
 (deftest populated-history-restores-the-repl-fidelity-checklist
   (support/with-database
@@ -467,9 +436,7 @@
       (db/transact!
        connection
        [{:seon.agent/id agent-id}
-        {:seon.turn/id "run-error-without-triage"
-         :seon.turn/agent [:seon.agent/id agent-id]
-         :seon.turn/opened-at (at 0)}
+        {:seon.turn/id "run-error-without-triage" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
         {:seon.cluster.eval/id "eval-error-without-triage"
          :seon.cluster.eval/run
          [:seon.turn/id "run-error-without-triage"]
@@ -563,31 +530,16 @@
         messages
         (concat
          (map (fn [index]
-                {:seon.cluster.message/id (str "middle-" index)
-                 :seon.cluster.message/to
-                 [:seon.agent/id agent-id]
-                 :seon.cluster.message/content
-                 (str "middle history " index " " (apply str (repeat 80 "x")))
-                 :seon.cluster.message/at (at (+ 100 index))})
+                {:seon.message/id (str "middle-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "middle history " index " " (apply str (repeat 80 "x"))) :seon.message/inbox [:seon.agent/id agent-id]})
               (range 40))
          (map (fn [index]
-                {:seon.cluster.message/id (str "newest-" index)
-                 :seon.cluster.message/to
-                 [:seon.agent/id agent-id]
-                 :seon.cluster.message/content (str "newest history " index)
-                 :seon.cluster.message/at (at (+ 1000 index))})
+                {:seon.message/id (str "newest-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "newest history " index) :seon.message/inbox [:seon.agent/id agent-id]})
               (range 6)))]
     (db/transact!
      connection
      (into [{:seon.agent/id agent-id}
-            {:seon.turn/id bootstrap-run-id
-             :seon.turn/agent [:seon.agent/id agent-id]
-             :seon.turn/opened-at (at 0)}
-            {:seon.cluster.message/id (bootstrap/task-message-id agent-id)
-             :seon.cluster.message/to
-             [:seon.agent/id agent-id]
-             :seon.cluster.message/content (bootstrap/task-message)
-             :seon.cluster.message/at (at 0)}]
+            {:seon.turn/id bootstrap-run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger "bootstrap-message"}
+            {:db/id "bootstrap-message" :seon.message/id "task0001" :seon.message/to [:seon.agent/id agent-id] :seon.message/content (bootstrap/task-message) :seon.message/inbox [:seon.agent/id agent-id]}]
            cat
            [bootstrap-receipts messages]))))
 
@@ -604,7 +556,7 @@
             bootstrap-count 12
             pinned-ids
             (mapv #(pr-str [bootstrap-run-id %]) (range bootstrap-count))
-            bootstrap-task-id (bootstrap/task-message-id agent-id)
+            bootstrap-task-id (bootstrap/task-message-id @connection agent-id)
             newest-ids (mapv #(str "newest-" %) (range 6))
             visible-ids (mapv :id html-rows)
             ;; Each pinned entry is located by its own prompt line AND the
@@ -649,9 +601,7 @@
         (db/transact!
          connection
          [{:seon.agent/id agent-id}
-          {:seon.turn/id bootstrap-run-id
-           :seon.turn/agent [:seon.agent/id agent-id]
-           :seon.turn/opened-at (at 0)}
+          {:seon.turn/id bootstrap-run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger "bootstrap-message"}
           {:seon.cluster.eval/id "bootstrap-receipt"
            :seon.cluster.eval/run [:seon.turn/id bootstrap-run-id]
            :seon.cluster.eval/ordinal 0
@@ -659,9 +609,7 @@
            :seon.cluster.eval/result-edn ":bootstrap"
            :seon.cluster.eval/source "(identity :bootstrap)"}
 
-          {:seon.turn/id "original"
-           :seon.turn/agent [:seon.agent/id agent-id]
-           :seon.turn/opened-at (at 100)}
+          {:seon.turn/id "original" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
           {:seon.cluster.eval/id "original-receipt"
            :seon.cluster.eval/run [:seon.turn/id "original"]
            :seon.cluster.eval/ordinal 0
@@ -674,11 +622,7 @@
            :seon.cluster.eval/at (at 102)
            :seon.cluster.eval/source "; original comment"}
 
-          {:seon.turn/id "curated"
-           :seon.turn/agent [:seon.agent/id agent-id]
-           :seon.turn/opened-at (at 200)
-           :seon.turn/supersedes
-           [[:seon.turn/id "original"]]}
+          {:seon.turn/id "curated" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
           {:seon.cluster.eval/id "curated-receipt"
            :seon.cluster.eval/run [:seon.turn/id "curated"]
            :seon.cluster.eval/ordinal 0
@@ -686,11 +630,7 @@
            :seon.cluster.eval/result-edn ":curated"
            :seon.cluster.eval/source "(identity :curated)"}
 
-          {:seon.turn/id "proof"
-           :seon.turn/agent [:seon.agent/id agent-id]
-           :seon.turn/opened-at (at 300)
-           :seon.turn/supersedes
-           [[:seon.turn/id "curated"]]}
+          {:seon.turn/id "proof" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
           {:seon.cluster.eval/id "proof-receipt"
            :seon.cluster.eval/run [:seon.turn/id "proof"]
            :seon.cluster.eval/ordinal 0
@@ -724,15 +664,8 @@
        [{:seon.agent/id agent-id}
         {:seon.agent/id peer-id}
         {:seon.test/sym "target-fact"}
-        {:seon.cluster.message/id "about-test"
-         :seon.cluster.message/from [:seon.agent/id agent-id]
-         :seon.cluster.message/to [:seon.agent/id peer-id]
-         :seon.cluster.message/about [:seon.test/sym "target-fact"]
-         :seon.cluster.message/content "Inspect the test fact."
-         :seon.cluster.message/at (at 0)}
-        {:seon.turn/id "run-malformed"
-         :seon.turn/agent [:seon.agent/id agent-id]
-         :seon.turn/opened-at (at 500)}
+        {:seon.message/id "about-test" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about [:seon.test/sym "target-fact"] :seon.message/content "Inspect the test fact." :seon.message/inbox [:seon.agent/id peer-id]}
+        {:seon.turn/id "run-malformed" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
         {:seon.cluster.eval/id "eval-malformed"
          :seon.cluster.eval/run [:seon.turn/id "run-malformed"]
          :seon.cluster.eval/ordinal 0
@@ -755,16 +688,8 @@
        [{:seon.agent/id agent-id}
         {:seon.problems/id "about-first"}
         {:seon.problems/id "about-second"}
-        {:seon.cluster.message/id "about-message-first"
-         :seon.cluster.message/to [:seon.agent/id agent-id]
-         :seon.cluster.message/about [:seon.problems/id "about-first"]
-         :seon.cluster.message/content "Inspect the first problem."
-         :seon.cluster.message/at (at 0)}
-        {:seon.cluster.message/id "about-message-second"
-         :seon.cluster.message/to [:seon.agent/id agent-id]
-         :seon.cluster.message/about [:seon.problems/id "about-second"]
-         :seon.cluster.message/content "Inspect the second problem."
-         :seon.cluster.message/at (at 1000)}])
+        {:seon.message/id "about-message-first" :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "about-first"] :seon.message/content "Inspect the first problem." :seon.message/inbox [:seon.agent/id agent-id]}
+        {:seon.message/id "about-message-second" :seon.message/to [:seon.agent/id agent-id] :seon.message/about [:seon.problems/id "about-second"] :seon.message/content "Inspect the second problem." :seon.message/inbox [:seon.agent/id agent-id]}])
       (let [database @connection
             basis-before (:max-tx database)
             pull-many db/pull-many
@@ -807,9 +732,7 @@
         (db/transact!
          connection
          [{:seon.agent/id agent-id}
-          {:seon.turn/id "run-capped"
-           :seon.turn/agent [:seon.agent/id agent-id]
-           :seon.turn/opened-at (at 0)}
+          {:seon.turn/id "run-capped" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
           {:seon.cluster.eval/id "eval-capped"
            :seon.cluster.eval/run [:seon.turn/id "run-capped"]
            :seon.cluster.eval/ordinal 0
@@ -831,31 +754,21 @@
           (is (not (str/includes? ai ":audit/field-39")))
           (assert-no-session-narration ai))))))
 
-(deftest a-missing-value-says-why-and-names-no-result-handle
-  ;; THE CLASS: an evaluation that stored nothing must never render as an
-  ;; evaluation that produced nothing. It states the reason and the bytes it
-  ;; reached, and it emits NO `:result` — the handle is ablated, so a later
-  ;; form naming it gets an ordinary unresolved symbol rather than a lie.
+(deftest historical-shown-text-keeps-its-original-elision
   (support/with-database
     (fn [connection]
-      (db/transact!
-       connection
-       [{:seon.agent/id agent-id}
-        {:seon.turn/id "run-missing"
-         :seon.turn/agent [:seon.agent/id agent-id]
-         :seon.turn/opened-at (at 0)}
-        {:seon.cluster.eval/id "eval-missing"
-         :seon.cluster.eval/run [:seon.turn/id "run-missing"]
-         :seon.cluster.eval/ordinal 0
-         :seon.cluster.eval/at (at 1000)
-         :seon.eval/missing :over-bound
-         :seon.eval/size 8388608
-         :seon.cluster.eval/source "(range)"}])
-      (let [ai (transcript/render-ai (unit connection))]
-        (is (str/includes? ai ":value #:seon.eval{:missing :over-bound"))
-        (is (str/includes? ai ":size 8388608"))
-        (is (not (str/includes? ai ":result result/")))
-        (assert-no-session-narration ai)))))
+      (let [shown "(0 1 #:seon.print{:elided 8388608})"]
+        (db/transact! connection
+                      [{:seon.agent/id agent-id}
+                       {:seon.turn/id "run-shown" :seon.turn/agent [:seon.agent/id agent-id]
+                        :seon.turn/opened-tx "datomic.tx"}
+                       {:seon.cluster.eval/id "eval-shown"
+                        :seon.cluster.eval/run [:seon.turn/id "run-shown"]
+                        :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (at 1000)
+                        :seon.eval/shown shown :seon.cluster.eval/source "(range)"}])
+        (let [ai (transcript/render-ai (unit connection))]
+          (is (str/includes? ai shown))
+          (assert-no-session-narration ai))))))
 
 (deftest reasoning-is-html-only-and-inline-blob-history-has-one-disclosure
   (support/with-database
@@ -871,9 +784,7 @@
         (db/transact!
          connection
          [{:seon.agent/id agent-id}
-          {:seon.turn/id "run-reasoning"
-           :seon.turn/agent [:seon.agent/id agent-id]
-           :seon.turn/opened-at (at 0)}
+          {:seon.turn/id "run-reasoning" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
           (assoc base-attempt
                  :seon.ai.attempt/id "reasoning-inline"
                  :seon.ai.attempt/ordinal 0)])
@@ -932,11 +843,7 @@
        connection
        (into [{:seon.agent/id agent-id}]
              (map (fn [index]
-                    {:seon.cluster.message/id (str "bounded-" index)
-                     :seon.cluster.message/to
-                     [:seon.agent/id agent-id]
-                     :seon.cluster.message/content (str "message " index)
-                     :seon.cluster.message/at (at index)}))
+                    {:seon.message/id (str "bounded-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "message " index) :seon.message/inbox [:seon.agent/id agent-id]}))
              (range 100)))
       (let [candidate-limit
             (:seon.config.eval.result/max-nodes caps)
@@ -987,20 +894,16 @@
   [{:keys [source-index event-kind id content]
     event-at :at}]
   (if (contains? message-event-kinds event-kind)
-    [(cond-> {:seon.cluster.message/id id
-              :seon.cluster.message/ordinal source-index
-              :seon.cluster.message/to
-              [:seon.agent/id
-               (if (= :message-out event-kind) peer-id agent-id)]
-              :seon.cluster.message/content content
-              :seon.cluster.message/at event-at}
+    [(cond-> {:seon.message/id id :seon.message/to [:seon.agent/id
+               (if (= :message-out event-kind) peer-id agent-id)] :seon.message/content content :seon.message/inbox [:seon.agent/id
+               (if (= :message-out event-kind) peer-id agent-id)]}
        (not= :message-in event-kind)
-       (assoc :seon.cluster.message/from
+       (assoc :seon.message/from
               [:seon.agent/id agent-id])
        (= :message-self event-kind)
-       (assoc :seon.cluster.message/to [:seon.agent/id agent-id])
+       (assoc :seon.message/to [:seon.agent/id agent-id])
        (contains? #{:message-about :message-decline} event-kind)
-       (assoc :seon.cluster.message/about [:seon.test/sym "generated-target"])
+       (assoc :seon.message/about [:seon.test/sym "generated-target"])
        (= :message-decline event-kind)
        (assoc :my.message/reason (str "declined: " content)))]
     (let [run-id (str "run-" id)
@@ -1009,9 +912,7 @@
                    (str "(identity " source-index ")"))]
       ;; ONE ENTITY PER (run, ordinal): the frozen source rides the
       ;; evaluation it belongs to.
-      [{:seon.turn/id run-id
-        :seon.turn/agent [:seon.agent/id agent-id]
-        :seon.turn/opened-at event-at}
+      [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
        (cond-> {:seon.cluster.eval/id id
                 :seon.cluster.eval/run [:seon.turn/id run-id]
                 :seon.cluster.eval/ordinal 0
@@ -1193,11 +1094,7 @@
         (mapcat
          (fn [ordinal]
            (let [run-id (str "history-run-" ordinal)]
-             [{:seon.turn/id run-id
-               :seon.turn/agent [:seon.agent/id agent-id]
-               :seon.turn/opened-at (java.util.Date. (* 1000 ordinal))
-               :seon.turn/closed-at
-               (java.util.Date. (+ 500 (* 1000 ordinal)))}
+             [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
               {:seon.cluster.eval/id (str "history-eval-" ordinal)
                :seon.cluster.eval/run [:seon.turn/id run-id]
                :seon.cluster.eval/ordinal 0
@@ -1212,8 +1109,8 @@
             ai (transcript/format-history-ai derived)
             rows (db/pull-many
                   database
-                  '[:db/id :seon.turn/id :seon.turn/opened-at
-                    :seon.turn/closed-at :seon.turn/agent]
+                  '[:db/id :seon.turn/id :seon.turn/opened-tx
+                    :seon.turn/closed-tx :seon.turn/agent]
                   (mapv :db/id
                         (:seon.turn/_agent
                          (db/pull database [:seon.turn/_agent]
@@ -1313,17 +1210,7 @@
                    :seon.ns/name 'my.agents.one-grammar
                    :seon.cluster.reply/sources sources}))
                prepared (turn/record-evaluated-tx
-                         {:seon.turn.loop/cluster cluster
-                          :seon.db/db database
-                          :seon.turn/id "one-grammar-stored"
-                          :seon.turn/agent
-                          [:seon.agent/id "one-grammar-agent"]
-                          :seon.turn/starting-ns
-                          [:seon.ns/name 'my.agents.one-grammar]
-                          :seon.turn/reply reply
-                          :seon.turn/opened-at opened-at
-                          :seon.turn/closed-at (java.util.Date.)
-                          :seon.turn.loop/evaluated-sources outcomes})
+                         {:seon.turn.loop/cluster cluster :seon.db/db database :seon.turn/id "one-grammar-stored" :seon.turn/agent [:seon.agent/id "one-grammar-agent"] :seon.turn/starting-ns [:seon.ns/name 'my.agents.one-grammar] :seon.turn/reply reply :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources outcomes})
                committed (blob/with-publication!
                            connection (:seon.blob/staged-writes prepared)
                            #(db/transact! connection

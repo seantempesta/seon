@@ -1,260 +1,277 @@
-#:seon.turn.loop{:cluster
-                    [:map
-                     [:seon.db/connection
-                      :seon.db/connection]
-                     [:seon.cluster/name :seon.cluster/name]
-                     [:seon.db.process/id
-                      :seon.db.process/id]
-                     [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-                     [:seon.flow/executor
-                      {:optional true}
-                      :seon.flow/executor]
-                     [:seon.cluster.wake/channel :seon.flow/channel]
-                     [:seon.turn.loop/stream-channel
-                      {:optional true}
-                      :seon.flow/channel]
-                     [:seon.turn.loop/completion :seon.flow/channel]
-                     [:seon.sci.admit/caps :seon.sci.admit/caps]
-                     [:seon.config.eval/time-limit-ms
-                      :seon.config.eval/time-limit-ms]
-                     [:seon.config/on-core-error
-                      :seon.config/on-core-error]
-                     [:seon.config.error/recurrence-limit
-                      :seon.config.error/recurrence-limit]
-                     ;; the fault family's own bound. `seon.turn`,
-                     ;; `seon.schedule` and `seon.cluster` all read it OFF
-                     ;; THIS HANDLE and hand it to `seon.error/prepare`,
-                     ;; whose contract requires an integer, so leaving it
-                     ;; undeclared made a handle without it look valid right
-                     ;; up to the moment a fault had to be recorded.
-                     [:seon.config.error/max-evidence-bytes
-                      :seon.config.error/max-evidence-bytes]
-                     [:seon.config.message/max-chain
-                      :seon.config.message/max-chain]
-                     [:seon.config.error/escalate-to
-                      {:optional true}
-                      :seon.config.error/escalate-to]
-                     [:clojure.core.async.flow/pid
-                      {:optional true}
-                      :keyword]],
-                    :completion :seon.flow/channel,
-                    :evaluation
-                    [:map
-                     [:seon.cluster.eval/at {:optional true} :seon.cluster.eval/at]
-                     ;; ONE OF TWO TERMINAL SHAPES: an admitted value with its
-                     ;; bytes, or :seon.eval/missing with the reason.
-                     [:seon.sci.admit/value
-                      {:optional true}
-                      [:any
-                       {:seon.schema.admission/exemption
-                        :seon.schema.admission/polymorphic-boundary
-                        :seon.schema.admission/reason
-                        "An evaluation carries any already-admitted Clojure value; receipt settlement separately projects its durable representation."
-                        :gen/elements [nil true 0 "" :k [] {} #{}]}]]
-                     [:seon.eval/value
-                      {:optional true}
-                      :seon.eval/value]
-                     [:seon.eval/missing {:optional true} :seon.eval/missing]
-                     [:seon.eval/size {:optional true} :seon.eval/size]
-                     [:seon.cluster.eval/error
-                      {:optional true}
-                      :seon.cluster.eval/error]
-                     [:seon.cluster.eval/triage-edn
-                      {:optional true}
-                      :seon.cluster.eval/triage-edn]
-                     [:seon.cluster.eval/interrupted-at
-                      {:optional true}
-                      :seon.cluster.eval/interrupted-at]
-                     [:seon.cluster.eval/output
-                      {:optional true}
-                      :seon.cluster.eval/output]
-                     [:seon.cluster.eval/ns
-                      {:optional true}
-                      :seon.cluster.eval/ns]
-                     [:seon.sci.eval/ending-ns
-                      {:optional true}
-                      :seon.sci.eval/ending-ns]
-                     [:seon.program/row
-                      {:optional true}
-                      :seon.program/row]
-                     [:seon.sci.eval/bindings
-                      {:optional true}
-                      :seon.sci.eval/bindings]
-                     [:seon.print/options
-                      {:optional true}
-                      :seon.print/options]],
-                    :admitted-form
-                    [:map
-                     [:seon.cluster.eval/source :seon.cluster.eval/source]
-                     [:seon.cluster.eval/ns :seon.cluster.eval/ns]],
-                    :evaluated-source
-                    [:map
-                     [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-                     [:seon.turn.loop/admitted-form :seon.turn.loop/admitted-form]
-                     [:seon.sci.eval/evaluation :seon.turn.loop/evaluation]],
-                    :evaluated-sources [:vector :seon.turn.loop/evaluated-source],
-                    :preview
-                    [:map
-                     [:seon.turn.loop/evaluated-sources
-                      :seon.turn.loop/evaluated-sources]
-                     [:seon.agent/id :seon.agent/id]
-                     [:seon.turn/starting-ns :seon.turn/starting-ns]
-                     [:seon.turn/opened-at :seon.turn/opened-at]
-                     [:seon.turn/closed-at :seon.turn/closed-at]
-                     [:seon.db/db :seon.db/database-value]],
-                    :preview-sources-request
-                    [:map
-                     [:seon.turn.loop/cluster :seon.turn.loop/cluster]
-                     [:seon.db/db :seon.db/database-value]
-                     [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-                     [:seon.agent/id :seon.agent/id]
-                     [:seon.ns/name :seon.ns/name]
-                     [:seon.cluster.reply/text :seon.cluster.reply/text]
-                     [:seon.sci.admit/caps :seon.sci.admit/caps]],
-                    :evaluate-sources-request
-                    [:map
-                     [:seon.turn.loop/cluster :seon.turn.loop/cluster]
-                     [:seon.db/db {:optional true} :seon.db/database-value]
-                     [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-                     [:seon.agent/id :seon.agent/id]
-                     [:seon.turn/id {:optional true} :seon.turn/id]
-                     [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-                     [:seon.ns/name :seon.ns/name]
-                     [:seon.cluster.reply/sources :seon.cluster.reply/sources]
-],
-                    :forms-run [:int {:min 0}],
-                    :now :inst,
-                    :phase [:enum :claim :fork :prompt :freeze :evaluate :delivery],
-                    :outcome
-                    [:enum :closed :released :error :interrupted],
-                    :commit-outcome
-                    [:map
-                     [:db-after :seon.db/database-value]],
-                    :terminal-request
-                    [:map
-                     [:seon.turn/id :seon.turn/id]
-                     [:seon.db.process/id {:optional true}
-                      :seon.db.process/id]
-                     [:seon.cluster.eval/ordinal
-                      :seon.cluster.eval/ordinal]
-                     [:seon.eval/value
-                      {:optional true}
-                      :seon.eval/value]
-
-                     [:seon.eval/missing {:optional true} :seon.eval/missing]
-                     [:seon.eval/size {:optional true} :seon.eval/size]
-                     [:seon.cluster.eval/error
-                      {:optional true}
-                      :seon.cluster.eval/error]
-                     [:seon.cluster.eval/triage-edn
-                      {:optional true}
-                      :seon.cluster.eval/triage-edn]
-                     [:seon.cluster.eval/interrupted-at
-                      {:optional true}
-                      :seon.cluster.eval/interrupted-at]
-                     [:seon.error/kind
-                      {:optional true}
-                      :seon.error/kind]
-                     [:seon.cluster.eval/output
-                      {:optional true}
-                      :seon.cluster.eval/output]
-                     [:seon.cluster.eval/ns
-                      {:optional true}
-                      :seon.cluster.eval/ns]
-                     [:seon.sci.eval/ending-ns
-                      {:optional true}
-                      :seon.sci.eval/ending-ns]
-                     [:seon.program/row
-                      {:optional true}
-                      :seon.program/row]
-
-                     [:my.turn/value {:optional true} :my.turn/value]],
-                    :settle-evaluation-request
-                    [:map
-                     [:seon.turn.loop/cluster
-                      :seon.turn.loop/cluster]
-                     [:seon.turn.loop/now :seon.turn.loop/now]
-                     [:seon.agent/id :seon.agent/id]
-                     [:seon.turn/id :seon.turn/id]
-                     [:seon.cluster.eval/ordinal
-                      :seon.cluster.eval/ordinal]
-                     [:seon.sci.eval/evaluation
-                      :seon.sci.eval/evaluation]
-                     [:seon.problems/form-problem
-                      {:optional true}
-                      :seon.problems/form-problem]
-                     [:seon.cluster.message/trigger
-                      {:optional true}
-                      :seon.cluster.message/id]],
-                    :settle-failure-request
-                    [:map
-                     [:seon.turn.loop/cluster
-                      :seon.turn.loop/cluster]
-                     [:seon.turn.loop/now :seon.turn.loop/now]
-                     [:seon.agent/id :seon.agent/id]
-                     [:seon.error/value :seon.error/value]
-                     [:seon.turn/id
-                      {:optional true}
-                      :seon.turn/id]
-                     [:seon.cluster.eval/ordinal
-                      {:optional true}
-                      :seon.cluster.eval/ordinal]],
-                    :settle-request
-                    [:or
-                     :seon.turn.loop/settle-evaluation-request
-                     :seon.turn.loop/settle-failure-request],
-                    :evaluation-settlement
-                    [:map
-                     [:seon.turn.loop/settled
-                      [:or :nil :my.turn/value]]
-                     [:seon.turn.loop/evaluation
-                      :seon.turn.loop/evaluation]
-                     [:seon.turn.loop/receipt
-                      :seon.turn.loop/terminal-request]
-                     [:seon.blob/staged-writes
-                      [:vector :seon.blob/staged-write]]
-                     [:seon.db/tx-data
-                      :seon.store/transaction-data]
-                     [:seon.turn.loop/outcome
-                      :seon.turn.loop/commit-outcome]
-                     [:seon.turn.loop/refused-outcome
-                      {:optional true}
-                      :seon.error/value]],
-                    :failure-settlement
-                    [:map
-                     [:seon.error/value :seon.error/value]
-                     [:seon.db/tx-data
-                      :seon.store/transaction-data]
-                     [:seon.turn.loop/outcome
-                      :seon.turn.loop/commit-outcome]
-                     [:seon.turn.loop/refused-outcome
-                      {:optional true}
-                      :seon.error/value]],
-                    :settlement
-                    [:or
-                     :seon.turn.loop/evaluation-settlement
-                     :seon.turn.loop/failure-settlement],
-                    :turn-report
-                    [:map
-                     [:seon.turn/id
-                      {:optional true}
-                      :seon.turn/id]
-                     [:seon.agent/id :seon.agent/id]
-                     [:seon.turn.work/situation
-                      :seon.turn.work/situation]
-                     [:seon.turn.loop/forms-run [:int {:min 0}]]
-                     [:seon.turn.loop/outcome
-                      :seon.turn.loop/outcome]],
-                    :turn-request
-                    [:map
-                     [:seon.turn.loop/cluster
-                      :seon.turn.loop/cluster]
-                     [:seon.turn.work/next :seon.turn.work/next]],
-                    :lint-rejected [:= true]
-                    :lint-rejected-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark an evaluated form rejected by lint"} [:seon.turn.loop/lint-rejected :seon.turn.loop/lint-rejected] [:seon.error/message :seon.error/message]]
-                    :prompt-failed :seon.agent/id
-                    :prompt-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the agent whose prompt failed to render"} [:seon.turn.loop/prompt-failed :seon.turn.loop/prompt-failed] [:seon.error/message :seon.error/message]]
-                    :terminal-refusal-settlement-refused :seon.turn/rule
-                    :terminal-refusal-settlement-refused-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the run rule that refused terminal-refusal settlement"} [:seon.turn.loop/terminal-refusal-settlement-refused :seon.turn.loop/terminal-refusal-settlement-refused] [:seon.error/message :seon.error/message]]
- :seon.turn.loop/phase-failed [:= true]
- :seon.turn.loop/phase-failed-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.turn.loop/phase-failed class marker"} [:seon.turn.loop/phase-failed :seon.turn.loop/phase-failed] [:seon.error/message :seon.error/message]]}
+#:seon.turn.loop{:preview-sources-request
+                 [:map
+                  [:seon.turn.loop/cluster :seon.turn.loop/cluster]
+                  [:seon.db/db :seon.db/database-value]
+                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                  [:seon.agent/id :seon.agent/id]
+                  [:seon.ns/name :seon.ns/name]
+                  [:seon.cluster.reply/text :seon.cluster.reply/text]
+                  [:seon.sci.admit/caps :seon.sci.admit/caps]],
+                 :turn-request
+                 [:map
+                  [:seon.turn.loop/cluster :seon.turn.loop/cluster]
+                  [:seon.turn.work/next :seon.turn.work/next]],
+                 :evaluation-settlement
+                 [:map
+                  [:seon.turn.loop/settled [:or :nil :my.turn/value]]
+                  [:seon.turn.loop/evaluation
+                   :seon.turn.loop/evaluation]
+                  [:seon.turn.loop/receipt
+                   :seon.turn.loop/terminal-request]
+                  [:seon.blob/staged-writes
+                   [:vector :seon.blob/staged-write]]
+                  [:seon.db/tx-data :seon.store/transaction-data]
+                  [:seon.turn.loop/outcome
+                   :seon.turn.loop/commit-outcome]
+                  [:seon.turn.loop/refused-outcome
+                   {:optional true}
+                   :seon.error/value]],
+                 :prompt-failed :seon.agent/id,
+                 :phase
+                 [:enum
+                  :claim
+                  :fork
+                  :prompt
+                  :freeze
+                  :evaluate
+                  :delivery],
+                 :settle-evaluation-request
+                 [:map
+                  [:seon.turn.loop/cluster :seon.turn.loop/cluster]
+                  [:seon.turn.loop/now :seon.turn.loop/now]
+                  [:seon.agent/id :seon.agent/id]
+                  [:seon.turn/id :seon.turn/id]
+                  [:seon.cluster.eval/ordinal
+                   :seon.cluster.eval/ordinal]
+                  [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]
+                  [:seon.problems/form-problem
+                   {:optional true}
+                   :seon.problems/form-problem]
+                  [:seon.message/trigger
+                   {:optional true}
+                   :seon.message/id]],
+                 :outcome
+                 [:enum :closed :released :error :interrupted],
+                 :terminal-request
+                 [:map
+                  [:seon.turn/id :seon.turn/id]
+                  [:seon.db.process/id
+                   {:optional true}
+                   :seon.db.process/id]
+                  [:seon.cluster.eval/ordinal
+                   :seon.cluster.eval/ordinal]
+                  [:seon.eval/shown {:optional true} :seon.eval/shown]
+                  [:seon.cluster.eval/error
+                   {:optional true}
+                   :seon.cluster.eval/error]
+                  [:seon.cluster.eval/triage-edn
+                   {:optional true}
+                   :seon.cluster.eval/triage-edn]
+                  [:seon.cluster.eval/interrupted-at
+                   {:optional true}
+                   :seon.cluster.eval/interrupted-at]
+                  [:seon.error/kind {:optional true} :seon.error/kind]
+                  [:seon.cluster.eval/output
+                   {:optional true}
+                   :seon.cluster.eval/output]
+                  [:seon.cluster.eval/ns
+                   {:optional true}
+                   :seon.cluster.eval/ns]
+                  [:seon.sci.eval/ending-ns
+                   {:optional true}
+                   :seon.sci.eval/ending-ns]
+                  [:seon.program/row
+                   {:optional true}
+                   :seon.program/row]
+                  [:my.turn/value {:optional true} :my.turn/value]],
+                 :completion :seon.flow/channel,
+                 :phase-failed-error
+                 [:map
+                  {:seon.error/class true,
+                   :seon.render/ai seon.error/render-ai,
+                   :seon.render/html seon.error/render-html,
+                   :error/message
+                   "must carry the :seon.turn.loop/phase-failed class marker"}
+                  [:seon.turn.loop/phase-failed
+                   :seon.turn.loop/phase-failed]
+                  [:seon.error/message :seon.error/message]],
+                 :phase-failed [:= true],
+                 :evaluation
+                 [:map
+                  [:seon.cluster.eval/at
+                   {:optional true}
+                   :seon.cluster.eval/at]
+                  [:seon.sci.admit/value
+                   {:optional true}
+                   [:any
+                    {:seon.schema.admission/exemption
+                     :seon.schema.admission/polymorphic-boundary,
+                     :seon.schema.admission/reason
+                     "An evaluation carries any already-admitted Clojure value; receipt settlement separately projects its durable representation.",
+                     :gen/elements [nil true 0 "" :k [] {} #{}]}]]
+                  [:seon.eval/shown {:optional true} :seon.eval/shown]
+                  [:seon.cluster.eval/error
+                   {:optional true}
+                   :seon.cluster.eval/error]
+                  [:seon.cluster.eval/triage-edn
+                   {:optional true}
+                   :seon.cluster.eval/triage-edn]
+                  [:seon.cluster.eval/interrupted-at
+                   {:optional true}
+                   :seon.cluster.eval/interrupted-at]
+                  [:seon.cluster.eval/output
+                   {:optional true}
+                   :seon.cluster.eval/output]
+                  [:seon.cluster.eval/ns
+                   {:optional true}
+                   :seon.cluster.eval/ns]
+                  [:seon.sci.eval/ending-ns
+                   {:optional true}
+                   :seon.sci.eval/ending-ns]
+                  [:seon.program/row
+                   {:optional true}
+                   :seon.program/row]
+                  [:seon.sci.eval/bindings
+                   {:optional true}
+                   :seon.sci.eval/bindings]
+                  [:seon.print/options
+                   {:optional true}
+                   :seon.print/options]],
+                 :evaluated-sources
+                 [:vector :seon.turn.loop/evaluated-source],
+                 :terminal-refusal-settlement-refused-error
+                 [:map
+                  {:seon.error/class true,
+                   :seon.render/ai seon.error/render-ai,
+                   :seon.render/html seon.error/render-html,
+                   :error/message
+                   "must identify the run rule that refused terminal-refusal settlement"}
+                  [:seon.turn.loop/terminal-refusal-settlement-refused
+                   :seon.turn.loop/terminal-refusal-settlement-refused]
+                  [:seon.error/message :seon.error/message]],
+                 :settle-request
+                 [:or
+                  :seon.turn.loop/settle-evaluation-request
+                  :seon.turn.loop/settle-failure-request],
+                 :prompt-failed-error
+                 [:map
+                  {:seon.error/class true,
+                   :seon.render/ai seon.error/render-ai,
+                   :seon.render/html seon.error/render-html,
+                   :error/message
+                   "must identify the agent whose prompt failed to render"}
+                  [:seon.turn.loop/prompt-failed
+                   :seon.turn.loop/prompt-failed]
+                  [:seon.error/message :seon.error/message]],
+                 :lint-rejected [:= true],
+                 :evaluate-sources-request
+                 [:map
+                  [:seon.turn.loop/cluster :seon.turn.loop/cluster]
+                  [:seon.db/db
+                   {:optional true}
+                   :seon.db/database-value]
+                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                  [:seon.agent/id :seon.agent/id]
+                  [:seon.turn/id {:optional true} :seon.turn/id]
+                  [:seon.cluster.eval/ordinal
+                   :seon.cluster.eval/ordinal]
+                  [:seon.ns/name :seon.ns/name]
+                  [:seon.cluster.reply/sources
+                   :seon.cluster.reply/sources]],
+                 :commit-outcome
+                 [:map [:db-after :seon.db/database-value]],
+                 :lint-rejected-error
+                 [:map
+                  {:seon.error/class true,
+                   :seon.render/ai seon.error/render-ai,
+                   :seon.render/html seon.error/render-html,
+                   :error/message
+                   "must mark an evaluated form rejected by lint"}
+                  [:seon.turn.loop/lint-rejected
+                   :seon.turn.loop/lint-rejected]
+                  [:seon.error/message :seon.error/message]],
+                 :settle-failure-request
+                 [:map
+                  [:seon.turn.loop/cluster :seon.turn.loop/cluster]
+                  [:seon.turn.loop/now :seon.turn.loop/now]
+                  [:seon.agent/id :seon.agent/id]
+                  [:seon.error/value :seon.error/value]
+                  [:seon.turn/id {:optional true} :seon.turn/id]
+                  [:seon.cluster.eval/ordinal
+                   {:optional true}
+                   :seon.cluster.eval/ordinal]],
+                 :admitted-form
+                 [:map
+                  [:seon.cluster.eval/source :seon.cluster.eval/source]
+                  [:seon.cluster.eval/ns :seon.cluster.eval/ns]],
+                 :turn-report
+                 [:map
+                  [:seon.turn/id {:optional true} :seon.turn/id]
+                  [:seon.agent/id :seon.agent/id]
+                  [:seon.turn.work/situation :seon.turn.work/situation]
+                  [:seon.turn.loop/forms-run [:int {:min 0}]]
+                  [:seon.turn.loop/outcome :seon.turn.loop/outcome]],
+                 :evaluated-source
+                 [:map
+                  [:seon.cluster.eval/ordinal
+                   :seon.cluster.eval/ordinal]
+                  [:seon.turn.loop/admitted-form
+                   :seon.turn.loop/admitted-form]
+                  [:seon.sci.eval/evaluation
+                   :seon.turn.loop/evaluation]],
+                 :settlement
+                 [:or
+                  :seon.turn.loop/evaluation-settlement
+                  :seon.turn.loop/failure-settlement],
+                 :preview
+                 [:map
+                  [:seon.turn.loop/evaluated-sources
+                   :seon.turn.loop/evaluated-sources]
+                  [:seon.agent/id :seon.agent/id]
+                  [:seon.turn/starting-ns :seon.turn/starting-ns]
+                  [:seon.turn/opened-tx :seon.turn/opened-tx]
+                  [:seon.turn/closed-tx :seon.turn/closed-tx]
+                  [:seon.db/db :seon.db/database-value]],
+                 :terminal-refusal-settlement-refused :seon.turn/rule,
+                 :forms-run [:int {:min 0}],
+                 :cluster
+                 [:map
+                  [:seon.db/connection :seon.db/connection]
+                  [:seon.cluster/name :seon.cluster/name]
+                  [:seon.db.process/id :seon.db.process/id]
+                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                  [:seon.flow/executor
+                   {:optional true}
+                   :seon.flow/executor]
+                  [:seon.cluster.wake/channel :seon.flow/channel]
+                  [:seon.turn.loop/stream-channel
+                   {:optional true}
+                   :seon.flow/channel]
+                  [:seon.turn.loop/completion :seon.flow/channel]
+                  [:seon.sci.admit/caps :seon.sci.admit/caps]
+                  [:seon.config.eval/time-limit-ms
+                   :seon.config.eval/time-limit-ms]
+                  [:seon.config/on-core-error
+                   :seon.config/on-core-error]
+                  [:seon.config.error/recurrence-limit
+                   :seon.config.error/recurrence-limit]
+                  [:seon.config.error/max-evidence-bytes
+                   :seon.config.error/max-evidence-bytes]
+                  [:seon.config.message/max-chain
+                   :seon.config.message/max-chain]
+                  [:seon.config.error/escalate-to
+                   {:optional true}
+                   :seon.config.error/escalate-to]
+                  [:clojure.core.async.flow/pid
+                   {:optional true}
+                   :keyword]],
+                 :now :inst,
+                 :failure-settlement
+                 [:map
+                  [:seon.error/value :seon.error/value]
+                  [:seon.db/tx-data :seon.store/transaction-data]
+                  [:seon.turn.loop/outcome
+                   :seon.turn.loop/commit-outcome]
+                  [:seon.turn.loop/refused-outcome
+                   {:optional true}
+                   :seon.error/value]]}

@@ -31,9 +31,7 @@
        (db/transact!
         connection
         (turn/open-tx
-         {:seon.turn/id run-id
-          :seon.turn/agent [:seon.agent/id agent-id]
-          :seon.turn/opened-at now}))
+         {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
        (db/transact!
         connection
         (turn/receipt-start-tx

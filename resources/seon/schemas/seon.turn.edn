@@ -1,202 +1,211 @@
-#:seon.turn{:agent
-                   [:and
-                    {:description
-                     "The agent whose run this is; its reverse is that agent's own evaluation history.",
-                     :seon.render/ai
-                     seon.render.transcript/render-history-ai,
-                     :seon.render/html
-                     seon.render.transcript/render-history-html}
-                    :seon.db/ref],
-                   :background-results [:set :seon.db/ref],
-                   :closed-at :inst,
-                   :error [:string {:min 1}],
-                   :attempts [:set {:seon.db/component true
-                                    :description "The provider attempts owned by this turn."}
-                              :seon.db/ref],
-                   :id [:string {:min 1, :seon.db/identity true}],
-                   :generated-form-request
-                   [:map
-                    [:seon.turn/id :seon.turn/id]
-
-                    [:seon.cluster.eval/at :seon.cluster.eval/at]
-                    [:seon.cluster.eval/ordinal
-                     :seon.cluster.eval/ordinal]
-                    [:seon.cluster.eval/source
-                     :seon.cluster.eval/source]
-                    [:seon.cluster.eval/comment
-                     {:optional true}
-                     :seon.cluster.eval/comment]
-                    [:seon.ns/name :seon.ns/name]],
-
-                   :missing-results [:int {:min 0}],
-                   :opened-at :inst,
-                   :plan-digest [:string {:min 1}],
-                   :reply [:string {:seon.db/no-history? true}],
-                   :reply-blob :seon.blob/digest,
-                   :reply-size [:int {:min 0}],
-
-                   :starting-ns :seon.db/ref,
-                   :supersedes [:set :seon.db/ref],
-                   :evaluation-facts-request
-                   [:map
-                    [:seon.turn/id :seon.turn/id]
-
-                    [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-                    [:seon.sci.eval/evaluation :seon.turn.loop/evaluation]
-                    [:seon.turn.loop/settlement-evaluation :seon.turn.loop/evaluation]
-                    [:seon.problems/form-problem {:optional true} :seon.problems/form-problem]
-
-                    [:my.turn/value {:optional true} :my.turn/value]],
-                   :record-evaluated-request
-                   [:map
-                    [:seon.turn.loop/cluster :seon.turn.loop/cluster]
-                    [:seon.db/db :seon.db/database-value]
-                    [:seon.turn/id :seon.turn/id]
-                    [:seon.turn/agent :seon.turn/agent]
-                    [:seon.turn/starting-ns :seon.turn/starting-ns]
-                    [:seon.turn/reply :seon.turn/reply]
-                    [:seon.turn/opened-at :seon.turn/opened-at]
-                    [:seon.turn/closed-at :seon.turn/closed-at]
-                    [:seon.turn.loop/evaluated-sources
-                     [:vector
-                      [:and :seon.turn.loop/evaluated-source
-                       [:map
-                        [:seon.sci.eval/evaluation
-                         [:map [:seon.cluster.eval/at :seon.cluster.eval/at]]]]]]]],
-                   :record-evaluated-call-request
-                   [:map
-                    [:seon.turn/id :seon.turn/id]
-                    [:seon.turn/agent :seon.turn/agent]
-                    [:seon.turn/starting-ns :seon.turn/starting-ns]
-                    [:seon.turn/opened-at :seon.turn/opened-at]
-                    [:seon.turn/closed-at :seon.turn/closed-at]
-                    [:seon.turn/reply {:optional true} :seon.turn/reply]
-                    [:seon.turn/reply-blob {:optional true} :seon.turn/reply-blob]
-                    [:seon.turn/reply-size :seon.turn/reply-size]
-                    [:seon.turn/sources :seon.cluster.reply/sources]
-                    [:seon.turn/evaluations
-                     [:vector [:and :seon.cluster.eval/settle-request
-                               [:map
-                                [:seon.cluster.eval/at :seon.cluster.eval/at]
-                                [:seon.cluster.eval/source :seon.cluster.eval/source]
-                                [:seon.cluster.eval/ns :seon.cluster.eval/ns]]]]]],
-                   :system-run-request
-                   [:map
-                    [:seon.agent/id :seon.agent/id]
-                    [:seon.turn/id :seon.turn/id]
-
-                    [:seon.turn/opened-at :seon.turn/opened-at]
-                    [:seon.turn/starting-ns :seon.turn/starting-ns]
-                    [:seon.turn/plan-digest :seon.turn/plan-digest]
-                    [:seon.turn/sources :seon.cluster.reply/sources]
-                    [:seon.turn/reply {:optional true} :seon.turn/reply]
-                    [:seon.turn/reply-blob {:optional true} :seon.turn/reply-blob]
-                    [:seon.turn/reply-size {:optional true} :seon.turn/reply-size]
-                    [:seon.turn/trigger {:optional true} :seon.turn/trigger]],
-                   :generated-run-request
-                   [:map
-                    [:seon.agent/id :seon.agent/id]
-                    [:seon.turn/id :seon.turn/id]
-
-                    [:seon.turn/opened-at :seon.turn/opened-at]
-                    [:seon.turn/starting-ns :seon.turn/starting-ns]
-                    [:seon.turn/trigger {:optional true}
-                     :seon.turn/trigger]],
-                   :turn
-                   [:map
-                    {:seon.db/attributes true,
-                     :seon.render/ai seon.render.transcript/render-run-ai,
-                     :seon.render/html seon.render.transcript/render-run-html}
-                    [:seon.turn/id :seon.turn/id]
-                    [:seon.turn/agent :seon.turn/agent]
-                    [:seon.turn/attempts {:optional true} :seon.turn/attempts]
-                    [:seon.turn/trigger
-                     {:optional true}
-                     :seon.turn/trigger]
-                    [:seon.turn/background-results
-                     {:optional true}
-                     :seon.turn/background-results]
-                    [:seon.turn/opened-at
-                     :seon.turn/opened-at]
-                    [:seon.turn/starting-ns
-                     {:optional true}
-                     :seon.turn/starting-ns]
-                    [:seon.turn/supersedes
-                     {:optional true}
-                     :seon.turn/supersedes]
-                    [:seon.turn/closed-at
-                     {:optional true}
-                     :seon.turn/closed-at]
-
-                    [:seon.turn/undisposed-at
-                     {:optional true}
-                     :seon.turn/undisposed-at]
-
-                    [:seon.turn/plan-digest
-                     {:optional true}
-                     :seon.turn/plan-digest]
-                    [:seon.turn/reply
-                     {:optional true}
-                     :seon.turn/reply]
-                    [:seon.turn/reply-blob
-                     {:optional true}
-                     :seon.turn/reply-blob]
-                    [:seon.turn/reply-size
-                     {:optional true}
-                     :seon.turn/reply-size]
-                    [:seon.turn.work/situation
-                     {:optional true}
-                     :seon.turn.work/situation]
-                    [:seon.turn/error
-                     {:optional true}
-                     :seon.turn/error]],
-                   :trigger [:and #:seon.db{:index true} :seon.db/ref],
-                   :turns-remaining [:int {:min 0}],
-                   ;; PRESENCE IS THE STATE: the run loop asserts this in
-                   ;; the same transaction that closes the last clean form
-                   ;; exactly when no complete/wait disposition was returned.
-                   :undisposed-at :inst,
-                   :rule :keyword,
-                   :transition :keyword,
-                   :refused :seon.turn/rule
-                   :refused-error [:and {:seon.error/class true :seon.error/refusal true :seon.error/refusal-shape :seon.error/refusal-value :seon.render/ai seon.error/refusal-prose :seon.render/html seon.error/render-html :gen/schema [:map [:seon.turn/refused :seon.turn/refused] [:seon.error/message :seon.error/message]] :error/message "must identify the run rule that refused its transition"} :seon.error/refusal-value [:map [:seon.turn/refused :seon.turn/refused]]]
- :seon.turn/missing-opening-datom [:= true]
- :seon.turn/missing-opening-datom-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must carry the :seon.turn/missing-opening-datom class marker"} [:seon.turn/missing-opening-datom :seon.turn/missing-opening-datom] [:seon.error/message :seon.error/message]]
-:write? :boolean
- :basis-t :seon.db/basis-t
- :status [:enum {:description "Why one read form participates in this system walk: no prior evaluation, unchanged dependencies, or changed dependencies."}
-          :none :unchanged :changed]
- :changes :seon.db/datoms
- :text :string
- :form
- [:map
-  [:seon.cluster.eval/source :seon.cluster.eval/source]
-  [:seon.ns/name :seon.ns/name]
-  [:seon.turn/status :seon.turn/status]
-  [:seon.render.walk/lookup {:optional true} :seon.render.walk/lookup]
-  [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]
-  [:seon.cluster.eval/read-basis-transaction {:optional true}
-   :seon.cluster.eval/read-basis-transaction]
-  [:seon.turn/changes {:optional true} :seon.turn/changes]
-  [:seon.turn/text {:optional true} :seon.turn/text]]
- :forms [:vector :seon.turn/form]
- :system-request
- [:map
-  [:seon.turn.loop/cluster :seon.turn.loop/cluster]
-  [:seon.agent/id :seon.agent/id]
-  [:seon.turn/write? {:optional true} :seon.turn/write?]]
- :system-result
- [:map
-  [:seon.turn/forms :seon.turn/forms]
-  [:seon.render.walk/units :seon.render.walk/units]
-  [:seon.turn/id {:optional true} :seon.turn/id]]
- :compaction-request
- [:map
-  [:seon.db/connection :seon.db/connection]
-  [:seon.agent/id :seon.agent/id]]
- :virtual-request
- [:map
-  [:seon.turn.loop/cluster :seon.turn.loop/cluster]
-  [:seon.agent/routing :seon.agent/routing]
-  [:seon.agent/id :seon.agent/id]
-  [:seon.cluster.reply/text {:optional true} :seon.cluster.reply/text]]}
+#:seon.turn{:write? :boolean,
+            :turn
+            [:map
+             {:seon.db/attributes true,
+              :seon.render/ai seon.render.transcript/render-run-ai,
+              :seon.render/html seon.render.transcript/render-run-html}
+             [:seon.turn/id :seon.turn/id]
+             [:seon.turn/agent :seon.turn/agent]
+             [:seon.turn/attempts {:optional true} :seon.turn/attempts]
+             [:seon.turn/trigger {:optional true} :seon.turn/trigger]
+             [:seon.turn/opened-tx :seon.turn/opened-tx]
+             [:seon.turn/starting-ns
+              {:optional true}
+              :seon.turn/starting-ns]
+             [:seon.turn/closed-tx
+              {:optional true}
+              :seon.turn/closed-tx]
+             [:seon.turn/reply {:optional true} :seon.turn/reply]
+             [:seon.turn/reply-blob
+              {:optional true}
+              :seon.turn/reply-blob]
+             [:seon.turn/reply-size
+              {:optional true}
+              :seon.turn/reply-size]
+             [:seon.turn.work/situation
+              {:optional true}
+              :seon.turn.work/situation]],
+            :missing-opening-datom-error
+            [:map
+             {:seon.error/class true,
+              :seon.render/ai seon.error/render-ai,
+              :seon.render/html seon.error/render-html,
+              :error/message
+              "must carry the :seon.turn/missing-opening-datom class marker"}
+             [:seon.turn/missing-opening-datom
+              :seon.turn/missing-opening-datom]
+             [:seon.error/message :seon.error/message]],
+            :rule :keyword,
+            :trigger [:and #:seon.db{:index true} :seon.db/ref],
+            :system-result
+            [:map
+             [:seon.turn/forms :seon.turn/forms]
+             [:seon.render.walk/units :seon.render.walk/units]
+             [:seon.turn/id {:optional true} :seon.turn/id]],
+            :agent
+            [:and
+             {:description
+              "The agent whose run this is; its reverse is that agent's own evaluation history.",
+              :seon.render/ai seon.render.transcript/render-history-ai,
+              :seon.render/html
+              seon.render.transcript/render-history-html}
+             :seon.db/ref],
+            :form
+            [:map
+             [:seon.cluster.eval/source :seon.cluster.eval/source]
+             [:seon.ns/name :seon.ns/name]
+             [:seon.turn/status :seon.turn/status]
+             [:seon.render.walk/lookup
+              {:optional true}
+              :seon.render.walk/lookup]
+             [:seon.cluster.eval/comment
+              {:optional true}
+              :seon.cluster.eval/comment]
+             [:seon.cluster.eval/read-basis-transaction
+              {:optional true}
+              :seon.cluster.eval/read-basis-transaction]
+             [:seon.turn/changes {:optional true} :seon.turn/changes]
+             [:seon.turn/text {:optional true} :seon.turn/text]],
+            :record-evaluated-request
+            [:map
+             [:seon.turn.loop/cluster :seon.turn.loop/cluster]
+             [:seon.db/db :seon.db/database-value]
+             [:seon.turn/id :seon.turn/id]
+             [:seon.turn/agent :seon.turn/agent]
+             [:seon.turn/starting-ns :seon.turn/starting-ns]
+             [:seon.turn/reply :seon.turn/reply]
+             [:seon.turn/opened-tx :seon.turn/opened-tx]
+             [:seon.turn/closed-tx :seon.turn/closed-tx]
+             [:seon.turn.loop/evaluated-sources
+              [:vector
+               [:and
+                :seon.turn.loop/evaluated-source
+                [:map
+                 [:seon.sci.eval/evaluation
+                  [:map
+                   [:seon.cluster.eval/at
+                    :seon.cluster.eval/at]]]]]]]],
+            :compaction-request
+            [:map
+             [:seon.db/connection :seon.db/connection]
+             [:seon.agent/id :seon.agent/id]],
+            :basis-t :seon.db/basis-t,
+            :starting-ns :seon.db/ref,
+            :virtual-request
+            [:map
+             [:seon.turn.loop/cluster :seon.turn.loop/cluster]
+             [:seon.agent/routing :seon.agent/routing]
+             [:seon.agent/id :seon.agent/id]
+             [:seon.cluster.reply/text
+              {:optional true}
+              :seon.cluster.reply/text]],
+            :evaluation-facts-request
+            [:map
+             [:seon.turn/id :seon.turn/id]
+             [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+             [:seon.sci.eval/evaluation :seon.turn.loop/evaluation]
+             [:seon.turn.loop/settlement-evaluation
+              :seon.turn.loop/evaluation]
+             [:seon.problems/form-problem
+              {:optional true}
+              :seon.problems/form-problem]
+             [:my.turn/value {:optional true} :my.turn/value]],
+            :system-request
+            [:map
+             [:seon.turn.loop/cluster :seon.turn.loop/cluster]
+             [:seon.agent/id :seon.agent/id]
+             [:seon.turn/write? {:optional true} :seon.turn/write?]],
+            :text :string,
+            :turns-remaining [:int {:min 0}],
+            :reply [:string #:seon.db{:no-history? true}],
+            :missing-results [:int {:min 0}],
+            :changes :seon.db/datoms,
+            :missing-opening-datom [:= true],
+            :attempts
+            [:set
+             {:seon.db/component true,
+              :description "The provider attempts owned by this turn."}
+             :seon.db/ref],
+            :refused :seon.turn/rule,
+            :forms [:vector :seon.turn/form],
+            :system-run-request
+            [:map
+             [:seon.agent/id :seon.agent/id]
+             [:seon.turn/id :seon.turn/id]
+             [:seon.turn/opened-tx :seon.turn/opened-tx]
+             [:seon.turn/starting-ns :seon.turn/starting-ns]
+             [:seon.turn/sources :seon.cluster.reply/sources]
+             [:seon.turn/reply {:optional true} :seon.turn/reply]
+             [:seon.turn/reply-blob
+              {:optional true}
+              :seon.turn/reply-blob]
+             [:seon.turn/reply-size
+              {:optional true}
+              :seon.turn/reply-size]
+             [:seon.turn/trigger {:optional true} :seon.turn/trigger]],
+            :generated-run-request
+            [:map
+             [:seon.agent/id :seon.agent/id]
+             [:seon.turn/id :seon.turn/id]
+             [:seon.turn/opened-tx :seon.turn/opened-tx]
+             [:seon.turn/starting-ns :seon.turn/starting-ns]
+             [:seon.turn/trigger {:optional true} :seon.turn/trigger]],
+            :closed-tx :seon.db/ref,
+            :opened-tx :seon.db/ref,
+            :transition :keyword,
+            :reply-blob :seon.blob/digest,
+            :id [:string {:min 1, :seon.db/identity true}],
+            :refused-error
+            [:and
+             {:seon.error/class true,
+              :seon.error/refusal true,
+              :seon.error/refusal-shape :seon.error/refusal-value,
+              :seon.render/ai seon.error/refusal-prose,
+              :seon.render/html seon.error/render-html,
+              :gen/schema
+              [:map
+               [:seon.turn/refused :seon.turn/refused]
+               [:seon.error/message :seon.error/message]],
+              :error/message
+              "must identify the run rule that refused its transition"}
+             :seon.error/refusal-value
+             [:map [:seon.turn/refused :seon.turn/refused]]],
+            :status
+            [:enum
+             {:description
+              "Why one read form participates in this system walk: no prior evaluation, unchanged dependencies, or changed dependencies."}
+             :none
+             :unchanged
+             :changed],
+            :generated-form-request
+            [:map
+             [:seon.turn/id :seon.turn/id]
+             [:seon.cluster.eval/at :seon.cluster.eval/at]
+             [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+             [:seon.cluster.eval/source :seon.cluster.eval/source]
+             [:seon.cluster.eval/comment
+              {:optional true}
+              :seon.cluster.eval/comment]
+             [:seon.ns/name :seon.ns/name]],
+            :reply-size [:int {:min 0}],
+            :record-evaluated-call-request
+            [:map
+             [:seon.turn/id :seon.turn/id]
+             [:seon.turn/agent :seon.turn/agent]
+             [:seon.turn/starting-ns :seon.turn/starting-ns]
+             [:seon.turn/opened-tx :seon.turn/opened-tx]
+             [:seon.turn/closed-tx :seon.turn/closed-tx]
+             [:seon.turn/reply {:optional true} :seon.turn/reply]
+             [:seon.turn/reply-blob
+              {:optional true}
+              :seon.turn/reply-blob]
+             [:seon.turn/reply-size :seon.turn/reply-size]
+             [:seon.turn/sources :seon.cluster.reply/sources]
+             [:seon.turn/evaluations
+              [:vector
+               [:and
+                :seon.cluster.eval/settle-request
+                [:map
+                 [:seon.cluster.eval/at :seon.cluster.eval/at]
+                 [:seon.cluster.eval/source :seon.cluster.eval/source]
+                 [:seon.cluster.eval/ns :seon.cluster.eval/ns]]]]]]}

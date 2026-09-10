@@ -47,12 +47,7 @@
                       "the regression keeps the formerly failing boundary armed")
                   (db/transact!
                    connection
-                   [{:seon.cluster.message/id message-id
-                     :seon.cluster.message/to
-                     [:seon.agent/id "root"]
-                     :seon.cluster.message/content
-                     "Complete one instrumented turn."
-                     :seon.cluster.message/at (Date.)}])
+                   [{:seon.message/id message-id :seon.message/to [:seon.agent/id "root"] :seon.message/content "Complete one instrumented turn." :seon.message/inbox [:seon.agent/id "root"]}])
                   (let [attempt-request
                         (test-support/await-event!
                          attempt-requests "instrumented attempt request")]

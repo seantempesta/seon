@@ -14,6 +14,7 @@
   (:require [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.error :as error]
             [seon.print :as print]
             [seon.render.hiccup :as hiccup]
@@ -757,7 +758,7 @@
 ;;; throwable's class. The kernel's diagnostic record — duration, entrances,
 ;;; allocation — is deliberately NOT carried: it is the one part of a refusal
 ;;; that differs run to run, and it would otherwise both move prompt bytes and
-;;; mint a fresh `failure-message-id` for every repeat of one broken renderer.
+;;; contribute changing diagnostic evidence for the same broken renderer.
 
 (def ^:private unknown-reason-by-outcome
   "The reason each guarded invocation outcome states about itself."
@@ -1423,11 +1424,6 @@
   [request]
   ((requiring-resolve 'seon.render.web/derive-context!) request))
 
-(defn- failure-message-id
-  [namespace-name failure]
-  (str "render-failure-"
-       (schema/sha-256
-        [(.getBytes (pr-str [namespace-name failure]) "UTF-8")])))
 
 (defn- namespace-owner
   [database namespace-name]
@@ -1450,10 +1446,8 @@
   renderer broke (§2.4).
 
   The namespace owner, when one is explicitly assigned, receives one durable
-  message carrying the internal evidence. Its idempotence is real only because
-  the unknown is stable: `failure-message-id` digests the failure, and a
-  failure carrying the kernel's duration and allocation minted a NEW message
-  for every repeat of one broken renderer. An agentless namespace has no
+  message carrying the internal evidence with a fresh event id.
+  An agentless namespace has no
   queryable stakeholders yet, so its transaction data is empty rather than
   guessed."
   {:malli/schema [:=> [:cat :seon.render/failure-request]
@@ -1463,15 +1457,7 @@
     failure :seon.error/value}]
   (let [unavailable (refused failure)
         owner (namespace-owner database namespace-name)
-        message-id (failure-message-id namespace-name unavailable)
-        already-recorded?
-        (some? (db/q '[:find ?message .
-                       :in $ ?message-id
-                       :where
-                       [?message :seon.cluster.message/id ?message-id]]
-                     database message-id))
-        at (:db/txInstant
-            (db/pull database [:db/txInstant] (db/basis-t database)))
+        message-id (id/id (random-uuid) 8)
         message
         (str "A renderer in " namespace-name " failed. "
              (:seon.error/message unavailable)
@@ -1481,14 +1467,12 @@
      :seon.render/html (unknown-html {:seon.render/value unavailable})
      :seon.db/tx-data
      (cond-> []
-       (and owner (not already-recorded?))
+       owner
        (conj
-        (cond-> {:seon.cluster.message/id
-                 message-id
-                 :seon.cluster.message/to
-                 [:seon.agent/id owner]
-                 :seon.cluster.message/content message}
-          at (assoc :seon.cluster.message/at at))))}))
+        {:seon.message/id message-id
+         :seon.message/to [:seon.agent/id owner]
+         :seon.message/inbox [:seon.agent/id owner]
+         :seon.message/content message}))}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Ambient walk custody

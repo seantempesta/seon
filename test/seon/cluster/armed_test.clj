@@ -77,7 +77,7 @@
                   :in $ ?run-id
                   :where
                   [?run :seon.turn/id ?run-id]
-                  [?run :seon.turn/closed-at ?closed-at]]
+                  [?run :seon.turn/closed-tx ?closed-at]]
                 db (bootstrap/run-id "root"))))
         (body instance)
         (finally
@@ -95,7 +95,7 @@
          :in $ ?agent-id
          :where
          [?agent :seon.agent/id ?agent-id]
-         [?message :seon.cluster.message/to ?agent]]
+         [?message :seon.message/to ?agent]]
        db agent-id))
 
 ;;; ---------------------------------------------------------------------------
@@ -200,7 +200,7 @@
                     :in $ ?run-id
                     :where
                     [?run :seon.turn/id ?run-id]
-                    [?run :seon.turn/closed-at ?closed-at]]
+                    [?run :seon.turn/closed-tx ?closed-at]]
                   db (bootstrap/run-id "root")))))
         (let [left-handle (:seon.turn.loop/cluster left)
               right-handle (:seon.turn.loop/cluster right)
@@ -302,10 +302,7 @@
            (db/transact!
             (:seon.db/connection
              (:seon.turn.loop/cluster request))
-            [{:seon.cluster.message/id "boot-window-message"
-              :seon.cluster.message/to [:seon.agent/id "root"]
-              :seon.cluster.message/content "answer during boot"
-              :seon.cluster.message/at (Date.)}])
+            [{:seon.message/id "boot-window-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "answer during boot" :seon.message/inbox [:seon.agent/id "root"]}])
            entry))
        ai/complete
        (fn [_request]
@@ -321,15 +318,15 @@
                     '[:find (pull ?run
                                   [:seon.turn/id
                                    {:seon.turn/trigger
-                                    [:seon.cluster.message/id]}]) .
+                                    [:seon.message/id]}]) .
                       :in $ ?message-id
                       :where
-                      [?message :seon.cluster.message/id ?message-id]
+                      [?message :seon.message/id ?message-id]
                       [?run :seon.turn/trigger ?message]]
                     database "boot-window-message")))]
             (is (= "boot-window-message"
                    (get-in run [:seon.turn/trigger
-                                :seon.cluster.message/id]))
+                                :seon.message/id]))
                 "the committed message opened a run without a later wake"))
           (finally
             (cluster/stop! instance)))))))
@@ -398,17 +395,17 @@
                                 (filter
                                  (fn [candidate]
                                    (str/includes?
-                                    (:seon.cluster.message/content candidate)
+                                    (:seon.message/content candidate)
                                     (:seon.error/id fact)))
                                  (messages-to db "root")))))]
                 (is (some? message) "the message names the evidence")
-                (is (some? (:seon.cluster.message/about message))
+                (is (some? (:seon.message/about message))
                     "and points at the fact — the absence of `about` on an
                      ordinary user message is what makes the storm fence
                      computable without a flag")))))
         (testing "THE STORM IS BOUNDED, and this is the falsifier for the
         cycle the live probe found: an explanation message is a commit,
-        a commit wakes the loop through :seon.cluster.message/to, and a
+        a commit wakes the loop through :seon.message/to, and a
         woken loop hits the same broken code. One injected throw made
         six faults in 1.5s before the fence bounded the MESSAGES."
           (let [limit (:seon.config.error/recurrence-limit handle)

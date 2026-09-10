@@ -18,14 +18,8 @@
                         [:seon.ns/name 'my.message]]}
     {:seon.agent/id "situation"
      :seon.agent/namespace [:seon.ns/name 'my.agents.situation]}
-    {:seon.turn/id "situation-run"
-     :seon.turn/agent [:seon.agent/id "situation"]
-     :seon.turn/opened-at #inst "2026-08-12T12:00:00.000-00:00"
-     :seon.turn/starting-ns [:seon.ns/name 'my.agents.situation]}
-    {:seon.cluster.message/id "unread"
-     :seon.cluster.message/to [:seon.agent/id "situation"]
-     :seon.cluster.message/content "Read me"
-     :seon.cluster.message/at #inst "2026-08-12T12:00:01.000-00:00"}]))
+    {:seon.turn/id "situation-run" :seon.turn/agent [:seon.agent/id "situation"] :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.situation]}
+    {:seon.message/id "unread" :seon.message/to [:seon.agent/id "situation"] :seon.message/content "Read me" :seon.message/inbox [:seon.agent/id "situation"]}]))
 
 (deftest situation-is-the-live-derived-control-surface
   (support/with-database

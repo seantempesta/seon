@@ -129,7 +129,9 @@
   (->> (db/q '[:find ?id ?agent-id ?error
               :where
               [?run :seon.turn/id ?id]
-              [?run :seon.turn/error ?error]
+              [?run :seon.turn/closed-tx _]
+              [?error-fact :seon.error/run ?run]
+              [?error-fact :seon.error/message ?error]
               [?run :seon.turn/agent ?agent]
               [?agent :seon.agent/id ?agent-id]]
             db)
@@ -137,7 +139,7 @@
        (mapv (fn [[id agent-id message]]
                {:seon.turn/id id
                 :seon.agent/id agent-id
-                :seon.turn/error message}))))
+                :seon.error/message message}))))
 
 (defn- errored-receipts
   [db]
@@ -480,7 +482,7 @@
     (for [entry (:seon.problems/failed-runs found)]
       (row "run" (:seon.turn/id entry)
            "agent" (:seon.agent/id entry)
-           "error" (:seon.turn/error entry))))
+           "error" (:seon.error/message entry))))
    (family-section
     "errored forms"
     (for [entry (:seon.problems/errored-receipts found)]
@@ -565,7 +567,7 @@
         (for [entry (:seon.problems/failed-runs found)]
           (str "seon.problems failed-run run=" (:seon.turn/id entry)
                " agent=" (:seon.agent/id entry)
-               " error=" (pr-str (:seon.turn/error entry))))
+               " error=" (pr-str (:seon.error/message entry))))
         (for [entry (:seon.problems/errored-receipts found)]
           (str "seon.problems errored-receipt receipt="
                (:seon.cluster.eval/id entry)

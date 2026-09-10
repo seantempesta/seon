@@ -26,14 +26,12 @@
 
 (def ^:private message-selector
   [:db/id
-   :seon.cluster.message/id
-   :seon.cluster.message/ordinal
-   :seon.cluster.message/at
-   :seon.cluster.message/content
+   :seon.message/id
+   :seon.message/content
    :my.message/reason
-   {:seon.cluster.message/to [:db/id :seon.agent/id]}
-   {:seon.cluster.message/from [:db/id :seon.agent/id]}
-   {:seon.cluster.message/about [:db/id]}])
+   {:seon.message/to [:db/id :seon.agent/id]}
+   {:seon.message/from [:db/id :seon.agent/id]}
+   {:seon.message/about [:db/id]}])
 
 (def ^:private receipt-selector
   [:db/id
@@ -42,9 +40,7 @@
    :seon.cluster.eval/at
    :seon.cluster.eval/source
    :seon.cluster.eval/read-basis-transaction
-   :seon.eval/value
-   :seon.eval/missing
-   :seon.eval/size
+   :seon.eval/shown
    :seon.cluster.eval/error
    :seon.cluster.eval/triage-edn
    :seon.cluster.eval/interrupted-at
@@ -62,19 +58,13 @@
    :seon.error/kind
    {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
    {:seon.cluster.eval/run
-    [:db/id :seon.turn/id :seon.turn/opened-at
+    [:db/id :seon.turn/id {:seon.turn/opened-tx [:db/id :db/txInstant]}
      {:seon.turn/agent
       [:db/id
        :seon.agent/id
        {:seon.agent/namespace [:db/id :seon.ns/name]}]}]}])
 
-(def ^:private undisposed-run-selector
-  [:db/id
-   :seon.turn/id
-   :seon.turn/opened-at
-   :seon.turn/closed-at
-   :seon.turn/plan-digest
-   :seon.turn/undisposed-at])
+
 
 (def ^:private reasoning-attempt-selector
   [:db/id
@@ -89,8 +79,6 @@
   '[[(active-run ?run ?agent ?bootstrap-run-id ?pinned?)
      [?run :seon.turn/agent ?agent]
      [?run :seon.turn/id ?run-id]
-     (not-join [?run]
-               [_ :seon.turn/supersedes ?run])
      [(= ?run-id ?bootstrap-run-id) ?pinned?]]])
 
 (defn- recent-message-rows
@@ -101,12 +89,11 @@
           :where
           [?agent :seon.agent/id ?agent-id]
           (or-join [?message ?agent]
-                   [?message :seon.cluster.message/to ?agent]
-                   [?message :seon.cluster.message/from ?agent])
-          [?message :seon.cluster.message/at ?at ?tx]
-          [?message :seon.cluster.message/id _]
-          [(get-else $ ?message :seon.cluster.message/ordinal 0)
-           ?ordinal]]
+                   [?message :seon.message/to ?agent]
+                   [?message :seon.message/from ?agent])
+          [?message :seon.message/to _ ?tx]
+          [?tx :db/txInstant ?at]
+          [?message :seon.message/id ?ordinal]]
         :args [db agent-id]
         :order-by '[?at :desc ?tx :desc ?ordinal :desc ?message :desc]
         :limit limit}))
@@ -126,19 +113,7 @@
         :order-by '[?at :desc ?id :desc]
         :limit limit}))
 
-(defn- recent-undisposed-run-rows
-  [db agent-id limit]
-  (db/q {:query
-         '[:find ?run ?at ?id
-           :in $ ?agent-id
-           :where
-           [?agent :seon.agent/id ?agent-id]
-           [?run :seon.turn/agent ?agent]
-           [?run :seon.turn/undisposed-at ?at]
-           [?run :seon.turn/id ?id]]
-         :args [db agent-id]
-         :order-by '[?at :desc ?id :desc]
-         :limit limit}))
+
 
 (defn- pinned-receipt-ids
   [db agent-id]
@@ -155,8 +130,8 @@
   (db/q '[:find ?message .
           :in $ ?message-id
           :where
-          [?message :seon.cluster.message/id ?message-id]]
-        db (bootstrap/task-message-id agent-id)))
+          [?message :seon.message/id ?message-id]]
+        db (bootstrap/task-message-id db agent-id)))
 
 (defn- candidate-entity-ids
   [db agent-id limit]
@@ -166,9 +141,7 @@
                      [:message entity at [tx ordinal entity]])
                    (recent-message-rows db agent-id limit))
               (map #(into [:eval] %)
-                   (recent-receipt-rows db agent-id limit))
-              (map #(into [:run] %)
-                   (recent-undisposed-run-rows db agent-id limit)))
+                   (recent-receipt-rows db agent-id limit)))
              (sort-by (fn [[kind _ at id]]
                         [(.getTime ^java.util.Date at)
                          (case kind :message 0 :eval 2 :run 3)
@@ -232,7 +205,7 @@
 (defn- about-identities
   [db messages]
   (let [about-eids
-        (into [] (comp (keep #(get-in % [:seon.cluster.message/about :db/id]))
+        (into [] (comp (keep #(get-in % [:seon.message/about :db/id]))
                        (distinct))
               messages)
         attributes (identity-attributes db)
@@ -282,35 +255,33 @@
   (if (seq message-ids)
     (into
      {}
-     (map (fn [[message tx ordinal]]
-            [message {::transaction tx ::ordinal ordinal}]))
-     (db/q '[:find ?message ?tx ?ordinal
+     (map (fn [[message tx at]]
+            [message {::transaction tx ::ordinal 0 ::at at}]))
+     (db/q '[:find ?message ?tx ?at
             :in $ [?message ...]
             :where
-            [?message :seon.cluster.message/at _ ?tx]
-            [(get-else $ ?message :seon.cluster.message/ordinal 0)
-             ?ordinal]]
+            [?message :seon.message/to _ ?tx]
+            [?tx :db/txInstant ?at]]
           db message-ids))
     {}))
 
 (defn- message-entry
   [database run-id agent-id identities orders message]
-  (let [about-eid (get-in message [:seon.cluster.message/about :db/id])]
+  (let [about-eid (get-in message [:seon.message/about :db/id])]
     (merge
      {::kind :message
       ::entity message
-      ::id (:seon.cluster.message/id message)
-      ::at (:seon.cluster.message/at message)
-      ::content (:seon.cluster.message/content message)
-      ::from (get-in message [:seon.cluster.message/from
+      ::id (:seon.message/id message)
+      ::content (:seon.message/content message)
+      ::from (get-in message [:seon.message/from
                               :seon.agent/id])
-      ::to (get-in message [:seon.cluster.message/to
+      ::to (get-in message [:seon.message/to
                             :seon.agent/id])
       ::about (get identities about-eid)
       ::about-ref? (some? about-eid)
       ::reason (:my.message/reason message)}
-     (when (= (bootstrap/task-message-id agent-id)
-              (:seon.cluster.message/id message))
+     (when (= (bootstrap/task-message-id database agent-id)
+              (:seon.message/id message))
        {::bootstrap-trigger? true})
      {::custody
       (context/message-custody database run-id agent-id (:db/id message))}
@@ -327,12 +298,12 @@
      ;; wrote it, which is exactly what the retired `:input` kind used.
      ::at (or (:seon.cluster.eval/at receipt)
               (get-in receipt [:seon.cluster.eval/run
-                               :seon.turn/opened-at]))
+                               :seon.turn/opened-tx :db/txInstant]))
      ::ordinal ordinal
      ::run-id (get-in receipt [:seon.cluster.eval/run
                                :seon.turn/id])
      ::run-opened-at (get-in receipt [:seon.cluster.eval/run
-                                      :seon.turn/opened-at])
+                                      :seon.turn/opened-tx :db/txInstant])
      ;; ONE ENTITY PER (run, ordinal): the frozen source is this evaluation's
      ;; own attribute, not a twin form entity joined by ordinal.
      ::source (:seon.cluster.eval/source receipt)
@@ -344,9 +315,7 @@
                           :seon.ns/name])
          'user)
      ::read-basis (:seon.cluster.eval/read-basis-transaction receipt)
-     ::result (:seon.eval/value receipt)
-     ::missing (:seon.eval/missing receipt)
-     ::size (:seon.eval/size receipt)
+     ::result (:seon.eval/shown receipt)
      ::error (:seon.cluster.eval/error receipt)
      ::triage-edn (:seon.cluster.eval/triage-edn receipt)
      ::error-kind (:seon.error/kind receipt)
@@ -359,14 +328,7 @@
      ::ending-ns (:seon.sci.eval/ending-ns receipt)
      ::output (:seon.cluster.eval/output receipt)}))
 
-(defn- undisposed-run-entry
-  [run]
-  {::kind :run
-   ::entity run
-   ::id (:seon.turn/id run)
-   ::at (:seon.turn/undisposed-at run)
-   ::run-id (:seon.turn/id run)
-   ::run-opened-at (:seon.turn/opened-at run)})
+
 
 (defn- entry-order
   [entry]
@@ -420,8 +382,6 @@
                :else (candidate-entity-ids db agent-id limit))
         messages (pulled-many db message-selector (:message ids))
         receipts (pulled-many db receipt-selector (:eval ids))
-        undisposed-runs
-        (pulled-many db undisposed-run-selector (:run ids))
         identities (about-identities db messages)
         identity-attrs (identity-attributes db)
         message-orders (message-order-facts db (:message ids))]
@@ -429,7 +389,7 @@
                                identities message-orders)
                       messages)
                  (map receipt-entry receipts)
-                 (map undisposed-run-entry undisposed-runs))
+                 [])
          (map (fn [entry]
                 (assoc entry
                        ::root (entry-root identity-attrs entry)
@@ -487,12 +447,12 @@
   [unit entry _detail]
   (let [entity (cond-> (::entity entry)
                  (::content entry)
-                 (assoc :seon.cluster.message/content
+                 (assoc :seon.message/content
                         (bounded-scalar unit (::content entry))))
         sentence (rendered-family unit entity 1)
         extra (cond-> {}
                 (::about entry)
-                (assoc :seon.cluster.message/about (::about entry))
+                (assoc :seon.message/about (::about entry))
                 (and (::about-ref? entry) (nil? (::about entry)))
                 (assoc :seon.transcript/unresolved-about? true)
                 (::reason entry) (assoc :my.message/reason (::reason entry)))]
@@ -538,8 +498,6 @@
       ;; MISSING IS A TERMINAL FACT OF THE EVALUATION, so it travels as one
       ;; and `seon.repl` writes the one sentence for it. Bounding a value
       ;; that was never stored is not a thing this call can do.
-      (::missing entry) (assoc :seon.eval/missing (::missing entry))
-      (int? (::size entry)) (assoc :seon.eval/size (::size entry))
       (and (::result entry) (nil? (::missing entry)))
       (assoc :seon.repl/value
              (::result entry))
@@ -824,16 +782,17 @@
   "Return the ordinary message read form for one message entity."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
   [unit]
-  (list 'my.message/read {:my.message/id (:seon.cluster.message/id unit)}))
+  (list 'my.message/read {:my.message/id (:seon.message/id unit)}))
 
 (defn inbox-form
-  "Return the ordinary inbox listing form for messages reached through `to`."
-  {:malli/schema [:=> [:cat :seon.cluster.message/to] :seon.render/form]}
-  [_recipient]
-  ;; The empty request map names the call shape: `inbox` has a map arity
-  ;; and a positional arity, so a bare call is ambiguous to call
-  ;; preparation (it refused on the live page, 2026-09-08).
-  (list 'my.message/inbox))
+  "Read the recipient's pending messages through the exact reverse inbox edge."
+  {:malli/schema [:=> [:cat :seon.message/inbox] :seon.render/form]}
+  [recipient]
+  (list 'seon.db/pull
+        (list 'quote '[{:seon.message/_inbox
+                       [:seon.message/id :seon.message/content
+                        {:seon.message/from [:seon.agent/id]}]}])
+        recipient))
 
 (defn- entry-basis
   [db entry]
@@ -896,8 +855,8 @@
 (defn- turn-header
   [database turn-id]
   (let [row (db/pull database
-                     '[:seon.turn/id :seon.turn/opened-at :seon.turn/reply :seon.turn/reply-blob
-                       {:seon.turn/trigger [:seon.cluster.message/id]}]
+                     '[:seon.turn/id {:seon.turn/opened-tx [:db/id :db/txInstant]} :seon.turn/reply :seon.turn/reply-blob
+                       {:seon.turn/trigger [:seon.message/id]}]
                      [:seon.turn/id turn-id])
         evaluations (db/q '[:find (count ?evaluation) . :in $ ?id
                             :where [?turn :seon.turn/id ?id]
@@ -908,8 +867,8 @@
       [:article {:class "seon-turn-header"}
        [:h3 (str "Turn " turn-id)]
        [:dl
-        [:dt "Opened"] [:dd (pr-str (:seon.turn/opened-at row))]
-        [:dt "Trigger"] [:dd (or (get-in row [:seon.turn/trigger :seon.cluster.message/id]) "None")]
+        [:dt "Opened"] [:dd (pr-str (get-in row [:seon.turn/opened-tx :db/txInstant]))]
+        [:dt "Trigger"] [:dd (or (get-in row [:seon.turn/trigger :seon.message/id]) "None")]
         [:dt "Evaluations"] [:dd (if (:seon.error/kind evaluations)
                                    (:seon.error/message evaluations)
                                    (str (or evaluations 0)))]
@@ -979,9 +938,8 @@
 
 (def ^:private history-run-selector
   [:seon.turn/id
-   :seon.turn/opened-at
-   :seon.turn/closed-at
-   :seon.turn/error])
+   {:seon.turn/opened-tx [:db/id :db/txInstant]}
+   {:seon.turn/closed-tx [:db/id :db/txInstant]}])
 
 (defn agent-history
   "This agent's own submitted forms and their stored results, newest run first.
@@ -1001,7 +959,7 @@
                              [?agent :seon.agent/id ?agent-id]
                              [?run :seon.turn/agent ?agent]
                              [?run :seon.turn/id _]
-                             [?run :seon.turn/opened-at ?opened]]
+                             [?run :seon.turn/opened-tx ?opened]]
                     :args [database agent-id]
                     :order-by '[?opened :desc ?run :desc]})]
     (if (:seon.error/kind rows)
@@ -1041,9 +999,9 @@
 (defn- run-heading
   [run]
   (str "Run " (:seon.turn/id run)
-       (when-let [opened (:seon.turn/opened-at run)]
+       (when-let [opened (get-in run [:seon.turn/opened-tx :db/txInstant])]
          (str ", opened " (pr-str opened)))
-       (if-let [closed (:seon.turn/closed-at run)]
+       (if-let [closed (get-in run [:seon.turn/closed-tx :db/txInstant])]
          (str ", closed " (pr-str closed))
          ", still open")
        "."))
@@ -1069,9 +1027,6 @@
                   (str/join
                    "\n"
                    (cond-> [(run-heading run)]
-                     (:seon.turn/error run)
-                     (conj (str "It did not run: "
-                                (:seon.turn/error run)))
                      :always
                      (into (map :seon.render.history/bytes)
                            (:seon.render.transcript/entries run)))))
@@ -1092,7 +1047,7 @@
                   :seon.render/hiccup]}
   [turns database]
   (let [rows (if (and (coll? turns) (every? map? turns)) turns [])
-        ordered (sort-by (juxt :seon.turn/opened-at :seon.turn/id)
+        ordered (sort-by (juxt #(get-in % [:seon.turn/opened-tx :db/id]) :seon.turn/id)
                          #(compare %2 %1) rows)]
     (into [:section {:class "seon-turn-history"}
            [:h2 (str "Turns (" (count rows) ")")]]

@@ -267,23 +267,23 @@
                 (evaluate-in
                  ctx-a
                  (str "(seon.db/transact! own-connection "
-                      "[{:seon.cluster.message/id \"custody-own\"}])"))
+                      "[{:seon.message/id \"custody-own\"}])"))
                 ambient
                 (evaluate-in
                  ctx-a
                  (str "(seon.db/transact! "
-                      "[{:seon.cluster.message/id \"custody-ambient\"}])"))
+                      "[{:seon.message/id \"custody-ambient\"}])"))
                 foreign
                 (evaluate-in
                  ctx-a
                  (str "(seon.db/transact! foreign-connection "
-                      "[{:seon.cluster.message/id \"custody-foreign\"}])"))
+                      "[{:seon.message/id \"custody-foreign\"}])"))
                 message-ids
                 (fn [connection]
                   (set
                    (db/q
                     '[:find [?id ...]
-                      :where [_ :seon.cluster.message/id ?id]]
+                      :where [_ :seon.message/id ?id]]
                     @connection)))]
             (is (nil? (:seon.cluster.eval/error own)))
             (is (nil? (:seon.cluster.eval/error ambient)))

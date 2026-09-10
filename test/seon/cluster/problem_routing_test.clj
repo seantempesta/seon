@@ -27,26 +27,13 @@
        {:seon.agent/id "alpha"
         :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
        {:seon.agent/id "root"}
-       {:seon.cluster.message/id "goal"
-        :seon.cluster.message/to [:seon.agent/id "root"]
-        :seon.cluster.message/content "Generate the program."
-        :seon.cluster.message/at now}])
+       {:seon.message/id "goal" :seon.message/to [:seon.agent/id "root"] :seon.message/content "Generate the program." :seon.message/inbox [:seon.agent/id "root"]}])
      (db/transact!
       connection
-      [{:seon.cluster.message/id "planner-goal"
-        :seon.cluster.message/to [:seon.agent/id "planner"]
-        :seon.cluster.message/from [:seon.agent/id "root"]
-        :seon.cluster.message/caused-by [:seon.cluster.message/id "goal"]
-        :seon.cluster.message/content "Generate the program."
-        :seon.cluster.message/at now}])
+      [{:seon.message/id "planner-goal" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/caused-by [:seon.message/id "goal"] :seon.message/content "Generate the program." :seon.message/inbox [:seon.agent/id "planner"]}])
      (db/transact!
       connection
-      [{:seon.turn/id run-id
-        :seon.turn/agent [:seon.agent/id "planner"]
-        :seon.turn/trigger
-        [:seon.cluster.message/id "planner-goal"]
-        :seon.turn/opened-at now
-        :seon.turn/plan-digest "settlement-digest"}])
+      [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "planner"] :seon.turn/trigger [:seon.message/id "planner-goal"] :seon.turn/opened-tx "datomic.tx"}])
      (body connection))))
 
 (defn- form-row
@@ -74,14 +61,9 @@
   (let [delivery
         (message/delivery
          @connection
-         {:my.message/value value
-          :seon.agent/id sender
-          :seon.turn/id run-id
-          :seon.cluster.eval/ordinal 0
-          :seon.cluster.message/at now
-          :seon.config.message/max-chain 16})]
+         {:my.message/value value :seon.agent/id sender :seon.turn/id run-id :seon.cluster.eval/ordinal 0 :seon.config.message/max-chain 16})]
     (is (empty? (:seon.error/values delivery)))
-    (db/transact! connection (:seon.cluster.message/rows delivery))))
+    (db/transact! connection (:seon.message/rows delivery))))
 
 (defn- assign!
   [connection ordinal]
@@ -173,7 +155,7 @@
             (db/q '[:find ?message
                    :in $ ?problem-id
                    :where
-                   [?message :seon.cluster.message/about ?problem]
+                   [?message :seon.message/about ?problem]
                    [?problem :seon.problems/id ?problem-id]]
                  @connection
                  (:seon.problems/id problem)))
@@ -191,10 +173,7 @@
    (fn [connection]
      (db/transact!
       connection
-      [{:seon.turn/id "historical-run"
-        :seon.turn/agent [:seon.agent/id "planner"]
-        :seon.turn/opened-at now
-        :seon.turn/plan-digest "historical-digest"}
+      [{:seon.turn/id "historical-run" :seon.turn/agent [:seon.agent/id "planner"] :seon.turn/opened-tx "datomic.tx"}
        {:seon.cluster.eval/id "historical-form"
         :seon.cluster.eval/run [:seon.turn/id "historical-run"]
         :seon.cluster.eval/ordinal 0
@@ -209,7 +188,7 @@
      (is (empty?
           (db/q '[:find ?assignment
                  :where
-                 [?assignment :seon.cluster.message/about _]]
+                 [?assignment :seon.message/about _]]
                @connection))
          "a newly assigned owner has no historical problem to deliver"))))
 
@@ -262,7 +241,7 @@
        (testing "closing the run cannot falsely settle its plan"
          (db/transact! connection
                      [[:db/add [:seon.turn/id run-id]
-                       :seon.turn/closed-at now]])
+                       :seon.turn/closed-tx now]])
          (is (false?
               (:seon.turn.work/settled?
                (turn/plan-settlement @connection run-id)))))))))

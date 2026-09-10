@@ -23,7 +23,7 @@
                   :seon.cluster.eval/source "(+ 1 1)"
                   :seon.ns/name 'my.agents.juniper
                   :seon.repl/handle (admit/result-handle "41")
-                  :seon.eval/value "2"
+                  :seon.eval/shown "2"
                   :seon.eval/duration-ms 3})]
       (is (= (str "; the agent's comment, verbatim, above the prompt\n"
                   "my.agents.juniper=> (+ 1 1)\n"
@@ -37,7 +37,7 @@
            (repl/text {:seon.cluster.eval/source "(+ 1 1)"
                        :seon.ns/name 'my.agents.juniper
                        :seon.repl/handle (admit/result-handle "41")
-                       :seon.eval/value "2"
+                       :seon.eval/shown "2"
                        :seon.eval/duration-ms 3})))))
 
 (deftest response-key-order-is-the-emitter-not-the-map
@@ -46,7 +46,7 @@
                     :seon.sci.eval/ending-ns 'my.agents.probe
                     :seon.cluster.eval/output "hi\n"
                     :seon.repl/handle (admit/result-handle "2")
-                    :seon.eval/value "41"
+                    :seon.eval/shown "41"
                     :seon.cluster.eval/source "(do (println \"hi\") 41)"
                     :seon.ns/name 'my.agents.juniper}
           response (repl/response emission)
@@ -62,7 +62,7 @@
                                  :seon.ns/name 'my.agents.juniper
                                  :seon.cluster.eval/ordinal 2
                                  :seon.cluster.eval/output "hi\n"
-                                 :seon.eval/value
+                                 :seon.eval/shown
                                  ;; the declared `::nil` face carries its
                                  ;; value key, exactly as admission emits it
                                  "nil"
@@ -79,7 +79,7 @@
                    {:seon.cluster.eval/source source
                     :seon.ns/name 'my.agents.juniper
                     :seon.cluster.eval/ordinal 0
-                    :seon.eval/value
+                    :seon.eval/shown
                     "nil"})
         def-response (repl/response (emission "(def secret 99)"))
         defn-response (repl/response (emission "(defn hello [] 42)"))]
@@ -117,7 +117,7 @@
                          :seon.ns/name 'my.agents.juniper
                          :seon.cluster.eval/ordinal 1
                          :seon.sci.eval/ending-ns 'my.agents.probe
-                         :seon.eval/value "1"})
+                         :seon.eval/shown "1"})
          ":ns my.agents.probe")))
   (testing "a form that stayed put does not repeat its own prompt"
     (is (not (str/includes?
@@ -125,14 +125,14 @@
                               :seon.ns/name 'my.agents.juniper
                               :seon.cluster.eval/ordinal 1
                               :seon.sci.eval/ending-ns 'my.agents.juniper
-                              :seon.eval/value "2"})
+                              :seon.eval/shown "2"})
               ":ns ")))))
 
 (deftest history-preserves-shown-text-without-applying-a-later-profile
   (let [shown "[my.turn/complete my.turn/wait]"
         emission {:seon.cluster.eval/source "(dir my.turn)"
                   :seon.ns/name 'my.agents.juniper
-                  :seon.eval/value shown}
+                  :seon.eval/shown shown}
         response (repl/response emission)]
     (is (str/includes? response (str ":value " shown)))
     (doseq [settings [{:seon.print/length 1}
@@ -178,7 +178,7 @@
          (repl/render-ai
           {:seon.cluster.eval/source "(+ 1 1)"
            :seon.cluster.eval/ns {:seon.ns/name 'my.agents.juniper}
-           :seon.eval/value "2"})
+           :seon.eval/shown "2"})
          "my.agents.juniper=> (+ 1 1)"))))
 
 (deftest nothing-emitted-is-comment-shaped
@@ -187,7 +187,7 @@
                             :seon.ns/name 'my.agents.juniper
                             :seon.cluster.eval/ordinal 4
                             :seon.cluster.eval/output "complete\n"
-                            :seon.eval/value "[my.turn/complete my.turn/wait]"
+                            :seon.eval/shown "[my.turn/complete my.turn/wait]"
                             :seon.eval/duration-ms 2})]
       (is (not (str/includes? emitted ";; result/"))
           "the result handle is a map key, never a comment")
@@ -228,7 +228,7 @@
                             :seon.cluster.eval/id "8143"
                             :seon.cluster.eval/source "(+ 1 1)"
                             :seon.cluster.eval/ordinal 0
-                            :seon.eval/value "2"})
+                            :seon.eval/shown "2"})
            (str ":result " handle)))))
   (testing "two evaluations at the same ordinal never share a handle"
     (let [emitted (fn [entity-id]
@@ -236,7 +236,7 @@
                                      :seon.cluster.eval/id (str entity-id)
                                      :seon.cluster.eval/source "(+ 1 1)"
                                      :seon.cluster.eval/ordinal 0
-                                     :seon.eval/value
+                                     :seon.eval/shown
                                      "2"}))]
       (is (not= (emitted 11) (emitted 12)))))
   (testing "shown text identifies an opaque live object without restoring it"
@@ -245,10 +245,10 @@
                           :seon.cluster.eval/id "8144"
                           :seon.cluster.eval/source "(atom 1)"
                           :seon.ns/name 'my.agents.juniper
-                          :seon.eval/value "#object[clojure.lang.Atom]"})
+                          :seon.eval/shown "#object[clojure.lang.Atom]"})
          ":result result/e8144"))
     (is (not (str/includes?
               (repl/render-ai {:seon.cluster.eval/source "(+ 1 1)"
-                               :seon.eval/value "2"})
+                               :seon.eval/shown "2"})
               ":result"))
         "a preview with no evaluation identity has no handle")))

@@ -709,7 +709,7 @@
                         :where [?agent :seon.agent/id ?id]
                                [?turn :seon.turn/agent ?agent]
                                [?turn :seon.turn/id ?turn-id]
-                               [?turn :seon.turn/opened-at ?opened]] database agent-id))]
+                               [?turn :seon.turn/opened-tx ?opened]] database agent-id))]
     (cond
       (:seon.error/kind evaluations) evaluations
       (:seon.error/kind turns) turns
@@ -2060,17 +2060,17 @@
 (defn- unsettled-stream?
   "True when a stream entry's run has no settled terminal fact at `db`.
 
-  The provider reply settles as a frozen plan (`:seon.turn/plan-digest`) or
-  a durable `:seon.turn/error`; `:seon.turn/closed-at` covers a run terminated by
+  The provider reply settles as a frozen plan (`:seon.turn/reply-size`) or
+  a durable error fact; `:seon.turn/closed-tx` covers a run terminated by
   another path. A missing run is not live. This presence gate makes a
   delayed partial incapable of repainting over its settled facts."
   [db stream]
   (when-let [run-id (:seon.turn/id stream)]
-    (let [row (db/pull db [:db/id :seon.turn/plan-digest :seon.turn/error :seon.turn/closed-at]
+    (let [row (db/pull db [:db/id :seon.turn/reply-size :seon.turn/closed-tx]
                       [:seon.turn/id run-id])]
       (and (some? row)
            (not-any? #(contains? row %)
-                     [:seon.turn/plan-digest :seon.turn/error :seon.turn/closed-at])))))
+                     [:seon.turn/reply-size :seon.turn/closed-tx])))))
 
 (defn- derive-page
   [handle database streams profile registration-key retained-values derive-all? invalidate-calls?]
@@ -2907,9 +2907,8 @@
    inbound]
   (let [request
         {:seon.agent/id (:seon.agent/id inbound)
-         :seon.cluster.message/inbound-content
-         (or (:seon.cluster.message/inbound-content inbound) "")
-         :seon.cluster.message/at (Date.)
+         :seon.message/inbound-content
+         (or (:seon.message/inbound-content inbound) "")
          :seon.config.eval.result/max-string
          (:seon.config.eval.result/max-string caps)}
         decision (message/inbound-tx @connection request)]
@@ -3160,7 +3159,7 @@
     (inbound service
              (cond-> {:seon.agent/id agent-id}
                (contains? params "content")
-               (assoc :seon.cluster.message/inbound-content
+               (assoc :seon.message/inbound-content
                       (get params "content"))))))
 
 (defn- context-response

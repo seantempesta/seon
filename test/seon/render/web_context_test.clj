@@ -18,13 +18,8 @@
    (fn [connection server context]
      (flow/pause (:graph context))
      (db/transact! connection
-                   [{:seon.cluster.message/id "context-probe-message"
-                     :seon.cluster.message/to [:seon.agent/id "root"]
-                     :seon.cluster.message/at (java.util.Date.)
-                     :seon.cluster.message/content "A caller-owned context."}
-                    {:seon.turn/id "context-probe"
-                     :seon.turn/agent [:seon.agent/id "root"]
-                     :seon.turn/opened-at (java.util.Date.)}])
+                   [{:seon.message/id "context-probe-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A caller-owned context." :seon.message/inbox [:seon.agent/id "root"]}
+                    {:seon.turn/id "context-probe" :seon.turn/agent [:seon.agent/id "root"] :seon.turn/opened-tx "datomic.tx"}])
      (let [ctx (:ctx context)
            request {:seon.db/db @connection
                     :seon.db/connection connection
@@ -129,10 +124,7 @@
            (is (= 200 (.statusCode before)))
            (is (pos? initial))
            (db/transact! connection
-                         [{:seon.cluster.message/id "identity-cache-message"
-                           :seon.cluster.message/to [:seon.agent/id "root"]
-                           :seon.cluster.message/at (java.util.Date.)
-                           :seon.cluster.message/content "A newly connected message."}])
+                         [{:seon.message/id "identity-cache-message" :seon.message/to [:seon.agent/id "root"] :seon.message/content "A newly connected message." :seon.message/inbox [:seon.agent/id "root"]}])
            (let [after (#'web-test/fetch server "/agent/root/debug")]
              (is (= 200 (.statusCode after)))
              (is (str/includes? (.body after) "A newly connected message."))

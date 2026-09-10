@@ -23,10 +23,7 @@
    {:tx-data
     [[:db.fn/call
       #'message/inbound-tx
-      {:seon.agent/id agent-id
-       :seon.cluster.message/inbound-content content
-       :seon.cluster.message/at (java.util.Date.)
-       :seon.config.eval.result/max-string 4096}]]}))
+      {:seon.agent/id agent-id :seon.message/inbound-content content :seon.config.eval.result/max-string 4096}]]}))
 
 (defn- await-commit!
   "Wait on Datahike's commit event, with a loud test-only backstop."
@@ -107,7 +104,7 @@
          :where
          [?run :seon.turn/agent ?agent]
          [?agent :seon.agent/id ?agent-id]
-         (not [?run :seon.turn/closed-at _])]
+         (not [?run :seon.turn/closed-tx _])]
        db))
 
 (defn- agent-open-run?
@@ -118,7 +115,7 @@
           :where
           [?agent :seon.agent/id ?agent-id]
           [?run :seon.turn/agent ?agent]
-          (not [?run :seon.turn/closed-at _])]
+          (not [?run :seon.turn/closed-tx _])]
         db agent-id)))
 
 (defn- agent-authored-closed-run-count
@@ -130,7 +127,7 @@
          [?run :seon.turn/agent ?agent]
          [?run :seon.turn/id ?run-id]
          [(not= ?run-id ?bootstrap-run-id)]
-         [?run :seon.turn/closed-at _]]
+         [?run :seon.turn/closed-tx _]]
        db agent-id (bootstrap/run-id agent-id)))
 
 (defn- await-bootstrap!
@@ -138,8 +135,8 @@
   (await-commit!
    connection
    (fn [db]
-     (:seon.turn/closed-at
-      (db/pull db [:seon.turn/closed-at]
+     (:seon.turn/closed-tx
+      (db/pull db [:seon.turn/closed-tx]
               [:seon.turn/id (bootstrap/run-id agent-id)])))
    (constantly nil)))
 

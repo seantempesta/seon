@@ -247,7 +247,7 @@
         input (request value interrupt-fn)
         admitted (admit/admit input)
         printed (:seon.sci.admit/edn admitted)]
-    (if (:seon.eval/missing admitted)
+    (if (:seon.sci.admit/reason admitted)
       ;; A MISSING ADMISSION IS A COMPLETE ANSWER, and its whole contract is
       ;; that it stored nothing: no node, no value, no bytes to read back.
       (and (nil? printed)
@@ -411,11 +411,11 @@
                   (request (range) interrupt-fn
                            (assoc caps
                                   :seon.config.eval.result/max-bytes 4096)))]
-    (is (= :over-bound (:seon.eval/missing admitted))
+    (is (= :over-bound (:seon.sci.admit/reason admitted))
         "an infinite source is missing, never a page of itself")
-    (is (>= (long (:seon.eval/size admitted)) 4096)
+    (is (>= (long (:seon.sci.admit/bytes admitted)) 4096)
         "and the size it reports is the BYTES REACHED, as the schema declares")
-    (is (< (long (:seon.eval/size admitted)) (* 2 4096))
+    (is (< (long (:seon.sci.admit/bytes admitted)) (* 2 4096))
         "measured at the fragment that crossed the bound, not a running total")
     (is (pos? (calls))
         "the evaluation's own SCI interrupt was consulted at every node")
@@ -483,8 +483,8 @@
               "and the derived semantic value keeps them too"))))
     (testing "a depth past the storage bound is MARKED, never thrown"
       (let [admitted (admit/admit (request (nest 100000)))]
-        (is (= :over-bound (:seon.eval/missing admitted)))
-        (is (int? (:seon.eval/size admitted))
+        (is (= :over-bound (:seon.sci.admit/reason admitted)))
+        (is (int? (:seon.sci.admit/bytes admitted))
             "an over-bound depth still reports the bytes it reached")))))
 
 (deftest a-host-reference-the-walk-cannot-enter-is-missing-not-described
@@ -495,8 +495,8 @@
                          ["an atom" (atom 1)]]]
     (testing label
       (let [admitted (admit/admit (request value))]
-        (is (= :unserializable (:seon.eval/missing admitted)))
-        (is (not (contains? admitted :seon.eval/size))
+        (is (= :unserializable (:seon.sci.admit/reason admitted)))
+        (is (not (contains? admitted :seon.sci.admit/bytes))
             "an unserializable value has no measured size to report")
         (is (not (contains? admitted :seon.sci.admit/edn)))))))
 

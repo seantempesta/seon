@@ -25,18 +25,8 @@
                      {:seon.agent/id "bob"}])
       (let [before (db/basis-t @connection)]
         (db/transact! connection
-                      [{:seon.cluster.message/id "m-1"
-                        :seon.cluster.message/to
-                        [:seon.agent/id "bob"]
-                        :seon.cluster.message/from
-                        [:seon.agent/id "alice"]
-                        :seon.cluster.message/content "First message"
-                        :seon.cluster.message/at #inst "2026-08-12T10:00:00.000-00:00"}
-                       {:seon.cluster.message/id "m-2"
-                        :seon.cluster.message/to
-                        [:seon.agent/id "bob"]
-                        :seon.cluster.message/content (apply str (repeat 200 "x"))
-                        :seon.cluster.message/at #inst "2026-08-12T11:00:00.000-00:00"}])
+                      [{:seon.message/id "m-1" :seon.message/to [:seon.agent/id "bob"] :seon.message/from [:seon.agent/id "alice"] :seon.message/content "First message" :seon.message/inbox [:seon.agent/id "bob"]}
+                       {:seon.message/id "m-2" :seon.message/to [:seon.agent/id "bob"] :seon.message/content (apply str (repeat 200 "x")) :seon.message/inbox [:seon.agent/id "bob"]}])
         (f connection before)))))
 
 (deftest ^{:seon.test/usage true} inbox-lists-this-agents-messages-newest-last
@@ -44,10 +34,10 @@
     (fn [connection before]
       (is (= [{:my.message/id "m-1"
                :my.message/from "alice"
-               :my.message/at #inst "2026-08-12T10:00:00.000-00:00"
+               :my.message/at (db/q '[:find ?at . :where [?m :seon.message/id "m-1"] [?m :seon.message/to _ ?tx] [?tx :db/txInstant ?at]] @connection)
                :my.message/content "First message"}
               {:my.message/id "m-2"
-               :my.message/at #inst "2026-08-12T11:00:00.000-00:00"
+               :my.message/at (db/q '[:find ?at . :where [?m :seon.message/id "m-2"] [?m :seon.message/to _ ?tx] [?tx :db/txInstant ?at]] @connection)
                :my.message/content (apply str (repeat 200 "x"))}]
              (message/inbox @connection "bob")))
       (is (= ["m-1" "m-2"]
@@ -59,17 +49,10 @@
   (with-messages
     (fn [connection _before]
       (let [value (message/read "m-1" @connection)]
-        (is (= {:seon.cluster.message/id "m-1"
-                :seon.cluster.message/to
-                [:seon.agent/id "bob"]
-                :seon.cluster.message/from
-                [:seon.agent/id "alice"]
-                :seon.cluster.message/content "First message"
-                :seon.cluster.message/at
-                #inst "2026-08-12T10:00:00.000-00:00"}
+        (is (= {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "bob"] :seon.message/from [:seon.agent/id "alice"] :seon.message/content "First message" :seon.message/inbox [:seon.agent/id "bob"]}
                value))
         (is (seon.schema/valid-candidate-value?
-             :seon.cluster.message/message value))))))
+             :seon.message/message value))))))
 
 (deftest a-message-is-an-ordinary-value
   (testing "send carries the recipient and the content, and nothing else"
@@ -77,15 +60,16 @@
       (is (seon.schema/valid-candidate-value? :my.message/message value))
       (is (= "bob" (:my.message/to value)))
       (is (= "how many primes under 100?" (:my.message/content value)))
-      (is (= #{:my.message/to :my.message/content} (set (keys value)))
-          "no id, no timestamp, no sender — the driver owns all three")))
+      (is (= #{:my.message/to :my.message/content :seon.message/id} (set (keys value)))
+          "send mints the event identity; delivery resolves sender and recipient")))
   (testing "the optional third argument carries a fact identity"
     (let [value (message/send "bob" "repair this" "failure-17")]
       (is (seon.schema/valid-candidate-value? :my.message/message value))
       (is (= {:my.message/to "bob"
               :my.message/content "repair this"
               :my.message/about "failure-17"}
-             value))))
+             (dissoc value :seon.message/id)))
+      (is (= 8 (count (:seon.message/id value))))))
   (testing "one send and a vector of sends both validate as the union"
     (is (seon.schema/valid-candidate-value?
          :my.message/value (message/send "bob" "hello")))

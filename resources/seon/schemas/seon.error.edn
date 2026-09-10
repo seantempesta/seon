@@ -1,24 +1,7 @@
-#:seon.error{:agent
-             [:and
-              {:description
-               "The agent this fault happened to; its reverse is that agent's fault list.",
-               :seon.render/ai seon.error/render-faults-ai,
-               :seon.render/html seon.error/render-faults-html,
-               :seon.db/index true}
-              :seon.db/ref],
-             :at :inst,
-             :steward
-             [:and
-              {:description
-               "The agent this fault is ROUTED TO for repair: the steward of the namespace of the function that failed (:seon.instrument/fn -> :seon.fn/ns -> :seon.ns/steward), decided inside the committing transaction. A LISTENED ATTRIBUTE: asserting it wakes that agent. Distinct from :seon.error/agent, which is the agent this fault happened TO. Also an INSIDE wake — a fault is the population's own activity and never resets the steward's turn bound; the bound is what stops a fault about an agent's own code looping.",
-               :seon.db/index true,
-               :seon.render/ai seon.error/render-faults-ai,
-               :seon.render/html seon.error/render-faults-html,
-               :seon.render/form seon.error/faults-form,
-               :seon.wake/listen true,
-               :seon.wake/opens-turn? true,
-               :seon.wake/inside true}
-              :seon.db/ref],
+#:seon.error{:run [:and #:seon.db{:index true} :seon.db/ref],
+             :data-blob :seon.blob/digest,
+             :class [:= true],
+             :evidence [:tuple [:enum :seon.error/id] :seon.error/id],
              :steward-request
              [:map
               {:description
@@ -27,42 +10,73 @@
               [:seon.instrument/fn
                {:optional true}
                :seon.instrument/fn]],
-             :basis-t [:int {:min 0}],
+             :value
+             [:map
+              [:seon.error/kind :seon.error/kind]
+              [:seon.error/message :seon.error/message]
+              [:seon.error/data {:optional true} :seon.error/data]],
+             :notice-request
+             [:map
+              [:seon.error/fact :seon.error/fact]
+              [:seon.error/reason {:optional true} :seon.error/reason]
+              [:seon.error/occurrence
+               {:optional true}
+               :seon.error/occurrence]
+              [:seon.error/occurrences
+               {:optional true}
+               :seon.error/occurrences]
+              [:seon.error/notification-limit
+               {:optional true}
+               :seon.error/notification-limit]
+              [:seon.error/notification
+               {:optional true}
+               :seon.error/notification]
+              [:seon.agent/id {:optional true} :seon.agent/id]],
              :capped? :boolean,
-             :cid :keyword,
-             :class [:= true],
-             :commit-tx-request
+             :occurrences [:int {:min 1}],
+             :reason
+             [:enum
+              :your-run
+              :no-attributable-agent
+              :recurring
+              :failover],
+             :op :keyword,
+             :data-edn :string,
+             :refusal-value
+             [:map
+              [:seon.error/message :seon.error/message]
+              [:seon.turn/rule {:optional true} :seon.turn/rule]
+              [:seon.turn/transition
+               {:optional true}
+               :seon.turn/transition]],
+             :source
+             [:any
+              {:seon.schema.admission/exemption
+               :seon.schema.admission/polymorphic-boundary,
+               :seon.schema.admission/reason
+               "The error boundary must normalize any value or Throwable that escaped a failing subsystem.",
+               :gen/elements
+               [nil true 0 "failure" :failure [] {} #{}]}],
+             :normalize-request
              [:map
               [:seon.error/source :seon.error/source]
               [:seon.error/id :seon.error/id]
               [:seon.error/at :seon.error/at]
               [:seon.error/process :seon.error/process]
               [:seon.sci.admit/caps :seon.sci.admit/caps]
-              [:seon.config.error/recurrence-limit
-               :seon.config.error/recurrence-limit]
               [:seon.error/basis-t
                {:optional true}
                :seon.error/basis-t]
-              [:seon.turn/id
-               {:optional true}
-               :seon.turn/id]
-              [:seon.agent/id
-               {:optional true}
-               :seon.agent/id]
-              [:seon.config.error/escalate-to
-               {:optional true}
-               :seon.config.error/escalate-to]
+              [:seon.turn/id {:optional true} :seon.turn/id]
+              [:seon.agent/id {:optional true} :seon.agent/id]
               [:seon.config.error/max-evidence-bytes
-               :seon.config.error/max-evidence-bytes]
-              [:seon.error/fact {:optional true} :seon.error/fact]],
-             :data :map,
-             :data-blob :seon.blob/digest,
-             :data-content :string,
-             :data-edn :string,
-             :data-size [:int {:min 0}],
-             :dropped-fault-count [:int {:min 1}],
+               :seon.config.error/max-evidence-bytes]],
+             :id [:string {:min 1, :seon.db/identity true}],
+             :message [:string {:min 1, :seon.search/index :text}],
+             :refusal-shape :qualified-keyword,
+             :proc :keyword,
              :dropped-fault-digest [:string {:min 64, :max 64}],
-             :evidence [:tuple [:enum :seon.error/id] :seon.error/id],
+             :cid :keyword,
              :fact
              [:map
               {:seon.db/attributes true,
@@ -99,7 +113,9 @@
                :seon.error/basis-t]
               [:seon.error/run {:optional true} :seon.error/run]
               [:seon.error/agent {:optional true} :seon.error/agent]
-              [:seon.error/steward {:optional true} :seon.error/steward]
+              [:seon.error/steward
+               {:optional true}
+               :seon.error/steward]
               [:seon.instrument/fn
                {:optional true}
                :seon.instrument/fn]
@@ -111,35 +127,56 @@
                :seon.instrument/expected]
               [:seon.instrument/args
                {:optional true}
-               :seon.instrument/args]
-              [:seon.eval/missing {:optional true} :seon.eval/missing]
-              [:seon.eval/size {:optional true} :seon.eval/size]],
-             :id [:string {:min 1, :seon.db/identity true}],
-             :kind :keyword,
-             :message [:string {:min 1, :seon.search/index :text}],
-             :normalize-request
+               :seon.instrument/args]],
+             :commit-tx-request
              [:map
               [:seon.error/source :seon.error/source]
               [:seon.error/id :seon.error/id]
               [:seon.error/at :seon.error/at]
               [:seon.error/process :seon.error/process]
               [:seon.sci.admit/caps :seon.sci.admit/caps]
+              [:seon.config.error/recurrence-limit
+               :seon.config.error/recurrence-limit]
               [:seon.error/basis-t
                {:optional true}
                :seon.error/basis-t]
-              [:seon.turn/id
+              [:seon.turn/id {:optional true} :seon.turn/id]
+              [:seon.agent/id {:optional true} :seon.agent/id]
+              [:seon.config.error/escalate-to
                {:optional true}
-               :seon.turn/id]
-              [:seon.agent/id
-               {:optional true}
-               :seon.agent/id]
+               :seon.config.error/escalate-to]
               [:seon.config.error/max-evidence-bytes
-               :seon.config.error/max-evidence-bytes]],
+               :seon.config.error/max-evidence-bytes]
+              [:seon.error/fact {:optional true} :seon.error/fact]],
              :prepare-request :seon.error/normalize-request,
+             :data :map,
              :prepared
              [:map
               [:seon.error/fact :seon.error/fact]
               [:seon.error/data-content :seon.error/data-content]],
+             :steward
+             [:and
+              {:description
+               "The agent this fault is ROUTED TO for repair: the steward of the namespace of the function that failed (:seon.instrument/fn -> :seon.fn/ns -> :seon.ns/steward), decided inside the committing transaction. A LISTENED ATTRIBUTE: asserting it wakes that agent. Distinct from :seon.error/agent, which is the agent this fault happened TO. Also an INSIDE wake — a fault is the population's own activity and never resets the steward's turn bound; the bound is what stops a fault about an agent's own code looping.",
+               :seon.db/index true,
+               :seon.render/ai seon.error/render-faults-ai,
+               :seon.render/html seon.error/render-faults-html,
+               :seon.render/form seon.error/faults-form,
+               :seon.wake/listen true,
+               :seon.wake/opens-turn? true,
+               :seon.wake/inside true}
+              :seon.db/ref],
+             :data-content :string,
+             :occurrence [:int {:min 1}],
+             :unclassified-error
+             [:map
+              {:seon.error/class true,
+               :seon.render/ai seon.error/unclassified-prose,
+               :seon.render/html seon.error/render-html,
+               :error/message
+               "must mark a failure that no registered error class recognized"}
+              [:seon.error/unclassified :seon.error/unclassified]
+              [:seon.error/message :seon.error/message]],
              :notice
              [:map
               [:seon.error/fact :seon.error/fact]
@@ -159,68 +196,24 @@
               [:seon.error/notification
                {:optional true}
                :seon.error/notification]
-              [:seon.agent/id
-               {:optional true}
-               :seon.agent/id]],
-             :notice-request
-             [:map
-              [:seon.error/fact :seon.error/fact]
-              [:seon.error/reason {:optional true} :seon.error/reason]
-              [:seon.error/occurrence
-               {:optional true}
-               :seon.error/occurrence]
-              [:seon.error/occurrences
-               {:optional true}
-               :seon.error/occurrences]
-              [:seon.error/notification-limit
-               {:optional true}
-               :seon.error/notification-limit]
-              [:seon.error/notification
-               {:optional true}
-               :seon.error/notification]
-              [:seon.agent/id
-               {:optional true}
-               :seon.agent/id]],
-             :notification [:enum :final],
-             :notification-limit [:int {:min 1}],
-             :occurrence [:int {:min 1}],
-             :occurrences [:int {:min 1}],
-             :op :keyword,
-             :proc :keyword,
-             :process [:string {:min 1}],
-             :reason
-             [:enum
-              :your-run
-              :no-attributable-agent
-              :recurring
-              :failover],
-             :run [:and #:seon.db{:index true} :seon.db/ref],
+              [:seon.agent/id {:optional true} :seon.agent/id]],
              :refusal [:= true],
-             :refusal-shape :qualified-keyword,
-             :refusal-value
-             [:map
-              [:seon.error/message :seon.error/message]
-              [:seon.turn/rule {:optional true} :seon.turn/rule]
-              [:seon.turn/transition {:optional true} :seon.turn/transition]],
-             :unclassified [:= true],
-             :unclassified-error
-             [:map {:seon.error/class true
-                    :seon.render/ai seon.error/unclassified-prose
-                    :seon.render/html seon.error/render-html
-                    :error/message "must mark a failure that no registered error class recognized"}
-              [:seon.error/unclassified :seon.error/unclassified]
-              [:seon.error/message :seon.error/message]],
-             :signature [:re #:seon.db{:index true} "^[0-9a-f]{64}$"],
+             :basis-t [:int {:min 0}],
+             :agent
+             [:and
+              {:description
+               "The agent this fault happened to; its reverse is that agent's fault list.",
+               :seon.render/ai seon.error/render-faults-ai,
+               :seon.render/html seon.error/render-faults-html,
+               :seon.db/index true}
+              :seon.db/ref],
+             :data-size [:int {:min 0}],
+             :kind :keyword,
+             :at :inst,
              :throwable-class [:string {:min 1}],
-             :source
-             [:any
-              {:seon.schema.admission/exemption
-               :seon.schema.admission/polymorphic-boundary
-               :seon.schema.admission/reason
-               "The error boundary must normalize any value or Throwable that escaped a failing subsystem."
-               :gen/elements [nil true 0 "failure" :failure [] {} #{}]}],
-             :value
-             [:map
-              [:seon.error/kind :seon.error/kind]
-              [:seon.error/message :seon.error/message]
-              [:seon.error/data {:optional true} :seon.error/data]]}
+             :notification-limit [:int {:min 1}],
+             :notification [:enum :final],
+             :unclassified [:= true],
+             :dropped-fault-count [:int {:min 1}],
+             :signature [:re #:seon.db{:index true} "^[0-9a-f]{64}$"],
+             :process [:string {:min 1}]}

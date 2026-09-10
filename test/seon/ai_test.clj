@@ -1054,7 +1054,7 @@
    :seon.ai/timeout-ms 10000
    :seon.ai/stream? true
    :seon.ai.http/headers {"content-type" "application/json"}
-   :seon.ai.attempt/sent-body "{}"})
+   :seon.ai.http/body "{}"})
 
 (defn- start-custody-stub!
   "A local server whose two response bodies are independently gated."

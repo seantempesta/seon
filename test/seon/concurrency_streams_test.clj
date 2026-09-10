@@ -110,13 +110,8 @@
              delivery
              (message/delivery
               @connection
-              {:my.message/value value
-               :seon.agent/id sender
-               :seon.turn/id "streams-test-message-run"
-               :seon.cluster.eval/ordinal 1
-               :seon.cluster.message/at at
-               :seon.config.message/max-chain 64})
-             rows (:seon.cluster.message/rows delivery)
+              {:my.message/value value :seon.agent/id sender :seon.turn/id "streams-test-message-run" :seon.cluster.eval/ordinal 1 :seon.config.message/max-chain 64})
+             rows (:seon.message/rows delivery)
              expected-ids (mapv #(str "streams-test-message-run-1-message-" %)
                                 (range 12))]
          (db/transact! connection rows)
@@ -126,13 +121,13 @@
                        :in $ ?recipient
                        :where
                        [?agent :seon.agent/id ?recipient]
-                       [?message :seon.cluster.message/to ?agent]
-                       [?message :seon.cluster.message/id ?id]
-                       [?message :seon.cluster.message/content ?content]
-                       [?message :seon.cluster.message/ordinal ?ordinal]]
+                       [?message :seon.message/to ?agent]
+                       [?message :seon.message/id ?id]
+                       [?message :seon.message/content ?content]
+                       [?message :seon.message/ordinal ?ordinal]]
                      database recipient)
                trigger-ids
-               (mapv :seon.cluster.message/id
+               (mapv :seon.message/id
                      (turn/unanswered-triggers database recipient))
                request (transcript-unit connection recipient)
                ai (transcript/render-ai request)
@@ -143,7 +138,7 @@
                      (range 12))]
            (testing "delivery keeps source-vector identity before commit"
              (is (= expected-ids
-                    (mapv :seon.cluster.message/id rows)))
+                    (mapv :seon.message/id rows)))
              (is (empty? (:seon.error/values delivery))))
            (testing "the database and trigger derivation lose no message"
              (is (= 12 (count facts)))

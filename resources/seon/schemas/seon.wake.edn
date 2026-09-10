@@ -26,12 +26,7 @@
              [:db/id :int]
              [:seon.wake/attribute :seon.wake/attribute]
              [:seon.wake/t :seon.wake/t]
-             [:seon.cluster.message/id
+             [:seon.message/id
               {:optional true}
-              :seon.cluster.message/id]
-             [:seon.cluster.message/at
-              {:optional true}
-              :seon.cluster.message/at]
-             [:seon.cluster.message/ordinal
-              {:optional true}
-              :seon.cluster.message/ordinal]]}
+              :seon.message/id]
+]}

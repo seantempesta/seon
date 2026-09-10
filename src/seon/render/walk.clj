@@ -140,7 +140,7 @@
                     asked-for-nested
                     (if (and (= 1 remaining)
                              (contains? installed
-                                        :seon.cluster.message/from)
+                                        :seon.message/from)
                              (contains? installed
                                         :seon.turn/trigger))
                       (conj nested
@@ -155,7 +155,7 @@
                        (map (fn [attribute]
                               {(selector-key (reverse-attribute attribute)
                                              width)
-                               (if (= :seon.cluster.message/from attribute)
+                               (if (= :seon.message/from attribute)
                                  asked-for-nested
                                  nested)})
                             ref-attributes)))))]
@@ -313,7 +313,7 @@
                                  connection-attributes))]
                       (if (or (pos? remaining)
                               (and (zero? remaining)
-                                   (= :seon.cluster.message/from reached-by)))
+                                   (= :seon.message/from reached-by)))
                         (reduce-kv
                          (fn [result index connection]
                            (if-let [child
@@ -489,7 +489,7 @@
                          [[:seon.ns/requires :seon.ns/requires false]
                           [:seon.ns/_requires :seon.ns/requires true]]
                          connections)
-                       (= :seon.cluster.message/from reached-by)
+                       (= :seon.message/from reached-by)
                        [[:seon.turn/_trigger :seon.turn/trigger true]]
                        :else []))))))]
       (let [root (visit (:seon.render.walk/lookup request) distance nil)]

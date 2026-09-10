@@ -28,7 +28,7 @@
                     :seon.sci.admit/caps (config/result-caps configuration)
                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
                     :seon.config/on-core-error :panic})
-           shown (:seon.eval/value result)
+           shown (:seon.eval/shown result)
            response (repl/response result)
            parsed (edn/read-string response)
            diagnostic (:seon.sci.admit/value result)]
@@ -52,4 +52,4 @@
               (:seon.repl/error
                (edn/read-string
                 (repl/response {:seon.cluster.eval/error "saved refusal"
-                                :seon.eval/value "Expected: saved schema\nGot: saved value"})))))))))
+                                :seon.eval/shown "Expected: saved schema\nGot: saved value"})))))))))

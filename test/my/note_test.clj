@@ -14,7 +14,7 @@
       (let [written (db/transact! connection
                                   [{:seon.agent/id "alice"}
                                    {:seon.agent/id "bob"}
-                                   [:db/add "subject" :seon.cluster.message/id "subject-1"]])]
+                                   [:db/add "subject" :seon.message/id "subject-1"]])]
         (is (:db-after written) (pr-str written)))
       (f connection))))
 
@@ -29,10 +29,10 @@
               :my.note/content "Prefer one current fact."
               :my.note/about
               (db/q '[:find ?subject .
-                      :where [?subject :seon.cluster.message/id "subject-1"]]
+                      :where [?subject :seon.message/id "subject-1"]]
                     @connection)}
              (note/add! "design" "Prefer one current fact."
-                        [:seon.cluster.message/id "subject-1"]
+                        [:seon.message/id "subject-1"]
                         connection "alice")))
       (is (= "Prefer current facts only."
              (:my.note/content

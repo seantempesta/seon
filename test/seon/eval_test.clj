@@ -16,9 +16,7 @@
               ["a-second" 1000 "a" [[0 "a2"]]]]]
        (db/transact!
         connection
-        (into [{:seon.turn/id turn-id
-                :seon.turn/agent [:seon.agent/id agent-id]
-                :seon.turn/opened-at (java.util.Date. timestamp)}]
+        (into [{:seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}]
               (map (fn [[ordinal source]]
                      {:seon.cluster.eval/id source
                       :seon.cluster.eval/run [:seon.turn/id turn-id]

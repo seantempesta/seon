@@ -140,8 +140,8 @@
   "Attributes whose presence on a wake entity marks it the population's OWN.
 
   An inside wake never resets an agent's turn bound: an agent-sent
-  message carries `:seon.cluster.message/from`, an error recorder's
-  notification carries `:seon.cluster.message/about`, a fault routed for
+  message carries `:seon.message/from`, an error recorder's
+  notification carries `:seon.message/about`, a fault routed for
   repair carries `:seon.error/steward`, and an effect the agent itself
   requested carries `:seon.effect/to`. One query over
   `:seon.wake/inside`, so the rule that used to be a hard-coded
@@ -245,8 +245,8 @@
   (into []
         (mapcat (fn [attribute]
                   (map (fn [datom] [(:e datom) (:tx datom) attribute])
-                       (reverse (d/datoms database :avet attribute
-                                          agent-eid)))))
+                       (filter :added
+                               (reverse (d/datoms database :avet attribute agent-eid))))))
         attributes))
 
 (defn inside-wake?

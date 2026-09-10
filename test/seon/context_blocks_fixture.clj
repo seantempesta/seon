@@ -5,6 +5,7 @@
             [seon.cluster.agent :as agent]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.turn :as turn]))
 
 ; The live installer and loop regression share these ordinary declarations.
@@ -69,26 +70,22 @@
         (let [agent-eid (db/q '[:find ?e . :where [?e :seon.agent/id "juniper"]] database)
               old-plan (db/q '[:find ?p . :in $ ?a :where [?a :seon.agent/plan ?p]] database agent-eid)
               messages (db/q '[:find [?e ...] :in $ ?a
-                                :where (or [?e :seon.cluster.message/to ?a]
-                                           [?e :seon.cluster.message/from ?a])] database agent-eid)
+                                :where (or [?e :seon.message/to ?a]
+                                           [?e :seon.message/from ?a])] database agent-eid)
               faults (db/q '[:find [?e ...] :in $ ?a :where [?e :seon.error/agent ?a]] database agent-eid)
               old-orders (db/q '[:find [?e ...] :where [?e :example/order]] database)
               settings (db/q '[:find ?s . :in $ ?a :where [?a :seon.agent/settings ?s]] database agent-eid)]
           (into (mapv #(vector :db.fn/retractEntity %) (concat messages faults old-orders (when old-plan [old-plan])))
                 (concat orders
                         [{:db/id agent-eid
-                          :seon.agent/plan (update authored-plan :my.plan/steps set)
+                          :seon.agent/plan (assoc (update authored-plan :my.plan/steps set) :my.plan/agent agent-eid)
                           :seon.agent/settings
                           {:db/id (or settings "juniper-settings")
                            :seon.config/agent agent-eid
                            :seon.config.ai/no-provider true
                            :seon.config.eval/time-limit-ms 10000
                            :seon.config.run/max-episode-runs 20}}
-                         {:seon.cluster.message/id "juniper/largest-customer"
-                          :seon.cluster.message/from [:seon.agent/id "root"]
-                          :seon.cluster.message/to [:seon.agent/id "juniper"]
-                          :seon.cluster.message/at #inst "2026-09-09T12:00:00Z"
-                          :seon.cluster.message/content instruction}]))))]]))
+                         {:seon.message/id (id/id (random-uuid) 8) :seon.message/from [:seon.agent/id "root"] :seon.message/to [:seon.agent/id "juniper"] :seon.message/content instruction :seon.message/inbox [:seon.agent/id "juniper"]}]))))]]))
   {:seon.test/orders (count orders)})
 
 (defn submit!
@@ -110,7 +107,7 @@
                                                 [event (async/timeout (max 1 (quot (- deadline (System/nanoTime)) 1000000)))])))
                        (throw (ex-info "Juniper fixture turn did not settle" {:seon.test/source source}))))]
         (d/listen connection listener (fn [report]
-                                       (when (some #(and (= :seon.turn/closed-at (:a %)) (:added %))
+                                       (when (some #(and (= :seon.turn/closed-tx (:a %)) (:added %))
                                                    (:tx-data report))
                                          (async/offer! event true))))
         (let [result
@@ -120,14 +117,14 @@
                                  (:seon.turn/rule submitted))
                     (do
                       (when-not (and (= :seon.turn/run-exists (:seon.turn/rule submitted))
-                                     (:seon.turn/closed-at
-                                      (db/pull @connection [:seon.turn/closed-at]
+                                     (:seon.turn/closed-tx
+                                      (db/pull @connection [:seon.turn/closed-tx]
                                                [:seon.turn/id (get-in submitted [:seon.turn/request :seon.turn/id])])))
                         (await!))
                       ::busy)
                     (let [id (:seon.turn/id (checked submitted))]
                       (loop []
-                        (when-not (:seon.turn/closed-at (db/pull @connection [:seon.turn/closed-at] [:seon.turn/id id]))
+                        (when-not (:seon.turn/closed-tx (db/pull @connection [:seon.turn/closed-tx] [:seon.turn/id id]))
                           (await!)
                           (when (> (System/nanoTime) deadline)
                             (throw (ex-info "Juniper submitted turn remained open" {:seon.turn/id id})))

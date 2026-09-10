@@ -78,7 +78,7 @@
 
 (def ^:private attributes
   [:seon.agent/id :seon.turn/id :seon.turn/agent
-   :seon.turn/opened-at :seon.cluster.eval/ordinal])
+   :seon.turn/opened-tx :seon.cluster.eval/ordinal])
 
 (defn- with-connection [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}

@@ -38,8 +38,8 @@
                             :seon.ns/ns
                             :seon.fn/fn
                             :seon.schema/schema
-                            :seon.cluster.message/message
-                            :seon.cluster.message/to}
+                            :seon.message/message
+                            :seon.message/to}
                           :seon.schema/key))
             (schema/canonical-schema-rows)))
      (db/transact!
@@ -47,10 +47,7 @@
       [{:seon.ns/name 'fixture.history}
        {:seon.agent/id "history-agent"
         :seon.agent/namespace [:seon.ns/name 'fixture.history]}
-       {:seon.cluster.message/id "history-message"
-        :seon.cluster.message/to [:seon.agent/id "history-agent"]
-        :seon.cluster.message/at (java.util.Date. 1786400000000)
-        :seon.cluster.message/content "Read me."}])
+       {:seon.message/id "history-message" :seon.message/to [:seon.agent/id "history-agent"] :seon.message/content "Read me." :seon.message/inbox [:seon.agent/id "history-agent"]}])
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            selected
@@ -65,7 +62,7 @@
            (db/pull database '[*] [:seon.ns/name 'fixture.history])
            message
            (db/pull database '[*]
-                    [:seon.cluster.message/id "history-message"])]
+                    [:seon.message/id "history-message"])]
        (testing "shape owners declare ordinary doc/dir/read forms"
          (is (= 'seon.render.ns/namespace-form
                 (selected namespace-entity)))
@@ -77,15 +74,15 @@
                 (transcript/message-form message))))
        (testing "an attribute declaration precedes the landed entity shape"
          (is (= 'seon.render.transcript/inbox-form
-                (selected message :seon.cluster.message/to)))
+                (selected message :seon.message/to)))
          (is (= '(my.message/inbox)
                 (transcript/inbox-form
-                 (:seon.cluster.message/to (render/transacted message)))))
+                 (:seon.message/to (render/transacted message)))))
          (is (= '(my.message/inbox)
                 (render/render-form-value
                  (assoc (render-request database ctx message)
                         :seon.render.walk/attribute
-                        :seon.cluster.message/to)))))
+                        :seon.message/to)))))
        (testing "the entity floor uses the projection's declared identity"
          (let [agent-entity (db/pull database '[*]
                                      [:seon.agent/id "history-agent"])
@@ -156,7 +153,7 @@
     :seon.repl/subject 'my.message/inbox
     :seon.repl/entry {:seon.repl/form '(my.message/inbox)}}
    {:seon.repl/key :message
-    :seon.repl/subject [:seon.cluster.message/id "task-1"]
+    :seon.repl/subject [:seon.message/id "task-1"]
     :seon.repl/entry {:seon.repl/form '(my.message/read "task-1")}}])
 
 (defn- episode-request
@@ -165,7 +162,7 @@
    :seon.repl/candidates candidates
    :seon.repl/settled settled
    :seon.print/identity-attributes
-   #{:seon.agent/id :seon.cluster.message/id :seon.ns/name}})
+   #{:seon.agent/id :seon.message/id :seon.ns/name}})
 
 (deftest generated-episodes-have-two-independent-gates
   (let [settled
@@ -189,7 +186,7 @@
           :seon.sci.admit/print-node (settled-node nil)}
          {:seon.repl/key :inbox
           :seon.sci.admit/print-node
-          (settled-node [{:seon.cluster.message/id "task-1"}])}]
+          (settled-node [{:seon.message/id "task-1"}])}]
         candidates episode-candidates
         result (walk/ordered-episode (episode-request candidates settled))
         episode-keys (mapv :seon.repl/key result)]
@@ -220,7 +217,7 @@
           :seon.sci.admit/print-node (settled-node nil)}
          {:seon.repl/key :inbox
           :seon.sci.admit/print-node
-          (settled-node [{:seon.cluster.message/id "task-1"}])}
+          (settled-node [{:seon.message/id "task-1"}])}
          {:seon.repl/key :read-doc
           :seon.sci.admit/print-node (settled-node nil)}]
         candidates (remove #(contains? #{:run-namespace :complete-doc}

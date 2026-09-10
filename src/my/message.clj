@@ -11,7 +11,7 @@
 
 (defn read
   "Read one message by its identity."
-  {:malli/schema [:=> [:cat :my.message/read-request] [:or :seon.cluster.message/message :seon.error/value]]}
+  {:malli/schema [:=> [:cat :my.message/read-request] [:or :seon.message/message :seon.error/value]]}
   [request]
   (message/read (:my.message/id request) (:seon.db/db request)))
 

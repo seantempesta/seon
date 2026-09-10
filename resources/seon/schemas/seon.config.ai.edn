@@ -1,4 +1,5 @@
-#:seon.config.ai{:api-key-variable
+#:seon.config.ai{:retain-reasoning [:boolean {:seon.config/optional true :seon.config/per-agent true :description "Retain provider reasoning in attempt evidence when explicitly enabled. The provider output bound limits its size."}]
+:api-key-variable
                  [:string {:min 1, :seon.config/optional true,
                            :seon.config/per-agent true}],
                  :endpoint

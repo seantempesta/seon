@@ -1,36 +1,37 @@
-#:seon.eval{:value [:string {:description "Exact shown text produced once by the evaluation's value renderer under its render profile. It is an observation, not a serialization of the live object."}]
+#:seon.eval{:host-interop-count [:int {:min 0}],
             :entity
-            [:map {:seon.render/ai seon.repl/render-ai
-                   :seon.render/html seon.repl/render-html}
+            [:map
+             #:seon.render{:ai seon.repl/render-ai,
+                           :html seon.repl/render-html}
              [:db/id {:optional true} :int]
              [:t {:optional true} :seon.db/basis-t]
              [:seon.cluster.eval/id :seon.cluster.eval/id]
              [:seon.cluster.eval/run [:map [:db/id :int]]]
              [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-             [:seon.cluster.eval/source {:optional true} :seon.cluster.eval/source]
+             [:seon.cluster.eval/source
+              {:optional true}
+              :seon.cluster.eval/source]
              [:seon.cluster.eval/at {:optional true} :inst]
-             [:seon.cluster.eval/ns {:optional true}
+             [:seon.cluster.eval/ns
+              {:optional true}
               [:map [:seon.ns/name :seon.ns/name]]]
-             [:seon.cluster.eval/read-evidence {:optional true}
+             [:seon.cluster.eval/read-evidence
+              {:optional true}
               [:vector :seon.db/read-evidence]]
-             [:seon.cluster.eval/read-basis-transaction {:optional true}
+             [:seon.cluster.eval/read-basis-transaction
+              {:optional true}
               :seon.db/basis-t]
-             [:seon.eval/value {:optional true} :string]
+             [:seon.eval/shown {:optional true} :string]
              [:seon.cluster.eval/output {:optional true} :string]
              [:seon.cluster.eval/error {:optional true} :string]
-             [:seon.cluster.eval/interrupted-at {:optional true} :inst]],
-            :allocated-bytes :int,
+             [:seon.cluster.eval/interrupted-at
+              {:optional true}
+              :inst]],
             :duration-ms :int,
             :fn-entries :int,
-            :host-interop-count [:int {:min 0}],
-            :missing
-            [:enum
+            :allocated-bytes :int,
+            :outcome [:enum :ok :time :error],
+            :shown
+            [:string
              {:description
-              "Why this evaluation stores no value: it reached the storage bound while its serialization streamed (:over-bound), the walk could not project it into data at all (:unserializable), or its stored bytes are gone (:lost). A missing value ablates the result handle: the response carries no :seon.repl/result and the turn's fork binds nothing, so a later form naming it gets an ordinary unresolved-symbol error."}
-             :over-bound :unserializable :lost],
-            :size
-            [:int
-             {:min 0,
-              :description
-              "UTF-8 bytes reached when the value went over the storage bound. Present only with :seon.eval/missing :over-bound: an unserializable or lost value has no measured size, and a stored value's size is the length of what is stored."}],
-            :outcome [:enum :ok :time :error]}
+              "Exact shown text produced once by the evaluation's value renderer under its render profile. It is an observation, not a serialization of the live object."}]}

@@ -53,7 +53,7 @@
 (def ^:private schema-family-query
   '[:find [?key ...]
     :where
-    [?reference :seon.schema/key :seon.cluster.message/id]
+    [?reference :seon.schema/key :seon.message/id]
     [?schema :seon.schema/references ?reference]
     [?schema :seon.db/attributes true]
     [?schema :seon.schema/key ?key]])
@@ -62,7 +62,7 @@
   '[:find [?key ...]
     :in $ ?sample
     :where
-    [?reference :seon.schema/key :seon.cluster.message/id]
+    [?reference :seon.schema/key :seon.message/id]
     [?schema :seon.schema/references ?reference]
     [?schema :seon.db/attributes true]
     [?schema :seon.schema/key ?key]])
@@ -91,7 +91,7 @@
      (without-handed-projection
       (fn []
         (let [database @connection
-              expected [:seon.cluster.message/message]
+              expected [:seon.message/message]
               _ (db/q schema-family-query database)
               raw
               (mapv
@@ -122,7 +122,7 @@
            (mapv (fn [_]
                    (elapsed-nanos #(db/q schema-family-query @connection)))
                  (range 10))]
-       (is (every? #(= [:seon.cluster.message/message] (::value %)) samples))
+       (is (every? #(= [:seon.message/message] (::value %)) samples))
        (is (every? #(< (::elapsed-nanos %) 5000000) samples)
            (str "handed query samples in ns: "
                 (pr-str (mapv ::elapsed-nanos samples))))))))
@@ -177,18 +177,12 @@
      (is (map? (db/transact!
                 connection
                 (turn/open-tx
-                 {:seon.turn/id "already-open"
-                  :seon.turn/agent
-                  [:seon.agent/id "busy-agent"]
-                  :seon.turn/opened-at (java.util.Date.)}))))
+                 {:seon.turn/id "already-open" :seon.turn/agent [:seon.agent/id "busy-agent"] :seon.turn/opened-tx "datomic.tx"}))))
      (let [result
            (db/transact!
             connection
             (turn/open-tx
-             {:seon.turn/id "contending-run"
-              :seon.turn/agent
-              [:seon.agent/id "busy-agent"]
-              :seon.turn/opened-at (java.util.Date.)}))]
+             {:seon.turn/id "contending-run" :seon.turn/agent [:seon.agent/id "busy-agent"] :seon.turn/opened-tx "datomic.tx"}))]
        (is (= :seon.turn/refused (:seon.error/kind result)))
        (is (= :seon.turn/agent-already-running
               (:seon.turn/rule result))
@@ -377,7 +371,7 @@
             ['[:find ?result .
                :where
                [?evaluation :seon.cluster.eval/ordinal 1]
-               [?evaluation :seon.eval/value ?result]]
+               [?evaluation :seon.eval/shown ?result]]
              [database]]
             ['[:find ?entity .
                :in $ ?id
@@ -531,8 +525,8 @@
        (is (every? #(find % :seon.db/read-result) process-local)
            "the explicit process-local cache retains stable replay values")
        (db/transact! connection
-                     [{:seon.cluster.message/id "semantic-replay-unrelated"
-                       :seon.cluster.message/content "unrelated"}])
+                     [{:seon.message/id "semantic-replay-unrelated"
+                       :seon.message/content "unrelated"}])
        (is (true? (db/read-evidence-current? @connection durable))
            "an equal wildcard replay survives an unrelated transaction")
        (is (true? (db/read-evidence-current? @connection process-local))
@@ -551,11 +545,11 @@
               (digest {:a 1 :b #{2 3}}))
            "canonical map and set ordering does not alter the digest"))
      (doseq [subject [[:seon.ns/name 'seon.db-test/missing]
-                      [:seon.cluster.message/id "large-digest"]]]
-       (when (= :seon.cluster.message/id (first subject))
+                      [:seon.message/id "large-digest"]]]
+       (when (= :seon.message/id (first subject))
          (db/transact! connection
-                       [{:seon.cluster.message/id (second subject)
-                         :seon.cluster.message/content
+                       [{:seon.message/id (second subject)
+                         :seon.message/content
                          (apply str (repeat 100000 "x"))}]))
        (let [captured (atom [])]
          (binding [db/*read-evidence-sink* captured]
@@ -565,7 +559,7 @@
                "nil and large pull results both retain a digest")
            (is (< (count (pr-str evidence)) 2000)
                "durable evidence size does not scale with the pull result")
-           (when (= :seon.cluster.message/id (first subject))
+           (when (= :seon.message/id (first subject))
              (db/transact!
               connection
               [{:seon.cluster.eval/id "digest-persistence"
@@ -937,7 +931,7 @@
            ;; nothing, until the armed contract asked what a time point is.
            before-t (db/basis-t before)]
        (db/transact! connection
-                     [{:seon.cluster.message/id "db-test-temporal"}])
+                     [{:seon.message/id "db-test-temporal"}])
        (let [after @connection]
          (binding [db/*conn* connection]
            (is (= (db/q exam-query (db/history after))
@@ -945,10 +939,10 @@
            (is (= (db/q exam-query (db/as-of after before-t))
                   (db/q exam-query (db/as-of before-t))))
            (is (= (db/q '[:find [?id ...]
-                          :where [_ :seon.cluster.message/id ?id]]
+                          :where [_ :seon.message/id ?id]]
                         (db/since after before-t))
                   (db/q '[:find [?id ...]
-                          :where [_ :seon.cluster.message/id ?id]]
+                          :where [_ :seon.message/id ?id]]
                         (db/since before-t))))))))))
 
 (defn- seed-diff-messages!
@@ -957,20 +951,8 @@
    connection
    [{:seon.agent/id "db-diff-alice"}
     {:seon.agent/id "db-diff-bob"}
-    {:seon.cluster.message/id "db-diff-m1"
-     :seon.cluster.message/to
-     [:seon.agent/id "db-diff-bob"]
-     :seon.cluster.message/from
-     [:seon.agent/id "db-diff-alice"]
-     :seon.cluster.message/content "hello"
-     :seon.cluster.message/at
-     #inst "2026-08-13T20:00:00.000-00:00"}
-    {:seon.cluster.message/id "db-diff-m2"
-     :seon.cluster.message/to
-     [:seon.agent/id "db-diff-bob"]
-     :seon.cluster.message/content "removed"
-     :seon.cluster.message/at
-     #inst "2026-08-13T20:01:00.000-00:00"}]))
+    {:seon.message/id "db-diff-m1" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/from [:seon.agent/id "db-diff-alice"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "db-diff-bob"]}
+    {:seon.message/id "db-diff-m2" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/content "removed" :seon.message/inbox [:seon.agent/id "db-diff-bob"]}]))
 
 (deftest ^{:seon.test/usage true} diff-replays-one-read-by-derived-identity
   (test-support/with-database
@@ -979,16 +961,11 @@
      (let [before (db/basis-t @connection)]
        (db/transact!
         connection
-        [[:db/add [:seon.cluster.message/id "db-diff-m1"]
-          :seon.cluster.message/content "hello, edited"]
+        [[:db/add [:seon.message/id "db-diff-m1"]
+          :seon.message/content "hello, edited"]
          [:db.fn/retractEntity
-          [:seon.cluster.message/id "db-diff-m2"]]
-         {:seon.cluster.message/id "db-diff-m3"
-          :seon.cluster.message/to
-          [:seon.agent/id "db-diff-bob"]
-          :seon.cluster.message/content "added"
-          :seon.cluster.message/at
-          #inst "2026-08-13T20:02:00.000-00:00"}])
+          [:seon.message/id "db-diff-m2"]]
+         {:seon.message/id "db-diff-m3" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/content "added" :seon.message/inbox [:seon.agent/id "db-diff-bob"]}])
        (binding [db/*conn* connection]
          (let [result (db/diff before #'message/inbox "db-diff-bob")
                current (db/basis-t @connection)]

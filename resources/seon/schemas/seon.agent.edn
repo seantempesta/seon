@@ -1,13 +1,14 @@
-#:seon.agent{:agent
+#:seon.agent{:runtime [:and {:seon.db/component true :description "The agent owns its runtime and turn history."} :seon.db/ref]
+:agent
                      [:map
                       {:seon.db/attributes true,
                        :seon.render/units
                        [:seon.agent/plan
-                        :seon.cluster.message/_to
+                        :seon.message/_inbox
                         :seon.agent/settings
                         :my.note/_agent
                         :seon.agent/namespace
-                        :seon.turn/_agent
+                        :seon.agent/runtime
                         :seon.error/_steward],
                        :seon.render/ai
                        seon.cluster.agent/render-identity-ai,
@@ -18,7 +19,8 @@
                        {:optional true}
                        :seon.agent/namespace]
                       [:seon.agent/plan {:optional true} :seon.agent/plan]
-                      [:seon.agent/settings {:optional true} :seon.agent/settings]],
+                      [:seon.agent/settings {:optional true} :seon.agent/settings]
+                      [:seon.agent/runtime {:optional true} :seon.agent/runtime]],
                      :arm-request
                      [:map
                       [:seon.turn.loop/cluster

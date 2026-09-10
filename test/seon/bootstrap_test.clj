@@ -51,30 +51,30 @@
             run (db/pull @connection
                          '[:seon.turn/id
                            :seon.turn.work/situation
-                           :seon.turn/plan-digest
+                           :seon.turn/reply-size
                            {:seon.cluster.eval/_run
                             [:seon.cluster.eval/ordinal
                              :seon.cluster.eval/author
                              :seon.cluster.eval/source]}
                            {:seon.turn/trigger
-                            [:seon.cluster.message/id
-                             :seon.cluster.message/content]}]
+                            [:seon.message/id
+                             :seon.message/content]}]
                          [:seon.turn/id run-id])]
         (is (= run-id (:seon.turn/id result)))
 
-        (is (nil? (:seon.turn/plan-digest run))
+        (is (nil? (:seon.turn/reply-size run))
             "a generated run has no frozen authored plan")
         (is (= :generate (:seon.turn.work/situation run)))
         ;; ONE ENTITY PER (run, ordinal): the evaluations point AT the run,
         ;; and the run keeps no component mirror of that back-edge.
         (is (empty? (:seon.cluster.eval/_run run))
             "creation admits no evaluation outside the generator")
-        (is (= (bootstrap/task-message-id agent-id)
+        (is (= (bootstrap/task-message-id @connection agent-id)
                (get-in run [:seon.turn/trigger
-                            :seon.cluster.message/id])))
+                            :seon.message/id])))
         (is (= (bootstrap/task-message)
                (get-in run [:seon.turn/trigger
-                            :seon.cluster.message/content])))
+                            :seon.message/content])))
         (is (= {:seon.turn.work/situation :generate
                 :seon.turn/id run-id
                 :seon.agent/id agent-id}
@@ -377,7 +377,7 @@
                :seon.ns/name 'my.agents.worker})))
       (let [tx (bootstrap/supervision-tx
                 @connection cluster/boot-process-identity
-                (java.util.Date.) "worker")]
+                "worker")]
         (is (seq tx))
         (db/transact! connection tx)
         (let [sources
@@ -396,4 +396,4 @@
                       sources))
           (is (empty? (bootstrap/supervision-tx
                        @connection cluster/boot-process-identity
-                       (java.util.Date.) "worker"))))))))
+                       "worker"))))))))

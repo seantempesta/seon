@@ -641,7 +641,7 @@
         (is (= :seon.effect/request-too-large (:seon.error/kind result))
             (pr-str result))
         (is (= :over-bound
-               (get-in result [:seon.error/data :seon.eval/missing]))
+               (get-in result [:seon.error/data :seon.sci.admit/reason]))
             "the refusal carries WHY the admission kept nothing")
         (is (= 8 (get-in result [:seon.error/data
                                  :seon.config.eval.result/max-bytes]))
@@ -723,9 +723,7 @@
         (db/transact!
          connection
          (turn/open-tx
-          {:seon.turn/id "effect-run"
-           :seon.turn/agent [:seon.agent/id "effect-agent"]
-           :seon.turn/opened-at opened-at}))
+          {:seon.turn/id "effect-run" :seon.turn/agent [:seon.agent/id "effect-agent"] :seon.turn/opened-tx "datomic.tx"}))
 
         (install-capability! connection)
         (db/transact!
@@ -748,6 +746,6 @@
                                 (id/digest 12 [:seon.effect/id "effect-run" 3 0])])]
           (is (= now (:seon.effect/interrupted-at receipt)))
           (is (nil? (:seon.effect/result-edn receipt)))
-          (is (some? (:seon.turn/closed-at
+          (is (some? (:seon.turn/closed-tx
                       (db/pull @connection '[*]
                                [:seon.turn/id "effect-run"])))))))))

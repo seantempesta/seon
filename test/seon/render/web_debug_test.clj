@@ -21,15 +21,13 @@
              {:seon.agent/id "history-probe"
               :seon.agent/namespace [:seon.ns/name 'my.agents.history-probe]
               :seon.agent/plan {:my.plan/objective "An anonymous component"}}
-             {:seon.turn/id "history-probe-turn"
-              :seon.turn/agent [:seon.agent/id "history-probe"]
-              :seon.turn/opened-at (java.util.Date. 0)}
+             {:seon.turn/id "history-probe-turn" :seon.turn/agent [:seon.agent/id "history-probe"] :seon.turn/opened-tx "datomic.tx"}
              {:seon.cluster.eval/id "history-probe-evaluation"
               :seon.cluster.eval/run [:seon.turn/id "history-probe-turn"]
               :seon.cluster.eval/ordinal 0
               :seon.cluster.eval/ns [:seon.ns/name 'my.agents.history-probe]
               :seon.cluster.eval/source "(my.plan/plan {})"
-              :seon.eval/value "The component's shown text."}])
+              :seon.eval/shown "The component's shown text."}])
            _ (is (nil? (:seon.error/kind written)))
            database @connection
            agent-row (db/pull database '[:db/id {:seon.agent/plan [:db/id]}]

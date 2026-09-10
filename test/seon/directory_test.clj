@@ -48,6 +48,6 @@
          (is (not (:seon.cluster.eval/error updated)) (pr-str updated))
          (is (= [:seon.print/options] (mapv :seon.schema/key rows)))
          (is (string? (:seon.schema/form (first rows))))
-         (is (= rows (edn/read-string (:seon.eval/value updated))))
+         (is (= rows (edn/read-string (:seon.eval/shown updated))))
          (is (some #(= "my.message/send" (:seon.fn/sym %)) functions))
          (is (not (seq (:seon.cluster.eval/output updated)))))))))

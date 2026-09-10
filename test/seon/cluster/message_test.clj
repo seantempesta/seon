@@ -42,10 +42,7 @@
   ([id content]
    (inbound-request id content now))
   ([id content at]
-   {:seon.agent/id id
-    :seon.cluster.message/inbound-content content
-    :seon.cluster.message/at at
-    :seon.config.eval.result/max-string 1024}))
+   {:seon.agent/id id :seon.message/inbound-content content :seon.config.eval.result/max-string 1024}))
 
 (defn- commit-inbound!
   [connection request]
@@ -70,31 +67,31 @@
         (is (= "Agent alice said to bob: hello"
                (message/format-ai
                 {:seon.db/db database
-                 :seon.cluster.message/content "hello"
-                 :seon.cluster.message/from
+                 :seon.message/content "hello"
+                 :seon.message/from
                  [:seon.agent/id "alice"]
-                 :seon.cluster.message/to
+                 :seon.message/to
                  {:seon.agent/id "bob"}})))
         (is (= "Agent alice said to bob: hello"
                (message/format-ai
                 {:seon.db/db database
-                 :seon.cluster.message/content "hello"
-                 :seon.cluster.message/from {:db/id alice-eid}
-                 :seon.cluster.message/to
+                 :seon.message/content "hello"
+                 :seon.message/from {:db/id alice-eid}
+                 :seon.message/to
                  [:seon.agent/id "bob"]})))
         (is (= "An unresolved sender [:seon.agent/id \"nobody\"] said to bob: hello"
                (message/format-ai
                 {:seon.db/db database
-                 :seon.cluster.message/content "hello"
-                 :seon.cluster.message/from
+                 :seon.message/content "hello"
+                 :seon.message/from
                  [:seon.agent/id "nobody"]
-                 :seon.cluster.message/to
+                 :seon.message/to
                  [:seon.agent/id "bob"]})))
         (is (= "From outside this cluster to bob: hello"
                (message/format-ai
                 {:seon.db/db database
-                 :seon.cluster.message/content "hello"
-                 :seon.cluster.message/to
+                 :seon.message/content "hello"
+                 :seon.message/to
                  [:seon.agent/id "bob"]})))))))
 
 (deftest message-ai-source-evaluates-through-the-agent-database
@@ -104,12 +101,8 @@
                      :seon.boot/cluster-name "message-test"})
       (db/transact!
        connection
-       [{:seon.cluster.message/id "message-1"
-         :seon.cluster.message/from [:seon.agent/id "alice"]
-         :seon.cluster.message/to [:seon.agent/id "bob"]
-         :seon.cluster.message/content "hello"
-         :seon.cluster.message/at now}])
-      (let [source (message/render-ai {:seon.cluster.message/id "message-1"})
+       [{:seon.message/id "message-1" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "bob"]}])
+      (let [source (message/render-ai {:seon.message/id "message-1"})
             planned (turn/planned-sources source 'my.agents.alice 4096)
             evaluated
             (sci.eval/evaluate
@@ -136,15 +129,8 @@
                      :seon.boot/cluster-name "message-test"})
       (db/transact!
        connection
-       [{:seon.cluster.message/id "message-older"
-         :seon.cluster.message/from [:seon.agent/id "alice"]
-         :seon.cluster.message/to [:seon.agent/id "bob"]
-         :seon.cluster.message/content "older"
-         :seon.cluster.message/at (Date. 1699999999000)}
-        {:seon.cluster.message/id "message-newer"
-         :seon.cluster.message/to [:seon.agent/id "bob"]
-         :seon.cluster.message/content "newer"
-         :seon.cluster.message/at now}])
+       [{:seon.message/id "message-older" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "older" :seon.message/inbox [:seon.agent/id "bob"]}
+        {:seon.message/id "message-newer" :seon.message/to [:seon.agent/id "bob"] :seon.message/content "newer" :seon.message/inbox [:seon.agent/id "bob"]}])
       (let [ctx (test-support/fork-cluster-ctx connection "message-test")
             evaluate-form
             (fn [source]
@@ -172,11 +158,8 @@
                                            :my.message/from
                                            :my.message/content])
                             (:seon.sci.admit/value evaluation)))
-            expected [{:my.message/id "message-older"
-                       :my.message/from "alice"
-                       :my.message/content "older"}
-                      {:my.message/id "message-newer"
-                       :my.message/content "newer"}]]
+            expected [{:my.message/id "message-newer" :my.message/content "newer"}
+                      {:my.message/id "message-older" :my.message/from "alice" :my.message/content "older"}]]
         (is (= #{1}
                (into #{}
                      (map :seon.fn.arity/argument-count)
@@ -212,26 +195,18 @@
     (fn [connection]
       (db/transact!
        connection
-       [{:seon.cluster.message/id "inbox/2"
-         :seon.cluster.message/from [:seon.agent/id "alice"]
-         :seon.cluster.message/to [:seon.agent/id "bob"]
-         :seon.cluster.message/content "second"
-         :seon.cluster.message/at (Date. 1700000060000)}
-        {:seon.cluster.message/id "inbox/1"
-         :seon.cluster.message/from [:seon.agent/id "alice"]
-         :seon.cluster.message/to [:seon.agent/id "bob"]
-         :seon.cluster.message/content "first"
-         :seon.cluster.message/at now}])
+       [{:seon.message/id "inbox/2" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "second" :seon.message/inbox [:seon.agent/id "bob"]}
+        {:seon.message/id "inbox/1" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/content "first" :seon.message/inbox [:seon.agent/id "bob"]}])
       (let [database @connection
             reverse-value
-            (:seon.cluster.message/_to
-             (db/pull database [:seon.cluster.message/_to]
+            (:seon.message/_inbox
+             (db/pull database [:seon.message/_inbox]
                       [:seon.agent/id "bob"]))
             messages (db/pull-many database '[*]
                                    (mapv :db/id reverse-value))
             rendered (message/render-inbox-html messages database)]
         (is (= (str/join "\n\n"
-                             (map message/render-ai (sort-by :seon.cluster.message/at messages)))
+                             (map message/render-ai (sort-by :seon.message/id messages)))
                (message/render-inbox-ai messages)))
         (is (str/includes? (pr-str rendered)
                            "my.message/send"))
@@ -269,19 +244,14 @@
 (deftest message-html-separates-attribution-time-and-authored-content
   (with-database
     (fn [connection]
+      (db/transact! connection [{:db/id "datomic.tx" :db/txInstant now}
+                                {:seon.message/id "message-1"
+                                 :seon.message/to [:seon.agent/id "bob"]
+                                 :seon.message/content "first line\nsecond line"}])
       (let [database @connection
             rendered
             (message/render-html
-             {:seon.db/db database
-              :seon.cluster.message/id "message-1"
-              :seon.cluster.message/content "first line\nsecond line"
-              :seon.cluster.message/from [:seon.agent/id "alice"]
-              :seon.cluster.message/to [:seon.agent/id "bob"]
-              :seon.cluster.message/at now
-              :seon.cluster.message/about
-              [:seon.agent/id "alice"]
-              :seon.cluster.message/caused-by
-              {:seon.cluster.message/id "message-0"}})]
+             {:seon.db/db database :seon.message/id "message-1" :seon.message/content "first line\nsecond line" :seon.message/from [:seon.agent/id "alice"] :seon.message/to [:seon.agent/id "bob"] :seon.message/about [:seon.agent/id "alice"] :seon.message/caused-by {:seon.message/id "message-0"} :seon.message/inbox [:seon.agent/id "bob"]})]
         (is (= [:article {:class "seon-family-entry seon-message-entry"}
                 [:header {:class "seon-message-meta"}
                  [:span {:class "seon-message-direction"}
@@ -315,25 +285,20 @@
                         {}
                         {:entity
                          (pr-str
-                          [:seon.cluster.message/id "message-0"])})}
+                          [:seon.message/id "message-0"])})}
                    "caused-by message-0"]]]]
                rendered)
             "metadata and the authored content occupy distinct elements")
         (is (= "From outside this cluster to bob: first line\nsecond line"
                (message/format-ai
                 {:seon.db/db database
-                 :seon.cluster.message/content "first line\nsecond line"
-                 :seon.cluster.message/to [:seon.agent/id "bob"]}))
+                 :seon.message/content "first line\nsecond line"
+                 :seon.message/to [:seon.agent/id "bob"]}))
             "the AI projection remains the existing exact sentence")
         (is (str/includes?
              (pr-str
               (message/render-html
-               {:seon.db/db database
-                :seon.cluster.message/content "hello"
-                :seon.cluster.message/from
-                [:seon.agent/id "nobody"]
-                :seon.cluster.message/to [:seon.agent/id "bob"]
-                :seon.cluster.message/at now}))
+               {:seon.db/db database :seon.message/content "hello" :seon.message/from [:seon.agent/id "nobody"] :seon.message/to [:seon.agent/id "bob"]}))
              "Unresolved sender [:seon.agent/id \\\"nobody\\\"]")
             "the HTML metadata preserves unresolved-sender evidence")))))
 
@@ -342,10 +307,7 @@
   No `from`, and no triggering transaction: the head of a chain."
   [connection id to content]
   (db/transact! connection
-              [{:seon.cluster.message/id id
-                :seon.cluster.message/to [:seon.agent/id to]
-                :seon.cluster.message/content content
-                :seon.cluster.message/at now}])
+              [{:seon.message/id id :seon.message/to [:seon.agent/id to] :seon.message/content content :seon.message/inbox [:seon.agent/id to]}])
   id)
 
 (defn- deliver!
@@ -354,14 +316,9 @@
                :or {ordinal 0 chain limit}}]
   (let [delivery (message/delivery
                   @connection
-                  (cond-> {:my.message/value value
-                           :seon.agent/id sender
-                           :seon.turn/id run
-                           :seon.cluster.eval/ordinal ordinal
-                           :seon.cluster.message/at now
-                           :seon.config.message/max-chain chain}
-                    trigger (assoc :seon.cluster.message/trigger trigger)))
-        rows (:seon.cluster.message/rows delivery)]
+                  (cond-> {:my.message/value value :seon.agent/id sender :seon.turn/id run :seon.cluster.eval/ordinal ordinal :seon.config.message/max-chain chain}
+                    trigger (assoc :seon.message/trigger trigger)))
+        rows (:seon.message/rows delivery)]
     (when (seq rows)
       (db/transact! connection rows))
     delivery))
@@ -454,15 +411,14 @@
       (let [depth (if trigger (inc (model-depth messages trigger)) 1)
             refused-kind (cond
                            (not (pos-int? chain-limit))
-                           :seon.cluster.message/no-limit
+                           :seon.message/no-limit
                            (> depth chain-limit)
-                           :seon.cluster.message/chain-limit)
+                           :seon.message/chain-limit)
             deliverable (if refused-kind
                           []
                           (filterv ::known? recipients))
             rows (mapv (fn [{::keys [candidate-index to content]}]
-                         (let [id (id/digest 12 [:seon.cluster.message/id
-                                                run-id ordinal candidate-index])]
+                         (let [id (id/id (random-uuid) 8)]
                            (cond-> {::id id ::to to ::from sender
                                     ::content content
                                     ::depth (if trigger depth 0)}
@@ -474,7 +430,7 @@
             error-kinds (if refused-kind
                           [refused-kind]
                           (vec (repeat unknown-count
-                                       :seon.cluster.message/unknown-recipient)))
+                                       :seon.message/unknown-recipient)))
             next-model (reduce
                         (fn [current row]
                           (-> current
@@ -492,14 +448,14 @@
   (into {}
         (map
          (fn [entity]
-           (let [id (:seon.cluster.message/id entity)
+           (let [id (:seon.message/id entity)
                  parent
                  (db/q '[:find ?parent-id .
                         :in $ ?id
                         :where
-                        [?message :seon.cluster.message/id ?id]
-                        [?message :seon.cluster.message/caused-by ?parent]
-                        [?parent :seon.cluster.message/id ?parent-id]]
+                        [?message :seon.message/id ?id]
+                        [?message :seon.message/caused-by ?parent]
+                        [?parent :seon.message/id ?parent-id]]
                       db id)]
              [id
               (cond-> {::id id
@@ -508,14 +464,14 @@
                                    :where [?to :seon.agent/id
                                            ?agent-id]]
                                  db
-                                 (:db/id (:seon.cluster.message/to entity)))
-                       ::content (:seon.cluster.message/content entity)
+                                 (:db/id (:seon.message/to entity)))
+                       ::content (:seon.message/content entity)
                        ::depth (message/chain-depth db id)}
-                (:seon.cluster.message/from entity)
+                (:seon.message/from entity)
                 (assoc ::from (message/sender db id))
                 parent (assoc ::parent parent))]))
          (db/q '[:find [(pull ?message [*]) ...]
-                :where [?message :seon.cluster.message/id _]]
+                :where [?message :seon.message/id _]]
               db))))
 
 (defn- execute-command!
@@ -530,27 +486,25 @@
       (let [{::keys [sender trigger run-id ordinal chain-limit recipients]}
             (::data expected)
             value (mapv (fn [{::keys [to content]}]
-                          (seon.cluster.message/send to content))
+                          (cond-> (seon.cluster.message/send to content)
+                            (some #(= content (::content %)) (::rows expected))
+                            (assoc :seon.message/id
+                                   (::id (first (filter #(= content (::content %)) (::rows expected)))))))
                         recipients)
-            request (cond-> {:my.message/value value
-                             :seon.agent/id sender
-                             :seon.turn/id run-id
-                             :seon.cluster.eval/ordinal ordinal
-                             :seon.cluster.message/at now
-                             :seon.config.message/max-chain chain-limit}
+            request (cond-> {:my.message/value value :seon.agent/id sender :seon.turn/id run-id :seon.cluster.eval/ordinal ordinal :seon.config.message/max-chain chain-limit}
                       trigger
-                      (assoc :seon.cluster.message/trigger trigger))
+                      (assoc :seon.message/trigger trigger))
             delivery (message/delivery @connection request)
-            rows (:seon.cluster.message/rows delivery)]
+            rows (:seon.message/rows delivery)]
         (when (seq rows)
           (db/transact! connection rows))
         [next-model
          (and
           (or (nil? chain-limit)
               (schema/valid-candidate-value?
-               :seon.cluster.message/delivery-request request))
+               :seon.message/delivery-request request))
           (= (mapv ::id (::rows expected))
-             (mapv :seon.cluster.message/id rows))
+             (mapv :seon.message/id rows))
           (= (::error-kinds expected)
              (mapv :seon.error/kind (:seon.error/values delivery)))
           (every? #(schema/valid-candidate-value? :seon.error/value %)
@@ -604,7 +558,7 @@
   (with-database
     (fn [connection]
       (ask! connection "m-0" "alice" "hello")
-      (let [rows (:seon.cluster.message/rows
+      (let [rows (:seon.message/rows
                   (deliver! connection
                             {:sender "alice" :trigger "m-0" :run "r-1"
                              :value (seon.cluster.message/send "bob" "hello bob")}))
@@ -629,17 +583,17 @@
                             :value (seon.cluster.message/send "bob" "how many?")})
       (let [pulled (db/q '[:find (pull ?message [*]) .
                           :where
-                          [?message :seon.cluster.message/content "how many?"]]
+                          [?message :seon.message/content "how many?"]]
                         @connection)]
         (is (= "alice"
                (db/q '[:find ?id .
                       :in $ ?eid
                       :where [?eid :seon.agent/id ?id]]
                     @connection
-                    (:db/id (:seon.cluster.message/from pulled))))
+                    (:db/id (:seon.message/from pulled))))
             "from resolves to the sending agent")
-        (is (some? (:seon.cluster.message/to pulled)))
-        (is (= now (:seon.cluster.message/at pulled)))))))
+        (is (some? (:seon.message/to pulled)))
+        (is (some? (:seon.message/inbox pulled)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The refusals, each a fact
@@ -654,12 +608,7 @@
     (fn [connection]
       (ask! connection "m-0" "alice" "hello")
       (db/transact! connection
-                  [{:seon.turn/id "r-1"
-                    :seon.turn/agent
-                    [:seon.agent/id "alice"]
-                    :seon.turn/trigger
-                    [:seon.cluster.message/id "m-0"]
-                    :seon.turn/opened-at now}])
+                  [{:seon.turn/id "r-1" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/trigger [:seon.message/id "m-0"] :seon.turn/opened-tx "datomic.tx"}])
       (is (= "m-0" (message/trigger @connection "r-1"))
           "the cause is an ordinary run fact")
       (is (nil? (message/trigger @connection "no-such-run"))))))
@@ -681,12 +630,7 @@
             (db/transact!
              connection
              (turn/open-tx
-              {:seon.turn/id "r-1"
-               :seon.turn/agent
-               [:seon.agent/id "alice"]
-               :seon.turn/trigger
-               [:seon.cluster.message/id "m-0"]
-               :seon.turn/opened-at now}))
+              {:seon.turn/id "r-1" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/trigger [:seon.message/id "m-0"] :seon.turn/opened-tx "datomic.tx"}))
             transaction (:max-tx (:db-after report))]
         (is (nil? (db/pull @connection '[*] transaction))
             "the HISTORY-OFF database has no transaction entity")
@@ -723,10 +667,10 @@
                                          recipient
                                          (str "hop " hop
                                               " — and how about this?"))})
-                      rows (:seon.cluster.message/rows delivery)]
+                      rows (:seon.message/rows delivery)]
                   (if (seq rows)
                     (recur (inc hop) recipient sender
-                           (:seon.cluster.message/id (first rows))
+                           (:seon.message/id (first rows))
                            (inc delivered))
                     {:outcome :refused
                      :delivered delivered
@@ -736,7 +680,7 @@
             "an unattended agent-to-agent conversation stops itself")
         (is (= limit (:delivered outcome))
             "and it stops at exactly the configured number of hops")
-        (is (= [:seon.cluster.message/chain-limit] (:kinds outcome))))))
+        (is (= [:seon.message/chain-limit] (:kinds outcome))))))
 
   (testing "and a human message in the middle buys a full budget again"
     (with-database
@@ -754,10 +698,10 @@
                                   {:sender sender :trigger trigger
                                    :run (str head "-r-" hop)
                                    :value (seon.cluster.message/send recipient "…")})
-                        rows (:seon.cluster.message/rows delivery)]
+                        rows (:seon.message/rows delivery)]
                     (if (and (seq rows) (< hop 200))
                       (recur (inc hop) recipient sender
-                             (:seon.cluster.message/id (first rows))
+                             (:seon.message/id (first rows))
                              (inc delivered))
                       delivered))))]
           (is (= limit (run-to-refusal "m-0")))
@@ -776,12 +720,13 @@
       (ask! connection "m-0" "alice" "ask bob")
       (deliver! connection {:sender "alice" :trigger "m-0" :run "r-1"
                             :value (seon.cluster.message/send "bob" "how many?")})
-      (is (= {:my.message/to "alice" :my.message/content "25"}
+      (is (= {:my.message/to "alice" :my.message/content "25"
+               :my.message/about (db/q '[:find ?id . :where [?m :seon.message/id ?id] [?m :seon.message/content "how many?"]] @connection)}
              (message/reply @connection
                             {:my.turn/result "25"
                              :seon.agent/id "bob"
-                             :seon.cluster.message/trigger
-                             (id/digest 12 [:seon.cluster.message/id "r-1" 0 0])}))
+                             :seon.message/trigger
+                             (db/q '[:find ?id . :where [?m :seon.message/id ?id] [?m :seon.message/content "how many?"]] @connection)}))
           "bob completing a run alice triggered owes alice the answer —
            derived from the trigger, never remembered by the agent"))))
 
@@ -792,7 +737,7 @@
       (is (nil? (message/reply @connection
                                {:my.turn/result "25"
                                 :seon.agent/id "alice"
-                                :seon.cluster.message/trigger "m-0"}))
+                                :seon.message/trigger "m-0"}))
           "delivery to a human is a surface, not a message to an agent
            that does not exist"))))
 
@@ -808,14 +753,14 @@
       (ask! connection "m-0" "alice" "ask bob")
       (deliver! connection {:sender "alice" :trigger "m-0" :run "r-1"
                             :value (seon.cluster.message/send "bob" "how many?")})
-      (deliver! connection {:sender "bob" :trigger (id/digest 12 [:seon.cluster.message/id "r-1" 0 0])
+      (deliver! connection {:sender "bob" :trigger (db/q '[:find ?id . :where [?m :seon.message/id ?id] [?m :seon.message/content "how many?"]] @connection)
                             :run "r-2"
                             :value (seon.cluster.message/send "alice" "25")})
       (is (nil? (message/reply @connection
                                {:my.turn/result "There are 25."
                                 :seon.agent/id "alice"
-                                :seon.cluster.message/trigger
-                                (id/digest 12 [:seon.cluster.message/id "r-2" 0 0])}))
+                                :seon.message/trigger
+                                (db/q '[:find ?id . :where [?m :seon.message/id ?id] [?m :seon.message/content "25"]] @connection)}))
           "alice completing on bob's ANSWER owes bob nothing — the
            delegation ends when the delegator completes, which is what
            puts the chain bound back to being a backstop")))
@@ -830,8 +775,8 @@
                       (message/reply @connection
                                      {:my.turn/result "25"
                                       :seon.agent/id "alice"
-                                      :seon.cluster.message/trigger
-                                      (id/digest 12 [:seon.cluster.message/id "r-1" 0 0])})))
+                                      :seon.message/trigger
+                                      (db/q '[:find ?id . :where [?m :seon.message/id ?id] [?m :seon.message/content "how many?"]] @connection)})))
             "bob's message was caused by the HUMAN's, not by alice's")))))
 
 ;;; ---------------------------------------------------------------------------
@@ -844,20 +789,20 @@
       (commit-inbound! connection (inbound-request "bob" "hello bob"))
       (let [row (db/q '[:find (pull ?message [*]) .
                        :where
-                       [?message :seon.cluster.message/content "hello bob"]]
+                       [?message :seon.message/content "hello bob"]]
                      @connection)]
-        (is (string? (:seon.cluster.message/id row)))
+        (is (string? (:seon.message/id row)))
         (is (= "bob"
                (db/q '[:find ?agent-id .
                       :in $ ?message-id
                       :where
-                      [?message :seon.cluster.message/id ?message-id]
-                      [?message :seon.cluster.message/to ?agent]
+                      [?message :seon.message/id ?message-id]
+                      [?message :seon.message/to ?agent]
                       [?agent :seon.agent/id ?agent-id]]
                     @connection
-                    (:seon.cluster.message/id row))))
-        (is (= now (:seon.cluster.message/at row)))
-        (is (not (contains? row :seon.cluster.message/from))
+                    (:seon.message/id row))))
+        (is (= (:seon.message/to row) (:seon.message/inbox row)))
+        (is (not (contains? row :seon.message/from))
             "absence, not a human/origin stamp, is the outside contract")))))
 
 (deftest inbound-identity-is-unique-under-burst-test
@@ -869,10 +814,10 @@
          connection
          (inbound-request "bob" (str "burst-" index))))
       (let [inbound-ids (db/q '[:find [?id ...]
-                               :where [?message :seon.cluster.message/id ?id]
-                               [?message :seon.cluster.message/to ?recipient]
+                               :where [?message :seon.message/id ?id]
+                               [?message :seon.message/to ?recipient]
                                [?recipient :seon.agent/id "bob"]
-                               (not [?message :seon.cluster.message/from])]
+                               (not [?message :seon.message/from])]
                              @connection)]
         (is (= 64 (count inbound-ids)))
         (is (= 64 (count (distinct inbound-ids)))
@@ -921,9 +866,9 @@
                              :seon.config.eval.result/max-string 3)
                       (inbound-request "nobody" "hello")]
             results (mapv #(message/inbound-tx @connection %) requests)]
-        (is (= [::message/blank-content
-                ::message/content-too-large
-                ::message/unknown-recipient]
+        (is (= [:seon.message/blank-content
+                :seon.message/content-too-large
+                :seon.message/unknown-recipient]
                (mapv :seon.error/kind results)))
         (is (every? #(schema/valid-candidate-value?
                       :seon.error/value %)
@@ -934,8 +879,7 @@
 (deftest reverse-agent-concerns-are-schema-declarations
   (let [forms (schema.edn/packaged-forms)
         units (:seon.render/units (second (:seon.agent/agent forms)))]
-    (is (= [:seon.cluster.message/_to :seon.turn/_agent :seon.error/_agent]
-           units))
+    (is (some #{:seon.message/_inbox} units))
     (is (not-any? (set units)
                   [:seon.def/_agent :seon.def/_ns
                    :seon.schema.admission/_source :seon.render.route/_data]))))

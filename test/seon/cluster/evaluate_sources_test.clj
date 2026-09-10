@@ -31,10 +31,7 @@
      ;; evaluation's durable identity, so a form can only name an earlier value
      ;; when that value's evaluation actually persisted.
      (db/transact! connection
-                   [{:seon.turn/id "preview-run"
-                     :seon.turn/agent
-                     [:seon.agent/id "preview-batch-agent"]
-                     :seon.turn/opened-at (java.util.Date.)}])
+                   [{:seon.turn/id "preview-run" :seon.turn/agent [:seon.agent/id "preview-batch-agent"] :seon.turn/opened-tx "datomic.tx"}])
      (db/transact! connection
                    (into []
                          (map (fn [ordinal]
@@ -131,30 +128,18 @@
            (is (= (db/q '[:find (count ?run) . :where [?run :seon.turn/id]] database)
                   (db/q '[:find (count ?run) . :where [?run :seon.turn/id]] @connection)))
            (is (every? #(inst? (get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/at])) outcomes))
-           (db/transact! connection [{:seon.turn/id "preview-run"
-                                     :seon.turn/closed-at closed-at}])
+           (db/transact! connection [{:seon.turn/id "preview-run" :seon.turn/closed-tx "datomic.tx"}])
            (is (nil? (:seon.error/kind
                       (db/transact! connection
                                     (turn/open-tx
-                                     {:seon.turn/id "active-during-add"
-                                      :seon.turn/agent [:seon.agent/id "preview-batch-agent"]
-                                      :seon.turn/opened-at closed-at})))))
-           (let [request {:seon.turn.loop/cluster cluster
-                          :seon.db/db database
-                          :seon.turn/id "saved-preview"
-                          :seon.turn/agent [:seon.agent/id "preview-batch-agent"]
-                          :seon.turn/starting-ns [:seon.ns/name 'my.agents.preview-batch]
-                          :seon.turn/reply raw-source
-                          :seon.turn/opened-at opened-at
-                          :seon.turn/closed-at closed-at
-                          :seon.turn.loop/evaluated-sources outcomes}
+                                     {:seon.turn/id "active-during-add" :seon.turn/agent [:seon.agent/id "preview-batch-agent"] :seon.turn/opened-tx "datomic.tx"})))))
+           (let [request {:seon.turn.loop/cluster cluster :seon.db/db database :seon.turn/id "saved-preview" :seon.turn/agent [:seon.agent/id "preview-batch-agent"] :seon.turn/starting-ns [:seon.ns/name 'my.agents.preview-batch] :seon.turn/reply raw-source :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources outcomes}
                  prepared (turn/record-evaluated-tx request)
                  _refusal (is (:seon.error/kind
                                (db/transact! connection (:seon.db/tx-data prepared))))
                  _close (db/transact!
                          connection
-                         [{:seon.turn/id "active-during-add"
-                           :seon.turn/closed-at closed-at}])
+                         [{:seon.turn/id "active-during-add" :seon.turn/closed-tx "datomic.tx"}])
                  committed
                  (with-redefs [sci.eval/evaluate
                                (fn [& _] (throw (ex-info "saving re-executed source" {})))]
@@ -177,7 +162,7 @@
                               [:seon.turn/id]
                               [:seon.turn/id "saved-preview"]))))
              (is (= raw-source (:seon.turn/reply saved)))
-             (is (= closed-at (:seon.turn/closed-at saved)))
+             (is (= closed-at (:seon.turn/closed-tx saved)))
 
              (is (nil?
                    (turn/open-for-agent @connection

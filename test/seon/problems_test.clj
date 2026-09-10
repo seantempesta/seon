@@ -43,6 +43,7 @@
   [body]
   (test-support/with-database
     (fn [connection]
+      (config/apply! {:seon.db/connection connection})
       (db/transact! connection [{:seon.agent/id "agent-a"}])
       (body connection))))
 
@@ -95,19 +96,22 @@
 (defn- commit-failed-run!
   [connection]
   (db/transact! connection
-              [{:seon.turn/id "run-failed"
-                :seon.turn/agent [:seon.agent/id "agent-a"]
-                :seon.turn/opened-at now
-                :seon.turn/closed-at now
-                :seon.turn/error "the model did not answer"}]))
+                [{:seon.turn/id "run-failed"
+                  :seon.turn/agent [:seon.agent/id "agent-a"]
+                  :seon.turn/opened-tx "datomic.tx"
+                  :seon.turn/closed-tx "datomic.tx"}
+                 (error/normalize
+                  {:seon.error/source {:seon.error/kind :seon.ai/provider-error
+                                       :seon.error/message "the model did not answer"}
+                   :seon.error/id "run-failed-error" :seon.error/at now
+                   :seon.error/process live :seon.sci.admit/caps caps
+                   :seon.config.error/max-evidence-bytes 16384
+                   :seon.turn/id "run-failed" :seon.agent/id "agent-a"})]))
 
 (defn- commit-errored-receipt!
   [connection]
   (db/transact! connection
-              [{:seon.turn/id "run-with-receipt"
-                :seon.turn/agent [:seon.agent/id "agent-a"]
-               :seon.turn/opened-at now
-                :seon.turn/closed-at now}
+              [{:seon.turn/id "run-with-receipt" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
                {:seon.cluster.eval/id "receipt-1"
                 :seon.cluster.eval/run [:seon.turn/id "run-with-receipt"]
                 :seon.cluster.eval/ordinal 0
@@ -120,8 +124,7 @@
 (defn- commit-missing-model!
   [connection]
   (db/transact! connection
-                [{:seon.config/cluster "default"
-                  :seon.config.ai/model "missing-model"}]))
+                [[:db/add [:seon.config/cluster "default"] :seon.config.ai/model "missing-model"]]))
 
 (def ^:private families
   {:seon.problems/error-signatures commit-error!
@@ -199,8 +202,7 @@
     (fn [connection]
       (db/transact!
        connection
-       [{:seon.config/cluster "default"
-         :seon.config.ai/model "z-cluster-model"}
+       [[:db/add [:seon.config/cluster "default"] :seon.config.ai/model "z-cluster-model"]
         {:seon.agent/id "agent-a"
          :seon.config.ai/model "a-agent-model"}
         {:seon.agent/id "agent-b"
@@ -223,8 +225,8 @@
              (:seon.error/kind
               (db/transact!
                connection
-               [{:seon.ai.model/id "a-agent-model"}
-                {:seon.ai.model/id "z-cluster-model"}]))))
+               [{:seon.ai.model/id "a-agent-model" :seon.ai.model/provider [:seon.ai.model/provider-id "deepseek"]}
+                {:seon.ai.model/id "z-cluster-model" :seon.ai.model/provider [:seon.ai.model/provider-id "deepseek"]}]))))
         (is (nil? (:seon.problems/missing-models (found connection)))
             "adding matching registry rows makes the finding disappear")))))
 
@@ -232,14 +234,13 @@
   (with-db
     (fn [connection]
       (db/transact! connection
-                    [{:seon.config/cluster "default"
-                      :seon.config.ai/model "registered-model"}])
+                    [[:db/add [:seon.config/cluster "default"] :seon.config.ai/model "registered-model"]])
       (is (= [{:seon.config.ai/model "registered-model"}]
              (:seon.problems/missing-models (found connection))))
       (is (nil?
            (:seon.error/kind
             (db/transact! connection
-                          [{:seon.ai.model/id "registered-model"}]))))
+                          [{:seon.ai.model/id "registered-model" :seon.ai.model/provider [:seon.ai.model/provider-id "deepseek"]}]))))
       (is (nil? (:seon.problems/missing-models (found connection)))))))
 
 (deftest missing-model-values-accrete-extra-attributes
@@ -328,9 +329,7 @@
        (fn [connection]
          (db/transact!
           connection
-          [{:seon.turn/id "generated-error-run"
-            :seon.turn/agent [:seon.agent/id "agent-a"]
-            :seon.turn/opened-at now}])
+          [{:seon.turn/id "generated-error-run" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx"}])
          (let [facts (mapv (fn [ordinal attribution]
                              (generated-error-fact
                               ordinal optional-attributes attribution))
@@ -385,7 +384,7 @@
       (commit-failed-run! connection)
       (let [entry (first (:seon.problems/failed-runs (found connection)))]
         (is (= "run-failed" (:seon.turn/id entry)))
-        (is (= "the model did not answer" (:seon.turn/error entry)))))))
+        (is (= "the model did not answer" (:seon.error/message entry)))))))
 
 (deftest an-errored-receipt-is-a-problem-without-being-a-fault
   (with-db
@@ -419,13 +418,16 @@
           (with-db
             (fn [connection]
               (doseq [family present] ((families family) connection))
-              (let [value (found connection)]
+              (let [value (found connection)
+                    expected (cond-> present
+                               (present :seon.problems/failed-runs)
+                               (conj :seon.problems/error-signatures))]
                 (and
                  ;; every family that has facts is reported, once
                  (every? (fn [family] (seq (get value family))) present)
                  ;; and NOTHING else appears — this is the half that a
                  ;; stored status would fail
-                 (empty? (remove present (keys value)))
+                 (empty? (remove expected (keys value)))
                  ;; empty means empty: `{}`, never `{family []}`
                  (= (empty? present) (= {} value))
                  (seon.schema/valid-candidate-value? :seon.problems/problems
@@ -467,20 +469,20 @@
              (seon.schema/valid-candidate-value?
               :seon.problems/problems value)
              (= present (set/intersection present (set (keys value))))
-             (= (count present) (count (str/split-lines log)))
-             (= (count present) (count rows))
+             (= (+ (count present) (if (present :seon.problems/failed-runs) 1 0))
+                (count (str/split-lines log)))
+             (= (+ (count present) (if (present :seon.problems/failed-runs) 1 0)) (count rows))
              (= log routed-log)
              (= html routed-html)
              (hiccup/hiccup? html)
              (or (not (contains? present
                                  :seon.problems/error-signatures))
-                 (let [[signature]
-                       (:seon.problems/error-signatures value)]
+                 (let [signature (first (filter #(= :seon.db/rejected (:seon.error/kind %))
+                                                (:seon.problems/error-signatures value)))]
                    (and (= error-occurrences
                            (:seon.problems/occurrences signature))
-                        (= 1
-                           (count
-                            (:seon.problems/error-signatures value)))))))))))
+                        (= (if (present :seon.problems/failed-runs) 2 1)
+                           (count (:seon.problems/error-signatures value)))))))))))
     :seed 202607280902)
    "problems projection twins"))
 

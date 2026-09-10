@@ -432,20 +432,12 @@
         (db/transact!
          connection
          (turn/open-tx
-          {:seon.turn/id run-id
-           :seon.turn/agent
-           [:seon.agent/id "call-edges-agent"]
-           :seon.turn/opened-at (java.util.Date.)}))
+          {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "call-edges-agent"] :seon.turn/opened-tx "datomic.tx"}))
 
         (db/transact!
          connection
          (turn/plan-tx
-          {:seon.turn/id run-id
-           :seon.db.process/id process
-           :seon.turn/starting-ns [:seon.ns/name namespace-name]
-           :seon.turn/plan-digest "call-edges-digest"
-           :seon.turn/sources
-           [{:seon.cluster.eval/source source}]}))
+          {:seon.turn/id run-id :seon.db.process/id process :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/sources [{:seon.cluster.eval/source source}]}))
         (db/transact!
          connection
          (turn/receipt-start-tx
@@ -458,7 +450,7 @@
           @connection
           {:seon.turn/id run-id
            :seon.cluster.eval/ordinal 0
-           :seon.eval/value ":done"}))
+           :seon.eval/shown ":done"}))
         (is (empty?
              (db/q '[:find [?attribute ...]
                      :in $ ?form-id
@@ -512,21 +504,12 @@
           (db/transact!
            connection
            (turn/open-tx
-            {:seon.turn/id "settlement-parity-run"
-             :seon.turn/agent
-             [:seon.agent/id "settlement-parity-agent"]
-             :seon.turn/opened-at (java.util.Date.)}))
+            {:seon.turn/id "settlement-parity-run" :seon.turn/agent [:seon.agent/id "settlement-parity-agent"] :seon.turn/opened-tx "datomic.tx"}))
 
           (db/transact!
            connection
            (turn/plan-tx
-            {:seon.turn/id "settlement-parity-run"
-             :seon.db.process/id "settlement-parity-process"
-             :seon.turn/starting-ns
-             [:seon.ns/name namespace-name]
-             :seon.turn/plan-digest "settlement-parity-digest"
-             :seon.turn/sources
-             [{:seon.cluster.eval/source source}]}))
+            {:seon.turn/id "settlement-parity-run" :seon.db.process/id "settlement-parity-process" :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/sources [{:seon.cluster.eval/source source}]}))
           (db/transact!
            connection
            (turn/receipt-start-tx
@@ -540,7 +523,7 @@
                   @connection
                   {:seon.turn/id "settlement-parity-run"
                    :seon.cluster.eval/ordinal 0
-                   :seon.eval/value ":defined"
+                   :seon.eval/shown ":defined"
                    :seon.program/row indexed}))]
             (is (nil? (:seon.error/kind settlement))
                 (pr-str (select-keys settlement

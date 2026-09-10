@@ -1,0 +1,210 @@
+#:seon.message{:blank-content-error
+               [:map
+                {:seon.error/class true,
+                 :seon.render/ai seon.error/render-ai,
+                 :seon.render/html seon.error/render-html,
+                 :error/message
+                 "must mark a message whose content is blank"}
+                [:seon.message/blank-content
+                 :seon.message/blank-content]
+                [:seon.error/message :seon.error/message]],
+               :ambiguous-about :seon.message/id,
+               :reply-request
+               [:map
+                [:my.turn/result :my.turn/result]
+                [:seon.agent/id :seon.agent/id]
+                [:seon.message/trigger
+                 {:optional true}
+                 :seon.message/id]],
+               :content-too-large :seon.message/size,
+               :to
+               [:and
+                {:description "The permanent recipient record.",
+                 :seon.db/index true}
+                :seon.db/ref],
+               :about
+               [:and
+                {:description
+                 "The entity this message concerns when one was named. Its presence marks the message an INSIDE wake: an agent in an error loop must not have its turn bound reset by its own failure notifications.",
+                 :seon.db/index true,
+                 :seon.wake/inside true}
+                :seon.db/ref],
+               :unknown-about :seon.message/id,
+               :inbound-content :string,
+               :unknown-about-error
+               [:map
+                {:seon.error/class true,
+                 :seon.render/ai seon.error/render-ai,
+                 :seon.render/html seon.error/render-html,
+                 :error/message
+                 "must identify the unknown message named as context"}
+                [:seon.message/unknown-about
+                 :seon.message/unknown-about]
+                [:seon.error/message :seon.error/message]],
+               :no-limit [:= true],
+               :inbound-request
+               [:map
+                [:seon.agent/id :seon.agent/id]
+                [:seon.message/inbound-content
+                 :seon.message/inbound-content]
+                [:seon.config.eval.result/max-string
+                 :seon.config.eval.result/max-string]],
+               :id [:string {:min 1, :seon.db/identity true}],
+               :inbox-unit
+               [:sequential
+                {:description
+                 "Every message addressed to one agent, as the reverse of `to` pulls them."}
+                :seon.message/pulled],
+               :no-limit-error
+               [:map
+                {:seon.error/class true,
+                 :seon.render/ai seon.error/render-ai,
+                 :seon.render/html seon.error/render-html,
+                 :error/message
+                 "must mark a message chain with no configured limit"}
+                [:seon.message/no-limit :seon.message/no-limit]
+                [:seon.error/message :seon.error/message]],
+               :message
+               [:map
+                {:seon.db/attributes true,
+                 :seon.render/ai seon.cluster.message/render-ai,
+                 :seon.render/html seon.cluster.message/render-html,
+                 :seon.render/form seon.render.transcript/message-form}
+                [:seon.message/id :seon.message/id]
+                [:seon.message/to :seon.message/to]
+                [:seon.message/content :seon.message/content]
+                [:seon.message/from
+                 {:optional true}
+                 :seon.message/from]
+                [:seon.message/caused-by
+                 {:optional true}
+                 :seon.message/caused-by]
+                [:seon.message/about
+                 {:optional true}
+                 :seon.message/about]
+                [:my.message/reason
+                 {:optional true}
+                 :my.message/reason]
+                [:seon.message/inbox
+                 {:optional true}
+                 :seon.message/inbox]
+                [:seon.message/read-tx
+                 {:optional true}
+                 :seon.message/read-tx]],
+               :pulled
+               [:map
+                {:description
+                 "One message as a pull returns it, before its references resolve to agents."}
+                [:db/id {:optional true} :int]
+                [:seon.message/id :seon.message/id]
+                [:seon.message/content :seon.message/content]
+                [:seon.message/from
+                 {:optional true}
+                 :seon.message/pulled-reference]
+                [:seon.message/to
+                 {:optional true}
+                 :seon.message/pulled-reference]
+                [:seon.message/about
+                 {:optional true}
+                 :seon.message/pulled-reference]
+                [:seon.message/caused-by
+                 {:optional true}
+                 :seon.message/pulled-reference]],
+               :caused-by
+               [:and
+                {:description
+                 "The earlier message that caused this message.",
+                 :seon.db/index true}
+                :seon.db/ref],
+               :from
+               [:and
+                {:description
+                 "The agent that sent this message. Its presence marks the message an INSIDE wake: the population's own activity never resets the recipient's turn bound.",
+                 :seon.db/index true,
+                 :seon.wake/inside true}
+                :seon.db/ref],
+               :inbound
+               [:or [:vector {:min 1, :max 1} :map] :seon.error/value],
+               :delivery-request
+               [:map
+                [:my.message/value :my.message/value]
+                [:seon.agent/id :seon.agent/id]
+                [:seon.turn/id :seon.turn/id]
+                [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+                [:seon.config.message/max-chain
+                 :seon.config.message/max-chain]
+                [:seon.message/trigger
+                 {:optional true}
+                 :seon.message/id]],
+               :chain-limit :seon.message/limit,
+               :content [:string {:min 1, :seon.search/index :text}],
+               :inbox
+               [:and
+                {:description
+                 "The recipient's pending inbox edge. Handling retracts this edge in the answering transaction.",
+                 :seon.db/index true,
+                 :seon.wake/listen true,
+                 :seon.wake/opens-turn? true,
+                 :seon.render/ai seon.cluster.message/render-inbox-ai,
+                 :seon.render/html
+                 seon.cluster.message/render-inbox-html,
+                 :seon.render/form seon.render.transcript/inbox-form}
+                :seon.db/ref],
+               :size [:int {:min 0}],
+               :content-too-large-error
+               [:map
+                {:seon.error/class true,
+                 :seon.render/ai seon.error/render-ai,
+                 :seon.render/html seon.error/render-html,
+                 :error/message
+                 "must identify the size of message content that exceeds its limit"}
+                [:seon.message/content-too-large
+                 :seon.message/content-too-large]
+                [:seon.error/message :seon.error/message]],
+               :chain-limit-error
+               [:map
+                {:seon.error/class true,
+                 :seon.render/ai seon.error/render-ai,
+                 :seon.render/html seon.error/render-html,
+                 :error/message
+                 "must identify the message-chain limit that was reached"}
+                [:seon.message/chain-limit :seon.message/chain-limit]
+                [:seon.error/message :seon.error/message]],
+               :blank-content [:= true],
+               :unknown-recipient :seon.agent/id,
+               :ambiguous-about-error
+               [:map
+                {:seon.error/class true,
+                 :seon.render/ai seon.error/render-ai,
+                 :seon.render/html seon.error/render-html,
+                 :error/message
+                 "must identify the ambiguous message context"}
+                [:seon.message/ambiguous-about
+                 :seon.message/ambiguous-about]
+                [:seon.error/message :seon.error/message]],
+               :pulled-reference
+               [:or
+                {:description
+                 "One reference as a pull hands it to a renderer: an entity id, a lookup ref, or the referenced entity map the page already acquired."}
+                :seon.db/ref
+                [:map [:db/id :int]]],
+               :delivery
+               [:map
+                [:seon.message/rows :seon.db/tx-data]
+                [:seon.error/values [:vector :seon.error/value]]],
+               :unknown-recipient-error
+               [:map
+                {:seon.error/class true,
+                 :seon.render/ai seon.error/render-ai,
+                 :seon.render/html seon.error/render-html,
+                 :error/message
+                 "must identify the unknown message recipient"}
+                [:seon.message/unknown-recipient
+                 :seon.message/unknown-recipient]
+                [:seon.error/message :seon.error/message]],
+               :read-tx
+               [:and
+                {:description
+                 "The transaction which handled the inbox edge."}
+                :seon.db/ref],
+               :limit [:int {:min 0}]}

@@ -1,44 +1,34 @@
-#:seon.cluster.eval{:at :inst,
+#:seon.cluster.eval{:triage-edn [:string {:min 1}],
+                    :read-basis-transaction :seon.db/basis-t,
+                    :error :string,
+                    :read-evidence
+                    [:vector #:seon.db{:component true} :seon.db/ref],
+                    :source
+                    [:string {:min 1, :seon.db/no-history? true}],
+                    :author
+                    [:enum
+                     {:description
+                      "Who wrote this form: :agent when the agent's reply carried it, :system when the platform generated it. Authorship is the fact a stored situation label used to stand in for."}
+                     :agent
+                     :system],
                     :comment
                     [:string
                      {:min 1,
                       :seon.db/no-history? true,
                       :description
                       "The agent's own prose above this form, verbatim and stored apart from the source it introduces, so a prompt line holds exactly one form and HTML can label the comment separately."}],
-                    :author
-                    [:enum
-                     {:description
-                      "Who wrote this form: :agent when the agent's reply carried it, :system when the platform generated it. Authorship is the fact a stored situation label used to stand in for."}
-                     :agent :system],
-                    :error :string,
-                    :id [:string {:min 1, :seon.db/identity true}],
                     :interrupted-at :inst,
+                    :id [:string {:min 1, :seon.db/identity true}],
                     :ns :seon.db/ref,
-                    :ordinal [:int {:min 0}],
-                    :source [:string {:min 1, :seon.db/no-history? true}],
+                    :run :seon.db/ref,
                     :output
                     [:string {:min 1, :seon.db/no-history? true}],
-                    :read-evidence
-                    [:vector {:seon.db/component true} :seon.db/ref],
-                    :read-basis-transaction :seon.db/basis-t,
-                    :read-evidence-entity
-                    [:map {:seon.db/attributes true}
-                     [:seon.db/source-argument-position
-                      :seon.db/source-argument-position]
-                     [:datahike.read/dependency-plan
-                      :seon.db/read-dependency-plan]
-                     [:datahike.read/revision
-                      :seon.db/dependency-revision]
-                     [:seon.db/read-request
-                      {:optional true}
-                      :seon.db/read-request]
-                     [:seon.db/read-result-digest
-                      {:optional true}
-                      :seon.db/read-result-digest]],
-                    :triage-edn [:string {:min 1}],
+                    :refreshes
+                    [:and #:seon.db{:unique true} :seon.db/ref],
+                    :ordinal [:int {:min 0}],
                     :receipt
                     [:map
-                    {:seon.db/attributes true}
+                     #:seon.db{:attributes true}
                      [:seon.cluster.eval/id :seon.cluster.eval/id]
                      [:seon.cluster.eval/run :seon.cluster.eval/run]
                      [:seon.cluster.eval/ordinal
@@ -71,16 +61,9 @@
                      [:seon.sci.eval/ending-ns
                       {:optional true}
                       :seon.sci.eval/ending-ns]
-                     [:seon.eval/value
+                     [:seon.eval/shown
                       {:optional true}
-                      :seon.eval/value]
-
-                     [:seon.eval/missing
-                      {:optional true}
-                      :seon.eval/missing]
-                     [:seon.eval/size
-                      {:optional true}
-                      :seon.eval/size]
+                      :seon.eval/shown]
                      [:seon.cluster.eval/error
                       {:optional true}
                       :seon.cluster.eval/error]
@@ -105,44 +88,44 @@
                      [:seon.cluster.eval/read-basis-transaction
                       {:optional true}
                       :seon.cluster.eval/read-basis-transaction]
-                     [:seon.test.accretion/gate-tests {:optional true}
+                     [:seon.test.accretion/gate-tests
+                      {:optional true}
                       :seon.test.accretion/gate-tests]
-                     [:seon.test.accretion/gate-test-count {:optional true}
+                     [:seon.test.accretion/gate-test-count
+                      {:optional true}
                       :seon.test.accretion/gate-test-count]
-                     [:seon.test.accretion/gate-pass-count {:optional true}
+                     [:seon.test.accretion/gate-pass-count
+                      {:optional true}
                       :seon.test.accretion/gate-pass-count]
-                     [:seon.test.accretion/gate-fail-count {:optional true}
+                     [:seon.test.accretion/gate-fail-count
+                      {:optional true}
                       :seon.test.accretion/gate-fail-count]
-                     [:seon.test.accretion/seed {:optional true}
+                     [:seon.test.accretion/seed
+                      {:optional true}
                       :seon.test.accretion/seed]
-                     [:seon.test.accretion/case-count {:optional true}
+                     [:seon.test.accretion/case-count
+                      {:optional true}
                       :seon.test.accretion/case-count]
-                     [:seon.test.accretion/executed-count {:optional true}
+                     [:seon.test.accretion/executed-count
+                      {:optional true}
                       :seon.test.accretion/executed-count]
-                     [:seon.test.accretion/status {:optional true}
+                     [:seon.test.accretion/status
+                      {:optional true}
                       :seon.test.accretion/status]
-                     [:seon.test.accretion/report-blob {:optional true}
+                     [:seon.test.accretion/report-blob
+                      {:optional true}
                       :seon.test.accretion/report-blob]
-                     [:seon.test.accretion/report-size {:optional true}
+                     [:seon.test.accretion/report-size
+                      {:optional true}
                       :seon.test.accretion/report-size]],
-                    :refreshes
-                    [:and {:seon.db/unique true} :seon.db/ref],
-                    :run :seon.db/ref,
                     :settle-request
                     [:map
                      [:seon.turn/id :seon.turn/id]
                      [:seon.cluster.eval/ordinal
                       :seon.cluster.eval/ordinal]
-                     [:seon.eval/value
+                     [:seon.eval/shown
                       {:optional true}
-                      :seon.eval/value]
-
-                     [:seon.eval/missing
-                      {:optional true}
-                      :seon.eval/missing]
-                     [:seon.eval/size
-                      {:optional true}
-                      :seon.eval/size]
+                      :seon.eval/shown]
                      [:seon.cluster.eval/error
                       {:optional true}
                       :seon.cluster.eval/error]
@@ -179,27 +162,52 @@
                      [:seon.print/level
                       {:optional true}
                       :seon.print/level]
-                     [:seon.test.accretion/gate-tests {:optional true}
+                     [:seon.test.accretion/gate-tests
+                      {:optional true}
                       :seon.test.accretion/gate-tests]
-                     [:seon.test.accretion/gate-test-count {:optional true}
+                     [:seon.test.accretion/gate-test-count
+                      {:optional true}
                       :seon.test.accretion/gate-test-count]
-                     [:seon.test.accretion/gate-pass-count {:optional true}
+                     [:seon.test.accretion/gate-pass-count
+                      {:optional true}
                       :seon.test.accretion/gate-pass-count]
-                     [:seon.test.accretion/gate-fail-count {:optional true}
+                     [:seon.test.accretion/gate-fail-count
+                      {:optional true}
                       :seon.test.accretion/gate-fail-count]
-                     [:seon.test.accretion/seed {:optional true}
+                     [:seon.test.accretion/seed
+                      {:optional true}
                       :seon.test.accretion/seed]
-                     [:seon.test.accretion/case-count {:optional true}
+                     [:seon.test.accretion/case-count
+                      {:optional true}
                       :seon.test.accretion/case-count]
-                     [:seon.test.accretion/executed-count {:optional true}
+                     [:seon.test.accretion/executed-count
+                      {:optional true}
                       :seon.test.accretion/executed-count]
-                     [:seon.test.accretion/status {:optional true}
+                     [:seon.test.accretion/status
+                      {:optional true}
                       :seon.test.accretion/status]
-                     [:seon.test.accretion/report-blob {:optional true}
+                     [:seon.test.accretion/report-blob
+                      {:optional true}
                       :seon.test.accretion/report-blob]
-                     [:seon.test.accretion/report-size {:optional true}
+                     [:seon.test.accretion/report-size
+                      {:optional true}
                       :seon.test.accretion/report-size]
                      [:seon.program/row
                       {:optional true}
-                      :seon.program/row]
-                     ]}
+                      :seon.program/row]],
+                    :at :inst,
+                    :read-evidence-entity
+                    [:map
+                     #:seon.db{:attributes true}
+                     [:seon.db/source-argument-position
+                      :seon.db/source-argument-position]
+                     [:datahike.read/dependency-plan
+                      :seon.db/read-dependency-plan]
+                     [:datahike.read/revision
+                      :seon.db/dependency-revision]
+                     [:seon.db/read-request
+                      {:optional true}
+                      :seon.db/read-request]
+                     [:seon.db/read-result-digest
+                      {:optional true}
+                      :seon.db/read-result-digest]]}

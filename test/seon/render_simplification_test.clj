@@ -806,11 +806,7 @@
         {:seon.agent/id "source-cache-agent"
          :seon.ns/name fixture-a
          :seon.cluster/name "source-cache"})
-       [{:seon.turn/id "source-cache-run"
-         :seon.turn/agent
-         [:seon.agent/id "source-cache-agent"]
-         :seon.turn/opened-at #inst "2026-09-06T20:00:00Z"
-         :seon.turn/starting-ns [:seon.ns/name fixture-a]}
+       [{:seon.turn/id "source-cache-run" :seon.turn/agent [:seon.agent/id "source-cache-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name fixture-a]}
         {:seon.cluster.eval/id "source-cache-eval"
          :seon.cluster.eval/run
          [:seon.turn/id "source-cache-run"]
@@ -895,9 +891,7 @@
                     [{:seon.cluster.eval/id "source-cache-eval"
                       :seon.cluster.eval/result-edn
                       "#:seon.print{:face :seon.print/number, :value 2}"}
-                     {:seon.turn/id "source-cache-run"
-                      :seon.turn/closed-at
-                      #inst "2026-09-06T20:00:01Z"}])
+                     {:seon.turn/id "source-cache-run" :seon.turn/closed-tx "datomic.tx"}])
                  second-invocations (atom {})
                  second-calls (atom {})
                  second-output
@@ -1026,8 +1020,8 @@
                     :in $ ?owner
                     :where
                     [?agent :seon.agent/id ?owner]
-                    [?message :seon.cluster.message/to ?agent]
-                    [?message :seon.cluster.message/content ?content]]
+                    [?message :seon.message/to ?agent]
+                    [?message :seon.message/content ?content]]
                   @connection "owner-b")]
          (is (str/includes? browser "unavailable"))
          (is (not (str/includes? browser "secret stack")))

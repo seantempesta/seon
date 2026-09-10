@@ -26,7 +26,7 @@
   `admit` returns the print node, the derived semantic value, and the exact
   EDN it emitted. Over the bound — or when the walk could project no data at
   all, an opaque host reference or a projection that failed — it returns
-  nothing but `:seon.eval/missing` and, for the bound, `:seon.eval/size`.
+  nothing but `:seon.sci.admit/reason` and, for the bound, `:seon.sci.admit/bytes`.
   There is no window, no page, and no `capped?` flag: a caller never has to
   ask whether the thing it holds is the whole value.
 
@@ -113,7 +113,7 @@
 
   The bound is checked BEFORE the fragment lands, so nothing past it is ever
   built. The size reported is the bytes REACHED — everything emitted plus the
-  fragment that crossed the bound — because `:seon.eval/size` is declared as a
+  fragment that crossed the bound — because `:seon.sci.admit/bytes` is declared as a
   measurement, and a diagnostic that reads as a measurement and is a constant
   is the one thing a diagnostic may not be."
   [state ^String text]
@@ -124,7 +124,7 @@
       (throw (ex-info "value admission reached its storage bound"
                       {:seon.error/kind over-bound-marker
                        over-bound-marker true
-                       :seon.eval/size total})))
+                       :seon.sci.admit/bytes total})))
     (vreset! (:bytes state) total)
     (.append ^StringBuilder (:builder state) text)
     nil))
@@ -560,15 +560,15 @@
           (recur stack [::advance value]))))))
 
 (defn missing-marker
-  "The `:seon.eval/missing` answer one admission gave, alone, or nil.
+  "The `:seon.sci.admit/reason` answer one admission gave, alone, or nil.
 
   ONE CONSTRUCTOR for the marker every surface reports an absent value with:
   the REPL response, a fault fact's evidence, and any caller that has to say
   why it is holding nothing. Nil when the admission kept the value."
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
   [admitted]
-  (when (keyword? (:seon.eval/missing admitted))
-    (select-keys admitted [:seon.eval/missing :seon.eval/size])))
+  (when (keyword? (:seon.sci.admit/reason admitted))
+    (select-keys admitted [:seon.sci.admit/reason :seon.sci.admit/bytes])))
 
 (def ^:private opaque-result-faces
   ;; A node whose face kept only a name or a class NEVER held the value.
@@ -584,7 +584,7 @@
 
   A bare object node named a host reference it could not enter, and a failed
   node names a projection that threw. Neither IS the value, so neither is
-  stored as one: the evaluation records `:seon.eval/missing :unserializable`
+  stored as one: the evaluation records `:seon.sci.admit/reason :unserializable`
   and the handle is ablated. A reference WITH a registry identity projection
   carries `:seon.print/value` and is faithful, so it is not this."
   [node]
@@ -710,14 +710,14 @@
         (try
           (let [print-node (project value state)]
             (if (unserializable-root? print-node)
-              {:seon.eval/missing :unserializable}
+              {:seon.sci.admit/reason :unserializable}
               {::print-node print-node
                ::value (semantic-value print-node)
                :seon.sci.admit/edn (str builder)}))
           (catch clojure.lang.ExceptionInfo failure
             (if (over-bound? failure)
-              {:seon.eval/missing :over-bound
-               :seon.eval/size (:seon.eval/size (ex-data failure))}
+              {:seon.sci.admit/reason :over-bound
+               :seon.sci.admit/bytes (:seon.sci.admit/bytes (ex-data failure))}
               (throw failure))))]
     (cond-> answer
       ;; absent in, absent out — never a stored nil
@@ -730,7 +730,7 @@
   render declarations. It walks the source exactly once and returns the same
   print node, semantic value, and optional diagnostics as `admit` — or, when
   the value went over the storage bound or could not be projected into data
-  at all, nothing but `:seon.eval/missing` and the size that names why."
+  at all, nothing but `:seon.sci.admit/reason` and the size that names why."
   {:malli/schema
    [:=> [:cat :seon.sci.admit/request] :seon.sci.admit/admitted-value]}
   [request]
@@ -753,8 +753,8 @@
   or, for a value that reached `:seon.config.eval.result/max-bytes` or that
   the walk could only describe,
 
-      {:seon.eval/missing :over-bound|:unserializable
-       :seon.eval/size    <bytes reached, for the bound>
+      {:seon.sci.admit/reason :over-bound|:unserializable
+       :seon.sci.admit/bytes    <bytes reached, for the bound>
        ::record           <the diagnostics, unchanged>}
 
   The projection's grammar is the namespace docstring's total codec. There is

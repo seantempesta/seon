@@ -19,10 +19,7 @@
                  [{:seon.agent/id "alice"}
                   {:seon.agent/id "bob"}
                   {:seon.error/id "failure-17"}
-                  {:seon.turn/id "red-run"
-                   :seon.turn/agent
-                   [:seon.agent/id "alice"]
-                   :seon.turn/opened-at now}
+                  {:seon.turn/id "red-run" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/opened-tx "datomic.tx"}
                   {:seon.cluster.eval/id "receipt-17"
                    :seon.cluster.eval/run
                    [:seon.turn/id "red-run"]
@@ -36,28 +33,22 @@
 
 (defn- request
   [run-id content]
-  {:my.message/value
-   (seon.cluster.message/send "bob" content "failure-17")
-   :seon.agent/id "alice"
-   :seon.turn/id run-id
-   :seon.cluster.eval/ordinal 0
-   :seon.cluster.message/at now
-   :seon.config.message/max-chain 16})
+  {:my.message/value (seon.cluster.message/send "bob" content "failure-17") :seon.agent/id "alice" :seon.turn/id run-id :seon.cluster.eval/ordinal 0 :seon.config.message/max-chain 16})
 
 (deftest delivery-resolves-about-to-the-identified-fact
   (with-assignment-database
    (fn [connection]
      (let [delivery (message/delivery @connection
                                       (request "run-1" "repair this"))
-           rows (:seon.cluster.message/rows delivery)]
+           rows (:seon.message/rows delivery)]
        (is (empty? (:seon.error/values delivery)))
        (is (= 1 (count rows)))
        (db/transact! connection rows)
        (is (= "failure-17"
               (db/q '[:find ?failure-id .
                      :where
-                     [?message :seon.cluster.message/content "repair this"]
-                     [?message :seon.cluster.message/about ?failure]
+                     [?message :seon.message/content "repair this"]
+                     [?message :seon.message/about ?failure]
                      [?failure :seon.error/id ?failure-id]]
                    @connection))
            "the driver resolves the string identity and commits the ref")))))
@@ -71,8 +62,8 @@
             (assoc (request "run-1" "repair this")
                    :my.message/value
                    (seon.cluster.message/send "bob" "repair this" "missing-fact")))]
-       (is (empty? (:seon.cluster.message/rows delivery)))
-       (is (= [:seon.cluster.message/unknown-about]
+       (is (empty? (:seon.message/rows delivery)))
+       (is (= [:seon.message/unknown-about]
               (mapv :seon.error/kind (:seon.error/values delivery))))))))
 
 (deftest a-declination-settles-without-retiring-the-red-fact
@@ -85,7 +76,7 @@
                    :my.message/value
                    (seon.cluster.message/send "bob" "repair this" "receipt-17")))
            _ (db/transact! connection
-                         (:seon.cluster.message/rows assignment))
+                         (:seon.message/rows assignment))
            red-before
            (:seon.problems/errored-receipts
             (problems/problems
@@ -94,14 +85,8 @@
            declination
            (message/delivery
             @connection
-            {:my.message/value
-             (seon.cluster.message/decline "alice" "receipt-17" reason)
-             :seon.agent/id "bob"
-             :seon.turn/id "declination-run"
-             :seon.cluster.eval/ordinal 0
-             :seon.cluster.message/at now
-             :seon.config.message/max-chain 16})
-           rows (:seon.cluster.message/rows declination)]
+            {:my.message/value (seon.cluster.message/decline "alice" "receipt-17" reason) :seon.agent/id "bob" :seon.turn/id "declination-run" :seon.cluster.eval/ordinal 0 :seon.config.message/max-chain 16})
+           rows (:seon.message/rows declination)]
        (is (empty? (:seon.error/values declination)))
        (is (= 1 (count rows)))
        (db/transact! connection rows)
@@ -112,12 +97,12 @@
                        [?problem :seon.cluster.eval/id "receipt-17"]
                        [?planner :seon.agent/id "alice"]
                        [?owner :seon.agent/id "bob"]
-                       [?assignment :seon.cluster.message/about ?problem]
-                       [?assignment :seon.cluster.message/from ?planner]
-                       [?assignment :seon.cluster.message/to ?owner]
-                       [?declination :seon.cluster.message/about ?problem]
-                       [?declination :seon.cluster.message/from ?owner]
-                       [?declination :seon.cluster.message/to ?planner]
+                       [?assignment :seon.message/about ?problem]
+                       [?assignment :seon.message/from ?planner]
+                       [?assignment :seon.message/to ?owner]
+                       [?declination :seon.message/about ?problem]
+                       [?declination :seon.message/from ?owner]
+                       [?declination :seon.message/to ?planner]
                        [?declination :my.message/reason _]]
                      @connection))
              "the owner's structured answer settles the routed form"))
@@ -145,7 +130,7 @@
            (fn [run-id content]
              (future
                (let [rows
-                     (:seon.cluster.message/rows
+                     (:seon.message/rows
                       (message/delivery @connection
                                         (request run-id content)))]
                  (.countDown ready)
@@ -167,7 +152,7 @@
                        :where
                        [?failure :seon.error/id "failure-17"]
                        [?recipient :seon.agent/id "bob"]
-                       [?message :seon.cluster.message/about ?failure]
-                       [?message :seon.cluster.message/to ?recipient]]
+                       [?message :seon.message/about ?failure]
+                       [?message :seon.message/to ?recipient]]
                      @connection))
              "both stale derivations upsert the same assignment entity"))))))

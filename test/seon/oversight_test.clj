@@ -76,7 +76,7 @@
                   :in $ ?run-id
                   :where
                   [?run :seon.turn/id ?run-id]
-                  [?run :seon.turn/closed-at ?closed-at]]
+                  [?run :seon.turn/closed-tx ?closed-at]]
                 db (bootstrap/run-id "root"))))
         (body instance)
         (finally

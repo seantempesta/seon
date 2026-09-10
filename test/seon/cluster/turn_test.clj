@@ -214,10 +214,7 @@
                        :seon.config.ai.retry/maximum-delay-ms 1
                        :seon.config.ai.retry/maximum-retries 0
                        :seon.config.ai.retry/maximum-total-delay-ms 0}}))
-                   {:seon.cluster.message/id "m-1"
-                    :seon.cluster.message/to [:seon.agent/id "agent-a"]
-                    :seon.cluster.message/content "count the widgets"
-                    :seon.cluster.message/at now}])
+                   {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets" :seon.message/inbox [:seon.agent/id "agent-a"]}])
       (with-render-context-proc
          connection
          ;; THE HANDLE IS THE PRODUCTION HANDLE: `test-support/cluster-handle`
@@ -507,7 +504,7 @@
                   "no error and no cut instant anywhere — presence is
                    the state"))
             (is (some? (db/q '[:find ?c . :where
-                              [_ :seon.turn/closed-at ?c]] @connection))
+                              [_ :seon.turn/closed-tx ?c]] @connection))
                 "and the run closed")))))))
 
 (deftest agent-code-with-defn-and-println-folds-green-without-in-ns
@@ -550,7 +547,7 @@
               (is (= "counting 12 in my.agents.agent-a" (str/trim output)))))
           (testing "and the disposition closed the run"
             (is (some? (db/q '[:find ?c . :where
-                              [_ :seon.turn/closed-at ?c]]
+                              [_ :seon.turn/closed-tx ?c]]
                             @connection)))))))))
 
 (deftest mixed-plan-publishes-only-the-contracted-function
@@ -967,7 +964,7 @@
                 (is (empty?
                      (db/q '[:find ?message
                             :where
-                            [?message :seon.cluster.message/about ?error]
+                            [?message :seon.message/about ?error]
                             [?error :seon.error/id _]]
                           @connection))
                     "a returned error value creates no delivery wake")
@@ -984,13 +981,7 @@
                     "commit-first leaves the program row unchanged")
                 (db/transact!
                  connection
-                 [{:seon.cluster.message/id "peer-follow-up"
-                   :seon.cluster.message/to
-                   [:seon.agent/id "agent-a"]
-                   :seon.cluster.message/from
-                   [:seon.agent/id "peer"]
-                   :seon.cluster.message/content "Try again after reading the error."
-                   :seon.cluster.message/at now}])
+                 [{:seon.message/id "peer-follow-up" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/from [:seon.agent/id "peer"] :seon.message/content "Try again after reading the error." :seon.message/inbox [:seon.agent/id "agent-a"]}])
                 (let [next-reports (drive-agent! cluster "agent-a" 10)]
                   (if next-turn?
                     (do
@@ -1007,7 +998,7 @@
                       (is (= 1 (count @calls))
                           "the cap is the only retry budget")
                       (is (= ["peer-follow-up"]
-                             (mapv :seon.cluster.message/id
+                             (mapv :seon.message/id
                                    (turn/deferred-triggers
                                     @connection "agent-a"))))))
                 (is (= 1
@@ -1481,10 +1472,7 @@
             (assoc (agent-row "agent-b")
                    :seon.agent/namespace
                    [:seon.ns/name 'my.agents.agent-b])
-            {:seon.cluster.message/id "m-agent-b"
-             :seon.cluster.message/to [:seon.agent/id "agent-b"]
-             :seon.cluster.message/content "call the published function"
-             :seon.cluster.message/at now}])
+            {:seon.message/id "m-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "call the published function" :seon.message/inbox [:seon.agent/id "agent-b"]}])
           (drive! cluster 10)
           (is (some #(str/includes? % "42")
                     (db/q '[:find [?result ...]
@@ -1537,10 +1525,7 @@
             (assoc (agent-row "agent-b")
                    :seon.agent/namespace
                    [:seon.ns/name 'my.agents.agent-b])
-            {:seon.cluster.message/id "m-contract-agent-b"
-             :seon.cluster.message/to [:seon.agent/id "agent-b"]
-             :seon.cluster.message/content "violate the published contract"
-             :seon.cluster.message/at now}])
+            {:seon.message/id "m-contract-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "violate the published contract" :seon.message/inbox [:seon.agent/id "agent-b"]}])
           (drive-agent! cluster "agent-b" 10)
           (let [receipts
                 (db/q '[:find [(pull ?receipt
@@ -1615,10 +1600,7 @@
               "the refused shared definition's executable root stays in the agent's defs")
           (db/transact!
            connection
-           [{:seon.cluster.message/id "m-agent-a-after-refusal"
-             :seon.cluster.message/to [:seon.agent/id "agent-a"]
-             :seon.cluster.message/content "call the refused definition"
-             :seon.cluster.message/at now}])
+           [{:seon.message/id "m-agent-a-after-refusal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "call the refused definition" :seon.message/inbox [:seon.agent/id "agent-a"]}])
           (drive! cluster 10)
           (is (some #(str/includes? % "42")
                     (db/q '[:find [?result ...]
@@ -1756,23 +1738,18 @@
           (drive! cluster 4))
         (testing "the run closed rather than sitting claimed"
           (is (some? (db/q '[:find ?c . :where
-                            [_ :seon.turn/closed-at ?c]] @connection)))
+                            [_ :seon.turn/closed-tx ?c]] @connection)))
           )
         (testing "and WHY is readable from the database"
           (is (re-find #"DEEPSEEK_API_KEY"
                        (db/q '[:find ?e . :where
-                              [_ :seon.turn/error ?e]] @connection))))
+                              [?error :seon.error/run _] [?error :seon.error/message ?e]] @connection))))
         (testing "so the agent's next prompt tells it what happened"
           ;; the NEXT prompt belongs to the next held run: open it the
           ;; way the loop does — the run carries the trigger and the
           ;; agent pointer names the run
           (db/transact! connection
-                      {:tx-data [{:seon.turn/id "run-next"
-                                  :seon.turn/agent
-                                  [:seon.agent/id "agent-a"]
-                                  :seon.turn/trigger
-                                  [:seon.cluster.message/id "m-1"]
-                                  :seon.turn/opened-at (Date.)}
+                      {:tx-data [{:seon.turn/id "run-next" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/trigger [:seon.message/id "m-1"] :seon.turn/opened-tx "datomic.tx"}
                                  {:seon.agent/id "agent-a"
                                   }]})
           (is (re-find #"DEEPSEEK_API_KEY"
@@ -1829,19 +1806,10 @@
            :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
           {:seon.agent/id "agent-a"
            :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
-          {:seon.cluster.message/id "route-goal"
-           :seon.cluster.message/to [:seon.agent/id "agent-a"]
-           :seon.cluster.message/content "Generate the program."
-           :seon.cluster.message/at now}])
+          {:seon.message/id "route-goal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "Generate the program." :seon.message/inbox [:seon.agent/id "agent-a"]}])
         (db/transact!
          connection
-         [{:seon.turn/id route-run
-           :seon.turn/agent [:seon.agent/id "agent-a"]
-           :seon.turn/trigger
-           [:seon.cluster.message/id "route-goal"]
-           :seon.turn/opened-at now
-
-           :seon.turn/plan-digest "route-digest"}])
+         [{:seon.turn/id route-run :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/trigger [:seon.message/id "route-goal"] :seon.turn/opened-tx "datomic.tx"}])
         (db/transact!
          connection
          (into
@@ -1891,7 +1859,7 @@
           (is (empty?
                (db/q '[:find ?assignment
                       :where
-                      [?assignment :seon.cluster.message/about ?problem]
+                      [?assignment :seon.message/about ?problem]
                       [?problem :seon.cluster.eval/id _]]
                     @connection))
               "no message is written on the agent's behalf: an error is a
@@ -1973,7 +1941,7 @@
                              :where
                              [?agent :seon.agent/id "agent-a"]
                              [?run :seon.turn/agent ?agent]
-                             [?run :seon.turn/error ?message]]
+                             [?error :seon.error/run ?run] [?error :seon.error/message ?message]]
                            @connection)]
             (is (string? error) "the run records WHY it settled nothing")
             (is (str/includes? error "prose")
@@ -1982,7 +1950,7 @@
                             :where
                             [?agent :seon.agent/id "agent-a"]
                             [?run :seon.turn/agent ?agent]
-                            [?run :seon.turn/closed-at ?closed]]
+                            [?run :seon.turn/closed-tx ?closed]]
                           @connection))
               "the run still closes — loudly, with its reason recorded")
           (let [rendered
@@ -2071,7 +2039,7 @@
                             :in $ ?run-id
                             :where
                             [?run :seon.turn/id ?run-id]
-                            [?run :seon.turn/closed-at ?closed]]
+                            [?run :seon.turn/closed-tx ?closed]]
                           @connection run-id))))
         (testing "the receipt is the typed refusal and retains exact source"
           (is (= :seon.sci.reader/unreadable
@@ -2103,12 +2071,7 @@
         (testing "the next prompt renders both correction inputs"
           (db/transact!
            connection
-           {:tx-data [{:seon.turn/id "run-after-unreadable"
-                       :seon.turn/agent
-                       [:seon.agent/id "agent-a"]
-                       :seon.turn/trigger
-                       [:seon.cluster.message/id "m-1"]
-                       :seon.turn/opened-at (Date.)}
+           {:tx-data [{:seon.turn/id "run-after-unreadable" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/trigger [:seon.message/id "m-1"] :seon.turn/opened-tx "datomic.tx"}
                       {:seon.agent/id "agent-a"
                        }]})
           (let [next-prompt
@@ -2144,7 +2107,7 @@
                    (mapv :seon.turn.work/situation reports))
                 "no separate close pass — the disposition closed it")
             (is (some? (db/q '[:find ?closed .
-                              :where [_ :seon.turn/closed-at ?closed]]
+                              :where [_ :seon.turn/closed-tx ?closed]]
                             @connection))
                 "the run closed in the SAME transaction as its receipt")))))))
 
@@ -2199,7 +2162,7 @@
                          [?receipt :seon.cluster.eval/interrupted-at _ ?tx]
                          [?receipt :seon.cluster.eval/error _ ?tx]
                          [?receipt :seon.cluster.eval/output _ ?tx]
-                         [?run :seon.turn/closed-at _ ?tx]
+                         [?run :seon.turn/closed-tx _ ?tx]
                          [?schema :seon.schema/key
                           :my.agents.agent-a/combined-receipt ?tx]]
                        @connection)]
@@ -2253,7 +2216,7 @@
                 "no error facts — the old path committed one per pass")
             (is (nil? (db/q '[:find ?a . :where
                              [?turn :seon.turn/agent ?a]
-                             (not [?turn :seon.turn/closed-at])] @connection))
+                             (not [?turn :seon.turn/closed-tx])] @connection))
                 "the agent has no open turn, so another wake can open one")
             (is (str/includes?
                  (db/q '[:find ?edn . :where
@@ -2484,7 +2447,7 @@
               "partial output remains an ordinary completion, not a failure")
           (is (some? (db/q '[:find ?digest .
                             :where
-                            [?run :seon.turn/plan-digest ?digest]]
+                            [?run :seon.turn/reply-size ?digest]]
                           database))
               "the already-arrived completion still settles as the plan"))))))
 
@@ -2553,7 +2516,7 @@
               recorded (semantic-result (:seon.error/data-edn error-fact))]
           (is (= 1 (count @requests)))
           (is (= 1 (count rows)))
-          (is (= sent-body (:seon.ai.attempt/sent-body row)))
+          (is (nil? (:seon.ai.attempt/sent-body row)))
           (is (true? (:seon.ai/output-observed? row)))
           (is (= :seon.ai/stream-truncated (:seon.error/kind error-fact)))
           (is (= 8 (get-in recorded
@@ -2630,7 +2593,7 @@
                 "a failover waits for nothing"))
           (testing "the run proceeded on the backup's answer"
             (is (some? (db/q '[:find ?d . :where
-                              [_ :seon.turn/plan-digest ?d]]
+                              [_ :seon.turn/reply-size ?d]]
                             @connection)))))))))
 
 (def ^:private turn-evidence-partitions
@@ -2817,10 +2780,10 @@
            (= (vec (range (count rows)))
               (mapv :seon.ai.attempt/ordinal rows))
            (every? #(not (contains? % :seon.ai/disposition)) rows)
-           (contains? run-row :seon.turn/closed-at)
+           (contains? run-row :seon.turn/closed-tx)
            (= 1 (turn/episode-runs @connection "agent-a"))
            (= succeeded?
-              (contains? run-row :seon.turn/plan-digest))))))))
+              (contains? run-row :seon.turn/reply-size))))))))
 
 (deftest generated-model-attempt-traces-preserve-presence-and-episode-laws
   (test-support/assert-check!
@@ -2868,15 +2831,15 @@
                      ["there are three widgets" "agent-a" "agent-b"]}
                    (set (db/q '[:find ?content ?to-id ?from-id
                                :where
-                               [?m :seon.cluster.message/content ?content]
-                               [?m :seon.cluster.message/to ?to]
+                               [?m :seon.message/content ?content]
+                               [?m :seon.message/to ?to]
                                [?to :seon.agent/id ?to-id]
-                               [?m :seon.cluster.message/from ?from]
+                               [?m :seon.message/from ?from]
                                [?from :seon.agent/id ?from-id]]
                              @connection)))))
           (testing "the run still completed — sending is not finishing"
             (is (some? (db/q '[:find ?c . :where
-                              [_ :seon.turn/closed-at ?c]]
+                              [_ :seon.turn/closed-tx ?c]]
                             @connection))))
           (testing "message and receipt rode ONE transaction"
             ;; asked from the MESSAGE's transaction rather than by
@@ -2885,7 +2848,7 @@
             ;; ordinal 0" matches both of them.
             (let [message-tx
                   (db/q '[:find ?mtx . :where
-                         [?m :seon.cluster.message/content
+                         [?m :seon.message/content
                           "please count the widgets" ?mtx]]
                        @connection)]
               (is (= [0 1]
@@ -2901,9 +2864,9 @@
             (is (= 1 (message/chain-depth
                       @connection
                       (db/q '[:find ?id . :where
-                             [?m :seon.cluster.message/content
+                             [?m :seon.message/content
                               "please count the widgets"]
-                             [?m :seon.cluster.message/id ?id]]
+                             [?m :seon.message/id ?id]]
                            @connection)))
                 "the conversation's depth is walkable from committed refs
                  alone — no hop counter anywhere")))))))
@@ -2930,19 +2893,19 @@
                   (db/q '[:find [?tx ...]
                          :where
                          [?receipt :seon.cluster.eval/result-edn _ ?tx]
-                         [?message :seon.cluster.message/content
+                         [?message :seon.message/content
                           "delivered together" ?tx]
                          [?error :seon.error/kind
-                          :seon.cluster.message/unknown-recipient ?tx]]
+                          :seon.message/unknown-recipient ?tx]]
                        @connection)]
               (is (= 1 (count terminal-txs))
                   "the delivered row, refusal fact, and receipt commit together")
               (is (= "agent-b"
                      (db/q '[:find ?id .
                             :where
-                            [?message :seon.cluster.message/content
+                            [?message :seon.message/content
                              "delivered together"]
-                            [?message :seon.cluster.message/to ?agent]
+                            [?message :seon.message/to ?agent]
                             [?agent :seon.agent/id ?id]]
                           @connection)))
               (is (= "missing-agent"
@@ -2951,7 +2914,7 @@
                        (db/q '[:find ?data .
                               :where
                               [?error :seon.error/kind
-                               :seon.cluster.message/unknown-recipient]
+                               :seon.message/unknown-recipient]
                               [?error :seon.error/data-edn ?data]]
                             @connection))
                       [:seon.error/data :my.message/to]))))))))))
@@ -2978,11 +2941,11 @@
                                     "(seon.run/complete \"tried\")")})]
           (drive! cluster 10)
           (is (empty? (db/q '[:find ?c :where
-                             [?m :seon.cluster.message/content ?c]
-                             [?m :seon.cluster.message/from _]]
+                             [?m :seon.message/content ?c]
+                             [?m :seon.message/from _]]
                            @connection))
               "nothing was delivered")
-          (is (= #{:seon.cluster.message/no-limit}
+          (is (= #{:seon.message/no-limit}
                  (set (db/q '[:find [?kind ...] :where
                              [?e :seon.error/kind ?kind]]
                            @connection)))
@@ -3030,7 +2993,7 @@
         (is (= 1 (count (attempt-rows @connection)))
             "and the durable attempt chain agrees")
         (is (some? (db/q '[:find ?c . :where
-                          [_ :seon.turn/closed-at ?c]] @connection))
+                          [_ :seon.turn/closed-tx ?c]] @connection))
             "the turn ran to completion")))))
 
 ;;; ---------------------------------------------------------------------------
@@ -3099,13 +3062,13 @@
           (let [run-row (db/pull @connection
                                  [:seon.turn/reply
                                   {:seon.turn/trigger
-                                   [:seon.cluster.message/id]}]
+                                   [:seon.message/id]}]
                                  [:seon.turn/id run-id])]
             (is (= "(+ 1 1)\n(+ 2 2)\n(+ 3 3)"
                    (:seon.turn/reply run-row)))
             (is (= "m-1"
                    (get-in run-row [:seon.turn/trigger
-                                    :seon.cluster.message/id])))
+                                    :seon.message/id])))
             (is (= [0 1 2] (unsettled-ordinals @connection run-id)))
             (is (zero? @evaluations)))
           (recover-cut-run! connection run-id)
@@ -3370,12 +3333,7 @@
          connection
          (turn/generated-run-tx
           @connection
-          {:seon.agent/id "agent-a"
-           :seon.turn/id run-id
-           :seon.db.process/id process
-           :seon.turn/opened-at now
-           :seon.turn/starting-ns
-           [:seon.ns/name 'my.agents.agent-a]}))
+          {:seon.agent/id "agent-a" :seon.turn/id run-id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]}))
         (db/transact!
          connection
          (turn/append-generated-tx
@@ -3407,8 +3365,8 @@
           ;; caller is `bootstrap/seed-tx`, whose run id always makes
           ;; `generate-turn`'s bootstrap? arm true.
           (is (= :closed (:seon.turn.loop/outcome report)))
-          (is (inst? (:seon.turn/closed-at
-                      (db/pull @connection [:seon.turn/closed-at]
+          (is (inst? (:seon.turn/closed-tx
+                      (db/pull @connection [:seon.turn/closed-tx]
                                [:seon.turn/id run-id]))))
           (is (not= run-id
                     (:seon.turn/id (turn/next-agent-work @connection
@@ -3433,12 +3391,7 @@
          connection
          (turn/generated-run-tx
           @connection
-          {:seon.agent/id "agent-a"
-           :seon.turn/id run-id
-           :seon.db.process/id process
-           :seon.turn/opened-at now
-           :seon.turn/starting-ns
-           [:seon.ns/name 'my.agents.agent-a]}))
+          {:seon.agent/id "agent-a" :seon.turn/id run-id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]}))
         (db/transact!
          connection
          (turn/append-generated-tx
@@ -3472,14 +3425,14 @@
               run-state
               (db/pull @connection
                        [:seon.turn.work/situation
-                        :seon.turn/closed-at
-                        :seon.turn/error]
+                        :seon.turn/closed-tx
+                        {:seon.error/_run [:seon.error/message]}]
                        [:seon.turn/id run-id])]
           (is (= :error (:seon.turn.loop/outcome report)))
           (is (not= :call (:seon.turn.work/situation run-state)))
-          (is (some? (:seon.turn/closed-at run-state)))
+          (is (some? (:seon.turn/closed-tx run-state)))
           (is (= (:seon.error/message failure)
-                 (:seon.turn/error run-state))))))))
+                 (-> run-state :seon.error/_run first :seon.error/message))))))))
 
 (deftest generated-phase-failures-converge-through-one-terminal-exit
   (with-cluster fake-evaluate
@@ -3505,11 +3458,7 @@
                                              failed-phase}}]
               (db/transact!
                connection
-               [{:seon.turn/id run-id
-                 :seon.turn/agent
-                 [:seon.agent/id "agent-a"]
-                 :seon.turn/opened-at now
-                 }
+               [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx"}
                 {:seon.agent/id "agent-a"
                  }])
               (when evaluation?
@@ -3544,7 +3493,7 @@
                             :in $ ?run-id
                             :where
                             [?run :seon.turn/id ?run-id]
-                            [?run :seon.turn/closed-at ?closed]]
+                            [?run :seon.turn/closed-tx ?closed]]
                           @connection run-id))
                  (= (if evaluation? 1 0) receipt-count)
                  (= 1
@@ -3569,8 +3518,8 @@
               faults (db/q '[:find ?to ?signature
                              :keys :seon.agent/id :seon.error/signature
                              :where
-                             [?message :seon.cluster.message/about ?error]
-                             [?message :seon.cluster.message/to ?agent]
+                             [?message :seon.message/about ?error]
+                             [?message :seon.message/to ?agent]
                              [?agent :seon.agent/id ?to]
                              [?error :seon.error/signature ?signature]]
                            db)
@@ -3606,10 +3555,7 @@
         ;; a held run whose creating transaction names NO trigger — the
         ;; caller-bug state `::no-trigger` seals
         (db/transact! connection
-                    [{:seon.turn/id "run-untriggered"
-                      :seon.turn/agent [:seon.agent/id "agent-a"]
-                      :seon.turn/opened-at now
-                      }
+                    [{:seon.turn/id "run-untriggered" :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx"}
                      {:seon.agent/id "agent-a"
                       }])
         (with-redefs [ai/complete
@@ -3646,11 +3592,7 @@
                               :seon.turn.work/next work}
                              (Date.)))
         (db/transact! connection
-                      [{:seon.cluster.message/id "m-2"
-                        :seon.cluster.message/to
-                        [:seon.agent/id "agent-a"]
-                        :seon.cluster.message/content "message B"
-                        :seon.cluster.message/at (Date.)}])
+                      [{:seon.message/id "m-2" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "message B" :seon.message/inbox [:seon.agent/id "agent-a"]}])
         (with-redefs [ai/complete
                       (recording-completer
                        requests
@@ -3672,7 +3614,7 @@
           (let [open-b (turn/next-agent-work @connection
                                              (request connection))]
             (is (= :open (:seon.turn.work/situation open-b)))
-            (is (= "m-2" (:seon.cluster.message/id open-b))
+            (is (= "m-2" (:seon.message/id open-b))
                 "the next derived work is the run triggered by B")
             (turn/turn {:seon.turn.loop/cluster cluster
                                 :seon.turn.work/next open-b}
@@ -3842,8 +3784,8 @@
               (testing "the settled reply's text equals the fold's final
                         snapshot text"
                 (let [reply (db/q '[:find ?text . :where
-                                   [?m :seon.cluster.message/content ?text]
-                                   [?m :seon.cluster.message/from _]]
+                                   [?m :seon.message/content ?text]
+                                   [?m :seon.message/from _]]
                                  @connection)]
                   (is (or (nil? reply)
                           (string? reply))
@@ -3892,11 +3834,7 @@
         ;; a second agent with a trigger of its own
         (db/transact! connection
                     [(agent-row "agent-b")
-                     {:seon.cluster.message/id "m-b"
-                      :seon.cluster.message/to
-                      [:seon.agent/id "agent-b"]
-                      :seon.cluster.message/content "count the sprockets"
-                      :seon.cluster.message/at (Date.)}])
+                     {:seon.message/id "m-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "count the sprockets" :seon.message/inbox [:seon.agent/id "agent-b"]}])
         ;; NOBODY reads the conn for the whole run: every offer must
         ;; still return immediately, which is what sliding-1 buys
         (let [offer-results (atom [])

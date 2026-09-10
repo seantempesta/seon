@@ -819,10 +819,7 @@
            :seon.test/source "(clojure.test/deftest same-name)"}])
         (db/transact!
          connection
-         (turn/open-tx {:seon.turn/id "registration-delete"
-                       :seon.turn/agent
-                       [:seon.agent/id "registration-test"]
-                       :seon.turn/opened-at now}))
+         (turn/open-tx {:seon.turn/id "registration-delete" :seon.turn/agent [:seon.agent/id "registration-test"] :seon.turn/opened-tx "datomic.tx"}))
         (db/transact!
          connection
          (turn/receipt-start-tx

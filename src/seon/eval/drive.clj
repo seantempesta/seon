@@ -35,7 +35,7 @@
                       :in $ ?run-id
                       :where
                       [?run :seon.turn/id ?run-id]
-                      [?run :seon.turn/closed-at ?closed]]
+                      [?run :seon.turn/closed-tx ?closed]]
                     db run-id)]
       (let [receipt-count
             (or (db/q '[:find (count ?receipt) .
@@ -54,9 +54,7 @@
                      db run-id)
                 0)]
         (when (= form-count receipt-count)
-          {:seon.turn/id run-id
-           :seon.turn/closed-at closed-at
-           :seon.eval.drive/receipt-count receipt-count})))))
+          {:seon.turn/id run-id :seon.turn/closed-tx closed-at :seon.eval.drive/receipt-count receipt-count})))))
 
 (defn- await-fact!
   [connection timeout-ms label probe]
@@ -83,11 +81,7 @@
   [connection cluster-name process agent-id content]
   (let [caps (config/result-caps
               (config/effective @connection cluster-name))
-        request {:seon.agent/id agent-id
-                 :seon.cluster.message/inbound-content content
-                 :seon.cluster.message/at (Date.)
-                 :seon.config.eval.result/max-string
-                 (:seon.config.eval.result/max-string caps)}
+        request {:seon.agent/id agent-id :seon.message/inbound-content content :seon.config.eval.result/max-string (:seon.config.eval.result/max-string caps)}
         before (message/inbound-tx @connection request)]
     (when-not (vector? before)
       (throw (ex-info "The objective message was refused."
@@ -106,9 +100,9 @@
                :in $ ?agent-id ?content
                :where
                [?agent :seon.agent/id ?agent-id]
-               [?message :seon.cluster.message/to ?agent]
-               [?message :seon.cluster.message/content ?content]
-               [?message :seon.cluster.message/id ?id]]
+               [?message :seon.message/to ?agent]
+               [?message :seon.message/content ?content]
+               [?message :seon.message/id ?id]]
              @connection agent-id content)
         (throw (ex-info "The committed objective message has no identity."
                         {:seon.agent/id agent-id})))))
@@ -117,7 +111,7 @@
   (->> (db/q '[:find ?run-id ?opened-tx
               :in $ ?message-id
               :where
-              [?message :seon.cluster.message/id ?message-id]
+              [?message :seon.message/id ?message-id]
               [?run :seon.turn/trigger ?message]
               [?run :seon.turn/id ?run-id ?opened-tx]]
             db message-id)
@@ -155,7 +149,7 @@
                 [?receipt :seon.cluster.eval/run ?run]
                 [?receipt :seon.cluster.eval/ordinal ?ordinal]
                 [?receipt :seon.cluster.eval/at ?at]
-                [(get-else $ ?receipt :seon.eval/value "") ?result]
+                [(get-else $ ?receipt :seon.eval/shown "") ?result]
                 [(get-else $ ?receipt :seon.cluster.eval/error "") ?error]
                 [(get-else $ ?receipt :seon.error/kind :seon.eval.drive/absent)
                  ?error-kind]]
@@ -165,7 +159,7 @@
                  {:seon.turn/id run-id
                   :seon.cluster.eval/ordinal ordinal
                   :seon.cluster.eval/source source
-                  :seon.eval/value result
+                  :seon.eval/shown result
                   :seon.eval.drive/value (read-result result)
                   :seon.cluster.eval/error error
                   :seon.error/kind error-kind
@@ -219,10 +213,9 @@
 (defn- run-records [db run-ids]
   (mapv #(db/pull db
                  [:seon.turn/id
-                  :seon.turn/opened-at
-                  :seon.turn/closed-at
-                  :seon.turn/plan-digest
-                  :seon.turn/error]
+                  :seon.turn/opened-tx
+                  :seon.turn/closed-tx
+                  :seon.turn/reply-size]
                  [:seon.turn/id %])
         run-ids))
 
@@ -231,7 +224,7 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.agent/id
-          :seon.db.process/id :seon.cluster.message/id [:int {:min 1}]]
+          :seon.db.process/id :seon.message/id [:int {:min 1}]]
      [:maybe :seon.eval.drive/terminal-state]]
     [:=> [:cat :seon.db/database-value :seon.agent/id
           :seon.db.process/id
@@ -248,15 +241,9 @@
          run-cap (:seon.eval.drive/run-cap request)
         receipts (run-receipts db run-ids)
         completions (completion-values receipts)
-        undisposed?
-        (and (seq run-ids)
-             (boolean
-              (db/q '[:find ?run .
-                      :in $ [?run-id ...]
-                      :where
-                      [?run :seon.turn/id ?run-id]
-                      [?run :seon.turn/undisposed-at _]]
-                    db run-ids)))
+        undisposed? (and (seq run-ids) (empty? completions)
+                          (every? #(some? (:seon.turn/closed-tx %))
+                                  (run-records db run-ids)))
         closed-count
         (if (seq run-ids)
           (count
@@ -264,7 +251,7 @@
                   :in $ [?run-id ...]
                   :where
                   [?run :seon.turn/id ?run-id]
-                  [?run :seon.turn/closed-at _]]
+                  [?run :seon.turn/closed-tx _]]
                 db run-ids))
           0)
         idle? (and (seq run-ids)

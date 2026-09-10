@@ -53,7 +53,7 @@
   "The print node for a value admitted as a MEMBER of an ordinary collection.
 
   A bare host reference at the ROOT of an admission is
-  `:seon.eval/missing :unserializable` — a description of a value is not a
+  `:seon.sci.admit/reason :unserializable` — a description of a value is not a
   value, so nothing is stored for it (the storage-bound wave, 2026-09-07).
   The object FACE is still what the grammar produces for that reference where
   it sits inside a value that IS stored, which is what these trials are
@@ -76,22 +76,22 @@
               {:frontier/symbol 'my.turn/complete
                :frontier/namespace 'my.message
                :frontier/entity
-               {:seon.cluster.message/id "task-1"
+               {:seon.message/id "task-1"
                 :frontier/nested
                 [[:seon.ns/name 'my.turn]
                  {:seon.agent/id "worker"}]}})]
     (is (= #{'my.turn/complete
              'my.message
              'my.turn
-             [:seon.cluster.message/id "task-1"]
+             [:seon.message/id "task-1"]
              [:seon.ns/name 'my.turn]
              [:seon.agent/id "worker"]}
            (print/references
-            #{:seon.cluster.message/id :seon.ns/name
+            #{:seon.message/id :seon.ns/name
               :seon.agent/id}
             node)))
     (is (not (contains? (print/references #{} node)
-                        [:seon.cluster.message/id "task-1"]))
+                        [:seon.message/id "task-1"]))
         "identity recognition comes only from schema-derived attributes")))
 
 (defn- sci-value
@@ -447,7 +447,7 @@
         "function class names are demunged")
     (testing "and a bare host reference at the root is missing, not described"
       (is (= :unserializable
-             (:seon.eval/missing
+             (:seon.sci.admit/reason
               (admit/admit {:seon.sci.admit/value (atom 1)
                             :seon.sci.admit/interrupt-fn (fn [])
                             :seon.sci.admit/caps admission-caps

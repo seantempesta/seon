@@ -43,25 +43,19 @@
       (body connection))))
 
 (defn- agent-eid
-  "The recipient's ENTITY ID — what a `:seon.cluster.message/to` datom
+  "The recipient's ENTITY ID — what a `:seon.message/to` datom
   carries as its value, and therefore the key `route!` looks up."
   [connection]
   (db/q '[:find ?e . :where [?e :seon.agent/id "agent-a"]]
        @connection))
 
 (defn- message-tx [id]
-  [{:seon.cluster.message/id id
-    :seon.cluster.message/to [:seon.agent/id "agent-a"]
-    :seon.cluster.message/content "hello"
-    :seon.cluster.message/at (Date.)}])
+  [{:seon.message/id id :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "agent-a"]}])
 
 (defn- run-tx
   "A commit of attributes a TURN writes — the other side of C2."
   [id]
-  [{:seon.turn/id id
-    :seon.turn/agent [:seon.agent/id "agent-a"]
-    :seon.turn/opened-at (Date.)
-    :seon.turn/plan-digest (apply str (repeat 64 "a"))}])
+  [{:seon.turn/id id :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx"}])
 
 (defn- route-probe!
   "Register the production listener with this test's own channels.
@@ -155,19 +149,19 @@
             listened (wake/wake-attributes database)
             opening (wake/turn-opening-attributes database)
             inside (wake/inside-attributes database)]
-        (is (= #{:seon.cluster.message/to
+        (is (= #{:seon.message/to
                  :seon.effect/to
                  :seon.error/steward
                  :seon.schedule.fire/agent}
                listened)
             "the four families that wake an agent, derived from their
              own declarations")
-        (is (= #{:seon.cluster.message/to :seon.effect/to :seon.error/steward}
+        (is (= #{:seon.message/to :seon.effect/to :seon.error/steward}
                opening)
             "a schedule firing surfaces in the next context; it never
              pays for a model call by itself")
-        (is (= #{:seon.cluster.message/from
-                 :seon.cluster.message/about
+        (is (= #{:seon.message/from
+                 :seon.message/about
                  :seon.effect/to
                  :seon.error/steward}
                inside)
@@ -199,10 +193,7 @@
                wakes nobody by itself")
           (db/transact!
            connection
-           [{:seon.cluster.message/id "m-to-b"
-             :seon.cluster.message/to [:seon.agent/id "agent-b"]
-             :seon.cluster.message/content "hello"
-             :seon.cluster.message/at (Date.)}])
+           [{:seon.message/id "m-to-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "hello" :seon.message/inbox [:seon.agent/id "agent-b"]}])
           (is (some? (test-support/await-event! armer "armer wake"))
               "the armer derives (agents in facts) − (armed set)")
           (is (nil? (async/poll! mailbox))
@@ -286,7 +277,7 @@
 (deftest a-fault-wakes-the-steward-of-the-failing-functions-namespace
   ;; THE CLASS: a fault used to reach an agent only by minting a MESSAGE,
   ;; which put faults and instructions in one family and forced an
-  ;; `:seon.cluster.message/about` carve-out to keep an agent in an error
+  ;; `:seon.message/about` carve-out to keep an agent in an error
   ;; loop from resetting its own bound with its own failures.
   ;;
   ;; The fault fact now routes itself: `:seon.error/steward` is decided
@@ -378,7 +369,7 @@
   (with-connection
     (fn [connection]
       (let [mailbox (async/chan (async/sliding-buffer 1))
-            interest (atom #{:seon.cluster.message/content})
+            interest (atom #{:seon.message/content})
             counting-render (async/chan 8)
             {:keys [render key]}
             (route-probe! connection mailbox (fn [_ _] false)
@@ -496,7 +487,7 @@
                 "and the fence produced NO core fault about itself"))
           (is (= ["m-9"]
                  (db/q '[:find [?id ...]
-                        :where [_ :seon.cluster.message/id ?id]]
+                        :where [_ :seon.message/id ?id]]
                       @connection))
               "the message stays a durable fact — the fresh mailbox
                `arm!` builds after recovery derives it from facts")

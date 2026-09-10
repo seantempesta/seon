@@ -63,9 +63,7 @@
                          [{:my.plan.item/id "preview-item" :my.plan.item/title "Before"}]))
      (db/transact! connection
                    (turn/open-tx
-                    {:seon.turn/id "agent-is-busy"
-                     :seon.turn/agent [:seon.agent/id "memory-preview-agent"]
-                     :seon.turn/opened-at (java.util.Date.)}))
+                    {:seon.turn/id "agent-is-busy" :seon.turn/agent [:seon.agent/id "memory-preview-agent"] :seon.turn/opened-tx "datomic.tx"}))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            channel (async/chan 1)
@@ -235,11 +233,7 @@
                                      "#:seon.print{:face :seon.print/nil, :value nil}"]]]
        (db/transact!
         connection
-        [{:seon.turn/id run-id
-          :seon.turn/agent [:seon.agent/id "source-contract-agent"]
-          :seon.turn/opened-at #inst "2026-09-06T20:00:00Z"
-          :seon.turn/closed-at #inst "2026-09-06T20:00:01Z"
-          :seon.turn/starting-ns [:seon.ns/name 'my.agents.source-contract]}
+        [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "source-contract-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.source-contract]}
          {:seon.cluster.eval/id (str run-id "/0")
           :seon.cluster.eval/run [:seon.turn/id run-id]
           :seon.cluster.eval/ordinal 0

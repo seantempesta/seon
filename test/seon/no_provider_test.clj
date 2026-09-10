@@ -29,10 +29,7 @@
                      [{:seon.agent/id agent-id
                        :seon.agent/settings
                        {:seon.config.ai/api-key-variable credential}}
-                      {:seon.cluster.message/id "refusal-trigger"
-                       :seon.cluster.message/to [:seon.agent/id agent-id]
-                       :seon.cluster.message/content "Take one turn."
-                       :seon.cluster.message/at now}])
+                      {:seon.message/id "refusal-trigger" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Take one turn." :seon.message/inbox [:seon.agent/id agent-id]}])
        (let [cluster (support/cluster-handle
                       {:seon.db/connection connection
                        :seon.cluster/name cluster-name
@@ -62,15 +59,12 @@
          (is (= 1 (db/q '[:find (count ?attempt) . :where
                          [?attempt :seon.ai.attempt/id]] @connection)))
          (is (= 1 (db/q '[:find (count ?turn) . :where
-                         [?turn :seon.turn/closed-at]] @connection)))
+                         [?turn :seon.turn/closed-tx]] @connection)))
          (is (nil? (turn/next-agent-work @connection request)))
          (is (false? (turn/more-agent-work? @connection request)))
          (is (seq (turn/unanswered-wakes @connection agent-id {})))
          (db/transact! connection
-                       [{:seon.cluster.message/id "new-outside-trigger"
-                         :seon.cluster.message/to [:seon.agent/id agent-id]
-                         :seon.cluster.message/content "Configuration repaired; try again."
-                         :seon.cluster.message/at now}])
+                       [{:seon.message/id "new-outside-trigger" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Configuration repaired; try again." :seon.message/inbox [:seon.agent/id agent-id]}])
          (is (= :open (:seon.turn.work/situation
                         (turn/next-agent-work @connection request)))))))))
 
@@ -94,16 +88,10 @@
                     connection
                     [{:seon.agent/id agent-id
                       :seon.agent/settings {:seon.config.ai/no-provider true}}
-                     {:seon.cluster.message/id "no-provider-message"
-                      :seon.cluster.message/to [:seon.agent/id agent-id]
-                      :seon.cluster.message/content "Take a virtual turn."
-                      :seon.cluster.message/at now}])
+                     {:seon.message/id "no-provider-message" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Take a virtual turn." :seon.message/inbox [:seon.agent/id agent-id]}])
            opened (db/transact! connection
                     (turn/open-tx
-                     {:seon.turn/id turn-id
-                      :seon.turn/agent [:seon.agent/id agent-id]
-                      :seon.turn/trigger [:seon.cluster.message/id "no-provider-message"]
-                      :seon.turn/opened-at now}))
+                     {:seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id "no-provider-message"] :seon.turn/opened-tx "datomic.tx"}))
            cluster (support/cluster-handle
                     {:seon.db/connection connection
                      :seon.cluster/name cluster-name
@@ -127,7 +115,7 @@
        (is (= "(+ 1 1)" (:seon.turn/reply
                          (db/pull database '[*] [:seon.turn/id turn-id]))))
        (is (= ["2"] (db/q '[:find [?value ...]
-                              :where [_ :seon.eval/value ?value]] database)))
+                              :where [_ :seon.eval/shown ?value]] database)))
        (is (empty? (db/q '[:find [?attempt ...]
                            :where [?attempt :seon.ai.attempt/id]] database)))
        (is (empty? (db/q '[:find [?error ...]

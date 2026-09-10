@@ -5,7 +5,7 @@
                            {:min 1,
                             :seon.config/dial true,
                             :description
-                            "The ONE storage bound on an evaluation's value: UTF-8 bytes of its serialized print node. Admission streams the serialization under the evaluation's SCI interrupt and stops emitting at this bound; a value that reaches it is stored as :seon.eval/missing :over-bound with :seon.eval/size, never as a window of itself."}],
+                            "The UTF-8 bound used by the bounded external-evidence codec. Evaluation objects remain in memory and their shown text follows the render profile; this bound does not admit evaluation results."}],
                           :max-collection [:int {:min 1}],
                           :max-depth [:int {:min 1}],
                           :max-nodes [:int {:min 1}],

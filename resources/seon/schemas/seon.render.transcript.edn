@@ -1,38 +1,39 @@
-#:seon.render.transcript
-{:history-request
- [:map
-  {:description
-   "The named request for one agent's own evaluation history. Call preparation supplies both members, so the agent's ordinary call is (seon.render.transcript/agent-history {})."}
-  [:seon.db/db :seon.db/database-value]
-  [:seon.agent/id :seon.agent/id]],
- :entries
- [:vector
-  {:description
-   "The REPL entries of one run, as seon.render.transcript/history-entries derives them: form, printed value, and the exact bytes the run loop printed."}
-  :map],
- :run
- [:map
-  {:description
-   "One run of an agent's history: the run's own facts plus the entries evaluated inside it."}
-  [:seon.turn/id :seon.turn/id]
-  [:seon.render.transcript/entries :seon.render.transcript/entries]
-  [:seon.turn/opened-at
-   {:optional true}
-   :seon.turn/opened-at]
-  [:seon.turn/closed-at
-   {:optional true}
-   :seon.turn/closed-at]
-  [:seon.turn/error {:optional true} :seon.turn/error]],
- :runs
- [:vector
-  {:description "The bounded newest-first runs of one agent's history."}
-  :seon.render.transcript/run],
- :history
- [:map
-  {:description
-   "One agent's own submitted forms and their stored results, newest run first, bounded by the render profile's child count with an ordinary elision value for the rest."}
-  [:seon.agent/id :seon.agent/id]
-  [:seon.render.transcript/runs :seon.render.transcript/runs]
-  [:seon.render.transcript/older-runs
-   {:optional true}
-   :seon.print/elision]]}
+#:seon.render.transcript{:history-request
+                         [:map
+                          {:description
+                           "The named request for one agent's own evaluation history. Call preparation supplies both members, so the agent's ordinary call is (seon.render.transcript/agent-history {})."}
+                          [:seon.db/db :seon.db/database-value]
+                          [:seon.agent/id :seon.agent/id]],
+                         :entries
+                         [:vector
+                          {:description
+                           "The REPL entries of one run, as seon.render.transcript/history-entries derives them: form, printed value, and the exact bytes the run loop printed."}
+                          :map],
+                         :run
+                         [:map
+                          {:description
+                           "One run of an agent's history: the run's own facts plus the entries evaluated inside it."}
+                          [:seon.turn/id :seon.turn/id]
+                          [:seon.render.transcript/entries
+                           :seon.render.transcript/entries]
+                          [:seon.turn/opened-tx
+                           {:optional true}
+                           :seon.turn/opened-tx]
+                          [:seon.turn/closed-tx
+                           {:optional true}
+                           :seon.turn/closed-tx]],
+                         :runs
+                         [:vector
+                          {:description
+                           "The bounded newest-first runs of one agent's history."}
+                          :seon.render.transcript/run],
+                         :history
+                         [:map
+                          {:description
+                           "One agent's own submitted forms and their stored results, newest run first, bounded by the render profile's child count with an ordinary elision value for the rest."}
+                          [:seon.agent/id :seon.agent/id]
+                          [:seon.render.transcript/runs
+                           :seon.render.transcript/runs]
+                          [:seon.render.transcript/older-runs
+                           {:optional true}
+                           :seon.print/elision]]}

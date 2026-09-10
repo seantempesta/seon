@@ -39,7 +39,7 @@
                           (cond-> {:seon.turn/id run-id
                                    :seon.turn/agent
                                    [:seon.agent/id agent-id]}
-                            closed? (assoc :seon.turn/closed-at
+                            closed? (assoc :seon.turn/closed-tx
                                            #inst "2026-09-06T00:00:00Z")))
                         runs)
                    (for [[_ run-id _] runs
@@ -133,14 +133,8 @@
            _ (db/transact!
               connection
               [{:seon.agent/id "compact-agent"}
-               {:seon.turn/id "compact-before"
-                :seon.turn/agent
-                [:seon.agent/id "compact-agent"]
-                :seon.turn/closed-at closed-at}
-               {:seon.turn/id "compact-after"
-                :seon.turn/agent
-                [:seon.agent/id "compact-agent"]
-                :seon.turn/closed-at closed-at}
+               {:seon.turn/id "compact-before" :seon.turn/agent [:seon.agent/id "compact-agent"] :seon.turn/closed-tx "datomic.tx"}
+               {:seon.turn/id "compact-after" :seon.turn/agent [:seon.agent/id "compact-agent"] :seon.turn/closed-tx "datomic.tx"}
                {:seon.ns/name 'compact.context}
                {:seon.cluster.eval/id "compact-before-0"
                 :seon.cluster.eval/run

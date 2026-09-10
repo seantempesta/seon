@@ -30,9 +30,9 @@
                   :inbound
                   [:map
                    [:seon.agent/id :seon.agent/id]
-                   [:seon.cluster.message/inbound-content
+                   [:seon.message/inbound-content
                     {:optional true}
-                    :seon.cluster.message/inbound-content]],
+                    :seon.message/inbound-content]],
                   :latest-packages
                   [:fn
                    {:error/message

@@ -3,7 +3,7 @@
  :my.message/content [:string {:min 1}],
  :my.message/from :seon.agent/id,
  :my.message/at :inst,
- :my.message/id :seon.cluster.message/id,
+ :my.message/id :seon.message/id,
  :my.message/inbox-entry
              [:map
               [:my.message/id :my.message/id]
@@ -46,5 +46,5 @@
  :my.message/no-about-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no subject"} [:my.message/no-about :my.message/no-about] [:seon.error/message :seon.error/message]]
  :my.message/no-reason [:= true]
  :my.message/no-reason-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a declination with no reason"} [:my.message/no-reason :my.message/no-reason] [:seon.error/message :seon.error/message]]
- :my.message/not-found :seon.cluster.message/id
+ :my.message/not-found :seon.message/id
  :my.message/not-found-error [:map {:seon.error/class true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the message that does not exist"} [:my.message/not-found :my.message/not-found] [:seon.error/message :seon.error/message]]}

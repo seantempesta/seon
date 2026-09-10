@@ -149,7 +149,7 @@
                              :seon.maintenance.receipt/completed-at)))
         (is (= 1 (count-with @connection :seon.maintenance.receipt/result)))
         (is (= 0 (count-with @connection :seon.turn/id)))
-        (is (= 0 (count-with @connection :seon.cluster.message/id)))
+        (is (= 0 (count-with @connection :seon.message/id)))
         (is (identical? connection (:seon.db/connection (first @handler-calls))))
         (is (= (dissoc (first @handler-calls)
                        :seon.db/connection
@@ -271,7 +271,7 @@
           (is (= 1 (count-with @connection :seon.maintenance.receipt/id)))
           (is (= 1 (count-with @connection :seon.maintenance.receipt/error)))
           (is (= 1 (count-with @connection :seon.error/id)))
-          (is (= 1 (count-with @connection :seon.cluster.message/id)))
+          (is (= 1 (count-with @connection :seon.message/id)))
           (let [[evaluation-id error-id task nominal]
                 (first (db/q '[:find ?evaluation-id ?error-id ?task ?nominal
                         :where

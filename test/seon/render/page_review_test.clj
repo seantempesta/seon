@@ -13,9 +13,7 @@
            (db/transact! connection
              [{:seon.agent/id "page"}
               {:seon.ns/name 'my.agents.page}
-              {:seon.turn/id "old" :seon.turn/agent [:seon.agent/id "page"]
-               :seon.turn/opened-tx (java.util.Date. 0)
-               :seon.turn/reply "Earlier reply"}
+              {:seon.turn/id "old" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx" :seon.turn/reply "Earlier reply"}
               {:seon.cluster.eval/id "old-eval"
                :seon.cluster.eval/at (java.util.Date. 0)
                :seon.cluster.eval/run [:seon.turn/id "old"]
@@ -24,9 +22,7 @@
        (is (:db-after written) (pr-str written)))
      (let [written
            (db/transact! connection
-             [{:seon.turn/id "current" :seon.turn/agent [:seon.agent/id "page"]
-               :seon.turn/opened-tx (java.util.Date. 1)
-               :seon.turn/reply "Current reply"}
+             [{:seon.turn/id "current" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx" :seon.turn/reply "Current reply"}
               {:seon.cluster.eval/id "current-a"
                :seon.cluster.eval/at (java.util.Date. 1)
                :seon.cluster.eval/run [:seon.turn/id "current"]
@@ -41,8 +37,7 @@
                :seon.cluster.eval/source "(+ 3 3)" :seon.eval/shown "6"}])]
        (is (:db-after written) (pr-str written)))
      (is (:db-after (db/transact! connection
-                     [{:seon.turn/id "late-old" :seon.turn/agent [:seon.agent/id "page"]
-                       :seon.turn/opened-tx (java.util.Date. -1)}]))
+                     [{:seon.turn/id "late-old" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx"}]))
          "An older opening can commit after the current turn.")
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
@@ -73,7 +68,6 @@
        (is (not (str/includes? html "seon-value-"))
            "Evaluations use their declared pair, not repeated floor wrappers with one root id."))
      (is (:db-after (db/transact! connection
-                     [{:seon.turn/id "empty" :seon.turn/agent [:seon.agent/id "page"]
-                       :seon.turn/opened-tx (java.util.Date. 2)}])))
+                     [{:seon.turn/id "empty" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx"}])))
      (is (= [] (#'web/current-turn-evaluations @connection "page")))
      (is (:seon.error/kind (#'web/current-turn-evaluations @connection "absent"))))))

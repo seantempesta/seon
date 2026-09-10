@@ -124,10 +124,10 @@
                              [:seon.agent/id agent-id]))
         run-data (transaction-read
                   (db/pull database
-                           [:db/id :seon.turn/closed-at
+                           [:db/id :seon.turn/closed-tx
                             {:seon.turn/agent [:db/id]}
                             {:seon.cluster.eval/_run
-                             [:db/id :seon.eval/value
+                             [:db/id :seon.eval/shown
                               :seon.cluster.eval/error
                               :seon.cluster.eval/interrupted-at]}]
                            [:seon.turn/id run-id]))
@@ -139,7 +139,7 @@
                (not= (:db/id agent-data)
                      (get-in run-data [:seon.turn/agent :db/id]))
                ::foreign-run
-               (not (:seon.turn/closed-at run-data)) ::run-open
+               (not (:seon.turn/closed-tx run-data)) ::run-open
                (empty? evaluations) ::no-evaluations
                (not-every? turn/terminal? evaluations) ::unfinished-evaluation)]
     {:agent-data agent-data
@@ -323,10 +323,10 @@
                        [:seon.agent/id agent-id])
         refreshed
         (when-not in-memory? (db/pull database
-                 [:db/id :seon.turn/closed-at
+                 [:db/id :seon.turn/closed-tx
                  {:seon.turn/agent [:db/id]}]
                  [:seon.turn/id run-id]))
-        eligibility (when (:seon.turn/closed-at refreshed)
+        eligibility (when (:seon.turn/closed-tx refreshed)
                       (eligible-run database request))
         baseline-runs
         (set (keep #(get-in % [:seon.cluster.eval/run :db/id])
@@ -357,7 +357,7 @@
       rule (selection-refusal rule request
                               {:seon.context.contribution/id contribution-id
                                :seon.turn/id run-id})
-      (and (not in-memory?) (not (:seon.turn/closed-at refreshed)))
+      (and (not in-memory?) (not (:seon.turn/closed-tx refreshed)))
       {:seon.context.comparison/status :pending}
       :else
       (let [baseline-run (first baseline-runs)
@@ -410,7 +410,7 @@
                   :in $ ?agent-id ?message
                   :where
                   [?agent :seon.agent/id ?agent-id]
-                  [?message :seon.cluster.message/to ?agent ?tx]]
+                  [?message :seon.message/to ?agent ?tx]]
                 database agent-id message-eid)
           run-t (db/q '[:find ?tx .
                         :in $ ?run-id

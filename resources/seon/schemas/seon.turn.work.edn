@@ -71,9 +71,9 @@
                       [:map
                        [:seon.turn.work/situation [:= :open]]
                        [:seon.agent/id :seon.agent/id]
-                       [:seon.cluster.message/id
+                       [:seon.message/id
                         {:optional true}
-                        :seon.cluster.message/id]]]
+                        :seon.message/id]]]
                      [:close
                       [:map
                        [:seon.turn.work/situation [:= :close]]

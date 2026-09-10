@@ -78,7 +78,7 @@
                :seon.search/index :text}
               {:seon.search/field :seon.cluster.instruction/text
                :seon.search/index :text}
-              {:seon.search/field :seon.cluster.message/content
+              {:seon.search/field :seon.message/content
                :seon.search/index :text}
               {:seon.search/field :seon.error/message
                :seon.search/index :text}
@@ -159,10 +159,7 @@
                :seon.agent/id "fixture-search-agent"}
               {:seon.cluster.instruction/id :fixture-search-instruction
                :seon.cluster.instruction/text "crossfamilysearchneedle"}
-              {:seon.cluster.message/id "fixture-search-message"
-               :seon.cluster.message/to "fixture-search-agent"
-               :seon.cluster.message/content "crossfamilysearchneedle"
-               :seon.cluster.message/at (java.util.Date. 0)}])]
+              {:seon.message/id "fixture-search-message" :seon.message/to "fixture-search-agent" :seon.message/content "crossfamilysearchneedle" :seon.message/inbox "fixture-search-agent"}])]
         (search/apply-report! index report)
         (let [request
               {:seon.search/query "crossfamilysearchneedle"
@@ -179,7 +176,7 @@
                (search-with-connection
                 connection
                 (assoc request :seon.search/families
-                       #{:seon.cluster.message/id})))]
+                       #{:seon.message/id})))]
           (is (= [{:seon.search/family :seon.cluster.instruction/id
                    :seon.search/field :seon.cluster.instruction/text
                    :seon.search/identity :fixture-search-instruction}]
@@ -187,8 +184,8 @@
                                         :seon.search/field
                                         :seon.search/identity])
                        instruction-results)))
-          (is (= [{:seon.search/family :seon.cluster.message/id
-                   :seon.search/field :seon.cluster.message/content
+          (is (= [{:seon.search/family :seon.message/id
+                   :seon.search/field :seon.message/content
                    :seon.search/identity "fixture-search-message"}]
                  (mapv #(select-keys % [:seon.search/family
                                         :seon.search/field

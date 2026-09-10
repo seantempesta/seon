@@ -28,10 +28,10 @@ in the read-evidence / wake / evaluation-point map
    `:db/txInstant`. Proven on `default`: 2 datoms, derived instant exact.
    (The reply reader accepts only `#inst`/`#uuid`; `(java.util.Date.)` is
    not in the agent's SCI classes — `reader.cljc:24-30`, `eval.clj:227`.)
-3. **Ids.** One function: `(seon.id/id {:parts […] :length n})` — SHA-256
-   of the ordered parts, truncated to `n`; no parts → random of `n`.
-   Things that ARE their parts hash (evaluations 12, plan items by title
-   slug); genuine events are random (messages, 8).
+3. **Ids.** One entry: `(seon.id/id data)` — SHA-256 of `(pr-str data)`,
+   truncated to the default length 12; `(seon.id/id data n)` chooses the
+   length; `(seon.id/id)` mints a random event of the default length.
+   Things that ARE their parts hash (evaluations 12, plan items by title); genuine events are random (messages, 8).
 4. **Components are addressable.** A component the agent writes to
    carries an identity derived from its owner (`:my.plan/agent` as a unique
    identity ref), because a nested map under a cardinality-one component
@@ -149,21 +149,20 @@ HTML: override / effective columns per changed dial, grouped; turns left.
 
 | store | the open turn's id, opened-tx, trigger (the wake datom); the listens; turns taken this session (derived) |
 |---|---|
-| names | NEW: `:seon.agent/runtime` component; `:seon.runtime/turn`, `/trigger`, `/listens`; retire `:seon.turn/plan-digest`, `supersedes`, `undisposed-at`, `background-results`, `error` |
+| names | NEW: `:seon.agent/runtime` component; `:seon.runtime/agent` unique identity ref, `/turns` component many, `/trigger`, `/listens`; retire `:seon.turn/plan-digest`, `supersedes`, `undisposed-at`, `background-results`, `error` |
 | component | yes; rendered together; the agent's turn is part of it |
 | matters | agent: am I mid-turn, what woke me, what I listen for; person: state, trigger, latency |
 
 ```clojure
 ;; Where is my turn, what woke me, and what am I listening for?
-my.agents.juniper=> (seon.db/pull '[{:seon.agent/runtime [{:seon.runtime/turn [:seon.turn/id {:seon.turn/opened-tx [:db/txInstant]}]} {:seon.runtime/trigger [*]} {:seon.runtime/listens [*]}]}] [:seon.agent/id "juniper"])
-#:seon.repl{:value #:seon.agent{:runtime #:seon.runtime{:turn #:seon.turn{:id "e1b2…", :opened-tx #:db{:txInstant #inst "…"}}, :trigger {:seon.message/to …}, :listens [{:seon.listen/attribute :seon.message/to} {:seon.listen/attribute :example/amount}]}}}
+my.agents.juniper=> (seon.db/pull '[{:seon.agent/runtime [{:seon.runtime/turns [:seon.turn/id {:seon.turn/opened-tx [:db/txInstant]}]} {:seon.runtime/trigger [*]} {:seon.runtime/listens [*]}]}] [:seon.agent/id "juniper"])
+#:seon.repl{:value #:seon.agent{:runtime #:seon.runtime{:turns [#:seon.turn{:id "e1b2…", :opened-tx #:db{:txInstant #inst "…"}}], :trigger {:seon.message/inbox …}, :listens [{:seon.listen/attribute :seon.message/inbox} {:seon.listen/attribute :example/amount}]}}}
 ;; Wake me when any order amount changes.
 (seon.db/transact! [{:seon.runtime/agent [:seon.agent/id "juniper"] :seon.runtime/listens [{:seon.listen/attribute :example/amount}]}])
 ```
 
 A listen is an index pattern (attribute, optional entity, optional value)
-— the same shape read evidence stores. The cluster's one listener
-(`wake.clj:428-438`) unions them with the schema-declared listened
+— the same shape read evidence stores. Roadmap step 8 will make the cluster's existing listener union them with the schema-declared listened
 attributes; the union is a map lookup per datom, computed outside the
 per-datom loop. Not a new mechanism.
 
@@ -287,7 +286,7 @@ Both derived from the schema rows; absent when none.
 
 ```clojure
 ;; How are my agents doing?
-my.agents.root=> (seon.db/q '[:find [(pull ?a [:seon.agent/id :seon.agent/turns-left {:seon.agent/runtime [{:seon.runtime/turn [:seon.turn/id]}]} {:seon.agent/plan [{:my.plan/current-step [:my.plan.item/title]}]}]) ...] :where [?a :seon.agent/id]])
+my.agents.root=> (seon.db/q '[:find [(pull ?a [:seon.agent/id :seon.agent/turns-left {:seon.agent/runtime [{:seon.runtime/turns [:seon.turn/id]}]} {:seon.agent/plan [{:my.plan/current-step [:my.plan.item/title]}]}]) ...] :where [?a :seon.agent/id]])
 ```
 
 plus derived per-agent measures in the same block, computed by the render
@@ -329,11 +328,11 @@ Status: ✅ landed · ▶ running · ⏭ next · ◻ queued.
 | 1b | Transaction report as resolved changes; positioned components ordered; nested pull shapes; `dir` shows declared schemas; forms printed as agent source; faults to root / routed stewards; root's agents block; raw component reads at turn 0 even when empty; data-first help lines | no | ✅ cookbook lane, 11 commits `d6377ac39`…`778be4b94` |
 | 1c | `(help)` as `#:seon.help{:lines}` with its own render pair (bare lines, no quoted strings); settings AI = effective values grouped; turns concern HTML-only and "Context now" showing the turn; plan ids derived and taught by an add/remove example (§14a) | no | ▶ cookbook (after its harness slice) |
 | 2 | Read evidence exact for `not`/`or` pattern clauses and `pull` in `:find` | no | ◻ evidence lane |
-| 3 | `(seon.id/id data [n])` as the one id entry; message ids random 8; plan item ids from title | no | ▶ data lane |
-| 4 | Time is the transaction: NEW `completed-tx`, `read-tx` refs; DELETE `completed-at`, message `at`, `ordinal` | yes | ▶ data lane |
-| 5 | Addressable components: `:my.plan/agent`, `:seon.config/agent` identities; `expected-result` → `done-when` | yes (batch) | ▶ data lane |
-| 6 | Messages `:seon.message/*`; the inbox as an edge `:seon.message/inbox` retracted when handled; `send` mints id and writes both facts | yes (batch) | ▶ data lane |
-| 7 | Runtime component `:seon.agent/runtime` with the turns inside it; retire `plan-digest`, `supersedes`, `undisposed-at`, `background-results`, `error`; `:seon.eval/value` → `/shown`; `sent-body` gone; reasoning off | yes (batch) | ▶ data lane |
+| 3 | `(seon.id/id data [n])` as the one id entry; message ids random 8; plan item ids from title | no | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
+| 4 | Time is the transaction: NEW `completed-tx`, `read-tx` refs; DELETE `completed-at`, message `at`, `ordinal` | yes | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
+| 5 | Addressable components: `:my.plan/agent`, `:seon.config/agent` identities; `expected-result` → `done-when` | yes (batch) | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
+| 6 | Messages `:seon.message/*`; the inbox as an edge `:seon.message/inbox` retracted when handled; `send` mints id and writes both facts | yes (batch) | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
+| 7 | Runtime component `:seon.agent/runtime` with the turns inside it; retire `plan-digest`, `supersedes`, `undisposed-at`, `background-results`, `error`; `:seon.eval/value` → `/shown`; `sent-body` gone; reasoning off | yes (batch) | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
 | 8 | Agent-declared listens union into the wake matcher | no | ◻ evidence lane |
 | 9–12 | Block functions from the cookbook on the new shapes; `dir`/`doc` structure; `my.plan`/`my.note` as documented data | no | ◻ render lane (after 3–7) |
 | 13 | Root's cluster block (JVM, store, commit, fault signatures) | no | ◻ root lane |

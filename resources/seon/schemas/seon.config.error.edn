@@ -4,5 +4,5 @@
                     [:int
                      {:min 1,
                       :description
-                      "UTF-8 bytes of evidence one durable fault fact keeps INLINE. The fault's meaningful source goes through the same streaming admission every stored value does, with this bound in place of the storage bound; over it the fact records :seon.eval/missing and the size reached, and the complete evidence stays in the fault's content blob."}],
+                      "UTF-8 bytes of evidence one durable fault fact keeps INLINE. The fault's meaningful source goes through the same streaming admission every stored value does, with this bound in place of the storage bound; over it the fact records :seon.sci.admit/reason and the size reached, and the complete evidence stays in the fault's content blob."}],
                     :recurrence-limit [:int {:min 1}]}

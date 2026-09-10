@@ -59,17 +59,6 @@
                 :ending-ns (:seon.sci.eval/ending-ns evaluation)
                 :semantic-printed
                 (pr-str (:seon.sci.admit/value evaluation))}
-                ;; ABSENT MEANS NO KEY, on this side of the boundary too. An
-                ;; evaluation whose value binds nothing — a bare host object,
-                ;; a failed projection — stores NO print node and reports
-                ;; `:seon.eval/missing` instead
-                ;; (`src/seon/sci/admit.clj` `unserializable-root?`). Reading
-                ;; the absent key and handing nil to a total render was this
-                ;; harness asserting a contract violation of its own making,
-                ;; three rows deep, in place of the row's own subject.
-                (some? (:seon.eval/missing evaluation))
-                (assoc :missing (:seon.eval/missing evaluation))
-
                 (some? result-edn)
                 (assoc
                  ;; The evaluation stores the closed print tree; presentation

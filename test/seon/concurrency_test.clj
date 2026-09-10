@@ -54,25 +54,21 @@
                 (let [result
                       (db/transact!
                        right
-                       [{:seon.cluster.message/id "connection-isolation"
-                         :seon.cluster.message/to
-                         [:seon.agent/id "recipient"]
-                         :seon.cluster.message/content "only the right recipient"
-                         :seon.cluster.message/at (java.util.Date.)}])]
+                       [{:seon.message/id "connection-isolation" :seon.message/to [:seon.agent/id "recipient"] :seon.message/content "only the right recipient" :seon.message/inbox [:seon.agent/id "recipient"]}])]
                   (is (not (:seon.error/kind result)))
                   (is (some? (support/await-event! right-mailbox "right message wake")))
                   ;; Datahike has synchronously delivered the committed report.
                   ;; The positive right wake proves this was an observed event.
                   (is (nil? (async/poll! left-mailbox)))
-                  (is (nil? (db/pull @left [:seon.cluster.message/id]
-                                    [:seon.cluster.message/id "connection-isolation"])))))))))))))
+                  (is (nil? (db/pull @left [:seon.message/id]
+                                    [:seon.message/id "connection-isolation"])))))))))))))
 
 (defn- await-closed! [connection run-id]
   (let [event (async/promise-chan)
         listener (random-uuid)
         closed (fn [database]
-                 (:seon.turn/closed-at
-                  (db/pull database [:seon.turn/closed-at]
+                 (:seon.turn/closed-tx
+                  (db/pull database [:seon.turn/closed-tx]
                            [:seon.turn/id run-id])))]
     (d/listen connection listener
               #(when (closed (:db-after %)) (async/offer! event true)))
@@ -129,7 +125,7 @@
                    ::run run-id
                    ::turn
                    (db/pull @connection
-                            [:seon.turn/opened-at :seon.turn/closed-at
+                            [:seon.turn/opened-tx :seon.turn/closed-tx
                              :seon.turn/reply
                              {:seon.turn/agent [:seon.agent/id]}]
                             [:seon.turn/id run-id])
@@ -237,8 +233,8 @@
                   (doseq [result (::results wave)]
                     (let [evaluations (map first (::evaluations result))]
                       (is (zero? (or (::attempts result) 0)))
-                      (is (some? (:seon.turn/closed-at (::turn result))))
-                      (is (some? (:seon.turn/opened-at (::turn result))))
+                      (is (some? (:seon.turn/closed-tx (::turn result))))
+                      (is (some? (:seon.turn/opened-tx (::turn result))))
                       (is (string? (:seon.turn/reply (::turn result))))
                       (is (= (::agent result)
                              (get-in result [::turn :seon.turn/agent

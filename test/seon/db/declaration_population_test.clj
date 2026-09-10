@@ -32,13 +32,13 @@
 
 (def ^:private wide-attributes
   (into narrow-attributes
-        [:seon.cluster.message/id
-         :seon.cluster.message/to
-         :seon.cluster.message/content
-         :seon.cluster.message/at
+        [:seon.message/id
+         :seon.message/to
+         :seon.message/content
+         :seon.message/inbox
          :seon.turn/id
-         :seon.turn/opened-at
-         :seon.turn/plan-digest]))
+         :seon.turn/opened-tx
+         :seon.turn/reply-size]))
 
 (defn- resource-reads
   "Schema resource reads performed while calling `thunk`, and its value."
@@ -95,20 +95,11 @@
         wide-attributes
         (fn [connection]
           (db/transact! connection
-                        [{:seon.agent/id "agent-a"
-                          :seon.cluster.registry/from :core
-                          :seon.cluster.message/id "message-1"
-                          :seon.cluster.message/to "agent-a"
-                          :seon.cluster.message/content "hello"
-                          :seon.cluster.message/at (java.util.Date.)
-                          :seon.turn/id "run-1"
-                          :seon.turn/opened-at (java.util.Date.)
-                          :seon.turn/plan-digest
-                          (apply str (repeat 64 "a"))}])
+                        [{:seon.agent/id "agent-a" :seon.cluster.registry/from :core :seon.message/id "message-1" :seon.message/to "agent-a" :seon.message/content "hello" :seon.turn/id "run-1" :seon.turn/opened-tx "datomic.tx" :seon.message/inbox "agent-a"}])
           (dotimes [index 8]
             (db/transact! connection
-                          [{:seon.cluster.message/id (str "extra-" index)
-                            :seon.cluster.message/content "x"}]))
+                          [{:seon.message/id (str "extra-" index)
+                            :seon.message/content "x"}]))
           (let [database (db/db connection)
                 agent-ref [:seon.agent/id "agent-a"]]
             (doseq [[operation thunk]

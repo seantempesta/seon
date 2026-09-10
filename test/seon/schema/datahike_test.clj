@@ -299,12 +299,7 @@
   ;; grow with the transaction's attribute count or nesting depth.
   (let [resolutions (atom 0)
         real-declaration-population schema/declaration-population
-        wide {:seon.agent/id "agent-a"
-              :seon.cluster.message/id "m-1"
-              :seon.cluster.message/content "do the thing"
-              :seon.cluster.message/at (java.util.Date.)
-              :seon.turn/id "run-1"
-              ::title "Alpha"}
+        wide {:seon.agent/id "agent-a" :seon.message/id "m-1" :seon.message/content "do the thing" :seon.turn/id "run-1" ::title "Alpha"}
         nested {:seon.agent/id "agent-b"
                 :seon.agent/namespace {:seon.ns/name 'my.agents.b}}]
     (with-redefs [schema/declaration-population

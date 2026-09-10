@@ -415,7 +415,7 @@
                     :seon.sci.admit/caps (config/result-caps configuration)
                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
                     :seon.config/on-core-error :panic})
-           shown (:seon.eval/value result)
+           shown (:seon.eval/shown result)
            parsed (edn/read-string shown)]
        (is (not (:seon.cluster.eval/error result)) (pr-str result))
        (is (= "shape" (get-in parsed [:seon.agent/namespace :seon.ns/steward :seon.agent/id])) shown)

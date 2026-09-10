@@ -322,6 +322,11 @@
         (is (str/includes? (str (:seon.ai/body (:seon.error/data completion)))
                            "slow down"))))))
 
+(defn- recorded-attempt [database turn-id ordinal]
+  (db/q '[:find (pull ?attempt [*]) . :in $ ?id ?ordinal
+          :where [?turn :seon.turn/id ?id] [?turn :seon.turn/attempts ?attempt]
+                 [?attempt :seon.ai.attempt/ordinal ?ordinal]] database turn-id ordinal))
+
 (deftest a-real-jdk-provider-status-commits-with-its-attempt
   (let [received-body (promise)]
     (with-provider {:status 502
@@ -332,11 +337,10 @@
                        (dissoc :seon.ai/prompt)
                        (assoc :seon.ai/thinking :disabled))
             failure (ai/complete (assoc target :seon.ai/prompt "hello"))
-            sent-body (:seon.ai.attempt/sent-body failure)
+            sent-body @received-body
             status (:seon.ai/http-status (:seon.error/data failure))]
         (is (= :seon.ai/provider-error (:seon.error/kind failure)))
-        (is (= @received-body sent-body)
-            "the exact string posted by the JDK rides the completion")
+        (is (nil? (:seon.ai.attempt/sent-body failure)))
         (is (= "disabled"
                (get-in (json/read-str sent-body) ["thinking" "type"])))
         (is (instance? Integer status)
@@ -345,25 +349,24 @@
           (fn [connection]
             (db/transact! connection
                         [{:seon.agent/id "status-agent"}
-                         {:seon.turn/id "status-run"}])
+                         {:seon.turn/id "status-run" :seon.turn/agent [:seon.agent/id "status-agent"] :seon.turn/opened-tx "datomic.tx"}])
             ((ns-resolve 'seon.turn 'record-attempt!)
              {:seon.db/connection connection
               :seon.db.process/id "process/status-test"
               :seon.config.error/recurrence-limit 3
+              :seon.config.error/max-evidence-bytes 16384
               :seon.sci.admit/caps caps}
              {:seon.ai/target target
+              :seon.ai/settings (support/effective-config)
               :seon.error/value failure
-              :seon.ai.attempt/sent-body sent-body
               :seon.turn/id "status-run"
               :seon.agent/id "status-agent"
               :seon.ai.attempt/ordinal 0}
              (Date. 1785319000000))
             (let [attempt
-                  (db/pull @connection '[*]
-                          [:seon.ai.attempt/id "status-run-attempt-0"])]
+                  (recorded-attempt @connection "status-run" 0)]
               (is (= 502 (:seon.ai/http-status attempt)))
-              (is (= @received-body (:seon.ai.attempt/sent-body attempt))
-                  "the attempt fact is the exact posted string")
+              (is (nil? (:seon.ai.attempt/sent-body attempt)))
               (is (some? (:seon.ai.attempt/error attempt))
                   "the provider error and attempt committed together")))))))))
 
@@ -374,18 +377,19 @@
       (db/transact! connection
                   [{:seon.config.eval.result/blob-threshold 65536}
                    {:seon.agent/id "reasoning-agent"}
-                   {:seon.turn/id "reasoning-run"}])
+                   {:seon.turn/id "reasoning-run" :seon.turn/agent [:seon.agent/id "reasoning-agent"] :seon.turn/opened-tx "datomic.tx"}])
       (let [inline-reasoning "private reasoning"
             large (apply str (repeat 65537 "x"))
             cluster {:seon.db/connection connection
                      :seon.db.process/id "process/reasoning-test"
                      :seon.config.error/recurrence-limit 3
+              :seon.config.error/max-evidence-bytes 16384
                      :seon.sci.admit/caps caps}
             base-request {:seon.ai/target
                           {:seon.ai/endpoint "http://provider.invalid"
                            :seon.ai/model "fixture"}
                           :seon.ai/settings
-                          (ai/settings (support/effective-config) {})
+                          (assoc (ai/settings (support/effective-config) {}) :seon.config.ai/retain-reasoning true)
                           :seon.turn/id "reasoning-run"
                           :seon.agent/id "reasoning-agent"}]
         (doseq [[ordinal reasoning] [[0 inline-reasoning] [1 large]]]
@@ -395,12 +399,8 @@
                   :seon.ai.attempt/ordinal ordinal
                   :seon.ai/reasoning-content reasoning)
            (Date. 1785319000000)))
-        (let [inline (db/pull @connection '[*]
-                             [:seon.ai.attempt/id
-                              "reasoning-run-attempt-0"])
-              oversized (db/pull @connection '[*]
-                                [:seon.ai.attempt/id
-                                 "reasoning-run-attempt-1"])]
+        (let [inline (recorded-attempt @connection "reasoning-run" 0)
+              oversized (recorded-attempt @connection "reasoning-run" 1)]
           (is (= inline-reasoning (:seon.ai.attempt/reasoning inline)))
           (is (not (contains? inline :seon.ai.attempt/reasoning-blob)))
           (is (not (contains? oversized :seon.ai.attempt/reasoning)))

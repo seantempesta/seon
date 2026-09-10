@@ -48,7 +48,7 @@
                                       (preview evaluation-request))]
                          (turn/system-turn request))
                saved (first (evaluation/of-agent @connection "help"))
-               lines (some-> (:seon.eval/value saved) str/split-lines)
+               lines (some-> (:seon.eval/shown saved) str/split-lines)
                evidence (:seon.cluster.eval/read-evidence saved)
                shown (when saved (repl/render-ai saved))]
            (is (some? saved) (pr-str {:opening opening :committed @committed}))
@@ -63,7 +63,7 @@
                         (evaluation/of-agent @connection "help"))))
            (let [entries (evaluation/of-agent @connection "help")
                  empty-reads (subvec entries 2 6)]
-             (is (= ["nil" "nil" "nil" "nil"] (mapv :seon.eval/value empty-reads)))
+             (is (= ["nil" "nil" "nil" "nil"] (mapv :seon.eval/shown empty-reads)))
              (is (every? #(seq (:seon.cluster.eval/read-evidence %)) empty-reads)))
            (is (vector? lines) (pr-str lines))
            (is (= 13 (count lines)))
@@ -112,17 +112,14 @@
                           [{:seon.agent/id "help"
                             :seon.agent/plan {:my.plan/objective "Observe the new plan"}
                             :seon.agent/settings {:seon.config.ai/no-provider true}}
-                           {:seon.cluster.message/id "new-message"
-                            :seon.cluster.message/to [:seon.agent/id "help"]
-                            :seon.cluster.message/content "Observe the new message"
-                            :seon.cluster.message/at (java.util.Date. 0)}
+                           {:seon.message/id "new-message" :seon.message/to [:seon.agent/id "help"] :seon.message/content "Observe the new message" :seon.message/inbox [:seon.agent/id "help"]}
                            {:my.note/id "first-note" :my.note/agent [:seon.agent/id "help"]
                             :my.note/content "Observe the first note"}])]
              (is (:db-after written) (pr-str written))
              (is (every? #(false? (db/read-evidence-current?
                                    @connection (:seon.cluster.eval/read-evidence %))) initial))
              (is (not (:seon.error/kind (turn/system-turn request))))
-             (let [latest (into {} (map (juxt :seon.cluster.eval/source :seon.eval/value))
+             (let [latest (into {} (map (juxt :seon.cluster.eval/source :seon.eval/shown))
                                 (evaluation/of-agent @connection "help"))]
                (doseq [[entry text] (map vector initial
                                         ["Observe the new plan" "Observe the new message" "no-provider true"

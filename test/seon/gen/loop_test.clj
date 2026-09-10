@@ -179,7 +179,7 @@
         (->> (db/q '[:find ?id ?opened
                     :where
                     [?run :seon.turn/id ?id]
-                    [?run :seon.turn/opened-at ?opened]
+                    [?run :seon.turn/opened-tx ?opened]
                     [?run :seon.turn/agent ?agent]
                     [?agent :seon.agent/id "planner"]]
                   database)
@@ -367,8 +367,8 @@
               [?run :seon.turn/id ?run-id]
               [?receipt :seon.cluster.eval/run ?run]
               [?receipt :seon.cluster.eval/id ?receipt-id]
-              [?m :seon.cluster.message/about ?receipt]
-              [?m :seon.cluster.message/to ?to]
+              [?m :seon.message/about ?receipt]
+              [?m :seon.message/to ?to]
               [?to :seon.agent/id ?to-id]]
             db run-id)))
 
@@ -447,15 +447,8 @@
        ;; ordinary message, and everything after it is the system's own
        ;; doing.
        (db/transact! connection
-                   [{:seon.cluster.message/id "goal-1"
-                     :seon.cluster.message/to
-                     [:seon.agent/id "planner"]
-                     :seon.cluster.message/from
-                     [:seon.agent/id "root"]
-                     :seon.cluster.message/content
-                     (str "Build the widget helpers: my.gen.alpha owns "
-                          "the arithmetic and my.gen.beta owns the label.")
-                     :seon.cluster.message/at now}])
+                   [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content (str "Build the widget helpers: my.gen.alpha owns "
+                          "the arithmetic and my.gen.beta owns the label.") :seon.message/inbox [:seon.agent/id "planner"]}])
        (let [run-id (with-redefs [ai/complete staged-reply]
                       (drive! cluster 12 7))
              db @connection]
@@ -526,7 +519,7 @@
                                       :in $ ?receipt-id
                                       :where
                                       [?about :seon.cluster.eval/id ?receipt-id]
-                                      [?m :seon.cluster.message/about ?about
+                                      [?m :seon.message/about ?about
                                        ?tx]]
                                     db (turn/problem-id run-id 2))]
              (is (= [2]
@@ -544,7 +537,7 @@
          ;; into two `:db.unique/identity` attributes, so EVERY problem
          ;; identity an agent could name resolved to two entities and
          ;; every `my.message/decline` about one was refused
-         ;; `:seon.cluster.message/ambiguous-about` — loudly, into an
+         ;; `:seon.message/ambiguous-about` — loudly, into an
          ;; error fact, which no assertion here was reading. The form
          ;; identity is now qualified by its own attribute
          ;; (`seon.turn/form-identity`), and this is the standing
@@ -583,7 +576,7 @@
                              :in $ ?run-id
                              :where
                              [?run :seon.turn/id ?run-id]
-                             [?run :seon.turn/closed-at ?closed]]
+                             [?run :seon.turn/closed-tx ?closed]]
                            db run-id))
                "the planner's run closed normally — settlement is a
                 derivation over forms, never a run state"))
@@ -606,10 +599,10 @@
                             :in $ ?receipt-id
                             :where
                             [?about :seon.cluster.eval/id ?receipt-id]
-                            [?m :seon.cluster.message/about ?about]
-                            [?m :seon.cluster.message/to ?to]
+                            [?m :seon.message/about ?about]
+                            [?m :seon.message/to ?to]
                             [?to :seon.agent/id "alpha"]
-                            [?m :seon.cluster.message/id ?id]]
+                            [?m :seon.message/id ?id]]
                           db (turn/problem-id run-id 2))))
                "the assignment is one hop from the human-shaped goal")))))))
 
@@ -624,13 +617,7 @@
    (fn [cluster]
      (let [connection (:seon.db/connection cluster)]
        (db/transact! connection
-                   [{:seon.cluster.message/id "goal-1"
-                     :seon.cluster.message/to
-                     [:seon.agent/id "planner"]
-                     :seon.cluster.message/from
-                     [:seon.agent/id "root"]
-                     :seon.cluster.message/content "Count the primes."
-                     :seon.cluster.message/at now}])
+                   [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content "Count the primes." :seon.message/inbox [:seon.agent/id "planner"]}])
        (let [run-id
              (with-redefs [ai/complete
                            (fn [{prompt :seon.ai/prompt}]
@@ -663,13 +650,7 @@
    (fn [cluster]
      (let [connection (:seon.db/connection cluster)]
        (db/transact! connection
-                   [{:seon.cluster.message/id "goal-1"
-                     :seon.cluster.message/to
-                     [:seon.agent/id "planner"]
-                     :seon.cluster.message/from
-                     [:seon.agent/id "root"]
-                     :seon.cluster.message/content "Build the helpers."
-                     :seon.cluster.message/at now}])
+                   [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content "Build the helpers." :seon.message/inbox [:seon.agent/id "planner"]}])
        ;; every owner is mute; only the planner ever answers, and it
        ;; answers by claiming it is done
        (let [run-id
@@ -685,9 +666,9 @@
          (is (= "the program is built"
                 (db/q '[:find ?content .
                        :where
-                       [?m :seon.cluster.message/to ?to]
+                       [?m :seon.message/to ?to]
                        [?to :seon.agent/id "root"]
-                       [?m :seon.cluster.message/content ?content]]
+                       [?m :seon.message/content ?content]]
                      db))
              "the planner said it was finished")
          (is (false? (:seon.turn.work/settled?

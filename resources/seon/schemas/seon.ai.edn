@@ -1,79 +1,81 @@
-#:seon.ai{:extra-body :boolean,
+#:seon.ai{:provider-error :seon.ai/http-status,
+          :rate-limited-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the rate-limit response status"}
+           [:seon.ai/rate-limited :seon.ai/rate-limited]
+           [:seon.error/message :seon.error/message]],
           :wire [:vector [:tuple :string :qualified-symbol]],
-          :api-key-variable [:string {:min 1}],
-          :attempt
+          :authorization-failure-error
           [:map
-           {:seon.db/attributes true,
-            :seon.render/ai seon.ai/attempt-ai,
-            :seon.render/html seon.ai/attempt-html}
-           [:seon.ai.attempt/id :seon.ai.attempt/id]
-           [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
-           [:seon.ai.attempt/at :seon.ai.attempt/at]
-           [:seon.ai/endpoint :seon.ai/endpoint]
-           [:seon.ai/model :seon.ai/model]
-           [:seon.ai.attempt/sent-body
-            {:optional true}
-            :seon.ai.attempt/sent-body]
-           [:seon.ai.attempt/settings-edn
-            :seon.ai.attempt/settings-edn]
-           [:seon.ai.attempt/usage-edn
-            {:optional true}
-            :seon.ai.attempt/usage-edn]
-           [:seon.ai.attempt/reasoning
-            {:optional true}
-            :seon.ai.attempt/reasoning]
-           [:seon.ai.attempt/reasoning-blob
-            {:optional true}
-            :seon.ai.attempt/reasoning-blob]
-           [:seon.ai.attempt/reasoning-size
-            {:optional true}
-            :seon.ai.attempt/reasoning-size]
-           [:seon.ai.attempt/finish-reason
-            {:optional true}
-            :seon.ai.attempt/finish-reason]
-           [:seon.ai.attempt/truncation
-            {:optional true}
-            :seon.ai.attempt/truncation]
-           [:seon.ai/http-status {:optional true} :seon.ai/http-status]
-           [:seon.ai/request-transmitted?
-            {:optional true}
-            :seon.ai/request-transmitted?]
-           [:seon.ai/response-started?
-            {:optional true}
-            :seon.ai/response-started?]
-           [:seon.ai/output-observed?
-            {:optional true}
-            :seon.ai/output-observed?]
-           [:seon.ai.attempt/error
-            {:optional true}
-            :seon.ai.attempt/error]
-           [:seon.ai.attempt/failover-from
-            {:optional true}
-            :seon.ai.attempt/failover-from]
-           [:seon.ai.attempt/delay-ms
-            {:optional true}
-            :seon.ai.attempt/delay-ms]],
-          :backup :seon.ai/target,
-          :backup? :boolean,
-          :completion
-          [:or
-           [:map
-            [:seon.ai/text :seon.ai/text]
-            [:seon.ai/reasoning-content
-             {:optional true}
-             :seon.ai/reasoning-content]
-            [:seon.ai/usage {:optional true} :seon.ai/usage]
-            [:seon.ai/tokens {:optional true} :seon.ai/tokens]
-            [:seon.ai/finish-reason
-             {:optional true}
-             :seon.ai/finish-reason]]
-           :seon.error/value],
-          :disposition [:enum :failover-now :backoff :fail],
-          :disposition-request
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the provider authorization response status"}
+           [:seon.ai/authorization-failure
+            :seon.ai/authorization-failure]
+           [:seon.error/message :seon.error/message]],
+          :authentication-failure-error
           [:map
-           [:seon.error/value :seon.error/value]
-           [:seon.ai/backup? :seon.ai/backup?]],
-          :endpoint [:string {:min 1}],
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the provider authentication response status"}
+           [:seon.ai/authentication-failure
+            :seon.ai/authentication-failure]
+           [:seon.error/message :seon.error/message]],
+          :transport-outcome-unknown :seon.ai/endpoint,
+          :invalid-extra-body [:= true],
+          :response-failure-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the unusable provider response status"}
+           [:seon.ai/response-failure :seon.ai/response-failure]
+           [:seon.error/message :seon.error/message]],
+          :transport-failure :seon.ai/endpoint,
+          :sink
+          [:fn
+           {:error/message
+            "must be a callable sink that accepts one streamed AI partial",
+            :gen/gen seon.ai/sink-generator}
+           seon.ai/sink?],
+          :temperature :seon.config.ai/temperature,
+          :top-p :seon.config.ai/top-p,
+          :credential-failure-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message "must mark a provider credential failure"}
+           [:seon.ai/credential-failure :seon.ai/credential-failure]
+           [:seon.error/message :seon.error/message]],
+          :output-observed? :boolean,
+          :transport-failure-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the endpoint whose transport failed"}
+           [:seon.ai/transport-failure :seon.ai/transport-failure]
+           [:seon.error/message :seon.error/message]],
+          :token-starvation-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must mark an attempt with no usable output-token budget"}
+           [:seon.ai/token-starvation :seon.ai/token-starvation]
+           [:seon.error/message :seon.error/message]],
           :error-class
           [:enum
            :credential
@@ -87,11 +89,82 @@
            :model
            :request
            :response],
-          :extra-body-edn :seon.config.ai/extra-body-edn,
-          :finish-reason [:string {:min 1}],
-          :frequency-penalty :seon.config.ai/frequency-penalty,
-          :http-status [:int {:min 100, :max 599}],
+          :unparseable-body [:= true],
+          :rate-limited :seon.ai/http-status,
+          :sent [:map-of :string :seon.ai/json-value],
           :inert [:set :qualified-keyword],
+          :request-failure-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the endpoint that refused the request"}
+           [:seon.ai/request-failure :seon.ai/request-failure]
+           [:seon.error/message :seon.error/message]],
+          :extra-body-edn :seon.config.ai/extra-body-edn,
+          :thinking [:enum :disabled :low :high :max],
+          :backup :seon.ai/target,
+          :model-failure-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the unavailable or refused provider model"}
+           [:seon.ai/model-failure :seon.ai/model-failure]
+           [:seon.error/message :seon.error/message]],
+          :targets
+          [:map
+           [:seon.ai/primary :seon.ai/target]
+           [:seon.ai/backup {:optional true} :seon.ai/target]],
+          :disposition [:enum :failover-now :backoff :fail],
+          :http-status [:int {:min 100, :max 599}],
+          :reasoning-without-answer-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must mark a provider response with reasoning but no answer"}
+           [:seon.ai/reasoning-without-answer
+            :seon.ai/reasoning-without-answer]
+           [:seon.error/message :seon.error/message]],
+          :no-credential [:= true],
+          :authentication-failure :seon.ai/http-status,
+          :stream-truncated [:= true],
+          :reasoning-partial :string,
+          :no-credential-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must mark an attempt with no provider credential"}
+           [:seon.ai/no-credential :seon.ai/no-credential]
+           [:seon.error/message :seon.error/message]],
+          :partial
+          [:map
+           [:seon.ai/text :string]
+           [:seon.ai/reasoning-partial
+            {:optional true}
+            :seon.ai/reasoning-partial]
+           [:seon.ai/tokens :seon.ai/tokens]
+           [:seon.ai/usage {:optional true} :seon.ai/usage]
+           [:seon.ai/finish-reason
+            {:optional true}
+            :seon.ai/finish-reason]],
+          :credential-failure [:= true],
+          :api-key-variable [:string {:min 1}],
+          :unparseable-body-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the status of an unparseable provider response"}
+           [:seon.ai/unparseable-body :seon.ai/unparseable-body]
+           [:seon.error/message :seon.error/message]],
           :json-value
           [:schema
            {:registry
@@ -106,39 +179,8 @@
                              :string
                              [:ref :seon.ai.json/value]]]}}
            [:ref :seon.ai.json/value]],
-          :max-tokens [:int {:min 1}],
-          :model [:string {:min 1}],
-          :normalized-usage
-          [:map
-           [:seon.ai.usage/prompt-tokens
-            {:optional true}
-            :seon.ai.usage/prompt-tokens]
-           [:seon.ai.usage/completion-tokens
-            {:optional true}
-            :seon.ai.usage/completion-tokens]
-           [:seon.ai.usage/total-tokens
-            {:optional true}
-            :seon.ai.usage/total-tokens]
-           [:seon.ai.usage/cached-tokens
-            {:optional true}
-            :seon.ai.usage/cached-tokens]],
-          :output-observed? :boolean,
-          :partial
-          [:map
-           [:seon.ai/text :string]
-           [:seon.ai/reasoning-partial
-            {:optional true}
-            :seon.ai/reasoning-partial]
-           [:seon.ai/tokens :seon.ai/tokens]
-           [:seon.ai/usage {:optional true} :seon.ai/usage]
-           [:seon.ai/finish-reason
-            {:optional true}
-            :seon.ai/finish-reason]],
-          :presence-penalty :seon.config.ai/presence-penalty,
+          :reasoning-without-answer [:= true],
           :primary :seon.ai/target,
-          :prompt [:string {:min 1}],
-          :reasoning-content [:string {:min 1}],
-          :reasoning-partial :string,
           :request
           [:or
            [:map
@@ -197,21 +239,49 @@
             [:seon.ai/timeout-ms :seon.ai/timeout-ms]
             [:seon.ai/stream? {:optional true} :seon.ai/stream?]
             [:seon.ai/sink {:optional true} :seon.ai/sink]]],
-          :request-body [:or :seon.ai/sent :seon.error/value],
-          :request-transmitted? :boolean,
-          :response-format :seon.config.ai/response-format,
-          :response-started? :boolean,
-          :sent [:map-of :string :seon.ai/json-value],
-          :settings :seon.config/effective,
-          :sink
-          [:fn
-           {:error/message
-            "must be a callable sink that accepts one streamed AI partial"
-            :gen/gen seon.ai/sink-generator}
-           seon.ai/sink?],
-          :stop :seon.config.ai/stop,
-          :stream? :boolean,
-          :system [:string {:min 1}],
+          :request-failure :seon.ai/http-status,
+          :stream-truncated-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must mark a provider stream that ended before its terminal event"}
+           [:seon.ai/stream-truncated :seon.ai/stream-truncated]
+           [:seon.error/message :seon.error/message]],
+          :normalized-usage
+          [:map
+           [:seon.ai.usage/prompt-tokens
+            {:optional true}
+            :seon.ai.usage/prompt-tokens]
+           [:seon.ai.usage/completion-tokens
+            {:optional true}
+            :seon.ai.usage/completion-tokens]
+           [:seon.ai.usage/total-tokens
+            {:optional true}
+            :seon.ai.usage/total-tokens]
+           [:seon.ai.usage/cached-tokens
+            {:optional true}
+            :seon.ai.usage/cached-tokens]],
+          :response-failure [:= true],
+          :model-failure [:= true],
+          :wire-settings
+          [:map
+           [:seon.ai/sent :seon.ai/sent]
+           [:seon.ai/inert :seon.ai/inert]],
+          :tokens [:int {:min 0}],
+          :extra-body-conflict-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must mark provider-specific data that conflicts with governed fields"}
+           [:seon.ai/extra-body-conflict :seon.ai/extra-body-conflict]
+           [:seon.error/message :seon.error/message]],
+          :token-starvation [:= true],
+          :reasoning-content [:string {:min 1}],
+          :transport-before-send-failure [:= true],
           :target
           [:or
            [:map
@@ -262,58 +332,150 @@
              {:optional true}
              :seon.ai/extra-body-edn]
             [:seon.ai/timeout-ms :seon.ai/timeout-ms]]],
-          :targets
+          :response-format :seon.config.ai/response-format,
+          :provider-server-failure :seon.ai/http-status,
+          :provider-server-failure-error
           [:map
-           [:seon.ai/primary :seon.ai/target]
-           [:seon.ai/backup {:optional true} :seon.ai/target]],
-          :temperature :seon.config.ai/temperature,
-          :text [:string {:min 1}],
-          :thinking [:enum :disabled :low :high :max],
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the provider server response status"}
+           [:seon.ai/provider-server-failure
+            :seon.ai/provider-server-failure]
+           [:seon.error/message :seon.error/message]],
+          :extra-body :boolean,
+          :model [:string {:min 1}],
+          :backup? :boolean,
+          :attempt
+          [:map
+           {:seon.db/attributes true,
+            :seon.render/ai seon.ai/attempt-ai,
+            :seon.render/html seon.ai/attempt-html}
+           [:seon.ai.attempt/id :seon.ai.attempt/id]
+           [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
+           [:seon.ai.attempt/at :seon.ai.attempt/at]
+           [:seon.ai/endpoint :seon.ai/endpoint]
+           [:seon.ai/model :seon.ai/model]
+           [:seon.ai.attempt/settings-edn
+            :seon.ai.attempt/settings-edn]
+           [:seon.ai.attempt/usage-edn
+            {:optional true}
+            :seon.ai.attempt/usage-edn]
+           [:seon.ai.attempt/reasoning
+            {:optional true}
+            :seon.ai.attempt/reasoning]
+           [:seon.ai.attempt/reasoning-blob
+            {:optional true}
+            :seon.ai.attempt/reasoning-blob]
+           [:seon.ai.attempt/reasoning-size
+            {:optional true}
+            :seon.ai.attempt/reasoning-size]
+           [:seon.ai.attempt/finish-reason
+            {:optional true}
+            :seon.ai.attempt/finish-reason]
+           [:seon.ai.attempt/truncation
+            {:optional true}
+            :seon.ai.attempt/truncation]
+           [:seon.ai/http-status {:optional true} :seon.ai/http-status]
+           [:seon.ai/request-transmitted?
+            {:optional true}
+            :seon.ai/request-transmitted?]
+           [:seon.ai/response-started?
+            {:optional true}
+            :seon.ai/response-started?]
+           [:seon.ai/output-observed?
+            {:optional true}
+            :seon.ai/output-observed?]
+           [:seon.ai.attempt/error
+            {:optional true}
+            :seon.ai.attempt/error]
+           [:seon.ai.attempt/failover-from
+            {:optional true}
+            :seon.ai.attempt/failover-from]
+           [:seon.ai.attempt/delay-ms
+            {:optional true}
+            :seon.ai.attempt/delay-ms]],
+          :stop :seon.config.ai/stop,
+          :completion
+          [:or
+           [:map
+            [:seon.ai/text :seon.ai/text]
+            [:seon.ai/reasoning-content
+             {:optional true}
+             :seon.ai/reasoning-content]
+            [:seon.ai/usage {:optional true} :seon.ai/usage]
+            [:seon.ai/tokens {:optional true} :seon.ai/tokens]
+            [:seon.ai/finish-reason
+             {:optional true}
+             :seon.ai/finish-reason]]
+           :seon.error/value],
+          :settings :seon.config/effective,
+          :prompt [:string {:min 1}],
+          :request-body [:or :seon.ai/sent :seon.error/value],
+          :presence-penalty :seon.config.ai/presence-penalty,
           :timeout-ms [:int {:min 1}],
-          :tokens [:int {:min 0}],
-          :top-p :seon.config.ai/top-p,
-          :usage [:map-of :string :seon.ai/json-value],
-          :wire-settings
+          :frequency-penalty :seon.config.ai/frequency-penalty,
+          :response-started? :boolean,
+          :finish-reason [:string {:min 1}],
+          :authorization-failure :seon.ai/http-status,
+          :transport-before-send-failure-error
           [:map
-           [:seon.ai/sent :seon.ai/sent]
-           [:seon.ai/inert :seon.ai/inert]],
-          :unparseable-body [:= true]
-          :unparseable-body-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the status of an unparseable provider response"} [:seon.ai/unparseable-body :seon.ai/unparseable-body] [:seon.error/message :seon.error/message]]
-          :provider-error :seon.ai/http-status
-          :provider-error-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the status of a provider error response"} [:seon.ai/provider-error :seon.ai/provider-error] [:seon.error/message :seon.error/message]]
-          :timeout :seon.ai/timeout-ms
-          :timeout-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the elapsed provider request limit"} [:seon.ai/timeout :seon.ai/timeout] [:seon.error/message :seon.error/message]]
-          :transport-failure :seon.ai/endpoint
-          :transport-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the endpoint whose transport failed"} [:seon.ai/transport-failure :seon.ai/transport-failure] [:seon.error/message :seon.error/message]]
-          :no-credential [:= true]
-          :no-credential-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark an attempt with no provider credential"} [:seon.ai/no-credential :seon.ai/no-credential] [:seon.error/message :seon.error/message]]
-          :token-starvation [:= true]
-          :token-starvation-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark an attempt with no usable output-token budget"} [:seon.ai/token-starvation :seon.ai/token-starvation] [:seon.error/message :seon.error/message]]
-          :invalid-extra-body [:= true]
-          :invalid-extra-body-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark invalid provider-specific request data"} [:seon.ai/invalid-extra-body :seon.ai/invalid-extra-body] [:seon.error/message :seon.error/message]]
-          :extra-body-conflict [:= true]
-          :extra-body-conflict-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark provider-specific data that conflicts with governed fields"} [:seon.ai/extra-body-conflict :seon.ai/extra-body-conflict] [:seon.error/message :seon.error/message]]
-          :reasoning-without-answer [:= true]
-          :reasoning-without-answer-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark a provider response with reasoning but no answer"} [:seon.ai/reasoning-without-answer :seon.ai/reasoning-without-answer] [:seon.error/message :seon.error/message]]
-          :stream-truncated [:= true]
-          :stream-truncated-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark a provider stream that ended before its terminal event"} [:seon.ai/stream-truncated :seon.ai/stream-truncated] [:seon.error/message :seon.error/message]]
-          :rate-limited :seon.ai/http-status
-          :rate-limited-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the rate-limit response status"} [:seon.ai/rate-limited :seon.ai/rate-limited] [:seon.error/message :seon.error/message]]
-          :provider-server-failure :seon.ai/http-status
-          :provider-server-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the provider server response status"} [:seon.ai/provider-server-failure :seon.ai/provider-server-failure] [:seon.error/message :seon.error/message]]
-          :credential-failure [:= true]
-          :credential-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must mark a provider credential failure"} [:seon.ai/credential-failure :seon.ai/credential-failure] [:seon.error/message :seon.error/message]]
-          :authentication-failure :seon.ai/http-status
-          :authentication-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the provider authentication response status"} [:seon.ai/authentication-failure :seon.ai/authentication-failure] [:seon.error/message :seon.error/message]]
-          :authorization-failure :seon.ai/http-status
-          :authorization-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the provider authorization response status"} [:seon.ai/authorization-failure :seon.ai/authorization-failure] [:seon.error/message :seon.error/message]]
-          :model-failure [:= true]
-          :model-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the unavailable or refused provider model"} [:seon.ai/model-failure :seon.ai/model-failure] [:seon.error/message :seon.error/message]]
-          :transport-before-send-failure [:= true]
-          :transport-before-send-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the endpoint whose transport failed before send"} [:seon.ai/transport-before-send-failure :seon.ai/transport-before-send-failure] [:seon.error/message :seon.error/message]]
-          :request-failure :seon.ai/http-status
-          :request-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the endpoint that refused the request"} [:seon.ai/request-failure :seon.ai/request-failure] [:seon.error/message :seon.error/message]]
-          :response-failure [:= true]
-          :response-failure-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the unusable provider response status"} [:seon.ai/response-failure :seon.ai/response-failure] [:seon.error/message :seon.error/message]]
-          :transport-outcome-unknown :seon.ai/endpoint
-          :transport-outcome-unknown-error [:map {:seon.error/class true :seon.render/ai seon.error/ai-prose :seon.render/html seon.error/render-html :error/message "must identify the endpoint with an indeterminate transport outcome"} [:seon.ai/transport-outcome-unknown :seon.ai/transport-outcome-unknown] [:seon.error/message :seon.error/message]]}
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the endpoint whose transport failed before send"}
+           [:seon.ai/transport-before-send-failure
+            :seon.ai/transport-before-send-failure]
+           [:seon.error/message :seon.error/message]],
+          :invalid-extra-body-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must mark invalid provider-specific request data"}
+           [:seon.ai/invalid-extra-body :seon.ai/invalid-extra-body]
+           [:seon.error/message :seon.error/message]],
+          :timeout-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the elapsed provider request limit"}
+           [:seon.ai/timeout :seon.ai/timeout]
+           [:seon.error/message :seon.error/message]],
+          :text [:string {:min 1}],
+          :disposition-request
+          [:map
+           [:seon.error/value :seon.error/value]
+           [:seon.ai/backup? :seon.ai/backup?]],
+          :endpoint [:string {:min 1}],
+          :usage [:map-of :string :seon.ai/json-value],
+          :request-transmitted? :boolean,
+          :stream? :boolean,
+          :extra-body-conflict [:= true],
+          :provider-error-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the status of a provider error response"}
+           [:seon.ai/provider-error :seon.ai/provider-error]
+           [:seon.error/message :seon.error/message]],
+          :max-tokens [:int {:min 1}],
+          :transport-outcome-unknown-error
+          [:map
+           {:seon.error/class true,
+            :seon.render/ai seon.error/ai-prose,
+            :seon.render/html seon.error/render-html,
+            :error/message
+            "must identify the endpoint with an indeterminate transport outcome"}
+           [:seon.ai/transport-outcome-unknown
+            :seon.ai/transport-outcome-unknown]
+           [:seon.error/message :seon.error/message]],
+          :system [:string {:min 1}],
+          :timeout :seon.ai/timeout-ms}

@@ -114,13 +114,13 @@
            (is (empty? (agent-reads "repair")))
            (is (seq (:seon.cluster.eval/read-evidence entry)))
            (is (= (set agents)
-                  (set (map :seon.agent/id (edn/read-string (:seon.eval/value entry))))))
+                  (set (map :seon.agent/id (edn/read-string (:seon.eval/shown entry))))))
            (is (str/includes? (pr-str (agent/render-identity-html
                                       {:seon.db/db @connection :seon.agent/id "root"}))
                               "seon-root-agents")))
          (let [root-read (first (filter #(str/includes? (:seon.cluster.eval/source %) ":seon.error/steward")
                                        (evaluation/of-agent @connection "root")))]
-           (is (= "[]" (:seon.eval/value root-read)))
+           (is (= "[]" (:seon.eval/shown root-read)))
            (is (seq (:seon.cluster.eval/read-evidence root-read))))
          (let [fault (assoc
                       (error/normalize
@@ -141,7 +141,7 @@
          (is (empty? (repair-reads "happened")))
          (let [entry (last (filter #(str/includes? (:seon.cluster.eval/source %) ":seon.error/steward")
                                   (evaluation/of-agent @connection "repair")))]
-           (is (str/includes? (:seon.eval/value entry) "Repair this configured provider.")))
+           (is (str/includes? (:seon.eval/shown entry) "Repair this configured provider.")))
          (finally
            (doseq [channel [(:seon.cluster.wake/channel handle)
                             (:seon.render/context-channel handle)

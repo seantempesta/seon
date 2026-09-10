@@ -141,7 +141,8 @@
       :seon.agent/id agent-id
       :seon.agent/namespace namespace-tempid
       :seon.agent/plan {:my.plan/agent (str "agent:" agent-id)}
-      :seon.agent/settings {:seon.config/agent (str "agent:" agent-id)}}
+      :seon.agent/settings {:seon.config/agent (str "agent:" agent-id)}
+      :seon.agent/runtime {:seon.runtime/agent (str "agent:" agent-id)}}
      [:db.fn/call #'steward-call agent-id namespace-name]]))
 
 (defn situation-form
@@ -565,15 +566,7 @@
                     (turn/system-run-tx
                      database
                      (merge (dissoc staged-reply :seon.blob/staged-writes)
-                            {:seon.agent/id agent-id
-                             :seon.turn/id run-id
-                             :seon.db.process/id
-                             (:seon.db.process/id handle)
-                             :seon.turn/opened-at now
-                             :seon.turn/starting-ns
-                             [:seon.ns/name namespace-name]
-                             :seon.turn/plan-digest (turn/plan-digest sources)
-                             :seon.turn/sources sources}))}))]
+                            {:seon.agent/id agent-id :seon.turn/id run-id :seon.db.process/id (:seon.db.process/id handle) :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply-size (count (pr-str sources)) :seon.turn/sources sources}))}))]
             (if (:seon.error/kind outcome)
               outcome
               (let [channel
@@ -917,7 +910,7 @@
                         :in $ ?run-id
                         :where
                         [?run :seon.turn/id ?run-id]
-                        [?run :seon.turn/closed-at ?closed]]
+                        [?run :seon.turn/closed-tx ?closed]]
                       database (bootstrap/run-id first-agent)))
                root-eid
                (db/q '[:find ?root .
@@ -929,14 +922,13 @@
                      (db/q '[:find ?run .
                              :in $ ?root
                              :where [?run :seon.turn/agent ?root]
-                             (not [?run :seon.turn/closed-at])]
+                             (not [?run :seon.turn/closed-tx])]
                            database root-eid)))]
            (when (and worker-closed? root-idle?)
              (let [supervision-tx
                    (bootstrap/supervision-tx
                     database
                     (:seon.db.process/id handle)
-                    (Date.)
                     first-agent)]
                (when (seq supervision-tx)
                  (let [result (db/transact! connection supervision-tx)]

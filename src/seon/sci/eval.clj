@@ -1883,7 +1883,7 @@
                       [:seon.cluster.eval/source
                        (:seon.cluster.eval/source request)]))]
     (cond-> {:seon.sci.admit/value value
-             :seon.eval/value (if (string? shown) shown (pr-str shown))}
+             :seon.eval/shown (if (string? shown) shown (pr-str shown))}
       (:seon.error/kind value)
       (assoc :seon.cluster.eval/error
              (or (:seon.error/message value) (str (:seon.error/kind value))))
@@ -1908,9 +1908,9 @@
             ;; is what lets a reader ask `contains?` instead of guessing.
             (contains? admitted :seon.sci.admit/value)
             (assoc :seon.sci.admit/value (:seon.sci.admit/value admitted))
-            (:seon.eval/value admitted)
-            (assoc :seon.eval/value
-                   (:seon.eval/value admitted))
+            (:seon.eval/shown admitted)
+            (assoc :seon.eval/shown
+                   (:seon.eval/shown admitted))
             (:seon.cluster.eval/error admitted)
             (assoc :seon.cluster.eval/error (:seon.cluster.eval/error admitted))
 )
@@ -1948,9 +1948,9 @@
                    :seon.sci.admit/record record}
             (contains? admitted :seon.sci.admit/value)
             (assoc :seon.sci.admit/value (:seon.sci.admit/value admitted))
-            (:seon.eval/value admitted)
-            (assoc :seon.eval/value
-                   (:seon.eval/value admitted))
+            (:seon.eval/shown admitted)
+            (assoc :seon.eval/shown
+                   (:seon.eval/shown admitted))
 )
     ;; The same one spelling on the failing path.
     (int? (:seon.eval/duration-ms record))
@@ -2019,7 +2019,7 @@
                  (assoc :seon.eval/duration-ms duration-ms)
                  interrupted? (assoc :seon.eval/outcome :time))]
     (cond-> {:seon.sci.admit/value value
-             :seon.eval/value (pr-str value)
+             :seon.eval/shown (pr-str value)
              :seon.cluster.eval/error (:seon.error/message value)
              :seon.cluster.eval/ns namespace-ref
              :seon.sci.eval/ending-ns (symbol (str (second namespace-ref)))

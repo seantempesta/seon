@@ -83,7 +83,7 @@
   "Return the saved shown text unchanged."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
   [emission]
-  (or (:seon.eval/value emission) (:seon.repl/value emission)))
+  (or (:seon.eval/shown emission) (:seon.repl/value emission)))
 
 (defn error-text
   "Clojure's own concise REPL error for one failed evaluation.
@@ -204,9 +204,7 @@
                              :seon.cluster.eval/source
                              :seon.cluster.eval/comment
                              :seon.cluster.eval/ordinal
-                             :seon.eval/value
-                             :seon.eval/missing
-                             :seon.eval/size
+                             :seon.eval/shown
                              :seon.cluster.eval/error
                              :seon.cluster.eval/interrupted-at
                              :seon.cluster.eval/triage-edn
@@ -232,7 +230,7 @@
     ;; have no handle, and the response then carries no `:result` key.
     ;; A MISSING VALUE NAMES NOTHING EITHER — it stored no node at all, so
     ;; the same predicate that binds the fork's handles refuses here.
-    (and (string? (:seon.cluster.eval/id unit)) (string? (:seon.eval/value unit)))
+    (and (string? (:seon.cluster.eval/id unit)) (string? (:seon.eval/shown unit)))
     (assoc :seon.repl/handle (admit/result-handle (:seon.cluster.eval/id unit))))))
 
 (defn render-ai

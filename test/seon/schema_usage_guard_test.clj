@@ -262,9 +262,7 @@
         (db/transact! connection [{base-key 7}])
         (db/transact!
          connection
-         (turn/open-tx {:seon.turn/id run-id
-                       :seon.turn/agent [:seon.agent/id agent-id]
-                       :seon.turn/opened-at (java.util.Date.)}))
+         (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
         (testing "current data answers with the guard's typed refusal"
           (let [refusal
                 (transact-result
