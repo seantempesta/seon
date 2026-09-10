@@ -7,6 +7,14 @@ tags: [issue, mcp, runtime]
 
 # Default component probe timed out after development adoption
 
+Dir-own-fns, 2026-09-10: default PID 23557 / PREPL 49971 again returned
+health/Flow unknown with `Read timed out`. JVM `(+ 1 1)` returned 2 in
+0 ms and `(boolean (seon.operator/connection "default"))` returned true
+in 1 ms. The required two-function `seon.db/pull` probe timed out at
+20,000 ms in two separate MCP sessions; supplying a database-derived
+schema projection also timed out at 20,000 ms. No cause or row contents
+are inferred from those timeouts. No default lifecycle operation occurred.
+
 REPL display, 2026-09-10: initial MCP status selected default PID 23557,
 PREPL 49971, and returned health/Flow unknown with `Read timed out`.
 The subsequent JVM `(+ 1 2)` returned 3 in 1 ms; the direct value-renderer

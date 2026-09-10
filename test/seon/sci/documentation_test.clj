@@ -3,6 +3,7 @@
             [clojure.test :refer [deftest is]]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.program :as program]
             [seon.sci.eval :as evaluation]
             [seon.schema :as schema]
             [seon.test-support :as support]))
@@ -52,6 +53,42 @@
               (get-in missing-ns [:seon.sci.admit/value :seon.error/kind])))
        (is (= {:schemas {} :functions []} (:seon.sci.admit/value empty-ns)))
        (is (nil? (:seon.cluster.eval/error empty-ns)))))))
+
+(deftest directory-observes-a-function-installed-after-context-acquisition
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           configuration (support/effective-config)
+           run (fn [source]
+                 (evaluation/evaluate
+                  {:seon.sci.eval/ctx ctx
+                   :seon.db/db @connection
+                   :seon.db/connection connection
+                   :seon.cluster.eval/ns [:seon.ns/name 'fixture.own-functions]
+                   :seon.cluster.eval/source source
+                   :seon.sci.admit/caps (config/result-caps configuration)
+                   :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
+                   :seon.config/on-core-error :panic}))
+           defined (run "(defn identity-number \"Return the number.\nA durable function.\" {:malli/schema [:=> [:cat :int] :int]} [number] number)")
+           row (:seon.program/row defined)]
+       (is (nil? (:seon.cluster.eval/error defined)) (pr-str defined))
+       (is (= "fixture.own-functions/identity-number" (:seon.fn/sym row)))
+       (let [written (db/transact! connection
+                                   [{:seon.ns/name 'fixture.own-functions}
+                                    (program/canonical-row row)])]
+         (is (:db-after written) (pr-str written))
+         (when (:db-after written)
+           (evaluation/install-evaluated-rows!
+            {:seon.sci.eval/ctx ctx :seon.db/db (:db-after written)
+             :seon.sci.eval/installations
+             [{:seon.program/row row :seon.sci.eval/evaluation defined}]})))
+       (let [directory (run "(dir fixture.own-functions)")]
+         (is (nil? (:seon.cluster.eval/error directory)) (pr-str directory))
+         (is (= [{:sym 'fixture.own-functions/identity-number
+                  :arglists '([number])
+                  :doc "Return the number."
+                  :in [:cat :int] :out :int}]
+                (get-in directory [:seon.sci.admit/value :functions]))))))))
 
 (deftest a-contract-mistake-carries-the-same-documentation-as-doc
   (support/with-database
