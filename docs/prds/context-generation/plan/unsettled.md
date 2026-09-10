@@ -889,3 +889,25 @@ half-edit. Measured targets in the issue.
   `(dir my.plan)` before completing it — the taught behaviour. Waiting on
   loop-continue for the self-continuing session, then the full §17 rerun.
 
+## 2026-09-10 15:35 — live run 2: the loop runs by itself; four of seven steps
+
+- loop-continue `57f1a8c23`: an accepted ordinary reply with no terminal
+  disposition continues the session under the same bound (PRD §14 amended;
+  `:seon.turn/disposition` retains the last completed/wait control).
+- Run 2 (landing `live-run-2-landing-2026-09-10.md`): 61 turns in 4 m 41 s
+  (30 provider / 31 system), 137 evaluations, 954,877 prompt tokens (93 %
+  cache hits) / 7,259 completion; read, define (contracted durable fn),
+  test (deftest run 1/0/0), save (note) completed; the order of 40 added
+  but unmarked; no report/done — budget exhausted. Every §17 capability was
+  exercised once. Ranked defects, each filed: (1) system since-diff turns
+  re-read self-churning reads (turns-left, the turns list) after EVERY
+  provider turn under the agent's own prompt — the model read them as its
+  own loop and burned ~10 turns; OWNER DECISION (issue
+  `system-turns-reread-self-churning-data-…`, options 1/2/3); (2) fenced
+  replies read as prose and `no-forms` raised as a CORE fault to root
+  (lane reader-fences); (3) `dir` omits the agent's own durable functions
+  (lane dir-own-fns); (4) platform faults woke/interrupted turns (issue
+  filed); (5) prompt 178 KB by turn 30, driven by (1).
+- Lanes: reader-fences (high), dir-own-fns (medium), debug-refs (medium,
+  identity links instead of the id dump).
+

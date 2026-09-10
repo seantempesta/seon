@@ -407,7 +407,7 @@ completed with `completed-tx` as it goes; every done-when is a query:
 | 6 | Run it again and record the new total | call; note updated | the note carries both totals |
 | 7 | Report and finish | `(my.message/send …)`; `(my.agent/done)` | message to root exists; session closed |
 
-Budget THIRTY turns (owner, 2026-09-10: costs are not a concern for this test); `deepseek-flash`, thinking disabled. Ending early: `(my.agent/done)` closes the session, taught in help ("Each reply is one turn … (my.agent/done) ends your session early") and named as the plan's last step. Root's
+**Run 2 (2026-09-10 15:22): 4/7 steps in 30 provider turns; the loop self-continues; defects ranked in `research/live-run-2-landing-2026-09-10.md`.** Budget THIRTY turns (owner, 2026-09-10: costs are not a concern for this test); `deepseek-flash`, thinking disabled. Ending early: `(my.agent/done)` closes the session, taught in help ("Each reply is one turn … (my.agent/done) ends your session early") and named as the plan's last step. Root's
 mid-session "what step are you on?" tests additive context. Open: whether
 root's message gives the contract or the agent designs it from
 `(doc seon.fn)`.
