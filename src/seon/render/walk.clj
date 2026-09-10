@@ -20,15 +20,10 @@
   renderer decides what it does with the budget it was handed, which is
   what makes the convention compositional rather than imposed.
 
-  NEIGHBOURS RUN BOTH WAYS, and that is not a special case. An agent
-  holds one forward ref (its open run) and is POINTED AT by everything
-  that matters — its runs, the messages sent to it, the errors recorded
-  against it. A traversal that followed only forward refs would render an
-  agent as an almost empty entity, so the root selector pulls both directions
-  from the same database value. Reverse neighbours retain the newest values
-  and bounded by the SAME `:seon.sci.admit/caps` collection dial the eval
-  door and the generic panel already use; a second width dial here would
-  be a magic number and would drift from the first.
+  Neighbours are the schema's declared render concerns and owned components.
+  Reverse refs participate only when a schema declares the concern. Namespace
+  pages follow requires in both directions. Operational refs pointing at an
+  agent do not become page concerns merely because they exist.
 
   TOTAL, because the prompt path is an error path. Every selected renderer
   failure is a flat value and an undeclared value reaches the floor. Node and
@@ -90,76 +85,62 @@
   (min (long distance)
        (dec (admit/required-cap caps :seon.config.eval.result/max-nodes))))
 
-(defn root-selector
-  "A concrete bidirectional pull selector for an agent-root distance.
+(defn- declared-concerns
+  [projection entity]
+  (into []
+        (distinct)
+        (mapcat #(-> (get-in projection [:seon.schema.projection/forms
+                                         (:seon.schema/key %)])
+                    schema.form/schema-properties :seon.render/units)
+                (schema/matching-shapes-in projection (render/transacted entity)))))
 
-  Every installed scalar attribute is enumerated. Every installed ref is an
-  explicit forward and reverse subpattern, so Datahike records the canonical
-  stored ref in the dependency plan and never widens component expansion to
-  `:all`. The pull asks for one value beyond the query-work limit so the walk
-  can emit an exact elision observation without a second read. Acquisition
-  depth
-  also stops at one less than the node cap: a deeper member's path alone would
-  already consume more nodes than the result can retain."
+(defn- connection-attributes
+  [projection installed entity]
+  (if (:seon.ns/name entity)
+    [[:seon.ns/requires false] [:seon.ns/requires true]]
+    (into []
+          (comp
+           (distinct)
+           (keep (fn [display]
+                   (let [reverse? (str/starts-with? (name display) "_")
+                         attribute (if reverse?
+                                     (keyword (namespace display) (subs (name display) 1))
+                                     display)]
+                     (when (= :db.type/ref (get-in installed [attribute :db/valueType]))
+                       [attribute reverse?])))))
+          (concat (declared-concerns projection entity)
+                  (keep (fn [[attribute properties]]
+                          (when (and (:db/isComponent properties)
+                                     (get entity attribute))
+                            attribute))
+                        installed)))))
+
+(defn root-selector
+  "Acquire own attributes and forward reference identities.
+
+  Forward refs have an explicit identity subpattern, including components:
+  Datahike never implicitly expands them. Once this value identifies its
+  matching schemas, acquisition reads only their declared reverse concerns.
+  The pull's existing query-work limit asks one past its bound."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.render/distance
          :seon.sci.admit/caps]
     :seon.db/pull-selector]}
-  [database distance caps]
+  [database _distance caps]
   (let [installed (installed-attributes database)
-        ref-attributes (into []
-                             (keep (fn [[attribute properties]]
-                                     (when (= :db.type/ref
-                                              (:db/valueType properties))
-                                       attribute)))
-                             installed)
-        identity-attributes (into []
-                                  (keep (fn [[attribute properties]]
-                                          (when (= :db.unique/identity
-                                                   (:db/unique properties))
-                                            attribute)))
-                                  installed)
-        scalar-attributes (into []
-                                (keep (fn [[attribute properties]]
-                                        (when (and (not= :db/id attribute)
-                                                   (not= :db.type/ref
-                                                         (:db/valueType
-                                                          properties)))
-                                          attribute)))
-                                installed)
-        ;; THE PULL'S OWN LIMIT IS QUERY WORK, not the AI boundary's elision:
-        ;; it decides how many stored refs Datahike is asked for, and the
-        ;; walk's declared connection width decides how many the agent sees.
-        width (pull-width caps)
-        distance (bounded-acquisition-distance distance caps)
-        leaf (into [:db/id] identity-attributes)]
-    (letfn [(selector-at [remaining]
-              (let [nested (if (pos? remaining)
-                             (selector-at (dec remaining))
-                             leaf)
-                    asked-for-nested
-                    (if (and (= 1 remaining)
-                             (contains? installed
-                                        :seon.message/from)
-                             (contains? installed
-                                        :seon.turn/trigger))
-                      (conj nested
-                            {(selector-key :seon.turn/_trigger width)
-                             leaf})
-                      nested)]
-                (into (into [:db/id] scalar-attributes)
-                      (concat
-                       (map (fn [attribute]
-                              {(selector-key attribute width) nested})
-                            ref-attributes)
-                       (map (fn [attribute]
-                              {(selector-key (reverse-attribute attribute)
-                                             width)
-                               (if (= :seon.message/from attribute)
-                                 asked-for-nested
-                                 nested)})
-                            ref-attributes)))))]
-      (selector-at distance))))
+        leaf (into [:db/id]
+                   (keep (fn [[attribute properties]]
+                           (when (= :db.unique/identity (:db/unique properties))
+                             attribute)))
+                   installed)
+        width (pull-width caps)]
+    (into [:db/id]
+                (keep (fn [[attribute properties]]
+                        (when (not= :db/id attribute)
+                          (if (= :db.type/ref (:db/valueType properties))
+                            {(selector-key attribute width) leaf}
+                            attribute))))
+                installed)))
 
 (defn- stable-lookup
   [id-attributes entity]
@@ -235,7 +216,7 @@
        :seon.render.walk/shown (long shown)}}}))
 
 (defn- acquisition-members
-  [database root distance width query-width]
+  [projection database root distance width query-width]
   (let [installed (installed-attributes database)
         refs (into []
                    (keep (fn [[attribute properties]]
@@ -272,13 +253,8 @@
                                           (assoc :seon.render.walk/attribute
                                                  reached-by)))
                               (update :seon.render.walk/order conj lookup))
-                          connection-attributes
-                          (if (:seon.ns/name entity)
-                            [[:seon.ns/requires false]
-                             [:seon.ns/requires true]]
-                            (concat
-                             (map vector refs (repeat false))
-                             (map vector refs (repeat true))))
+                          declared-connections
+                          (connection-attributes projection installed entity)
                           connections
                           (into []
                                 (mapcat
@@ -310,18 +286,12 @@
                                        (conj (connection-observation
                                               attribute reverse? shown
                                               query-width width)))))
-                                 connection-attributes))]
-                      (if (or (pos? remaining)
-                              (and (zero? remaining)
-                                   (= :seon.message/from reached-by)))
+                                 declared-connections))]
+                      (if (pos? remaining)
                         (reduce-kv
                          (fn [result index connection]
                            (if-let [child
-                                    (when (or (pos? remaining)
-                                              (= :seon.turn/trigger
-                                                 (:seon.render.walk/attribute
-                                                  connection)))
-                                      (:seon.render.walk/pulled connection))]
+                                    (:seon.render.walk/pulled connection)]
                              (visit result child (max 0 (dec remaining))
                                     (conj path :seon.render.walk/neighbours
                                           index)
@@ -410,7 +380,7 @@
 
 (defn- acquire-entity
   "Reuse one entity pull only while its recorded read evidence is current."
-  [database plan lookup cache]
+  [projection database installed plan lookup cache]
   (let [cache-key [::entity-pull lookup]
         previous (get @cache cache-key)]
     (if (and previous
@@ -425,10 +395,26 @@
                    current)))
         refreshed)
       (let [captured (atom [])
-            value (binding [db/*read-evidence-sink* captured]
-                    (db/pull database {:selector (:seon.render.walk/selector plan)
-                                       :datahike.pull/plan (:datahike.pull/plan plan)
-                                       :eid lookup}))
+            value
+            (binding [db/*read-evidence-sink* captured]
+              (let [entity (db/pull database {:selector (:seon.render.walk/selector plan)
+                                              :datahike.pull/plan (:datahike.pull/plan plan)
+                                              :eid lookup})
+                    reverse-selector
+                    (when (:db/id entity)
+                      (into []
+                            (keep (fn [[attribute reverse?]]
+                                    (when reverse?
+                                      {(selector-key (reverse-attribute attribute)
+                                                     (pull-width (:seon.sci.admit/caps plan)))
+                                       [:db/id]})))
+                            (connection-attributes projection installed entity)))]
+                (if (seq reverse-selector)
+                  (let [reverse-values (db/pull database reverse-selector lookup)]
+                    (if (:seon.error/kind reverse-values)
+                      reverse-values
+                      (merge entity reverse-values)))
+                  entity)))
             entry {:datahike.pull/plan (:datahike.pull/plan plan)
                    :seon.render.call/output value
                    :seon.render.call/basis-transaction (db/basis-t database)
@@ -448,18 +434,15 @@
   (let [database (:seon.db/db request)
         plan (root-pull-plan (assoc request :seon.render/distance 0))
         cache (render/shared-cache (:seon.sci.eval/ctx request))
-        refs (into [] (keep (fn [[a properties]]
-                             (when (= :db.type/ref (:db/valueType properties)) a)))
-                   (installed-attributes database))
-        connections (concat (map (fn [a] [a a false]) refs)
-                            (map (fn [a] [(reverse-attribute a) a true]) refs))
+        projection (schema/current-projection)
+        installed (installed-attributes database)
         pulled (atom {})
         visited (atom #{})
         evidence (atom [])
         width (pull-width caps)]
-    (letfn [(visit [lookup remaining reached-by]
+    (letfn [(visit [lookup remaining]
               (let [value (or (get @pulled lookup)
-                              (let [entry (acquire-entity database plan lookup cache)
+                              (let [entry (acquire-entity projection database installed plan lookup cache)
                                     value (:seon.render.call/output entry)]
                                 (swap! evidence into (:seon.render.call/read-evidence entry))
                                 (swap! pulled assoc lookup value (:db/id value) value)
@@ -470,9 +453,9 @@
                   (do
                     (swap! visited conj eid)
                     (reduce
-                     (fn [result [display attribute reverse?]]
+                     (fn [result [display _attribute reverse?]]
                        (if-let [children (get value display)]
-                         (let [expand #(visit (:db/id %) (max 0 (dec remaining)) attribute)]
+                         (let [expand #(visit (:db/id %) (max 0 (dec remaining)))]
                            (assoc result display
                                   (if (map? children)
                                     (expand children)
@@ -483,16 +466,12 @@
                                       (mapv #(if (selected (:db/id %)) (expand %) %) children)))))
                          result))
                      value
-                     (cond
-                       (pos? remaining)
-                       (if (:seon.ns/name value)
-                         [[:seon.ns/requires :seon.ns/requires false]
-                          [:seon.ns/_requires :seon.ns/requires true]]
-                         connections)
-                       (= :seon.message/from reached-by)
-                       [[:seon.turn/_trigger :seon.turn/trigger true]]
-                       :else []))))))]
-      (let [root (visit (:seon.render.walk/lookup request) distance nil)]
+                     (when (pos? remaining)
+                       (map (fn [[attribute reverse?]]
+                              [(if reverse? (reverse-attribute attribute) attribute)
+                               attribute reverse?])
+                            (connection-attributes projection installed value))))))))]
+      (let [root (visit (:seon.render.walk/lookup request) distance)]
         (when db/*read-evidence-sink*
           (swap! db/*read-evidence-sink* into
                  (map #(assoc % :seon.db/db database) @evidence)))
@@ -530,7 +509,7 @@
                 ;; compiled pull plan is shared across every caller of one
                 ;; schema generation; reading a presentation decision off it
                 ;; would hand the second caller the first caller's profile.
-                (acquisition-members database root
+                (acquisition-members projection database root
                                      (bounded-acquisition-distance distance caps)
                                      ;; No presentation width here: the
                                      ;; value renderer elides, the pull's
@@ -651,11 +630,7 @@
   (let [root-lookup (first (:seon.render.walk/order acquisition))
         root (get-in acquisition [:seon.render.walk/members root-lookup])
         entity (:seon.render/value root)
-        concerns (->> (when (map? entity)
-                        (schema/matching-shapes-in projection (render/transacted entity)))
-                      (mapcat #(-> (get-in projection [:seon.schema.projection/forms (:seon.schema/key %)])
-                                   schema.form/schema-properties :seon.render/units))
-                      distinct vec)]
+        concerns (when (map? entity) (declared-concerns projection entity))]
     (if (empty? concerns)
       acquisition
       (reduce

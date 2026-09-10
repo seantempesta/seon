@@ -8,7 +8,6 @@
             [seon.render.walk :as walk]
             [seon.render.web :as web]
             [seon.schema :as schema]
-            [seon.sci.kernel :as sci.kernel]
             [seon.test-support :as support]))
 
 (def ^:private root-pull-schema
@@ -115,15 +114,8 @@
        (is (= ["The opening message."]
               (mapv :seon.message/content messages))
            "the as-of root retains the reverse message graph")
-       ;; THE SUBJECT IS A FACT. History used to name the acquired message
-       ;; by the form its retired `:seon.render/form` producer emitted; it
-       ;; now names the entity itself, and the bytes are that message's own
-       ;; `:seon.render/ai` render rather than a second prompt line built
-       ;; around a `pr-str`'d form.
-       (is (some #(= [:seon.message/id "temporal-root-message"]
-                     (:seon.render.history/subject %))
-                 history)
-           "history renders the acquired message as its identified value")))))
+       (is (empty? history)
+           "an unexecuted message does not invent a saved evaluation")))))
 
 (deftest history-database-neighborhood-terminates-with-origin-schema
   (support/with-database
@@ -252,7 +244,7 @@
   [attribute]
   (keyword (namespace attribute) (str "_" (name attribute))))
 
-(deftest root-selector-is-concrete-bidirectional-and-evidence-bearing
+(deftest root-selector-is-concrete-and-declared-reverse-evidence-bearing
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
@@ -295,15 +287,17 @@
        (is (contains? selector-map-keys
                       [::forward :limit (inc (long width))])
            "the forward stored ref is nested and asks one past the width")
-       (is (contains? selector-map-keys
-                      [(reverse-attribute ::edge) :limit (inc (long width))])
-           "the same stored ref has its reverse spelling")
+       (is (not (contains? selector-map-keys
+                           [(reverse-attribute ::edge) :limit (inc (long width))]))
+           "an installed ref does not declare a reverse concern")
+       (is (not (contains? selector-map-keys [:seon.message/_inbox :limit (inc (long width))]))
+           "reverse concerns require the pulled entity's matching schema")
        (is (set? attributes))
        (is (every? attributes
                    [::root-id ::node-id ::forward ::edge ::component ::value])
            "explicit component nesting keeps every concrete dependency")))))
 
-(deftest root-membership-diffs-forward-reverse-and-component-changes
+(deftest root-membership-ignores-undeclared-refs-and-diffs-components
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
@@ -314,33 +308,35 @@
                      ::node-id "component"
                      ::value "before"}])
      (let [initial (acquire connection)]
-       (testing "a forward boundary edge adds and removes one stable member"
+       (testing "an undeclared forward ref remains an identity in the root value"
          (db/transact! connection
                        [{::node-id "forward"}
                         {::root-id "root"
                          ::forward [::node-id "forward"]}])
          (let [with-forward (acquire connection)
                added (walk/membership-diff initial with-forward)]
-           (is (contains? (member-lookups with-forward)
-                          [::node-id "forward"]))
-           (is (= #{[::node-id "forward"]}
+           (is (not (contains? (member-lookups with-forward)
+                               [::node-id "forward"])))
+           (is (= "forward" (get-in with-forward
+                                    [:seon.render.walk/root ::forward ::node-id])))
+           (is (= #{}
                   (changed-lookups added :seon.render.walk/added)))
            (db/transact! connection
                          [[:db/retract [::root-id "root"] ::forward
                            [::node-id "forward"]]])
            (let [without-forward (acquire connection)
                  removed (walk/membership-diff with-forward without-forward)]
-             (is (= #{[::node-id "forward"]}
+             (is (= #{}
                     (changed-lookups removed :seon.render.walk/removed))))))
 
-       (testing "a reverse boundary edge uses the canonical stored ref"
+       (testing "an undeclared reverse ref neither adds nor removes a member"
          (let [before-reverse (acquire connection)]
            (db/transact! connection
                          [{::node-id "reverse"
                            ::edge [::root-id "root"]}])
            (let [with-reverse (acquire connection)
                  added (walk/membership-diff before-reverse with-reverse)]
-             (is (= #{[::node-id "reverse"]}
+             (is (= #{}
                     (changed-lookups added :seon.render.walk/added)))
              (db/transact! connection
                            [[:db/retract [::node-id "reverse"] ::edge
@@ -348,7 +344,7 @@
              (let [without-reverse (acquire connection)
                    removed
                    (walk/membership-diff with-reverse without-reverse)]
-               (is (= #{[::node-id "reverse"]}
+               (is (= #{}
                       (changed-lookups removed
                                        :seon.render.walk/removed)))))))
 
@@ -384,21 +380,14 @@
                  :seon.render/output :seon.render/ai
                  :seon.render.walk/root-acquisition acquisition))
          (is (zero? @reads)
-             "neighborhood consumes the acquisition without discovery")
-         (walk/history
-          (assoc render-request
-                 :seon.agent/id "root"
-                 :seon.render.walk/root-acquisition acquisition
-                 :seon.render/captured-calls (atom {})))
-         (is (zero? @reads)
-             "history shares the acquisition without a second discovery"))))))
+             "neighborhood consumes the acquisition without discovery"))))))
 
 (deftest installed-identity-selects-a-stable-lookup-ref
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
      (db/transact! connection
-                   [{::root-id "root" ::forward "both"}
+                   [{::root-id "root" ::component "both"}
                     {:db/id "both" ::root-id "lexical" ::node-id "declared"}])
      (let [acquisition (acquire connection)]
        (is (contains? (:seon.render.walk/members acquisition)
@@ -422,7 +411,7 @@
                     {::root call} fixed))
            "an opening as-of database compares through seon.db revisions")))))
 
-(deftest relevant-semantically-equal-root-read-replays-once-and-advances
+(deftest unrelated-entity-change-keeps-root-read-current
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
@@ -443,8 +432,8 @@
                          (#'web/refresh-root
                           (assoc render-request :seon.db/db database)
                           retained call-id candidates))]
-         (is (= #{call-id} candidates)
-             "the relevant attribute revision selects the root read")
+         (is (empty? candidates)
+             "the same attribute on an unrelated entity does not invalidate the root")
          (is (zero? @pulls) "Datahike semantic evidence reuses the unchanged entity pull")
          (is (false? (:changed? refreshed)))
          (is (identical?
@@ -455,6 +444,51 @@
          (is (empty? (#'web/candidate-call-ids
                       {call-id (:entry refreshed)} database))
              "the consumed revision advances even when the result is equal"))))))
+
+(deftest another-entity-schema-cannot-add-a-reverse-read-to-this-root
+  (support/with-database
+   {:seon.test-support/extra-schema root-pull-schema}
+   (fn [connection]
+     (is (:db-after (db/transact! connection [{::root-id "root" ::value "own"}])))
+     (let [render-request (request connection)
+           before (walk/root-acquisition render-request)
+           tx (db/transact! connection
+                            [{:seon.message/id "non-agent-reference"
+                              :seon.message/content "Only agents declare the inbox concern."
+                              :seon.message/to [::root-id "root"]
+                              :seon.message/inbox [::root-id "root"]}])
+           after (walk/root-acquisition (assoc render-request :seon.db/db @connection))]
+       (is (:db-after tx) (pr-str tx))
+       (is (true? (db/read-evidence-current?
+                   @connection (:seon.render.call/read-evidence before))))
+       (is (= (:seon.render.walk/root before) (:seon.render.walk/root after)))
+       (is (= #{[::root-id "root"]} (member-lookups after)))))))
+
+(deftest namespace-neighborhood-follows-requires-in-both-directions
+  (support/with-database
+   (fn [connection]
+     (let [tx (db/transact!
+               connection
+               [{:seon.ns/name 'root-walk.required}
+                {:seon.ns/name 'root-walk.subject
+                 :seon.ns/requires [[:seon.ns/name 'root-walk.required]]}
+                {:seon.ns/name 'root-walk.dependent
+                 :seon.ns/requires [[:seon.ns/name 'root-walk.subject]]}
+                {:seon.fn/sym "root-walk.subject/unrelated"
+                 :seon.fn/ns [:seon.ns/name 'root-walk.subject]
+                 :seon.schema.admission/source :core}])
+           acquisition
+           (walk/root-acquisition
+            {:seon.db/db @connection
+             :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+             :seon.render.walk/lookup [:seon.ns/name 'root-walk.subject]
+             :seon.render/distance 1
+             :seon.sci.admit/caps caps})]
+       (is (not (:seon.error/kind tx)) (pr-str tx))
+       (is (= #{[:seon.ns/name 'root-walk.subject]
+                [:seon.ns/name 'root-walk.required]
+                [:seon.ns/name 'root-walk.dependent]}
+              (member-lookups acquisition)))))))
 
 (deftest cold-root-pull-records-an-informational-latency-sample
   (support/with-database

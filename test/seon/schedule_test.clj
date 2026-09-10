@@ -7,6 +7,8 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.id :as id]
+            [seon.render :as render]
+            [seon.render.walk :as walk]
             [seon.schedule :as schedule]
             [seon.schema :as schema]
             [seon.cluster.wake :as wake]
@@ -81,10 +83,14 @@
 
 (defn- seed-task!
   [connection task-id handler]
-  (db/transact!
+  (let [handler-ns (symbol (namespace (symbol handler)))
+        result (db/transact!
    connection
    [{:seon.agent/id "root"}
-    {:seon.fn/sym handler}
+    {:seon.ns/name handler-ns}
+    {:seon.fn/sym handler
+     :seon.fn/ns [:seon.ns/name handler-ns]
+     :seon.schema.admission/source :core}
     {:seon.schedule/id (str task-id "/schedule")
      :seon.schedule/expression "* * * * *"
      :seon.schedule/zone-id "UTC"}
@@ -92,7 +98,9 @@
      :seon.schedule.task/owner [:seon.agent/id "root"]
      :seon.schedule.task/function [:seon.fn/sym handler]
      :seon.schedule.task/schedule
-     [:seon.schedule/id (str task-id "/schedule")]}]))
+     [:seon.schedule/id (str task-id "/schedule")]}])]
+    (is (not (:seon.error/kind result)) (pr-str result))
+    result))
 
 (defn- count-with
   [database attribute]
@@ -101,6 +109,50 @@
               :where [?entity ?attribute _]]
             database attribute)
       0))
+
+(deftest scheduled-operational-events-do-not-expand-or-invalidate-the-agent-page
+  (test-support/with-database
+   (fn [connection]
+     (seed-task! connection "schedule-test/page"
+                 "seon.schedule-test/successful-handler")
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           request {:seon.db/db @connection
+                    :seon.sci.eval/ctx ctx
+                    :seon.render.walk/lookup [:seon.agent/id "root"]
+                    :seon.render/distance 2
+                    :seon.sci.admit/caps result-caps}
+           before (walk/root-acquisition request)
+           cache (render/shared-cache ctx)
+           pull-keys (set (keys @cache))
+           observed-at (observed-after-seed)]
+       (is (= [[:seon.agent/id "root"]] (:seon.render.walk/order before)))
+       (is (= 1 (count pull-keys)) "the real root was pulled")
+       (doseq [at [observed-at (Date. (+ (.getTime observed-at) 60000))]]
+         (is (= 1 (schedule/fire-due! connection "root" at (execution-context))))
+         (is (true? (db/read-evidence-current?
+                     @connection (:seon.render.call/read-evidence before)))
+             "successful operational firings are outside the page's read evidence")
+         (let [after (walk/root-acquisition (assoc request :seon.db/db @connection))]
+           (is (= (select-keys before [:seon.render.walk/root :seon.render.walk/members
+                                      :seon.render.walk/order])
+                  (select-keys after [:seon.render.walk/root :seon.render.walk/members
+                                     :seon.render.walk/order])))
+           (is (= pull-keys (set (keys @cache))))))
+       (is (= 2 (count-with @connection :seon.schedule.fire/id)))
+       (is (= 2 (count-with @connection :seon.maintenance.request/id)))
+       (is (= 2 (count-with @connection :seon.maintenance.receipt/completed-at)))
+       (is (not (:seon.error/kind
+                 (db/transact! connection
+                               [{:seon.message/id "schedule-test/inbox"
+                                 :seon.message/content "A declared concern changed."
+                                 :seon.message/to [:seon.agent/id "root"]
+                                 :seon.message/inbox [:seon.agent/id "root"]}]))))
+       (is (false? (db/read-evidence-current?
+                    @connection (:seon.render.call/read-evidence before)))
+           "an initially empty declared reverse concern still invalidates on insertion")
+       (is (some #{[:seon.message/id "schedule-test/inbox"]}
+                 (:seon.render.walk/order
+                  (walk/root-acquisition (assoc request :seon.db/db @connection)))))))))
 
 (deftest every-public-schedule-contract-compiles
   (test-support/with-database
