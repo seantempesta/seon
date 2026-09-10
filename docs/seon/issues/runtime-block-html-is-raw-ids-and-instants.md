@@ -48,3 +48,15 @@ header dump still needs the render owner. During HTTP verification at
 The pair renders that stored message faithfully. This is follow-up evidence
 for the existing `scratch-debug-feed-and-turn-backstops-after-adoption.md`
 issue, not a runtime HTML failure or a claim about the backstop's cause.
+
+Final runtime-html verification: implementation commits `237c4c572` and
+`881c720f4`; isolated gate 10 tests / 71 assertions, platform 84 / 505,
+all green. Live HTTP 200 with the new pair, zero `#inst` or `:db/id`
+literals in its text. Three explicit adoption attempts reloaded the
+definitions and instrumented them, then refused to seal because source
+changed during adoption. Adopted marker remained
+`6aa31517-2ccf-50a2-a61a-9f0a9261b8e2`; published source advanced to
+`6aa31c20-1ac0-53b5-959b-b810cd0c5c92`. The orchestrator must verify
+convergence when publication settles. Full rendered text and exact
+verification boundary are in
+`docs/prds/context-generation/research/runtime-html-landing-2026-09-10.md`.

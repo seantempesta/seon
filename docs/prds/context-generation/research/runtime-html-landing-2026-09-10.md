@@ -182,7 +182,7 @@ PY
 ## Live default observation
 
 After the final functions were hot-reloaded by development adoption, GET
-returned **HTTP 200 in 1.696967 seconds**. The emitted runtime section has
+returned **HTTP 200 in 1.462016 seconds**. The emitted runtime section has
 five table rows, no `#inst` literals and no numeric database-id display.
 The UUID and digest below are literal message content, retained through
 the message pair. Juniper had no authored listens at this observation;
@@ -192,7 +192,7 @@ Full runtime text (adjacent text-node whitespace normalized):
 
 ```text
 Runtime
-Idle since 14:56:52 (5 min)
+Idle since 14:56:52 (11 min)
 Woke on
 Message from outside this cluster: The feed  failed with :seon.await/backstop-fired. Inspect error 9c931b6e-8128-4552-8290-abb5ca69e00d; the proc survived and no work was re-executed. Signature: b2bbe875e0db427eca8cd87f78ac785c480976a9d0c150d46ce9d44d045b259e.
 Outside this cluster → Agent juniper
@@ -209,7 +209,7 @@ Opened | Duration | Trigger | Evaluations | Reply
 14:46:44 | 0 ms | No recorded trigger | 9 | (help)
 ```
 
-Two explicit `bin/seon init --dev default --changed
+Three explicit `bin/seon init --dev default --changed
 src/seon/render/transcript.clj` attempts completed loaded definitions, SCI
 acquisition, and JVM instrumentation, then exited 1 with **“Source changed
 during development adoption; the next edit must converge it.”** The first
@@ -217,7 +217,18 @@ also waited over 300 seconds behind other publication commands under the
 operator lifecycle lock. No holder was stopped or modified. These are
 hot-reloaded-Var and HTTP proofs, not a claim of sealed adoption. The last
 observed adopted marker was `6aa31517-2ccf-50a2-a61a-9f0a9261b8e2`, while
-current source was `6aa31aa0-c1f1-5101-abea-a9958c95a3c9`.
+current source was `6aa31c20-1ac0-53b5-959b-b810cd0c5c92`.
+The final HTTP read followed the third terminal refusal and counted zero
+`#inst` and zero `:db/id` literals inside the runtime pair's text. The
+requested sealed-adoption proof remains unavailable at this boundary;
+the default cluster was never stopped, restarted, or reforked.
+
+Final implementation commit: `881c720f4`. Owned source/test and both notes
+are committed. All lane command sessions exited, successful test roots
+were removed by the runner, and lane-created HTTP/log scratch files were
+deleted. No worktree or scratch cluster was created. Foreign working-tree
+edits, untracked `build/`, `workers/`, and `config/virtual-turns.edn` were
+preserved.
 
 The convergence observation uses the supported MCP JVM tool, wrapping this
 form in `pr-str` to avoid its known result-envelope problem:
