@@ -16,21 +16,21 @@
     (is (= form (read-string source)))))
 
 (deftest one-evaluation-emits-comment-prompt-and-response
-  (testing "the comment sits above the prompt so the prompt holds one form"
+  (testing "the prompt precedes the entire agent input"
     (let [emitted (repl/text
                  {:seon.cluster.eval/comment
-                  "; the agent's comment, verbatim, above the prompt"
+                  ";; I should check the sum."
                   :seon.cluster.eval/source "(+ 1 1)"
                   :seon.ns/name 'my.agents.juniper
                   :seon.repl/handle (admit/result-handle "41")
                   :seon.eval/shown "2"
                   :seon.eval/duration-ms 3})]
-      (is (= (str "; the agent's comment, verbatim, above the prompt\n"
-                  "my.agents.juniper=> (+ 1 1)\n"
+      (is (= (str "my.agents.juniper=> ;; I should check the sum.\n"
+                  "(+ 1 1)\n"
                   "#:seon.repl{:value 2, :result result/e41, :ms 3}")
              emitted))
       (is (= 3 (count (str/split-lines emitted)))
-          "comment, prompt, response — never a comment glued into the prompt")))
+          "prompt and comment, form, response")))
   (testing "no comment means no blank line before the prompt"
     (is (= (str "my.agents.juniper=> (+ 1 1)\n"
                 "#:seon.repl{:value 2, :result result/e41, :ms 3}")

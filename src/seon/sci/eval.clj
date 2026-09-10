@@ -1875,15 +1875,19 @@
 (defn- shown-result
   [value request record]
   (let [profile (render/request-profile request)
-        shown (render.value/render-ai
+        projection (render.value/prepare
                (assoc request
                       :seon.render/value value
                       :seon.render/profile profile
                       :seon.render.call/id
                       [:seon.cluster.eval/source
-                       (:seon.cluster.eval/source request)]))]
+                       (:seon.cluster.eval/source request)]))
+        shown (if (:seon.error/kind projection) projection
+                  (render.value/render-ai-data projection))]
     (cond-> {:seon.sci.admit/value value
              :seon.eval/shown (if (string? shown) shown (pr-str shown))}
+      (:seon.render.call/selected-producer projection)
+      (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
       (:seon.error/kind value)
       (assoc :seon.cluster.eval/error
              (or (:seon.error/message value) (str (:seon.error/kind value))))
@@ -1908,6 +1912,8 @@
             ;; is what lets a reader ask `contains?` instead of guessing.
             (contains? admitted :seon.sci.admit/value)
             (assoc :seon.sci.admit/value (:seon.sci.admit/value admitted))
+            (:seon.eval/renderer admitted)
+            (assoc :seon.eval/renderer (:seon.eval/renderer admitted))
             (:seon.eval/shown admitted)
             (assoc :seon.eval/shown
                    (:seon.eval/shown admitted))

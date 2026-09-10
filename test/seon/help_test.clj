@@ -58,12 +58,13 @@
            (is (string? (:seon.turn/id @committed)))
            (is (= "(help)" (:seon.cluster.eval/source saved)))
            (is (= ['help 'seon.db/pull 'seon.db/pull 'seon.db/pull
-                   'seon.db/pull 'seon.db/pull 'dir]
+                   'seon.agent/effective-settings 'seon.db/pull 'dir]
                   (mapv (comp first edn/read-string :seon.cluster.eval/source)
                         (evaluation/of-agent @connection "help"))))
            (let [entries (evaluation/of-agent @connection "help")
                  empty-reads (subvec entries 2 6)]
-             (is (= ["nil" "nil" "nil" "nil"] (mapv :seon.eval/shown empty-reads)))
+             (is (= ["nil" "nil" "nil"] (mapv :seon.eval/shown (mapv empty-reads [0 1 3]))))
+             (is (str/includes? (:seon.eval/shown (nth empty-reads 2)) "turns-left"))
              (is (every? #(seq (:seon.cluster.eval/read-evidence %)) empty-reads)))
            (is (vector? lines) (pr-str lines))
            (is (= 13 (count lines)))
@@ -90,11 +91,14 @@
            (is (seq evidence))
            (is (= 0 (turn/episode-runs @connection "help")))
            (let [again (turn/system-turn request)]
-             (is (nil? (:seon.turn/id again)) (pr-str again))
-             (is (every? #(= :unchanged (:seon.turn/status %)) (:seon.turn/forms again))))
+             (is (string? (:seon.turn/id again)))
+             (is (= ["(seon.agent/effective-settings)"]
+                    (mapv :seon.cluster.eval/source
+                          (filter #(= :changed (:seon.turn/status %))
+                                  (:seon.turn/forms again))))))
            (is (true? (db/read-evidence-current? @connection evidence)))
-           (is (str/includes? shown ":ms"))
-           (is (str/includes? shown "result/e"))
+           (is (= 'seon.bootstrap/render-help-ai (:seon.eval/renderer saved)))
+           (is (= (:seon.eval/shown saved) (repl/response (repl/entity-emission saved))))
            (db/transact! connection [{:seon.agent/id "unrelated"}])
            (is (true? (db/read-evidence-current? @connection evidence)))
            (is (= shown (repl/render-ai (first (evaluation/of-agent @connection "help")))))

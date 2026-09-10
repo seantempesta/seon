@@ -4,7 +4,6 @@
   (:require [seon.turn :as turn]
             [seon.ai :as ai]
             [seon.db :as db]
-            [seon.repl :as repl]
             [seon.config :as config]))
 
 (defn identity
@@ -73,19 +72,37 @@
       result
       (ai/agent-overlay (:db-after result) agent-id))))
 
+(defn effective-settings
+  "Read effective agent dials grouped by namespace, then remaining turns."
+  {:malli/schema
+   [:=> [:cat :seon.db/db :seon.agent/id]
+    [:or [:vector [:map-of :qualified-keyword :seon.schema/value]] :seon.error/value]]}
+  [database agent-id]
+  (let [cluster-name (db/q '[:find ?name . :where [_ :seon.config/cluster ?name]] database)
+        defaults (when (string? cluster-name) (config/effective database cluster-name))
+        overrides (ai/agent-overlay database agent-id)
+        attributes (ai/agent-setting-attributes database)
+        remaining (turn/turns-left database agent-id)
+        refusal (some #(when (:seon.error/kind %) %)
+                      [cluster-name defaults overrides attributes remaining])]
+    (cond
+      refusal refusal
+      (nil? defaults) {:seon.error/kind :seon.config/required-absent
+                      :seon.error/message "The cluster configuration is absent."}
+      :else
+      (let [effective (select-keys (ai/settings defaults overrides) attributes)
+            order {"seon.config.ai" 0 "seon.config.ai.retry" 1
+                   "seon.config.eval" 2 "seon.config.run" 3}]
+        (conj (mapv (fn [[_ entries]] (into (sorted-map) entries))
+                    (sort-by (fn [[group _]] [(get order group 4) group])
+                             (group-by (comp namespace key) effective)))
+              {:my.agent/turns-left remaining})))))
+
 (defn render-settings-ai
-  "Read my overrides and the remaining turns in this session."
+  "Read effective values in provider, retry, evaluation, and budget order."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
-  [unit]
-  (str ";; I should pull my overrides; omitted settings inherit defaults, and turns left is derived rather than stored.\n"
-       (repl/source-text
-        (list 'seon.db/pull
-              (list 'quote
-                    '[{:seon.agent/settings
-                       [:seon.config.ai/model :seon.config.ai/no-provider
-                        :seon.config.eval/time-limit-ms
-                        :seon.config.run/max-episode-runs]}])
-              [:seon.agent/id (:seon.agent/id unit)]))))
+  [_unit]
+  ";; I should read effective settings; my overrides win over cluster defaults, and turns left is derived.\n(seon.agent/effective-settings)")
 
 (defn render-settings-html
   "Show every declared agent dial, its effective value, and where it comes from."

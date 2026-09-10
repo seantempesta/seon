@@ -442,7 +442,7 @@
           id (node-id unit path)]
       (if (:seon.error/kind id)
         id
-        {:seon.render.value/tree tree
+        (cond-> {:seon.render.value/tree tree
          :seon.render.value/options options
          :seon.render.value/truncated? truncated?
          :seon.render.value/text (:seon.print/text emitted)
@@ -453,7 +453,10 @@
           (:seon.print/hiccup emitted)
           (when truncated?
             [:p {:class "seon-data-capped"}
-             "elided — this value is larger than the configured window"]) ]}))))
+             "elided — this value is larger than the configured window"]) ]}
+          (:seon.render.call/selected-producer initial-tree)
+          (assoc :seon.render.call/selected-producer
+                 (:seon.render.call/selected-producer initial-tree)))))))
 
 (defn render-ai-data
   "Return the text sink result from one already prepared projection."

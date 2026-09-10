@@ -41,6 +41,7 @@
    :seon.cluster.eval/source
    :seon.cluster.eval/read-basis-transaction
    :seon.eval/shown
+   :seon.eval/renderer
    :seon.cluster.eval/error
    :seon.cluster.eval/triage-edn
    :seon.cluster.eval/interrupted-at
@@ -316,6 +317,7 @@
          'user)
      ::read-basis (:seon.cluster.eval/read-basis-transaction receipt)
      ::result (:seon.eval/shown receipt)
+     ::renderer (:seon.eval/renderer receipt)
      ::error (:seon.cluster.eval/error receipt)
      ::triage-edn (:seon.cluster.eval/triage-edn receipt)
      ::error-kind (:seon.error/kind receipt)
@@ -501,6 +503,7 @@
       (and (::result entry) (nil? (::missing entry)))
       (assoc :seon.repl/value
              (::result entry))
+      (::renderer entry) (assoc :seon.eval/renderer (::renderer entry))
       (int? (::print-length entry)) (assoc :seon.print/length
                                            (::print-length entry))
       (int? (::print-level entry)) (assoc :seon.print/level

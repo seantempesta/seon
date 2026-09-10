@@ -1036,6 +1036,7 @@
             (if (:seon.error/kind rendered)
               node
               {:seon.print/face :seon.print/projected
+               :seon.render.call/selected-producer selected
                :seon.render/output output
                :seon.print/value rendered})
             node)))

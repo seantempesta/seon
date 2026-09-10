@@ -39,6 +39,7 @@
                     :projection
                     [:map
                      [:seon.render.value/tree :seon.render.value/tree]
+                     [:seon.render.call/selected-producer {:optional true} :qualified-symbol]
                      [:seon.render.value/truncated?
                       :seon.render.value/truncated?]
                      [:seon.render.value/text :seon.render.value/text]

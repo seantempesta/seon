@@ -24,6 +24,7 @@
             :settled
             [:map
              [:seon.repl/key :seon.repl/key]
+             [:seon.eval/renderer {:optional true} :seon.eval/renderer]
              [:seon.eval/shown {:optional true} :seon.eval/shown]
              [:seon.cluster.eval/output {:optional true} :string]
              [:seon.cluster.eval/error {:optional true} :string]
@@ -79,6 +80,7 @@
              [:seon.cluster.eval/ordinal
               {:optional true}
               :seon.cluster.eval/ordinal]
+             [:seon.eval/renderer {:optional true} :seon.eval/renderer]
              [:seon.eval/shown {:optional true} :seon.eval/shown]
              [:seon.cluster.eval/error
               {:optional true}

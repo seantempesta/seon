@@ -197,3 +197,33 @@ exited through `bin/seon --root … down`; the store lock was free and `lsof`
 reported no open files under this lane's root or worktree before deletion.
 Both were removed, with the shared `reference-code` target intact. All owned
 shells ended. Default was never stopped, restarted, or reforked.
+
+## 19:25 resume — land on the data batch
+
+Read the landed data-lane note end to end and reread turn §18d. The prior
+held patch now uses `:seon.eval/shown`; its renderer provenance survives
+evaluation, settlement, entity rendering, and the fixed transcript selector.
+The exact multiline entry is **128 bytes**, help is **2470 bare bytes** and
+its complete entry **2554 bytes**. The flat invalid-write response remains
+**131 bytes**, schema first. These are executed canonical armed SCI results.
+
+Effective settings group provider, retry, evaluation, and budget namespaces,
+then remaining groups and turns-left. Both authored plan examples execute
+through SCI: `(seon.id/id title 8)` names the added step; `retractEntity`
+removes it while preserving the existing step. The public renderer docstring
+contains both writes. Data-lane selectors already use `done-when`,
+`completed-tx`, and `:seon.message/_inbox`.
+
+Gates: selected paths, **19 tests / 128 assertions**, then the additional
+fixed-transcript-selector regression **2 / 13**, both green, one worker.
+Default MCP observed the changed loaded `seon.repl/text` at basis 536870998.
+CUA again lists no browser surfaces and native Chrome returns
+`cgWindowNotFound`; browser paint remains unavailable.
+
+The effective-settings read conservatively refreshes after a system turn
+adds its runtime edge, despite unchanged remaining count;
+[the evidence and follow-up](../../../seon/issues/effective-settings-read-refreshes-after-system-turn.md)
+are recorded. No other lane's edits or sessions were used.
+
+Platform gate: **84 tests green**, one worker, isolated root `run.mZQqlO`;
+all gate shells exited and successful gate roots removed automatically.

@@ -30,7 +30,6 @@
                     :seon.config/on-core-error :panic})
            shown (:seon.eval/shown result)
            response (repl/response result)
-           parsed (edn/read-string response)
            diagnostic (:seon.sci.admit/value result)]
        (println "RETURNED-ERROR"
                 (pr-str {:shown shown :bytes (alength (.getBytes shown "UTF-8"))
@@ -40,8 +39,8 @@
        (is (= 42 (:seon.db/offending diagnostic)))
        (is (str/starts-with? shown "Expected:") shown)
        (is (< (alength (.getBytes shown "UTF-8")) 300) shown)
-       (is (= shown (:seon.repl/error parsed)) response)
-       (is (not (contains? parsed :seon.repl/value)) response)
+       (is (= shown response))
+       (is (= 'seon.db/render-rejection-ai (:seon.eval/renderer result)))
        (is (= before (db/basis-t @connection)))
        (is (= "Verify" (:my.plan.item/title
                         (db/pull @connection [:my.plan.item/title]

@@ -8,7 +8,8 @@
                     :seon.schema.admission/reason
                     "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation.",
                     :gen/elements [nil true 0 "" :k [] {} #{}]}]]
-                 [:seon.eval/shown {:optional true} :seon.eval/shown]
+                 [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+             [:seon.eval/shown {:optional true} :seon.eval/shown]
                  [:seon.cluster.eval/error
                   {:optional true}
                   :seon.cluster.eval/error]

@@ -42,10 +42,10 @@
                                            :seon.cluster.eval/source source
                                            :seon.sci.eval/time-limit-ms 10000))]
                        (assert (not (:seon.cluster.eval/error result))
-                               (:seon.eval/value result))
-                       {:source source :shown (:seon.eval/value result)
+                               (:seon.eval/shown result))
+                       {:source source :shown (:seon.eval/shown result)
                         :value (:seon.sci.admit/value result)
-                        :bytes (alength (.getBytes (:seon.eval/value result) "UTF-8"))})) sources)
+                        :bytes (alength (.getBytes (:seon.eval/shown result) "UTF-8"))})) sources)
              record {:seon.page/plan-examples results}]
          (spit (str directory "/context_page_plan_examples_2026_09_09.edn") (pr-str record))
          (mapv #(select-keys % [:bytes :shown]) results))))))
@@ -67,7 +67,7 @@
              _ (assert (= 1 (count (filter #{"(help)"} sources))))
              prompt ((resolve 'juniper-fixture-2026-09-06/prompt) cluster-name)
              instructions (bootstrap/help-value database "juniper")
-             shown (:seon.eval/value (first rows))
+             shown (:seon.eval/shown (first rows))
              record {:seon.page/cluster cluster-name
                      :seon.page/basis (db/basis-t database)
                      :seon.page/prompt-bytes (alength (.getBytes prompt "UTF-8"))
@@ -77,7 +77,7 @@
                      :seon.page/help-html (bootstrap/render-help-html instructions)
                      :seon.page/evaluations
                      (mapv #(select-keys % [:seon.cluster.eval/source
-                                           :seon.cluster.eval/comment :seon.eval/value :seon.eval/renderer]) rows)
+                                           :seon.cluster.eval/comment :seon.eval/shown :seon.eval/renderer]) rows)
                      :seon.trial/score-status :unavailable
                      :seon.trial/score-error :seon.ai/provider-error}]
          (assert (= 'seon.bootstrap/render-help-ai (:seon.eval/renderer (first rows))))

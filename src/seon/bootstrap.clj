@@ -46,7 +46,7 @@
           " and is drawn for you. Send only ;; thinking comments and forms.")
      "Results are data: chain them with ->>, sort-by, filter, map, and get-in. Every function in the program is callable."
      "Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
-     "Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value."
+     "A declared AI renderer prints its output directly. Other results use #:seon.repl: :value (or :error) is data, :out is printed text, and :result names the live value."
      "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
      (str "When unsure, inspect data first: (dir " namespace-name
           ") lists your namespace's public functions and schema declarations; (doc seon.db/q) returns its docstring and contract.")

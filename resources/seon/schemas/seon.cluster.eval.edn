@@ -16,7 +16,7 @@
                      {:min 1,
                       :seon.db/no-history? true,
                       :description
-                      "The agent's own prose above this form, verbatim and stored apart from the source it introduces, so a prompt line holds exactly one form and HTML can label the comment separately."}],
+                      "The agent's own comment, stored verbatim. The REPL prompt precedes the comment and source as one agent input; the response follows both."}],
                     :interrupted-at :inst,
                     :id [:string {:min 1, :seon.db/identity true}],
                     :ns :seon.db/ref,
@@ -61,7 +61,8 @@
                      [:seon.sci.eval/ending-ns
                       {:optional true}
                       :seon.sci.eval/ending-ns]
-                     [:seon.eval/shown
+                     [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+             [:seon.eval/shown
                       {:optional true}
                       :seon.eval/shown]
                      [:seon.cluster.eval/error
@@ -123,7 +124,8 @@
                      [:seon.turn/id :seon.turn/id]
                      [:seon.cluster.eval/ordinal
                       :seon.cluster.eval/ordinal]
-                     [:seon.eval/shown
+                     [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+             [:seon.eval/shown
                       {:optional true}
                       :seon.eval/shown]
                      [:seon.cluster.eval/error

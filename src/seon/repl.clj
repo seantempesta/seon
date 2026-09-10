@@ -1,24 +1,13 @@
 (ns seon.repl
   "The ONE generator of REPL bytes: one evaluation, as the session it was.
 
-  An agent writes comments and forms. The REPL answers each form with one
-  `#:seon.repl{…}` map the agent is never asked to write (PRD ruling 69,
-  docs/prds/context-generation/plan/agent-record-and-repl-response-prd-2026-09-07.md
-  §4). The page's AI column, the agent's history unit, and the provider
-  prompt are the same pure function over the same evaluation, so their bytes
-  are identical by construction rather than by three formatters agreeing.
+  The prompt precedes everything the agent typed, including its comments.
+  Declared AI renderer output is the response itself; ordinary data uses the
+  reply map. Historical entries preserve the evaluation's saved shown text.
 
-  The grammar, exactly:
-
-      ; the agent's comment, verbatim, above the prompt
-      my.agents.juniper=> (+ 1 1)
-      #:seon.repl{:value 2, :result result/e41, :ms 3}
-
-  Comments sit ABOVE the prompt so a prompt line holds exactly one form and
-  HTML can label the comment separately. Key order is enforced by walking an
-  ordered vector — never by printing a map, whose order is the reader's
-  accident. Ruling 45 holds: nothing this emits is comment-shaped except the
-  agent's own comment."
+      my.agents.juniper=> ;; I should check the sum.
+      (+ 1 1)
+      #:seon.repl{:value 2, :result result/e41, :ms 3}"
   (:require [clojure.edn :as edn]
             [clojure.main :as main]
             [clojure.pprint :as pprint]
@@ -149,42 +138,47 @@
           response-order)))
 
 (defn response
-  "The one-line `#:seon.repl{…}` answer to one evaluated form.
+  "The saved declared-renderer response, or the reply map for ordinary data.
 
   Returns nil when the evaluation has settled nothing — a running form has
   not printed a result, and inventing an empty map would say it had."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
   [emission]
-  (let [entries (response-entries emission)]
+  (if (:seon.eval/renderer emission)
+    (value-text emission)
+    (let [entries (response-entries emission)]
     (when (seq entries)
       (str "#:seon.repl{"
            (str/join ", "
                      (map (fn [[response-key text]]
                             (str ":" (name response-key) " " text))
                           entries))
-           "}"))))
+           "}")))))
+
+(defn- input-text
+  [{prose :seon.cluster.eval/comment source :seon.cluster.eval/source
+    prompt-ns :seon.ns/name}]
+  (str (or prompt-ns 'user) "=> "
+       (when (seq prose) (str (str/trim-newline prose) "\n"))
+       source))
 
 (defn text
-  "The REPL bytes for ONE evaluation: comment, prompt line, response.
+  "The REPL bytes for one evaluation: prompt, agent input, response.
 
   This is the single generator behind the debug page's AI column, the agent's
   history unit, and the provider prompt. Anything that formats an evaluation
   some other way is by definition a second grammar, and a second grammar is
   what taught agents to echo results instead of writing forms."
   {:malli/schema [:=> [:cat :seon.repl/emission] :string]}
-  [{prose :seon.cluster.eval/comment
-    source :seon.cluster.eval/source
-    prompt-ns :seon.ns/name
-    :as emission}]
+  [emission]
   (let [answer (response emission)]
-    (str (when (seq prose) (str (str/trim-newline prose) "\n"))
-         (or prompt-ns 'user) "=> " source
+    (str (input-text emission)
          (when answer (str "\n" answer)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The evaluation entity's two projections
 ;;;
-;;; Both are the same bytes by construction: `/html` labels the comment and
+;;; Both share the prompt and complete input bytes; `/html` labels input and
 ;;; the response, and `/ai` is the text the agent reads. Neither invents a
 ;;; second grammar, because both call `text`/`response`.
 ;;; ---------------------------------------------------------------------------
@@ -200,11 +194,13 @@
   (let [unit (if (map? (:seon.render/value unit))
                (:seon.render/value unit)
                unit)]
-   (cond-> (select-keys unit [:seon.cluster.eval/id
+   (cond-> (select-keys unit [:seon.ns/name
+                             :seon.cluster.eval/id
                              :seon.cluster.eval/source
                              :seon.cluster.eval/comment
                              :seon.cluster.eval/ordinal
                              :seon.eval/shown
+                             :seon.eval/renderer
                              :seon.cluster.eval/error
                              :seon.cluster.eval/interrupted-at
                              :seon.cluster.eval/triage-edn
@@ -242,23 +238,12 @@
       (text emission))))
 
 (defn render-html
-  "`:seon.render/html` — the same evaluation, with the comment labeled.
-
-  The comment is its own element rather than a line of the prompt, which is
-  the whole reason it is stored apart from the source it introduces."
+  "Render the prompt and complete agent input together, then its response."
   {:malli/schema [:=> [:cat :seon.repl/entity-request] [:maybe :seon.render/hiccup]]}
   [unit]
   (let [emission (entity-emission unit)
-        prose (:seon.cluster.eval/comment emission)
         answer (response emission)]
     (when (seq (:seon.cluster.eval/source emission))
-      (into [:article {:class "seon-family-entry seon-eval-entry"}]
-            (cond-> []
-              (seq prose)
-              (conj [:p {:class "seon-eval-comment"} prose])
-              :always
-              (conj [:pre [:code {:class "seon-eval-prompt"}
-                           (str (or (:seon.ns/name emission) 'user) "=> "
-                                (:seon.cluster.eval/source emission))]])
-              answer
-              (conj [:pre [:code {:class "seon-eval-response"} answer]]))))))
+      (cond-> [:article {:class "seon-family-entry seon-eval-entry"}
+               [:pre [:code {:class "seon-eval-prompt"} (input-text emission)]]]
+        answer (conj [:pre [:code {:class "seon-eval-response"} answer]])))))

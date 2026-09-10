@@ -77,6 +77,8 @@
                  (:seon.error/kind form-problem))]
     (cond-> {:seon.turn/id id
              :seon.cluster.eval/ordinal ordinal}
+      (:seon.eval/renderer settlement-evaluation)
+      (assoc :seon.eval/renderer (:seon.eval/renderer settlement-evaluation))
       (:seon.eval/shown settlement-evaluation)
       (assoc :seon.eval/shown
              (:seon.eval/shown settlement-evaluation))
@@ -1345,6 +1347,7 @@
 
 (def ^:private receipt-terminal-attributes
   [:seon.eval/shown
+   :seon.eval/renderer
 
 
    :seon.cluster.eval/error
