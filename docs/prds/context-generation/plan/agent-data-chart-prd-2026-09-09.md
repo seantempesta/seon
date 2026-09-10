@@ -386,3 +386,25 @@ shapes), after 3–7 (raw writes in the history on a fresh fixture), after
 ## Live attribute inventory (default, tenth refork)
 
 seon.agent/{id, namespace, plan comp, settings comp}; my.plan/{objective, steps*comp, current-step}; my.plan.item/{id, title, expected-result, description, about, position, needs*, completed-at, steps*comp, agent}; seon.cluster.message/{id, to, from, content, about, caused-by, at, ordinal}; seon.turn/{id, agent, opened-at, closed-at, reply, reply-blob, reply-size, attempts*comp, trigger, starting-ns, plan-digest, supersedes*, undisposed-at, background-results*, error}; seon.eval/{value, missing, size, duration-ms}; seon.ai.attempt/{…}; seon.error/{…}; my.note/{id, agent, about, content}; seon.ns/{…}; seon.wake/{listen, opens-turn?, inside}.
+
+## 17. The live-test scenario (owner, 2026-09-10) — every core capability once
+
+Root's message: "Find the customer with the largest order total with a
+contracted function and a test, add an order of 40 for them, and tell me
+the customer and both totals." The plan, current first, each step
+completed with `completed-tx` as it goes; every done-when is a query:
+
+| # | step | writes / runs | done when |
+|---|---|---|---|
+| 1 | Read the orders | `q` over `:example/*` | ids, customers, amounts read |
+| 2 | Define `largest-customer` with a `:malli/schema` contract (rows → `{:customer :total}`) | `defn` → durable function | a `:seon.fn` row with `:seon.fn/spec` exists |
+| 3 | Write a `deftest` over the fixture data and run it | `deftest` → durable test; `(my.test/run)` | the `:seon.test` row's last result passed |
+| 4 | Run it and save the answer | call; `transact!` a `:my.note` | a note records customer and total |
+| 5 | Add an order of 40 for that customer | `transact!` | the new order entity exists |
+| 6 | Run it again and record the new total | call; note updated | the note carries both totals |
+| 7 | Report and finish | `(my.message/send …)`; `(my.agent/done)` | message to root exists; session closed |
+
+Budget twelve turns; `deepseek-flash`, thinking disabled. Root's
+mid-session "what step are you on?" tests additive context. Open: whether
+root's message gives the contract or the agent designs it from
+`(doc seon.fn)`.
