@@ -775,4 +775,8 @@ half-edit. Measured targets in the issue.
   (trigger, listens) — 118 lines, zero printer fallbacks, zero commented
   code. Leftovers noted on the issue: the trigger's `[*]` shows a bare
   `#:db{:id}` for `:from`; the empty notes read prints `nil`.
+- render-pass ended: prompt 11,376 → 9,724 bytes (−14.5%); gate 29/183,
+  platform 84/505. No lane running at 21:00; next: evidence for `not`/
+  `or`/pull-in-find and agent listens (roadmap 2, 8); the two leftovers
+  and `dir`/`doc` structure (roadmap 1h, 11).
 

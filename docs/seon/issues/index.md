@@ -93,7 +93,7 @@ See `README.md` for the convention.
 | [Carry agent routing into the virtual-turn control](virtual-turn-control-loses-agent-routing.md) | blocker | turn follow-up wave |
 | [Render walk-unit hiccup as markup, never escaped EDN text](walk-units-render-their-hiccup-as-escaped-edn-text.md) | blocker | ui verification wave |
 
-## Friction (178)
+## Friction (179)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -239,6 +239,7 @@ See `README.md` for the convention.
 | [Root's turns on a fresh dev cluster hit the context-acquisition backstop](root-turns-on-a-fresh-dev-cluster-hit-the-context-acquisition-backstop.md) | friction | turn-cut lane (running, 2026-09-09) |
 | [Render run forms and receipts with strict REPL fidelity](run-renderer-narrates-forms-and-receipts.md) | friction | strict REPL display wave |
 | [Resolve namespace aliases before selecting runtime lint stubs](runtime-lint-does-not-resolve-namespace-aliases.md) | friction | future runtime-lint wave |
+| [The runtime block's trigger prints a bare `#:db{:id}` and an empty notes read prints `nil`](runtime-trigger-pulls-a-bare-db-id-and-empty-reads-print-nil.md) | friction | context-nits lane (2026-09-09) |
 | [Split the turn and evaluation kernels at durable boundaries](runtime-turn-and-evaluate-kernels-conflate-boundaries.md) | friction | runtime boundary refactor |
 | [Construct the schedule graph test from a real environment-bearing handle](schedule-graph-test-constructs-a-handle-without-an-environment.md) | friction | schedule fixture repair |
 | [Stop rebuilding gigabytes of schema state for one declaration](schema-declaration-rebuilds-four-gigabytes-per-form.md) | friction | schema projection performance wave |
