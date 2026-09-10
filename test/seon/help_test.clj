@@ -52,13 +52,14 @@
                evidence (:seon.cluster.eval/read-evidence saved)
                shown (when saved (repl/render-ai saved))]
            (is (some? saved) (pr-str {:opening opening :committed @committed}))
+           (is (empty? (keep :seon.cluster.eval/error (evaluation/of-agent @connection "help"))))
            (is (nil? (:seon.error/kind opening)) (pr-str opening))
            (is (nil? (:seon.turn/id opening))
                "a second real system pass committed while this pass evaluated")
            (is (string? (:seon.turn/id @committed)))
            (is (= "(help)" (:seon.cluster.eval/source saved)))
            (is (= ['help 'seon.db/pull 'seon.db/pull 'seon.db/pull
-                   'seon.agent/effective-settings 'seon.db/pull 'dir]
+                   'seon.agent/effective-settings 'seon.db/pull 'dir 'seon.db/pull]
                   (mapv (comp first edn/read-string :seon.cluster.eval/source)
                         (evaluation/of-agent @connection "help"))))
            (let [entries (evaluation/of-agent @connection "help")
@@ -92,10 +93,10 @@
            (is (= 0 (turn/episode-runs @connection "help")))
            (let [again (turn/system-turn request)]
              (is (string? (:seon.turn/id again)))
-             (is (= ["(seon.agent/effective-settings)"]
-                    (mapv :seon.cluster.eval/source
-                          (filter #(= :changed (:seon.turn/status %))
-                                  (:seon.turn/forms again))))))
+             (let [changed (filter #(= :changed (:seon.turn/status %)) (:seon.turn/forms again))]
+               (is (= 2 (count changed)))
+               (is (= "(seon.agent/effective-settings)" (:seon.cluster.eval/source (first changed))))
+               (is (str/includes? (:seon.cluster.eval/source (second changed)) ":seon.runtime/turns"))))
            (is (true? (db/read-evidence-current? @connection evidence)))
            (is (= 'seon.bootstrap/render-help-ai (:seon.eval/renderer saved)))
            (is (= (:seon.eval/shown saved) (repl/response (repl/entity-emission saved))))

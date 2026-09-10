@@ -1055,3 +1055,73 @@
     (into [:section {:class "seon-turn-history"}
            [:h2 (str "Turns (" (count rows) ")")]]
           (map #(turn-header database (:seon.turn/id %)) ordered))))
+
+(defn- runtime-owner
+  [unit]
+  (let [runtime (or (:seon.render/value unit) unit)
+        owner (:seon.runtime/agent runtime)
+        agent-id (or (when owner
+                       (:seon.agent/id
+                        (db/pull (:seon.db/db unit) [:seon.agent/id]
+                                 (if (map? owner) (:db/id owner) owner))))
+                     (:seon.agent/id unit))]
+    (or agent-id
+        (error/diagnostic
+         {:seon.error/kind :seon.db/not-found
+          :seon.error/message "The runtime component's owner could not be resolved."
+          :seon.error/diagnostic-layer :seon.render
+          :seon.error/diagnostic-operation 'seon.render.transcript/render-runtime-ai
+          :seon.error/diagnostic-member :seon.runtime/agent
+          :seon.error/diagnostic-expected :seon.agent/id
+          :seon.error/diagnostic-offending (or owner :seon.error/unknown)
+          :seon.error/diagnostic-cause :seon.db/not-found
+          :seon.error/diagnostic-evidence [:seon.runtime/agent]}))))
+
+(defn render-runtime-ai
+  "Read my runtime component, its turn transaction refs, trigger, and listens."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.error/value]]}
+  [unit]
+  (let [agent-id (runtime-owner unit)]
+    (if (:seon.error/kind agent-id) agent-id
+      (str ";; I should follow my runtime's owner ref before pulling its turns, trigger, and listens.\n"
+       (repl/source-text
+        (list 'seon.db/pull
+              (list 'quote
+                    '[{:seon.agent/runtime
+                       [{:seon.runtime/turns
+                         [:seon.turn/id {:seon.turn/opened-tx [:db/txInstant]}
+                          {:seon.turn/closed-tx [:db/txInstant]}]}
+                        {:seon.runtime/trigger [*]}
+                        {:seon.runtime/listens
+                         [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}])
+              [:seon.agent/id agent-id]))))))
+
+(defn render-runtime-html
+  "Show runtime state and all turn headers; evaluations belong in the prompt."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or :seon.render/hiccup :seon.error/value]]}
+  [unit]
+  (let [agent-id (runtime-owner unit)
+        database (:seon.db/db unit)
+        row (if (:seon.error/kind agent-id) agent-id
+                (db/pull database
+                     '[{:seon.agent/runtime
+                        [{:seon.runtime/turns
+                          [:seon.turn/id {:seon.turn/opened-tx [:db/id :db/txInstant]}
+                           :seon.turn/closed-tx]}
+                         {:seon.runtime/trigger [:seon.message/id]}
+                         {:seon.runtime/listens [*]}]}]
+                     [:seon.agent/id agent-id]))]
+    (if (:seon.error/kind row) row
+        (let [runtime (:seon.agent/runtime row)
+              turns (:seon.runtime/turns runtime)
+              open (last (sort-by #(get-in % [:seon.turn/opened-tx :db/id])
+                                 (remove :seon.turn/closed-tx turns)))]
+          [:section {:class "seon-runtime"}
+           [:h2 "Runtime"]
+           [:p (if open (str "Turn open since " (pr-str (get-in open [:seon.turn/opened-tx :db/txInstant]))) "Idle")]
+           [:p (str "Trigger: " (or (get-in runtime [:seon.runtime/trigger :seon.message/id]) "None"))]
+           (into [:ul {:class "seon-runtime-listens"}]
+                 (map #(vector :li [:code (pr-str (dissoc % :db/id))])
+                      (:seon.runtime/listens runtime)))
+           (render-history-html turns database)]))))

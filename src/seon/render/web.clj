@@ -707,7 +707,8 @@
         turns (when-not (:seon.error/kind evaluations)
                 (db/q '[:find ?turn ?opened ?turn-id :in $ ?id
                         :where [?agent :seon.agent/id ?id]
-                               [?turn :seon.turn/agent ?agent]
+                               [?agent :seon.agent/runtime ?runtime]
+                               [?runtime :seon.runtime/turns ?turn]
                                [?turn :seon.turn/id ?turn-id]
                                [?turn :seon.turn/opened-tx ?opened]] database agent-id))]
     (cond

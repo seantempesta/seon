@@ -2,94 +2,60 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]))
 
-; This formats retained default-MCP evidence; it never evaluates a database form.
-(let [root "docs/prds/context-generation/research/"
-      path (str root "context-cookbook-2026-09-09.md")
-      prior (slurp path)
-      result (edn/read-string (slurp (str root "context_cookbook_rechecked_2026_09_09.edn")))
-      blocks (edn/read-string (slurp (str root "context_cookbook_blocks_2026_09_09.edn")))
-      notes-help (edn/read-string (slurp (str root "context_cookbook_notes_help_2026_09_09.edn")))
-      root-agents (edn/read-string (slurp (str root "context_cookbook_root_agents_2026_09_09.edn")))
-      records (concat (:reads result) (:writes result) (:proposed-reads result))
-      _ (assert (every? :unchanged? records))
-      prefix (subs prior 0 (or (str/index-of prior "\n## Agent-source recheck\n")
-                              (str/index-of prior "\n## Identity\n")))
-      prefix (str/replace prefix
-                          "each read receives `database = @connection`. Basis 536871165."
-                          (str "the connection and immutable read basis are supplied to bare reads. Basis "
-                               (:basis result) "."))
-      prefix (str/replace prefix
-                          "../../../seon/issues/platform-blob-reachability-fails-at-3d13aa0f7.md"
-                          "../../../seon/issues/archive/platform-blob-reachability-fails-at-3d13aa0f7.md")
-      choices {"Identity" "Pull: one known entity and its nested refs."
-               "Plan" "Pull: the agent's plan component and nested steps."
-               "Settings" "Pull: the agent's override component."
-               "Runtime target" "Pull: the intended component shape; this installed-schema refusal is not an empty runtime."
-               "Runtime current" "Q plus inner pull: filter open turns and shape their refs; absence filtering and inner pull yield attribute-level evidence."
-               "Messages" "Reverse-ref pull: all messages addressed to this known agent, with sender shape."
-               "History" "Q: join this agent's turns to their evaluations. The prompt itself is the history block."
-               "Faults root" "Q plus inner pull: filter by repair steward and shape the fault. Root gets this read at turn 0."
-               "Faults juniper" "Q plus inner pull: an ordinary agent gets this block when a fault is routed to it as steward."
-               "Notes" "Reverse-ref pull: notes attached to this known agent."
-               "Namespace" "Pull: the namespace and its reverse declaration refs."
-               "Namespace counts" "Q: count stored facts for the declared attributes."
-               "Root agents" "Q plus inner pull: select all agents and shape their current work."
-               "Orders" "Q: join order identities, customers, and amounts."
-               "Customer totals" "Q: group by customer and sum amounts."}
-      section
-      (fn [mode {:keys [title thought form output evidence] n :bytes}]
-        (str "\n## " title "\n\n"
-             (when (= mode :read) (str (get choices title "Pull: verify the known entity's resulting shape.") "\n\n"))
-             "```clojure\n;; " thought "\n" form "\n```\n\n"
-             "Actual " (if (= mode :write) "speculative transaction result" "read result")
-             ": **" n " UTF-8 bytes**"
-             (when (seq evidence) (str "; evidence " (pr-str evidence)))
-             ".\n\n```clojure\n" output "\n```\n"))]
-  (spit path
-        (str prefix
-             "\n## Agent-source recheck\n\n"
-             "All source forms below use reader quotes, explicit keyword keys, and supplied database custody. "
-             "The production `seon.repl/source-text` uses Clojure's `pprint/code-dispatch`; the probe calls that same function. "
-             "Each of the 23 bare reads was executed beside its explicit-database form at the same immutable basis; "
-             "all returned equal values. Each of the nine printed transactions parsed to identical transaction data "
-             "and then ran through `datahike.api/with`. Writes below are the agent's source, never committed to default. "
-             "The new report timestamps come from those actual speculative transactions. "
-             "[Complete recheck evidence](context_cookbook_rechecked_2026_09_09.edn).\n"
-             "\n## Tuned block outputs\n\nThese later executed forms are exactly the bytes emitted by the current block pairs. "
-             "Raw pulls keep database refusals visible. Their shown text uses the production value renderer.\n"
-             (str/join
-              (for [{:keys [label source source-bytes shown shown-bytes evidence]} (:records blocks)]
-                (str "\n### " label "\n\n```clojure\n" source "\n```\n\n"
-                     source-bytes " source bytes; **" shown-bytes " shown UTF-8 bytes**; evidence "
-                     (pr-str evidence) ".\n\n```clojure\n" shown "\n```\n")))
-             "\n## Earlier equivalent-source probes\n"
-             "\n### Root's generated agents read\n\n```clojure\n" (:source root-agents)
-             "\n```\n\nActual output: **" (:bytes root-agents)
-             " UTF-8 bytes**; q plus inner pull has attribute-level evidence.\n\n```clojure\n"
-             (:output root-agents) "\n```\n"
-             "\n### Notes, help, and transaction time\n"
-             (str/join
-              (for [[kind thought] [[:notes nil]
-                                    [:help "I should inspect the REPL rules before choosing forms."]
-                                    [:write "I should link this note to the transaction that records my observation."]
-                                    [:time "I should pull the referenced transaction's instant."]]
-                    :let [{:keys [source output bytes shown shown-bytes]} (get notes-help kind)]]
-                (str "\n```clojure\n" (when thought (str ";; " thought "\n")) source
-                     "\n```\n\nActual output: **" (or shown-bytes bytes)
-                     " UTF-8 bytes**.\n\n```clojure\n" (or shown output) "\n```\n")))
-             (str/join (map #(section :read %) (:reads result)))
-             "\n## Write examples\n\nThe proposed identity, transaction-time, message, and runtime attributes exist only in the speculative value. "
-             "These are dependency-semantic probes, not a claim that the data lane's schema is installed.\n"
-             (str/join (map #(section :write %) (:writes result)))
-             "\n## Verify the speculative state\n"
-             (str/join (map #(section :read %) (:proposed-reads result)))
-             "\n## Positioned component proof\n\n"
-             "The renderer derives component membership from the handed database schema, sorts counted members when all share a numeric position key, "
-             "and preserves set syntax through fitting and emission. An uncounted tail is not traversed to discover positions. "
-             "The first regression's lexical order matched its position order; the live opposite-order probe falsified it. "
-             "The corrected regression puts those orders in opposition. Live default returned 118 bytes, `cookbook/b` at 1 before `cookbook/a` at 2; "
-             "[both ordering and set-preservation checks are true](context_cookbook_set_2026_09_09.edn). "
-             "The real plan's six pulled positions changed from 0,2,1,4,3,5 to 0,1,2,3,4,5 at 373 shown bytes. "
-             "The corrected isolated print/value gate passed 42 tests / 202 assertions; platform passed 83 / 490. "
-             "The print fixture now reads the actual node from `admit-value`, matching its existing cross-process test.\n"))
-  (println {:records (count records) :basis (:basis result) :bytes (count (.getBytes (slurp path) "UTF-8"))}))
+; Format executed evidence; never fabricate or evaluate a database result here.
+(let [directory "docs/prds/context-generation/research/"
+      record (edn/read-string (slurp (str directory "context_cookbook_landed_2026_09_09.edn")))
+      capture (edn/read-string (slurp (str directory "context_page_capture_2026_09_09.edn")))
+      titles ["Help" "Identity" "Plan" "Messages" "Settings" "Notes" "Namespace"
+              "Namespace counts" "Runtime" "History" "Faults at root" "Root's agents" "Customer totals"]
+      choices ["The declared help pair returns bare lines."
+               "Pull: one known entity and its nested refs."
+               "Pull: the plan component and its nested steps; the recursive selector has attribute-level evidence."
+               "Reverse-ref pull: the known agent's inbox and sender shapes."
+               "Effective settings: query the cluster configuration and pull the agent overlay; derive turns-left from turn facts."
+               "Reverse-ref pull: this agent's notes, including an empty result."
+               "Dir: namespace declarations as data; inspect unknown attribute candidates before choosing keys."
+               "Q: aggregate the facts under the declared attributes."
+               "Pull: the runtime component, turn transaction refs, trigger, and listens; the wildcard trigger makes evidence attribute-level."
+               "Q joins the runtime's turns to evaluations; map selects stored source and ordinal. The prompt itself is the history block, whose AI concern emits nothing."
+               "Q with inner pull: filter by repair steward and shape matching faults. Root receives this at turn 0; an ordinary agent receives it only when a fault is routed to it."
+               "Q with inner pull: select agents and shape their current work."
+               "Q: group customer values and aggregate amounts."]
+      section (fn [title choice {:keys [comment source shown source-bytes bytes evidence]}]
+                (str "\n## " title "\n\n" choice "\n\n```clojure\n"
+                     (when (seq comment) (str comment "\n")) source "\n```\n\n"
+                     source-bytes " form bytes; **" bytes " output UTF-8 bytes**."
+                     (when (seq evidence)
+                       (str " Complete evaluation evidence: " (pr-str (frequencies evidence)) "."))
+                     "\n\n```clojure\n" shown "\n```\n"))]
+  (assert (:fixture-unchanged? record))
+  (assert (= (count titles) (count (:reads record))))
+  (spit (str directory "context-cookbook-2026-09-09.md")
+        (str "---\ntype: research\nstatus: verified\ntags: [agent-context, repl, render]\n---\n\n"
+             "# Context cookbook — landed data shapes, 2026-09-09\n\n"
+             "Read AGENTS.md, the chart r2 and roadmap, its raw-data probe note, and turn PRD §18–§18d end to end. "
+             "This replaces the earlier proposed-schema examples with executed canonical-fixture evidence. "
+             "[Landing and verification](context-page-review-2026-09-09.md).\n\n"
+             "MCP JVM mode, cluster `" (:cluster record) "`, explicit `(seon.operator/connection \"" (:cluster record)
+             "\")`, immutable basis **" (:basis record) "**. Reads execute through the real agent SCI evaluation point with that database supplied. "
+             "Every write below executes with `datahike.api/with` on a succession of immutable database values; no fixture or default write is committed. "
+             "The source shown is exactly what an agent types. Read outputs are the production renderer's shown text; write outputs are the compact transaction report's exact `pr-str`. "
+             "The nine writes use fixed message event ids for reproducibility.\n\n"
+             "The [whole reseeded prompt](context_cookbook_final_prompt_2026_09_09.txt), read end to end, is **"
+             (:seon.page/prompt-bytes capture) " bytes**. Help is **" (:seon.page/help-bytes capture)
+             " bare bytes**; its complete entry is **2554 bytes**. The exact multiline regression is **128 bytes**. "
+             "Paid trial: **`:unavailable`**, provider credits unavailable; no paid retry.\n\n"
+             "Pull describes one known entity or known set, nested refs, and reverse refs. Q handles filters, joins, and aggregates; q with inner pull combines filtering and shaping. "
+             "Finite pull selectors and positive datom patterns record index constraints; recursive/wildcard pulls and inner-pull/absence joins retain attribute-level evidence. "
+             "The counts below include acquisition and rendering reads as well as the form: index-pattern presence does not make the entire evaluation exact. "
+             "The dependency capture owner is `src/seon/db.clj:335–423`.\n\n"
+             "Dependency ledger: Datahike `transaction.cljc:640` identity upsert, `:738` nested maps, `:785` cardinality-one replacement, `:997/:1059` retractEntity/retract; "
+             "`pull_api.cljc:304` reverse refs and component collections. First-party owners: `seon.db/transaction-result`, `seon.repl/source-text`, `seon.render.value/prepare`, and the schema-declared block pairs. "
+             "The next read is db-after; tx-data already says what changed, so the report omits db-before/db-after.\n"
+             (str/join (map section titles choices (:reads record)))
+             (str/join (map #(section (:title %) "Speculative write on the landed schema; the following read receives its db-after." %) (:writes record)))
+             "\n## Reproduction\n\n"
+             "`context_page_probe_2026_09_09.clj` captures the prompt and executes the plan examples. "
+             "`context_cookbook_landed_2026_09_09.clj` re-executes every read and the nine speculative writes. "
+             "[Exact retained results](context_cookbook_landed_2026_09_09.edn) include source/output counts and read evidence. "
+             "The earlier default-only observations remain in `context_cookbook_rechecked_2026_09_09.edn`; their proposed schema is historical.\n")))

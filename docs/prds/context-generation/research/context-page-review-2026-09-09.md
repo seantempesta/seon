@@ -227,3 +227,59 @@ are recorded. No other lane's edits or sessions were used.
 
 Platform gate: **84 tests green**, one worker, isolated root `run.mZQqlO`;
 all gate shells exited and successful gate roots removed automatically.
+
+## Runtime and landed-form recapture
+
+The final isolated source publication is `6aa20c40-dc3b-5683-b460-3c218e7a3ec1`.
+The canonical fixture was seeded on a fresh scratch branch after the actual
+plan add/remove examples. The complete model prompt is **9093 UTF-8 bytes**,
+read end to end: **nine successful opening evaluations**, one each, including
+the empty runtime read. Help is **2470 bare bytes**, with **2554** for its
+complete entry; multiline grammar remains **128** and the returned refusal
+**131**. Actual SCI plan add/remove reports are **407 / 415 bytes**.
+
+The cookbook now re-executes **13 reads and nine speculative writes** on the
+landed schema. All write reports come from `datahike.api/with`, and the
+probe asserts the fixture basis is unchanged. A later runtime read sees
+the committed turn and trigger: **631 shown bytes** at the recorded basis;
+the earlier opening correctly saw no turns yet. Every block's generated
+comment and form is retained, with read evidence and output bytes.
+
+The runtime pair resolves `:seon.runtime/agent` from the component handed
+to it, rather than assuming the root agent id is present in the render unit.
+The nil-owner live report falsified that assumption. The strengthened
+canonical opening regression requires every stored evaluation to succeed,
+and a separate component-only input verifies the exact non-nil lookup.
+An absent owner returns a diagnostic.
+
+`seon.eval/of-agent` and the debug current-turn query now join the runtime's
+turns. Regressions remove the legacy turn/agent edge and require evaluations
+to remain visible. The timestamp fixture now asserts its write and supplies
+required `:seon.cluster.eval/at`; the live refusal identified that missing
+attribute. Runtime HTML uses the existing turn-header renderer and omits
+evaluation bodies; its AI side emits the runtime read, while the turns
+concern's AI side remains empty.
+
+Scratch HTTP returned **52355 bytes** with Runtime, turn headers, and Context
+now. Both native Chrome and Brave returned `cgWindowNotFound`; browser paint
+is unavailable, not inferred from HTTP. The retained complete prompt is the
+model-view evidence. Paid trial score is **`:unavailable`**, with no paid retry.
+
+Foreign boundary: uncommitted edits appeared in `src/seon/turn.clj`,
+`src/seon/cluster/agent.clj`, `test/seon/context_blocks_fixture.clj`,
+`test/seon/cluster/agent_test.clj`, `test/seon/loop_proof_test.clj`,
+`juniper_fixture_2026_09_06.clj`, and `loop_live_probe_2026_09_09.clj`.
+They were preserved. Final scratch work used `tmp/context-page-wt`, HEAD
+617e538f3 plus this lane's paths, with the shared reference-code linked.
+Full-tree adoption twice reported source changing during adoption; isolated
+publication converged. A second fixture installation met an open ordinary
+turn from the pre-fix armer; the final capture therefore used the fresh
+scratch branch's first installation. The separate no-provider turn-settlement
+issue is owned by the loop lane. Default was never stopped, reforked, or
+restarted by this lane. RESET NEEDED remains an orchestrator-batched concern,
+not a lane lifecycle action.
+
+Final selected-path gate: **5 tests / 104 assertions**, green. Final platform:
+**84 / 505**, green. All used `SEON_TEST_WORKERS=1`. The newly filed
+`runtime-block-generates-a-nil-agent-pull.md` is another lane's untracked note
+and was preserved; this slice fixes its reported renderer boundary.

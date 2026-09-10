@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, render, debug-page, runtime, turn]
 ---
@@ -22,3 +22,5 @@ the page reads a shape the writer no longer produces. Fix at
 `seon.eval/of-agent` (one query over `:seon.runtime/turns` in order) and
 add the page regression on the canonical fixture: seeded opening →
 "8 evaluations · continuing" and the entries in "Context now".
+
+Resolution, 2026-09-09: The evaluation and current-turn queries now follow agent/runtime/turns. Canonical regressions retract the old turn/agent edge and still retrieve the evaluations. A genuinely newer empty turn still has no evaluations; the separate no-provider settlement defect is not hidden by choosing an older turn.

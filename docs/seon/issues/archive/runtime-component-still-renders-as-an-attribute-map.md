@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, agent, wave/render-producers]
 ---
@@ -22,3 +22,5 @@ when that lane implements the chart's block functions; do not add a second
 turn history or copy runtime state onto the agent.
 
 Evidence: `docs/prds/context-generation/research/data-lane-landing-2026-09-09.md`.
+
+Resolution, 2026-09-09: The runtime entity now declares its AI/HTML pair. The live scratch debug response contains Runtime and turn headers; its nine-form opening executes without errors. Browser paint remains unavailable.

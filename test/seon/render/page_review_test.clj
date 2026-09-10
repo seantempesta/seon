@@ -37,13 +37,24 @@
                :seon.cluster.eval/source "(+ 3 3)" :seon.eval/shown "6"}])]
        (is (:db-after written) (pr-str written)))
      (is (:db-after (db/transact! connection
-                     [{:seon.turn/id "late-old" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx"}]))
+                     [{:seon.turn/id "late-old" :seon.turn/agent [:seon.agent/id "page"]
+                       :seon.turn/opened-tx
+                       (get-in (db/pull @connection '[{:seon.turn/opened-tx [:db/id]}]
+                                        [:seon.turn/id "old"])
+                               [:seon.turn/opened-tx :db/id])}]))
          "An older opening can commit after the current turn.")
+     (is (:db-after (db/transact! connection
+                     [{:seon.agent/id "page"
+                       :seon.agent/runtime
+                       {:seon.runtime/agent [:seon.agent/id "page"]
+                        :seon.runtime/turns (mapv #(vector :seon.turn/id %) ["old" "current" "late-old"])}}
+                      [:db/retract [:seon.turn/id "current"] :seon.turn/agent [:seon.agent/id "page"]]])))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            evaluations (#'web/current-turn-evaluations database "page")
-           turns (:seon.turn/_agent
-                  (db/pull database '[{:seon.turn/_agent [*]}] [:seon.agent/id "page"]))
+           turns (get-in (db/pull database '[{:seon.agent/runtime [{:seon.runtime/turns [*]}]}]
+                                 [:seon.agent/id "page"])
+                         [:seon.agent/runtime :seon.runtime/turns])
            unit (assoc (db/pull database '[*] [:seon.turn/id "current"])
                        :seon.db/db database :seon.sci.eval/ctx ctx)
            headers (pr-str (transcript/render-history-html turns database))
@@ -53,6 +64,20 @@
        (is (= ["current-a" "current-b"] (mapv :seon.cluster.eval/id evaluations)))
        (is (= "" (transcript/render-history-ai turns database)))
        (is (= "" (transcript/render-run-ai unit)))
+       (let [linked (db/transact! connection
+                      [{:seon.agent/id "page"
+                        :seon.agent/runtime
+                        {:seon.runtime/agent [:seon.agent/id "page"]
+                         :seon.runtime/turns (mapv #(vector :seon.turn/id %) ["old" "current" "late-old"])}}])
+             runtime-unit {:seon.db/db @connection
+                           :seon.render/value (db/pull @connection '[*] [:seon.runtime/agent [:seon.agent/id "page"]])}
+             runtime-html (pr-str (transcript/render-runtime-html runtime-unit))]
+         (is (:db-after linked))
+         (is (str/includes? (transcript/render-runtime-ai runtime-unit) "[:seon.agent/id \"page\"]"))
+         (is (:seon.error/kind (transcript/render-runtime-ai {:seon.db/db @connection})))
+         (is (str/includes? runtime-html "Current reply"))
+         (is (str/includes? runtime-html "Turns (3)"))
+         (is (not (str/includes? runtime-html "(+ 2 2)"))))
        (is (str/includes? headers "Current reply"))
        (is (str/includes? headers "Opened"))
        (is (str/includes? headers "Trigger"))
@@ -68,6 +93,8 @@
        (is (not (str/includes? html "seon-value-"))
            "Evaluations use their declared pair, not repeated floor wrappers with one root id."))
      (is (:db-after (db/transact! connection
-                     [{:seon.turn/id "empty" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx"}])))
+                     [{:seon.turn/id "empty" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx"}
+                      {:seon.runtime/agent [:seon.agent/id "page"]
+                       :seon.runtime/turns [[:seon.turn/id "empty"]]}])))
      (is (= [] (#'web/current-turn-evaluations @connection "page")))
      (is (:seon.error/kind (#'web/current-turn-evaluations @connection "absent"))))))

@@ -1,13 +1,11 @@
-{:seon.verification/base "24adad07289e2862ce0765ff008e4513295fac59"
- :seon.verification/committed-overlay "dbec8be7e"
- :seon.verification/patch-base "7e7c74f01"
- :seon.verification/paths ["resources/seon/schemas/my.plan.edn", "resources/seon/schemas/my.plan.item.edn", "resources/seon/schemas/seon.config.edn", "resources/seon/schemas/seon.db.edn", "src/my/plan.clj", "src/seon/agent.clj", "src/seon/bootstrap.clj", "src/seon/cluster/agent.clj", "src/seon/plan.clj", "src/seon/render.clj", "src/seon/render/transcript.clj", "src/seon/render/value.clj", "src/seon/render/web.clj", "test/my/plan_api_test.clj", "test/my/plan_test.clj", "test/seon/context_blocks_fixture.clj", "test/seon/help_test.clj", "test/seon/render/value_test.clj", "test/seon/sci/shown_text_test.clj", "resources/seon/schemas/seon.help.edn", "test/seon/render/page_review_test.clj", "test/seon/render/page_settings_test.clj", "test/seon/data_shapes_test.clj", "docs/prds/context-generation/research/context_page_probe_2026_09_09.clj", "src/seon/repl.clj", "src/seon/sci/eval.clj", "src/seon/turn.clj", "resources/seon/schemas/seon.eval.edn", "test/seon/repl_test.clj", "test/seon/repl_grammar_test.clj", "test/seon/returned_error_test.clj", "resources/seon/schemas/seon.cluster.eval.edn", "resources/seon/schemas/seon.repl.edn", "resources/seon/schemas/seon.sci.eval.edn", "resources/seon/schemas/seon.render.value.edn"]
- :seon.verification/namespaces ["seon.repl-test" "seon.repl-grammar-test" "seon.returned-error-test" "seon.help-test" "seon.render.page-settings-test"]
- :seon.verification/isolated-tests 19 :seon.verification/isolated-assertions 128
- :seon.verification/final-help-tests 3 :seon.verification/final-help-assertions 60
- :seon.verification/platform-tests 83 :seon.verification/platform-assertions 490
- :seon.verification/failures 0 :seon.verification/errors 0 :seon.verification/workers 1
- :seon.verification/source-commit "6aa1fd30-7141-5589-83d9-ee1fe20aff65"
- :seon.verification/prompt-bytes 8651
- :seon.verification/prompt-sha256 "4ae8b97460fdff4529995542e4b8cfb9bbe53c6b658ed3ebd546640a3bca996a"
- :seon.verification/paid-score :unavailable}
+{:seon.page/base "617e538f3"
+ :seon.page/source-commit #uuid "6aa20c40-dc3b-5683-b460-3c218e7a3ec1"
+ :seon.page/prompt-bytes 9093 :seon.page/help-bytes 2470
+ :seon.page/help-entry-bytes 2554 :seon.page/multiline-entry-bytes 128
+ :seon.page/refusal-bytes 131 :seon.page/plan-example-bytes [407 415]
+ :seon.page/read-count 13 :seon.page/write-count 9
+ :seon.page/gate {:tests 5 :assertions 104 :failures 0 :errors 0}
+ :seon.page/platform {:tests 84 :assertions 505 :failures 0 :errors 0}
+ :seon.page/workers 1 :seon.page/browser :unavailable
+ :seon.page/scratch-http-bytes 52355 :seon.trial/score :unavailable
+ :seon.page/owned-paths ["src/seon/render/transcript.clj", "src/seon/render/web.clj", "src/seon/eval.clj", "resources/seon/schemas/seon.runtime.edn", "test/seon/help_test.clj", "test/seon/render/page_review_test.clj", "test/seon/eval_test.clj", "docs/prds/context-generation/research/context-cookbook-2026-09-09.md", "docs/prds/context-generation/research/context-page-review-2026-09-09.md", "docs/prds/context-generation/research/context_cookbook_document_2026_09_09.clj", "docs/prds/context-generation/research/context_cookbook_landed_2026_09_09.clj", "docs/prds/context-generation/research/context_cookbook_landed_2026_09_09.edn", "docs/prds/context-generation/research/context_cookbook_final_prompt_2026_09_09.txt", "docs/prds/context-generation/research/context_page_capture_2026_09_09.edn", "docs/prds/context-generation/research/context_page_plan_examples_2026_09_09.edn", "docs/prds/context-generation/research/context_page_verification_2026_09_09.edn", "docs/seon/issues/runtime-component-still-renders-as-an-attribute-map.md", "docs/seon/issues/archive/runtime-component-still-renders-as-an-attribute-map.md", "docs/seon/issues/debug-page-counts-zero-evaluations-after-turns-moved-under-runtime.md", "docs/seon/issues/archive/debug-page-counts-zero-evaluations-after-turns-moved-under-runtime.md"]}

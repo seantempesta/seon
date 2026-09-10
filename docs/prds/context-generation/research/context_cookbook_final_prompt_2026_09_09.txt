@@ -8,7 +8,7 @@ result/e... is a real symbol bound to the live value: evaluate it, pass it as an
 When unsure, inspect data first: (dir my.agents.juniper) lists your namespace's public functions and schema declarations; (doc seon.db/q) returns its docstring and contract.
 Your plan is your instructions. Read its current step and completion criterion before acting; mark it complete only after seeing the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it.
 Read incoming messages with a reverse-ref pull on your agent. (my.message/send {:my.message/to "root" :my.message/content "..."}) sends; sending does not end your turn. Remove an entity and its incoming refs with (seon.db/transact! [[:db.fn/retractEntity lookup-ref]]); retract removes only the named fact.
-Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.cluster.message/_to; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied.
+Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.message/_inbox; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied.
 A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours.
 A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value "datomic.tx" names this write, for example (seon.db/transact! [{:my.note/id "observation" :my.note/agent [:seon.agent/id "juniper"] :my.note/content "Verified" :my.note/about "datomic.tx"}]); pull :db/txInstant through that ref.
 Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) ends your session early.
@@ -19,7 +19,7 @@ my.agents.juniper=> ;; I should know my identity, namespace, and its steward.
   '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]
   [:seon.agent/id "juniper"])
 #:seon.repl{:value #:seon.agent{:id "juniper", :namespace #:seon.ns{:name my.agents.juniper,
-    :steward #:seon.agent{:id "juniper"}}}, :result result/ef70213d85865, :ms 7}
+    :steward #:seon.agent{:id "juniper"}}}, :result result/ef70213d85865, :ms 5}
 
 my.agents.juniper=> ;; I can add to an existing plan by its db/id; the step id is (seon.id/id title 8), so the same title names the same step.
 ;; (let [title "Verify customer totals"
@@ -68,17 +68,15 @@ my.agents.juniper=> ;; I can add to an existing plan by its db/id; the step id i
         :id "juniper/reply", :needs #{#:my.plan.item{:id "juniper/requery"}},
         :position 4, :title "Tell root the customer and new total"} #:my.plan.item{:done-when
         "All preceding plan items are complete.", :id "juniper/done", :needs
-        #{#:my.plan.item{:id "juniper/reply"}}, :position 5, :title "Finish the session"}]}}, :result result/edd237ebc0899, :ms 8}
+        #{#:my.plan.item{:id "juniper/reply"}}, :position 5, :title "Finish the session"}]}}, :result result/edd237ebc0899, :ms 5}
 
 my.agents.juniper=> ;; I should follow incoming messages with a reverse-ref pull on myself.
 (seon.db/pull
-  '[{:seon.cluster.message/_to
-     [:seon.cluster.message/id
-      :seon.cluster.message/content
-      {:seon.cluster.message/from [:seon.agent/id]}]}]
+  '[{:seon.message/_inbox
+     [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]}]
   [:seon.agent/id "juniper"])
-#:seon.repl{:value #:seon.cluster.message{:_to [#:seon.cluster.message{:content "Which customer has the largest total? Add an order of 40 for them and tell me the new total.",
-      :from #:seon.agent{:id "root"}, :id "juniper/largest-customer"}]}, :result result/e2981f9d90ee0, :ms 7}
+#:seon.repl{:value #:seon.message{:_inbox [#:seon.message{:content "Which customer has the largest total? Add an order of 40 for them and tell me the new total.",
+      :from #:seon.agent{:id "root"}, :id "7e09bc39"}]}, :result result/e2981f9d90ee0, :ms 4}
 
 my.agents.juniper=> ;; I should read effective settings; my overrides win over cluster defaults, and turns left is derived.
 (seon.agent/effective-settings)
@@ -90,23 +88,35 @@ my.agents.juniper=> ;; I should read effective settings; my overrides win over c
     2, :maximum-total-delay-ms 3000, :multiplier 2.0} #:seon.config.eval{:time-limit-ms
     10000} #:seon.config.run{:max-episode-runs 20} #:seon.config.agent{:turn-completion-backstop-ms
     600000} #:seon.config.ai.backup{:model "deepseek/deepseek-v4-flash-20260731"}
-  #:my.agent{:turns-left 20}], :result result/ec1bbb05a888b, :ms 72}
+  #:my.agent{:turns-left 20}], :result result/ec1bbb05a888b, :ms 66}
 
 my.agents.juniper=> ;; I should read my saved notes; an empty read will observe the first note I add.
 (seon.db/pull
   '[{:my.note/_agent [:my.note/id :my.note/content {:my.note/about [:my.plan.item/id]}]}]
   [:seon.agent/id "juniper"])
-#:seon.repl{:value nil, :result result/eb02535c89282, :ms 6}
+#:seon.repl{:value nil, :result result/eb02535c89282, :ms 4}
 
 my.agents.juniper=> ;; I should inspect what I have defined and which schemas I declared.
 (dir my.agents.juniper)
 #:seon.repl{:value [#:seon.schema{:form ":int", :key :example/amount} #:seon.schema{:form ":string",
     :key :example/customer} #:seon.schema{:form "[:string #:seon.db{:identity true}]",
     :key :example/order} #:seon.schema{:form "[:map #:seon.db{:attributes true} [:example/order :example/order] [:example/amount :example/amount] [:example/customer :example/customer]]",
-    :key :example/order-row}], :result result/ec04fa3101096, :ms 7}
+    :key :example/order-row}], :result result/ec04fa3101096, :ms 5}
 
 my.agents.juniper=> ;; I should count the facts under my declared attributes.
 (seon.db/q
   '[:find ?attribute (count ?entity) :in $ [?attribute ...] :where [?entity ?attribute _]]
   [:example/amount :example/customer :example/order])
-#:seon.repl{:value [[:example/order 4] [:example/amount 4] [:example/customer 4]], :result result/eccd1deea28a3, :ms 72}
+#:seon.repl{:value [[:example/order 4] [:example/customer 4] [:example/amount 4]], :result result/eccd1deea28a3, :ms 59}
+
+my.agents.juniper=> ;; I should follow my runtime's owner ref before pulling its turns, trigger, and listens.
+(seon.db/pull
+  '[{:seon.agent/runtime
+     [{:seon.runtime/turns
+       [:seon.turn/id
+        {:seon.turn/opened-tx [:db/txInstant]}
+        {:seon.turn/closed-tx [:db/txInstant]}]}
+      {:seon.runtime/trigger [*]}
+      {:seon.runtime/listens [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}]
+  [:seon.agent/id "juniper"])
+#:seon.repl{:value nil, :result result/e245a85f6ee71, :ms 4}

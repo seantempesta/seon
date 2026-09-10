@@ -7,7 +7,9 @@
                :trigger [:and {:description "The fact whose wake opened the latest turn."} :seon.db/ref]
                :listens [:set {:seon.db/component true
                                :description "Authored index patterns: attribute with optional entity and value constraints."} :seon.db/ref]
-               :entity [:map {:seon.db/attributes true :seon.render/units [:seon.runtime/turns]}
+               :entity [:map {:seon.db/attributes true
+                              :seon.render/ai seon.render.transcript/render-runtime-ai
+                              :seon.render/html seon.render.transcript/render-runtime-html}
                         [:seon.runtime/agent :seon.runtime/agent]
                         [:seon.runtime/turns {:optional true} :seon.runtime/turns]
                         [:seon.runtime/trigger {:optional true} :seon.runtime/trigger]
