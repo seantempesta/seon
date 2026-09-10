@@ -137,6 +137,14 @@
   (get-in (head-record (konserve-store store) branch)
           [:meta :datahike/commit-id]))
 
+(defn connection-branch-commit-id
+  "Read a branch head through an already supplied connection's physical store."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/branch]
+                  [:maybe :seon.source/commit-id]]}
+  [connection branch]
+  (get-in (head-record (:store @connection) branch)
+          [:meta :datahike/commit-id]))
+
 (defn- commit-present?
   [store commit-id]
   (some? (head-record (konserve-store store) commit-id)))

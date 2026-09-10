@@ -366,7 +366,7 @@ Status: ✅ landed · ▶ running · ⏭ next · ◻ queued.
 | 7 | Runtime component `:seon.agent/runtime` with the turns inside it; retire `plan-digest`, `supersedes`, `undisposed-at`, `background-results`, `error`; `:seon.eval/value` → `/shown`; `sent-body` gone; reasoning off | yes (batch) | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
 | 8 | Agent-declared listens union into the wake matcher | no | ✅ [delivery proof and turn-eligibility boundary](../research/evidence-listens-landing-2026-09-09.md) |
 | 9–12 | Block functions from the cookbook on the new shapes; `dir`/`doc` structure; `my.plan`/`my.note` as documented data; contract refusals carry the doc map | no | ✅ cookbook + `d25a12eda` `4652cc0e7` |
-| 13 | Root's cluster block (JVM, store, commit, fault signatures) | no | ◻ root lane |
+| 13 | Root's cluster block (JVM, store, commit, fault signatures) | no | ▶ [implementation gated; scratch prompt and HTML verified; default adoption pending](../research/root-cluster-landing-2026-09-09.md) |
 | 14 | Fixture on the new shapes; reseed; read the prompt; harness score | reseed | every landing; paid trial rerun after 1c |
 
 Review points for the owner: after 1c (help and page on the current

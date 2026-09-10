@@ -71,6 +71,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.blob :as blob]
+            [seon.cluster.status :as cluster.status]
             [seon.env :as env]
             [seon.error :as error]
             [seon.repl :as repl]
@@ -190,13 +191,6 @@
                 (when namespace-name (str "\nNamespace " namespace-name))
                 (when cluster-name (str "\nCluster   " cluster-name))))))))
 
-(def ^:private root-agents-query
-  '[:find [(pull ?agent
-                 [:seon.agent/id
-                  {:seon.agent/plan
-                   [{:my.plan/current-step [:my.plan.item/title]}]}]) ...]
-    :where [?agent :seon.agent/id]])
-
 (defn render-identity-ai
   "Read identity, namespace, and stewardship as data in one block."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
@@ -206,7 +200,7 @@
          (:seon.repl/comment form) "\n" (repl/source-text (:seon.repl/form form))
          (when (= "root" (:seon.agent/id unit))
            (str "\n\n;; I should review every agent and its current work with a filtered, shaped query.\n"
-                (repl/source-text (list 'seon.db/q (list 'quote root-agents-query))))))))
+                "(seon.cluster.status/agents {})")))))
 
 (defn render-id-ai
   "Read the identity concern from its identifying attribute."
@@ -253,13 +247,15 @@
                           [:dd [:a {:href (route/path :seon.render.route/agent {:id steward})}
                                 steward]]])))
            (when (and (= "root" agent-id) (:seon.db/db unit))
-             (let [agents (db/q root-agents-query (:seon.db/db unit))]
+             (let [agents (cluster.status/agents unit)]
                (if (:seon.error/kind agents)
                  [:p (:seon.error/message agents)]
                  [:section {:class "seon-root-agents"}
                   [:h3 "Agents"]
                   [:table
-                   [:thead [:tr [:th "Agent"] [:th "Current step"]]]
+                   [:thead [:tr [:th "Agent"] [:th "Current step"]
+                            [:th "Last turn ms"] [:th "Evaluations / ms"]
+                            [:th "Tokens / USD"] [:th "Storage bytes"]]]
                    (into [:tbody]
                          (map (fn [row]
                                 [:tr
@@ -267,7 +263,11 @@
                                                             {:id (:seon.agent/id row)})}
                                        (:seon.agent/id row)]]
                                  [:td (get-in row [:seon.agent/plan :my.plan/current-step
-                                                  :my.plan.item/title] "None selected")]]))
+                                                  :my.plan.item/title] "None selected")]
+                                 [:td (str (get row :seon.cluster.status/last-turn-ms "—"))]
+                                 [:td (str (:seon.cluster.status/evaluations row) " / " (:seon.cluster.status/evaluation-ms row))]
+                                 [:td (str (:seon.cluster.status/provider-tokens row) " / " (:seon.cluster.status/provider-cost-usd row))]
+                                 [:td (str (:seon.cluster.status/storage-bytes row))]]))
                          (sort-by :seon.agent/id agents))]])))])))))
 
 (defn render-id-html

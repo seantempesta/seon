@@ -7,6 +7,14 @@ tags: [issue, database, operator, performance, wave/exclusive-sweep]
 
 # Store grew to 69 gigabytes in one day of lanes
 
+Root-cluster observation, 2026-09-10 03:26 UTC: the shared `data/store`
+measured 56,239,201,429 bytes through `seon.operator.state/footprint`.
+The complete cluster observation took 24,945 ms in the live JVM; a fresh
+scratch cluster's stored observation took 369 ms with 76,169,884 store
+bytes. The shared-root scan is close to the default 30-second evaluation
+deadline. No shared store cleanup or default restart was performed by this
+bounded lane; reclamation remains with the owning sweep.
+
 ## Problem
 
 The shared root's `data/clusters/store` grew from 1.79 GiB (2026-08-12

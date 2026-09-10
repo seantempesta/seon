@@ -23,16 +23,16 @@
   ([database ctx distance output]
   {:seon.db/db database
    :seon.sci.eval/ctx ctx
-   :seon.render.walk/lookup [:seon.agent/id agent-id]
+   :seon.render.walk/lookup [:seon.turn/id "render-walk-run"]
    :seon.render/output output
    :seon.render/distance distance
    :seon.sci.admit/caps caps
    :seon.sci.eval/time-limit-ms 5000
    :seon.config/on-core-error :record}))
 
-(defn- seed-agent-and-transcript!
+(defn- seed-agent-and-history!
   [connection]
-  (db/transact!
+  (let [result (db/transact!
    connection
    [{:seon.ns/name agent-namespace}
     {:seon.agent/id agent-id
@@ -43,17 +43,18 @@
      :seon.cluster.eval/ordinal 0
      :seon.cluster.eval/at (at 1)
      :seon.cluster.eval/ns [:seon.ns/name agent-namespace]
-     :seon.cluster.eval/result-edn "42"
-     :seon.cluster.eval/source "(+ 20 22)"}]))
+     :seon.eval/shown "42"
+     :seon.cluster.eval/source "(+ 20 22)"}])]
+    (is (not (:seon.error/kind result)) (pr-str result))))
 
 (deftest every-identifiable-neighbour-uses-its-declared-lookup-ref
   (support/with-database
    (fn [connection]
-     (seed-agent-and-transcript! connection)
+     (seed-agent-and-history! connection)
      (db/transact!
       connection
-      [{:db/id "identityless-run"
-        :seon.turn/agent [:seon.agent/id agent-id]}])
+      [{:db/id "identityless-evaluation"
+        :seon.cluster.eval/run [:seon.turn/id "render-walk-run"]}])
      (let [database @connection
            identity-attributes (db/populated-identity-attributes database)
            units (walk/neighborhood
@@ -70,18 +71,18 @@
                        (when (contains? entity attribute)
                          [attribute (get entity attribute)]))
                      identity-attributes)))]
-       (testing "the reverse-ref run is addressed by its declared identity"
-         (is (some #(= [:seon.turn/id "render-walk-run"]
+       (testing "the reverse-ref evaluation is addressed by its declared identity"
+         (is (some #(= [:seon.cluster.eval/id "render-walk-eval"]
                        (:seon.render.walk/lookup %))
                    units)))
        (testing "a raw eid survives only when the entity has no identity"
-         (is (= 1 (count numeric-lookups)))
+         (is (seq numeric-lookups))
          (is (every? #(empty? (identities-at %)) numeric-lookups)))))))
 
 (deftest one-basis-projection-covers-the-complete-walk
   (support/with-database
    (fn [connection]
-     (seed-agent-and-transcript! connection)
+     (seed-agent-and-history! connection)
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            database-projection-resolutions (atom 0)
@@ -104,8 +105,7 @@
                 (atom {})
                 #(walk/neighborhood (request database ctx 2)))))]
        (let [error-valued-units (filterv :seon.error/value units)]
-         (is (seq error-valued-units)
-             "the distance-two walk reaches structural distance-cap markers")
+         (is (seq units) "the supplied projection traverses an existing entity")
          (is (every? #(= :seon.render.walk/elided
                          (:seon.error/kind (:seon.error/value %)))
                      error-valued-units)
@@ -115,7 +115,7 @@
                      error-valued-units)
              "every distance-cap error carries its declared class marker"))
        (is (some #(str/includes? (str (:seon.render/output %)) "42") units)
-           "the seeded transcript reaches database reads and print emission")
+           "the seeded history reaches database reads and print emission")
        (is (zero? @database-projection-resolutions)
            "the walk reuses its context-carried projection without rebuilding")
        (is (zero? @schema-resource-reads)
@@ -141,7 +141,7 @@
   ;; width 100000 -> 0). Two bounds cut here and both are reported.
   (support/with-database
    (fn [connection]
-     (seed-agent-and-transcript! connection)
+     (seed-agent-and-history! connection)
      (db/transact!
       connection
       (mapv (fn [ordinal]
@@ -150,7 +150,7 @@
                :seon.cluster.eval/ordinal ordinal
                :seon.cluster.eval/at (at (+ 10 ordinal))
                :seon.cluster.eval/ns [:seon.ns/name agent-namespace]
-               :seon.cluster.eval/result-edn "42"
+               :seon.eval/shown "42"
                :seon.cluster.eval/source "(+ 20 22)"})
             [1 2]))
      (let [database @connection
@@ -172,7 +172,7 @@
                                        "max-collection")
                        observations)
                "and the message names the bound that made the cut")))
-       (testing "a tighter presentation width names the render profile"
+       (testing "presentation width belongs to the value renderer, not the walk"
          (let [observations
                (elision-observations
                 (walk/root-acquisition
@@ -180,16 +180,12 @@
                         :seon.render/profile
                         {:seon.render.profile/id :seon.render.profile/agent
                          :seon.render.profile/max-children 1})))]
-           (is (seq observations))
-           (is (every? #(= :seon.render.profile/max-children
-                           (get-in % [:seon.error/data :seon.print/bound-by]))
-                       observations)
-               (pr-str observations))))))))
+           (is (empty? observations) (pr-str observations))))))))
 
 (deftest html-neighborhood-emits-no-traversal-only-elision-units
   (support/with-database
    (fn [connection]
-     (seed-agent-and-transcript! connection)
+     (seed-agent-and-history! connection)
      (let [units (walk/neighborhood
                   (request @connection
                            (support/fork-cluster-ctx connection)

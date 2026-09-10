@@ -651,7 +651,8 @@
   (let [root-lookup (first (:seon.render.walk/order acquisition))
         root (get-in acquisition [:seon.render.walk/members root-lookup])
         entity (:seon.render/value root)
-        concerns (->> (schema/matching-shapes-in projection (render/transacted entity))
+        concerns (->> (when (map? entity)
+                        (schema/matching-shapes-in projection (render/transacted entity)))
                       (mapcat #(-> (get-in projection [:seon.schema.projection/forms (:seon.schema/key %)])
                                    schema.form/schema-properties :seon.render/units))
                       distinct vec)]
@@ -663,7 +664,8 @@
                attribute (if reverse? (keyword (namespace display) (subs (name display) 1)) display)
                properties (schema.form/attr-form-properties
                            (get-in projection [:seon.schema.projection/forms attribute]))
-               producer (when (or (and reverse? (:seon.render/form properties))
+               producer (when (or (:seon.render/derived properties)
+                                  (and reverse? (:seon.render/form properties))
                                   (and (not reverse?) (:seon.db/component properties)))
                           (get properties output))
                connected (filter #(= attribute (:seon.render.walk/attribute %))

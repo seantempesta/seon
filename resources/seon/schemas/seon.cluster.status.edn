@@ -1,0 +1,35 @@
+{:seon.cluster.status/root
+ [:map {:seon.render/units [:seon.cluster.status/concern]}
+  [:seon.agent/id [:= "root"]]]
+ :seon.cluster.status/concern
+ [:and {:seon.render/derived true
+        :seon.render/ai seon.cluster.status/render-ai
+        :seon.render/html seon.cluster.status/render-html}
+  :seon.db/ref]
+ :seon.cluster.status/request
+ [:map [:seon.db/db :seon.db/database-value]
+  [:seon.db/connection :seon.db/connection]]
+ :seon.cluster.status/count [:int {:min 0}]
+ :seon.cluster.status/measurement [:or :seon.cluster.status/count :seon.error/value]
+ :seon.cluster.status/agent
+ [:map
+  [:seon.agent/id :seon.agent/id]
+  [:seon.cluster.status/evaluations :seon.cluster.status/count]
+  [:seon.cluster.status/evaluation-ms :seon.cluster.status/count]
+  [:seon.cluster.status/last-turn-ms {:optional true} :int]
+  [:seon.cluster.status/provider-tokens :seon.cluster.status/measurement]
+  [:seon.cluster.status/provider-cost-usd [:or :int :double :seon.error/value]]
+  [:seon.cluster.status/storage-bytes :seon.cluster.status/measurement]]
+ :seon.cluster.status/value
+ [:map
+  [:seon.cluster/name :seon.cluster/name]
+  [:seon.cluster.status/heap-used :seon.cluster.status/count]
+  [:seon.cluster.status/heap-max :int]
+  [:seon.cluster.status/platform-threads :seon.cluster.status/measurement]
+  [:seon.cluster.status/virtual-threads :seon.cluster.status/measurement]
+  [:seon.cluster.status/store-bytes :seon.cluster.status/measurement]
+  [:seon.cluster.status/adopted-commit [:or :uuid :seon.error/value]]
+  [:seon.cluster.status/current-commit [:or :uuid :seon.error/value]]
+  [:seon.cluster.status/agents :seon.cluster.status/count]
+  [:seon.cluster.status/open-turns :seon.cluster.status/count]
+  [:seon.cluster.status/faults [:vector [:tuple :string :seon.cluster.status/count]]]]}

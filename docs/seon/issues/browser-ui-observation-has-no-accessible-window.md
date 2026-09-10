@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: friction
-tags: [issue, tooling, browser]
+tags: [issue, web, mcp, wave/issues-sweep]
 ---
 
 # Browser observation has no accessible window
@@ -32,3 +32,7 @@ Render-pass recheck at 2026-09-10 02:40 UTC: browser inventory was empty;
 native Chrome and Safari both returned `cgWindowNotFound` (-10005).
 The default debug URL returned HTTP 200 and was read as served HTML.
 This remains an observation boundary, not a browser-paint proof.
+
+Root-cluster recheck at 2026-09-10 03:29 UTC: `getBrowser` for the
+default root debug URL reported no browser; native Safari returned
+`cgWindowNotFound` (-10005). The lane records served HTML separately.

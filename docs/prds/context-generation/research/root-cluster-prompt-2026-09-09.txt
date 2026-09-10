@@ -1,0 +1,106 @@
+my.agents.root=> ;; I should understand how this REPL works before I act.
+(help)
+The prompt shows your namespace my.agents.root and is drawn for you. Send only ;; thinking comments and forms.
+Results are data: chain them with ->>, sort-by, filter, map, and get-in. Every function in the program is callable.
+Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work.
+A declared AI renderer prints its output directly. Other results use #:seon.repl: :value (or :error) is data, :out is printed text, and :result names the live value.
+result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys.
+When unsure, inspect data first: (dir my.agents.root) lists your namespace's public functions and schema declarations; (doc seon.db/q) returns its docstring and contract.
+Your plan is your instructions. Read its current step and completion criterion before acting; mark it complete only after seeing the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it.
+Read incoming messages with a reverse-ref pull on your agent. (my.message/send {:my.message/to "root" :my.message/content "..."}) sends; sending does not end your turn. Remove an entity and its incoming refs with (seon.db/transact! [[:db.fn/retractEntity lookup-ref]]); retract removes only the named fact.
+Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.message/_inbox; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied.
+A defn with :malli/schema becomes a durable function. A deftest becomes a durable test. (my.test/run) runs yours.
+A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value "datomic.tx" names this write, for example (seon.db/transact! [{:my.note/id "observation" :my.note/agent [:seon.agent/id "root"] :my.note/content "Verified" :my.note/about "datomic.tx"}]); pull :db/txInstant through that ref.
+Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) ends your session early.
+Tools: my.agent, my.background, my.edit, my.fs, my.message, my.note, my.plan, my.shell, my.test, my.turn, my.web. Inspect one with dir.
+
+my.agents.root=> ;; I should know my identity, namespace, and its steward.
+(seon.db/pull
+  '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}]
+  [:seon.agent/id "root"])
+#:seon.repl{:value #:seon.agent{:id "root", :namespace #:seon.ns{:name my.agents.root, :steward
+    #:seon.agent{:id "root"}}}, :result result/e405d3d0664b3, :ms 9}
+
+my.agents.root=> ;; I should review every agent and its current work with a filtered, shaped query.
+(seon.cluster.status/agents {})
+#:seon.repl{:value [{:seon.agent/id "root", :seon.cluster.status/evaluation-ms 0, :seon.cluster.status/evaluations
+    0, :seon.cluster.status/last-turn-ms 10262, :seon.cluster.status/provider-cost-usd
+    0, :seon.cluster.status/provider-tokens 0, :seon.cluster.status/storage-bytes
+    0}], :result result/e7960720d616e, :ms 100}
+
+my.agents.root=> ;; My plan is my instructions; a step is done when it has :completed-tx. (doc my.plan) shows how to add, complete, and remove steps; ids are (seon.id/id title 8).
+(seon.db/pull
+  '[{:seon.agent/plan
+     [:my.plan/objective
+      {:my.plan/current-step [:my.plan.item/id]}
+      {:my.plan/steps
+       [:my.plan.item/id
+        :my.plan.item/title
+        :my.plan.item/done-when
+        :my.plan.item/position
+        {:my.plan.item/completed-tx [:db/txInstant]}
+        {:my.plan.item/needs [:my.plan.item/id]}
+        {:my.plan.item/steps ...}]}]}]
+  [:seon.agent/id "root"])
+#:seon.repl{:value nil, :result result/e1b0e9e3a621d, :ms 15}
+
+my.agents.root=> ;; I should follow incoming messages with a reverse-ref pull on myself.
+(seon.db/pull
+  '[{:seon.message/_inbox
+     [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]}]
+  [:seon.agent/id "root"])
+#:seon.repl{:value #:seon.message{:_inbox [#:seon.message{:content "Define a durable contracted function named largest that returns the row with the greatest :example/amount, or {} for empty input. Call it once, query its stored :seon.fn/spec, then complete with a short reply naming what you built and its contract.",
+      :id "ede6743b"}]}, :result result/e4e7147bf2344, :ms 19}
+
+my.agents.root=> ;; I should read effective settings; my overrides win over cluster defaults, and turns left is derived.
+(seon.agent/effective-settings)
+#:seon.repl{:value [#:seon.config.ai{:model "deepseek-v4-flash", :no-provider true} #:seon.config.ai.retry{:base-delay-ms
+    500, :jitter-fraction 0.25, :maximum-delay-ms 4000, :maximum-retries
+    2, :maximum-total-delay-ms 3000, :multiplier 2.0} #:seon.config.eval{:time-limit-ms
+    30000} #:my.agent{:turns-left 0}], :result result/ee606ab53f30e, :ms 124}
+
+my.agents.root=> ;; I should read my saved notes; an empty read will observe the first note I add.
+(get
+  (seon.db/pull
+    '[{:my.note/_agent [:my.note/id :my.note/content {:my.note/about [:my.plan.item/id]}]}]
+    [:seon.agent/id "root"])
+  :my.note/_agent
+  [])
+#:seon.repl{:value [], :result result/ec2e4bd591a35, :ms 8}
+
+my.agents.root=> ;; I should inspect what I have defined and which schemas I declared.
+(dir my.agents.root)
+#:seon.repl{:value {:functions [], :schemas {}}, :result result/ea54d984d7727, :ms 23}
+
+my.agents.root=> ;; I should follow my runtime's owner ref before pulling its turns, trigger, and listens.
+(seon.db/pull
+  '[{:seon.agent/runtime
+     [{:seon.runtime/turns
+       [:seon.turn/id
+        {:seon.turn/opened-tx [:db/txInstant]}
+        {:seon.turn/closed-tx [:db/txInstant]}]}
+      {:seon.runtime/trigger
+       [:seon.message/id :seon.message/content {:seon.message/from [:seon.agent/id]}]}
+      {:seon.runtime/listens [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}]
+  [:seon.agent/id "root"])
+#:seon.repl{:value #:seon.agent{:runtime #:seon.runtime{:trigger #:seon.message{:content "Define a durable contracted function named largest that returns the row with the greatest :example/amount, or {} for empty input. Call it once, query its stored :seon.fn/spec, then complete with a short reply naming what you built and its contract.",
+      :id "ede6743b"}, :turns [#:seon.turn{:closed-tx #:db{:txInstant #inst "2026-09-10T03:27:34.581-00:00"},
+        :id "12a2b18544e6", :opened-tx #:db{:txInstant #inst "2026-09-10T03:27:24.319-00:00"}}]}}, :result result/ef900a6ef53d8, :ms 8}
+
+my.agents.root=> ;; I should inspect faults routed to me as steward; fixing them is my job.
+(seon.db/q
+  '[:find
+    [(pull ?f [:seon.error/kind :seon.error/message :seon.instrument/fn]) ...]
+    :where
+    [?f :seon.error/steward [:seon.agent/id "root"]]])
+#:seon.repl{:value [], :result result/e62af1b545b93, :ms 10}
+
+my.agents.root=> ;; How is my cluster doing: JVM, store, source adoption, faults, and open work?
+(seon.cluster.status/snapshot {})
+#:seon.repl{:value {:seon.cluster.status/adopted-commit #uuid "6aa22426-3ff8-575a-a021-61e46e443537",
+  :seon.cluster.status/agents 1, :seon.cluster.status/current-commit #uuid "6aa22426-3ff8-575a-a021-61e46e443537",
+  :seon.cluster.status/faults [], :seon.cluster.status/heap-max 17179869184,
+  :seon.cluster.status/heap-used 1066484680, :seon.cluster.status/open-turns
+  0, :seon.cluster.status/platform-threads 44, :seon.cluster.status/store-bytes
+  161411894, :seon.cluster.status/virtual-threads 14, :seon.cluster/name
+  "root-cluster"}, :result result/eff3bd55079f8, :ms 157}
