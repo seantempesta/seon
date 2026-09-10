@@ -718,3 +718,21 @@ half-edit. Measured targets in the issue.
   verified patch in `2b9ebe98c` waiting for the data batch's files.
 - Owner review point: after the refork, the cookbook patch, and a reseed.
 
+## 2026-09-09 20:00 — twelfth refork on the data batch; two blockers found reading it; grammar landed
+
+- `default` reforked and reseeded on the data batch: turn 0 holds the
+  data-first opening (help, identity pull, plan pull with `done-when` and
+  `completed-tx`, inbox as a reverse pull on the `:seon.message/inbox`
+  edge, notes, `dir`, the data count) — read directly from the record.
+- Two blockers found on the same page: the wake's turn under the runtime
+  component never settled and never faulted (loop-live resumed:
+  `2b6913f4b` — the fixture's install disarmed the live turn proc
+  without waiting for its stop; the fixture stays armed); the page read
+  evaluations through the retired turn relationship and showed "0
+  evaluations" (filed; the cookbook owns the page).
+- cookbook `617e538f3`: prompt-first grammar (§18d) landed on the new
+  shapes; a value with a declared pair prints its pair's output as the
+  response. publication-provenance `3b8cd7276`: incremental publication
+  converges on `default` again.
+- Paid trial still blocked on provider credits (OpenRouter 402).
+
