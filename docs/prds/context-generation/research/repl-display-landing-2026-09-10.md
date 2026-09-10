@@ -122,6 +122,64 @@ the three production Clojure files, the two CSS files, and the five changed
 test files listed below. Two isolated workers ran alongside one fast JVM;
 this lane never exceeded three test workers and never ran `--all`/`--full`.
 
+## Post-commit browser proof
+
+Implementation commit: `6f339bc6e`. A separate Chrome context resized each
+page from 1100 to 500 × 900 and opened the comparison. Juniper had 40
+preformatted surfaces; root had 91. Every surface computed `pre-wrap`,
+`overflow-wrap: anywhere`, and `word-break: normal`, with no horizontal
+text overflow. Both document widths equalled the 500 px viewport; no
+visible element extended beyond it. The primary REPL, help list, renderer
+annotations, and expanded comparisons were inspected in screenshots.
+
+The first resize observation ran before Cytoscape's own debounced resize.
+Its existing `ResizeObserver` calls `cy.resize()` after 100 ms
+(`reference-code/cytoscape/src/extensions/renderer/base/load-listeners.js:328`).
+The browser probe now awaits the actual nonempty canvas dimensions under a
+30-second backstop; no second observer or graph production change was added.
+
+Rerun `repl_display_browser_2026_09_10.cjs` with Playwright on `NODE_PATH`.
+It owns and closes its browser, verifies both pages, and writes disposable
+screenshots under `tmp/repl-display-browser/`. Native Chrome's window
+became unavailable after the earlier 768 px inspection; this independent
+browser supplied the final post-commit proof.
+
+Complete adoption subsequently refused source commit
+`6aa31404-2e94-5684-aa9e-8614a871fc7c` because source changed during adoption.
+A live comparison (186 ms) identified exactly
+`test/seon/data_shapes_test.clj` as changed since the analyzed snapshot.
+That is a foreign edit boundary; this lane did not edit that path, operate
+its session, or restart default. The comparison was:
+
+```clojure
+(let [before (:seon.source/file-digests
+              (:seon.source/snapshot @@#'seon.cluster/source-analysis-cache))
+      after (:seon.source/file-digests (seon.cluster/source-snapshot))]
+  (vec (filter #(not= (get before %) (get after %))
+               (distinct (concat (keys before) (keys after))))))
+```
+
+## Final adoption and cleanup
+
+Complete publication subsequently succeeded. MCP verified in 1790 ms that
+default's adopted commit and `seon.cluster.source/current` both equal
+`6aa31517-2ccf-50a2-a61a-9f0a9261b8e2`; publication digest
+`ff61ab15259c07f1117ce96557b90fdc030822ae37a545724c824f444c1b380b`.
+This was in-place development adoption, not a restart or a new fork.
+
+The browser probe was rerun after convergence. Juniper then had 46
+preformatted surfaces and root 91; both again measured 500 px viewport /
+500 px document width, zero overflowing elements, and zero wrapping-rule
+failures. Primary views and expanded comparisons were inspected. The live
+scenario changed evaluation counts during the lane; the measurements are
+dated observations, not fixed fixture counts.
+
+The final evidence change contains only this note and the browser probe.
+The Clojure and CSS bytes remain those of the green implementation commit.
+Completed failed snapshots were removed after their runners exited; successful
+gate and fast snapshots removed themselves. The probe closes its browser in
+`finally`, and disposable logs and screenshots are removed before reporting.
+
 ## Changed paths — this checkpoint
 
 ```text
@@ -129,6 +187,7 @@ this lane never exceeded three test workers and never ran `--all`/`--full`.
 docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md
 docs/prds/context-generation/research/repl-display-landing-2026-09-10.md
 docs/prds/context-generation/research/repl_display_probe_2026_09_10.clj
+docs/prds/context-generation/research/repl_display_browser_2026_09_10.cjs
 docs/seon/architecture/ui.md
 docs/seon/issues/default-component-probe-times-out-after-adoption.md
 docs/seon/issues/system-turn-drops-live-results-after-saving-shown-text.md
