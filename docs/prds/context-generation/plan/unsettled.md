@@ -824,3 +824,14 @@ half-edit. Measured targets in the issue.
   the current generator; the orchestrator is compacting root on `default`
   to see what the current generator produces for it.
 
+## 2026-09-09 22:10 — root's page fixed; the roadmap is landed
+
+- root-page `55029df8d`: the root prompt path scanned the store; removed,
+  and bootstrap now shares the current opening generation. Measured on
+  `default` after compaction: system turn 13.9 s → 1.4 s; `?prompt=true`
+  20 s → 1.1 s cold, 44 ms warm; zero fallbacks; the cluster block present.
+- Every roadmap row of the chart PRD is landed except the harness rerun
+  (provider credits). No lane running. Thirteen reforks of `default`
+  today; the page for the owner: Juniper 0.5 s / 11 evaluations, root
+  1.1 s / 11 evaluations, both on the current generator.
+

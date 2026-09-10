@@ -21,7 +21,6 @@ See `README.md` for the convention.
 
 | Issue | Severity | Lane |
 |-------|----------|------|
-| [Root's `?prompt=true` page takes 18 s, and its opening is from the old generator](root-prompt-page-takes-18-seconds-and-carries-an-old-generation-opening.md) | blocker | root-page lane (2026-09-09) |
 | [Settle what arrived when a provider stream closes mid-body](a-mid-stream-provider-disconnect-discards-the-whole-turn.md) | blocker | whole-system arc repair wave |
 | [One render exception stops the render proc and every page then hangs silently](a-render-exception-stops-the-cluster-render-proc-and-every-page-hangs.md) | blocker | page follow-up wave (after turn-cut lands) |
 | [Name the run a history entry actually pulled](a-run-history-entry-can-name-a-different-run-than-its-form-pulled.md) | blocker | ui verification wave |
