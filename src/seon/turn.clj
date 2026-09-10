@@ -2548,28 +2548,6 @@
                        [?attempt :seon.ai.attempt/error _]]
                      db agent-id (outside-wake-t db agent-id))))))
 
-(defn- openable-wakes
-  "The unanswered wakes `agent-id`'s next turn answers, under the bound.
-
-  A TURN OPENS FOR ALL OF THEM AT ONCE. Answeredness is the answering
-  turn's own `:t`, so every wake at or before it is answered by the one
-  turn whose context contained them — two wakes in one transaction are
-  one paid call, where selecting one at a time paid twice (prototype 1c,
-  measured on live data).
-
-  AT THE CAP, NOTHING OPENS. The exemption that let an OUTSIDE wake open
-  a turn at the cap existed so a human could always reach a looping
-  agent; under answered-by-`:t` it is both redundant and unbounded. Any
-  message from outside is newer than every turn, so it moves the anchor
-  and the count derives to zero — the bound refills by arithmetic, with
-  no exemption. Keeping the exemption instead made an unanswered outside
-  wake open a turn at the cap forever, which is precisely the paid loop
-  a turn whose provider fails now produces."
-  [db agent-id]
-  (if (opening-deferred? db agent-id)
-    []
-    (unanswered-wakes db agent-id {})))
-
 (defn deferred-triggers
   "The pending message wakes deferred by the turn bound or provider refusal.
   A closed turn with a failed attempt and no reply awaits a new outside
@@ -2613,6 +2591,29 @@
        :seon.turn/id run-id
        :seon.agent/id agent-id})))
 
+(defn- continuing-reply?
+  "The latest closed turn accepted a provider reply and did not end the session."
+  [database agent-id]
+  (when-let [latest-t
+             (db/q '[:find (max ?t) . :in $ ?agent-id
+                     :where [?agent :seon.agent/id ?agent-id]
+                     [?turn :seon.turn/agent ?agent]
+                     [?turn :seon.turn/id _ ?t]
+                     [?turn :seon.turn/closed-tx _]]
+                   database agent-id)]
+    (some?
+     (db/q '[:find ?turn . :in $ ?agent-id ?latest-t
+             :where [?agent :seon.agent/id ?agent-id]
+             [?turn :seon.turn/agent ?agent]
+             [?turn :seon.turn/id _ ?t]
+             [(= ?t ?latest-t)]
+             [?turn :seon.turn/closed-tx _]
+             [?turn :seon.turn/reply-size _]
+             [?turn :seon.turn/attempts ?attempt]
+             (not [?attempt :seon.ai.attempt/error _])
+             (not [?turn :seon.turn/disposition _])]
+           database agent-id latest-t))))
+
 (defn next-agent-work
   "The ONE thing to do next for `agent-id` on `db`, or nil when idle.
   Pure — the per-agent derivation every turn proc runs (F1 §5.2). The
@@ -2622,8 +2623,11 @@
   `:resume` carries the ordinal the fold restarts at — the first form
   ordinal with no terminal receipt — so a turn never recomputes it;
   when no such ordinal remains the situation is `:close`. With no open
-  run, the `:open` arm selects an unanswered trigger under the episode
-  gate. A successful provider attempt answers its earlier wakes. A provider
+  turn, the `:open` arm admits unanswered wakes or continuation of the
+  latest closed provider reply under the same turn bound. A reply continues
+  unless its last evaluation returned a completed/wait disposition.
+  Virtual and system replies never authorize continuation.
+  A successful provider attempt answers its earlier wakes. A provider
   refusal leaves them unanswered and defers reopening until a new outside
   wake arrives. A deferred
   trigger simply derives no work — no consumer ever sees a decision to
@@ -2657,14 +2661,15 @@
       ;; answers all of them, so nothing is selected and nothing is
       ;; claimed; the wakes are named only so a consumer can say what it
       ;; is about to answer.
-      (let [wakes (openable-wakes db agent-id)]
-        (when (seq wakes)
-          (cond->
-           {:seon.turn.work/situation :open
-            :seon.agent/id agent-id}
-            (some :seon.message/id wakes)
-            (assoc :seon.message/id
-                   (some :seon.message/id wakes))))))))
+      (when-not (opening-deferred? db agent-id)
+        (let [wakes (unanswered-wakes db agent-id {})]
+          (when (or (seq wakes) (continuing-reply? db agent-id))
+            (cond->
+             {:seon.turn.work/situation :open
+              :seon.agent/id agent-id}
+              (some :seon.message/id wakes)
+              (assoc :seon.message/id
+                     (some :seon.message/id wakes)))))))))
 
 (defn more-agent-work?
   "True when another pass would find work for this agent.
@@ -2935,8 +2940,8 @@
   "The disposition an admitted eval value carries, or nil.
   The loop reads `my.turn`'s two values out of the LAST form's admitted
   result. Anything else — a number, a map that merely looks similar, an
-  error value — is not a disposition, and a run whose plan ends without
-  one simply stays open for the next wake."
+  error value — is not a disposition. An accepted provider reply ending
+  without one permits another turn under the session bound."
   {:malli/schema [:=> [:cat :any] [:maybe :my.turn/value]]}
   [value]
   (when (schema/valid-candidate-value? :my.turn/value value)
@@ -3274,6 +3279,9 @@
            settled (assoc :my.turn/value settled)))
         side-tx
         (concat
+         (when settled
+           [[:db/add [:seon.turn/id run-id]
+             :seon.turn/disposition (:my.turn/disposition settled)]])
          (when (or undisposed?
                    (contains? #{:completed :wait}
                               (:my.turn/disposition settled)))

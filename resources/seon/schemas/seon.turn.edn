@@ -7,6 +7,7 @@
              [:seon.turn/id :seon.turn/id]
              [:seon.turn/agent :seon.turn/agent]
              [:seon.turn/attempts {:optional true} :seon.turn/attempts]
+             [:seon.turn/disposition {:optional true} :seon.turn/disposition]
              [:seon.turn/trigger {:optional true} :seon.turn/trigger]
              [:seon.turn/opened-tx :seon.turn/opened-tx]
              [:seon.turn/starting-ns
@@ -35,6 +36,9 @@
              [:seon.turn/missing-opening-datom
               :seon.turn/missing-opening-datom]
              [:seon.error/message :seon.error/message]],
+            :disposition
+            [:and {:description "The completed/wait control returned by the last evaluated form, recorded with settlement before presentation. These are the two closed session dispositions, not an entity kind or a stored session-open flag."}
+             :my.turn/disposition],
             :rule :keyword,
             :trigger [:and #:seon.db{:index true} :seon.db/ref],
             :system-result

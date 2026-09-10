@@ -942,8 +942,8 @@ prompt caching works on a stable prefix, so:
   `seon.repl/text`; bytes already sent never change; only the tail is new.
 - **A system turn is an ordinary turn with a reply and no provider
   attempt** (the source-submission shape). "System" is derived, never
-  stamped. A system turn holding wakes' results answers those wakes under
-  the `:t` rule. The old generated-opening machinery does not return: a
+  stamped. A system turn does not answer wakes; accepted ordinary replies
+  answer them by their opening transaction `:t`. The old generated-opening machinery does not return: a
   system turn evaluates its forms like any turn.
 - **Before each agent turn the loop runs the system turn for what
   changed**; nothing changed ⇒ no system turn. This is "render the diff as
@@ -975,6 +975,32 @@ evaluation's `:t` (a `since` query), the system turn appends a fresh
 evaluation of that same form. Writes and effects are never re-run. One
 algorithm, no block-specific code: the cache validity check applied to the
 whole transcript. (superseded by §15)
+
+### Session continuation (owner, 2026-09-10)
+
+A reply is one turn, not the end of a session. With no open turn, the
+session remains open exactly when the latest closed turn has an accepted
+provider reply (reply-size present and a successful attempt), its last
+evaluated form did not return `:completed` or `:wait`, and turns remain
+under the existing bound. `next-agent-work` derives the next `:open` from
+those facts; `more-agent-work?` makes the existing proc self-rewake. No
+session-open flag, counter, new wake, or second loop is stored or added.
+The last evaluation's terminal control is recorded as
+`:seon.turn/disposition` in its settlement transaction, before presentation;
+shown text may be elided and cannot be the authority for execution control.
+
+`(my.agent/done)` returns `:wait` and ends continuation. A provider refusal
+defers until a new outside wake; failures never authorize a paid loop.
+Continuation consumes the same `turns-left`; only an outside wake refills
+the bound. Wake answering retains the opening-transaction `:t` rule.
+
+Virtual/no-provider replies and submitted system source do not authorize
+continuation: their source is system-generated, with no accepted provider
+attempt. This preserves one requested virtual turn as one turn, keeping
+the debug control and recurring virtual-loop proof's counts meaningful.
+Virtual replies still answer wakes when frozen after opening; submitted
+system source frozen with its identity does not. These wake-answering
+rules are separate from permission to continue a provider session.
 
 ## 15. Results: objects in memory, shown text on disk (owner, 2026-09-08)
 
