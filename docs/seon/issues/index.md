@@ -93,7 +93,7 @@ See `README.md` for the convention.
 | [Carry agent routing into the virtual-turn control](virtual-turn-control-loses-agent-routing.md) | blocker | turn follow-up wave |
 | [Render walk-unit hiccup as markup, never escaped EDN text](walk-units-render-their-hiccup-as-escaped-edn-text.md) | blocker | ui verification wave |
 
-## Friction (179)
+## Friction (181)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -235,6 +235,7 @@ See `README.md` for the convention.
 | [Delete bloated stores at IO pace with progress](reset-deletes-a-bloated-store-one-lstat-at-a-time.md) | friction | operator velocity fixes |
 | [Invalidate retained render calls when a selected producer changes](retained-render-packages-survive-producer-replacement.md) | friction | render package economics wave |
 | [Give the shared compute executor per-cluster fairness](root-compute-executor-has-no-per-cluster-fairness.md) | friction | shared-surface scheduling design gate |
+| [Root's empty plan read shows nil](root-empty-plan-read-shows-nil.md) | friction | page follow-up wave |
 | [Fit the root maintenance context to the provider budget](root-maintenance-context-exceeds-provider-budget.md) | friction | drive-1 defect wave |
 | [Root's turns on a fresh dev cluster hit the context-acquisition backstop](root-turns-on-a-fresh-dev-cluster-hit-the-context-acquisition-backstop.md) | friction | turn-cut lane (running, 2026-09-09) |
 | [Render run forms and receipts with strict REPL fidelity](run-renderer-narrates-forms-and-receipts.md) | friction | strict REPL display wave |
@@ -253,6 +254,7 @@ See `README.md` for the convention.
 | [Give `seon.db` the branch and commit reads root needs](seon-db-has-no-branch-or-commit-reads.md) | friction | `my.branch` verb wave (W-C, [PRD](../../prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)) |
 | [Give `seon.cluster.loop/settle!` a complete public contract](settle-is-public-without-a-complete-contract.md) | friction | unreadable-reply lane coordination |
 | [Identify shared store growth during renderer changes](shared-store-grows-during-render-source-work.md) | friction | page follow-up wave (after turn-cut lands) |
+| [Source analysis can slice changing files with stale offsets](source-analysis-can-slice-changing-files-with-stale-offsets.md) | friction | adoption follow-up wave |
 | [Cut the 11.8 s source load back under the ten-second law](source-load-is-118s-against-the-ten-second-law.md) | friction | load-time incident |
 | [Source publication hides a failed dependency-cache subprocess](source-publication-cache-contention-hides-dependency-analysis-failure.md) | friction | adoption follow-up wave |
 | [Investigate the scratch config publication fingerprint collision](source-publication-fingerprint-collision-after-config-property-reordering.md) | friction | adoption follow-up wave |
