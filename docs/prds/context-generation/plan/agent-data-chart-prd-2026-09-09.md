@@ -326,7 +326,9 @@ Status: ✅ landed · ▶ running · ⏭ next · ◻ queued.
 | 1 | `transact!` validates against the projection; refusal carries form, offending value, path, candidates; returned flat errors render through their AI pair | no | ✅ `26ec13420` `24953d294` `6f7c6faa3` |
 | 1a | The live loop: duplicate graphs on concurrent arming; empty virtual reply as a fault | no | ✅ `e12ba7535` (wake→settled 1–2 s, proven on default) |
 | 1b | Transaction report as resolved changes; positioned components ordered; nested pull shapes; `dir` shows declared schemas; forms printed as agent source; faults to root / routed stewards; root's agents block; raw component reads at turn 0 even when empty; data-first help lines | no | ✅ cookbook lane, 11 commits `d6377ac39`…`778be4b94` |
-| 1c | `(help)` as `#:seon.help{:lines}` with its own render pair (bare lines, no quoted strings); settings AI = effective values grouped; turns concern HTML-only and "Context now" showing the turn; plan ids derived and taught by an add/remove example (§14a) | no | ▶ cookbook (after its harness slice) |
+| 1c | `(help)` as `#:seon.help{:lines}` with its own render pair (bare lines); turns concern HTML-only and "Context now" showing the turn | no | ✅ `9f9f432a8` `7e7c74f01` |
+| 1d | REPL grammar prompt-first (§18d); settings effective values grouped; plan writes by example | no | ▶ patch verified in `2b9ebe98c`, lands after the data batch |
+| 1e | Incremental publication writes complete rows (validation caught it) | no | ✅ `1e778e880` |
 | 2 | Read evidence exact for `not`/`or` pattern clauses and `pull` in `:find` | no | ◻ evidence lane |
 | 3 | `(seon.id/id data [n])` as the one id entry; message ids random 8; plan item ids from title | no | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
 | 4 | Time is the transaction: NEW `completed-tx`, `read-tx` refs; DELETE `completed-at`, message `at`, `ordinal` | yes | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |

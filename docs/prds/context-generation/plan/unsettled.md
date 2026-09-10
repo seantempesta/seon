@@ -701,3 +701,20 @@ half-edit. Measured targets in the issue.
   turns inside it).
 - Owner review point: after the cookbook's §14a slice and a reseed.
 
+## 2026-09-09 19:20 — the data batch landed; grammar patch queued behind it
+
+- data-lane `24adad072` (one id entry), `dbec8be7e` (addressable plan and
+  settings components; `done-when`; completion as a transaction ref),
+  `ae0e54841` (133 files: `:seon.message/*` with the inbox as an edge,
+  `read-tx`, the runtime component holding the turns, retired turn
+  attributes, `:seon.eval/shown`, `sent-body` gone). RESET NEEDED once —
+  twelfth refork when the lane's note lands.
+- publication-provenance `1e778e880`: incremental publication writes
+  complete rows; the write-seam validation caught a real publication
+  defect on its first day.
+- cookbook `9f9f432a8` (help render pair, bare lines), `7e7c74f01` (turn
+  headers separate from the current context); the prompt-first grammar
+  (§18d), settings effective values and plan writes-by-example are a
+  verified patch in `2b9ebe98c` waiting for the data batch's files.
+- Owner review point: after the refork, the cookbook patch, and a reseed.
+
