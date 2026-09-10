@@ -813,3 +813,14 @@ half-edit. Measured targets in the issue.
   provider credits. Next design step: the first real provider turn on the
   orders scenario, cheapest model, once credits exist.
 
+## 2026-09-09 21:55 — root's page: 18 s and an old-generation opening
+
+- Reseed on the adopted JVM succeeded (the schema re-declaration fix
+  proven live); Juniper's page 0.5 s, 11 evaluations, clean. Root's
+  `?prompt=true` page: 18 s (plain page 0.5 s); its opening is
+  bootstrap's old generation (forms printed as `(quote …)`, old help,
+  four printer fallbacks, no cluster block). Filed as a blocker;
+  `root-page` lane at high on the latency seam and on bootstrap using
+  the current generator; the orchestrator is compacting root on `default`
+  to see what the current generator produces for it.
+
