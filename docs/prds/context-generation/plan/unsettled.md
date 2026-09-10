@@ -765,3 +765,14 @@ half-edit. Measured targets in the issue.
   settings dials the agent cannot act on. Paid trial still blocked on
   provider credits.
 
+## 2026-09-09 20:55 — render pass landed; page re-read on a reseeded default
+
+- render-pass `5af34fc38`: plan comment one line, `:needs` as ids,
+  settings only actionable dials (model, no-provider, retry, time limit,
+  budget, turns-left), Turns block headers only. Reseeded and read: the
+  opening is help (bare lines), identity, plan, inbox (reverse pull on the
+  edge), settings, notes, `dir` (declared schemas), data count, runtime
+  (trigger, listens) — 118 lines, zero printer fallbacks, zero commented
+  code. Leftovers noted on the issue: the trigger's `[*]` shows a bare
+  `#:db{:id}` for `:from`; the empty notes read prints `nil`.
+
