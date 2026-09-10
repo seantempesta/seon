@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [turn, loop, live-test, class/p1]
 created: 2026-09-10
@@ -53,3 +53,28 @@ turn bound, with no new outside wake. Provider refusals still defer
 (no paid loop); the bound still refills only by an outside wake; the
 `:t` rule stays the answer for wakes. The live §17 run reaches its
 seventh step or its budget without a human sending anything.
+
+## Resolution — 2026-09-10
+
+Implemented in `57f1a8c23`. `next-agent-work` admits continuation from
+the latest closed accepted provider reply under the existing bound;
+the existing proc self-rewakes through `more-agent-work?`. Settlement
+records the terminal completed/wait control as `:seon.turn/disposition`.
+Session-open state is derived, not stored. Virtual/system replies do not
+continue, provider refusal still defers, and outside wakes alone refill
+the bound. The PRD section 14 amendment states the exact rule.
+
+The canonical armed regression proves a read's exact saved result reaches
+the next provider prompt without an outside wake, both terminal
+dispositions stop, provider refusal stops, and the bound stops. Fast:
+1 test / 65 assertions. Scoped gate with the unchanged virtual-loop proof:
+5 tests / 217 assertions. Platform: 84 tests / 505 assertions. All passed.
+
+The orchestrator retains the live §17 provider run. This lane performed no
+default agent or lifecycle action; pre-change terminal dispositions were
+not backfilled. Details, prior fixture failures, query evidence and the
+fresh-history verification boundary are in the
+[landing note](../../../prds/context-generation/research/loop-continue-landing-2026-09-10.md).
+The separate [transaction-input query defect](../bound-transaction-input-selects-an-older-turn.md)
+is recorded in `25de70550`; this caller uses the verified explicit
+transaction equality predicate.
