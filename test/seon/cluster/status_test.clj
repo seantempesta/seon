@@ -89,3 +89,14 @@
          (finally
            (.countDown release)
            (support/await-event! finished :status-thread-finished)))))))
+
+(deftest routine-status-declares-unmeasured-store-size
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "status-observation")
+     (let [observation (status/snapshot {:seon.db/db @connection
+                                         :seon.db/connection connection})]
+       (is (= "status-observation" (:seon.cluster/name observation)) (pr-str observation))
+       (is (= :seon.cluster.status/unavailable
+              (get-in observation [:seon.cluster.status/store-bytes :seon.error/kind])))
+       (is (pos-int? (:seon.cluster.status/platform-threads observation)))))))

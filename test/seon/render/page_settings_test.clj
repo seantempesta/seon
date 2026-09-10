@@ -6,9 +6,33 @@
             [seon.db :as db]
             [seon.id :as id]
             [seon.plan :as plan]
+            [seon.render :as render]
             [seon.repl :as repl]
             [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
+
+(deftest settings-without-overrides-use-the-declared-pair
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "empty-settings")
+     (let [created (db/transact! connection
+                    (agent/creation-tx {:seon.agent/id "root"
+                                        :seon.ns/name 'my.agents.root
+                                        :seon.cluster/name "empty-settings"}))]
+       (is (:db-after created) (pr-str created)))
+     (let [database @connection
+           component (:seon.agent/settings
+                      (db/pull database '[{:seon.agent/settings [*]}] [:seon.agent/id "root"]))
+           ctx (support/fork-cluster-ctx connection "empty-settings")]
+       (is (:seon.config/agent component))
+       (doseq [[output expected] [[:seon.render/ai 'seon.agent/render-settings-ai]
+                                  [:seon.render/html 'seon.agent/render-settings-html]]]
+         (let [decision (render/selection {:seon.db/db database :seon.sci.eval/ctx ctx
+                                           :seon.sci.admit/caps (config/result-caps (support/effective-config))
+                                           :seon.sci.eval/time-limit-ms 10000
+                                           :seon.config/on-core-error :panic
+                                           :seon.render/value component :seon.render/output output})]
+           (is (= expected (:seon.render.selection/selected decision)) (pr-str decision))))))))
 
 (deftest effective-settings-and-authored-plan-examples-work-through-sci
   (load-file "docs/prds/context-generation/research/context_page_probe_2026_09_09.clj")

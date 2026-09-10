@@ -36,3 +36,8 @@ This remains an observation boundary, not a browser-paint proof.
 Root-cluster recheck at 2026-09-10 03:29 UTC: `getBrowser` for the
 default root debug URL reported no browser; native Safari returned
 `cgWindowNotFound` (-10005). The lane records served HTML separately.
+
+Root-page recheck at 2026-09-10 03:53 UTC: CUA returned no browser
+surfaces; `getApp("com.google.Chrome")` returned `cgWindowNotFound`
+(-10005). Root HTTP controls and exact model-prompt captures succeeded;
+browser paint remains unobserved.

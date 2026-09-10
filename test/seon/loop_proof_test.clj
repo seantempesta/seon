@@ -267,9 +267,7 @@
              {:seon.agent/id "other"
               :seon.agent/namespace {:seon.ns/name 'my.agents.other}}
              {:seon.agent/id "unobserved"
-              :seon.agent/namespace {:seon.ns/name 'my.agents.unobserved}}
-             {:seon.agent/id "root"
-              :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
+              :seon.agent/namespace {:seon.ns/name 'my.agents.unobserved}}])
            _ (is (nil? (:seon.error/kind configured)) (pr-str configured))
            _ (cluster/ensure-cluster-entity! connection "loop-proof" cluster/boot-process-identity)
            ctx (support/fork-cluster-ctx connection)
@@ -350,6 +348,34 @@
                        (swap! transactions conj report)
                        (async/offer! events true)))
            (try
+             (testing "root boot stores the current system opening once"
+               (let [created (cluster/ensure-entity!
+                              connection cluster/boot-process-identity
+                              {:seon.agent/id "root" :seon.cluster/name "loop-proof"
+                               :seon.ns/name 'my.agents.root})
+                     bootstrap-id (:seon.turn/id created)
+                     root-request {:seon.turn.loop/cluster handle
+                                   :seon.agent/routing routing :seon.agent/id "root"}]
+                 (is (string? bootstrap-id) (pr-str created))
+                 (agent/arm! root-request)
+                 (support/await-event!
+                  events ::root-opening
+                  (fn [_] (:seon.turn/closed-tx
+                           (db/pull @connection [:seon.turn/closed-tx]
+                                    [:seon.turn/id bootstrap-id]))))
+                 (agent/disarm! root-request)
+                 (let [saved (evaluation/of-agent @connection "root")
+                       sources (mapv :seon.cluster.eval/source saved)
+                       planned (:seon.turn/forms
+                                (turn/system-turn (assoc root-request :seon.turn/write? false)))]
+                   (is (seq saved))
+                   (is (empty? (keep :seon.cluster.eval/error saved)))
+                   (is (= sources (mapv :seon.cluster.eval/source planned)))
+                   (is (= sources (vec (distinct sources))))
+                   (is (= "(help)" (first sources)))
+                   (is (some #{"(seon.cluster.status/snapshot {})"} sources))
+                   (is (str/starts-with? (:seon.eval/shown (first saved))
+                                        "The prompt shows your namespace my.agents.root")))))
              (testing "agent creation uses the same retained-read opening"
                (let [created (cluster/ensure-entity!
                               connection cluster/boot-process-identity
@@ -371,6 +397,12 @@
                                                     [(:seon.cluster.eval/source entry)
                                                      (count (:seon.cluster.eval/read-evidence entry))]) saved)})
                    (is (seq saved))
+                   (let [declared (#'turn/declared-sources
+                                   handle @connection "juniper" 'my.agents.juniper)]
+                     (is (= (mapv :seon.cluster.eval/source saved)
+                            (mapv :seon.cluster.eval/source
+                                  (#'turn/system-plan @connection (:seon.turn/forms declared) {})))
+                         "creation stores the generator's exact source, including reader quotes"))
                    (is (every? (comp seq :seon.cluster.eval/read-evidence)
                                (remove #(str/starts-with? (:seon.cluster.eval/source %) "(dir ") saved)))
                    (is (= ['(seon.agent/effective-settings) runtime-read]

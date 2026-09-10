@@ -4454,9 +4454,7 @@
                 declared (declared-sources cluster database agent-id namespace-name)]
             (if (:seon.error/kind declared)
               declared
-              (when-let [source (nth (:seon.turn/forms declared) ordinal nil)]
-                {:seon.repl/form (:seon.sci.reader/form (first (source-events source)))
-                 :seon.repl/comment (:seon.cluster.eval/comment source)}))))]
+              (nth (system-plan database (:seon.turn/forms declared) {}) ordinal nil))))]
     (cond
       (:seon.error/kind entry)
       (do
@@ -4500,12 +4498,12 @@
                        ;; its prose sits above the prompt exactly like an
                        ;; agent's own.
                        :seon.cluster.eval/source
-                       (pr-str (:seon.repl/form entry))
+                       (:seon.cluster.eval/source entry)
                        :seon.ns/name
                        ((requiring-resolve 'seon.sci.eval/agent-namespace) @connection agent-id)}
-                (:seon.repl/comment entry)
+                (:seon.cluster.eval/comment entry)
                 (assoc :seon.cluster.eval/comment
-                       (:seon.repl/comment entry)))))]
+                       (:seon.cluster.eval/comment entry)))))]
         (if (:seon.error/kind appended)
           (do
             (settle! {:seon.turn.loop/cluster cluster

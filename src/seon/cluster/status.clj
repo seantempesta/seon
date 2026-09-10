@@ -6,8 +6,7 @@
             [seon.blob :as blob]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
-            [seon.id :as id]
-            [seon.operator.state :as state])
+            [seon.id :as id])
   (:import [java.lang.management ManagementFactory]
            [com.sun.management HotSpotDiagnosticMXBean HotSpotDiagnosticMXBean$ThreadDumpFormat]))
 
@@ -45,7 +44,8 @@
 
 (defn snapshot
   "Observe this cluster and JVM. SCI supplies the database and connection.
-  Thread counts are a non-atomic JVM dump; disk bytes reuse operator status.
+  Thread counts are a non-atomic JVM dump. Store size is an explicit operator
+  diagnostic: routine observations never traverse the store's files.
   Faults and session accounting start at this JVM's boot instant.
 
   Example: (seon.cluster.status/snapshot {})"
@@ -56,7 +56,6 @@
     (let [cluster (db/q '[:find (pull ?c [:seon.cluster/name :seon.source/commit-id]) .
                           :where [?c :seon.cluster/name]] database)
           heap (.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean))
-          path (get-in database [:config :store :path])
           faults (db/q '[:find ?signature (count ?f)
                          :in $ ?boot
                          :where [?f :seon.error/signature ?signature]
@@ -69,8 +68,7 @@
           :seon.cluster.status/heap-used (.getUsed heap)
           :seon.cluster.status/heap-max (.getMax heap)
           :seon.cluster.status/store-bytes
-          (if path (:seon.operator.footprint/file-bytes (state/footprint path))
-              (unknown "This database has no file-backed store path."))
+          (unknown "Store bytes are not scanned during a cluster observation. Use bin/seon status --verbose for an explicit footprint measurement.")
           :seon.cluster.status/adopted-commit
           (or (:seon.source/commit-id cluster) (unknown "No source adoption is recorded."))
           :seon.cluster.status/current-commit

@@ -17,3 +17,8 @@ the plan entry after `(seon.cluster.status/agents {})`. The corresponding
 HTML correctly says “No objective set” and “No steps yet.” This is an AI
 empty-case presentation issue; the root-cluster lane does not own the plan
 renderer. No plan data was fabricated to hide it.
+
+Root-page re-observed this after compaction on default at 2026-09-10
+03:55 UTC. The empty inbox reverse pull also shows nil. Both execute
+declared render sources; they are empty-result presentation defects,
+not missing render pairs. [Exact prompt](../../prds/context-generation/research/root-page-default-prompt-2026-09-09.txt).
