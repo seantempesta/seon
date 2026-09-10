@@ -835,3 +835,20 @@ half-edit. Measured targets in the issue.
   today; the page for the owner: Juniper 0.5 s / 11 evaluations, root
   1.1 s / 11 evaluations, both on the current generator.
 
+## 2026-09-10 14:20 — deepseek-flash, thinking disabled: 12/12
+
+- Default model for every agent is `deepseek-flash` (DeepSeek-V4.1-Flash;
+  the provider lists only `deepseek-flash` and `deepseek-v4-pro`), config
+  `abc021957`; key verified from the JVM. trial-rerun `f183e1965`: harness
+  preflight reads the new message family and derives the expected opening
+  from the generator; seon.ai sends the thinking dial (verified: with
+  thinking on, Flash spent the whole output budget on reasoning and
+  returned an empty body); one paid trial on the current prompt scored
+  **12/12** (baseline 10/12), 2,533 in / 289 out tokens, $0.00055 at the
+  published V4.1 rates (the database's price row still carries V4 rates —
+  drift issue filed).
+- Live test scenario (chart §17): seven steps, every core capability once,
+  thirty-turn budget, `(my.agent/done)` to end early. Fixture update queued
+  behind trial-rerun's landing; repl-display on wrapping and the runtime
+  block's HTML.
+
