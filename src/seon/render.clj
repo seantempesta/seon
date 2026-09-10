@@ -1003,7 +1003,15 @@
         selected (when (and projection (map? value))
                    (or (get value output)
                        (declared-producer projection request value output)))
-        selected (when-not (contains? rendering selected) selected)]
+        selected (when-not (or (contains? rendering selected)
+                               (and (= output :seon.render/ai)
+                                    selected
+                                    (not (:seon.error/kind selected))
+                                    (source-producer?
+                                     projection selected
+                                     [(producer-argument
+                                       (assoc request :seon.render/value value))])))
+                   selected)]
     (cond
       (:seon.error/kind selected) (bounded-error-node request selected)
 

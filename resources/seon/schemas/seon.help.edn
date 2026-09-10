@@ -1,0 +1,6 @@
+{:seon.help/lines [:vector :string]
+ :seon.help/help
+ [:map {:description "The REPL instructions returned as data by help."
+        :seon.render/ai seon.bootstrap/render-help-ai
+        :seon.render/html seon.bootstrap/render-help-html}
+  [:seon.help/lines :seon.help/lines]]}

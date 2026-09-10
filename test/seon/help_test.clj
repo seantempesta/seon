@@ -5,6 +5,7 @@
             [clojure.test :refer [deftest is]]
             [sci.core :as sci]
             [seon.cluster :as cluster]
+            [seon.bootstrap :as bootstrap]
             [seon.cluster.agent :as agent]
             [seon.config :as config]
             [seon.db :as db]
@@ -47,7 +48,7 @@
                                       (preview evaluation-request))]
                          (turn/system-turn request))
                saved (first (evaluation/of-agent @connection "help"))
-               lines (some-> (:seon.eval/value saved) edn/read-string)
+               lines (some-> (:seon.eval/value saved) str/split-lines)
                evidence (:seon.cluster.eval/read-evidence saved)
                shown (when saved (repl/render-ai saved))]
            (is (some? saved) (pr-str {:opening opening :committed @committed}))
@@ -67,9 +68,11 @@
            (is (vector? lines) (pr-str lines))
            (is (= 13 (count lines)))
            (is (every? #(and (string? %) (not (str/includes? % "\n"))) lines))
-           (is (= "You are at a Clojure REPL in your namespace my.agents.help. Every function in the program is callable."
+           (is (= "The prompt shows your namespace my.agents.help and is drawn for you. Send only ;; thinking comments and forms."
                   (first lines)))
-           (is (not-any? #(str/includes? % "▲") lines))
+           (is (not-any? #(str/includes? % (str (char 9650))) lines))
+           (is (= lines (:seon.help/lines (bootstrap/help-value @connection "help"))))
+           (is (= :ul (first (bootstrap/render-help-html {:seon.help/lines lines}))))
            (is (str/includes? (nth lines 6) "identity-less nested map replaces it"))
            (is (str/includes? (nth lines 7) ":my.message/to"))
            (is (str/includes? (nth lines 7) "retractEntity"))

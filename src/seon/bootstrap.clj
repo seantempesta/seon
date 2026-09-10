@@ -15,14 +15,14 @@
             [seon.sci.kernel :as sci.kernel]))
 
 (defmacro help
-  "Return the calling agent's REPL instructions as one vector of lines."
+  "Return the calling agent's REPL instructions as a help entity."
   []
   (list 'seon.bootstrap/help-value))
 
 (defn help-value
   "Read the REPL instructions and tools from this program version."
   {:malli/schema [:=> [:cat :seon.db/db :seon.agent/id]
-                  [:vector :string]]}
+                  :seon.help/help]}
   [database agent-id]
   ;; The fixed prose belongs to this definition; the source read records
   ;; its code version in the same dependency evidence as every other read.
@@ -41,9 +41,10 @@
                        [?function :seon.fn/private? false]
                        (not [?function :seon.fn/internal? true])]
               database (instruction/toolkit-namespaces database))]
-    [(str "You are at a Clojure REPL in your namespace " namespace-name
-          ". Every function in the program is callable.")
-     (str "Reply with ;; thinking comments, each followed by the form it plans. Send only comments and forms; the prompt " namespace-name "=> is drawn for you.")
+    {:seon.help/lines
+    [(str "The prompt shows your namespace " namespace-name
+          " and is drawn for you. Send only ;; thinking comments and forms.")
+     "Results are data: chain them with ->>, sort-by, filter, map, and get-in. Every function in the program is callable."
      "Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
      "Each form returns one #:seon.repl map: :value (or :error) is data, :out is anything printed, :result names the live value."
      "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
@@ -58,7 +59,20 @@
           "] :my.note/content \"Verified\" :my.note/about \"datomic.tx\"}]); pull :db/txInstant through that ref.")
      "Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) ends your session early."
      (str "Tools: "
-          (str/join ", " (sort tools)) ". Inspect one with dir.")]))
+          (str/join ", " (sort tools)) ". Inspect one with dir.")]}))
+
+(defn render-help-ai
+  "Show help lines as bare text, one per line."
+  {:malli/schema [:=> [:cat :seon.help/help] :string]}
+  [instructions]
+  (str/join "\n" (:seon.help/lines instructions)))
+
+(defn render-help-html
+  "Show the same help lines as a list."
+  {:malli/schema [:=> [:cat :seon.help/help] :seon.render/hiccup]}
+  [instructions]
+  (into [:ul {:class "seon-help"}]
+        (map #(vector :li %) (:seon.help/lines instructions))))
 
 (defn situation
   "Derive one agent's live opening seeds from current database facts."

@@ -296,8 +296,7 @@
           {:seon.print/face :seon.print/string :seon.print/value value}))
 
       (coll? value)
-      (let [selected (when (and (or (not ai?) (:seon.error/kind value))
-                                (map? value) (:seon.sci.eval/ctx unit)
+      (let [selected (when (and (map? value) (:seon.sci.eval/ctx unit)
                                 (not (get-in unit [:seon.render.value/options
                                                    :seon.render.value/structural?])))
                        (let [node {:seon.print/face :seon.print/map :seon.print/entries []}
