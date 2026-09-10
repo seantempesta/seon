@@ -722,7 +722,9 @@
              ". The call was stopped before the function ran. "
              ". The function returned an invalid value. ")
            (when (:seon.error/id fact)
-             (evidence-prose fact)))
+             (evidence-prose fact))
+           (when-let [documentation (:seon.error/doc fact)]
+             (str "\n" (pr-str {:seon.error/doc documentation}))))
       (str (:seon.error/message fact)
            (when (:seon.error/id fact)
              (str " " (evidence-prose fact)))))))

@@ -34,3 +34,25 @@
     (spit (str "docs/prds/context-generation/research/context-nits-" label "-2026-09-09.edn")
           (pr-str evidence))
     (assoc (dissoc evidence :rows) :shown-bytes (mapv :bytes rows))))
+
+(defn capture-contract!
+  "Verify a refused call teaches its documentation without sending a message."
+  []
+  (let [instance (get @runtime/running-instances "default")
+        database @(operator/connection "default")
+        result (evaluation/evaluate
+                (assoc (:seon.turn.loop/cluster instance)
+                       :seon.db/db database
+                       :seon.cluster.eval/source
+                       "(my.message/send {:my.message/to 42 :my.message/content \"Hello\"})"
+                       :seon.sci.eval/time-limit-ms 10000))
+        value (:seon.sci.admit/value result)
+        evidence (select-keys result [:seon.sci.admit/value :seon.eval/shown
+                                      :seon.cluster.eval/error :seon.eval/duration-ms])]
+    (assert (= :seon.instrument/contract-violated (:seon.error/kind value)))
+    (assert (= "Return an addressed message for the turn to deliver."
+               (get-in value [:seon.error/doc :summary])) (pr-str evidence))
+    (spit "docs/prds/context-generation/research/context-nits-contract-2026-09-09.edn"
+          (pr-str evidence))
+    {:shown-bytes (alength (.getBytes ^String (:seon.eval/shown result) "UTF-8"))
+     :kind (:seon.error/kind value)}))

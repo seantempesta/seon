@@ -18,4 +18,4 @@ block render functions.
 
 Resolved by context-nits slice 1; both generated reads execute through
 real SCI on the canonical database fixture, including the first added
-note. See [landing evidence](../../prds/context-generation/research/context-nits-landing-2026-09-09.md).
+note. See [landing evidence](../../../prds/context-generation/research/context-nits-landing-2026-09-09.md).

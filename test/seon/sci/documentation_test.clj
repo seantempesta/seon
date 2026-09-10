@@ -4,6 +4,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.eval :as evaluation]
+            [seon.schema :as schema]
             [seon.test-support :as support]))
 
 (deftest documentation-is-returned-data-without-a-second-printed-copy
@@ -51,3 +52,27 @@
               (get-in missing-ns [:seon.sci.admit/value :seon.error/kind])))
        (is (= {:schemas {} :functions []} (:seon.sci.admit/value empty-ns)))
        (is (nil? (:seon.cluster.eval/error empty-ns)))))))
+
+(deftest a-contract-mistake-carries-the-same-documentation-as-doc
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           run (fn [source]
+                 (evaluation/evaluate
+                  {:seon.sci.eval/ctx ctx :seon.db/db @connection
+                   :seon.cluster.eval/source source
+                   :seon.sci.admit/caps (config/result-caps (config/defaults))
+                   :seon.sci.eval/time-limit-ms 10000
+                   :seon.config/on-core-error :panic}))
+           documentation (:seon.sci.admit/value (run "(doc my.message/send)"))
+           failed (run "(my.message/send {:my.message/to 42 :my.message/content \"Hello\"})")
+           value (:seon.sci.admit/value failed)]
+       (is (= :seon.instrument/contract-violated (:seon.error/kind value)) (pr-str failed))
+       (is (= documentation (:seon.error/doc value)) (pr-str failed))
+       (is (schema/valid-candidate-value? :seon.error/value value))
+       (is (str/includes? (:seon.eval/shown failed) ":example"))
+       (is (str/includes? (:seon.eval/shown failed) "Return an addressed message"))
+       (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] @connection)))
+       (let [unrelated (run "(/ 1 0)")]
+         (is (:seon.cluster.eval/error unrelated))
+         (is (not (find (:seon.sci.admit/value unrelated) :seon.error/doc))))))))

@@ -1920,7 +1920,17 @@
 
 (defn- shown-result
   [value request record]
-  (let [profile (render/request-profile request)
+  (let [function-name (when (= :seon.instrument/contract-violated (:seon.error/kind value))
+                        (:seon.instrument/contract-violated value))
+        database (when function-name
+                   (or (:seon.db/db request)
+                       (some-> (get-in request [:seon.sci.eval/ctx ::custody :seon.db/connection]) deref)))
+        function-row (when (and function-name database)
+                       (db/pull database program-documentation-selector
+                                [:seon.fn/sym function-name]))
+        value (if (:seon.fn/sym function-row)
+                (assoc value :seon.error/doc (function-doc-map function-row)) value)
+        profile (render/request-profile request)
         projection (render.value/prepare
                (assoc request
                       :seon.render/value value

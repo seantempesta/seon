@@ -41,8 +41,6 @@ Live initial MCP JVM probe returned the bare sender `#:db{:id 36216}`
 and nil notes in 1128 ms. Default PID remains 83040; no lifecycle operation
 was performed. Adoption and final page observations are recorded below.
 
-## Verification boundaries
-
 ## Slice 2
 
 `dir` now returns `:schemas` and `:functions`; each referenced schema is
@@ -55,7 +53,8 @@ example is one `do` form containing its three demonstrated writes.
 
 Fast gate: 2 tests / 58 assertions, green. Isolated documentation/settings
 gate: 2 tests / 60 assertions, green. Platform: 84 / 505, green.
-The directory read-evidence regression is also updated to the new map.
+The directory read-evidence regression's isolated gate is 1 test / 15
+assertions, green, including invalidation after a new schema declaration.
 The older `seon.sci.eval-test` printed-documentation expectations are
 already tracked in the existing retired-storage test issue; this slice
 uses the canonical documentation and directory regression owners.
@@ -72,6 +71,55 @@ convergence is checked again after the final edits.
 Reproducible live capture: load
 [context_nits_probe_2026_09_09.clj](context_nits_probe_2026_09_09.clj),
 then call `(context-nits-probe-2026-09-09/capture! "final")`.
+
+## Slice 3
+
+The shared evaluation-result boundary attaches `:seon.error/doc` from
+the named function's program row before rendering. Both returned and
+thrown contract violations cross this point. The optional field is
+declared in `resources/seon/schemas/seon.error.edn`; the existing
+`seon.error/instrumentation-prose` renderer includes it. The first fast
+regression caught that renderer dropping the doc, so the final regression
+checks the live error map AND the shown example, no message writes, and
+an unrelated error without a function doc.
+
+Fast: 2 tests / 43 assertions, green. Isolated gate including the error
+owner: 35 tests / 182 assertions, green. Separate platform: 84 tests /
+505 assertions, green. Live default refused the invalid
+message call in 33 ms and returned 984 UTF-8 shown bytes, including the
+same documentation summary. Exact bytes:
+[contract refusal](context-nits-contract-2026-09-09.edn).
+
+The read-only [live capture](context-nits-live-2026-09-09.edn) records the
+runtime, notes, directory and four docs: shown byte counts respectively
+773, 2, 2332, 791, 664, 899, 397. This capture observed hot-reloaded
+definitions before the complete adoption marker converged, and explicitly
+records both source IDs rather than claiming convergence.
+
+The [final capture](context-nits-final-2026-09-09.edn) includes the newly
+declared optional error-doc field in the output contract. Shown sizes are
+773, 2, 2395, 850, 723, 899, 397 bytes. At 03:09 UTC the adopted marker
+remained `6aa2187e-9fa6-5461-8dc3-c10a1668e1ce` while the published marker
+was `6aa21ec4-34f4-5fbb-a1b3-2b979aafbbb8`. The final explicit adoption
+client was still reconciling; live function results are not substituted
+for a successful adoption marker. The shared hook publication
+`6bc12f9d-0c4c-47e7-b160-d08e33f4c2df` separately reported operator exit
+124. Neither failure was repaired through a foreign session or a restart.
+
+The slice-2 debug HTML was fetched and its text read: the would-be system
+turn shows notes as `[]` and the explicit runtime trigger sender as
+`#:seon.agent{:id "root"}`. Saved history still shows its original nil
+and database id, as required by immutable historical shown text.
+
+Owned production paths across the three commits: `src/seon/note.clj`,
+`src/seon/render/transcript.clj`, `src/seon/sci/eval.clj`,
+`src/seon/error.clj`, `resources/seon/schemas/seon.error.edn`,
+`src/my/message.clj`, `src/my/agent.clj`, `src/my/plan.clj`, `src/my/note.clj`.
+Owned regressions: `test/seon/render/context_nits_test.clj`,
+`test/seon/loop_proof_test.clj`, `test/seon/sci/documentation_test.clj`,
+`test/seon/render/page_settings_test.clj`, `test/seon/directory_test.clj`.
+The two issue updates, this note, probe and linked captures are the
+documentation changes. The resolved trigger/notes issue is archived.
 
 ## Shared and tool boundaries
 

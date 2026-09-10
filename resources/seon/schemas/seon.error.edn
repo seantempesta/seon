@@ -1,5 +1,13 @@
 #:seon.error{:run [:and #:seon.db{:index true} :seon.db/ref],
              :data-blob :seon.blob/digest,
+             :doc
+             [:map
+              {:description "Function documentation attached to a contract refusal at the agent evaluation boundary."}
+              [:summary :string]
+              [:body :string]
+              [:example :string]
+              [:in :seon.schema/value]
+              [:out :seon.schema/value]],
              :class [:= true],
              :evidence [:tuple [:enum :seon.error/id] :seon.error/id],
              :steward-request
@@ -14,6 +22,7 @@
              [:map
               [:seon.error/kind :seon.error/kind]
               [:seon.error/message :seon.error/message]
+              [:seon.error/doc {:optional true} :seon.error/doc]
               [:seon.error/data {:optional true} :seon.error/data]],
              :notice-request
              [:map
