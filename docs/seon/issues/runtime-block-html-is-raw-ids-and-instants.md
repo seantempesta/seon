@@ -28,3 +28,15 @@ What a person wants from this block, all derivable from the pulled data:
   per referenced identity where an identity exists, otherwise nothing.
 
 The AI side of the block is fine as data; this is the HTML pair.
+
+Runtime-html lane observation, 2026-09-10: the generic reference dump is
+emitted by `src/seon/render/web.clj:1294–1313`, using the numeric ids from
+`referenced-entity-ids` at line 1144 as both link target and label. This
+protected file belongs to the render owner; the runtime pair cannot remove
+that surrounding header. Keep this issue open for that follow-up.
+
+Live verification also encountered the already-filed MCP degradation in
+`dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md`: status returned
+unknown health/Flow with `Read timed out`; `(+ 1 1)` returned 2, but runtime
+pulls through `seon.operator/connection` timed out at 10 and 20 seconds.
+The HTTP debug page remained readable. No default restart was attempted.

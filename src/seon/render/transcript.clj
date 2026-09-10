@@ -10,6 +10,7 @@
             [seon.db :as db]
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
+            [seon.cluster.message :as message]
             [seon.context :as context]
             [seon.turn :as turn]
             [seon.config :as config]
@@ -18,6 +19,7 @@
             [seon.render :as render]
             [seon.render.agent :as agent]
             [seon.render.block :as block]
+            [seon.render.route :as route]
             [seon.render.value :as value]
             [seon.render.walk :as walk]
             [seon.repl :as repl]
@@ -1095,8 +1097,76 @@
                          [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}])
               [:seon.agent/id agent-id]))))))
 
+(def ^:private runtime-message-selector
+  '[:seon.message/id :seon.message/content
+    {:seon.message/from [:seon.agent/id]}
+    {:seon.message/to [:seon.agent/id]}])
+
+(def ^:private runtime-turn-selector
+  [:seon.turn/id :seon.turn/reply :seon.turn/reply-blob
+   {:seon.turn/opened-tx [:db/txInstant]}
+   {:seon.turn/closed-tx [:db/txInstant]}
+   {:seon.turn/trigger runtime-message-selector}
+   {:seon.cluster.eval/_run [:seon.cluster.eval/id]}])
+
+(defn- runtime-time [instant]
+  (if (inst? instant)
+    (let [iso (str (.toInstant ^java.util.Date instant))]
+      [:time {:datetime iso
+              :data-text (str "new Date('" iso "').toLocaleTimeString()")}
+       (.format (java.text.SimpleDateFormat. "HH:mm:ss") instant)])
+    "Time unavailable"))
+
+(defn- runtime-duration [opened closed]
+  (if (and (inst? opened) (inst? closed))
+    (let [millis (- (.getTime ^java.util.Date closed)
+                    (.getTime ^java.util.Date opened))]
+      (cond
+        (neg? millis) "Duration unavailable"
+        (< millis 1000) (str millis " ms")
+        (< millis 60000) (str (quot millis 1000) " s")
+        (< millis 3600000) (str (quot millis 60000) " min")
+        :else (str (quot millis 3600000) " h "
+                   (mod (quot millis 60000) 60) " min")))
+    "Duration unavailable"))
+
+(defn- runtime-message-link [trigger]
+  (when-let [message-id (:seon.message/id trigger)]
+    [:a {:href (route/path ::route/data {} {:entity (pr-str [:seon.message/id message-id])})}
+     (str "Message from " (or (get-in trigger [:seon.message/from :seon.agent/id])
+                               "outside this cluster")
+          (when-let [content (:seon.message/content trigger)]
+            (str ": " (first (str/split-lines content)))))]))
+
+(defn- runtime-turn-table [turns latest-trigger]
+  [:section {:class "seon-turn-history"}
+   [:h3 (str "Turns (" (count turns) ")")]
+   (if (seq turns)
+     [:table {:class "seon-runtime-turns" :style {:width "100%" :text-align "left"}}
+      [:thead [:tr (for [label ["Opened" "Duration" "Trigger" "Evaluations" "Reply"]]
+                     [:th {:scope "col"} label])]]
+      [:tbody
+       (for [[index row] (map-indexed vector turns)]
+         (let [opened (get-in row [:seon.turn/opened-tx :db/txInstant])
+               closed (get-in row [:seon.turn/closed-tx :db/txInstant])
+               trigger (or (:seon.turn/trigger row)
+                           (when (zero? index) latest-trigger))
+               reply (:seon.turn/reply row)]
+           [:tr
+            [:td (runtime-time opened)]
+            [:td (if (:seon.turn/closed-tx row)
+                   (runtime-duration opened closed) "open")]
+            [:td (or (runtime-message-link trigger)
+                     (if trigger "Trigger details unavailable" "No recorded trigger"))]
+            [:td (str (count (:seon.cluster.eval/_run row))) ]
+            [:td (cond
+                   (seq reply) (first (str/split-lines reply))
+                   (:seon.turn/reply-blob row) "Reply stored separately"
+                   :else "—")]]))]]
+     [:p "No turns recorded."])])
+
 (defn render-runtime-html
-  "Show runtime state and all turn headers; evaluations belong in the prompt."
+  "Show transaction times, message triggers, listens, and newest-first turns."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.render/hiccup :seon.error/value]]}
   [unit]
@@ -1104,23 +1174,49 @@
         database (:seon.db/db unit)
         row (if (:seon.error/kind agent-id) agent-id
                 (db/pull database
-                     '[{:seon.agent/runtime
-                        [{:seon.runtime/turns
-                          [:seon.turn/id {:seon.turn/opened-tx [:db/id :db/txInstant]}
-                           :seon.turn/closed-tx]}
-                         {:seon.runtime/trigger [:seon.message/id]}
-                         {:seon.runtime/listens [*]}]}]
+                     [{:seon.agent/runtime
+                       [{:seon.runtime/turns runtime-turn-selector}
+                        {:seon.runtime/trigger runtime-message-selector}
+                        {:seon.runtime/listens [:seon.listen/attribute]}]}]
                      [:seon.agent/id agent-id]))]
-    (if (:seon.error/kind row) row
+    (cond
+      (:seon.error/kind row) row
+      (nil? (:seon.agent/runtime row))
+      (error/diagnostic
+       {:seon.error/kind :seon.db/not-found
+        :seon.error/message "The agent's runtime component is unavailable."
+        :seon.error/diagnostic-layer :seon.render
+        :seon.error/diagnostic-operation 'seon.render.transcript/render-runtime-html
+        :seon.error/diagnostic-member :seon.agent/runtime
+        :seon.error/diagnostic-expected :seon.runtime/entity
+        :seon.error/diagnostic-offending agent-id
+        :seon.error/diagnostic-cause :seon.db/not-found
+        :seon.error/diagnostic-evidence [:seon.agent/runtime]})
+      :else
         (let [runtime (:seon.agent/runtime row)
-              turns (:seon.runtime/turns runtime)
-              open (last (sort-by #(get-in % [:seon.turn/opened-tx :db/id])
-                                 (remove :seon.turn/closed-tx turns)))]
+              turns (sort-by (juxt #(some-> (get-in % [:seon.turn/opened-tx :db/txInstant])
+                                            (.getTime)) :seon.turn/id)
+                             #(compare %2 %1) (:seon.runtime/turns runtime))
+              open (first (remove :seon.turn/closed-tx turns))
+              since (if open (get-in open [:seon.turn/opened-tx :db/txInstant])
+                        (last (sort (keep #(get-in % [:seon.turn/closed-tx :db/txInstant]) turns))))
+              trigger (:seon.runtime/trigger runtime)]
           [:section {:class "seon-runtime"}
            [:h2 "Runtime"]
-           [:p (if open (str "Turn open since " (pr-str (get-in open [:seon.turn/opened-tx :db/txInstant]))) "Idle")]
-           [:p (str "Trigger: " (or (get-in runtime [:seon.runtime/trigger :seon.message/id]) "None"))]
-           (into [:ul {:class "seon-runtime-listens"}]
-                 (map #(vector :li [:code (pr-str (dissoc % :db/id))])
-                      (:seon.runtime/listens runtime)))
-           (render-history-html turns database)]))))
+           [:p {:class "seon-runtime-state"}
+            (if open "Turn open" "Idle")
+            (when since
+              (list " since " (runtime-time since) " ("
+                    (runtime-duration since (java.util.Date.)) ")"))]
+           (when trigger
+             [:div {:class "seon-runtime-trigger"}
+              [:p "Woke on " (or (runtime-message-link trigger) "a recorded fact")]
+              (message/render-html (assoc trigger :seon.db/db database))])
+           [:div {:class "seon-runtime-listens" :style {:display "flex" :gap "0.5rem" :flex-wrap "wrap"}}
+            [:span "Listening:"]
+            (if (seq (:seon.runtime/listens runtime))
+              (for [attribute (sort (distinct (keep :seon.listen/attribute (:seon.runtime/listens runtime))))]
+                [:code {:style {:border "1px solid currentColor" :border-radius "1rem" :padding "0.1rem 0.5rem"}}
+                 (str attribute)])
+              [:span "No listened attributes."])]
+           (runtime-turn-table turns trigger)]))))
