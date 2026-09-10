@@ -1,6 +1,6 @@
 ---
 type: research
-status: active
+status: complete
 tags: [context, render, documentation, testing]
 ---
 
@@ -98,18 +98,26 @@ records both source IDs rather than claiming convergence.
 
 The [final capture](context-nits-final-2026-09-09.edn) includes the newly
 declared optional error-doc field in the output contract. Shown sizes are
-773, 2, 2395, 850, 723, 899, 397 bytes. At 03:09 UTC the adopted marker
-remained `6aa2187e-9fa6-5461-8dc3-c10a1668e1ce` while the published marker
-was `6aa21ec4-34f4-5fbb-a1b3-2b979aafbbb8`. The final explicit adoption
-client was still reconciling; live function results are not substituted
-for a successful adoption marker. The shared hook publication
+773, 2, 2395, 850, 723, 899, 397 bytes. At 03:13 UTC final explicit
+adoption completed: the independently queried adopted and published IDs
+both equal `6aa22005-3cf7-52c7-a38b-511c0e8a17f5`. The read-only capture
+and refused-call capture were repeated after convergence. The earlier
+03:09 query had unequal IDs; it is not the final state. The shared hook publication
 `6bc12f9d-0c4c-47e7-b160-d08e33f4c2df` separately reported operator exit
 124. Neither failure was repaired through a foreign session or a restart.
+
+Production slices: `1d47ebb7f`, `d25a12eda`, `4652cc0e7`. A final
+documentation-only checkpoint records convergence after the last adoption
+client exited successfully. All owned shells have ended; successful gate
+roots and fast-test snapshots were removed by their runners. No manual
+scratch cluster or worktree was needed. Default retained PID 83040.
 
 The slice-2 debug HTML was fetched and its text read: the would-be system
 turn shows notes as `[]` and the explicit runtime trigger sender as
 `#:seon.agent{:id "root"}`. Saved history still shows its original nil
 and database id, as required by immutable historical shown text.
+The URL was fetched and checked again after final convergence. No browser
+was available for a visual-paint claim.
 
 Owned production paths across the three commits: `src/seon/note.clj`,
 `src/seon/render/transcript.clj`, `src/seon/sci/eval.clj`,
