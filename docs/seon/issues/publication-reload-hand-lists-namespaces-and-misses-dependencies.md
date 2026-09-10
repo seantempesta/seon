@@ -36,3 +36,17 @@ reloadable set — loud, instead of a stale compile error two hops later.
 - A change to any namespace a listed one requires reloads cleanly or
   refuses loudly naming the stale namespace.
 - One regression: a synthetic dependency edit through the reload path.
+
+## Live observation — 2026-09-09
+
+The publication-provenance lane observed stale `seon.schema` behavior in
+default PID 92059: `render-contract-observation` rejected
+`:my.note/agent` with `seon.note/render-notes-ai`'s declared
+`[:or :my.note/notes :seon.render/unit]` input. Checked-in commit
+`848d08a22` explicitly accepts that input. The same immutable probe returned
+false before reloading `seon.schema` and true afterward; contracts were
+rearmed with the cluster's projection. No source edit or default lifecycle
+action was needed. Publication then passed contract projection. This is
+evidence of stale loaded behavior, not proof of the precise current reload
+selection cause. The landing note retains the subsequent publication proof:
+`docs/prds/context-generation/research/publication-provenance-landing-2026-09-09.md`.
