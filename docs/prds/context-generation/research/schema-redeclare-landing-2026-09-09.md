@@ -88,7 +88,8 @@ Default's first pre-fix seed independently reproduced the same two errors.
 The following seed passed schema declaration but its opening encountered
 `seon.render/ambiguous`, candidates `seon.cluster.agent/render-identity-ai`
 and `seon.cluster.status/render-ai`, at the concurrent cluster-status boundary.
-The complete default proof is pending below.
+The initial default publication attempts encountered changing source; the
+successful complete proof is recorded below.
 
 Both isolated gates passed, workers capped at three:
 
@@ -103,3 +104,66 @@ coordinator phase 67 seconds. Both reported zero failures and errors and
 removed their successful isolated roots. No full-suite gate was run.
 
 Untracked `build/`, `workers/`, and `config/virtual-turns.edn` are preserved.
+
+## Default proof and cleanup
+
+Implementation committed path-limited as `4552f52ff`. After that commit,
+the fixed default fixture seeded successfully: turn `aa071259cfd8`, 7,774 ms.
+Restored only the original `advance-projection!` docstring ("Advance" →
+"Replace") as the required trivial source edit, then ran:
+
+```
+bin/seon init --dev default --changed src/seon/env.clj
+```
+
+It exited zero and converged to `6aa226e2-731d-55ef-9574-b1f1bf142fba`,
+source digest `b4bc238fd468c9f6e3a0590375b0772b50ab3e79d3f19928ef69f423ef42a0ea`.
+Reseed plus independent fact checks returned in 17,693 ms:
+
+```clojure
+{:probe/seed {:seon.turn/id "aa071259cfd8"}
+ :probe/pid 23557
+ :probe/adopted #uuid "6aa226e2-731d-55ef-9574-b1f1bf142fba"
+ :probe/published #uuid "6aa226e2-731d-55ef-9574-b1f1bf142fba"
+ :probe/orders 4
+ :probe/schema-count 4
+ :probe/environment-valid true}
+```
+
+The exact verification form is retained below; the dated fixture was already
+loaded. It exercises the real agent graph through `install!`, then requires
+both non-absent convergence and persisted declarations/orders:
+
+```clojure
+(let [seed (juniper-fixture-2026-09-06/install! "default")
+      instance (get @seon.operator.runtime/running-instances "default")
+      connection (:seon.boot/cluster-connection instance)
+      database @connection
+      state (get-in instance [:seon.sci.eval/ctx :seon.sci.eval/projection-state])
+      adopted (:seon.source/commit-id
+               (seon.db/pull database [:seon.source/commit-id]
+                             [:seon.cluster/name "default"]))
+      published (:seon.source/commit-id
+                 (seon.cluster.source/current (:seon.store/store instance)))
+      declarations
+      (mapv #(seon.db/pull database [:seon.schema/key :seon.schema/form]
+                          [:seon.schema/key %])
+            [:example/order :example/amount :example/customer :example/order-row])
+      orders (seon.db/q '[:find (count ?e) . :where [?e :example/order]] database)]
+  (assert (and adopted (= adopted published)))
+  (assert (= 4 orders))
+  (assert (every? :seon.schema/form declarations))
+  {:probe/seed seed
+   :probe/pid (get-in instance [:seon.boot/advertisement :seon.boot/pid])
+   :probe/adopted adopted :probe/published published
+   :probe/orders orders :probe/schema-count (count declarations)
+   :probe/environment-valid (seon.env/environment-state? state)})
+```
+
+Default stayed on PID `23557`, the PID observed at entry. It was never
+stopped, reforked, or restarted. The only post-gate production-file edit was
+the docstring restoration used in this live proof; executable behavior is
+identical to the gated version. The scratch operator was downed, its free
+store lock confirmed, and `tmp/schema-redeclare-root` removed without following
+symlinks. Both successful gate roots cleaned themselves up. All owned shell
+commands finished; unrelated working-tree edits remain preserved.

@@ -103,7 +103,7 @@
   (reset! state environment))
 
 (defn advance-projection!
-  "Advance the environment's projection at a non-older database basis."
+  "Replace the environment's projection at a non-older database basis."
   {:malli/schema
    [:=> [:cat :seon.sci.eval/projection-state :seon.db/basis-t
          :seon.schema/projection]
