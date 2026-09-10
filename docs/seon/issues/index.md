@@ -17,7 +17,7 @@ Lifecycle `open → resolved | superseded`; closed issues live in `archive/`.
 See `README.md` for the convention.
 
 
-## Blocker (70)
+## Blocker (71)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -75,6 +75,7 @@ See `README.md` for the convention.
 | [A renamed core predicate leaves a row the projection treats as live, and a fresh cluster refuses to boot](renamed-predicate-leaves-a-tombstone-that-refuses-boot.md) | blocker | context-blocks lane (running, 2026-09-09) |
 | [Execute generated form projections before they enter history](render-history-serializes-unexecuted-form-projections.md) | blocker | generated-episode receipt integration |
 | [Fix render revision state overwriting its input atom](render-runtime-revision-overwrites-its-atom.md) | blocker | design-lab integration lane |
+| [The runtime block generates a pull with a nil agent identity](runtime-block-generates-a-nil-agent-pull.md) | blocker | context-cookbook lane (running, 2026-09-09) |
 | [Make the schema environment an explicit argument, not an ambient binding](schema-environment-is-ambient-not-explicit.md) | blocker | test runner explicit-unhanded proof conversion |
 | [Derive or explain every special SCI base binding](sci-base-context-silently-hand-lists-special-callables.md) | blocker | SCI base-context derivation wave |
 | [A seeded opening stores no read evidence, so the first wake re-emits the whole opening](seeded-opening-stores-no-read-evidence-so-the-first-wake-re-emits-everything.md) | blocker | context-blocks lane (running, 2026-09-09) |
@@ -92,7 +93,7 @@ See `README.md` for the convention.
 | [Carry agent routing into the virtual-turn control](virtual-turn-control-loses-agent-routing.md) | blocker | turn follow-up wave |
 | [Render walk-unit hiccup as markup, never escaped EDN text](walk-units-render-their-hiccup-as-escaped-edn-text.md) | blocker | ui verification wave |
 
-## Friction (170)
+## Friction (178)
 
 | Issue | Severity | Lane |
 |-------|----------|------|
@@ -136,6 +137,7 @@ See `README.md` for the convention.
 | [Give config-dial discovery one explicit authority](config-dial-discovery-has-three-authorities.md) | friction | config derivation wave |
 | [Bound the parallel-only confirmation protocol exchange](confirmation-parallel-failure-blocks-reading-worker-protocol.md) | friction | test-platform follow-up |
 | [Route exact context captures through the blob owner](context-capture-prompts-bypass-the-blob-splitter.md) | friction | eval-scale economics wave |
+| [Cheapest configured trial provider refused for insufficient credits](context-cookbook-trial-provider-has-no-credits.md) | friction | wave/provider-context |
 | [Make the Context MVP drive prove its semantic exit](context-mvp-drive-can-false-green-after-cross-agent-delivery.md) | friction | projection lane — causal episode recurring proof |
 | [Contract evidence carries the offending argument twice, and busts its own bound](contract-evidence-carries-the-offending-argument-twice.md) | friction | page follow-up wave (after turn-cut lands) |
 | [Attribute the seven-second core namespace-page derivation](core-namespace-pages-spend-seven-seconds-without-declaration-fallbacks.md) | friction | namespace-page performance wave |
@@ -159,11 +161,13 @@ See `README.md` for the convention.
 | [Fix edit-hook kondo false positives on seon.db dynamic vars](edit-hook-kondo-false-positives-on-seon-db-dynamic-vars.md) | friction | dev-tooling-face-hygiene wave |
 | [Order effect feedback by numeric facts](effect-feedback-orders-receipts-by-id.md) | friction | effect ordering follow-up |
 | [Effect receipts have no render producers](effect-receipts-have-no-render-producers.md) | friction | render receipt-producer wave |
+| [Effective settings read refreshes after a system turn](effective-settings-read-refreshes-after-system-turn.md) | friction | loop follow-up wave |
 | [Reconcile the error-class catalog with declared schemas and renderers](error-class-catalog-and-renderers-disagree.md) | friction | error class contract repair |
 | [Give eval episode backstops one declared owner](eval-drives-duplicate-a-four-minute-run-clock.md) | friction | eval-driver lifecycle wave |
 | [One bounded log face per expected transaction refusal](expected-refusal-logs-raw-datom-error-twice.md) | friction | Datahike fork logging-seam wave |
 | [Feed writer casts an absent package number](feed-writer-casts-an-absent-package-number.md) | friction | page follow-up wave (after turn-cut lands) |
 | [Create the store with the write-amplification options it already has](file-store-commits-pay-five-times-the-fsyncs-they-need.md) | friction | store/perf fix lane |
+| [Re-admitting the fixture schemas after adoption refuses the environment](fixture-schema-readmission-after-adoption-refuses-environment.md) | friction | adoption follow-up wave |
 | [Adopt flow's read-set control and sanctioned egress](flow-has-no-read-set-control-and-a-hand-rolled-egress.md) | friction | flow-protocol wave |
 | [Pass the root :io executor to the work-launcher graph](flow-work-launcher-graph-omits-its-root-io-executor.md) | friction | seon.env Phase 3 production sweep ([PRD](../../prds/sci-execution-runtime/plan/seon-env-prd-2026-08-07.md)) |
 | [Make generation dependency analysis see keywords](generation-dependency-analysis-ignores-keywords.md) | friction | evolving-session phases |
@@ -172,6 +176,7 @@ See `README.md` for the convention.
 | [Make the history-policy refusal test independent of machine load](history-policy-refusal-test-is-load-flaky.md) | friction | test fixture repair wave |
 | [Bind first-party namespaces so value-position reads deref](host-bound-first-party-vars-break-in-value-position.md) | friction | SCI eval-context owner design gate |
 | [Hyperlith pin is 23 commits behind the upstream lockstep rework](hyperlith-pin-behind-lockstep-rework.md) | friction | upstream-delta sweep after seon.env Phase 0 |
+| [Incremental planner test expects incomplete rows](incremental-planner-test-expects-incomplete-rows.md) | friction | adoption follow-up wave |
 | [Lead a failed init with its cause, not the event history](init-failure-dumps-entire-prepl-event-history.md) | friction | operator status-face hygiene |
 | [Derive the initial-paint census instead of hand-maintaining it](initial-paint-census-is-a-hand-maintained-count.md) | friction | render test repair |
 | [Require the general printer bound for every contract headline](instrumentation-headline-unbounded-when-caps-absent.md) | friction | adversarial-audit fix wave |
@@ -214,10 +219,12 @@ See `README.md` for the convention.
 | [Make the provider descriptor own its output-token wire key](provider-output-token-wire-key-is-hard-coded.md) | friction | AI provider protocol wave |
 | [Publication's live-JVM reload hand-lists namespaces and misses dependencies](publication-reload-hand-lists-namespaces-and-misses-dependencies.md) | friction | operator launch-concurrency wave (second occurrence 2026-08-08) |
 | [Raw identity projection hides a selected steward](raw-identity-projection-hides-selected-steward.md) | friction | page follow-up wave |
+| [Raw write validation refuses reverse refs and partial entity maps](raw-write-validation-refuses-reverse-refs-and-partial-entity-maps.md) | friction | wave/schema-admission |
 | [Report malformed root claims in the reap result](reap-dead-roots-calls-delete-recursively-with-a-nil-path.md) | friction | wave/directory-claims |
 | [Tolerate entries vanishing during recursive deletion](recursive-delete-throws-when-entries-vanish-mid-walk.md) | friction | operator velocity fixes |
 | [Render adversarial roots outlive their fault experiment](render-adversarial-roots-outlive-their-experiment.md) | friction | operator directory-claim governor wave |
 | [Check renderer input and output on one arity](render-candidate-checks-mix-different-arities.md) | friction | agent context |
+| [Render fixture failures print the entire SCI context](render-fixtures-dump-context-on-stale-assertions.md) | friction | page follow-up wave |
 | [Render live-proof roots have no declared lifecycle owner](render-live-proof-roots-have-no-lifecycle-owner.md) | friction | operator directory-claim governor wave |
 | [Skip unchanged renderer invocations in the package proc](render-package-proc-reruns-unchanged-renderers.md) | friction | render package economics wave |
 | [Carry the viewing namespace through rendering](render-selection-loses-the-viewing-namespace.md) | friction | agent context |
@@ -238,6 +245,8 @@ See `README.md` for the convention.
 | [Permit accretive schema loosenings over existing data](schema-guard-refuses-accretive-loosenings-with-data.md) | friction | schema-lifecycle wave |
 | [Extract Malli map entries by shape, not position](schema-map-extraction-still-depends-on-position-two.md) | friction | schema-form extraction repair |
 | [SCI evaluation tests still expect retired storage](sci-evaluation-tests-still-expect-retired-storage.md) | friction | loop follow-up wave |
+| [Scratch debug feed and turn backstops after adoption](scratch-debug-feed-and-turn-backstops-after-adoption.md) | friction | loop follow-up wave |
+| [Scratch root has agent-authored errors without provider attempt facts](scratch-root-has-agent-errors-without-attempt-facts.md) | friction | wave/provider-context |
 | [Separate declared search metadata from the process index ID](search-index-property-collides-with-process-index-id.md) | friction | cluster search wiring wave |
 | [Refuse `:db.secondary/only` until a covering index exists](secondary-only-attributes-have-no-covering-index.md) | friction | schema-lifecycle wave |
 | [Give `seon.db` the branch and commit reads root needs](seon-db-has-no-branch-or-commit-reads.md) | friction | `my.branch` verb wave (W-C, [PRD](../../prds/sci-execution-runtime/plan/agent-desk-and-checkout-prd-2026-08-05.md)) |
