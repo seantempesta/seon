@@ -37,6 +37,24 @@
   [value]
   (contains? value :seon.error/kind))
 
+(deftest fences-are-whitespace-between-reader-forms
+  (doseq [delimiter ["```" "```clojure" "```edn" "  ```clj" "~~~clojure"]
+          newline ["\n" "\r\n"]]
+    (let [source (str "(inc 1)" newline ";; before fence" newline
+                      delimiter newline ";; inside" newline
+                      "(dec 3)" newline "```" newline "(+ 2 3)")
+          parsed (events source)]
+      (is (= ['(inc 1) '(dec 3) '(+ 2 3)]
+             (mapv :seon.sci.reader/form parsed)))
+      (is (not-any? :seon.sci.reader/error parsed))
+      (doseq [{:seon.sci.reader/keys [source-start source-end] :as event} parsed]
+        (is (= (:seon.sci.reader/source event)
+               (subs source source-start source-end))))))
+  (let [source "(identity \"before\n```clojure\n(+ 1 2)\n```\nafter\")"]
+    (is (= source (:seon.sci.reader/source (first (events source)))))
+    (is (= '(identity "before\n```clojure\n(+ 1 2)\n```\nafter")
+           (:seon.sci.reader/form (first (events source)))))))
+
 (deftest fabricated-responses-are-reader-errors-with-exact-source
   (let [source "#:seon.repl{:value (throw (ex-info \"must not run\" {}))}"
         parsed (events (str "(inc 1)\n" source))]

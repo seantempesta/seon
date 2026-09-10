@@ -2,6 +2,8 @@
   "The one reader for accepted Clojure source."
   (:refer-clojure :exclude [read])
   (:require [clojure.string :as str]
+            #?(:clj [clojure.tools.reader.reader-types :as rt]
+               :cljs [cljs.tools.reader.reader-types :as rt])
             [sci.core :as sci]))
 
 (def ^:private eof ::eof)
@@ -496,6 +498,42 @@
       :else
       state)))
 
+(defn fence-line?
+  "True for a Markdown backtick or tilde delimiter line, with an optional tag."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [line]
+  (let [line (str/triml line)]
+    (or (str/starts-with? line "```")
+        (str/starts-with? line "~~~"))))
+
+(defn- skip-fences!
+  "Skip delimiter lines only between top-level forms, never inside a literal.
+  SCI owns form boundaries; its source reader owns cursor advancement."
+  [source-reader text starts start]
+  (let [end
+        (loop [offset start fence-end start]
+          (let [character (get text offset)
+                line-end (when character (.indexOf text "\n" offset))
+                line-end (if (or (nil? line-end) (neg? line-end))
+                           (count text) line-end)]
+            (cond
+              (nil? character) fence-end
+              (or (= \, character) (str/blank? (str character)))
+              (recur (inc offset) fence-end)
+              (= \; character) (recur line-end fence-end)
+              (and (contains? #{\` \~} character)
+                   (str/blank? (subs text (inc (.lastIndexOf text "\n" (dec offset))) offset))
+                   (fence-line? (subs text offset line-end)))
+              (recur line-end line-end)
+              :else fence-end)))]
+    (loop []
+      (when (< (cursor-offset starts (count text)
+                             (sci/get-line-number source-reader)
+                             (sci/get-column-number source-reader)) end)
+        (when (rt/read-char source-reader)
+          (recur))))
+    end))
+
 (defn- read-events
   [text reading-context]
   (let [ctx (sci/init {})
@@ -515,6 +553,7 @@
       (let [line (sci/get-line-number source-reader)
             column (sci/get-column-number source-reader)
             start (cursor-offset starts text-length line column)
+            source-offset (skip-fences! source-reader text starts start)
             [form _]
             (try
               (sci/parse-next+string
@@ -528,7 +567,7 @@
                   (or (ex-message failure) (str failure))
                   (merge (ex-data failure)
                          {::partial-events events
-                          ::failure-start start
+                          ::failure-start source-offset
                           ::reading-state state})
                   failure))))
             end-line (sci/get-line-number source-reader)
@@ -542,11 +581,11 @@
                    ;; length is its exact subs-compatible offset.
                    (assoc (peek events) ::end text-length))
             [])
-          (let [consumed (subs text start end)
-                source-start (+ start
+          (let [consumed (subs text source-offset end)
+                source-start (+ source-offset
                                 (- (count consumed)
                                    (count (str/triml consumed))))
-                source-end (+ start (count (str/trimr consumed)))
+                source-end (+ source-offset (count (str/trimr consumed)))
                 source (subs text source-start source-end)
                 [source-line source-column]
                 (offset-cursor starts source-start)

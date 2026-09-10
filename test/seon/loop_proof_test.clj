@@ -717,6 +717,23 @@
                                             [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count]
                                             [:seon.test/sym "my.agents.juniper/order-total"])]
                         (mapv result [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count]))))
+               (testing "the three exact live fenced replies evaluate through the ordinary proc"
+                 ; Only reader/evaluation behavior is under test. The supplied
+                 ; single-order function is private fixture state, not a domain implementation.
+                 (submit "(def largest-customer first)")
+                 (doseq [{:seon.turn/keys [reply] original-id :seon.turn/id}
+                         (edn/read-string (slurp "test/seon/reader_fences.edn"))]
+                   (let [id (submit reply)
+                         turn-eid (:db/id (db/pull @connection [:db/id] [:seon.turn/id id]))
+                         saved (filterv #(= turn-eid (get-in % [:seon.cluster.eval/run :db/id]))
+                                        (evaluation/of-agent @connection "juniper"))]
+                     (is (= 1 (count saved)) original-id)
+                     (is (nil? (:seon.cluster.eval/error (first saved))) (pr-str saved))
+                     (is (seq (:seon.eval/shown (first saved))))
+                     (println "READER-FENCES" original-id
+                              (pr-str (select-keys (first saved)
+                                                  [:seon.cluster.eval/source :seon.eval/shown
+                                                   :seon.cluster.eval/error]))))))
                (submit "(my.agent/done)\n(seon.db/transact! [{:example/order \"after-done\" :example/customer \"Ada\" :example/amount 999}])")
                (is (nil? (db/q '[:find ?order . :where [?order :example/order "after-done"]] @connection)))
                (is (nil? (turn/next-agent-work @connection {:seon.agent/id "juniper"}))))

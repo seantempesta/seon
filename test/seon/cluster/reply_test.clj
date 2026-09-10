@@ -13,7 +13,8 @@
   The refusal cases are the ones probe C measured on real model-shaped
   text, and they are the reason nothing here calls
   `clojure.core/read-string`."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -95,6 +96,20 @@
          :seed 20260727)]
     (is (true? (:result check))
         (str "fenced input differed: " (pr-str check)))))
+
+(deftest exact-live-fences-and-unfenced-forms-share-the-grammar
+  (let [replies (edn/read-string (slurp "test/seon/reader_fences.edn"))]
+    (is (= ["(largest-customer [{:example/order \"a1\" :example/customer \"Ada\" :example/amount 60}])"
+            "(my.test/run)" "(dir my.test)"]
+           (mapv (fn [reply]
+                   (let [parsed (sources (:seon.turn/reply reply))]
+                     (is (= 1 (count parsed)) (pr-str parsed))
+                     (first parsed)))
+                 replies))))
+  (is (= ["(inc 1)" "(dec 3)" "(+ 2 3)"]
+         (sources "(inc 1)\n```\n(dec 3)\n```\n(+ 2 3)")))
+  (let [source "(identity \"before\n```clojure\n(+ 1 2)\n```\nafter\")"]
+    (is (= [source] (sources source)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Call shapes, as documentation
@@ -356,7 +371,7 @@
         "prose above a form is its comment; prose after the last form is not")))
 
 (deftest tilde-fences-have-the-same-presentation-semantics
-  (let [text "Here:\n~~~clojure\n(+ 1 2)\n~~~\nDone."]
+  (let [text "Here:\n~~~clojure\n(+ 1 2)\n~~~\nThat is done."]
     (is (= ["(+ 1 2)"] (sources text)))
     (is (= ["; Here:"]
            (mapv :seon.cluster.eval/comment (reply/sources text))))))

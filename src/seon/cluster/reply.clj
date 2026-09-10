@@ -2,9 +2,9 @@
   "A model reply is text; a plan is ordered form sources. This reads one
   into the other.
 
-  SCI'S OWN READER DOES THE WHOLE JOB, and the quarry's 1,517-line
-  parser (`src-old/seon/repl/parse.cljc`) is dead — one idea survives
-  it, fence stripping. Probe C measured the four things that matter:
+  SCI's reader owns form boundaries through `seon.sci.reader`. The deleted
+  parser (`src-old/seon/repl/parse.cljc`) remains historical evidence.
+  The current contract preserves these properties:
 
   - `#=` is REFUSED (`EvalReader not allowed when *read-eval* is
     false`) and an unknown tag is refused by name. The D7 scar cannot
@@ -16,9 +16,9 @@
   - source fidelity is exact, and a leading comment attaches to the
     form it precedes. That is wanted: the stored source is what the
     agent wrote;
-  - FENCES MUST BE STRIPPED FIRST. Backticks read as an ordinary
-    symbol, so an unstripped ```` ```clojure ```` reply yields three
-    \"forms\" — the failure is silent and produces plausible garbage.
+  - Markdown delimiter lines are whitespace between reader forms.
+    SCI consumes each whole form, so fence-looking lines within strings
+    remain literal data. There is no separate fenced-region grammar.
 
   PROSE BECOMES SOURCE COMMENTS, never forms. Every English word can
   read as a symbol, so successful reading alone cannot distinguish
@@ -78,17 +78,8 @@
 (schema.edn/load! {})
 
 ;;; ---------------------------------------------------------------------------
-;;; Fence stripping — the one idea that survives the quarry's parser
+;;; Prose accompanying reader forms
 ;;; ---------------------------------------------------------------------------
-
-;;; A fence is presentation. Backticks read as an ordinary symbol, so an
-;;; unstripped ```clojure reply yields plausible garbage rather than an
-;;; error. Outside-fence Markdown is prose, so retain it as comments
-;;; instead of either parsing it or dropping it.
-(defn- fence-line?
-  "True for one Markdown backtick or tilde fence line."
-  [line]
-  (boolean (re-matches #"[ \t]*(?:```|~~~).*" line)))
 
 (defn- prose-line
   "One nonblank prose line in the agent-facing comment grammar."
@@ -98,26 +89,6 @@
       (if (str/starts-with? line ";")
         line
         (str "; " line)))))
-
-(defn- unfenced
-  "Remove fence lines while retaining outside Markdown as prose comments."
-  [text]
-  (let [lines (str/split-lines text)
-        fenced? (some fence-line? lines)]
-    (if-not fenced?
-      text
-      (->> lines
-           (reduce (fn [{:keys [inside? output]} line]
-                     (if (fence-line? line)
-                       {:inside? (not inside?) :output output}
-                       {:inside? inside?
-                        :output (conj output
-                                      (if inside?
-                                        line
-                                        (or (prose-line line) "")))}))
-                   {:inside? false :output []})
-           :output
-           (str/join "\n")))))
 
 (defn- refused
   "The ONE registered flat error value (`:seon.error/value`).
@@ -247,6 +218,7 @@
   "Coalesce prose into safe single-`;` source comments."
   [text]
   (->> (str/split-lines (str/trim text))
+       (remove reader/fence-line?)
        (keep prose-line)
        (str/join "\n")))
 
@@ -377,7 +349,7 @@
 
 (defn sources
   "The ordered plan forms in one model reply, or a flat error value.
-  Strips code fences and leading prompt markers, then reads through THE ONE reader
+  Strips leading prompt markers and reads through THE ONE reader
   (`seon.sci.reader/read`), returning each form's EXACT source text in
   order — each carrying `:seon.ns/name`, the namespace that form was
   written under, whenever the reader attributed one. Attribution is the
@@ -425,7 +397,7 @@
                 (:seon.error/message admission-events)
                 (merge {::text text}
                        (:seon.error/data admission-events)))
-       (loop [source (unfenced text)
+       (loop [source text
               recovered-lines #{}]
          (let [events (parsed-events source namespace-name (count source))
                recovered (when (vector? events)
