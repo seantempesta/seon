@@ -103,6 +103,7 @@
             [clojure.java.io :as io]
             [clojure.main :as main]
             [clojure.string :as str]
+            [clojure.walk :as walk]
             [clojure.test]
             [clojure.test.check.generators :as gen]
             [my.background]
@@ -1139,6 +1140,41 @@
    :seon.error/kind :seon.sci.eval/documentation-unavailable
    :seon.error/message (str "No public program documentation is available for " requested ".")})
 
+(defn- docstring-parts
+  [docstring]
+  (let [[summary & lines] (str/split-lines (or docstring ""))
+        lines (mapv str/trim lines)
+        example-index (last (keep-indexed #(when (= "Example:" %2) %1) lines))]
+    {:summary (or summary "")
+     :body (str/trim (str/join "\n" (if example-index (subvec lines 0 example-index) lines)))
+     :example (if example-index
+                (str/trim (str/join "\n" (subvec lines (inc example-index)))) "")}))
+
+(defn- documentation-schemas
+  [row]
+  (into (sorted-map)
+        (map (fn [reference]
+               [(:seon.schema/key reference) (edn/read-string (:seon.schema/form reference))]))
+        (mapcat #(concat (:seon.fn.arity/input-refs %) (:seon.fn.arity/output-refs %))
+                (:seon.fn/arities row))))
+
+(defn- documentation-contract
+  [row]
+  (if-let [spec (:seon.fn/spec row)]
+    (let [form (edn/read-string spec)
+          arities (if (= :function (first form)) (rest form) [form])
+          inputs (mapv #(nth % (- (count %) 2)) arities)
+          outputs (mapv last arities)]
+      {:in (if (= 1 (count inputs)) (first inputs) inputs)
+       :out (if (= 1 (count outputs)) (first outputs) outputs)})
+    {:in [] :out []}))
+
+(defn- function-doc-map
+  [row]
+  (merge (docstring-parts (:seon.fn/doc row))
+         (walk/postwalk-replace (into {} (documentation-schemas row))
+                                (documentation-contract row))))
+
 (defn- program-doc-var
   "An SCI doc macro returning the acquired function facts without printing."
   [ctx documentation]
@@ -1151,10 +1187,9 @@
                          (symbol (str ns) (str name))))]
        (if-let [row (or (get documentation (str function-symbol))
                         (get documentation (str qualified)))]
-         (list 'quote row)
-         `(or (seon.db/pull '[:seon.ns/name :seon.ns/doc]
-                            '~[:seon.ns/name function-symbol])
-              '~(documentation-unavailable function-symbol)))))
+         (list 'quote (function-doc-map row))
+         (list 'quote (or (get documentation function-symbol)
+                         (documentation-unavailable function-symbol))))))
    {:ns (sci/create-ns 'clojure.repl)}))
 
 (defn- program-dir-var
@@ -1163,15 +1198,16 @@
   (let [by-namespace
         (group-by (comp symbol namespace symbol :seon.fn/sym)
                   (sort-by (juxt #(get % :seon.fn/doc-order Long/MAX_VALUE) :seon.fn/sym)
-                           (vals documentation)))]
+                           (filter :seon.fn/sym (vals documentation))))]
     (sci/new-macro-var
      'dir
      (fn [_form _env namespace-name]
-       (let [rows (mapv (fn [row]
-                          (cond-> (dissoc row :seon.fn/arities)
-                            (:seon.fn/doc row)
-                            (update :seon.fn/doc #(first (str/split-lines %)))))
-                        (get by-namespace namespace-name))]
+       (let [functions (get by-namespace namespace-name)
+             schemas (into (sorted-map) (mapcat documentation-schemas) functions)
+             rows (mapv (fn [row]
+                          (merge {:sym (symbol (:seon.fn/sym row))
+                                  :doc (:summary (docstring-parts (:seon.fn/doc row)))}
+                                 (documentation-contract row))) functions)]
          ;; This pull runs with the agent's form, so even an empty directory
          ;; records the reverse edge that a later declaration will change.
          `(let [namespace# (seon.db/pull
@@ -1183,7 +1219,11 @@
               (or (:seon.ns/name namespace#)
                   (clojure.core/find-ns '~namespace-name)
                   ~(boolean (seq rows)))
-              (into '~rows (sort-by :seon.schema/key (:seon.schema/_ns namespace#)))
+              {:schemas (into '~schemas
+                              (map (fn [row#] [(:seon.schema/key row#)
+                                               (clojure.edn/read-string (:seon.schema/form row#))]))
+                              (:seon.schema/_ns namespace#))
+               :functions '~rows}
               :else '~(documentation-unavailable namespace-name)))))
      {:ns (sci/create-ns 'clojure.repl)})))
 
@@ -1193,7 +1233,11 @@
   (schema/call-with-projection
    projection
    (fn []
-     (let [documentation (program-documentation db)
+     (let [documentation (into (program-documentation db)
+                              (map (fn [[namespace-name docstring]]
+                                     [namespace-name (merge (docstring-parts docstring) {:in [] :out []})]))
+                              (db/q '[:find ?name ?doc :where [?ns :seon.ns/name ?name]
+                                      [?ns :seon.ns/doc ?doc]] db))
            doc-var (program-doc-var ctx documentation)
            dir-var (program-dir-var ctx documentation)]
        ;; Preserve qualified `clojure.repl/doc`/`dir` and expose the same

@@ -11,7 +11,13 @@
   (agent/identity (:seon.db/db request) (:seon.agent/id request)))
 
 (defn done
-  "End my session now; a later outside wake may start another session."
+  "End my session now; a later outside wake may start another session.
+
+  Finish only after verifying the requested result and sending any reply.
+  Call preparation supplies my database and agent identity.
+
+  Example:
+  (my.agent/done {})"
   {:malli/schema [:=> [:cat :my.plan/request] [:or :my.turn/wait :seon.error/value]]}
   [_request]
   (run/wait "Session complete."))

@@ -1,5 +1,13 @@
 (ns my.note
-  "My durable notes through one request map per call."
+  "My notes are durable facts I can read and transact.
+
+  Upsert a note by :my.note/id and link it to my agent with :my.note/agent.
+  Use :my.note/about when the note concerns another entity.
+
+  Example:
+  (seon.db/transact! [{:my.note/id \"customer-total\"
+                      :my.note/agent [:seon.agent/id \"juniper\"]
+                      :my.note/content \"Ada totals 155 after the new order.\"}])"
   (:require [seon.note :as note]))
 
 (defn notes

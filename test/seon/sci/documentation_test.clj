@@ -22,23 +22,32 @@
            missing (run "(doc my.agent/does-not-exist)")
            missing-ns (run "(dir missing.namespace)")
            empty-ns (run "(do (in-ns 'fixture.empty-doc) (dir fixture.empty-doc))")
-           rows (:seon.sci.admit/value directory)
+           directory-value (:seon.sci.admit/value directory)
+           rows (:functions directory-value)
            row (:seon.sci.admit/value documentation)]
        (is (seq rows))
-       (is (some #(= "my.agent/settings!" (:seon.fn/sym %)) rows))
-       (is (every? :seon.fn/spec rows))
-       (is (every? #(not (str/includes? (:seon.fn/doc %) "\n")) rows))
-       (is (= "my.agent/settings!" (:seon.fn/sym row)))
+       (is (some #(= 'my.agent/settings! (:sym %)) rows))
+       (is (every? #(and (:in %) (:out %)) rows))
+       (is (every? #(not (str/includes? (:doc %) "\n")) rows))
+       (is (= #{:summary :body :example :in :out} (set (keys row))))
        (is (= (:seon.fn/doc (db/pull @connection [:seon.fn/doc]
                                     [:seon.fn/sym "my.agent/settings!"]))
-              (:seon.fn/doc row)))
-       (is (seq (:seon.fn/arities row)))
-       (is (seq (get-in row [:seon.fn/arities 0 :seon.fn.arity/input-refs])))
+              (:summary row)))
+       (is (= [:cat :my.agent/settings-request]
+              (:in (first (filter #(= 'my.agent/settings! (:sym %)) rows)))))
+       (is (= :map (first (get-in directory-value [:schemas :my.agent/settings-request]))))
+       (is (= :map (first (second (:in row)))))
+       (doseq [target ["my.message/send" "my.agent/done" "my.plan" "my.note"]
+               :let [doc (:seon.sci.admit/value (run (str "(doc " target ")")))]]
+         (is (= #{:summary :body :example :in :out} (set (keys doc))))
+         (is (not (str/blank? (:summary doc))))
+         (is (not (str/blank? (:body doc))))
+         (is (seq (read-string (:example doc)))))
        (doseq [result [directory documentation missing missing-ns]]
          (is (empty? (:seon.cluster.eval/output result))))
        (is (= :seon.sci.eval/documentation-unavailable
               (get-in missing [:seon.sci.admit/value :seon.error/kind])))
        (is (= :seon.sci.eval/documentation-unavailable
               (get-in missing-ns [:seon.sci.admit/value :seon.error/kind])))
-       (is (= [] (:seon.sci.admit/value empty-ns)))
+       (is (= {:schemas {} :functions []} (:seon.sci.admit/value empty-ns)))
        (is (nil? (:seon.cluster.eval/error empty-ns)))))))

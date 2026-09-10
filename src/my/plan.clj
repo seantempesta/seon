@@ -1,9 +1,13 @@
 (ns my.plan
-  "My plan is my instructions. A step is done when it has :my.plan.item/completed-tx.
+  "My plan is my instructions.
 
+  A step is done when it has :my.plan.item/completed-tx.
   Add a step by upserting the plan's identity. Use the next position in your
-  plan (6 below); ids are (seon.id/id title 8).
+  plan (6 below); ids are (seon.id/id title 8). Complete only after observing
+  the result. Remove a step with retractEntity to remove its incoming refs.
+
   Example:
+  (do
   (seon.db/transact!
     [{:my.plan/agent [:seon.agent/id \"juniper\"]
       :my.plan/steps [{:my.plan.item/id (seon.id/id \"Verify customer totals\" 8)
@@ -11,14 +15,12 @@
                        :my.plan.item/done-when \"I have read the new total.\"
                        :my.plan.item/position 6}]}])
 
-  Complete only after observing the result:
   (seon.db/transact!
     [[:db/add [:my.plan.item/id (seon.id/id \"Verify customer totals\" 8)]
       :my.plan.item/completed-tx \"datomic.tx\"]])
 
-  Remove the step and its incoming refs:
   (seon.db/transact!
-    [[:db.fn/retractEntity [:my.plan.item/id (seon.id/id \"Verify customer totals\" 8)]]])"
+    [[:db.fn/retractEntity [:my.plan.item/id (seon.id/id \"Verify customer totals\" 8)]]]))"
   (:require [seon.plan :as plan]))
 
 (defn plan

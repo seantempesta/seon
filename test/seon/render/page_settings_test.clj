@@ -59,7 +59,7 @@
                  :my.plan.item/position 6} step))
          (is (= 8 (count step-id))))
        (let [documentation (evaluate "(doc my.plan)")
-             text (:seon.ns/doc (:seon.sci.admit/value documentation))
+             text (:example (:seon.sci.admit/value documentation))
              source (plan/render-plan-ai {:seon.agent/id "juniper"})]
          (is (string? text) (:seon.eval/shown documentation))
          (is (str/includes? text ":my.plan/agent"))

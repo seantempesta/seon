@@ -33,7 +33,7 @@
            initial (read! "(dir my.agents.directory)")
            evidence (db/read-evidence @captured)]
        (is (not (:seon.cluster.eval/error initial)) (pr-str initial))
-       (is (= [] (:seon.sci.admit/value initial)))
+       (is (= {:schemas {} :functions []} (:seon.sci.admit/value initial)))
        (is (seq evidence))
        (is (true? (db/read-evidence-current? @connection evidence)))
        (let [assigned (db/transact!
@@ -46,8 +46,8 @@
              rows (:seon.sci.admit/value updated)
              functions (:seon.sci.admit/value (read! "(dir my.message)"))]
          (is (not (:seon.cluster.eval/error updated)) (pr-str updated))
-         (is (= [:seon.print/options] (mapv :seon.schema/key rows)))
-         (is (string? (:seon.schema/form (first rows))))
+         (is (= [:seon.print/options] (vec (keys (:schemas rows)))))
+         (is (vector? (get-in rows [:schemas :seon.print/options])))
          (is (= rows (edn/read-string (:seon.eval/shown updated))))
-         (is (some #(= "my.message/send" (:seon.fn/sym %)) functions))
+         (is (some #(= 'my.message/send (:sym %)) (:functions functions)))
          (is (not (seq (:seon.cluster.eval/output updated)))))))))

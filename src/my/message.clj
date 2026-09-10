@@ -16,7 +16,13 @@
   (message/read (:my.message/id request) (:seon.db/db request)))
 
 (defn send
-  "Return an addressed message for the turn to deliver."
+  "Return an addressed message for the turn to deliver.
+
+  The turn mints the message id and writes the message and inbox edge together.
+  Supply :my.message/about to answer a message and remove its inbox edge.
+
+  Example:
+  (my.message/send {:my.message/to \"root\" :my.message/content \"Ada totals 155.\"})"
   {:malli/schema [:=> [:cat :my.message/message] [:or :my.message/message :seon.error/value]]}
   [request]
   (if-let [about (:my.message/about request)]

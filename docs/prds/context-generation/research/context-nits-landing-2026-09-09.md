@@ -43,6 +43,38 @@ was performed. Adoption and final page observations are recorded below.
 
 ## Verification boundaries
 
+## Slice 2
+
+`dir` now returns `:schemas` and `:functions`; each referenced schema is
+named once in the schema map and each function retains its input/output
+contract structure with named references. Namespace declarations join
+that map through the existing evaluated reverse pull. `doc` returns
+summary, body, final example source, and expanded input/output forms.
+The four requested my.* docs follow the convention; the plan's final
+example is one `do` form containing its three demonstrated writes.
+
+Fast gate: 2 tests / 58 assertions, green. Isolated documentation/settings
+gate: 2 tests / 60 assertions, green. Platform: 84 / 505, green.
+The directory read-evidence regression is also updated to the new map.
+The older `seon.sci.eval-test` printed-documentation expectations are
+already tracked in the existing retired-storage test issue; this slice
+uses the canonical documentation and directory regression owners.
+
+Default's JVM evaluation using its real cluster handle returned the new
+`my.message/send` documentation and shown text in 19 ms. The MCP SCI
+transport separately returned a projection failure naming an immutable
+database input to `seon.sci.kernel/invoke`; it is not treated as a
+successful observation. The first explicit adoption reached SCI acquisition
+and instrumentation but refused its final marker because source changed.
+The loaded runtime/notes functions were verified updated; complete
+convergence is checked again after the final edits.
+
+Reproducible live capture: load
+[context_nits_probe_2026_09_09.clj](context_nits_probe_2026_09_09.clj),
+then call `(context-nits-probe-2026-09-09/capture! "final")`.
+
+## Shared and tool boundaries
+
 MCP runtime status timed out with health and Flow unknown; JVM evaluation
 answered. Recorded in the existing
 [component-probe issue](../../../seon/issues/default-component-probe-times-out-after-adoption.md).
