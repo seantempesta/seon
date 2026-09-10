@@ -365,7 +365,7 @@ Status: ✅ landed · ▶ running · ⏭ next · ◻ queued.
 | 6 | Messages `:seon.message/*`; the inbox as an edge `:seon.message/inbox` retracted when handled; `send` mints id and writes both facts | yes (batch) | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
 | 7 | Runtime component `:seon.agent/runtime` with the turns inside it; retire `plan-digest`, `supersedes`, `undisposed-at`, `background-results`, `error`; `:seon.eval/value` → `/shown`; `sent-body` gone; reasoning off | yes (batch) | ✅ data lane ([landing](../research/data-lane-landing-2026-09-09.md)) |
 | 8 | Agent-declared listens union into the wake matcher | no | ✅ [delivery proof and turn-eligibility boundary](../research/evidence-listens-landing-2026-09-09.md) |
-| 9–12 | Block functions from the cookbook on the new shapes; `dir`/`doc` structure; `my.plan`/`my.note` as documented data | no | ◻ render lane (after 3–7) |
+| 9–12 | Block functions from the cookbook on the new shapes; `dir`/`doc` structure; `my.plan`/`my.note` as documented data; contract refusals carry the doc map | no | ✅ cookbook + `d25a12eda` `4652cc0e7` |
 | 13 | Root's cluster block (JVM, store, commit, fault signatures) | no | ◻ root lane |
 | 14 | Fixture on the new shapes; reseed; read the prompt; harness score | reseed | every landing; paid trial rerun after 1c |
 

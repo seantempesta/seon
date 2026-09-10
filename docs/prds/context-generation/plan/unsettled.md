@@ -780,3 +780,13 @@ half-edit. Measured targets in the issue.
   `or`/pull-in-find and agent listens (roadmap 2, 8); the two leftovers
   and `dir`/`doc` structure (roadmap 1h, 11).
 
+## 2026-09-09 21:15 — roadmap rows 2, 8, 11 and the leftovers landed
+
+- evidence-listens `ed8fd02e3` (exact evidence through `not`/`or` and
+  pull-in-find), `6778a4614` (runtime listen patterns routed through the
+  cluster wake matcher). context-nits `1d47ebb7f` (trigger fields; empty
+  reads as `[]`), `d25a12eda` (structured `dir`/`doc` with examples),
+  `4652cc0e7` (contract refusals carry the doc map). Both lanes writing
+  their notes. Remaining on the roadmap: root's cluster block (13) and the
+  harness rerun (14, blocked on provider credits).
+
