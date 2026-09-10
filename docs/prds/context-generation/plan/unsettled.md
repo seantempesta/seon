@@ -790,3 +790,14 @@ half-edit. Measured targets in the issue.
   their notes. Remaining on the roadmap: root's cluster block (13) and the
   harness rerun (14, blocked on provider credits).
 
+## 2026-09-09 21:20 — thirteenth refork; the page at its cleanest; one blocker open
+
+- Reseeding on the adopted JVM refused the fixture's schema re-declaration
+  (unresolved reference + `advance-projection!` contract) — any agent
+  declaring a schema after an in-place adoption would hit it; filed as a
+  blocker (`redeclaring-an-agent-schema-after-in-place-adoption-is-refused`),
+  `schema-redeclare` lane running at high. Recovery: thirteenth refork.
+- Page read after reseed: 11 evaluations, 119 lines, zero printer
+  fallbacks, zero bare db ids, zero nil reads, zero faults since boot;
+  `dir`/`doc` structured; trigger fields named. This is the review page.
+
