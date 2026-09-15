@@ -6,6 +6,27 @@ tags: [test, schema, runtime]
 
 # September 15 four-namespace failure investigation
 
+## Final result
+
+The fixture repair (`6dc70f30a`) and rendering/admission repair (`ee8d54dca`)
+are committed on `steward-platform`. The required four-namespace isolated
+gate passed **103 tests / 248 assertions**; the separate platform gate
+passed **86 tests / 542 assertions**. Both exited 0 with **zero failures
+and zero errors**. The platform snapshot had no differences from committed
+HEAD `ee8d54dca` and reused the four-namespace gate's exact content digest.
+
+The canonical platform selection reported 53 skipped long tests; no `--all`
+or `--full` run is claimed. The live default-cluster projection limitation
+and the protected test-provenance boundary are recorded below. Neither
+contaminated the isolated gates.
+
+Platform log SHA-256:
+`df25a63eca1d5a35e6f80308ab9c67fe0fddf4267d5ade44599984f46cd0e1ff`.
+Its final test completed at 20:20:25Z. Every manually launched subprocess
+was reaped; successful test roots were removed by the gate. The two retained
+scratch roots and `tmp/bisect-fix` were deleted after checking for live
+holders. `tmp/bisect-wt` is absent. No foreign root or session was cleaned.
+
 ## Authorized repair, September 15
 
 The owner released the cluster, instrumentation, database, and SCI evaluation
@@ -60,6 +81,39 @@ paths and all four namespaces passed **103 tests / 248 assertions,
 content digest `8b385a2dbb6d3e24f106dda301e8d68ef9700f9267e7a6eceb5a2fee95271425`.
 The core repair issues are resolved and archived; the broader parity-divergence
 issue remains open for its separate, explicitly recorded language differences.
+The rendering slice landed as `ee8d54dca` before the platform-only gate.
+
+Exact code/schema/test path scope for the final gates:
+
+```sh
+paths=(
+  resources/seon/schemas/seon.sci.admit.edn
+  resources/seon/schemas/seon.print.edn
+  src/seon/render/value.clj
+  src/seon/sci/admit.clj
+  src/seon/cluster.clj
+  test/seon/effect_test.clj
+  test/seon/search_test.clj
+  test/seon/repl_parity_test.clj
+  test/seon/cluster/mcp_test.clj
+)
+SEON_TEST_WORKERS=1 SEON_TEST_SLOTS=1 bin/test --paths "${paths[@]}" -- \
+  seon.cluster.mcp-test seon.effect-test seon.repl-parity-test seon.search-test
+SEON_TEST_WORKERS=1 SEON_TEST_SLOTS=1 bin/test --paths "${paths[@]}" --platform
+```
+
+The successful fixture log's SHA-256 is
+`58e121232c0ba6ec3279a89f4cee9d86399302986ee3d83ed6536e6ab65368ff`;
+the four-namespace log's is
+`2b45dd5d586ba815e829798eab573eb9efbd1367f85190ffcb656f546a25854f`.
+
+Documentation touched in the repair is this landing note, the four resolved
+issue files under `docs/seon/issues/archive/` (fixture provenance, ordinary
+MCP rendering, missing-marker admission, and structural record naming),
+`docs/seon/issues/repl-parity-divergences.md`, and
+`docs/seon/issues/partial-hot-reload-produces-mixed-code-with-no-warning.md`.
+The original paths of the three pre-existing resolved issues were moved to
+the archive. The issue index and all protected files were left untouched.
 
 ### Fixture gate
 
