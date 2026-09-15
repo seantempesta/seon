@@ -277,6 +277,9 @@ The code delta is **2 files, 77 insertions, 7 deletions**; the output of
 `git show --format= --binary f402c5d3d` is **6,036 bytes**. No protected file
 was edited. No scratch cluster or worktree was created; the refused gate's
 shell exited. Probe scratch files are removed after retaining this evidence.
+The refused gate left `tmp/test-runs/run.OtOT2Y`; its recorded launcher PID
+68834 was absent, lane status and the JVM process table showed no holder,
+and this lane removed only that snapshot without following symlinks.
 The shared hook workers and another lane's files are not owned by this lane.
 Markdown feedback reports existing gitlink citation errors in the separate
 agents-md audit; those documents were not edited.
