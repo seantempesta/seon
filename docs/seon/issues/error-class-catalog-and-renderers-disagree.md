@@ -7,6 +7,20 @@ tags: [issue, schema, render, test, class/n11, wave/error-class-contract]
 
 # Reconcile the error-class catalog with declared schemas and renderers
 
+## Refusal-grammar boundary — 2026-09-15
+
+The derived class/schema/renderer regression now passes its registry to
+Malli's `:gen/schema` generator. Running it exposed seven missing class
+messages and the undeclared `:seon.render.unknown/reason` attribute; those
+declarations are repaired. The kernel's evaluation failure marker also now
+matches its declared shape, so unresolved-symbol values select the error pair.
+The focused canonical run passed 4,901 assertions across 17 tests, including
+all four catalog tests. The final gate and implementation commit are recorded
+in [the landing](../../prds/context-generation/research/refusal-grammar-2026-09-15.md).
+
+The broader discriminator migration described below remains open. A green
+derived renderer check does not establish deletion of `:seon.error/kind`.
+
 ## Problem
 
 The dated error-class census no longer agrees with the queryable declaration

@@ -1,11 +1,20 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, render, context, doc, ugly-output, agent-facing]
 ---
 
 # `doc` prints schema bodies and flattens arity alternatives — the primary teaching surface is ugly and misleading
+
+## Disposition — 2026-09-15
+
+Implementation: `a65985098`, with final wording in `1fd81b2be`; dependency selection `a24ad11b7`.
+
+The documentation owner derives input/output positions from Malli function-schema data, preserving guard semantics and named contracts. The default JVM proof for `seon.db/pull` returns three ordered input alternatives and three `[:or :nil :map :seon.error/value]` outputs, without generator bodies. The canonical documentation tests pass. A distinct arglist-reading defect is recorded in [documentation-arglists-with-auto-keywords-are-not-edn](../documentation-arglists-with-auto-keywords-are-not-edn.md); it does not restore the flattened-contract mechanism.
+
+Implementation commit and gate results: [refusal-grammar landing](../../../prds/context-generation/research/refusal-grammar-2026-09-15.md).
+
 
 ## Problem
 

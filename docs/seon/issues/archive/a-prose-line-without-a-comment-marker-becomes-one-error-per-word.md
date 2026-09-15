@@ -1,12 +1,21 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, sci, agent, reader]
 created: 2026-09-15
 ---
 
 # A prose line without a comment marker becomes one error per word
+
+## Disposition — 2026-09-15
+
+Implementation: `a65985098`, with final wording in `1fd81b2be`; dependency selection `a24ad11b7`.
+
+The reader mechanism is fixed: four contiguous unreadable prose lines produce one refusal naming `Gate:` and then recover the following valid form. The exact 70-token live refusal and canonical recovery regression are recorded in the landing. The protected opening instruction remains an explicit residual in [opening-does-not-explain-per-line-comment-markers](../opening-does-not-explain-per-line-comment-markers.md). This closure does not claim that teaching sentence was edited.
+
+Implementation commit and gate results: [refusal-grammar landing](../../../prds/context-generation/research/refusal-grammar-2026-09-15.md).
+
 
 ## Problem
 

@@ -1,11 +1,20 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, schema, wave/schema-audit]
 ---
 
 # Retain reader coordinates and enclosing contract for key corrections
+
+## Disposition — 2026-09-15
+
+Implementation: `a65985098`, with final wording in `1fd81b2be`; dependency selection `a24ad11b7`.
+
+The approved Edamame extension retains the invalid token and enclosing collections; the existing Seon reader preserves them. The error owner derives the unique missing declared key. The exact run-7 canonical SCI regression passes, and the live default JVM reader/render proof produces `Fix: Use :my.plan.item/id.` with the enclosing function and its docstring example (107 estimated tokens). Dependency commit: `63373df`; parent implementation and final gates are recorded in the landing linked below.
+
+Implementation commit and gate results: [refusal-grammar landing](../../../prds/context-generation/research/refusal-grammar-2026-09-15.md).
+
 
 ## Live dependency boundary — 2026-09-15
 
@@ -19,7 +28,7 @@ requires extending that dependency evidence and carrying it through the
 existing reader; parsing exception prose is not the fix. The assignment's
 cross-owner design gate was reached before production edits. Three priced
 options and exact rendered bytes are in
-[the landing note](../../prds/context-generation/research/refusal-grammar-2026-09-15.md).
+[the landing note](../../../prds/context-generation/research/refusal-grammar-2026-09-15.md).
 This member remains open.
 
 The 2026-09-15 run-7 source `(my.plan/current! {:my.plan/item/id "juniper/define"})`

@@ -1,0 +1,8 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"seon.dev.mcp/namespace\":\"user\",\"seon.dev.mcp/session-id\":\"refusal-grammar\",\"seon.dev.mcp/cluster\":\"default\",\"seon.dev.mcp/mode\":\"jvm\",\"seon.dev.mcp/events\":[{\"tag\":\"ret\",\"val\":{\"seon.dev.mcp/value\":{\"text\":\"seon.sci.eval/evaluate refused source at []: expected a resolvable symbol (:symbol), got an unresolved symbol my.web/no-such-fetch. Fix: Define or require this symbol. Example: No docstring example is available.\",\"tokens\":65,\"valid\":true},\"seon.dev.mcp/windowed?\":false},\"ns\":\"user\",\"ms\":5543}],\"seon.dev.mcp/runtime\":\"clj\",\"seon.dev.mcp/cluster-state\":\"alive\",\"seon.dev.mcp/form\":\"(let [c (seon.operator/connection \\\"default\\\") p (seon.schema/projection-from-database @c)] (seon.schema/call-with-projection p (fn [] (let [d (seon.sci.kernel/failure-value {:seon.sci.kernel/time-limit-kind :seon.sci.eval/time-limit :seon.sci.kernel/failure-kind :seon.sci.eval/evaluation-failed} (ex-info \\\"Unable to resolve symbol: my.web/no-such-fetch\\\" {:sci.impl/symbol 'my.web/no-such-fetch}) (seon.sci.kernel/unarmed-record (System/nanoTime))) text (seon.error/render-ai {:seon.db/db @c :seon.render/value d :seon.render/profile {:seon.render.profile/id :refusal.probe/profile :seon.render.profile/token-budget 2048 :seon.render.profile/max-depth 8 :seon.render.profile/max-children 10 :seon.render.profile/max-string-length 256 :seon.render.profile/composition :multiline}})] {:valid (malli.core/validate :seon.sci.eval/evaluation-failed-error d {:registry (:seon.schema.projection/registry p)}) :text text :tokens (seon.ai.tokens/estimate text)}))))\",\"seon.dev.mcp/root\":\"/Users/sean/src/seon\"}"
+    }
+  ]
+}

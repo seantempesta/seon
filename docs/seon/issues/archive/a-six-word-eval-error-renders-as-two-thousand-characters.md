@@ -1,11 +1,26 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, render, sci, class/n1, wave/error-face-budget]
 ---
 
 # A six-word evaluation error renders as 2,154 characters
+
+## Disposition — 2026-09-15
+
+Implementation: `a65985098`, with final wording in `1fd81b2be`; dependency selection `a24ad11b7`.
+
+The owner's September 15 grammar supersedes the old character-count target. A real canonical SCI evaluation of `my.web/no-such-fetch` now stores the actionable refusal instead of the diagnostic map; its regression requires fewer than 150 estimated tokens and no diagnostic-evidence dump. The kernel had emitted `:evaluation` against a `true` marker schema, preventing error-pair selection; its producer is repaired. The live constructor/render proof validates the installed shape and measures 65 estimated tokens. Exact text follows:
+
+```text
+seon.sci.eval/evaluate refused source at []: expected a resolvable symbol (:symbol), got an unresolved symbol my.web/no-such-fetch. Fix: Define or require this symbol. Example: No docstring example is available.
+```
+
+The live generic database refusal is 49 tokens; the exact run-7 reader refusal with its real example is 107 tokens. Their full text is in the saved probe envelope linked from the landing.
+
+Implementation commit and gate results: [refusal-grammar landing](../../../prds/context-generation/research/refusal-grammar-2026-09-15.md).
+
 
 ## Problem
 
@@ -21,7 +36,7 @@ buried in the middle. Cheap correct diagnosis is what makes the next defect
 cheap to kill; an expensive one discourages the probe.
 
 This is the SIZE half of the shape recorded in
-[contract-violation-serializes-print-tree-inside-error-data](archive/contract-violation-serializes-print-tree-inside-error-data.md),
+[contract-violation-serializes-print-tree-inside-error-data](contract-violation-serializes-print-tree-inside-error-data.md),
 which owns the structural half (evidence stored as EDN strings). Fixing that
 one is likely to shrink this one, but the acceptance here is a measured
 budget, not a shape.
@@ -30,7 +45,7 @@ budget, not a shape.
 
 Tool-exercise lane, 2026-08-07, cluster `tools` in an isolated operator root,
 driven through real runs. Report:
-[tool-exercise-2026-08-08.md](../../prds/sci-execution-runtime/research/tool-exercise-2026-08-08.md).
+[tool-exercise-2026-08-08.md](../../../prds/sci-execution-runtime/research/tool-exercise-2026-08-08.md).
 
 ```text
 "Unable to resolve symbol: my.web/fetch"   → 2,154 characters
