@@ -37,7 +37,7 @@ stop_fast_runner() {
   release_test_slot
 }
 trap stop_fast_runner EXIT HUP INT TERM
-clojure -M:test -m seon.test.fast "$@" &
+nice -n 15 clojure -M:test -m seon.test.fast "$@" &
 suite_pid=$!
 if wait "$suite_pid"; then status=0; else status=$?; fi
 suite_pid=

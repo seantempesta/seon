@@ -382,7 +382,10 @@ reap_runner() {
 }
 
 launch_runner() {
-  "$@" &
+  # Test JVMs run at low priority (inherited by the coordinator's worker and
+  # confirmation JVMs): the owner's cluster, editor, and shell keep the CPU
+  # when a gate saturates it (owner, 2026-09-15: "faster, but don't saturate").
+  nice -n 15 "$@" &
   suite_pid=$!
   printf 'runner-pid=%s runner-started-at=%s\n' \
     "$suite_pid" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
