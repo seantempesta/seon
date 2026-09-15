@@ -1299,4 +1299,12 @@ half-edit. Measured targets in the issue.
   rows, test evidence tied to the exact tested definition, exported to two
   new files. No new problem entity family; `seon.problems` already derives
   aggregates.
+- 16:45Z data-audit-b landed (`4b33cd9c5`, 2,359 lines): no problem family
+  or metrics registry; the plan item IS the task (subject + done-query);
+  no pair receives viewer/subject today (P7) — accrete viewer/subject/window
+  to `seon.render.edn` and into retained-call evidence; the call ledger has
+  no seam that sees every call → deferred (per-evaluation aggregates with
+  explicit coverage when built); MVP = an owed response about a message,
+  with a small pure predicate + test as the reusable result, exported to
+  two new files. PRD §10 rewritten from both audits with the build order.
 
