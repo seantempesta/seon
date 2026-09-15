@@ -806,7 +806,12 @@ details.tool-call-details[open] .tool-preview {
   word-break: normal;
 }
 .seon-session-page h2 { font-size: 0.75rem; font-weight: 600; color: var(--color-text-100); }
-.seon-session-header { border-bottom: 1px solid var(--color-base-800); padding-bottom: 0.75rem; }
+.seon-session-header { border-bottom: 1px solid var(--color-base-800); padding-bottom: 0.75rem; font-family: var(--font-mono); color: var(--color-text-200); background: var(--color-base-950); }
+.seon-session-sticky, .seon-main > .seon-session-header { position: sticky; top: 0; z-index: 10; background: var(--color-base-950); }
+.seon-session-sticky { padding-top: 0.5rem; padding-bottom: 0.35rem; }
+.seon-session-nav { font-size: 0.625rem; padding-right: 0.5rem; }
+.seon-session-nav a { color: var(--color-text-400); }
+.seon-session-nav a[aria-current="page"] { color: var(--color-text-100); text-decoration: underline; text-underline-offset: 0.2rem; }
 .seon-session-identity { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.25rem 1rem; }
 .seon-session-identity h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.75rem; font-size: 1rem; font-weight: 600; color: var(--color-text-100); }
 .seon-session-namespace, .seon-session-state { font-size: 0.625rem; font-weight: 400; color: var(--color-text-400); }
@@ -837,7 +842,7 @@ details.tool-call-details[open] .tool-preview {
 .seon-session-selection { gap: 0.2rem; padding: 0.5rem 0; }
 .seon-session-selection a { color: var(--color-text-400); padding: 0 0.35rem; }
 .seon-session-selection a[aria-current="true"] { color: var(--color-signal); border-bottom: 1px solid var(--color-signal); }
-.seon-session-scroll { height: 65vh; overflow-y: auto; border: 1px solid var(--color-base-800); }
+.seon-session-scroll { border: 1px solid var(--color-base-800); }
 .seon-session-boundary { border-top: 1px solid var(--color-base-800); color: var(--color-text-400); font-size: 0.625rem; padding: 0.4rem 0.6rem; }
 .seon-session-line { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); }
 .seon-session-gutter { padding: 0.5rem 0.6rem; font-size: 0.625rem; color: var(--color-text-400); border-right: 1px solid var(--color-base-800); }
@@ -845,9 +850,9 @@ details.tool-call-details[open] .tool-preview {
 .seon-session-line pre, .seon-session-raw { margin: 0; padding: 0.5rem 0.75rem; font: inherit; overflow: visible; }
 .seon-session-record { margin-top: 0.75rem; border-top: 1px solid var(--color-base-800); padding-top: 0.5rem; }
 .seon-session-rereads { border-top: 1px solid var(--color-base-800); padding: 0.4rem 0; color: var(--color-text-400); font-size: 0.625rem; }
-.seon-session-rereads label { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.15rem 0; }
-.seon-session-rereads input { appearance: none; width: 0.65rem; height: 0.65rem; border: 1px solid var(--color-base-700); background: var(--color-base-900); }
-.seon-session-rereads input:checked { background: var(--color-signal); border-color: var(--color-signal); }
+.seon-session-rereads details { padding: 0.15rem 0; }
+.seon-session-rereads summary { cursor: pointer; }
+.seon-session-rereads details p { padding-left: 1rem; }
 .seon-syntax-prompt { color: var(--color-signal); }
 .seon-syntax-comment { color: var(--color-text-400); }
 .seon-syntax-keyword, .seon-syntax-result { color: var(--color-info); }

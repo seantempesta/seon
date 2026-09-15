@@ -75,6 +75,10 @@ section loads the existing agent record blocks on demand below the session.
 A compact header shows the agent, namespace, objective, local state time,
 and cluster. System/virtual/compact actions and the raw toggle share its
 toolbar; the message form is collapsed until requested.
+The same header appears on the ordinary namespace page, with agent/debug
+navigation. Debug history uses normal document scrolling, with selected-turn
+facts and navigation in the sticky header. Re-read disclosures reveal entries
+in place, and the last emission scrolls into view on load.
 Compaction wipes the agent's evaluations;
 the next system turn regenerates the opening. There is no manual
 Add/remove/revision/proof/adoption path for editing context.

@@ -6,6 +6,55 @@ tags: [research, debug, web, prompt]
 
 # Debug session product — 2026-09-14
 
+## Shared-header review follow-up
+
+The orchestrator's review widened the shell pass to both namespace pages.
+The ordinary page now uses the same agent title, namespace, runtime-derived
+idle/running time, cluster, navigation and collapsed message toolbar. Debug
+turn metadata uses the ordinal and local time rather than a hash in prose;
+token counts are grouped and include cache misses. Re-read folds use native
+details/summary disclosures, retaining each emission's exact position.
+The transcript uses normal document scrolling. Header, selected-turn facts,
+turn links and byte total stay sticky; the last emission scrolls into view.
+
+Screenshots `shared-shell-1-{1440,700}.png` are full documents; accompanying
+`-top.png` and `-end.png` captures make the long document readable in review.
+Both end captures retain the selected-turn underline. The browser found
+no horizontal overflow and verified the same 177,576 bytes across both
+renderings. Document scroll offsets were 16,709 and 26,301 px, respectively;
+the transcript no longer owns an inner scroll position.
+
+`shared-shell-1-agent-{1440,700}.png` confirms the new header on the ordinary
+page and the separate layout defect: recency places empty Faults first,
+the desktop rail clips its contents, and the narrow runtime table overflows.
+The next isolated layout commit removes those constraints. These screenshots
+are not a claim that the main-page layout is already fixed.
+
+Adoption subsequently converged at
+`6aa89d37-e2fa-52dc-8b25-1bb051571764`. The
+`shared-shell-adopted-*` captures repeat both pages at both widths after
+that convergence; all debug byte and layout assertions passed. Initial GET
+was **200 / 0.003636 s**. Fast gate: **27 tests / 184 assertions, green**.
+The first isolated gate had one failure in the grammar test: the newly
+landed help pair adds `seon-help-instructions` to its existing CSS class.
+The assertion required the entire old class attribute, despite all 2,554
+help bytes remaining unchanged. This lane updated that test-only selector;
+no foreign renderer was changed. Failed root: `tmp/test-runs/run.WVdXcX`.
+The corrected isolated gate passed **87 tests / 583 assertions** with zero
+failures or errors (`run.L15a8Y`, automatically removed). The targeted
+grammar fast gate passed **2 tests / 17 assertions**.
+
+### Row probes for the upcoming problems panel
+
+On the adopted default database, `seon.eval/of-agent` and runtime-owned turn
+refs give **30 provider turns**, **21 error evaluations** (9 fabricated
+responses, 5 unreadable replies, 6 evaluation failures, 1 invalid read),
+**2 repeated provider evaluations with identical source and shown text**,
+and **1 provider reply with no evaluations**. Attempt usage totals are
+**954,877 prompt / 890,752 hit / 64,125 miss / 7,259 completion tokens**.
+The stored plan has **4 of 7 steps completed**. These are read-only probes;
+the panel implementation remains a later part after the main-page layout.
+
 ## Header and shell checkpoint
 
 Replaced the duplicated agent/debug links and always-open message bar with

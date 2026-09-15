@@ -2106,6 +2106,31 @@ details.tool-call-details[open] .tool-preview {
 .seon-session-header {
   border-bottom: 1px solid var(--color-base-800);
   padding-bottom: 0.75rem;
+  font-family: var(--font-mono);
+  color: var(--color-text-200);
+  background: var(--color-base-950);
+}
+.seon-session-sticky, .seon-main > .seon-session-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--color-base-950);
+}
+.seon-session-sticky {
+  padding-top: 0.5rem;
+  padding-bottom: 0.35rem;
+}
+.seon-session-nav {
+  font-size: 0.625rem;
+  padding-right: 0.5rem;
+}
+.seon-session-nav a {
+  color: var(--color-text-400);
+}
+.seon-session-nav a[aria-current="page"] {
+  color: var(--color-text-100);
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
 }
 .seon-session-identity {
   display: flex;
@@ -2188,8 +2213,6 @@ details.tool-call-details[open] .tool-preview {
   border-bottom: 1px solid var(--color-signal);
 }
 .seon-session-scroll {
-  height: 65vh;
-  overflow-y: auto;
   border: 1px solid var(--color-base-800);
 }
 .seon-session-boundary {
@@ -2228,22 +2251,14 @@ details.tool-call-details[open] .tool-preview {
   color: var(--color-text-400);
   font-size: 0.625rem;
 }
-.seon-session-rereads label {
-  display: flex;
-  gap: 0.5rem;
-  align-items: baseline;
+.seon-session-rereads details {
   padding: 0.15rem 0;
 }
-.seon-session-rereads input {
-  appearance: none;
-  width: 0.65rem;
-  height: 0.65rem;
-  border: 1px solid var(--color-base-700);
-  background: var(--color-base-900);
+.seon-session-rereads summary {
+  cursor: pointer;
 }
-.seon-session-rereads input:checked {
-  background: var(--color-signal);
-  border-color: var(--color-signal);
+.seon-session-rereads details p {
+  padding-left: 1rem;
 }
 .seon-syntax-prompt {
   color: var(--color-signal);

@@ -323,11 +323,11 @@
       ;; refuses it, correctly, and the first live page came back empty
       ;; until this said `seq`. A seq is a fragment and splices.
       [:main {:class "seon-main"}
-       (when (and id (not (::session? request)))
+       (when (and id (not (::session? request)) (not (::agent-header? request)))
          [:nav {:class "seon-agent-routes"}
           [:a {:href (route/path ::route/agent {:id id})} "agent"]
           [:a {:href (route/path ::route/agent-debug {:id id})} "debug"]])
-       (when (and id (not (::session? request))) (message-bar-html {:seon.agent/id id}))
+       (when (and id (not (::session? request)) (not (::agent-header? request))) (message-bar-html {:seon.agent/id id}))
        (seq page)]
       ;; OUTSIDE every morph target. A data-init inside one is stripped
       ;; by that element's first whole-element morph, and the tab then
@@ -3086,8 +3086,15 @@
         {:status 200
      :headers {"content-type" "text/html; charset=utf-8"}
      :body (shell {:seon.agent/id agent-id
+                   ::agent-header? true
                    :seon.render/page
-                   [[:section {:class "seon-namespace-page"
+                   [(transcript/render-agent-header
+                     (session-controls
+                      (debug-turn-request @(:seon.store/connection-object service)
+                                          (:seon.store/connection-object service) agent-id
+                                          (:seon.sci.admit/caps service)
+                                          (assoc service ::transcript/debug? false))))
+                    [:section {:class "seon-namespace-page"
                                :data-signals__ifmissing
                                "{showEverything:false}"}
                      [:label {:class "seon-floor-control"}

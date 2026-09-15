@@ -1225,11 +1225,12 @@
      (str "Attempt " (:seon.ai.attempt/ordinal attempt) " · "
           (or (:seon.ai/model attempt) "model unavailable")
           " · finish: " (or (:seon.ai.attempt/finish-reason attempt) "unavailable")
-          " · prompt tokens: " (get usage "prompt_tokens" "unavailable")
-          " · completion tokens: " (get usage "completion_tokens" "unavailable")
-          " · cache-hit tokens: " (or (get usage "prompt_cache_hit_tokens")
-                                      (get-in usage ["prompt_tokens_details" "cached_tokens"])
-                                      "unavailable"))]))
+          " · prompt tokens: " (if-let [n (get usage "prompt_tokens")] (format "%,d" n) "unavailable")
+          " · completion tokens: " (if-let [n (get usage "completion_tokens")] (format "%,d" n) "unavailable")
+          " · cache-hit tokens: " (if-let [n (or (get usage "prompt_cache_hit_tokens")
+                                               (get-in usage ["prompt_tokens_details" "cached_tokens"]))]
+                                     (format "%,d" n) "unavailable")
+          " · miss: " (if-let [n (get usage "prompt_cache_miss_tokens")] (format "%,d" n) "unavailable"))]))
 
 (defn- session-id [agent-id]
   (block/surface-id (keyword "debug-session" agent-id)))
@@ -1268,20 +1269,36 @@
      (when-let [objective (get-in agent-row [:seon.agent/plan :my.plan/objective])]
        [:p {:class "seon-session-objective"} objective])
      [:div {:class "seon-session-toolbar"}
+      [:nav {:class "seon-session-nav" :aria-label "Agent pages"}
+       [:a {:href (route/path ::route/agent {:id agent-id})
+            :aria-current (when (= false (::debug? request)) "page")} "agent"]
+       " | "
+       [:a {:href (route/path ::route/agent-debug {:id agent-id})
+            :aria-current (when (not= false (::debug? request)) "page")} "debug"]]
       (::toolbar request)
-      (when selected
+      (when (and selected (not= false (::debug? request)))
         [:a {:class "seon-session-toggle" :href (session-url agent-id selected (not raw?))
              (keyword "data-on:click")
              (str "evt.preventDefault(); history.replaceState(null, '', '"
                   (session-url agent-id selected (not raw?)) "'); @get('"
                   (session-url agent-id selected (not raw?)) "')")}
          (if raw? "Colourised session" "As the model saw it")])
-      [:a {:href (route/path ::route/agent-debug {:id agent-id})} "Latest"]
+      (when (not= false (::debug? request))
+        [:a {:href (route/path ::route/agent-debug {:id agent-id})} "Latest"])
       (when (::message-form request)
         [:details {:class "seon-session-message" :id (block/surface-id (keyword "session-message" agent-id))
                    :data-preserve-attr "open"}
          [:summary "Message"]
          (::message-form request)])]]))
+
+(defn render-agent-header
+  "One human-labelled header for the agent and its debug session."
+  {:malli/schema [:=> [:cat [:and :seon.render/unit
+                             [:map [:seon.db/db :seon.db/db] [:seon.agent/id :seon.agent/id]]]]
+                  :seon.render/hiccup]}
+  [request]
+  (let [rows (turn-rows (:seon.db/db request) (:seon.agent/id request))]
+    (session-header request (if (vector? rows) rows []))))
 
 (defn- readable-shown [source]
   (try
@@ -1376,11 +1393,12 @@
     [:section {:id (session-id agent-id) :class "seon-session" :data-ignore-morph ""
                :data-signals (str "{" (str/join "," (map #(str % ":false") (vals source-signals))) "}")
                :data-session-loaded selected-id}
+     [:div {:class "seon-session-sticky"}
      (session-header request rows)
      [:header {:class "seon-session-heading"}
       [:div [:h2 (str "Context at turn " (::ordinal selected))]
-       [:p (str "The saved prompt " (if (= "System" (turn-kind database selected)) "after " "before ") (str/lower-case (turn-kind database selected))
-                " turn " selected-id)]
+       [:p (str "turn " (::ordinal selected) " · " (str/lower-case (turn-kind database selected))
+                " · ") (runtime-time (get-in selected [:seon.turn/opened-tx :db/txInstant]))]
        (when (seq (:seon.turn/attempts selected))
          (into [:ul {:class "seon-session-meta"}] (map attempt-html) (:seon.turn/attempts selected)))]]
      [:nav {:class "seon-session-selection" :aria-label "Select turn"}
@@ -1392,24 +1410,26 @@
              (keyword "data-on:click")
              (str "evt.preventDefault(); @get('" (session-url agent-id (:seon.turn/id row) raw?) "')")}
          (str (::ordinal row))])]
+     (when prompt
+       [:p {:class "seon-session-meta"}
+        (str (format "%,d" (utf8-size prompt)) " bytes · ≈" (format "%,d" (tokens/estimate prompt))
+             " tokens · " (count entries) " emissions · oldest → newest")])]
      (if (:seon.error/kind acquired)
        [:p {:class "seon-emission-error"} (:seon.error/message acquired)]
        [:div
-        [:p {:class "seon-session-meta"}
-         (str (utf8-size prompt) " bytes · ≈" (tokens/estimate prompt)
-              " tokens · " (count entries) " emissions · oldest → newest")]
         (when (and (not raw?) (seq rereads))
           [:div {:class "seon-session-rereads"}
            [:p "Repeated system reads are folded in place. Expand to see their exact positions."]
            (for [[source matches] rereads]
              (let [signal (get source-signals source)
                    form (::value (readable-shown source))]
-               [:label
-                [:input {:type "checkbox" :data-bind signal}]
+               [:details {(keyword "data-on:toggle") (str "$" signal "=el.open")}
+                [:summary
                 (str (if (seq? form) (first form) (first (str/split-lines source)))
                      (when-let [attribute (first (filter qualified-keyword? (tree-seq coll? seq form)))]
                        (str " · " attribute))
-                     " · re-read ×" (count matches) " · " (reread-summary matches))]))])
+                     " · re-read ×" (count matches) " · " (reread-summary matches))]
+                [:p "Expanded at their original positions below."]]))])
         [:div {:class "seon-session-scroll"}
          (if raw?
            [:pre {:class "seon-session-raw" :data-prompt-bytes (utf8-size prompt)} [:code prompt]]
@@ -1443,7 +1463,7 @@
                            (repl/render-emission-html emission)
                            [:code (:seon.render.history/bytes entry)])]]]))
                   (map vector entries saved))))
-         [:span {:class "seon-session-end" :data-init "el.parentElement.scrollTop = el.parentElement.scrollHeight"}]]])]))
+         [:span {:class "seon-session-end" :data-init "el.scrollIntoView({block:'end'})"}]]])]))
 
 (defn render-runtime-html
   "Show transaction times, message triggers, listens, and newest-first turns."

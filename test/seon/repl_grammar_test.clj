@@ -71,7 +71,7 @@
                                         :seon.sci.eval/time-limit-ms 10000
                                         :seon.sci.eval/agent-ctx agent-ctx
                                         :seon.render/profile (render/agent-render-profile (config/defaults)))))]
-               (is (str/includes? html "<ul class=\"seon-help\">"))
+               (is (str/includes? html "<ul class=\"seon-help"))
                (is (= (count (:seon.help/lines instructions))
                       (count (re-seq #"<li>" html))))
                (is (str/includes? html "seon.bootstrap/render-help-html"))

@@ -19,9 +19,10 @@ const assert = require('node:assert/strict');
       assert.ok(coloured.length > 0);
       const selected = await page.locator('[data-session-loaded]').getAttribute('data-session-loaded');
       await page.screenshot({ path: `tmp/debug-product/${process.argv[2] || 'a-final'}-${width}.png`, fullPage: true });
+      await page.screenshot({ path: `tmp/debug-product/${process.argv[2] || 'a-final'}-${width}-end.png` });
       const layout = await page.evaluate(() => ({
         viewport: innerWidth, documentWidth: document.documentElement.scrollWidth,
-        scrollTop: document.querySelector('.seon-session-scroll').scrollTop,
+        scrollTop: scrollY,
         overflow: [...document.querySelectorAll('.seon-session-page *')]
           .filter(el => el.getBoundingClientRect().width && el.scrollWidth > el.clientWidth + 1
             && getComputedStyle(el).display !== 'inline')
@@ -30,6 +31,8 @@ const assert = require('node:assert/strict');
       assert.equal(layout.documentWidth, width);
       assert.ok(layout.scrollTop > 0);
       assert.deepEqual(layout.overflow, []);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.screenshot({ path: `tmp/debug-product/${process.argv[2] || 'a-final'}-${width}-top.png` });
       await page.getByRole('link', { name: 'As the model saw it', exact: true }).click();
       const raw = page.locator('[data-prompt-bytes]');
       await raw.waitFor();
@@ -47,6 +50,10 @@ const assert = require('node:assert/strict');
       assert.deepEqual(errors, []);
       console.log(JSON.stringify({ selected, emissions: coloured.length,
         bytes: Buffer.byteLength(coloured.join('')), ...layout }));
+      await page.goto('http://127.0.0.1:7994/ns/my.agents.juniper');
+      await page.locator('.seon-session-header').waitFor();
+      await page.screenshot({ path: `tmp/debug-product/${process.argv[2] || 'a-final'}-agent-${width}.png`, fullPage: true });
+      assert.match(await page.locator('h1').first().textContent(), /juniper/);
       await page.close();
     }
   } finally { await browser.close(); }
