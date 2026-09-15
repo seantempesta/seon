@@ -715,7 +715,8 @@
         received (or (:seon.error/diagnostic-offending data)
                      (:seon.instrument/args fact))]
     (if operation
-      (str "Contract violation in " operation " " (name member)
+      (str (when-let [message (:seon.error/message fact)] (str message "\n"))
+           "Contract violation in " operation " " (name member)
            ": expected " (pr-str expected)
            ", received " (pr-str received)
            (if (= :arguments member)

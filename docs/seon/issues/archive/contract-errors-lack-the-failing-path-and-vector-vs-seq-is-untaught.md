@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [contracts, errors, malli, help, live-test]
 created: 2026-09-15
@@ -41,18 +41,26 @@ JVM returned `argument 0 (0-based); schema path [0]; expected :vector, got
 LazySeq`. The canonical SCI regression reproduces the captured run-5 call
 and proves `vec` returns Ada/115.
 
-An additional presentation boundary was found: `seon.error/instrumentation-prose`
-reconstructs a message from expected/offending evidence and discards
-`:seon.error/message`. Its shown text still omits the new coordinate. A
-scope extension to that renderer has been requested; the shown-text
-assertion remains red until that boundary is repaired.
+The owner authorized the additional presentation boundary at
+`seon.error/instrumentation-prose` on 2026-09-15. Its one-hunk change
+prefixes the existing rendering with `:seon.error/message`; the rest of
+the AI text and HTML pair are unchanged. The real SCI regression now
+asserts all four details in the saved shown text as well as the error value.
 
 The vector-help sentence and the canonical :seon.db/attributes description
 are now documented. Their isolated help/example/grammar gate passed
 8 tests / 274 assertions; the live help trial with those bytes scored 12/12.
-The issue remains open for the shown-message boundary above.
+The shown-message boundary is now repaired.
 
 The exact run-5 function literal is now refused before `pr-str`, with the
 registered-predicate / quoted-symbol alternatives in its shown error.
 Candidate first-install and replacement isolation pass the canonical SCI
 regression; the selected isolated gate passed 10 tests / 318 assertions.
+
+Final authorized item 1 validation and the new help trial are recorded in the
+[landing note](../../../prds/context-generation/research/contracts-and-plan-landing-2026-09-15.md).
+
+Final item 1 gates: fast **42 tests / 430 assertions**, isolated **42 tests /
+434 assertions**, platform **84 tests / 505 assertions**; all pass. The new
+help trial remains **12/12**. The issue is resolved across constructor,
+rendering, installation, and documentation.

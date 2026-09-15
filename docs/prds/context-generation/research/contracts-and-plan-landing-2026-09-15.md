@@ -52,7 +52,7 @@ Live MCP JVM probe before editing:
 The existing message now carries the first failing argument (explicitly
 zero-based), Malli schema path, expected schema type and actual JVM type.
 Complete existing diagnostic evidence is retained. The exact run-5 accepted
-definition and lazy call are committed in `test/seon/contracts_plan_test.clj`;
+definition and lazy call are committed in `test/seon/contracts_fixture.clj`;
 the regression installs through candidate SCI evaluation, checks the
 evaluation's shown text and doc map, then proves `vec` returns Ada/115.
 
@@ -150,23 +150,27 @@ real declaration installation and schema bridge, with `:panic` contracts.
   returned the exact message above. The same live observation found the
   new attribute description and vector help in default's current projection.
 
-## Remaining item 1 boundary
+## Item 1 — authorized AI rendering seam
 
-All returned-message, doc-map and successful-`vec` assertions pass. The
-shown-text assertion exposes `src/seon/error.clj:718`: its renderer replaces
-the improved message with a reconstruction. That file is outside the
-assignment's listed ownership, and permission to extend the change there
-is pending. The concrete proposed change is to prefix its current rendering
-with the existing `:seon.error/message`:
+The owner authorized `src/seon/error.clj:718` on 2026-09-15. One hunk
+prefixes the existing `instrumentation-prose` output with the refusal's
+`:seon.error/message` and a newline. All existing suffix bytes and the
+HTML pair are unchanged. The regression checks argument position, schema
+path, expected vector and actual LazySeq in both the returned error and
+`:seon.eval/shown`, and still proves that `vec` succeeds.
 
-```diff
--      (str "Contract violation in " operation " " (name member)
-+      (str (when-let [message (:seon.error/message fact)] (str message "\n"))
-+           "Contract violation in " operation " " (name member)
+Default's adopted Var returned this live projection (final space omitted):
+
+```text
+argument 0 (0-based); schema path [0]; expected :vector, got LazySeq
+Contract violation in contracts-plan/probe arguments: expected [:vector :map], received []. The call was stopped before the function ran.
 ```
 
-The constructor edit and failing shown-text regression remain uncommitted
-until that last boundary can be fixed and gated as the single item 1 commit.
+The initial MCP health probe reported `Read timed out`; ordinary JVM
+`(+ 1 1)` returned 2 in 1 ms and the renderer call returned in 2 ms.
+This re-observes the existing
+[status-probe issue](../../../seon/issues/dev-mcp-envelopes-misdirect-errors-and-sprawl-status.md),
+not cluster death. No default lifecycle operation was performed.
 
 The initial graph-based reproduction also exposed missing
 `:example/order-row` in base installation after the fixture admitted its
@@ -174,7 +178,7 @@ schemas. It was replaced with the existing direct SCI/install seams, which
 test this assignment without asserting graph propagation health. The first
 failure printer expanded a graph into tens of megabytes; later assertions
 carry only the relevant evaluation evidence. An extra instrument namespace
-run observed two pre-existing-scope arity/arglist assertions failing; the
+run observed two arity/arglist assertions outside this slice failing; the
 many-problem bounded-headline regression passed. The final selected gates
 above are the verification claims, not that extra namespace run.
 
@@ -183,3 +187,43 @@ Scratch shutdown re-observed the already-filed
 main's `down` found zero records while PID 89956 was alive. The creating
 worktree's exact `stop contracts-plan` stopped it through the PREPL and the
 empty JVM exited. No process was killed by a substring match.
+
+## Final verification and custody
+
+Final authorized item 1 gates and new help-trial evidence are recorded below.
+
+Landed slices:
+
+- Item 2: `5bc825c5d` — function-object contract refusal.
+- Item 3: `f2277a861` — current-step completing call and 12/12 trial.
+- Item 4: `2d3d624c5` — vector and database-attribute guidance.
+
+- Authorized item 1 fast gate: **42 tests / 430 assertions**, 0 failures/errors;
+  namespaces `seon.contracts-plan-test`, `seon.error-test`,
+  `seon.help-trial-test`, `my.examples-test`, `seon.repl-grammar-test`.
+- New unchanged-harness trial: **12/12**, **2,305 prompt tokens**, **391
+  completion tokens**, **640 cached tokens**, estimated **$0.00048627**.
+  [Complete prompt, reply and score](contracts-and-plan-item1-help-trial-2026-09-15.edn).
+  Frozen HEAD `7f6e5b51c` plus the two refusal-owner edits supplied a new
+  scratch fork. The already-unavailable OpenRouter model row was removed
+  only from that scratch catalog; the unchanged harness selected DeepSeek.
+- The creating checkout stopped `contracts-plan-final` through the PREPL;
+  empty JVM PID 25914 exited. Default was never stopped, reforked or reseeded.
+
+- Authorized isolated gate: **42 tests / 434 assertions**, 0 failures/errors
+  (`run.UTvT25`, removed by runner). Its snapshot overlays only
+  `src/seon/instrument.clj`, `src/seon/error.clj`, and
+  `test/seon/contracts_plan_test.clj`; foreign in-flight `src/seon/db.clj`
+  and CSS edits are excluded. The final whole-file comparison proves
+  `error.clj` differs only by the authorized prefix hunk.
+
+- Final path-isolated platform gate: **84 tests / 505 assertions**, 0
+  failures/errors (`run.59zGrH`, removed by runner).
+- All lane shells exited. The scratch root and checkout were deleted only
+  after confirming 0/0 clusters alive and PID 25914 absent; successful test
+  roots were removed by their runner. Only this lane's temporary logs were
+  deleted. Foreign edits and worktrees remain untouched.
+
+Item 1 lands in this commit with the resolved contract issue, the exact
+run-5 regression, and the new 12/12 trial artifact. All four numbered items
+are complete.

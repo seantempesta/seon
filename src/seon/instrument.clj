@@ -386,6 +386,13 @@
         :seon.error/message
         (str function-symbol " violated its contract ("
              (name kind) "): " problem-message
+             (when first-problem
+               (str (when (= :malli.core/invalid-input kind)
+                      (str "; argument " (first (:in first-problem)) " (0-based)"))
+                    "; schema path " (pr-str (:path first-problem))
+                    "; expected " (m/type (:schema first-problem))
+                    ", got " (if (nil? (:value first-problem)) "nil"
+                                 (.getSimpleName (class (:value first-problem))))))
              (when (seq problem-paths)
                ;; THE HEADLINE IS BOUNDED LIKE EVERY OTHER RENDERED
                ;; VALUE, and the omission is COUNTED rather than silent.
