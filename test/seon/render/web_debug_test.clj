@@ -684,3 +684,74 @@
            (is (str/includes? text "Directory integrity · not checked"))
            (is (pos? (:seon.render.transcript/unknown audit)))
            (is (= {:directory 0 :render 0} @calls))))))))
+
+(deftest ledger-derives-shared-data-once
+  (#'web-test/with-server
+   (fn [connection _server context]
+     (doseq [ordinal (range 2)]
+       (let [turn-id (str "shared-ledger-" ordinal)
+             attempt-id (str "shared-attempt-" ordinal)]
+         (is (:db-after
+              (db/transact! connection
+                [{:seon.turn/id turn-id :seon.turn/agent [:seon.agent/id "root"]
+                  :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"
+                  :seon.turn/reply "; Send an update" :seon.turn/reply-size 16
+                  :seon.turn/attempts [{:seon.ai.attempt/id attempt-id
+                                       :seon.ai.attempt/ordinal 0 :seon.ai.attempt/at (java.util.Date.)
+                                       :seon.ai/model "fixture-model" :seon.ai/endpoint "http://fixture.invalid"
+                                       :seon.ai.attempt/settings-edn "{}" :seon.ai.attempt/finish-reason "stop"
+                                       :seon.ai.attempt/usage-edn
+                                       "{\"prompt_tokens\" 100, \"completion_tokens\" 12, \"prompt_cache_hit_tokens\" 80}"}]}
+                 {:seon.agent/id "root"
+                  :seon.agent/runtime {:seon.runtime/agent [:seon.agent/id "root"]
+                                       :seon.runtime/turns [[:seon.turn/id turn-id]]}}
+                 {:seon.context.capture/id turn-id
+                  :seon.context.capture/run [:seon.turn/id turn-id]
+                  :seon.context.capture/basis-t (db/basis-t (db/db connection))
+                  :seon.context.capture/prompt "The saved provider prompt."}
+                 {:seon.cluster.eval/id (id/evaluation turn-id 0)
+                  :seon.cluster.eval/run [:seon.turn/id turn-id]
+                  :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
+                  :seon.cluster.eval/source "(+ 1 1)" :seon.eval/shown "2"}
+                 {:seon.message/id (str "shared-message-" ordinal)
+                  :seon.message/from [:seon.agent/id "root"]
+                  :seon.message/to [:seon.agent/id "root"]
+                  :seon.message/content "Recorded effect"}])))))
+     (let [request {:seon.db/db (db/db connection) :seon.db/connection connection
+                    :seon.agent/id "root" :seon.sci.eval/ctx (:ctx context)
+                    :seon.sci.admit/caps (config/result-caps (config/defaults))
+                    :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
+                    :seon.config/on-core-error :record
+                    :seon.render/profile (render/agent-render-profile (config/defaults))}
+           calibration-var (requiring-resolve 'seon.cluster.prompt/agent-calibration)
+           calibration @calibration-var
+           effects @#'transcript/ledger-effects
+           summary @#'transcript/turn-effects
+           label @#'transcript/emission-label
+           calibrations (atom [])
+           batches (atom 0)
+           summaries (atom [])
+           labels (atom 0)]
+       (with-redefs-fn
+         {calibration-var (fn [& args] (swap! calibrations conj (last args)) (apply calibration args))
+          #'transcript/ledger-effects (fn [& args] (swap! batches inc) (apply effects args))
+          #'transcript/turn-effects (fn [facts row] (swap! summaries conj (:seon.turn/id row)) (summary facts row))
+          #'transcript/emission-label (fn [& args] (swap! labels inc) (apply label args))}
+         (fn []
+           (let [ledger (transcript/render-ledger request)
+                 text (element-text ledger)
+                 first-labels @labels]
+             (is (= ["fixture-model"] @calibrations))
+             (is (= 1 @batches))
+             (is (= {"shared-ledger-0" 1 "shared-ledger-1" 1}
+                    (select-keys (frequencies @summaries) ["shared-ledger-0" "shared-ledger-1"])))
+             (is (str/includes? text "message sent to root"))
+             (is (str/includes? text "message sent"))
+             (is (str/includes? text "200 in"))
+             (is (str/includes? text "24 out"))
+             (is (pos? first-labels))
+             (is (= text (element-text (transcript/render-ledger
+                                        (assoc request :seon.db/db (db/db connection))))))
+             (is (= 1 @batches) "retained acquisition carries its effect summaries")
+             (is (= ["fixture-model"] @calibrations))
+             (is (= first-labels @labels) "retained history carries evaluation labels"))))))))

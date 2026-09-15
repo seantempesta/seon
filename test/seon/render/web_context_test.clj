@@ -94,7 +94,10 @@
                      :seon.message/content "Does not change saved evaluations."}])
                  (let [unrelated (render/acquire-context! (assoc request :seon.db/db @connection))]
                    (is (= 1 @walks) "an unrelated transaction preserves the acquired history")
-                   (is (identical? @connection (:seon.db/db unrelated))))
+                   (is (identical? @connection (:seon.db/db unrelated)))
+                   (reset! checks 0)
+                   (render/acquire-context! (assoc request :seon.db/db (db/db connection)))
+                   (is (zero? @checks) "reuse carries the successfully checked committed basis"))
                  (let [changed (db/transact! connection
                                  [(assoc (db/pull @connection '[*] [:seon.cluster.eval/id "retained-history"])
                                          :seon.eval/shown "3")])]

@@ -134,3 +134,126 @@ thread. Markdown hook reported 11 cross-file lint errors (visible feedback
 names foreign `agents-md-audit-2026-09-15.md` gitlink citations); this note's
 `git diff --check` is clean. No foreign session operated. Plan complete;
 stop after path-only commit.
+
+## Landing
+
+Implemented by lane `debug-page-cost` on 2026-09-15. Read this approved plan,
+AGENTS.md §§2.1/2.4/2.5, the Datastar skill, and the linked page-speed landing
+end to end. Also applied the data-oriented Clojure, REPL, Datahike and testing
+skills. No subagents, test JVMs, provider calls, agent messages, process stops,
+restarts, reforks, or manual Var reloads were launched by this lane.
+
+### Three slices
+
+1. `cfb35a22b`: committed database identity at retained render and history
+   acquisition boundaries, with the existing program/projection/input checks.
+   Datahike supplies connection, generation and commit identity; temporal and
+   speculative values receive no shortcut. The final regression refinement
+   reads actual `:seon.eval/shown`, counts real renderer calls on program
+   change, and verifies another connection invalidates.
+2. `671108b60`: passive directory reconstruction deleted; saved shown text
+   stays intact and the audit says **Directory integrity · not checked**.
+   The existing namespace-page cost issue now records settlement option C as
+   future work in one line.
+3. This landing commit: the existing history acquisition carries evaluation
+   emissions/labels, turn summaries and per-model calibrations. Effects are
+   bulk queried once per fact family, then summarized once per turn for both
+   story and body. Root read evidence captures these derivations. Successful
+   reuse now carries the database value it just checked, so a later GET of that
+   commit does not replay the old basis again. History segments are constructed
+   once and reused for joined prompt text. No additional cache or schema.
+
+### Live evidence and timing
+
+Default remained PID **69622**, URL **http://127.0.0.1:7994**. The committed
+[probe](debug_page_cost_probe_2026_09_15.clj) measured at basis **536871675**:
+retained entries identical; **0** second-acquisition read-currentness calls;
+**1** effect batch; **45** turns each summarized exactly **once**; calibration
+called **once**, for `deepseek-flash`; **0** `directory-value` calls; **0**
+`render-directory-ai` calls; rendered audit text included **not checked**.
+The probe calls the real owners, then renders all stories, three bodies, and
+one ledger using the carried data. It does not substitute results.
+
+The [section timing probe](consolidate_debug_timing_2026_09_15.clj) now takes
+`(seon.db/db (seon.operator/connection "default"))`, with no supplied-projection
+binding, and measures `nanoTime` plus the MCP thread's `ThreadMXBean` allocated
+bytes. Final form explicitly warms the complete ledger at the captured basis.
+The before measurement at **536871662** used the earlier acquisition order;
+the after measurement at **536871679** uses the carried data. These overlapping
+microbenchmarks are not additive or a controlled same-generation ratio.
+
+| Section | Before ms / allocated MB | After ms / allocated MB |
+|---|---:|---:|
+| Turn rows | 0.945 / 1.439 | 9.035 / 8.645 |
+| Evaluation acquisition | 760.103 / 1432.535 | 5.548 / 7.952 |
+| Row summaries | 0.185 / 0.245 | 0.299 / 0.272 |
+| Prefix check | 3.370 / 7.536 | 48.607 / 28.526 |
+| Problems, inclusive | 51.673 / 62.866 | 95.763 / 67.141 |
+| All stories | 153.135 / 291.218 | 0.393 / 0.409 |
+| Three bodies plus serialization | 8.781 / 19.879 | 12.638 / 22.108 |
+| Whole ledger plus serialization | 819.408 / 1445.772 | 124.245 / 115.363 |
+
+The final directory-status derivation was **0.038 ms / 648 allocated bytes**;
+budget was **47.964 ms / 34.725 MB**. Before dedicated directory/budget values
+are the approved plan's measurements above, not a new matched baseline.
+An earlier after sample at **536871677** measured whole ledger **46.960 ms /
+115.375 MB**, acquisition **2.339 ms / 7.932 MB**, stories **0.226 ms /
+0.409 MB**, and bodies **5.534 ms / 22.111 MB**. Prefix was cold in that sample
+(**271.416 ms**); the later warm-prefix measurement is in the table. Timing
+variance remains visible: process-table observation during measurement showed
+default and several concurrent worker JVMs consuming CPU. No foreign worker
+was changed. These allocated bytes are for the MCP thread, not HTTP threads.
+
+Baseline three `curl -w '%{time_total}'` GETs were **0.555650, 0.593223,
+0.686417 seconds**, all HTTP 200. The final three were **8.826322, 0.076125,
+0.063841 seconds**, all HTTP 200. The latter two are warm tens-of-milliseconds
+GETs; the first is explicitly not a warm success. Earlier concurrent-activity
+sequences included **19.539559, 18.348096, 0.588172** and **17.429848,
+16.903313, 0.157429 seconds**. This change does not claim a bounded cold GET or
+uniform latency during source invalidation. Stop at the three approved kills;
+no additional performance mechanism was introduced to chase those samples.
+
+Chrome separately displayed the complete ledger, its billing totals, carried
+message/definition summaries, and **Directory integrity · not checked**. The
+last expanded provider card showed rebuilt ≈19,015 tokens and billed 19,302.
+Its normal disclosure and reply/result layout remained readable.
+
+### Adoption and verification boundary
+
+At entry MCP health and result projection refused missing
+`:seon.test/check-time-limit-ms`; bounded JVM `println` still exposed probe
+results. This was recorded in the existing
+[partial hot-reload issue](../../../seon/issues/partial-hot-reload-produces-mixed-code-with-no-warning.md).
+The hook initially encountered source-analysis churn and an incompatible
+foreign `:seon.test/adoption-changes` declaration (installed string/one,
+proposed ref/many). Later hook activity loaded and armed this lane's owners;
+MCP result projection recovered without lane intervention. No foreign schema,
+hook, runner, or session was operated to obtain that recovery.
+
+The final source check found both `ledger-data` and the checked-basis update
+in default's stored `seon.render.web/derive-context!` source. The live
+`acquire-ledger-data` Var bears its `:seon.instrument/var` wrapper. At the
+preceding stamp check default had adopted
+**6aa9b7fe-c56c-58e0-994e-1462dbc42ad6** while publication was already
+**6aa9b989-5e17-5b7e-9af1-14c9201432ef**. This proves the changed loaded owners
+and stored program source through hot adoption, not convergence with every
+concurrent publication. The final publication log still reported source
+changing during incremental analysis. No reset is requested or performed by
+this lane.
+
+Added the three named regressions and extended the existing history regression
+for carried wrappers and successful checked-basis reuse. Hook syntax checks and
+`git diff --check` passed for owned changes. The Markdown hook still reports
+11 foreign gitlink-citation errors in `agents-md-audit-2026-09-15.md`.
+**Tests remain orchestrator-only and unrun by this lane.** The three namespaces
+are in `tmp/orchestrator/gate-requests/debug-page-cost.txt`:
+`seon.render.retained-test`, `seon.render.web-debug-test`, and
+`seon.render.web-context-test`. No test verdict is implied by the live probes.
+
+Touched production/test paths: `src/seon/render.clj`,
+`src/seon/render/web.clj`, `src/seon/render/transcript.clj`,
+`test/seon/render/retained_test.clj`, `test/seon/render/web_debug_test.clj`,
+`test/seon/render/web_context_test.clj`. Supporting changes: this plan,
+the two linked probe scripts, and the existing namespace-page-cost and
+partial-hot-reload issue notes. No scratch cluster or worktree was created;
+all owned shell commands ended, and unrelated shared-tree edits were preserved.

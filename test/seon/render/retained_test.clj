@@ -4,6 +4,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
+            [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
 
 (deftest equal-committed-database-skips-read-replay
@@ -11,7 +12,9 @@
    (fn [connection]
      (let [namespace-name 'seon.render-simplification.fixture-a
            _ (db/transact! connection [{:seon.ns/name namespace-name
-                                       :seon.ns/doc "one"}])
+                                       :seon.ns/doc "Retained renderer fixture"}
+                                      {:seon.cluster.eval/id "retained-shown"
+                                       :seon.eval/shown "one"}])
            ctx (support/fork-cluster-ctx connection)
            profile (render/agent-render-profile (config/defaults))
            caps (config/result-caps (config/defaults))
@@ -37,10 +40,10 @@
          (sci/eval-form
           ctx
           '(defn namespace-ai [value]
-             (seon.db/q '[:find ?doc . :in $ ?name
-                          :where [?namespace :seon.ns/name ?name]
-                                 [?namespace :seon.ns/doc ?doc]]
-                        (:seon.db/db value) (:seon.ns/name value)))))
+             (seon.db/q '[:find ?shown .
+                          :where [?evaluation :seon.cluster.eval/id "retained-shown"]
+                                 [?evaluation :seon.eval/shown ?shown]]
+                        (:seon.db/db value)))))
        (let [a (:seon.db/db (request)) b (:seon.db/db (request))]
          (is (not (identical? a b)))
          (is (= a b))
@@ -55,19 +58,24 @@
                        (read-current? database evidence))]
          (is (= "one" (render/render-call (request))))
          (is (zero? @checks) "equal committed wrappers must not replay reads")
-         (db/transact! connection [{:seon.ns/name namespace-name :seon.ns/doc "two"}])
+         (db/transact! connection [{:seon.cluster.eval/id "retained-shown" :seon.eval/shown "two"}])
          (is (= "two" (render/render-call (request))))
          (is (pos? @checks) "a changed database still validates dependencies")
-         (let [previous (get @calls call-id)]
+         (let [previous (get @calls call-id)
+               invoke kernel/invoke
+               invocations (atom 0)]
            (db/transact! connection [{:seon.cluster/name "retained-program"
                                       :seon.source/commit-id #uuid "f54229d7-54eb-472d-9ae8-917a0f97af71"}])
-           (is (= "two" (render/render-call (request))))
+           (with-redefs [kernel/invoke (fn [input] (swap! invocations inc) (invoke input))]
+             (is (= "two" (render/render-call (request))))
+             (is (pos? @invocations) "changed program evidence invokes the renderer again"))
            (is (not= (:seon.render/source-generation previous)
                      (:seon.render/source-generation (get @calls call-id)))
                "a changed adopted program invalidates the retained evidence"))
          (support/with-database
           (fn [other]
-            (db/transact! other [{:seon.ns/name namespace-name :seon.ns/doc "other connection"}])
+            (db/transact! other [{:seon.ns/name namespace-name}
+                                {:seon.cluster.eval/id "retained-shown" :seon.eval/shown "other connection"}])
             (is (not (render/same-committed-database? (db/db connection) (db/db other))))
             (is (= "other connection"
                    (render/render-call (assoc (request) :seon.db/db (db/db other))))))))))))

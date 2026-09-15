@@ -2371,10 +2371,6 @@
         (range)
         entries))
 
-(defn- history-text
-  [entries]
-  (apply str (history-segments entries)))
-
 (defn- change-context
   "Run the requested ordinary turn operation on the calling thread."
   [request]
@@ -2437,14 +2433,24 @@
                                                      (:seon.db/db request))
                                  :seon.render/captured-calls calls))))]
          (cond
-           reusable? (assoc (:seon.render.call/output previous) :seon.db/db (:seon.db/db request))
+           reusable?
+           (let [database (:seon.db/db request)
+                 result (assoc (:seon.render.call/output previous) :seon.db/db database)]
+             (swap! cache assoc-in [::ai-calls key root-call]
+                    (assoc previous :seon.db/db database :seon.render.call/output result))
+             result)
            (:seon.error/kind entries)
            entries
            :else
-           (let [result {:seon.cluster.prompt/text (history-text entries)
+           (let [segments (history-segments entries)
+                 ledger-data (when (::transcript/ledger? request)
+                               (binding [db/*read-evidence-sink* reads]
+                                 (transcript/acquire-ledger-data request entries segments)))
+                 result (cond-> {:seon.cluster.prompt/text (apply str segments)
                          :seon.render.history/entries entries
-                         :seon.render.history/segments (history-segments entries)
-                         :seon.db/db (:seon.db/db request)}]
+                         :seon.render.history/segments segments
+                         :seon.db/db (:seon.db/db request)}
+                          ledger-data (assoc ::transcript/ledger-data ledger-data))]
              (swap! cache assoc-in [::ai-calls key]
                     (assoc @calls root-call
                            (merge evidence

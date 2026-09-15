@@ -1511,10 +1511,8 @@
         (some-> schema-key str)
         (str "Evaluation " (inc (or (:seon.cluster.eval/ordinal saved) 0))))))
 
-(defn- ledger-evaluations [request]
-  (let [database (:seon.db/db request)
-        projection ((requiring-resolve 'seon.sci.kernel/context-projection) (:seon.sci.eval/ctx request))
-        selector '[:seon.cluster.eval/source :seon.cluster.eval/comment
+(defn- ledger-acquisition [request]
+  (let [selector '[:seon.cluster.eval/source :seon.cluster.eval/comment
                  :seon.eval/shown :seon.eval/renderer :seon.cluster.eval/error
                  :seon.cluster.eval/output :seon.error/kind
                  :seon.cluster.eval/read-basis-transaction
@@ -1522,23 +1520,15 @@
                  :seon.eval/duration-ms :seon.sci.eval/ending-ns
                  :seon.print/length :seon.print/level
                  {:seon.cluster.eval/ns [:seon.ns/name]}
-                 {:seon.cluster.eval/read-evidence [*]}]
-        acquired (render/acquire-context! (assoc (dissoc request :seon.turn/id)
-                                                 :seon.db/pull-selector selector))
-        saved (map :seon.render/value (:seon.render.history/entries acquired))
-        bytes (zipmap (map :seon.render.history/subject (:seon.render.history/entries acquired))
-                      (map utf8-size (:seon.render.history/segments acquired)))]
-    (cond (:seon.error/kind acquired) acquired
-          :else
-      (group-by #(get-in % [:seon.cluster.eval/run :db/id])
-        (map
-          (fn [row]
-            (let [emission (repl/entity-emission (assoc row :seon.db/db database))]
-              (assoc row ::emission emission ::label (emission-label projection row)
-                     ::outcome (cond (:seon.cluster.eval/interrupted-at row) "interrupted"
-                                     (:seon.cluster.eval/error row) "error"
-                                     (:seon.eval/shown row) "value" :else "out")
-                     ::contributed-bytes (get bytes [:seon.cluster.eval/id (:seon.cluster.eval/id row)] 0)))) saved)))))
+                 {:seon.cluster.eval/read-evidence [*]}]]
+    (render/acquire-context!
+     (assoc (dissoc request :seon.turn/id)
+            ::ledger? true :seon.db/pull-selector selector))))
+
+(defn- ledger-evaluations [request]
+  (let [acquired (ledger-acquisition request)]
+    (if (:seon.error/kind acquired) acquired
+        (get-in acquired [::ledger-data ::evaluations]))))
 
 (defn- ledger-url [agent-id turn-id query]
   (route/path ::route/agent-debug {:id agent-id} (assoc query :turn turn-id)))
@@ -1576,31 +1566,45 @@
                             ["value" "error" "interrupted" "out"]))))
 
 (defn- ledger-effects
-  "Derive completed steps, sent messages and installed definitions at this turn's transactions."
-  [database agent-id row]
-  (let [opened (db/q '[:find ?tx . :in $ ?id :where [_ :seon.turn/id ?id ?tx]] database (:seon.turn/id row))
-        closed (get-in row [:seon.turn/closed-tx :db/id])]
-    (if-not (and opened closed) {::details "Turn is still open."}
-      (let [steps (db/q '[:find ?id :in $ ?agent ?from ?to
-                          :where [?a :seon.agent/id ?agent] [?tx :seon.db/user ?a]
-                                 [?s :my.plan.item/completed-tx ?tx]
-                                 [(<= ?from ?tx)] [(<= ?tx ?to)] [?s :my.plan.item/id ?id]]
-                        database agent-id opened closed)
-            messages (db/q '[:find ?target :in $ ?agent ?from ?to
-                             :where [?a :seon.agent/id ?agent] [?m :seon.message/from ?a ?tx]
-                                    [(<= ?from ?tx)] [(<= ?tx ?to)] [?m :seon.message/to ?recipient]
-                                    [?recipient :seon.agent/id ?target]] database agent-id opened closed)
-            definitions (db/q '[:find ?symbol :in $ ?from ?to
-                                :where (or [?f :seon.fn/sym ?symbol ?tx] [?f :seon.test/sym ?symbol ?tx])
-                                       [(<= ?from ?tx)] [(<= ?tx ?to)]] database opened closed)
-            effects (concat (map #(str "plan step " (first %) " completed") steps)
-                            (map #(str "message sent to " (first %)) messages)
-                            (map #(str "definition installed during this turn: " (first %)) definitions))]
-        {::details (if (seq effects) (str/join " · " effects) "—")
-         ::summary (str/join " · " (cond-> []
-                                    (seq steps) (conj "step completed")
-                                    (seq messages) (conj "message sent")
-                                    (seq definitions) (conj "definition installed")))}))))
+  "Acquire effect facts for all closed turns in one batch per fact family."
+  [database agent-id rows]
+  (let [intervals (db/q '[:find ?id ?opened ?closed :in $ [?id ...]
+                          :where [?turn :seon.turn/id ?id ?opened]
+                                 [?turn :seon.turn/closed-tx ?closed]]
+                        database (mapv :seon.turn/id rows))
+        steps (db/q '[:find ?id ?step :in $ ?agent [[?id ?from ?to]]
+                       :where [?a :seon.agent/id ?agent] [?tx :seon.db/user ?a]
+                              [?s :my.plan.item/completed-tx ?tx]
+                              [(<= ?from ?tx)] [(<= ?tx ?to)] [?s :my.plan.item/id ?step]]
+                     database agent-id intervals)
+        messages (db/q '[:find ?id ?target :in $ ?agent [[?id ?from ?to]]
+                          :where [?a :seon.agent/id ?agent] [?m :seon.message/from ?a ?tx]
+                                 [(<= ?from ?tx)] [(<= ?tx ?to)] [?m :seon.message/to ?recipient]
+                                 [?recipient :seon.agent/id ?target]] database agent-id intervals)
+        definitions (db/q '[:find ?id ?symbol :in $ [[?id ?from ?to]]
+                             :where (or [?f :seon.fn/sym ?symbol ?tx] [?f :seon.test/sym ?symbol ?tx])
+                                    [(<= ?from ?tx)] [(<= ?tx ?to)]] database intervals)]
+    (if-let [failure (some #(when (:seon.error/kind %) %) [intervals steps messages definitions])]
+      failure
+      {::steps (group-by first steps) ::messages (group-by first messages)
+       ::definitions (group-by first definitions)})))
+
+(defn- turn-effects [effects row]
+  (let [turn-id (:seon.turn/id row)
+        steps (get (::steps effects) turn-id)
+        messages (get (::messages effects) turn-id)
+        definitions (get (::definitions effects) turn-id)
+        details (concat (map #(str "plan step " (second %) " completed") steps)
+                        (map #(str "message sent to " (second %)) messages)
+                        (map #(str "definition installed during this turn: " (second %)) definitions))]
+    (cond
+      (:seon.error/kind effects) {::details (:seon.error/message effects)}
+      (not (:seon.turn/closed-tx row)) {::details "Turn is still open."}
+      :else {::details (if (seq details) (str/join " · " details) "—")
+             ::summary (str/join " · " (cond-> []
+                                       (seq steps) (conj "step completed")
+                                       (seq messages) (conj "message sent")
+                                       (seq definitions) (conj "definition installed")))})))
 
 (defn- emission-byte-count [emissions]
   (reduce + 0 (map ::contributed-bytes emissions)))
@@ -1615,6 +1619,32 @@
                      :seon.turn/attempts attempts ::attempt (last attempts)
                      ::bytes (emission-byte-count own)
                      ::outcomes (frequencies (map ::outcome own))))) rows)))
+
+(defn acquire-ledger-data
+  "Carry ledger rows and evaluation displays on the acquired history basis."
+  {:malli/schema [:=> [:cat :map [:vector :map] [:vector :string]] :map]}
+  [request entries segments]
+  (let [database (:seon.db/db request)
+        agent-id (:seon.agent/id request)
+        projection ((requiring-resolve 'seon.sci.kernel/context-projection) (:seon.sci.eval/ctx request))
+        evaluations
+        (group-by #(get-in % [:seon.cluster.eval/run :db/id])
+          (mapv (fn [entry segment]
+                  (let [row (:seon.render/value entry)]
+                    (assoc row ::emission (repl/entity-emission (assoc row :seon.db/db database))
+                           ::label (emission-label projection row)
+                           ::outcome (cond (:seon.cluster.eval/interrupted-at row) "interrupted"
+                                           (:seon.cluster.eval/error row) "error"
+                                           (:seon.eval/shown row) "value" :else "out")
+                           ::contributed-bytes (utf8-size segment)))) entries segments))
+        rows (ledger-rows database (turn-rows database agent-id) evaluations)
+        effects (ledger-effects database agent-id rows)
+        calibrations (into {} (for [model (distinct (keep #(get-in % [::attempt :seon.ai/model]) rows))]
+                                [model ((requiring-resolve 'seon.cluster.prompt/agent-calibration)
+                                        database agent-id model)]))]
+    {::evaluations evaluations
+     ::rows (mapv #(assoc % ::effects (turn-effects effects %)) rows)
+     ::calibrations calibrations}))
 
 (defn- ledger-turn-body [request rows evaluations row]
   (let [database (:seon.db/db request)
@@ -1634,9 +1664,7 @@
                           [?c :seon.context.capture/run ?t] [?c :seon.context.capture/prompt ?text]] database turn-id))
         attempt (::attempt row)
         usage (::usage attempt)
-        calibration (when (:seon.ai/model attempt)
-                      ((requiring-resolve 'seon.cluster.prompt/agent-calibration)
-                       database (:seon.agent/id request) (:seon.ai/model attempt)))
+        calibration (get (::calibrations request) (:seon.ai/model attempt))
         opening (filter #(= (:db/id (first rows)) (get-in % [:seon.cluster.eval/run :db/id])) generated)
         later (if authored? (remove (set opening) generated) generated)
         groups (partition-by :seon.cluster.eval/source later)]
@@ -1713,19 +1741,18 @@
                 [:pre rendered])])
            [:p "No evaluations recorded for this reply."])
          [:p {:class "seon-ledger-effects"}
-          (str "Effects: " (::details (ledger-effects database (:seon.agent/id request) row)))]]))]))
+          (str "Effects: " (::details (::effects row)))]]))]))
 
 (defn render-ledger-turn
   "Load one card from saved reply and evaluations without executing forms."
   {:malli/schema [:=> [:cat :seon.cluster.prompt/request] :seon.render/hiccup]}
   [request]
-  (let [rows (turn-rows (:seon.db/db request) (:seon.agent/id request))]
-    (let [evaluations (ledger-evaluations request)]
-      (if (:seon.error/kind evaluations)
-        [:div {:id (ledger-body-id (:seon.turn/id request))} [:p (:seon.error/message evaluations)]]
-        (let [rows (ledger-rows (:seon.db/db request) rows evaluations)
-              row (some #(when (= (:seon.turn/id request) (:seon.turn/id %)) %) rows)]
-          (ledger-turn-body request rows evaluations row))))))
+  (let [acquired (ledger-acquisition request)
+        {::keys [rows evaluations calibrations]} (::ledger-data acquired)]
+    (if (:seon.error/kind acquired)
+      [:div {:id (ledger-body-id (:seon.turn/id request))} [:p (:seon.error/message acquired)]]
+      (let [row (some #(when (= (:seon.turn/id request) (:seon.turn/id %)) %) rows)]
+        (ledger-turn-body (assoc request ::calibrations calibrations) rows evaluations row)))))
 
 (defn render-ledger-context
   "Expand the same faithful per-turn transcript beneath its ledger card."
@@ -1930,7 +1957,7 @@
                           [$history ?evaluation :seon.cluster.eval/read-basis-transaction _ ?t true]
                           [(> ?t ?shown-t)]]
                         database (db/history database) (vec (keys saved-by-eid)))
-        empty-emissions (filter #(and (= "System" (turn-kind database (get by-eid (get-in % [:seon.cluster.eval/run :db/id]))))
+        empty-emissions (filter #(and (= "System" (::kind (get by-eid (get-in % [:seon.cluster.eval/run :db/id]))))
                                       (= {:seon.repl/changes {}}
                                          (::value (readable-shown (:seon.eval/shown %))))) saved)]
     {::budget (session-budget database (:seon.agent/id request) rows)
@@ -2087,7 +2114,7 @@
         (if authored?
           [(reply-intent (turn-reply (:seon.db/connection request) row))
            (results-summary (::outcomes row))
-           (::summary (ledger-effects (:seon.db/db request) (:seon.agent/id request) row))
+           (::summary (::effects row))
            (when (:seon.turn/closed-tx row)
              (case (:seon.turn/disposition row) :wait "done" :completed "completed" nil))]
           [(cond (zero? (::ordinal row)) (str "opening · " (count own) " emissions")
@@ -2101,11 +2128,11 @@
                              [:map [:seon.db/db :seon.db/db] [:seon.agent/id :seon.agent/id]]]]
                   :seon.render/hiccup]}
   [request]
-  (let [database (:seon.db/db request)
-        rows (turn-rows database (:seon.agent/id request))
+  (let [acquired (ledger-acquisition request)
+        {::keys [rows evaluations calibrations]} (::ledger-data acquired)
+        evaluations (if (:seon.error/kind acquired) acquired evaluations)
+        request (assoc request ::calibrations calibrations)
         selected (or (:seon.turn/id request) (:seon.turn/id (last rows)))
-        evaluations (ledger-evaluations request)
-        rows (ledger-rows (:seon.db/db request) rows evaluations)
         expanded (conj (set (map :seon.turn/id (take-last 3 rows))) selected)
         problems (when-not (or (:seon.error/kind rows) (:seon.error/kind evaluations))
                    (session-problems request rows evaluations))]
