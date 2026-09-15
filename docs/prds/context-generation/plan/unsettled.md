@@ -1172,3 +1172,18 @@ half-edit. Measured targets in the issue.
   (`since-diff-appends-rereads-whose-changes-are-empty`); plus contract
   error path / `:fn` literal / plan-render wording issues.
 
+## 2026-09-15 06:40Z — cycle 8: consolidation done; run 5 on the page
+
+- consolidate-debug ended: A08 (`1d5edb65c`), A09 (`209a73fd2`), A02
+  (`0439448cb`), A01 (`f9ed564ef`), A04 (`cb967dd40`), speed fix
+  (`5613bbf17`), A07 (`53a9d5db5`), A13 (`d5a25d704`), A03 (`25bce52a0`).
+  backstop-and-misc ended: turn bound from admitted provider + evaluation
+  work (`d4a85dbdc`; run 5's 17.6 s provider turn no longer faults), misc
+  A05/A10/A11/A12 (`18a19382d`). run4-blockers ended (`747995bf4`).
+- Page: run 5 reads "29/30 turns · 3/7 steps · 7 evaluation errors · 0
+  faults · 3 repeated system reads · $0.0057"; main page plan block shows
+  3 done. Debug warm GET regressed again to 1.7–1.9 s after A03/A07/A13
+  (0.68 s after the speed fix) — sampling now.
+- Lanes: rereads-2 (empty-change re-reads), contracts-and-plan (contract
+  paths, `:fn` literal refusal, plan completing-call line, note example).
+
