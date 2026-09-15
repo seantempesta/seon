@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, runtime, wave/render-arm]
 ---
 
@@ -75,3 +75,11 @@ Fresh construction on the same rename served **200 / 42,913 bytes**, with
 four Juniper evaluations and zero provider attempts. **RESET NEEDED for
 `7004818dc`** remains; successful source adoption does not reconstruct a
 captured service/graph input. The lane did not operate default's lifecycle.
+
+## Re-verified at HEAD (2026-09-15)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source).
+
+OPEN, UNVERIFIABLE as a general adoption defect. HEAD `src/seon/render/web.clj:3423` still closes over the start-time `service` while resolving the current handler. Reload does not reconstruct that immutable map. The historical default HTTP failures are not current: `curl --max-time 15 -s -o /dev/null -w 'HTTP %{http_code}; bytes %{size_download}; seconds %{time_total}\n' http://127.0.0.1:7994/` returned HTTP 200, 49,291 bytes, 1.806230 seconds. This is HTTP evidence, not browser paint or HEAD adoption convergence. Reproducing the general defect requires an isolated before/after service-contract adoption with an added required key; no production/test edits or default lifecycle mutation were made. Severity is friction: the old reset incidents do not currently block the observed page or establish a blocked agent.
+
+surface: adoption-publication

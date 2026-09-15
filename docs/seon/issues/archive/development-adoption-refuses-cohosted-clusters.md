@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocker
 tags: [issue, operator, runtime, wave/per-cluster-live-graph]
 ---
@@ -39,3 +39,11 @@ program and page advance; beta's program facts, executed behavior, and served
 page retain the prior program. Observe both, not merely distinct commit IDs.
 
 See [the partial landing evidence](../../prds/context-generation/research/multi-cluster-concurrency-landing-2026-09-08.md).
+
+## Resolution (2026-09-15 triage)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source).
+
+Commit `4bd2116a2` removes the exactly-one-running-instance refusal. HEAD `src/seon/cluster.clj:2031` requires only that the named development cluster be running. The broader acceptance claim that beta's executed host behavior remains old is not established: shared host Vars remain. That residual belongs to [development-adoption-can-mix-host-and-sci-generations](../development-adoption-can-mix-host-and-sci-generations.md), whose triage records the current reload/acquisition seam and required concurrency proof. Verified by `git log -S 'Development updates require their own running JVM.' -- src/seon/cluster.clj` and the removing diff.
+
+surface: adoption-publication

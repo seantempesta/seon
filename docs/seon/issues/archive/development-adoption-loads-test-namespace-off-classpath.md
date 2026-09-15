@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, operator, test, wave/publication-velocity]
 ---
@@ -26,3 +26,11 @@ Owner: development adoption's namespace selection and loaded classpath.
 No change to that concurrent mechanism was attempted. Acceptance: admitted
 test edits can publish and development adoption completes without trying
 to load an unavailable namespace; the source commit converges afterward.
+
+## Resolution (2026-09-15 triage)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source).
+
+Commit `d756a09d4` adds the classpath-aware reload predicate. HEAD `src/seon/cluster.clj:1832` (`reloadable-namespace?`) requires both an already loaded namespace and a `.clj`/`.cljc` classpath resource; the reload loop at `:1960` applies it. Thus this selection path cannot require the unavailable test namespace described here. Verified with `git log -S 'reloadable-namespace?' -- src/seon/cluster.clj` and the committed predicate/caller. No default adoption was triggered.
+
+surface: adoption-publication

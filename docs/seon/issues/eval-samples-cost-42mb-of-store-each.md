@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocker
+severity: friction
 tags: [issue, database, performance, test, wave/eval-scale-economics]
 ---
 
@@ -158,3 +158,11 @@ bounded uncertainty.
    [[storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing]].
 5. A fresh 20-sample private-root run confirms the integrated history/batching/
    GC cost before this blocker closes.
+
+## Re-verified at HEAD (2026-09-15)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source).
+
+OPEN, UNVERIFIABLE for current sample cost. The note itself disproves its filename's 42 MB attribution. HEAD still has context capture (`src/seon/context.clj:490`, called at `src/seon/turn.clj:4161`) and retained database history, but the old result-storage and per-form transaction workload is no longer a valid current benchmark. `git grep -n 'result-edn' HEAD -- src/seon/turn.clj src/seon/eval.clj` finds historical docstrings in turn.clj, not the former evaluation attribute write. No fresh 20-sample provider-backed private-root run or physical before/after census was performed. That exact workload plus retention policy is needed before asserting current bytes/sample; the old numbers remain dated evidence only. Downgraded to friction: scale economics alone does not demonstrate a blocked current agent or context generation.
+
+surface: store-process

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [dir, doc, program-graph, sci, live-test]
 created: 2026-09-10
@@ -78,3 +78,11 @@ landing note before closure.
   defn's evaluation, with the same fields as shipped functions.
 - Regression on the canonical harness: install a contracted defn through
   the agent path; `(dir <ns>)` in the next evaluation lists it.
+
+## Resolution (2026-09-15 triage)
+
+Basis: `7e35df2131c71f476a85c6a38bfc8eb292cb36f5` (committed source).
+
+Commits `5081a11fb` and `b28ccc1f8` are present at HEAD. `src/seon/sci/eval.clj:1114` queries public functions from the supplied database; `program-dir-var` at `:1227` emits a call using `(seon.db/db)` at evaluation time rather than capturing documentation. The retained-context update at `:1665` installs aliases at actual binding paths. These remove both causes established by this note. Inspected the complete current query/macro and retained alias update; the prior canonical and live evidence above belongs to these landed fixes, not a new test run in this triage.
+
+surface: context-generation
